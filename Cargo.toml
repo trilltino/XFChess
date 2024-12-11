@@ -1,0 +1,18 @@
+[package]
+name = "StellarChess"
+version = "0.1.0"
+edition = "2021"
+
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[dependencies]
+bevy = "0.15.0"
+bevy_egui = "0.29.0"
+bevy_renet = "0.0.12"
+eframe = "0.28.1"
+egui = "0.28.1"
+renet = "0.0.16"
+serde = "1.0.208"
+bevy_mod_picking = "0.20.1"
