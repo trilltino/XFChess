@@ -1,4 +1,6 @@
     use bevy::{color::palettes::tailwind::*, prelude::*};
+    use crate::update_material_on;
+
     
     
     // add piece types

@@ -4,10 +4,14 @@
     mod board;
     use board::*;
     
-    mod assets;
-    use assets::*;
+    mod pieces;
+    use pieces::*;
 
+    mod pointer;
+    use pointer::*;
 
+    mod Pointer_methods;
+    use Pointer_methods::*;
 
     const WINDOW_WIDTH : f32 = 1366.0;
     const WINDOW_HEIGHT: f32 = 768.0;
