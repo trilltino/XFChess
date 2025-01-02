@@ -1,17 +1,24 @@
     use bevy::prelude::*;
-    use bevy_inspector_egui::quick::{WorldInspectorPlugin, AssetInspectorPlugin};
+    use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
     mod board;
     use board::*;
     
+    
     mod pieces;
     use pieces::*;
 
-    mod pointer;
-    use pointer::*;
+    mod pointer_events;
+    use pointer_events::*;
 
-    mod Pointer_methods;
-    use Pointer_methods::*;
+    
+    mod egui_ui;
+    use egui_ui::*;
+
+    //mod debug_camera;
+    //use debug_camera::*;
+
+
 
     const WINDOW_WIDTH : f32 = 1366.0;
     const WINDOW_HEIGHT: f32 = 768.0;
@@ -22,10 +29,10 @@
         App::new()
             .add_plugins( DefaultPlugins.set( WindowPlugin { primary_window, ..default()}))
             .add_plugins(MeshPickingPlugin)
+            //.add_plugins(CameraPlugin)
             .add_plugins(WorldInspectorPlugin::new())
-            .add_systems(Startup, |commands: Commands, meshes: ResMut<Assets<Mesh>>, materials: Res<SquareMaterials>| {
-                create_board(commands, meshes, materials);
-            })
+            .add_plugins(BoardPlugin)
+            .add_systems(Update, draw_mesh_intersections)
             .add_systems(Startup, setup)
             .add_systems(Startup, |mut commands: Commands, server: Res<AssetServer>, materials: ResMut<Assets<StandardMaterial>>| {
                 create_pieces(&mut commands, server, materials);

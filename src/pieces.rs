@@ -1,10 +1,7 @@
-    use bevy::{color::palettes::tailwind::*, prelude::*};
-    use crate::update_material_on;
-
-    
-    
-    // add piece types
-    // add movement per piece type
+    use bevy::color::palettes::css::BLACK;
+use bevy::{color::palettes::tailwind::*, prelude::*};
+    use bevy:: picking::pointer::PointerInteraction;
+    use crate::pointer_events::update_entitymatl_on;
 
 
     pub fn create_pieces(
@@ -29,18 +26,11 @@
         let queen_handle: Handle<Mesh> =
             asset_server.load("models/chess_kit/pieces.glb#Mesh7/Primitive0");
 
-            let hover_matl = materials.add(Color::from(GREEN_300));
-            let pressed_matl = materials.add(Color::from(BLUE_300));
 
+            let hover_matl = materials.add(Color::from(GREEN_300));
+            let white_material = materials.add(Color::from(AMBER_400));
+            let black_material = materials.add(Color::BLACK);
             
-            let white_material = materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.8, 0.8),
-                ..Default::default()
-            });
-            let black_material = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.0, 0.2, 0.2),
-                ..Default::default()
-            });
             
         spawn_rook(
             commands,
@@ -48,7 +38,6 @@
             white_material.clone(),
             Vec3::new(0., 0., 0.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
 
 
@@ -59,7 +48,6 @@
             white_material.clone(),
             Vec3::new(0., 0., 1.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
 
         spawn_knight(
@@ -69,7 +57,6 @@
             white_material.clone(),
             Vec3::new(0., 0., 6.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
 
         spawn_bishop(
@@ -78,7 +65,6 @@
             bishop_handle.clone(),
             Vec3::new(0., 0., 2.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
 
         spawn_queen(
@@ -87,7 +73,6 @@
             white_material.clone(),
             Vec3::new(0., 0., 3.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
 
         spawn_king(
@@ -97,7 +82,6 @@
             king_cross_handle.clone(),
             Vec3::new(0., 0., 4.),
             hover_matl.clone(),
-            pressed_matl.clone(),
         );
 
         spawn_bishop(
@@ -106,7 +90,6 @@
             bishop_handle.clone(),
             Vec3::new(0., 0., 5.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
 
         spawn_knight(
@@ -116,7 +99,6 @@
             white_material.clone(),
             Vec3::new(0., 0., 6.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
 
         spawn_rook(
@@ -125,7 +107,6 @@
             white_material.clone(),
             Vec3::new(0., 0., 7.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
     
         for i in 0..8 {
@@ -135,7 +116,7 @@
                 white_material.clone(),
                 Vec3::new(1., 0., i as f32),
                 hover_matl.clone(),
-                pressed_matl.clone()
+
             );
         }
 
@@ -145,7 +126,6 @@
             black_material.clone(),
             Vec3::new(7., 0., 0.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
         spawn_knight(
             commands,
@@ -154,7 +134,6 @@
             black_material.clone(),
             Vec3::new(7., 0., 1.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
         spawn_bishop(
             commands,
@@ -162,7 +141,6 @@
             bishop_handle.clone(),
             Vec3::new(7., 0., 2.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
         spawn_queen(
             commands,
@@ -170,7 +148,6 @@
             black_material.clone(),
             Vec3::new(7., 0., 3.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
         
         spawn_king(
@@ -179,8 +156,7 @@
             king_handle.clone(),
             king_cross_handle.clone(),
             Vec3::new(7., 0., 4.),
-            hover_matl.clone(),
-            pressed_matl.clone()    
+            hover_matl.clone(),    
         );
         
 
@@ -190,7 +166,6 @@
             bishop_handle.clone(),
             Vec3::new(7., 0., 5.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
         spawn_knight(
             commands,
@@ -199,7 +174,6 @@
             black_material.clone(),
             Vec3::new(7., 0., 6.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
         
         spawn_rook(
@@ -208,7 +182,6 @@
             black_material.clone(),
             Vec3::new(7., 0., 7.),
             hover_matl.clone(),
-            pressed_matl.clone()
         );
 
         for i in 0..8 {
@@ -218,7 +191,7 @@
                 black_material.clone(),
                 Vec3::new(6., 0., i as f32),
                 hover_matl.clone(),
-                pressed_matl.clone()
+
             );
         }
             pub fn spawn_king(
@@ -228,7 +201,6 @@
                 mesh_cross: Handle<Mesh>,
                 position: Vec3,
                 hover_matl: Handle<StandardMaterial>,
-                pressed_matl: Handle<StandardMaterial>
             ) {
 
                 commands.spawn((
@@ -244,8 +216,7 @@
                             transform
                         },
                     ))
-                    .observe(update_material_on::<Pointer<Over>>(hover_matl.clone()))
-                    .observe(update_material_on::<Pointer<Click>>(pressed_matl.clone()));
+                    .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
                     parent.spawn((
                         Mesh3d(mesh_cross),
                         MeshMaterial3d(material),
@@ -255,8 +226,7 @@
                             transform
                         },
                     ))
-                    .observe(update_material_on::<Pointer<Over>>(hover_matl.clone()))
-                    .observe(update_material_on::<Pointer<Click>>(pressed_matl.clone()));
+                    .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
                 });
             }
                 
@@ -267,7 +237,6 @@
                 material: Handle<StandardMaterial>,
                 position: Vec3,        
                 hover_matl: Handle<StandardMaterial>,
-                pressed_matl: Handle<StandardMaterial>
         ) {
             commands.spawn((
                 Transform::from_translation(position),
@@ -282,8 +251,7 @@
                         transform
                     },
                 ))
-                .observe(update_material_on::<Pointer<Over>>(hover_matl.clone()))
-                .observe(update_material_on::<Pointer<Click>>(pressed_matl.clone()));
+                .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
                 parent.spawn((
                     Mesh3d(mesh_2.clone()),
                     MeshMaterial3d(material),
@@ -293,8 +261,7 @@
                         transform
                     },
                 ))
-                .observe(update_material_on::<Pointer<Over>>(hover_matl.clone()))
-                .observe(update_material_on::<Pointer<Click>>(pressed_matl.clone()));
+                .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
             });
         }
 
@@ -303,8 +270,7 @@
             mesh: Handle<Mesh>,
             material: Handle<StandardMaterial>,
             position: Vec3,
-            hover_matl: Handle<StandardMaterial>,
-            pressed_matl: Handle<StandardMaterial>        
+            hover_matl: Handle<StandardMaterial>,    
         ) {
         commands.spawn((
             Transform::from_translation(position),
@@ -319,8 +285,7 @@
                     transform
                 },
             ))
-            .observe(update_material_on::<Pointer<Over>>(hover_matl.clone()))
-            .observe(update_material_on::<Pointer<Click>>(pressed_matl.clone()));
+            .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
         });
     }
 
@@ -331,7 +296,6 @@
                 mesh: Handle<Mesh>,
                 position: Vec3,
                 hover_matl: Handle<StandardMaterial>,
-                pressed_matl: Handle<StandardMaterial>
             ) {
                 commands.spawn((
                     Transform::from_translation(position),
@@ -346,8 +310,7 @@
                             transform
                         },
                     ))
-                    .observe(update_material_on::<Pointer<Over>>(hover_matl.clone()))
-                    .observe(update_material_on::<Pointer<Click>>(pressed_matl.clone()));
+                    .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
                 });
             }
 
@@ -356,8 +319,7 @@
                 mesh: Handle<Mesh>,
                 material: Handle<StandardMaterial>,
                 position: Vec3,   
-                hover_matl: Handle<StandardMaterial>,
-                pressed_matl: Handle<StandardMaterial>     
+                hover_matl: Handle<StandardMaterial>,     
         ) {
             commands.spawn((
                 Transform::from_translation(position),
@@ -372,8 +334,7 @@
                         transform
                     },
                 ))
-                .observe(update_material_on::<Pointer<Over>>(hover_matl.clone()))
-                .observe(update_material_on::<Pointer<Click>>(pressed_matl.clone()));
+                .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
             });
         }
     
@@ -384,7 +345,7 @@
                     material: Handle<StandardMaterial>,
                     position: Vec3,   
                     hover_matl: Handle<StandardMaterial>,
-                    pressed_matl: Handle<StandardMaterial>     
+     
             ) {
                 commands.spawn((
                     Transform::from_translation(position),
@@ -399,8 +360,7 @@
                             transform
                         },
                     ))
-                    .observe(update_material_on::<Pointer<Over>>(hover_matl.clone()))
-                    .observe(update_material_on::<Pointer<Click>>(pressed_matl.clone()));
+                    .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
                 });
             }
         }
