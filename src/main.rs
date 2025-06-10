@@ -1,27 +1,20 @@
+    use bevy::ecs::entity;
     use bevy::prelude::*;
+    use bevy_inspector_egui::{bevy_egui::EguiPlugin};
     use bevy_inspector_egui::quick::WorldInspectorPlugin;
-
     mod board;
-    use board::*;
-    
-    
+    use board::*;    
     mod pieces;
     use pieces::*;
-
     mod pointer_events;
     use pointer_events::*;
-
+    use board_utils::*;
+    mod board_utils;
     
-    mod egui_ui;
-    use egui_ui::*;
-
-    //mod debug_camera;
-    //use debug_camera::*;
-
-
-
     const WINDOW_WIDTH : f32 = 1366.0;
     const WINDOW_HEIGHT: f32 = 768.0;
+    
+    
      fn main()  
     { 
         let window = Window { resolution: ( WINDOW_WIDTH, WINDOW_HEIGHT ).into(), ..default() };
@@ -29,14 +22,13 @@
         App::new()
             .add_plugins( DefaultPlugins.set( WindowPlugin { primary_window, ..default()}))
             .add_plugins(MeshPickingPlugin)
-            //.add_plugins(CameraPlugin)
+            .add_plugins(PiecePlugin)
+            .add_plugins(EguiPlugin { enable_multipass_for_primary_context: true })
             .add_plugins(WorldInspectorPlugin::new())
             .add_plugins(BoardPlugin)
-            .add_systems(Update, draw_mesh_intersections)
-            .add_systems(Startup, setup)
-            .add_systems(Startup, |mut commands: Commands, server: Res<AssetServer>, materials: ResMut<Assets<StandardMaterial>>| {
-                create_pieces(&mut commands, server, materials);
-            })
+            .add_plugins(BoardUtils)
+            .add_plugins(PointerEventsPlugin)
+            .add_systems(Startup, setup,)
             .run();
     }
 
@@ -71,7 +63,3 @@
             Transform::from_scale(Vec3::splat(1_000_000.0)),
         ));
     }
-
-
-//5 . Play with audio and lighting. https://bevyengine.org/examples-webgpu/3d-rendering/fog
-//6. Define App states

@@ -1,13 +1,47 @@
-    use bevy::color::palettes::css::BLACK;
-use bevy::{color::palettes::tailwind::*, prelude::*};
-    use bevy:: picking::pointer::PointerInteraction;
-    use crate::pointer_events::update_entitymatl_on;
+    use bevy::prelude::*;
+    use bevy::picking::pointer::PointerInteraction;
+    use std::f32;
+    use crate::board_utils::{ReturnEntityMaterials,PieceMaterials};
+    use crate::pointer_events::{revert_on, update_on};
+    use bevy::color::Color;
 
 
-    pub fn create_pieces(
-        commands: &mut Commands,
+
+
+        #[derive(Clone, Copy, Debug, Component, PartialEq)]
+        pub enum PieceColor {
+            White,
+            Black,
+        }
+
+        #[derive(Component,Clone, Copy, PartialEq, Debug)]
+        pub enum PieceType {
+            King,
+            Queen,
+            Bishop,
+            Knight,
+            Rook,
+            Pawn,
+        }
+
+
+
+       #[derive(Component,Clone, Debug, Copy)]
+        pub struct Piece {
+            pub color: PieceColor,
+            pub piece_type: PieceType,
+            pub x: u8,
+            pub y: u8,
+            
+        }
+
+        
+     fn create_pieces(
+        mut commands: Commands,
         asset_server: Res<AssetServer>,
         mut materials: ResMut<Assets<StandardMaterial>>,
+        return_materials: Res<'_,ReturnEntityMaterials>,
+        piece_materials:  &Res<'_,PieceMaterials>,
     ) {
         let king_handle: Handle<Mesh> =
             asset_server.load("models/chess_kit/pieces.glb#Mesh0/Primitive0");
@@ -26,348 +60,367 @@ use bevy::{color::palettes::tailwind::*, prelude::*};
         let queen_handle: Handle<Mesh> =
             asset_server.load("models/chess_kit/pieces.glb#Mesh7/Primitive0");
 
+          
+          
+                let white_material = materials.add(StandardMaterial {
+                    base_color: Color::WHITE,
+                    ..default()
+                });
+                let black_material = materials.add(StandardMaterial {
+                    base_color: Color::BLACK,
+                    ..default()
+                });
 
-            let hover_matl = materials.add(Color::from(GREEN_300));
-            let white_material = materials.add(Color::from(AMBER_400));
-            let black_material = materials.add(Color::BLACK);
+
+
             
             
         spawn_rook(
-            commands,
+            &mut commands,
+            white_material.clone(),
+            PieceColor::White,
             rook_handle.clone(),
-            white_material.clone(),
-            Vec3::new(0., 0., 0.),
-            hover_matl.clone(),
-        );
-
-
-        spawn_knight(
-            commands,
-            knight_1_handle.clone(),
-            knight_2_handle.clone(),
-            white_material.clone(),
-            Vec3::new(0., 0., 1.),
-            hover_matl.clone(),
+            (0, 0),
         );
 
         spawn_knight(
-            commands,
+            &mut commands,
+            white_material.clone(),
+            PieceColor::White,
             knight_1_handle.clone(),
             knight_2_handle.clone(),
-            white_material.clone(),
-            Vec3::new(0., 0., 6.),
-            hover_matl.clone(),
+            (0, 1),
         );
+
 
         spawn_bishop(
-            commands,
+            &mut commands,
             white_material.clone(),
+            PieceColor::White,
             bishop_handle.clone(),
-            Vec3::new(0., 0., 2.),
-            hover_matl.clone(),
+            (0, 2),
         );
 
         spawn_queen(
-            commands,
-            queen_handle.clone(),
+            &mut commands,
             white_material.clone(),
-            Vec3::new(0., 0., 3.),
-            hover_matl.clone(),
+            PieceColor::White,
+            queen_handle.clone(),
+            (0, 3),
         );
 
         spawn_king(
-            commands,
-            white_material.clone(),
+            &mut commands,
+            &piece_materials, 
+            PieceColor::White,
             king_handle.clone(),
             king_cross_handle.clone(),
-            Vec3::new(0., 0., 4.),
-            hover_matl.clone(),
+            (0, 4),
+            &return_materials,
         );
 
         spawn_bishop(
-            commands,
+            &mut commands,
             white_material.clone(),
+            PieceColor::White,
             bishop_handle.clone(),
-            Vec3::new(0., 0., 5.),
-            hover_matl.clone(),
+            (0, 5),
         );
 
         spawn_knight(
-            commands,
+            &mut commands,
+            white_material.clone(),
+            PieceColor::White,
             knight_1_handle.clone(),
             knight_2_handle.clone(),
-            white_material.clone(),
-            Vec3::new(0., 0., 6.),
-            hover_matl.clone(),
+            (0, 6),
         );
 
         spawn_rook(
-            commands,
-            rook_handle.clone(),
+            &mut commands,
             white_material.clone(),
-            Vec3::new(0., 0., 7.),
-            hover_matl.clone(),
+            PieceColor::White,
+            rook_handle.clone(),
+            (0, 7),
         );
     
         for i in 0..8 {
             spawn_pawn(
-                commands,
-                pawn_handle.clone(),
-                white_material.clone(),
-                Vec3::new(1., 0., i as f32),
-                hover_matl.clone(),
-
+            &mut commands,
+            white_material.clone(),
+            PieceColor::White,
+            pawn_handle.clone(),
+            (1, i),
             );
         }
 
         spawn_rook(
-            commands,
-            rook_handle.clone(),
+            &mut commands,
             black_material.clone(),
-            Vec3::new(7., 0., 0.),
-            hover_matl.clone(),
+            PieceColor::Black,
+            rook_handle.clone(),
+            (7, 0),
         );
         spawn_knight(
-            commands,
+            &mut commands,
+            black_material.clone(),
+            PieceColor::Black,
             knight_1_handle.clone(),
             knight_2_handle.clone(),
-            black_material.clone(),
-            Vec3::new(7., 0., 1.),
-            hover_matl.clone(),
+            (7, 1),
         );
+
         spawn_bishop(
-            commands,
+            &mut commands,
             black_material.clone(),
+            PieceColor::Black,
             bishop_handle.clone(),
-            Vec3::new(7., 0., 2.),
-            hover_matl.clone(),
+            (7, 2),
         );
+
         spawn_queen(
-            commands,
-            queen_handle.clone(),
+            &mut commands,
             black_material.clone(),
-            Vec3::new(7., 0., 3.),
-            hover_matl.clone(),
+            PieceColor::Black,
+            queen_handle.clone(),
+            (7, 3),
         );
         
         spawn_king(
-            commands,
-            black_material.clone(),
+            &mut commands,
+            &piece_materials, 
+            PieceColor::Black,
             king_handle.clone(),
-            king_cross_handle.clone(),
-            Vec3::new(7., 0., 4.),
-            hover_matl.clone(),    
+            king_cross_handle.clone(),    
+            (7, 4),
+            &return_materials,
         );
         
-
         spawn_bishop(
-            commands,
+            &mut commands,
             black_material.clone(),
+            PieceColor::Black,
             bishop_handle.clone(),
-            Vec3::new(7., 0., 5.),
-            hover_matl.clone(),
+            (7, 5),
         );
         spawn_knight(
-            commands,
+            &mut commands,
+            black_material.clone(),
+            PieceColor::Black,
             knight_1_handle.clone(),
             knight_2_handle.clone(),
-            black_material.clone(),
-            Vec3::new(7., 0., 6.),
-            hover_matl.clone(),
+            (7, 6),
         );
         
         spawn_rook(
-            commands,
-            rook_handle.clone(),
+            &mut commands,
             black_material.clone(),
-            Vec3::new(7., 0., 7.),
-            hover_matl.clone(),
+            PieceColor::Black,
+            rook_handle.clone(),
+            (7, 7),
         );
 
         for i in 0..8 {
             spawn_pawn(
-                commands,
-                pawn_handle.clone(),
-                black_material.clone(),
-                Vec3::new(6., 0., i as f32),
-                hover_matl.clone(),
-
+            &mut commands,
+            black_material.clone(),
+            PieceColor::Black,
+       pawn_handle.clone(),
+  (6, i),
             );
         }
-            pub fn spawn_king(
-                commands: &mut Commands,
-                material: Handle<StandardMaterial>,
-                mesh: Handle<Mesh>,
-                mesh_cross: Handle<Mesh>,
-                position: Vec3,
-                hover_matl: Handle<StandardMaterial>,
-            ) {
-
-                commands.spawn((
-                    Transform::from_translation(position),
-                ))
-                .with_children(|parent| {
-                    parent.spawn((
-                        Mesh3d(mesh.clone()),
-                        MeshMaterial3d(material.clone()),
-                        {
-                            let mut transform = Transform::from_translation(Vec3::new(-0.2, 0., -1.9));
-                            transform.scale = Vec3::new(0.2, 0.2, 0.2);
-                            transform
-                        },
-                    ))
-                    .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
-                    parent.spawn((
-                        Mesh3d(mesh_cross),
-                        MeshMaterial3d(material),
-                        {
-                            let mut transform = Transform::from_translation(Vec3::new(-0.2, 0., -1.9));
-                            transform.scale = Vec3::new(0.2, 0.2, 0.2);
-                            transform
-                        },
-                    ))
-                    .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
-                });
-            }
-                
-            pub fn spawn_knight (
-                commands: &mut Commands,
-                mesh_1: Handle<Mesh>,
-                mesh_2: Handle<Mesh>,
-                material: Handle<StandardMaterial>,
-                position: Vec3,        
-                hover_matl: Handle<StandardMaterial>,
-        ) {
-            commands.spawn((
-                Transform::from_translation(position),
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Mesh3d(mesh_1.clone()),
-                    MeshMaterial3d(material.clone()),
-                    {
-                        let mut transform = Transform::from_translation(Vec3::new(-0.2, 0., 0.9));
-                        transform.scale = Vec3::new(0.2, 0.2, 0.2);
-                        transform
-                    },
-                ))
-                .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
-                parent.spawn((
-                    Mesh3d(mesh_2.clone()),
-                    MeshMaterial3d(material),
-                    {
-                        let mut transform = Transform::from_translation(Vec3::new(-0.2, 0., 0.9));
-                        transform.scale = Vec3::new(0.2, 0.2, 0.2);
-                        transform
-                    },
-                ))
-                .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
-            });
-        }
-
-        pub fn spawn_queen (
-            commands: &mut Commands,
-            mesh: Handle<Mesh>,
-            material: Handle<StandardMaterial>,
-            position: Vec3,
-            hover_matl: Handle<StandardMaterial>,    
-        ) {
-        commands.spawn((
-            Transform::from_translation(position),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                {
-                    let mut transform = Transform::from_translation(Vec3::new(-0.2, 0., -0.95));
-                    transform.scale = Vec3::new(0.2, 0.2, 0.2);
-                    transform
-                },
-            ))
-            .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
-        });
     }
 
-    
-            pub fn spawn_bishop(
-                commands: &mut Commands,
-                material: Handle<StandardMaterial>,
+    fn piece_transform(offset: Vec3) -> Transform {
+        let mut t = Transform::from_translation(offset);
+        t.scale = Vec3::splat(0.2);
+        t
+    }
+          #[allow(clippy::too_many_arguments)]    
+            pub fn spawn_king(
+                commands: &mut Commands,         
+                piece_materials: &Res<'_,PieceMaterials>,
+                piece_color: PieceColor,
                 mesh: Handle<Mesh>,
-                position: Vec3,
-                hover_matl: Handle<StandardMaterial>,
+                mesh_cross: Handle<Mesh>,
+                position: (u8, u8),
+                return_materials: &Res<'_,ReturnEntityMaterials>,
             ) {
-                commands.spawn((
-                    Transform::from_translation(position),
-                ))
+            commands
+                .spawn(Transform::from_translation(Vec3::new(
+                    position.0 as f32,
+                    0.,
+                    position.1 as f32,
+                )))
+                .insert(Piece {
+                    color: piece_color,
+                    piece_type: PieceType::King,
+                    x: position.0,
+                    y: position.1,
+                })
+                .insert(PointerInteraction::default())
                 .with_children(|parent| {
-                    parent.spawn((
-                        Mesh3d(mesh.clone()),
-                        MeshMaterial3d(material.clone()),
-                        {
-                            let mut transform = Transform::from_translation(Vec3::new(-0.1, 0., 0.0));
-                            transform.scale = Vec3::new(0.2, 0.2, 0.2);
-                            transform
-                        },
-                    ))
-                    .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
-                });
-            }
+                    parent
+                        .spawn((
+                            Mesh3d(mesh.clone()),
+                            MeshMaterial3d(piece_materials.white_material.clone()),
+                            piece_transform(Vec3::new(-0.2, 0., -1.9)),
+                        ));
+                    parent
+                        .spawn((
+                            Mesh3d(mesh_cross),
+                            MeshMaterial3d(piece_materials.white_material.clone()),
+                            piece_transform(Vec3::new(-0.2, 0., -1.9)),
+                        ));
+                })
+                .observe(update_on::<Pointer<Over>>::(&piece_materials))
+                .observe(revert_on::<Pointer<Out>>(return_materials.get_original_entmaterial(&Piece {
+                color: piece_color,
+                piece_type: PieceType::King,
+                x: position.0,
+                y: position.1,
+            }, // Pass the actual Piece instance here
+        )));
+}
 
-            pub fn spawn_rook (
-                commands: &mut Commands,
-                mesh: Handle<Mesh>,
-                material: Handle<StandardMaterial>,
-                position: Vec3,   
-                hover_matl: Handle<StandardMaterial>,     
-        ) {
-            commands.spawn((
-                Transform::from_translation(position),
-            ))
+    pub fn spawn_knight(
+        commands: &mut Commands,
+        material: Handle<StandardMaterial>,
+        piece_color: PieceColor,
+        mesh_1: Handle<Mesh>,
+        mesh_2: Handle<Mesh>,
+        position: (u8, u8),
+    ) {
+        commands
+            .spawn(Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32)))
+            .insert(Piece {
+            color: piece_color,
+            piece_type: PieceType::Knight,
+            x: position.0,
+            y: position.1,
+        })
             .with_children(|parent| {
-                parent.spawn((
-                    Mesh3d(mesh.clone()),
-                    MeshMaterial3d(material.clone()),
-                    {
-                        let mut transform = Transform::from_translation(Vec3::new(-0.1, 0., 1.8));
-                        transform.scale = Vec3::new(0.2, 0.2, 0.2);
-                        transform
-                    },
-                ))
-                .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
-            });
-        }
-    
-
-            pub fn spawn_pawn (
-                    commands: &mut Commands,
-                    mesh: Handle<Mesh>,
-                    material: Handle<StandardMaterial>,
-                    position: Vec3,   
-                    hover_matl: Handle<StandardMaterial>,
-     
-            ) {
-                commands.spawn((
-                    Transform::from_translation(position),
-                ))
-                .with_children(|parent| {
-                    parent.spawn((
-                        Mesh3d(mesh.clone()),
+                parent
+                    .spawn((
+                        Mesh3d(mesh_1.clone()),
                         MeshMaterial3d(material.clone()),
-                        {
-                            let mut transform = Transform::from_translation(Vec3::new(-0.2, 0., 2.6));
-                            transform.scale = Vec3::new(0.2, 0.2, 0.2);
-                            transform
-                        },
-                    ))
-                    .observe(update_entitymatl_on::<Pointer<Over>>(hover_matl.clone()));
-                });
-            }
+                        piece_transform(Vec3::new(-0.2, 0., 0.9)),
+                    ));                   
+                parent
+                    .spawn((
+                        Mesh3d(mesh_2),
+                        MeshMaterial3d(material),
+                        piece_transform(Vec3::new(-0.2, 0., 0.9)),
+                    ));                  
+            });
+    }
+    
+    pub fn spawn_queen(
+        commands: &mut Commands,
+        material: Handle<StandardMaterial>,
+        piece_color: PieceColor,
+        mesh: Handle<Mesh>,
+        position: (u8, u8),
+    ) {
+        commands
+            .spawn(Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32)))
+            .insert(Piece {
+            color: piece_color,
+            piece_type: PieceType::Queen,
+            x: position.0,
+            y: position.1,
+        })
+            .with_children(|parent| {
+                parent
+                    .spawn((
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        piece_transform(Vec3::new(-0.2, 0., -0.95)),
+                    ));
+            });
+    }
+    
+    pub fn spawn_bishop(
+        commands: &mut Commands,
+        material: Handle<StandardMaterial>,
+        piece_color: PieceColor,
+        mesh: Handle<Mesh>,
+        position: (u8, u8),
+    ) {
+        commands
+            .spawn(Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32)))
+            .insert(Piece {
+            color: piece_color,
+            piece_type: PieceType::Bishop,
+            x: position.0,
+            y: position.1,
+        })
+            .with_children(|parent| {
+                parent
+                    .spawn((
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        piece_transform(Vec3::new(-0.1, 0., 0.0)),
+                    ));
+            });
+    }
+    
+    pub fn spawn_rook(
+        commands: &mut Commands,
+        material: Handle<StandardMaterial>,
+        piece_color: PieceColor,
+        mesh: Handle<Mesh>,
+        position: (u8, u8),
+    ) {
+        commands
+            .spawn(Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32)))
+            .insert(Piece {
+            color: piece_color,
+            piece_type: PieceType::Rook,
+            x: position.0,
+            y: position.1,
+        })
+            .with_children(|parent| {
+                parent
+                    .spawn((
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        piece_transform(Vec3::new(-0.1, 0., 1.8)),
+                    ));
+            });
+    }
+    
+    pub fn spawn_pawn(
+        commands: &mut Commands,
+        material: Handle<StandardMaterial>,
+        piece_color: PieceColor,
+        mesh: Handle<Mesh>,
+        position: (u8, u8),
+    ) {
+        commands
+            .spawn(Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32)))
+            .insert(Piece {
+            color: piece_color,
+            piece_type: PieceType::Pawn,
+            x: position.0,
+            y: position.1,
+        })
+            .with_children(|parent| {
+                parent
+                    .spawn((
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        piece_transform(Vec3::new(-0.2, 0., 2.6)),
+                    ));
+            });
+    }
+   
+    pub struct PiecePlugin;
+    impl Plugin for PiecePlugin {
+        fn build(&self, app: &mut App) {
+            app.add_systems(Startup, create_pieces);
+            app.init_resource::<PieceMaterials>();
+            app.init_resource::<ReturnEntityMaterials>();
         }
-
-
-
-
-            
-
+    }
 

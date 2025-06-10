@@ -8,11 +8,6 @@ edition = "2021"
 opt-level = 3
 
 [dependencies]
-bevy = "0.15.0"
-bevy_egui = "0.29.0"
-bevy_renet = "0.0.12"
-renet = "0.0.16"
-serde = "1.0.208"
-tokio = "1.42.0"
-bevy-inspector-egui = "0.28.0"
-ahash = "0.8.11"
+bevy = "0.16.0"
+bevy_egui = "0.34.1"
+bevy-inspector-egui = "0.31.0"
