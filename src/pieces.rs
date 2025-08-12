@@ -1,32 +1,25 @@
     use bevy::prelude::*;
     use bevy::picking::pointer::PointerInteraction;
     use std::f32;
-    use crate::board_utils::{ReturnEntityMaterials,PieceMaterials};
-    use crate::pointer_events::{revert_on, update_on};
     use bevy::color::Color;
 
+    #[derive(Clone, Copy, Debug, Component, PartialEq)]
+    pub enum PieceColor {
+        White,
+        Black,
+    }
 
+    #[derive(Component,Clone, Copy, PartialEq, Debug)]
+    pub enum PieceType {
+        King,
+        Queen,
+        Bishop,
+        Knight,
+        Rook,
+        Pawn,
+    }
 
-
-        #[derive(Clone, Copy, Debug, Component, PartialEq)]
-        pub enum PieceColor {
-            White,
-            Black,
-        }
-
-        #[derive(Component,Clone, Copy, PartialEq, Debug)]
-        pub enum PieceType {
-            King,
-            Queen,
-            Bishop,
-            Knight,
-            Rook,
-            Pawn,
-        }
-
-
-
-       #[derive(Component,Clone, Debug, Copy)]
+    #[derive(Component,Clone, Debug, Copy)]
         pub struct Piece {
             pub color: PieceColor,
             pub piece_type: PieceType,
@@ -35,13 +28,11 @@
             
         }
 
-        
-     fn create_pieces(
+     
+    fn create_pieces(
         mut commands: Commands,
         asset_server: Res<AssetServer>,
         mut materials: ResMut<Assets<StandardMaterial>>,
-        return_materials: Res<'_,ReturnEntityMaterials>,
-        piece_materials:  &Res<'_,PieceMaterials>,
     ) {
         let king_handle: Handle<Mesh> =
             asset_server.load("models/chess_kit/pieces.glb#Mesh0/Primitive0");
@@ -60,21 +51,17 @@
         let queen_handle: Handle<Mesh> =
             asset_server.load("models/chess_kit/pieces.glb#Mesh7/Primitive0");
 
-          
-          
-                let white_material = materials.add(StandardMaterial {
-                    base_color: Color::WHITE,
-                    ..default()
-                });
-                let black_material = materials.add(StandardMaterial {
-                    base_color: Color::BLACK,
-                    ..default()
-                });
-
-
-
             
             
+        let white_material = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            ..default()
+        });
+        let black_material = materials.add(StandardMaterial {
+            base_color: Color::BLACK,
+            ..default()
+        });           
+                
         spawn_rook(
             &mut commands,
             white_material.clone(),
@@ -111,12 +98,11 @@
 
         spawn_king(
             &mut commands,
-            &piece_materials, 
+            white_material.clone(), 
             PieceColor::White,
             king_handle.clone(),
             king_cross_handle.clone(),
             (0, 4),
-            &return_materials,
         );
 
         spawn_bishop(
@@ -188,12 +174,11 @@
         
         spawn_king(
             &mut commands,
-            &piece_materials, 
+            black_material.clone(),
             PieceColor::Black,
             king_handle.clone(),
             king_cross_handle.clone(),    
             (7, 4),
-            &return_materials,
         );
         
         spawn_bishop(
@@ -225,8 +210,8 @@
             &mut commands,
             black_material.clone(),
             PieceColor::Black,
-       pawn_handle.clone(),
-  (6, i),
+    pawn_handle.clone(),
+(6, i),
             );
         }
     }
@@ -236,15 +221,14 @@
         t.scale = Vec3::splat(0.2);
         t
     }
-          #[allow(clippy::too_many_arguments)]    
+        #[allow(clippy::too_many_arguments)]    
             pub fn spawn_king(
                 commands: &mut Commands,         
-                piece_materials: &Res<'_,PieceMaterials>,
+                material: Handle<StandardMaterial>,
                 piece_color: PieceColor,
                 mesh: Handle<Mesh>,
                 mesh_cross: Handle<Mesh>,
                 position: (u8, u8),
-                return_materials: &Res<'_,ReturnEntityMaterials>,
             ) {
             commands
                 .spawn(Transform::from_translation(Vec3::new(
@@ -263,24 +247,16 @@
                     parent
                         .spawn((
                             Mesh3d(mesh.clone()),
-                            MeshMaterial3d(piece_materials.white_material.clone()),
+                            MeshMaterial3d(material.clone()),
                             piece_transform(Vec3::new(-0.2, 0., -1.9)),
                         ));
                     parent
                         .spawn((
                             Mesh3d(mesh_cross),
-                            MeshMaterial3d(piece_materials.white_material.clone()),
+                            MeshMaterial3d(material.clone()),
                             piece_transform(Vec3::new(-0.2, 0., -1.9)),
                         ));
-                })
-                .observe(update_on::<Pointer<Over>>::(&piece_materials))
-                .observe(revert_on::<Pointer<Out>>(return_materials.get_original_entmaterial(&Piece {
-                color: piece_color,
-                piece_type: PieceType::King,
-                x: position.0,
-                y: position.1,
-            }, // Pass the actual Piece instance here
-        )));
+                });
 }
 
     pub fn spawn_knight(
@@ -314,7 +290,7 @@
                     ));                  
             });
     }
-    
+        
     pub fn spawn_queen(
         commands: &mut Commands,
         material: Handle<StandardMaterial>,
@@ -339,7 +315,7 @@
                     ));
             });
     }
-    
+
     pub fn spawn_bishop(
         commands: &mut Commands,
         material: Handle<StandardMaterial>,
@@ -364,7 +340,7 @@
                     ));
             });
     }
-    
+
     pub fn spawn_rook(
         commands: &mut Commands,
         material: Handle<StandardMaterial>,
@@ -389,7 +365,7 @@
                     ));
             });
     }
-    
+
     pub fn spawn_pawn(
         commands: &mut Commands,
         material: Handle<StandardMaterial>,
@@ -414,13 +390,11 @@
                     ));
             });
     }
-   
+
     pub struct PiecePlugin;
     impl Plugin for PiecePlugin {
         fn build(&self, app: &mut App) {
             app.add_systems(Startup, create_pieces);
-            app.init_resource::<PieceMaterials>();
-            app.init_resource::<ReturnEntityMaterials>();
         }
     }
 
