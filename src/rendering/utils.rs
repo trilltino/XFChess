@@ -8,6 +8,7 @@
         }
 
     impl Square {
+        #[allow(dead_code)] // TODO: Used for square coloring
         fn is_white(&self) -> bool {
             (self.x + self.y + 1) % 2 == 0
         }
@@ -18,6 +19,7 @@
     pub struct SquareMaterials {
             pub black_color: Handle<StandardMaterial>,
             pub white_color: Handle<StandardMaterial>,
+            #[allow(dead_code)] // TODO: Will be used for square hover effects
             pub hover_matl:  Handle<StandardMaterial>,
         }
 
@@ -42,6 +44,7 @@
     }
 
     impl ReturnMaterials {
+        #[allow(dead_code)] // TODO: Used for hover effects
         pub fn get_original_material(&self, square: &Square, materials: &SquareMaterials) -> Handle<StandardMaterial> {
             if square.is_white() {
                 materials.black_color.clone()

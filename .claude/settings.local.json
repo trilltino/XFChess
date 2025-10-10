@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(git clone:*)",
+      "Bash(git sparse-checkout:*)",
+      "Bash(git checkout:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(tree:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo update:*)",
+      "Bash(cargo clean:*)",
+      "Bash(timeout 120 cargo check)",
+      "Bash(timeout 180 cargo check)",
+      "Bash(cargo doc:*)",
+      "Read(//c/Users/isich/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_picking-0.17.2/**)",
+      "Read(//c/Users/isich/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.17.2/src/**)",
+      "Bash(find:*)",
+      "Bash(cargo fix:*)",
+      "Bash(timeout 10 cargo check)",
+      "Bash(timeout 30 cargo check)",
+      "Bash(timeout 45 cargo build)",
+      "Bash(timeout 30 cargo check --message-format=short)",
+      "Bash(taskkill:*)",
+      "Read(//c/Users/isich/.cargo/registry/src/**)",
+      "Bash(timeout 60 cargo check --message-format=short)",
+      "Bash(ls \"C:\\Users\\isich\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\"\" | grep \"bevy_egui \")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

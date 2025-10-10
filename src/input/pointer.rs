@@ -1,7 +1,7 @@
 
      use bevy::prelude::*;
      use bevy::picking::pointer::{PointerInteraction,PointerPress};
-     use crate::pieces::PieceColor;
+     use crate::rendering::pieces::PieceColor;
      use bevy::window::PrimaryWindow;
      use bevy::time::Time;
 
@@ -11,32 +11,26 @@
     }
 
     impl FromWorld for Timer {
-        fn from_world(world: &mut World) -> Self {
+        fn from_world(_world: &mut World) -> Self {
             Timer { time: 0.0 }
         }
     }
     
 
     pub fn cursor_position(
-    q_windows: Query<&Window, With<PrimaryWindow>>,
+    _q_windows: Query<&Window, With<PrimaryWindow>>,
     time: Res<Time>,
     mut timer: ResMut<Timer>,) {
 
-    timer.time += time.delta_secs(); 
+    timer.time += time.delta_secs();
     if timer.time >= 1.0 {
-    match q_windows.single() {
-            Ok(window) => {
-                if let Some(position) = window.cursor_position() {
-                println!("Cursor is inside the primary window, at {position:?}")
-                } else {
-                    println!("Cursor is not in the game window.");
-                }
-            }
-            Err(_) => {
-                println!("Failed to get the primary window.");
-            }
-        }
-                timer.time = 0.0;
+        // Temporarily disabled - cursor tracking not needed for basic functionality
+        // if let Ok(window) = q_windows.get_single() {
+        //     if let Some(position) = window.cursor_position() {
+        //         println!("Cursor is inside the primary window, at {position:?}")
+        //     }
+        // }
+        timer.time = 0.0;
     }
  }
 
@@ -64,25 +58,29 @@
     }
 }
 
-    pub fn update_squarematl_on<E>(
-        new_material: Handle<StandardMaterial>,
-        ) -> impl Fn(Trigger<E>, Query<&mut MeshMaterial3d<StandardMaterial>>) {
-        move |trigger, mut query| {
-            if let Ok(mut material) = query.get_mut(trigger.target()) {
-                material.0 = new_material.clone();
-            }
-        }
-    }
+    // TODO: Re-enable these when Bevy 0.17 observer API is finalized
+    // Helper functions that return observer closures for board.rs
+    // In Bevy 0.17, observers use On (formerly Trigger) but the API is still being refined
+    // pub fn update_squarematl_on<E: Event>(
+    //     new_material: Handle<StandardMaterial>,
+    // ) -> impl Fn(On<E>, Query<&mut MeshMaterial3d<StandardMaterial>>) {
+    //     move |trigger, mut query| {
+    //         // Access entity from the On struct
+    //         if let Ok(mut material) = query.get_mut(/* entity access TBD */) {
+    //             material.0 = new_material.clone();
+    //         }
+    //     }
+    // }
 
-    pub fn revert_squarematl_on<E>(
-        new_material: Handle<StandardMaterial>,
-        ) -> impl Fn(Trigger<E>, Query<&mut MeshMaterial3d<StandardMaterial>>) {
-        move |trigger, mut query| {
-            if let Ok(mut material) = query.get_mut(trigger.target()) {
-                material.0 = new_material.clone();
-            }
-        }
-    }
+    // pub fn revert_squarematl_on<E: Event>(
+    //     new_material: Handle<StandardMaterial>,
+    // ) -> impl Fn(On<E>, Query<&mut MeshMaterial3d<StandardMaterial>>) {
+    //     move |trigger, mut query| {
+    //         if let Ok(mut material) = query.get_mut(/* entity access TBD */) {
+    //             material.0 = new_material.clone();
+    //         }
+    //     }
+    // }
 
 pub struct PointerEventsPlugin;
         impl Plugin for PointerEventsPlugin {

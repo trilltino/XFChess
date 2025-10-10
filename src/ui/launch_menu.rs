@@ -1,13 +1,12 @@
 use bevy::{
     math::ops,
-    pbr::{NotShadowCaster, NotShadowReceiver},
     prelude::*,
 };
 
-use crate::egui_ui::playgame_ui;
-use crate::state_manager::GameState;
+use crate::ui::egui_systems::playgame_ui;
+use crate::core::{GameState, LaunchMenu};
 
-pub fn setup_launch_camera(mut commands: Commands, state: ResMut<NextState<GameState>>) {
+pub fn setup_launch_camera(mut commands: Commands, _state: ResMut<NextState<GameState>>) {
     commands.spawn((
         Camera3d::default(),
         DistanceFog {
@@ -17,6 +16,7 @@ pub fn setup_launch_camera(mut commands: Commands, state: ResMut<NextState<GameS
     ));
 }
 
+#[allow(dead_code)] // TODO: Alternative launch menu scene
 pub fn setup_pyramid_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -47,8 +47,6 @@ pub fn setup_pyramid_scene(
             ..default()
         })),
         Transform::from_scale(Vec3::splat(1.75)).with_translation(Vec3::new(0.0, 4.0, 0.0)),
-        NotShadowCaster,
-        NotShadowReceiver,
     ));
 
     for i in 0..50 {
@@ -82,14 +80,12 @@ pub fn setup_pyramid_scene(
 }
 
 fn update_system(
-    camera: Single<(&mut DistanceFog, &mut Transform)>,
-    mut text: Single<&mut Text>,
+    camera: Single<&mut Transform>,
     time: Res<Time>,
 ) {
     let now = time.elapsed_secs();
-    let delta = time.delta_secs();
 
-    let (mut fog, mut transform) = camera.into_inner();
+    let mut transform = camera.into_inner();
 
     // Orbit camera around pyramid
     let orbit_scale = 8.0 + ops::sin(now / 10.0) * 7.0;
@@ -102,20 +98,15 @@ fn update_system(
 }
 
 pub struct Launchmenu<S: States> {
+    #[allow(dead_code)] // State stored for future use
     pub state: S,
 }
 
 impl<S: States> Plugin for Launchmenu<S> {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                update_system,
-                setup_launch_camera,
-                setup_pyramid_scene,
-                playgame_ui,
-            )
-                .run_if(in_computed_state::<LaunchMenu>()),
-        );
+        // UI system runs in Update with Result type
+        app
+            .add_systems(Update, update_system.run_if(in_state(LaunchMenu)))
+            .add_systems(Update, playgame_ui.run_if(in_state(LaunchMenu)));
     }
 }
