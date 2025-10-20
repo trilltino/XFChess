@@ -8,6 +8,9 @@ edition = "2021"
 opt-level = 3
 
 [dependencies]
-bevy = "0.16.0"
-bevy_egui = "0.34.1"
-bevy-inspector-egui = "0.31.0"
+bevy = "0.17.2"
+bevy_egui = "0.37.1"
+bevy-inspector-egui = "0.34.0"
+futures-lite = "2.5.0"
+rand = "0.8"
+chess_engine = { path = "crates/chess_engine" }

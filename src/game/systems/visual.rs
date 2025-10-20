@@ -2,28 +2,36 @@
 
 use bevy::prelude::*;
 use crate::rendering::pieces::Piece;
-use crate::rendering::utils::Square;
+use crate::rendering::utils::{Square, SquareMaterials, ReturnMaterials};
 use crate::game::resources::Selection;
 
-/// System to visually highlight possible moves
+/// System to visually highlight possible moves and selected square
+///
+/// This system runs every frame and updates square materials based on:
+/// - Whether a piece is selected (highlights source square)
+/// - Which squares are valid move destinations (highlights possible moves)
+/// - Restores original colors for squares that are no longer highlighted
 pub fn highlight_possible_moves(
     selection: Res<Selection>,
-    mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    squares_query: Query<(Entity, &Square)>,
-    _hover_materials: Res<crate::rendering::utils::SquareMaterials>,
+    square_materials: Res<SquareMaterials>,
+    return_materials: Res<ReturnMaterials>,
+    mut squares_query: Query<(Entity, &Square, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
-    if !selection.is_selected() {
-        return;
-    }
-
-    // Highlight squares where the selected piece can move
-    for (entity, square) in squares_query.iter() {
+    for (_, square, mut material) in squares_query.iter_mut() {
         let pos = (square.x, square.y);
-        if selection.possible_moves.contains(&pos) {
-            if let Ok(_material) = materials.get_mut(entity) {
-                // TODO: Use a different material for possible moves
-                // material.0 = hover_materials.hover_matl.clone();
-            }
+
+        // Check if this square should be highlighted
+        let should_highlight = selection.is_selected() && (
+            selection.selected_position == Some(pos) || // Selected square
+            selection.possible_moves.contains(&pos)      // Valid move destination
+        );
+
+        if should_highlight {
+            // Handle is Clone (not Copy), need .clone() from Res
+            material.0 = square_materials.hover_matl.clone();
+        } else {
+            // Restore original color
+            material.0 = return_materials.get_original_material(square, &square_materials);
         }
     }
 }

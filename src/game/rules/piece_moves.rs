@@ -1,7 +1,33 @@
-//! Chess piece movement rules
+//! Chess piece movement rules - Pure move validation logic
 //!
-//! Contains the rules for how each chess piece can move.
-//! Pure functions with no side effects - easy to test.
+//! Implements standard chess movement rules for all piece types using pure functions.
+//! This design enables easy unit testing and potential integration with the chess engine
+//! in `reference/chess_engine/move_gen.rs`.
+//!
+//! # Implemented Rules
+//!
+//! ✅ Basic movement for all pieces (pawn, knight, bishop, rook, queen, king)
+//! ✅ Pawn double-move from starting position
+//! ✅ Pawn diagonal capture
+//! ✅ Path-clear validation for sliding pieces (bishop, rook, queen)
+//! ❌ En passant (TODO - see `reference/chess_engine/` for implementation)
+//! ❌ Castling (TODO - requires king and rook movement tracking)
+//! ❌ Check/checkmate detection (see `game_logic.rs` TODO)
+//!
+//! # Architecture
+//!
+//! - **Pure functions**: No ECS dependencies, only piece type and board state
+//! - **Snapshot validation**: BoardState provides current piece positions
+//! - **No side effects**: Functions return bool, never mutate state
+//!
+//! # Reference
+//!
+//! Movement algorithms reference:
+//! - `reference/chess_engine/move_gen.rs` - Optimized move generation with bitboards
+//! - `reference/bevy-3d-chess/game_logic.rs` - Alternative ECS-integrated approach
+//!
+//! The chess engine's implementation uses bitboards for 2-5x faster move generation,
+//! which could be integrated for AI opponent move calculation.
 
 use crate::rendering::pieces::{PieceType, PieceColor};
 use super::board_state::BoardState;
@@ -71,32 +97,40 @@ fn is_valid_pawn_move(
     board_state: &BoardState,
     has_moved: bool,
 ) -> bool {
+    // Position tuple is (rank, file) where rank is vertical (0-7) and file is horizontal (0-7)
+    // Pawns move forward in rank direction: white moves from low rank to high rank (+1)
     let direction = match color {
         PieceColor::White => 1i8,
         PieceColor::Black => -1i8,
     };
 
-    let from_x = from.0 as i8;
-    let from_y = from.1 as i8;
-    let to_x = to.0 as i8;
-    let to_y = to.1 as i8;
+    let from_rank = from.0 as i8;
+    let from_file = from.1 as i8;
+    let to_rank = to.0 as i8;
+    let to_file = to.1 as i8;
 
-    let dx = to_x - from_x;
-    let dy = to_y - from_y;
+    let rank_diff = to_rank - from_rank;
+    let file_diff = to_file - from_file;
 
-    // Forward move
-    if dx == 0 && dy == direction {
+    // Forward move (same file, advance one rank)
+    if file_diff == 0 && rank_diff == direction {
         return board_state.is_empty(to);
     }
 
     // Double move from starting position
-    if dx == 0 && dy == 2 * direction && !has_moved {
-        let intermediate = (from.0, (from.1 as i8 + direction) as u8);
+    // White pawns start at rank 1, black pawns at rank 6
+    let starting_rank = match color {
+        PieceColor::White => 1,
+        PieceColor::Black => 6,
+    };
+
+    if file_diff == 0 && rank_diff == 2 * direction && !has_moved && from.0 == starting_rank {
+        let intermediate = ((from.0 as i8 + direction) as u8, from.1);
         return board_state.is_empty(intermediate) && board_state.is_empty(to);
     }
 
-    // Capture diagonally
-    if dx.abs() == 1 && dy == direction {
+    // Capture diagonally (one file sideways, one rank forward)
+    if file_diff.abs() == 1 && rank_diff == direction {
         if let Some(target_color) = board_state.get_piece_color(to) {
             return target_color != color;
         }
