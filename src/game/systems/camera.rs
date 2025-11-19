@@ -31,7 +31,13 @@
 //! - `reference/bevy/examples/3d/3d_scene.rs` - Camera transform manipulation
 //! - Total War series camera controls - RTS standard
 
-use bevy::{prelude::*, input::mouse::MouseWheel};
+use crate::game::ai::resource::{ChessAIResource, GameMode};
+use crate::game::resources::CurrentTurn;
+use bevy::{
+    input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
+    prelude::*,
+};
+use std::f32::consts::PI;
 
 /// Component marking a camera as player-controllable with RTS-style movement
 ///
@@ -102,6 +108,30 @@ pub struct CameraController {
     /// Prevents camera from zooming out too far and losing board visibility.
     /// Higher value = can zoom out farther.
     pub max_zoom: f32,
+
+    /// Camera pitch (rotation around X axis, looking up/down)
+    ///
+    /// Stored in radians. Clamped between -PI/2 and PI/2 to prevent gimbal lock.
+    /// Negative = looking down, Positive = looking up, 0 = looking straight ahead.
+    pub pitch: f32,
+
+    /// Camera yaw (rotation around Y axis, looking left/right)
+    ///
+    /// Stored in radians. Wraps around at 2*PI.
+    /// 0 = north, PI/2 = east, PI = south, 3*PI/2 = west.
+    pub yaw: f32,
+
+    /// Mouse rotation sensitivity multiplier
+    ///
+    /// Based on Bevy reference (Valorant-style): 1.0 / 180.0 radians per dot.
+    /// Higher values = faster rotation response. Suggested range: 0.5-2.0.
+    pub rotation_sensitivity: f32,
+
+    /// Whether the controller has been initialized
+    ///
+    /// On first frame, extracts pitch/yaw from Transform rotation.
+    /// Prevents sudden camera jumps on spawn.
+    pub initialized: bool,
 }
 
 impl Default for CameraController {
@@ -117,28 +147,41 @@ impl Default for CameraController {
     /// - **target_zoom**: 15.0 - Start at current zoom
     /// - **min_zoom**: 5.0 - Close-up view of pieces
     /// - **max_zoom**: 30.0 - Strategic overview height
+    /// - **pitch**: 0.0 - Extracted from Transform on first frame
+    /// - **yaw**: 0.0 - Extracted from Transform on first frame
+    /// - **rotation_sensitivity**: 1.0 - Valorant-style sensitivity
+    /// - **initialized**: false - Will be set true after first frame
     fn default() -> Self {
         Self {
             move_speed: 12.0,
             smoothing: 0.3,
             zoom_speed: 2.0,
-            zoom_smoothing: 0.15,    // Slower than movement for cinematic feel
-            current_zoom: 15.0,       // Typical chess board viewing height
+            zoom_smoothing: 0.15, // Slower than movement for cinematic feel
+            current_zoom: 15.0,   // Typical chess board viewing height
             target_zoom: 15.0,
-            min_zoom: 5.0,            // Close enough to see piece details
-            max_zoom: 30.0,           // Far enough for full board overview
+            min_zoom: 5.0,             // Close enough to see piece details
+            max_zoom: 30.0,            // Far enough for full board overview
+            pitch: 0.0,                // Will be initialized from Transform
+            yaw: 0.0,                  // Will be initialized from Transform
+            rotation_sensitivity: 1.0, // Bevy reference default
+            initialized: false,        // Needs initialization
         }
     }
 }
 
 /// System that handles mouse wheel zoom input and updates target zoom level
 ///
-/// Reads mouse wheel events and adjusts the camera's target_zoom accordingly.
-/// Positive delta (wheel up) zooms in (decreases height), negative delta (wheel down)
-/// zooms out (increases height). Target zoom is clamped to min/max bounds.
+/// Uses AccumulatedMouseScroll (Bevy 0.17+) which accumulates scroll events
+/// automatically each frame. Positive delta = scroll up = zoom in (decrease height),
+/// negative delta = scroll down = zoom out (increase height).
 ///
 /// This system only updates the target; actual camera movement happens in
 /// `camera_zoom_system` for smooth interpolation.
+///
+/// # Modern Pattern (Bevy 0.17+)
+///
+/// AccumulatedMouseScroll replaces the deprecated EventReader<MouseWheel> pattern.
+/// It provides a single delta value per frame, already normalized across scroll types.
 ///
 /// # Total War Feel
 ///
@@ -147,26 +190,17 @@ impl Default for CameraController {
 /// - Each wheel tick moves target by zoom_speed units
 /// - Smooth interpolation applied separately for cinematic effect
 pub fn camera_zoom_input_system(
-    mut mouse_wheel_events: EventReader<MouseWheel>,
+    mouse_scroll: Res<AccumulatedMouseScroll>,
     mut query: Query<&mut CameraController>,
 ) {
-    use bevy::input::mouse::MouseScrollUnit;
-
-    for mut controller in query.iter_mut() {
-        for event in mouse_wheel_events.read() {
-            // Calculate zoom delta based on scroll unit
-            let zoom_delta = match event.unit {
-                MouseScrollUnit::Line => {
-                    // Standard mouse wheel (most common)
-                    // Positive y = scroll up = zoom in = decrease height
-                    -event.y * controller.zoom_speed
-                }
-                MouseScrollUnit::Pixel => {
-                    // Touchpad or high-precision scroll
-                    // Scale down pixel values as they're much larger
-                    -event.y * controller.zoom_speed * 0.01
-                }
-            };
+    // Only process if there was scroll input this frame
+    // AccumulatedMouseScroll.delta is a Vec2 where y is vertical scroll
+    if mouse_scroll.delta.y != 0.0 {
+        for mut controller in query.iter_mut() {
+            // Calculate zoom delta
+            // AccumulatedMouseScroll.delta.y is already normalized
+            // Positive y = scroll up = zoom in = decrease height
+            let zoom_delta = -mouse_scroll.delta.y * controller.zoom_speed;
 
             // Update target zoom and clamp to bounds
             controller.target_zoom = (controller.target_zoom + zoom_delta)
@@ -189,15 +223,12 @@ pub fn camera_zoom_input_system(
 ///
 /// The zoom smoothing factor is typically lower than movement smoothing
 /// (0.15 vs 0.3) to create a more cinematic, gradual zoom effect.
-pub fn camera_zoom_system(
-    mut query: Query<(&mut Transform, &mut CameraController)>,
-) {
+pub fn camera_zoom_system(mut query: Query<(&mut Transform, &mut CameraController)>) {
     for (mut transform, mut controller) in query.iter_mut() {
         // Smoothly interpolate current zoom toward target
-        controller.current_zoom = controller.current_zoom.lerp(
-            controller.target_zoom,
-            controller.zoom_smoothing,
-        );
+        controller.current_zoom = controller
+            .current_zoom
+            .lerp(controller.target_zoom, controller.zoom_smoothing);
 
         // Apply zoom to camera Y position (height)
         transform.translation.y = controller.current_zoom;
@@ -274,6 +305,221 @@ pub fn camera_movement_system(
     }
 }
 
+/// Radians per mouse movement dot (based on Valorant sensitivity from Bevy reference)
+pub const RADIANS_PER_DOT: f32 = 1.0 / 180.0;
+
+/// System that handles mouse drag rotation (right-click + drag)
+///
+/// Implements orbit-style camera rotation following modern Bevy patterns:
+/// - Uses `AccumulatedMouseMotion` (NOT multiplied by delta_time - already frame-accumulated)
+/// - Pitch is clamped to prevent gimbal lock (-PI/2 to PI/2)
+/// - Yaw wraps naturally at 2*PI
+/// - Right mouse button must be pressed to rotate
+///
+/// # Modern Pattern (Bevy 0.17+)
+///
+/// Based on `reference/bevy/examples/helpers/camera_controller.rs`.
+/// The key insight: **AccumulatedMouseMotion is already frame-accumulated**.
+/// Do NOT multiply by delta_time or it will be way too slow!
+///
+/// # Initialization
+///
+/// On first frame (initialized == false), extracts current pitch/yaw from
+/// the Transform's rotation to prevent sudden camera jumps.
+pub fn camera_rotation_system(
+    mouse_motion: Res<AccumulatedMouseMotion>,
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    mut query: Query<(&mut Transform, &mut CameraController)>,
+) {
+    for (mut transform, mut controller) in query.iter_mut() {
+        // Initialize pitch/yaw from Transform on first frame
+        if !controller.initialized {
+            let (yaw, pitch, _roll) = transform.rotation.to_euler(EulerRot::YXZ);
+            controller.yaw = yaw;
+            controller.pitch = pitch;
+            controller.initialized = true;
+            info!(
+                "[CAMERA] Initialized - pitch: {:.2}, yaw: {:.2}",
+                controller.pitch.to_degrees(),
+                controller.yaw.to_degrees()
+            );
+        }
+
+        // Only rotate if right mouse button is pressed AND mouse is moving
+        if mouse_button.pressed(MouseButton::Right) && mouse_motion.delta != Vec2::ZERO {
+            // Update pitch (up/down) with clamping to prevent gimbal lock
+            // Negative delta.y = move mouse up = look up = increase pitch
+            controller.pitch = (controller.pitch
+                - mouse_motion.delta.y * RADIANS_PER_DOT * controller.rotation_sensitivity)
+                .clamp(-PI / 2.0, PI / 2.0);
+
+            // Update yaw (left/right) - no clamping needed, wraps naturally
+            // Negative delta.x = move mouse left = look left = decrease yaw
+            controller.yaw -=
+                mouse_motion.delta.x * RADIANS_PER_DOT * controller.rotation_sensitivity;
+
+            // Apply rotation to Transform
+            // Order: ZYX (roll=0, yaw, pitch) matches Bevy reference
+            transform.rotation =
+                Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+        }
+    }
+}
+
+/// Resource tracking camera rotation state for turn-based rotation
+///
+/// When a turn switches, the camera should rotate 180° around the board center
+/// so each player sees the board from their perspective.
+#[derive(Resource, Debug, Default)]
+pub struct CameraRotationState {
+    /// Target rotation angle (in radians) - 0 for White, PI for Black
+    pub target_yaw: f32,
+
+    /// Current rotation angle (in radians)
+    pub current_yaw: f32,
+
+    /// Whether rotation is in progress
+    pub is_rotating: bool,
+
+    /// Rotation speed (radians per second)
+    pub rotation_speed: f32,
+
+    /// Last turn color - used to detect turn changes
+    pub last_turn_color: Option<crate::rendering::pieces::PieceColor>,
+}
+
+impl CameraRotationState {
+    /// Board center position (around which we rotate)
+    pub const BOARD_CENTER: Vec3 = Vec3::new(3.5, 0.0, 3.5);
+
+    /// Rotation speed in radians per second
+    pub const DEFAULT_ROTATION_SPEED: f32 = 2.0;
+}
+
+/// System that detects turn changes and initiates camera rotation
+///
+/// Only rotates in VsHuman mode (both players are human).
+/// In VsAI mode, the camera stays fixed since only one player is human.
+pub fn camera_rotate_on_turn_detection_system(
+    mut rotation_state: ResMut<CameraRotationState>,
+    current_turn: Res<CurrentTurn>,
+    ai_config: Res<ChessAIResource>,
+) {
+    // Only rotate in VsHuman mode
+    if !matches!(ai_config.mode, GameMode::VsHuman) {
+        return;
+    }
+
+    // Initialize last_turn_color on first run
+    if rotation_state.last_turn_color.is_none() {
+        rotation_state.last_turn_color = Some(current_turn.color);
+        rotation_state.target_yaw = 0.0;
+        rotation_state.current_yaw = 0.0;
+        rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED;
+        return;
+    }
+
+    // Check if turn changed
+    if let Some(last_color) = rotation_state.last_turn_color {
+        if last_color != current_turn.color {
+            // Turn switched - initiate rotation
+            info!(
+                "[CAMERA] Turn switched from {:?} to {:?} - rotating camera",
+                last_color, current_turn.color
+            );
+
+            // Set target rotation: 0 for White, PI (180°) for Black
+            rotation_state.target_yaw = match current_turn.color {
+                crate::rendering::pieces::PieceColor::White => 0.0,
+                crate::rendering::pieces::PieceColor::Black => PI,
+            };
+
+            rotation_state.is_rotating = true;
+            rotation_state.last_turn_color = Some(current_turn.color);
+        }
+    }
+}
+
+/// System that smoothly rotates camera around board center when turn switches
+///
+/// Rotates the camera 180° around the Y-axis (board center) so each player
+/// sees the board from their perspective. Uses smooth interpolation for
+/// a cinematic rotation effect.
+pub fn camera_rotate_on_turn_system(
+    time: Res<Time>,
+    mut rotation_state: ResMut<CameraRotationState>,
+    mut camera_query: Query<&mut Transform, (With<Camera3d>, With<CameraController>)>,
+) {
+    if !rotation_state.is_rotating {
+        return;
+    }
+
+    // Calculate rotation delta
+    let delta_yaw = rotation_state.target_yaw - rotation_state.current_yaw;
+
+    // Normalize delta to shortest path (-PI to PI range)
+    let normalized_delta = {
+        let mut d = delta_yaw;
+        while d > PI {
+            d -= 2.0 * PI;
+        }
+        while d < -PI {
+            d += 2.0 * PI;
+        }
+        d
+    };
+
+    // Check if we're close enough to target (within 0.01 radians)
+    if normalized_delta.abs() < 0.01 {
+        rotation_state.current_yaw = rotation_state.target_yaw;
+        rotation_state.is_rotating = false;
+        info!(
+            "[CAMERA] Rotation complete - yaw: {:.2}°",
+            rotation_state.current_yaw.to_degrees()
+        );
+        return;
+    }
+
+    // Smoothly interpolate toward target
+    let rotation_delta = normalized_delta * rotation_state.rotation_speed * time.delta_secs();
+    rotation_state.current_yaw += rotation_delta;
+
+    // Normalize current_yaw to 0-2PI range
+    rotation_state.current_yaw = rotation_state.current_yaw % (2.0 * PI);
+    if rotation_state.current_yaw < 0.0 {
+        rotation_state.current_yaw += 2.0 * PI;
+    }
+
+    // Apply rotation to all game cameras
+    for mut transform in camera_query.iter_mut() {
+        // Store original position relative to board center
+        let relative_pos = transform.translation - CameraRotationState::BOARD_CENTER;
+
+        // Calculate total rotation from initial position
+        // Initial yaw is 0, so we rotate by current_yaw
+        let rotation_quat = Quat::from_rotation_y(rotation_state.current_yaw);
+
+        // Rotate position around board center
+        let rotated_pos = rotation_quat * relative_pos;
+
+        // Update position
+        transform.translation = CameraRotationState::BOARD_CENTER + rotated_pos;
+
+        // Update rotation to look at board center with the new yaw
+        // Extract current pitch from transform
+        let (_, current_pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+
+        // Create new rotation with updated yaw and same pitch
+        // This maintains the viewing angle while rotating around the board
+        transform.rotation = Quat::from_euler(
+            EulerRot::YXZ,
+            rotation_state.current_yaw,
+            current_pitch,
+            0.0,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,8 +557,10 @@ mod tests {
 
         let controller = CameraController::default();
 
-        assert!(controller.zoom_smoothing < controller.smoothing,
-            "Zoom should be smoother (slower) than movement for cinematic effect");
+        assert!(
+            controller.zoom_smoothing < controller.smoothing,
+            "Zoom should be smoother (slower) than movement for cinematic effect"
+        );
     }
 
     #[test]
@@ -328,6 +576,10 @@ mod tests {
             target_zoom: 10.0,
             min_zoom: 3.0,
             max_zoom: 50.0,
+            pitch: 0.0,
+            yaw: 0.0,
+            rotation_sensitivity: 1.0,
+            initialized: false,
         };
 
         assert_eq!(controller.zoom_speed, 3.0);
@@ -351,7 +603,10 @@ mod tests {
         // Should be closer to target but not exactly at it (smooth approach)
         assert!(current < 15.0, "Should move from start position");
         assert!(current > 10.0, "Should not reach target instantly");
-        assert!(current > 11.0, "Should make significant progress after 10 frames");
+        assert!(
+            current > 11.0,
+            "Should make significant progress after 10 frames"
+        );
     }
 
     #[test]
@@ -359,7 +614,7 @@ mod tests {
         //! Verifies zoom is clamped to min_zoom
 
         let controller = CameraController::default();
-        let attempted_zoom = 2.0; // Below min_zoom (5.0)
+        let attempted_zoom: f32 = 2.0; // Below min_zoom (5.0)
 
         let clamped = attempted_zoom.clamp(controller.min_zoom, controller.max_zoom);
 
@@ -371,7 +626,7 @@ mod tests {
         //! Verifies zoom is clamped to max_zoom
 
         let controller = CameraController::default();
-        let attempted_zoom = 50.0; // Above max_zoom (30.0)
+        let attempted_zoom: f32 = 50.0; // Above max_zoom (30.0)
 
         let clamped = attempted_zoom.clamp(controller.min_zoom, controller.max_zoom);
 
@@ -389,7 +644,10 @@ mod tests {
         // Scroll up = zoom in = negative change
         let new_target = initial_target + (-scroll_up_delta * zoom_speed);
 
-        assert!(new_target < initial_target, "Scroll up should zoom in (decrease height)");
+        assert!(
+            new_target < initial_target,
+            "Scroll up should zoom in (decrease height)"
+        );
         assert_eq!(new_target, 13.0);
     }
 
@@ -404,7 +662,10 @@ mod tests {
         // Scroll down = zoom out = positive change
         let new_target = initial_target + (-scroll_down_delta * zoom_speed);
 
-        assert!(new_target > initial_target, "Scroll down should zoom out (increase height)");
+        assert!(
+            new_target > initial_target,
+            "Scroll down should zoom out (increase height)"
+        );
         assert_eq!(new_target, 17.0);
     }
 
@@ -412,16 +673,18 @@ mod tests {
     fn test_zoom_speed_affects_response() {
         //! Higher zoom_speed should result in larger target changes
 
-        let scroll_delta = 1.0;
-        let slow_speed = 1.0;
-        let fast_speed = 3.0;
-        let initial = 15.0;
+        let scroll_delta: f32 = 1.0;
+        let slow_speed: f32 = 1.0;
+        let fast_speed: f32 = 3.0;
+        let initial: f32 = 15.0;
 
         let slow_change = -scroll_delta * slow_speed;
         let fast_change = -scroll_delta * fast_speed;
 
-        assert!(fast_change.abs() > slow_change.abs(),
-            "Higher zoom_speed should create larger zoom changes");
+        assert!(
+            fast_change.abs() > slow_change.abs(),
+            "Higher zoom_speed should create larger zoom changes"
+        );
     }
 
     #[test]
@@ -444,22 +707,31 @@ mod tests {
         // Chess board is typically 8x8 units, pieces ~1 unit tall
         // Min zoom (5.0) should see several squares clearly
         // Max zoom (30.0) should see entire board
-        assert!(controller.min_zoom >= 3.0, "Too close might clip through board");
-        assert!(controller.max_zoom <= 50.0, "Too far loses board visibility");
+        assert!(
+            controller.min_zoom >= 3.0,
+            "Too close might clip through board"
+        );
+        assert!(
+            controller.max_zoom <= 50.0,
+            "Too far loses board visibility"
+        );
 
         // Range should be wide enough for varied playstyles
         let zoom_range = controller.max_zoom - controller.min_zoom;
-        assert!(zoom_range >= 20.0, "Range should allow significant zoom variation");
+        assert!(
+            zoom_range >= 20.0,
+            "Range should allow significant zoom variation"
+        );
     }
 
     #[test]
     fn test_multiple_zoom_steps() {
         //! Simulates multiple scroll wheel inputs
 
-        let mut target_zoom = 15.0;
-        let zoom_speed = 2.0;
-        let min_zoom = 5.0;
-        let max_zoom = 30.0;
+        let mut target_zoom: f32 = 15.0;
+        let zoom_speed: f32 = 2.0;
+        let min_zoom: f32 = 5.0;
+        let max_zoom: f32 = 30.0;
 
         // Scroll up 3 times (zoom in)
         for _ in 0..3 {

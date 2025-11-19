@@ -174,9 +174,13 @@ use super::constants::*;
 
 pub type Position = i8;
 pub type Color = i64;
+#[allow(dead_code)] // Part of engine's public API - type aliases
 pub type ColorIndex = usize;
+#[allow(dead_code)] // Part of engine's public API - type aliases
 pub type Col = i8;
+#[allow(dead_code)] // Part of engine's public API - type aliases
 pub type Row = i8;
+#[allow(dead_code)] // Part of engine's public API - type aliases
 pub type FigureID = i8;
 pub type Board = [i8; 64];
 pub type BitBuffer192 = [u8; BIT_BUFFER_SIZE];
@@ -184,7 +188,14 @@ pub type HashLine1 = [Guide1; 11];
 pub type HashLine2 = [Guide2; TT_TRY];
 pub type KKS = Vec<KK>;
 
-#[allow(dead_code)]
+/// Central game state structure for the chess engine
+///
+/// This struct represents the complete state of a chess engine instance, combining:
+/// - Board state (piece positions)
+/// - Move history (move counter, castling rights)
+/// - Transposition table for move caching
+/// - Search state (current evaluation, best move)
+#[derive(Clone)]
 pub struct Game {
     pub board: Board,
     pub move_counter: i32,
@@ -267,6 +278,7 @@ impl KK {
 }
 
 #[derive(Copy, Clone, Debug)]
+#[allow(dead_code)] // Internal engine structure - reserved for future use
 pub(crate) struct Gnu {
     pub score: i16,
     pub src: i8,
@@ -276,6 +288,7 @@ pub(crate) struct Gnu {
 }
 
 #[derive(Copy, Clone, Debug)]
+#[allow(dead_code)] // Internal engine structure - reserved for future use
 pub(crate) struct MiniGnu {
     pub score: i16,
     pub src: i8,
@@ -287,10 +300,12 @@ pub(crate) struct MiniGnu {
 
 #[derive(Copy, Clone)]
 pub(crate) struct Guide1 {
+    #[allow(dead_code)] // Internal engine field - reserved for future use
     pub ply: i64,
     pub score: i16,
     pub best_move_src: i8,
     pub best_move_dst: i8,
+    #[allow(dead_code)] // Internal engine field - reserved for future use
     pub best_move_nxt_dir_idx: u8,
 }
 

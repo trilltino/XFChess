@@ -2,22 +2,44 @@
 //!
 //! Keeps the bitboard representation in sync with ECS piece entities.
 //! Rebuilds the bitboard when pieces are added, removed, or moved.
+//!
+//! # Performance
+//!
+//! This system uses change detection to avoid unnecessary rebuilds:
+//! - Only rebuilds when piece count changes (add/remove)
+//! - Only rebuilds when explicitly marked dirty (moved)
+//! - Provides O(1) square occupancy checks via bitboards
+//!
+//! # Execution Order
+//!
+//! Runs in `GameSystems::Validation` set, before move validation systems
+//! that need the fast board state for O(1) lookups.
 
-use bevy::prelude::*;
-use crate::rendering::pieces::{Piece, PieceColor};
 use crate::game::resources::FastBoardState;
+use crate::rendering::pieces::{Piece, PieceColor};
+use bevy::prelude::*;
 
 /// System that synchronizes FastBoardState with ECS piece positions
 ///
-/// Runs in the Validation set, before move validation systems that need
-/// the fast board state for O(1) lookups.
+/// Rebuilds the bitboard representation from ECS piece entities, enabling
+/// O(1) square occupancy checks for move validation.
 ///
-/// Automatically rebuilds when piece count changes (pieces added/removed)
-/// or when explicitly marked dirty (pieces moved).
-pub fn sync_fast_board_state(
-    mut fast_board: ResMut<FastBoardState>,
-    pieces: Query<&Piece>,
-) {
+/// # Execution Order
+///
+/// Runs in `GameSystems::Validation` set, before move validation systems
+/// that need the fast board state.
+///
+/// # Rebuild Conditions
+///
+/// Automatically rebuilds when:
+/// - Piece count changes (pieces added/removed)
+/// - Board is explicitly marked dirty (pieces moved)
+///
+/// # Performance
+///
+/// Uses early return to skip rebuilds when board is already in sync,
+/// minimizing unnecessary work each frame.
+pub fn sync_fast_board_state(mut fast_board: ResMut<FastBoardState>, pieces: Query<&Piece>) {
     // Always rebuild if piece count changed (add/remove) or if marked dirty (moved)
     let piece_count = pieces.iter().count() as u32;
     let current_count = fast_board.piece_count();

@@ -1,21 +1,2 @@
-# Cargo configuration for XFChess
-#
-# This file configures the Windows MSVC linker to use an 8MB stack size for all threads.
-# This is required because Bevy's Compute Task Pool performs recursive GLTF mesh parsing
-# during asset loading, which exceeds the default 2MB stack limit.
-#
-# Technical details:
-# - Default Windows thread stack: 2MB (insufficient for complex GLTF parsing)
-# - Configured stack size: 8MB (8388608 bytes)
-# - Affects: All threads including Bevy's internal task pools (Compute, AsyncCompute, IO)
-#
-# Reference:
-# - Bevy reference code: examples/stress_tests/* (spawn 10,000+ entities without issues)
-# - MSVC linker docs: https://docs.microsoft.com/en-us/cpp/build/reference/stack-stack-allocations
-#
-# Without this configuration, the game crashes with:
-# "thread 'Compute Task Pool (N)' has overflowed its stack"
-# error code: 0xc00000fd (STATUS_STACK_OVERFLOW)
-
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "link-arg=/STACK:8388608"]
+[target.wasm32-unknown-unknown]
+runner = "wasm-server-runner"

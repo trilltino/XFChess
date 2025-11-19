@@ -20,10 +20,10 @@
 //! - `reference/bevy-inspector-egui/examples/integrations/side_panel.rs`
 //! - `reference/bevy-inspector-egui/examples/basic/resource_inspector_manual.rs`
 
-use bevy::prelude::*;
-use bevy_egui::{EguiContext, egui, PrimaryEguiContext};
-use bevy_inspector_egui::bevy_inspector::hierarchy::SelectedEntities;
 use crate::game::resources::*;
+use bevy::prelude::*;
+use bevy_egui::{egui, EguiContext, PrimaryEguiContext};
+use bevy_inspector_egui::bevy_inspector::hierarchy::SelectedEntities;
 use std::ops::DerefMut;
 
 /// System that renders the comprehensive inspector UI
@@ -105,25 +105,38 @@ pub fn inspector_ui(world: &mut World, mut selected_entities: Local<SelectedEnti
                 ui.separator();
 
                 // Query resources from world (must be done before showing UI)
-                let current_turn = world.resource::<CurrentTurn>();
-                let game_timer = world.resource::<GameTimer>();
-                let move_history = world.resource::<MoveHistory>();
-                let game_phase = world.resource::<CurrentGamePhase>();
-                let selection = world.resource::<Selection>();
+                // Handle missing resources gracefully (they may not exist in menu states)
+                let (turn_color, turn_move_number) = world
+                    .get_resource::<CurrentTurn>()
+                    .map(|t| (t.color, t.move_number))
+                    .unwrap_or((crate::rendering::pieces::PieceColor::White, 0));
 
-                // Extract data from resources (to avoid borrowing issues)
-                let turn_color = current_turn.color;
-                let turn_move_number = current_turn.move_number;
-                let timer_white = game_timer.white_time_left;
-                let timer_black = game_timer.black_time_left;
-                let timer_increment = game_timer.increment;
-                let timer_running = game_timer.is_running;
-                let phase_value = game_phase.0;
-                let selected_pos = selection.selected_position;
-                // Only need the count, not the full Vec - no need to clone
-                let possible_moves_count = selection.possible_moves.len();
-                let history_len = move_history.len();
-                let last_move = move_history.last_move().copied();
+                let (timer_white, timer_black, timer_increment, timer_running) = world
+                    .get_resource::<GameTimer>()
+                    .map(|t| {
+                        (
+                            t.white_time_left,
+                            t.black_time_left,
+                            t.increment,
+                            t.is_running,
+                        )
+                    })
+                    .unwrap_or((0.0, 0.0, 0.0, false));
+
+                let (history_len, last_move) = world
+                    .get_resource::<MoveHistory>()
+                    .map(|h| (h.len(), h.last_move().copied()))
+                    .unwrap_or((0, None));
+
+                let phase_value = world
+                    .get_resource::<CurrentGamePhase>()
+                    .map(|p| p.0)
+                    .unwrap_or(crate::game::components::GamePhase::Setup);
+
+                let (selected_pos, possible_moves_count) = world
+                    .get_resource::<Selection>()
+                    .map(|s| (s.selected_position, s.possible_moves.len()))
+                    .unwrap_or((None, 0));
 
                 ui.columns(3, |columns| {
                     // Column 1: Turn and Phase

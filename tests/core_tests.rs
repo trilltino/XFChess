@@ -5,7 +5,7 @@
 //! in their designated states.
 
 use bevy::prelude::*;
-use xfchess::core::{GameState, LaunchMenu, debug_current_gamestate};
+use xfchess::core::{debug_current_gamestate, GameState, LaunchMenu};
 
 /// Helper struct to track system executions during tests
 #[derive(Resource, Default, Debug)]

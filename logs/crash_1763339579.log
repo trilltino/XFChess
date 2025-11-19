@@ -1,0 +1,100 @@
+PANIC DETECTED [1763339579]
+============================================
+Message: error[B0001]: Query<(Entity, Piece, HasMoved, Transform), ()> in system xfchess::game::systems::input::on_square_click accesses component(s) Piece, HasMoved in a way that conflicts with a previous system parameter. Consider using `Without<T>` to create disjoint Queries or merging conflicting Queries into a `ParamSet`. See: https://bevy.org/learn/errors/b0001
+Location: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bevy_ecs-0.17.2\src\system\system_param.rs:392:5
+GameState: MainMenu
+MenuState: Main
+
+Backtrace:
+   0: std::backtrace_rs::backtrace::win64::trace
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+   1: std::backtrace_rs::backtrace::trace_unsynchronized
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+   2: std::backtrace::Backtrace::create
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\backtrace.rs:331
+   3: std::backtrace::Backtrace::capture
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\backtrace.rs:296
+   4: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+   5: std::panicking::rust_panic_with_hook
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\panicking.rs:841
+   6: std::panicking::begin_panic_handler::closure$0
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\panicking.rs:706
+   7: std::sys::backtrace::__rust_end_short_backtrace<std::panicking::begin_panic_handler::closure_env$0,never$>
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\sys\backtrace.rs:174
+   8: std::panicking::begin_panic_handler
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\panicking.rs:697
+   9: core::panicking::panic_fmt
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\core\src\panicking.rs:75
+  10: bevy_ecs::system::system_param::assert_component_access_compatibility
+  11: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  12: bevy_ecs::world::command_queue::RawCommandQueue::apply_or_drop_queued
+  13: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  14: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  15: bevy_ecs::world::command_queue::RawCommandQueue::apply_or_drop_queued
+  16: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  17: <bevy_ecs::schedule::executor::multi_threaded::MultiThreadedExecutor as bevy_ecs::schedule::executor::SystemExecutor>::run
+  18: <bevy_diagnostic::DiagnosticsPlugin as bevy_app::plugin::Plugin>::build
+  19: <bevy_diagnostic::DiagnosticsPlugin as bevy_app::plugin::Plugin>::build
+  20: <bevy_diagnostic::DiagnosticsPlugin as bevy_app::plugin::Plugin>::build
+  21: <bevy_ecs::schedule::executor::multi_threaded::MultiThreadedExecutor as bevy_ecs::schedule::executor::SystemExecutor>::run
+  22: bevy_ecs::schedule::schedule::Schedule::run
+  23: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  24: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  25: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  26: <bevy_ecs::schedule::executor::ApplyDeferred as bevy_ecs::system::system::System>::default_system_sets
+  27: <bevy_diagnostic::DiagnosticsPlugin as bevy_app::plugin::Plugin>::build
+  28: <bevy_diagnostic::DiagnosticsPlugin as bevy_app::plugin::Plugin>::build
+  29: <bevy_diagnostic::DiagnosticsPlugin as bevy_app::plugin::Plugin>::build
+  30: <bevy_ecs::schedule::executor::multi_threaded::MultiThreadedExecutor as bevy_ecs::schedule::executor::SystemExecutor>::run
+  31: bevy_ecs::schedule::schedule::Schedule::run
+  32: bevy_ecs::world::World::resource_mut
+  33: bevy_app::main_schedule::Main::run_main
+  34: bevy_anti_alias::taa::_::_::__ctor
+  35: <bevy_ecs::schedule::executor::ApplyDeferred as bevy_ecs::system::system::System>::default_system_sets
+  36: <bevy_ecs::schedule::executor::single_threaded::SingleThreadedExecutor as bevy_ecs::schedule::executor::SystemExecutor>::run
+  37: bevy_ecs::schedule::schedule::Schedule::run
+  38: bevy_app::sub_app::SubApp::run_default_schedule
+  39: bevy_app::sub_app::SubApps::update
+  40: bevy_inspector_egui::inspector_egui_impls::register_bevy_impls
+  41: alloc::raw_vec::RawVec<T,A>::grow_one
+  42: winit::platform_impl::windows::dark_mode::try_theme
+  43: winit::platform_impl::windows::dark_mode::try_theme
+  44: winit::platform_impl::windows::event_loop::create_event_target_window
+  45: winit::platform_impl::windows::event_loop::create_event_target_window
+  46: CallWindowProcW
+  47: CallWindowProcW
+  48: accesskit_windows::subclass::wnd_proc
+  49: CallWindowProcW
+  50: CallWindowProcW
+  51: wglSwapLayerBuffers
+  52: CallWindowProcW
+  53: SendMessageW
+  54: GetWindowDpiAwarenessContext
+  55: KiUserCallbackDispatcher
+  56: NtUserDispatchMessage
+  57: IsWindowUnicode
+  58: bevy_inspector_egui::inspector_egui_impls::register_bevy_impls
+  59: bevy_app::app::App::run
+  60: xfchess::main
+  61: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  62: <winit::window::_::InternalBitFlags as core::fmt::Display>::fmt
+  63: std::rt::lang_start_internal::closure$0
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\rt.rs:175
+  64: std::panicking::catch_unwind::do_call
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\panicking.rs:589
+  65: std::panicking::catch_unwind
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\panicking.rs:552
+  66: std::panic::catch_unwind
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\panic.rs:359
+  67: std::rt::lang_start_internal
+             at /rustc/1159e78c4747b02ef996e55082b704c09b970588/library\std\src\rt.rs:171
+  68: main
+  69: invoke_main
+             at D:\agent\_work\9\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:78
+  70: __scrt_common_main_seh
+             at D:\agent\_work\9\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:288
+  71: BaseThreadInitThunk
+  72: RtlUserThreadStart
+
+============================================
+

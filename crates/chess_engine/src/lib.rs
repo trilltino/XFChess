@@ -38,8 +38,9 @@
 //! - **`hash`** (TODO) - Zobrist hashing, transposition table lookup/storage
 //!
 //! ### AI Engine (Depends on all above)
-//! - **`search`** (TODO) - Minimax with alpha-beta pruning, iterative deepening
-//! - **`api`** (TODO) - Public functions: `new_game()`, `reply()`, `do_move()`
+//! - **`search`** - Minimax with alpha-beta pruning, iterative deepening
+//! - **`api`** - Public functions: `new_game()`, `reply()`, `do_move()`
+//! - **`error`** - Error types for engine operations
 //!
 //! ## Algorithm Overview: Alpha-Beta Pruning
 //!
@@ -214,27 +215,29 @@
 //! - **Minimax Algorithm**: https://www.chessprogramming.org/Minimax
 //! - **Modern Engine Techniques**: https://www.chessprogramming.org/Main_Page
 
+mod api;
 mod bitset;
-mod constants;
-mod types;
 mod board;
-mod move_gen;
+mod constants;
+mod error;
 mod evaluation;
 mod hash;
+mod move_gen;
 mod search;
-mod api;
+mod types;
+mod utils;
 
 // Re-export public API
-pub use api::{new_game, reply, do_move, is_legal_move, get_game_state, reset_game};
+pub use api::{do_move, get_game_state, is_legal_move, new_game, reply, reset_game};
+pub use error::{ChessEngineError, ChessEngineResult};
+pub use move_gen::{generate_pseudo_legal_moves, is_in_check};
 
 // Re-export types
-pub use types::{Game, Move, Board, Position, Color, KK};
+pub use types::{Board, Color, Game, Move, Position, KK};
 
 // Re-export constants
 pub use constants::{
-    STATE_CHECKMATE, STATE_PLAYING, STATE_STALEMATE,
-    KING_VALUE, KING_VALUE_DIV_2, SURE_CHECKMATE,
-    FLAG_PLAIN, FLAG_CAPTURE, FLAG_EP, FLAG_PROMOTION, FLAG_PROCAP,
-    PAWN_VALUE, KNIGHT_VALUE, BISHOP_VALUE, ROOK_VALUE, QUEEN_VALUE,
-    COLOR_WHITE, COLOR_BLACK,
+    BISHOP_VALUE, COLOR_BLACK, COLOR_WHITE, FLAG_CAPTURE, FLAG_EP, FLAG_PLAIN, FLAG_PROCAP,
+    FLAG_PROMOTION, KING_VALUE, KING_VALUE_DIV_2, KNIGHT_VALUE, PAWN_VALUE, QUEEN_VALUE,
+    ROOK_VALUE, STATE_CHECKMATE, STATE_PLAYING, STATE_STALEMATE, SURE_CHECKMATE,
 };

@@ -42,8 +42,8 @@
 //! - `crates/chess_engine/README.md` - Engine architecture and strength
 //! - ELO ratings are approximate based on depth-to-strength correlation studies
 
-use bevy::prelude::*;
 use crate::rendering::pieces::PieceColor;
+use bevy::prelude::*;
 
 /// Main resource for chess AI configuration
 ///
@@ -166,7 +166,7 @@ pub enum GameMode {
         ///
         /// When `current_turn.color == ai_color`, AI systems spawn
         /// a move computation task.
-        ai_color: PieceColor
+        ai_color: PieceColor,
     },
 }
 
@@ -257,9 +257,9 @@ impl AIDifficulty {
     /// ```
     pub fn seconds_per_move(self) -> f32 {
         match self {
-            AIDifficulty::Easy => 0.5,
-            AIDifficulty::Medium => 1.5,
-            AIDifficulty::Hard => 3.0,
+            AIDifficulty::Easy => 0.1,
+            AIDifficulty::Medium => 0.3,
+            AIDifficulty::Hard => 0.5,
         }
     }
 
@@ -281,9 +281,9 @@ impl AIDifficulty {
     /// ```
     pub fn description(self) -> &'static str {
         match self {
-            AIDifficulty::Easy => "Easy (0.5s)",
-            AIDifficulty::Medium => "Medium (1.5s)",
-            AIDifficulty::Hard => "Hard (3.0s)",
+            AIDifficulty::Easy => "Easy (0.2s)",
+            AIDifficulty::Medium => "Medium (0.5s)",
+            AIDifficulty::Hard => "Hard (1.0s)",
         }
     }
 
@@ -328,14 +328,27 @@ mod tests {
         //! Tests GameMode equality comparisons
         assert_eq!(GameMode::VsHuman, GameMode::VsHuman);
         assert_eq!(
-            GameMode::VsAI { ai_color: PieceColor::White },
-            GameMode::VsAI { ai_color: PieceColor::White }
+            GameMode::VsAI {
+                ai_color: PieceColor::White
+            },
+            GameMode::VsAI {
+                ai_color: PieceColor::White
+            }
         );
         assert_ne!(
-            GameMode::VsAI { ai_color: PieceColor::White },
-            GameMode::VsAI { ai_color: PieceColor::Black }
+            GameMode::VsAI {
+                ai_color: PieceColor::White
+            },
+            GameMode::VsAI {
+                ai_color: PieceColor::Black
+            }
         );
-        assert_ne!(GameMode::VsHuman, GameMode::VsAI { ai_color: PieceColor::Black });
+        assert_ne!(
+            GameMode::VsHuman,
+            GameMode::VsAI {
+                ai_color: PieceColor::Black
+            }
+        );
     }
 
     #[test]
@@ -385,7 +398,9 @@ mod tests {
     #[test]
     fn test_game_mode_clone() {
         //! Verifies GameMode can be cloned
-        let original = GameMode::VsAI { ai_color: PieceColor::White };
+        let original = GameMode::VsAI {
+            ai_color: PieceColor::White,
+        };
         let cloned = original.clone();
         assert_eq!(original, cloned);
     }
@@ -396,7 +411,9 @@ mod tests {
         let mut ai_config = ChessAIResource::default();
 
         // Start human vs AI with AI playing black
-        ai_config.mode = GameMode::VsAI { ai_color: PieceColor::Black };
+        ai_config.mode = GameMode::VsAI {
+            ai_color: PieceColor::Black,
+        };
         ai_config.difficulty = AIDifficulty::Hard;
 
         if let GameMode::VsAI { ai_color } = ai_config.mode {

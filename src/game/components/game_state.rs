@@ -66,8 +66,8 @@
 //! };
 //! ```
 
-use bevy::prelude::*;
 use crate::rendering::pieces::{PieceColor, PieceType};
+use bevy::prelude::*;
 
 /// Current phase of an active chess game
 ///

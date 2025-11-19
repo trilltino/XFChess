@@ -7,9 +7,8 @@
 //! # Module Organization
 //!
 //! - `components` - ECS components (Piece, HasMoved, GamePhase, MoveRecord)
-//! - `resources` - Global game state (CurrentTurn, GameTimer, Selection, MoveHistory)
+//! - `resources` - Global game state (CurrentTurn, GameTimer, Selection, MoveHistory, ChessEngine)
 //! - `systems` - ECS systems for gameplay (input, movement, visual, game_logic)
-//! - `rules` - Pure chess logic (move validation, board state)
 //! - `plugin` - GamePlugin that registers everything with reflection support
 //!
 //! # ECS Architecture
@@ -39,13 +38,15 @@
 //! - Transposition tables for move caching
 //! - Opening book integration
 
-pub mod components;
-pub mod resources;
-pub mod systems;
-pub mod rules;
-pub mod plugin;
 pub mod ai;
+pub mod components;
+pub mod error;
+pub mod plugin;
+pub mod resources;
 pub mod system_sets;
+pub mod systems;
+pub mod types;
+pub mod view_mode;
 
 // Re-export the plugin and camera controller (main entry points)
 pub use plugin::GamePlugin;

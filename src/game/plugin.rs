@@ -1,54 +1,79 @@
-//! Chess game plugin
+//! Game plugin - Core chess game logic and systems
 //!
-//! This plugin registers all game systems and resources.
-//! Systems are organized with run conditions to optimize performance.
+//! This plugin registers all game systems and resources for the chess game.
+//! Systems are organized with run conditions and explicit ordering to optimize
+//! performance and ensure correct execution order.
+//!
+//! # Plugin Architecture
+//!
+//! The plugin follows Bevy 0.17 best practices:
+//! - Resource initialization in `build()`
+//! - System registration with explicit ordering via SystemSets
+//! - Type registration for reflection support
+//! - Clean separation of concerns
+//!
+//! # Plugin Dependencies
+//!
+//! This plugin depends on:
+//! - [`crate::core::CorePlugin`] - Must be added first for state management
+//! - [`bevy::DefaultPlugins`] - Required for ECS, rendering, and input
+//! - [`bevy_egui::EguiPlugin`] - Required for UI systems
+//!
+//! This plugin should be added before:
+//! - State-specific plugins (MainMenuPlugin, SettingsPlugin, etc.)
+//! - Rendering plugins (PiecePlugin, BoardPlugin)
+//!
+//! # System Organization
+//!
+//! Systems are organized into sets with explicit ordering:
+//! - `Input` - Handle user input (camera, piece selection)
+//! - `Validation` - Validate moves and sync board state
+//! - `Execution` - Execute moves and update game state
+//! - `Visual` - Update rendering (highlights, animations)
+//!
+//! System execution order is controlled via [`GameSystems`] sets and `.chain()`.
+//!
+//! # Resources
+//!
+//! All game resources are initialized here. See [`super::resources`] for details.
+//!
+//! # See Also
+//!
+//! - [`super::resources`] - Game resource definitions
+//! - [`super::systems`] - Game system implementations
+//! - [`super::system_sets`] - System set definitions
+//! - [`crate::core::CorePlugin`] - Core plugin that must be added first
 
-use bevy::prelude::*;
-use bevy::input::common_conditions::input_toggle_active;
-use bevy::ecs::system::SystemParam;
-use crate::core::{GameState, debug_current_gamestate};
-use crate::rendering::pieces::{Piece, PieceColor, PieceType};
-use crate::game::components::{GamePhase, HasMoved, MoveRecord, SelectedPiece};
+use super::ai::AIPlugin;
 use super::resources::*;
-use super::systems::*;
 use super::system_sets::GameSystems;
-use super::ai::{AIPlugin, ChessAIResource, PendingAIMove, AIStatistics};
-use bevy_egui::EguiContexts;
+use super::systems::picking_debug::PickingDebugPlugin;
+use super::systems::*;
+use crate::core::{debug_current_gamestate, GameState};
+use crate::game::components::{GamePhase, HasMoved, MoveRecord, PieceMoveAnimation, SelectedPiece};
+use crate::rendering::pieces::{Piece, PieceColor, PieceType};
+use bevy::input::common_conditions::input_toggle_active;
+use bevy::prelude::*;
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
 
+/// Game plugin for XFChess
+///
+/// Registers all game systems and resources. This plugin should be added
+/// after CorePlugin and before state-specific plugins.
 pub struct GamePlugin;
 
-/// System parameter grouping game state resources
-#[derive(SystemParam)]
-pub struct GameStateParams<'w> {
-    pub captured: Res<'w, CapturedPieces>,
-    pub current_turn: Res<'w, CurrentTurn>,
-    pub game_phase: Res<'w, CurrentGamePhase>,
-    pub game_over: Res<'w, GameOverState>,
-}
 
-/// System parameter grouping AI-related resources
-#[derive(SystemParam)]
-pub struct AIParams<'w> {
-    pub ai_config: Res<'w, ChessAIResource>,
-    pub pending_ai: Option<Res<'w, PendingAIMove>>,
-    pub ai_stats: Res<'w, AIStatistics>,
-}
-
-/// Wrapper function for game_status_ui that handles errors
-fn game_status_ui_wrapper(
-    contexts: EguiContexts,
-    game_state: GameStateParams,
-    ai_params: AIParams,
-    next_state: ResMut<NextState<GameState>>,
+/// Simple UI that just shows "Press F1 for overlay" text
+///
+/// Disabled by default - no overlays shown on startup.
+/// Only shows when F1 is pressed (inspector active).
+fn simple_game_ui(
+    _contexts: EguiContexts,
+    _keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
-    // Silently ignore NoEntities errors - this happens during state transitions
-    // when the egui context isn't available yet
-    let _ = crate::ui::game_status_ui(
-        contexts,
-        game_state,
-        ai_params,
-        next_state,
-    );
+    // Disabled - don't show any UI overlay by default
+    // Only show inspector when F1 is pressed (handled by inspector system)
+    return;
 }
 
 impl Plugin for GamePlugin {
@@ -63,7 +88,12 @@ impl Plugin for GamePlugin {
             .init_resource::<GameOverState>()
             .init_resource::<DebugThrottle>()
             .init_resource::<FastBoardState>()
-            .init_resource::<TurnStateContext>();
+            .init_resource::<PendingTurnAdvance>()
+            .init_resource::<TurnStateContext>()
+            .init_resource::<ChessEngine>()
+            .init_resource::<Players>()
+            .init_resource::<super::systems::camera::CameraRotationState>()
+            .init_resource::<super::view_mode::ViewMode>();
 
         // Register types for reflection (needed for inspector)
         app.register_type::<CurrentTurn>()
@@ -73,6 +103,7 @@ impl Plugin for GamePlugin {
             .register_type::<CapturedPieces>()
             .register_type::<GameOverState>()
             .register_type::<FastBoardState>()
+            .register_type::<PendingTurnAdvance>()
             .register_type::<TurnStateContext>()
             .register_type::<TurnPhase>()
             .register_type::<GamePhase>()
@@ -81,8 +112,12 @@ impl Plugin for GamePlugin {
             .register_type::<PieceColor>()
             .register_type::<PieceType>()
             .register_type::<HasMoved>()
+            .register_type::<PieceMoveAnimation>()
             .register_type::<SelectedPiece>()
-            .register_type::<CameraController>();
+            .register_type::<CameraController>()
+            .register_type::<Player>()
+            .register_type::<Players>()
+            .register_type::<super::view_mode::ViewMode>();
 
         // Add AI plugin
         app.add_plugins(AIPlugin);
@@ -97,38 +132,67 @@ impl Plugin for GamePlugin {
                 GameSystems::Visual,
             )
                 .chain()
-                .run_if(in_state(GameState::Multiplayer)),
+                .run_if(in_state(GameState::InGame)),
         );
 
         // Register systems with run conditions
         // Systems are assigned to sets for predictable execution order
         // NOTE: Input handling is now done via observers on entities (.observe())
         // so we don't need handle_piece_selection/clear_selection_on_empty_click systems
+        // NOTE: Game logic systems are disabled in TempleOS mode (just a board, no game)
         app.add_systems(
             Update,
             (
-                // Input set: Handle user input
+                // Input set: Handle user input (camera only in TempleOS)
                 camera_movement_system.in_set(GameSystems::Input),
                 camera_zoom_input_system.in_set(GameSystems::Input),
                 camera_zoom_system.in_set(GameSystems::Input),
-
-                // Validation set: Sync board state before validation
-                sync_fast_board_state.in_set(GameSystems::Validation),
-
-                // Execution set: Update game state
-                update_game_phase.in_set(GameSystems::Execution),
-                update_game_timer.in_set(GameSystems::Execution),
-
-                // Visual set: Update rendering
-                highlight_possible_moves.in_set(GameSystems::Visual),
-                animate_piece_movement.in_set(GameSystems::Visual),
+                camera_rotation_system.in_set(GameSystems::Input),
+                camera_rotate_on_turn_detection_system
+                    .in_set(GameSystems::Input)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    }),
+                camera_rotate_on_turn_system
+                    .in_set(GameSystems::Input)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    }),
+                // Validation set: Sync board state before validation (disabled in TempleOS)
+                sync_fast_board_state
+                    .in_set(GameSystems::Validation)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    }),
+                // Execution set: Update game state (disabled in TempleOS)
+                update_game_phase
+                    .in_set(GameSystems::Execution)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    }),
+                update_game_timer
+                    .in_set(GameSystems::Execution)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    }),
+                // Visual set: Update rendering (disabled in TempleOS)
+                highlight_possible_moves
+                    .in_set(GameSystems::Visual)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    }),
+                animate_piece_movement
+                    .in_set(GameSystems::Visual)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    }),
             ),
         );
 
-        // Add UI system separately (it returns Result)
+        // Add UI system separately (egui requires EguiPrimaryContextPass)
         app.add_systems(
-            Update,
-            game_status_ui_wrapper.run_if(in_state(GameState::Multiplayer)),
+            EguiPrimaryContextPass,
+            simple_game_ui.run_if(in_state(GameState::InGame)),
         );
 
         // Debug system - toggle with F12 key
@@ -136,5 +200,8 @@ impl Plugin for GamePlugin {
             Update,
             debug_current_gamestate.run_if(input_toggle_active(true, KeyCode::F12)),
         );
+
+        // Add picking debug plugin
+        app.add_plugins(PickingDebugPlugin);
     }
 }

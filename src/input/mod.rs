@@ -6,10 +6,10 @@
 //! # Bevy 0.17 Migration
 //!
 //! **Updated Patterns**:
-//! - ❌ `Trigger<Pointer<Click>>` (Bevy 0.16)
-//! - ✅ `On<Pointer<Click>>` (Bevy 0.17)
-//! - ❌ `EventReader<Pointer<Click>>` (Bevy 0.16)
-//! - ✅ `MessageReader<Pointer<Click>>` (Bevy 0.17)
+//! - `Trigger<Pointer<Click>>` (Bevy 0.16) - deprecated
+//! - `On<Pointer<Click>>` (Bevy 0.17) - current
+//! - `EventReader<Pointer<Click>>` (Bevy 0.16) - deprecated
+//! - `MessageReader<Pointer<Click>>` (Bevy 0.17) - current
 //!
 //! # Architecture
 //!

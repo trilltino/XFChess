@@ -46,7 +46,24 @@
 //! # Integration
 //!
 //! All resources are registered in [`crate::game::plugin::GamePlugin`] and
-//! accessed via system parameters:
+//! accessed via system parameters. For convenience, use [`SystemParam`] groups
+//! to access related resources together:
+//!
+//! ## Using SystemParam Groups (Recommended)
+//!
+//! ```rust,ignore
+//! use crate::game::resources::GameStateParams;
+//!
+//! fn my_system(game_state: GameStateParams) {
+//!     // Access multiple related resources via a single parameter
+//!     if game_state.current_turn.color == PieceColor::White {
+//!         game_state.game_over.is_game_over();
+//!         game_state.captured.material_advantage();
+//!     }
+//! }
+//! ```
+//!
+//! ## Direct Resource Access
 //!
 //! ```rust,ignore
 //! fn my_system(
@@ -67,6 +84,15 @@
 //! }
 //! ```
 //!
+//! ## Available SystemParam Groups
+//!
+//! - [`GameStateParams`] - Turn, phase, game over, captured pieces
+//! - [`GameHistoryParams`] - Move history and timer
+//! - [`PlayerInteractionParams`] - Selection and board state
+//! - [`TurnParams`] - Turn and turn state context
+//! - [`EngineParams`] - Chess engine and players
+//! - [`AllGameParams`] - All game resources (use sparingly)
+//!
 //! # Reference
 //!
 //! Resource patterns from:
@@ -74,26 +100,25 @@
 //! - `reference/bevy-3d-chess/src/game_state.rs` - Chess game state management
 //! - `reference/chess_engine/src/types.rs` - Chess data structures
 
-pub mod turn;
-pub mod selection;
+// Submodules
+pub mod engine;
 pub mod history;
-pub mod timer;
-pub mod captured;
-pub mod game_over;
+pub mod player;
+pub mod sounds;
+pub mod turn;
+
+// Root-level modules
 pub mod debug;
-pub mod fast_board;
-pub mod turn_state;
+pub mod system_params;
 
 #[cfg(test)]
 mod tests;
 
 // Re-export all resources for convenience
-pub use turn::*;
-pub use selection::*;
-pub use history::*;
-pub use timer::*;
-pub use captured::*;
-pub use game_over::*;
 pub use debug::*;
-pub use fast_board::*;
-pub use turn_state::*;
+pub use engine::*;
+pub use history::*;
+pub use player::*;
+pub use sounds::*;
+pub use system_params::*;
+pub use turn::*;

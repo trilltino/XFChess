@@ -118,7 +118,7 @@ fn test_move_record_with_capture() {
         captured: Some(PieceType::Pawn),
         is_castling: false,
         is_en_passant: false,
-        is_check: true,  // Knight capture could give check
+        is_check: true, // Knight capture could give check
         is_checkmate: false,
     };
 

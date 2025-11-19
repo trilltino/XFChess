@@ -32,11 +32,19 @@
 //! - Materials are shared between same-colored pieces
 //! - Board uses instanced rendering for 64 square meshes
 
+// Submodules
 pub mod board;
+pub mod camera;
+pub mod effects;
 pub mod pieces;
+
+// Root-level modules
+pub mod graphics_quality;
 pub mod utils;
 
 // Re-export commonly used items
 pub use board::*;
+pub use camera::*;
+pub use effects::*;
 pub use pieces::*;
 pub use utils::*;
