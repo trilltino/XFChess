@@ -4,16 +4,16 @@ A modern 3D chess game built with Bevy 0.17, featuring beautiful graphics, AI op
 
 ## Features
 
-- 🎮 **3D Chess Gameplay** - Beautifully rendered 3D chess pieces and board
-- 🤖 **AI Opponent** - Play against an AI with adjustable difficulty (Easy, Medium, Hard)
-- 🎨 **View Modes**
+- **3D Chess Gameplay** - Beautifully rendered 3D chess pieces and board
+- **AI Opponent** - Play against an AI with adjustable difficulty (Easy, Medium, Hard)
+- **View Modes**
   - Standard: Classic 3D chess with piece meshes
   - TempleOS: Retro text-based view with ASCII-style board
-- 🎯 **Move Validation** - Full chess rules implementation with legal move checking
-- 📜 **Move History** - Track all moves made during the game
-- 🎵 **Sound Effects** - Audio feedback for moves and captures
-- 💾 **Settings Persistence** - Save your preferences (volume, graphics quality, themes)
-- 🌐 **Web Support** - WASM build for browser play (experimental)
+- **Move Validation** - Full chess rules implementation with legal move checking
+- **Move History** - Track all moves made during the game
+- **Sound Effects** - Audio feedback for moves and captures
+- **Settings Persistence** - Save your preferences (volume, graphics quality, themes)
+- **Web Support** - WASM build for browser play (experimental)
 
 ## Quick Start
 
