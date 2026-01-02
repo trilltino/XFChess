@@ -2,13 +2,13 @@
 //!
 //! Manages turn tracking, turn state, and game timing.
 
+pub mod current;
 pub mod pending;
+pub mod state;
 pub mod timer;
-pub mod turn;
-pub mod turn_state;
 
 // Re-export all public items
+pub use current::*;
 pub use pending::PendingTurnAdvance;
+pub use state::*;
 pub use timer::*;
-pub use turn::*;
-pub use turn_state::*;

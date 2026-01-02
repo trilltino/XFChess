@@ -6,18 +6,16 @@
 //! # State Flow
 //!
 //! ```text
-//! [MainMenu] (with loading) ⇄ [Settings]
-//!        ↓
-//!    [InGame] ⇄ [Paused]
-//!        ↓
-//!    [GameOver] → [MainMenu]
+//! [MainMenu] ⇄ [Settings]
+//!      ↓
+//!  [InGame] ⇄ [Paused]
+//!      ↓
+//!  [GameOver] → [MainMenu]
 //! ```
 //!
 //! # State Descriptions
 //!
-//! - **Splash**: Dramatic pyramid scene with loading animation (1-2 seconds) [Optional]
-//! - **Loading**: Asset preloading with progress bar over pyramid scene [Optional]
-//! - **MainMenu**: Main menu with game mode selection and settings (starting state, shows loading indicator while assets load)
+//! - **MainMenu**: Main menu with game mode selection and settings (starting state)
 //! - **Settings**: Configuration screen (AI difficulty, graphics, audio)
 //! - **InGame**: Active chess gameplay
 //! - **Paused**: In-game pause menu
@@ -46,22 +44,9 @@ use bevy::prelude::*;
 /// Each state has its own plugin that manages setup, update, and cleanup.
 #[derive(Clone, Copy, Resource, PartialEq, Eq, Hash, Debug, Default, States, Reflect)]
 pub enum GameState {
-    /// Splash screen state
-    ///
-    /// Dramatic pyramid scene with loading animation (1-2 seconds).
-    /// Automatically transitions to Loading state after timer expires.
-    Splash,
-
-    /// Loading screen state
-    ///
-    /// Asset preloading with progress bar over pyramid scene.
-    /// Displays loading progress and transitions to MainMenu when complete.
-    Loading,
-
     /// Main menu state (starting state)
     ///
     /// Displays game mode selection, settings access, and exit options.
-    /// Shows loading indicator while assets are loading, then displays full menu.
     /// Background shows animated 3D scene (rotating board).
     #[default]
     MainMenu,
@@ -91,6 +76,16 @@ pub enum GameState {
     /// Can start new game or return to MainMenu.
     GameOver,
 }
+
+/// Component marking entities to be despawned when exiting a specific state
+///
+/// Use this to automatically clean up entities associated with a specific game state.
+/// The state lifecycle systems will query for this component and despawn entities
+/// when their associated state is exited.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DespawnOnExit<T>(pub T)
+where
+    T: States + Copy;
 
 /// Sub-state for menu navigation
 ///
@@ -182,18 +177,6 @@ pub fn debug_current_gamestate(state: Res<State<GameState>>) {
     info!("[DEBUG] Current State: {:?}", state.get());
 }
 
-/// Transition timer resource for automatic state changes
-///
-/// Used in splash screen to automatically transition after a delay.
-#[derive(Resource, Deref, DerefMut)]
-pub struct StateTransitionTimer(pub Timer);
-
-impl Default for StateTransitionTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(1.5, TimerMode::Once))
-    }
-}
-
 /// Timer resource for state logging system
 ///
 /// Logs the current game state every 15 seconds for debugging purposes.
@@ -278,11 +261,6 @@ fn is_valid_state_transition(from: GameState, to: GameState) -> bool {
         (GameState::GameOver, GameState::MainMenu) => true,
         (GameState::GameOver, GameState::InGame) => true, // Allow restart
 
-        // Splash and Loading states (if used)
-        (GameState::Splash, GameState::Loading) => true,
-        (GameState::Splash, GameState::MainMenu) => true,
-        (GameState::Loading, GameState::MainMenu) => true,
-
         // Self-transitions are always valid (no-op)
         (from, to) if from == to => true,
 
@@ -308,7 +286,10 @@ pub fn validate_and_log_state_transitions(
                 if is_valid {
                     info!("[TRANSITION] {:?} -> {:?}", exited, entered);
                 } else {
-                    error!("[TRANSITION] INVALID: {:?} -> {:?} (state may be inconsistent)", exited, entered);
+                    error!(
+                        "[TRANSITION] INVALID: {:?} -> {:?} (state may be inconsistent)",
+                        exited, entered
+                    );
                 }
             }
             (Some(exited), None) => {
@@ -336,8 +317,6 @@ mod tests {
 
     #[test]
     fn test_game_state_variants() {
-        let splash = GameState::Splash;
-        let loading = GameState::Loading;
         let menu = GameState::MainMenu;
         let settings = GameState::Settings;
         let game = GameState::InGame;
@@ -345,13 +324,11 @@ mod tests {
         let over = GameState::GameOver;
 
         // Ensure all states are distinct
-        assert_ne!(splash, loading);
-        assert_ne!(loading, menu);
         assert_ne!(menu, settings);
         assert_ne!(settings, game);
         assert_ne!(game, paused);
         assert_ne!(paused, over);
-        assert_ne!(over, splash);
+        assert_ne!(over, menu);
     }
 
     #[test]
@@ -359,10 +336,6 @@ mod tests {
         // Should be active in interactive menu states
         assert!(InMenus::compute(GameState::MainMenu).is_some());
         assert!(InMenus::compute(GameState::Settings).is_some());
-
-        // Should be inactive in startup/pre-menu states
-        assert!(InMenus::compute(GameState::Splash).is_none());
-        assert!(InMenus::compute(GameState::Loading).is_none());
 
         // Should be inactive in gameplay states
         assert!(InMenus::compute(GameState::InGame).is_none());
@@ -376,10 +349,6 @@ mod tests {
         assert!(InGameplay::compute(GameState::InGame).is_some());
         assert!(InGameplay::compute(GameState::Paused).is_some());
         assert!(InGameplay::compute(GameState::GameOver).is_some());
-
-        // Should be inactive in startup/pre-menu states
-        assert!(InGameplay::compute(GameState::Splash).is_none());
-        assert!(InGameplay::compute(GameState::Loading).is_none());
 
         // Should be inactive in menu states
         assert!(InGameplay::compute(GameState::MainMenu).is_none());

@@ -8,7 +8,7 @@
 //!
 //! ## State Architecture
 //!
-//! - `GameState` - Primary state enum with 7 states (Splash → Loading → MainMenu → Settings → InGame → Paused → GameOver)
+//! - `GameState` - Primary state enum with 5 states (MainMenu → Settings → InGame → Paused → GameOver)
 //! - `MenuState` - Sub-state for menu navigation within MainMenu
 //! - `InMenus` - Computed state active during MainMenu and Settings
 //! - `InGameplay` - Computed state active during InGame, Paused, and GameOver
@@ -60,11 +60,11 @@
 //! - `reference/bevy/examples/state/sub_states.rs` - Hierarchical states
 //! - `reference/bevy/crates/bevy_app/src/plugin.rs` - Plugin architecture
 
-pub mod error;
 pub mod error_handling;
 pub mod plugin;
 pub mod resources;
 pub mod settings_persistence;
+pub mod state_lifecycle;
 pub mod states;
 pub mod window_config;
 

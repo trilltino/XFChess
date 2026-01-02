@@ -4,8 +4,7 @@
 
 use crate::core::GameSettings;
 use crate::game::resources::MoveHistory;
-use crate::rendering::utils::{Square, SquareMaterials};
-use crate::rendering::Board;
+use crate::rendering::utils::SquareMaterials;
 use bevy::prelude::*;
 
 /// Marker component for squares showing last move highlight
@@ -15,40 +14,40 @@ pub struct LastMoveHighlight;
 /// System that shows/hides last move highlights based on settings
 ///
 /// When highlight_last_move is enabled, highlights the from and to squares of the last move.
+/// System that shows/hides last move highlights based on settings
+///
+/// Optimized to only update when move history or settings change, and reuses shared meshes.
 pub fn update_last_move_highlight_system(
     mut commands: Commands,
     settings: Res<GameSettings>,
     move_history: Res<MoveHistory>,
-    square_query: Query<(Entity, &Square), With<Board>>,
-    highlight_query: Query<Entity, (With<LastMoveHighlight>, Without<Board>)>,
+    highlight_query: Query<Entity, With<LastMoveHighlight>>,
     materials: Res<SquareMaterials>,
-    mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    // First, remove all existing highlights
+    // Only update if move history or settings changed
+    if !move_history.is_changed() && !settings.is_changed() {
+        return;
+    }
+
+    // Always clear old highlights on change
     for entity in highlight_query.iter() {
         commands.entity(entity).despawn();
     }
 
     if settings.highlight_last_move {
         if let Some(last_move) = move_history.last_move() {
-            let from_pos = last_move.from;
-            let to_pos = last_move.to;
+            let positions = [last_move.from, last_move.to];
 
-            // Add highlights to from and to squares
-            for (entity, square) in square_query.iter() {
-                let pos = (square.x, square.y);
-                if pos == from_pos || pos == to_pos {
-                    // Spawn a highlight above the square
-                    commands.entity(entity).with_children(|parent| {
-                        parent.spawn((
-                            Mesh3d(meshes.add(Plane3d::default().mesh().size(0.95, 0.95))),
-                            MeshMaterial3d(materials.hover_matl.clone()),
-                            Transform::from_translation(Vec3::new(0.0, 0.02, 0.0)),
-                            LastMoveHighlight,
-                            Name::new("Last Move Highlight"),
-                        ));
-                    });
-                }
+            for (x, y) in positions {
+                commands.spawn((
+                    Mesh3d(materials.highlight_mesh.clone()),
+                    MeshMaterial3d(materials.hover_matl.clone()),
+                    Transform::from_translation(Vec3::new(x as f32, 0.02, y as f32)),
+                    LastMoveHighlight,
+                    Name::new("Last Move Highlight"),
+                    // Ensure highlights are cleaned up if state exits
+                    crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                ));
             }
         }
     }

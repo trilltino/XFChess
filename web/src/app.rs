@@ -6,7 +6,7 @@ use web_sys::HtmlCanvasElement;
 #[component]
 pub fn ChessApp() -> impl IntoView {
     let canvas_ref = NodeRef::<Canvas>::new();
-    let initialized = create_rw_signal(false);
+    let initialized = RwSignal::new(false);
 
     // Initialize Bevy when component mounts and canvas is ready
     Effect::new(move |_| {
@@ -74,10 +74,19 @@ pub fn ChessApp() -> impl IntoView {
     });
 
     view! {
-        <div style="width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden; background: #1a1a1a;">
+        <div style="width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden; background: #0a0a15; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+            <div
+                style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: sans-serif; pointer-events: none;"
+                class:hidden=move || initialized.get()
+            >
+                <h2>"Loading XFChess..."</h2>
+                <p>"Initial assets download may take a moment."</p>
+            </div>
+
             <canvas
                 node_ref=canvas_ref
-                style="width: 100%; height: 100%; display: block;"
+                style="width: 100%; height: 100%; display: block; touch-action: none;"
+                on:contextmenu=move |e| e.prevent_default()
             ></canvas>
         </div>
     }

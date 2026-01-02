@@ -62,7 +62,13 @@ pub fn update_game_phase(
 
     let previous_phase = game_phase.0;
     let piece_count = pieces_query.iter().count();
-    debug!("[GAME] Updating game phase - {} pieces on board", piece_count);
+
+    // Only log if piece count changed - reduces log spam
+    // We could store the last count in a local request, but for now just trace level is enough
+    trace!(
+        "[GAME] Updating game phase - {} pieces on board",
+        piece_count
+    );
 
     // Sync ECS → Engine before checking game state
     engine.sync_ecs_to_engine(&pieces_query, &current_turn);
@@ -225,5 +231,24 @@ pub fn update_game_timer(
                 );
             }
         }
+    }
+}
+
+/// System to transition game state when game is over
+///
+/// Watches for changes in [`GameOverState`] and updates the Bevy State machine.
+/// This ensures systems that should only run during active gameplay are stopped.
+pub fn check_game_over_state(
+    game_over: Res<GameOverState>,
+    state: Res<State<crate::core::GameState>>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+) {
+    // Only transition if we are currently InGame and the game is effectively over
+    if *state.get() == crate::core::GameState::InGame && game_over.is_game_over() {
+        info!(
+            "[GAME] Game over condition met ({:?}) - transitioning to GameOver state",
+            *game_over
+        );
+        next_state.set(crate::core::GameState::GameOver);
     }
 }

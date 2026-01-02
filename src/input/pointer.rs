@@ -178,10 +178,8 @@ pub fn cursor_tracking_system(
     mut cursor_state: ResMut<CursorState>,
 ) {
     cursor_state.last_update += time.delta_secs();
-
     if let Ok(window) = q_windows.single() {
         cursor_state.position = window.cursor_position();
-
         // Debug logging (rate-limited to 1 second intervals)
         if cursor_state.last_update >= 1.0 {
             if let Some(position) = cursor_state.position {
@@ -229,19 +227,16 @@ pub fn on_piece_hover(
     mut original_materials: ResMut<OriginalMaterials>,
 ) {
     let entity = hover.entity;
-
     // Only highlight pieces during active gameplay
     if !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check) {
         return;
     }
-
     // Get the piece being hovered
     if let Ok(piece) = piece_query.get(entity) {
         // Only highlight if it's this player's turn
         if piece.color != current_turn.color {
             return;
         }
-
         // Get the entity's current material
         if let Ok(mut material_handle) = material_query.get_mut(entity) {
             // Store original material for later restoration
@@ -596,55 +591,5 @@ mod tests {
         let mut world = World::new();
         let timer = PointerDebugTimer::from_world(&mut world);
         assert_eq!(timer.time, 0.0);
-    }
-
-    #[test]
-    fn test_create_material_observer_compiles() {
-        //! Verifies that create_material_observer compiles with correct type constraints
-        //!
-        //! This test ensures the helper function works with Bevy's picking event types.
-        //! While this function is marked as dead_code and not actively used in the codebase,
-        //! it serves as a reference implementation for dynamic observer creation.
-
-        use bevy::asset::Assets;
-        use bevy::render::color::Color;
-
-        // Create a dummy material handle
-        let mut materials = Assets::<StandardMaterial>::default();
-        let test_material = materials.add(StandardMaterial {
-            base_color: Color::LinearRgba(LinearRgba::new(1.0, 0.5, 0.5, 1.0)),
-            ..default()
-        });
-
-        // Verify the function creates observers with correct type signatures
-        let _hover_observer = create_material_observer::<Over>(test_material.clone());
-        let _unhover_observer = create_material_observer::<Out>(test_material.clone());
-
-        // The actual execution of observers requires a full Bevy app context,
-        // so we just verify compilation and type correctness here
-        assert!(true, "Observer creation compiles successfully");
-    }
-
-    #[test]
-    fn test_observer_helper_vs_direct_comparison() {
-        //! Documents the tradeoff between create_material_observer and direct observers
-        //!
-        //! **Helper Function (create_material_observer)**:
-        //! - Pros: Simple, reusable, less code
-        //! - Cons: No access to game state (CurrentTurn, Selection)
-        //! - Use case: Unconditional material swaps
-        //!
-        //! **Direct Observer Functions (on_piece_hover, etc.)**:
-        //! - Pros: Access to game state, conditional logic
-        //! - Cons: More verbose, need separate function per use case
-        //! - Use case: Game-aware interactions (only current player's pieces)
-        //!
-        //! The current implementation uses direct observers because hover effects
-        //! need to check if it's the player's turn before highlighting pieces.
-
-        assert!(
-            true,
-            "This test documents the design decision to use direct observers"
-        );
     }
 }

@@ -3,7 +3,7 @@
 //! Provides a viewer interface for inspecting chess pieces in 3D, similar to viewing
 //! a weapon in an FPS game. Click a piece to open the viewer, then rotate it with the mouse.
 
-use crate::core::MenuState;
+use crate::core::{DespawnOnExit, MenuState};
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use crate::ui::styles::*;
 use bevy::color::Color;

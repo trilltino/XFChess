@@ -299,7 +299,7 @@ pub(crate) struct MiniGnu {
 }
 
 #[derive(Copy, Clone)]
-pub(crate) struct Guide1 {
+pub struct Guide1 {
     #[allow(dead_code)] // Internal engine field - reserved for future use
     pub ply: i64,
     pub score: i16,
@@ -322,7 +322,7 @@ impl Default for Guide1 {
 }
 
 #[derive(Copy, Clone)]
-pub(crate) struct Guide2 {
+pub struct Guide2 {
     pub key: BitBuffer192,
     pub res: HashResult,
     pub pri: i64,
@@ -339,7 +339,7 @@ impl Default for Guide2 {
 }
 
 #[derive(Copy, Clone)]
-pub(crate) struct HashResult {
+pub struct HashResult {
     pub h: HashLine1,
     pub depth: i64,
     pub hit: i64,
@@ -356,7 +356,7 @@ impl Default for HashResult {
 }
 
 #[derive(Copy, Clone)]
-pub(crate) struct TTE {
+pub struct TTE {
     pub h: HashLine2,
 }
 

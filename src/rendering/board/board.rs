@@ -3,7 +3,7 @@
 //! Uses batch spawning pattern from Bevy examples (many_sprites.rs, bevymark.rs)
 //! to efficiently create all 64 board squares in a single operation.
 
-use crate::game::systems::input::{on_square_click, on_square_drag_drop};
+use crate::game::systems::input::on_square_click;
 use crate::game::view_mode::ViewMode;
 use crate::input::pointer::{on_square_hover, on_square_unhover};
 use crate::rendering::utils::{Square, SquareMaterials};
@@ -19,18 +19,19 @@ pub(crate) fn create_board(
     materials: Res<SquareMaterials>,
     view_mode: Res<ViewMode>,
 ) {
-    use crate::core::GameState;
+    use crate::core::{DespawnOnExit, GameState};
 
     // Extract view mode value to avoid move issues in closures
     let is_templeos = *view_mode == ViewMode::TempleOS;
 
-    // Use Rectangle (2D quad) for TempleOS mode, Plane3d for standard mode
+    // Use Rectangle (2D quad) for TempleOS mode, Cuboid (3D box) for standard mode
+    // We use a thin Cuboid instead of Plane3d to ensure reliable raycasting/picking
     let boardmesh = if is_templeos {
         // 2D rectangle quad for true 2D board rendering
         meshes.add(Rectangle::new(1.0, 1.0))
     } else {
-        // 3D plane for standard mode
-        meshes.add(Plane3d::default().mesh().size(1.0, 1.0))
+        // 3D thin box for standard mode - better for picking
+        meshes.add(Cuboid::new(1.0, 0.1, 1.0))
     };
 
     // Choose materials based on view mode
@@ -80,12 +81,13 @@ pub(crate) fn create_board(
                     // Plane3d already lies in XZ plane, no rotation needed
                     Transform::from_translation(Vec3::new(i as f32, 0., j as f32))
                 };
-                
+
                 (
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material),
                     transform,
                     PointerInteraction::default(),
+                    bevy::picking::Pickable::default(), // Required for picking
                     square,
                     Board,
                     Name::new(square_name),
@@ -101,7 +103,6 @@ pub(crate) fn create_board(
         commands
             .spawn(square_bundle)
             .observe(on_square_click)
-            .observe(on_square_drag_drop)
             .observe(on_square_hover)
             .observe(on_square_unhover);
     }
@@ -133,7 +134,8 @@ impl Plugin for BoardPlugin {
                 update_board_theme_system.run_if(in_state(GameState::InGame)),
                 update_move_hints_system.run_if(in_state(GameState::InGame)),
                 update_last_move_highlight_system.run_if(in_state(GameState::InGame)),
-                crate::rendering::templeos_camera_movement_system.run_if(in_state(GameState::InGame)),
+                crate::rendering::templeos_camera_movement_system
+                    .run_if(in_state(GameState::InGame)),
             ),
         );
     }

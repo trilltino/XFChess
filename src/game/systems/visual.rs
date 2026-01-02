@@ -13,7 +13,7 @@
 
 use crate::game::components::PieceMoveAnimation;
 use crate::game::resources::{CurrentTurn, GameTimer, PendingTurnAdvance, Selection};
-use crate::rendering::pieces::{Piece, PieceColor};
+use crate::rendering::pieces::Piece;
 use crate::rendering::utils::{ReturnMaterials, Square, SquareMaterials};
 use bevy::prelude::*;
 
@@ -104,9 +104,9 @@ pub fn animate_piece_movement(
                 animation_active = true;
             }
         } else {
+            // Rate-limited warning to avoid spam
             let target = Vec3::new(piece.x as f32, 0.0, piece.y as f32);
             if (transform.translation - target).length() > 0.01 {
-                warn!("[VISUAL] Piece at {:?} should be at {:?} - snapping", transform.translation, target);
                 transform.translation = target;
             }
         }
@@ -119,31 +119,17 @@ pub fn animate_piece_movement(
     if !animation_active && pending_turn.is_pending() {
         if let Some(pending) = pending_turn.take() {
             let mover = pending.mover;
-            let time_before = match mover {
-                PieceColor::White => game_timer.white_time_left,
-                PieceColor::Black => game_timer.black_time_left,
-            };
             game_timer.apply_increment(mover);
-            let time_after = match mover {
-                PieceColor::White => game_timer.white_time_left,
-                PieceColor::Black => game_timer.black_time_left,
-            };
-            info!(
-                "[ANIMATION] Timer +{:.1}s for {:?} ({:.1} -> {:.1})",
-                time_after - time_before,
-                mover,
-                time_before,
-                time_after
-            );
-
             current_turn.switch();
-            info!(
-                "[ANIMATION] Turn complete: now {:?}'s move | Move #{}",
-                current_turn.color, current_turn.move_number
-            );
-            info!(
-                "[ANIMATION] Time Remaining - White {:.1}s | Black {:.1}s",
-                game_timer.white_time_left, game_timer.black_time_left
+
+            // Consolidated log: one line instead of three
+            debug!(
+                "[MOVE] {:?} → {:?} | Move #{} | Times: W={:.1}s B={:.1}s",
+                mover,
+                current_turn.color,
+                current_turn.move_number,
+                game_timer.white_time_left,
+                game_timer.black_time_left
             );
         }
     }

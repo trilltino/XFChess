@@ -3,7 +3,7 @@
 //! Provides an isometric orthographic camera view for the TempleOS chess board mode.
 //! The camera uses orthographic projection to create a true 2D isometric view.
 
-use crate::core::GameState;
+use crate::core::{DespawnOnExit, GameState};
 use crate::game::view_mode::ViewMode;
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
@@ -37,11 +37,7 @@ pub fn setup_templeos_camera(mut commands: Commands, view_mode: Res<ViewMode>) {
     // This creates a true isometric view, not a bird's eye view
     // Offset from board center to match the example's angle
     let offset = 5.0;
-    let camera_position = Vec3::new(
-        board_center.x + offset,
-        offset,
-        board_center.z + offset,
-    );
+    let camera_position = Vec3::new(board_center.x + offset, offset, board_center.z + offset);
 
     // Calculate initial look-at offset
     let look_at_offset = board_center - camera_position;
@@ -79,7 +75,10 @@ pub fn templeos_camera_movement_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     view_mode: Res<ViewMode>,
-    mut query: Query<(&mut Transform, &TempleOSCameraLookAt), (With<TempleOSCamera>, With<Camera3d>)>,
+    mut query: Query<
+        (&mut Transform, &TempleOSCameraLookAt),
+        (With<TempleOSCamera>, With<Camera3d>),
+    >,
 ) {
     // Only move camera in TempleOS mode
     if *view_mode != ViewMode::TempleOS {
@@ -89,18 +88,18 @@ pub fn templeos_camera_movement_system(
     for (mut transform, look_at) in query.iter_mut() {
         // Movement speed
         let move_speed = 5.0;
-        
+
         // Calculate movement direction
         let mut direction = Vec3::ZERO;
-        
+
         // Get camera's forward and right vectors
         let forward = transform.forward();
         let right = transform.right();
-        
+
         // Project onto XZ plane (maintain isometric angle)
         let forward_xz = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
         let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
-        
+
         // WASD movement
         if keyboard.pressed(KeyCode::KeyW) {
             direction += forward_xz;
@@ -114,14 +113,14 @@ pub fn templeos_camera_movement_system(
         if keyboard.pressed(KeyCode::KeyA) {
             direction -= right_xz;
         }
-        
+
         // Normalize to prevent faster diagonal movement
         direction = direction.normalize_or_zero();
-        
+
         // Apply movement
         let movement = direction * move_speed * time.delta_secs();
         transform.translation += movement;
-        
+
         // Maintain isometric viewing angle by updating look-at target
         // Use the stored offset to maintain the same relative viewing angle
         let look_at_point = transform.translation + look_at.offset;

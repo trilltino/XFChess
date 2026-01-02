@@ -47,9 +47,12 @@
 //! - `reference/bevy-3d-chess/` - Alternative piece spawning approach
 
 use crate::game::components::HasMoved;
-use crate::game::systems::input::{on_piece_click, on_piece_drag, on_piece_drag_end, on_piece_drag_start};
+use crate::game::systems::input::{
+    on_piece_click, on_piece_drag, on_piece_drag_end, on_piece_drag_start,
+};
 use crate::input::pointer::{on_piece_hover, on_piece_unhover};
 use bevy::color::Color;
+
 use bevy::picking::pointer::PointerInteraction;
 use bevy::prelude::*;
 use std::f32;
@@ -231,7 +234,7 @@ fn spawn_piece_at(
     }
 }
 
-fn piece_transform(offset: Vec3) -> Transform {
+fn piece_mesh_transform(offset: Vec3) -> Transform {
     let mut t = Transform::from_translation(offset);
     t.scale = Vec3::splat(0.2);
     t
@@ -263,6 +266,17 @@ fn piece_name(piece_type: PieceType, color: PieceColor, position: (u8, u8)) -> S
     let rank = position.0 + 1;
     format!("{} {} {}{}", color_str, piece_str, file, rank)
 }
+macro_rules! spawn_piece_visual {
+    ($parent:expr, $mesh:expr, $material:expr, $offset:expr) => {
+        $parent.spawn((
+            Mesh3d($mesh),
+            MeshMaterial3d($material),
+            piece_mesh_transform($offset),
+            bevy::picking::Pickable::default(),
+        ));
+    };
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_king(
     commands: &mut Commands,
@@ -272,16 +286,17 @@ pub fn spawn_king(
     mesh_cross: Handle<Mesh>,
     position: (u8, u8),
 ) {
-    use crate::core::GameState;
+    use crate::core::{DespawnOnExit, GameState};
 
-    // DespawnOnExit automatically despawns all pieces when exiting Multiplayer
+    let pos_vec = Vec3::new(position.0 as f32, 0., position.1 as f32);
+    let rot = piece_rotation(piece_color);
+
     commands
         .spawn((
-            // All components in single tuple - idiomatic Bevy 0.17
-            Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32))
-                .with_rotation(piece_rotation(piece_color)),
+            Transform::from_translation(pos_vec).with_rotation(rot),
             Visibility::Inherited,
             PointerInteraction::default(),
+            bevy::picking::Pickable::default(), // Required for picking
             Name::new(piece_name(PieceType::King, piece_color, position)),
             DespawnOnExit(GameState::InGame),
             Piece {
@@ -292,23 +307,15 @@ pub fn spawn_king(
             },
             HasMoved::default(),
         ))
-        .observe(on_piece_click) // Observer for click handling
-        .observe(on_piece_drag_start) // Observer for drag start
-        .observe(on_piece_drag) // Observer for dragging
-        .observe(on_piece_drag_end) // Observer for drag end cleanup
-        .observe(on_piece_hover) // Observer for hover effect
-        .observe(on_piece_unhover) // Observer for unhover effect
+        .observe(on_piece_click)
+        .observe(on_piece_drag_start)
+        .observe(on_piece_drag)
+        .observe(on_piece_drag_end)
+        .observe(on_piece_hover)
+        .observe(on_piece_unhover)
         .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                piece_transform(Vec3::new(-0.2, 0., -1.9)),
-            ));
-            parent.spawn((
-                Mesh3d(mesh_cross),
-                MeshMaterial3d(material),
-                piece_transform(Vec3::new(-0.2, 0., -1.9)),
-            ));
+            spawn_piece_visual!(parent, mesh, material.clone(), Vec3::new(-0.2, 0., -1.9));
+            spawn_piece_visual!(parent, mesh_cross, material, Vec3::new(-0.2, 0., -1.9));
         });
 }
 
@@ -322,13 +329,15 @@ pub fn spawn_knight(
 ) {
     use crate::core::GameState;
 
+    let pos_vec = Vec3::new(position.0 as f32, 0., position.1 as f32);
+    let rot = piece_rotation(piece_color);
+
     commands
         .spawn((
-            // All components in single tuple - idiomatic Bevy 0.17
-            Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32))
-                .with_rotation(piece_rotation(piece_color)),
+            Transform::from_translation(pos_vec).with_rotation(rot),
             Visibility::Inherited,
             PointerInteraction::default(),
+            bevy::picking::Pickable::default(),
             Name::new(piece_name(PieceType::Knight, piece_color, position)),
             DespawnOnExit(GameState::InGame),
             Piece {
@@ -339,23 +348,15 @@ pub fn spawn_knight(
             },
             HasMoved::default(),
         ))
-        .observe(on_piece_click) // Observer for click handling
-        .observe(on_piece_drag_start) // Observer for drag start
-        .observe(on_piece_drag) // Observer for dragging
-        .observe(on_piece_drag_end) // Observer for drag end cleanup
-        .observe(on_piece_hover) // Observer for hover effect
-        .observe(on_piece_unhover) // Observer for unhover effect
+        .observe(on_piece_click)
+        .observe(on_piece_drag_start)
+        .observe(on_piece_drag)
+        .observe(on_piece_drag_end)
+        .observe(on_piece_hover)
+        .observe(on_piece_unhover)
         .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(mesh_1.clone()),
-                MeshMaterial3d(material.clone()),
-                piece_transform(Vec3::new(-0.2, 0., 0.9)),
-            ));
-            parent.spawn((
-                Mesh3d(mesh_2.clone()),
-                MeshMaterial3d(material.clone()),
-                piece_transform(Vec3::new(-0.2, 0., 0.9)),
-            ));
+            spawn_piece_visual!(parent, mesh_1, material.clone(), Vec3::new(-0.2, 0., 0.9));
+            spawn_piece_visual!(parent, mesh_2, material, Vec3::new(-0.2, 0., 0.9));
         });
 }
 
@@ -368,13 +369,15 @@ pub fn spawn_queen(
 ) {
     use crate::core::GameState;
 
+    let pos_vec = Vec3::new(position.0 as f32, 0., position.1 as f32);
+    let rot = piece_rotation(piece_color);
+
     commands
         .spawn((
-            // All components in single tuple - idiomatic Bevy 0.17
-            Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32))
-                .with_rotation(piece_rotation(piece_color)),
+            Transform::from_translation(pos_vec).with_rotation(rot),
             Visibility::Inherited,
             PointerInteraction::default(),
+            bevy::picking::Pickable::default(),
             Name::new(piece_name(PieceType::Queen, piece_color, position)),
             DespawnOnExit(GameState::InGame),
             Piece {
@@ -385,18 +388,14 @@ pub fn spawn_queen(
             },
             HasMoved::default(),
         ))
-        .observe(on_piece_click) // Observer for click handling
-        .observe(on_piece_drag_start) // Observer for drag start
-        .observe(on_piece_drag) // Observer for dragging
-        .observe(on_piece_drag_end) // Observer for drag end cleanup
-        .observe(on_piece_hover) // Observer for hover effect
-        .observe(on_piece_unhover) // Observer for unhover effect
+        .observe(on_piece_click)
+        .observe(on_piece_drag_start)
+        .observe(on_piece_drag)
+        .observe(on_piece_drag_end)
+        .observe(on_piece_hover)
+        .observe(on_piece_unhover)
         .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                piece_transform(Vec3::new(-0.2, 0., -0.95)),
-            ));
+            spawn_piece_visual!(parent, mesh, material, Vec3::new(-0.2, 0., -0.95));
         });
 }
 
@@ -409,13 +408,15 @@ pub fn spawn_bishop(
 ) {
     use crate::core::GameState;
 
+    let pos_vec = Vec3::new(position.0 as f32, 0., position.1 as f32);
+    let rot = piece_rotation(piece_color);
+
     commands
         .spawn((
-            // All components in single tuple - idiomatic Bevy 0.17
-            Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32))
-                .with_rotation(piece_rotation(piece_color)),
+            Transform::from_translation(pos_vec).with_rotation(rot),
             Visibility::Inherited,
             PointerInteraction::default(),
+            bevy::picking::Pickable::default(),
             Name::new(piece_name(PieceType::Bishop, piece_color, position)),
             DespawnOnExit(GameState::InGame),
             Piece {
@@ -426,18 +427,14 @@ pub fn spawn_bishop(
             },
             HasMoved::default(),
         ))
-        .observe(on_piece_click) // Observer for click handling
-        .observe(on_piece_drag_start) // Observer for drag start
-        .observe(on_piece_drag) // Observer for dragging
-        .observe(on_piece_drag_end) // Observer for drag end cleanup
-        .observe(on_piece_hover) // Observer for hover effect
-        .observe(on_piece_unhover) // Observer for unhover effect
+        .observe(on_piece_click)
+        .observe(on_piece_drag_start)
+        .observe(on_piece_drag)
+        .observe(on_piece_drag_end)
+        .observe(on_piece_hover)
+        .observe(on_piece_unhover)
         .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                piece_transform(Vec3::new(-0.1, 0., 0.0)),
-            ));
+            spawn_piece_visual!(parent, mesh, material, Vec3::new(-0.1, 0., 0.0));
         });
 }
 
@@ -450,13 +447,15 @@ pub fn spawn_rook(
 ) {
     use crate::core::GameState;
 
+    let pos_vec = Vec3::new(position.0 as f32, 0., position.1 as f32);
+    let rot = piece_rotation(piece_color);
+
     commands
         .spawn((
-            // All components in single tuple - idiomatic Bevy 0.17
-            Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32))
-                .with_rotation(piece_rotation(piece_color)),
+            Transform::from_translation(pos_vec).with_rotation(rot),
             Visibility::Inherited,
             PointerInteraction::default(),
+            bevy::picking::Pickable::default(),
             Name::new(piece_name(PieceType::Rook, piece_color, position)),
             DespawnOnExit(GameState::InGame),
             Piece {
@@ -467,18 +466,14 @@ pub fn spawn_rook(
             },
             HasMoved::default(),
         ))
-        .observe(on_piece_click) // Observer for click handling
-        .observe(on_piece_drag_start) // Observer for drag start
-        .observe(on_piece_drag) // Observer for dragging
-        .observe(on_piece_drag_end) // Observer for drag end cleanup
-        .observe(on_piece_hover) // Observer for hover effect
-        .observe(on_piece_unhover) // Observer for unhover effect
+        .observe(on_piece_click)
+        .observe(on_piece_drag_start)
+        .observe(on_piece_drag)
+        .observe(on_piece_drag_end)
+        .observe(on_piece_hover)
+        .observe(on_piece_unhover)
         .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                piece_transform(Vec3::new(-0.1, 0., 1.8)),
-            ));
+            spawn_piece_visual!(parent, mesh, material, Vec3::new(-0.1, 0., 1.8));
         });
 }
 
@@ -491,13 +486,15 @@ pub fn spawn_pawn(
 ) {
     use crate::core::GameState;
 
+    let pos_vec = Vec3::new(position.0 as f32, 0., position.1 as f32);
+    let rot = piece_rotation(piece_color);
+
     commands
         .spawn((
-            // All components in single tuple - idiomatic Bevy 0.17
-            Transform::from_translation(Vec3::new(position.0 as f32, 0., position.1 as f32))
-                .with_rotation(piece_rotation(piece_color)),
+            Transform::from_translation(pos_vec).with_rotation(rot),
             Visibility::Inherited,
             PointerInteraction::default(),
+            bevy::picking::Pickable::default(),
             Name::new(piece_name(PieceType::Pawn, piece_color, position)),
             DespawnOnExit(GameState::InGame),
             Piece {
@@ -508,18 +505,14 @@ pub fn spawn_pawn(
             },
             HasMoved::default(),
         ))
-        .observe(on_piece_click) // Observer for click handling
-        .observe(on_piece_drag_start) // Observer for drag start
-        .observe(on_piece_drag) // Observer for dragging
-        .observe(on_piece_drag_end) // Observer for drag end cleanup
-        .observe(on_piece_hover) // Observer for hover effect
-        .observe(on_piece_unhover) // Observer for unhover effect
+        .observe(on_piece_click)
+        .observe(on_piece_drag_start)
+        .observe(on_piece_drag)
+        .observe(on_piece_drag_end)
+        .observe(on_piece_hover)
+        .observe(on_piece_unhover)
         .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                piece_transform(Vec3::new(-0.2, 0., 2.6)),
-            ));
+            spawn_piece_visual!(parent, mesh, material, Vec3::new(-0.2, 0., 2.6));
         });
 }
 

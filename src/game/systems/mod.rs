@@ -158,17 +158,19 @@
 //! - `reference/bevy/examples/picking/mesh_picking.rs` - Observer pattern usage
 //! - `reference/bevy-3d-chess/src/systems/` - Alternative chess ECS implementation
 
-pub mod board_sync;
 pub mod camera;
+pub mod camera_debug_ui;
 pub mod game_init;
 pub mod game_logic;
 pub mod input;
 pub mod picking_debug;
+pub mod shared;
 pub mod visual;
 
 // Re-export all public systems for convenience
-pub use board_sync::*;
+
 pub use camera::*;
+pub use camera_debug_ui::*;
 pub use game_init::*;
 pub use game_logic::*;
 pub use visual::*;

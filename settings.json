@@ -1,9 +1,9 @@
 {
   "master_volume": 0.7,
-  "graphics_quality": "High",
+  "graphics_quality": "Ultra",
   "show_hints": true,
   "highlight_last_move": true,
-  "board_theme": "Marble",
+  "board_theme": "Classic",
   "dynamic_lighting": {
     "enabled": true,
     "light_count": 3,

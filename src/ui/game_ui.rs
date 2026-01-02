@@ -52,15 +52,30 @@ use bevy_egui::egui;
 ///
 /// Uses [`GameUIParams`] to group all UI-related resources into a single parameter,
 /// following bevy_egui best practices for cleaner APIs.
-pub fn game_status_ui(
-    mut params: GameUIParams,
-) -> Result<(), bevy::ecs::query::QuerySingleError> {
-    let ctx = params.contexts.ctx_mut()?;
+pub fn game_status_ui(mut params: GameUIParams) {
+    let Ok(ctx) = params.contexts.ctx_mut() else {
+        return;
+    };
 
     // === TOP BAR: Timer, Turn, Settings ===
     egui::TopBottomPanel::top("game_top_bar")
         .resizable(false)
         .show(ctx, |ui| {
+            // ... (rest of the code)
+        });
+
+    // (Note: The rest of the function body remains the same, just removing the final Ok(()))
+    // Wait, replace_file_content requires me to provide the *exact* target content.
+    // I can't just say "rest of the code".
+    // I need to use `multi_replace_file_content` or be very precise with `replace_file_content`.
+    // Since I'm changing the signature at start and return at the end, `multi_replace_file_content` is better.
+
+    egui::TopBottomPanel::top("game_top_bar")
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.add_space(5.0); // Add top padding
+            ui.set_min_height(40.0); // Ensure minimum height
+
             ui.horizontal(|ui| {
                 ui.set_width(ui.available_width());
 
@@ -100,7 +115,8 @@ pub fn game_status_ui(
                     |ui| {
                         if !params.game_state.game_over.is_game_over() {
                             // Get current player
-                            let current_player = params.players.current(params.game_state.current_turn.color);
+                            let current_player =
+                                params.players.current(params.game_state.current_turn.color);
                             let turn_text = format!(
                                 "{} ({:?}) to Move",
                                 current_player.name, params.game_state.current_turn.color
@@ -143,7 +159,8 @@ pub fn game_status_ui(
                         } else {
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 200, 0),
-                                egui::RichText::new(params.game_state.game_over.message()).size(18.0),
+                                egui::RichText::new(params.game_state.game_over.message())
+                                    .size(18.0),
                             );
                         }
                     },
@@ -158,6 +175,7 @@ pub fn game_status_ui(
                     }
                 });
             });
+            ui.add_space(5.0); // Add bottom padding
         });
 
     // === LEFT SIDE: Move Notation Panel ===
@@ -262,51 +280,53 @@ pub fn game_status_ui(
         });
 
     // === AI Statistics Panel (Bottom Left) - only show when playing vs AI ===
-    if let GameMode::VsAI { .. } = params.ai_params.ai_config.mode {
-        egui::Window::new("AI Statistics")
-            .anchor(egui::Align2::LEFT_BOTTOM, [10.0, -10.0])
-            .resizable(false)
-            .collapsible(true)
-            .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    ui.heading(TextStyle::heading("Engine Stats", TextSize::SM));
-                    ui.add_space(5.0);
+    // === AI Statistics Panel (Bottom Left) - only show when playing vs AI ===
+    // Note: Currently GameMode only has VsAI, but we use match for future extensibility
+    match params.ai_params.ai_config.mode {
+        GameMode::VsAI { .. } => {
+            egui::Window::new("AI Statistics")
+                .anchor(egui::Align2::LEFT_BOTTOM, [10.0, -10.0])
+                .resizable(false)
+                .collapsible(true)
+                .show(ctx, |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading(TextStyle::heading("Engine Stats", TextSize::SM));
+                        ui.add_space(5.0);
 
-                    if params.ai_params.ai_stats.last_depth > 0 {
-                        ui.label(TextStyle::caption(format!(
-                            "Evaluation: {}",
-                            format_score(params.ai_params.ai_stats.last_score)
-                        )));
-                        ui.label(TextStyle::caption(format!(
-                            "Search depth: {}",
-                            params.ai_params.ai_stats.last_depth
-                        )));
-                        ui.label(TextStyle::caption(format!(
-                            "Nodes: {}",
-                            format_nodes(params.ai_params.ai_stats.last_nodes)
-                        )));
-
-                        if params.ai_params.ai_stats.thinking_time > 0.0 {
+                        if params.ai_params.ai_stats.last_depth > 0 {
                             ui.label(TextStyle::caption(format!(
-                                "Thinking time: {:.2}s",
-                                params.ai_params.ai_stats.thinking_time
+                                "Evaluation: {}",
+                                format_score(params.ai_params.ai_stats.last_score)
                             )));
-                        }
+                            ui.label(TextStyle::caption(format!(
+                                "Search depth: {}",
+                                params.ai_params.ai_stats.last_depth
+                            )));
+                            ui.label(TextStyle::caption(format!(
+                                "Nodes: {}",
+                                format_nodes(params.ai_params.ai_stats.last_nodes)
+                            )));
 
-                        if params.ai_params.pending_ai.is_some() {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(100, 150, 255),
-                                "Calculating...",
-                            );
+                            if params.ai_params.ai_stats.thinking_time > 0.0 {
+                                ui.label(TextStyle::caption(format!(
+                                    "Thinking time: {:.2}s",
+                                    params.ai_params.ai_stats.thinking_time
+                                )));
+                            }
+
+                            if params.ai_params.pending_ai.is_some() {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(100, 150, 255),
+                                    "Calculating...",
+                                );
+                            }
+                        } else {
+                            ui.label(TextStyle::caption("Waiting for first move..."));
                         }
-                    } else {
-                        ui.label(TextStyle::caption("Waiting for first move..."));
-                    }
+                    });
                 });
-            });
+        }
     }
-
-    Ok(())
 }
 
 /// Format engine score for display

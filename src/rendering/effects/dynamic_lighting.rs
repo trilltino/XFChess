@@ -15,7 +15,7 @@
 //!
 //! Based on patterns from `reference/bevy/examples/3d/lighting.rs`
 
-use crate::core::{GameSettings, GameState};
+use crate::core::{DespawnOnExit, GameSettings, GameState};
 use bevy::prelude::*;
 
 /// Plugin for dynamic orbital lighting

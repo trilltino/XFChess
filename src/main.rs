@@ -1,4 +1,4 @@
-//! XFChess - A 3D Chess Game built with Bevy 0.17.2
+//! XFChess - A 3D Chess Game built with Bevy 0.17.3
 //!
 //! A modern, idiomatic chess game implementation following Bevy 0.17 best practices
 //! with comprehensive state management, ECS architecture, and AI opponent.
@@ -45,7 +45,7 @@
 //! - **Asset Loading**: Progress indication during startup (see [`crate::assets`])
 //! - **Chess AI**: Minimax engine with alpha-beta pruning (~1800-2000 ELO) (see [`crate::game::ai`])
 //! - **3D Graphics**: Enhanced lighting and atmospheric effects (see [`crate::rendering`])
-//! - **Game Modes**: Human vs Human, Human vs AI (configurable difficulty)
+//! - **Game Modes**: Human vs AI with selectable colors (White/Black), TempleOS view mode
 //! - **Settings**: Graphics quality, board themes, preferences (see [`crate::core::GameSettings`])
 //! - **Statistics**: Player performance tracking (see [`crate::core::GameStatistics`])
 //! - **Inspector UI**: F1 to toggle ECS entity/component inspector
@@ -66,11 +66,12 @@
 //! - `reference/bevy-inspector-egui/` - Inspector integration
 //! - `reference/bevy-3d-chess/` - Alternative chess implementation
 
-use bevy::ecs::entity::Entity;
 use bevy::ecs::error::{warn as bevy_warn, BevyError, ErrorContext};
 use bevy::input::common_conditions::input_toggle_active;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
+use bevy::render::settings::{PowerPreference, RenderCreation, WgpuSettings};
+use bevy::render::RenderPlugin;
 use bevy_egui::{
     EguiContext, EguiGlobalSettings, EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass,
     PrimaryEguiContext,
@@ -86,12 +87,15 @@ mod audio;
 mod core;
 mod game;
 mod input;
+mod persistent_camera;
 mod rendering;
 mod states;
 mod ui;
 
+pub use persistent_camera::PersistentEguiCamera;
+
 // Imports
-use core::{CorePlugin, GameState, WindowConfig};
+use core::{CorePlugin, DespawnOnExit, GameState, WindowConfig};
 use game::{CameraController, GamePlugin};
 use input::*;
 use rendering::*;
@@ -116,11 +120,7 @@ fn write_error_to_file(message: &str) {
     let timestamp = format!("{}", now);
     let log_file = logs_dir.join(format!("error_{}.log", timestamp));
 
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file)
-    {
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_file) {
         if let Err(e) = writeln!(file, "[{}] {}", timestamp, message) {
             eprintln!("[ERROR] Failed to write to log file: {}", e);
         }
@@ -128,18 +128,25 @@ fn write_error_to_file(message: &str) {
 }
 
 fn main() {
-    // === DISABLE ANSI COLORS FOR POWERSHELL COMPATIBILITY ===
-    // PowerShell doesn't render ANSI color codes properly, making logs unreadable
-    // Setting NO_COLOR environment variable disables color output
     std::env::set_var("NO_COLOR", "1");
-    
+
     let mut app = App::new();
 
-    // === GLOBAL ERROR HANDLER ===
-    // Set up custom error handler to catch system failures without crashing
-    // This allows the game to continue running even if individual systems fail
+    setup_error_handler(&mut app);
+    configure_core_plugins(&mut app);
+    configure_gui_plugins(&mut app);
+    initialize_resources(&mut app);
+    configure_state_plugins(&mut app);
+    configure_game_plugins(&mut app);
+    configure_game_state_systems(&mut app);
+    configure_settings_systems(&mut app);
+    configure_global_setup(&mut app);
+
+    app.run();
+}
+
+fn setup_error_handler(app: &mut App) {
     app.set_error_handler(|error: BevyError, context: ErrorContext| {
-        // Write error to file for later analysis
         write_error_to_file(&format!(
             "[ERROR_HANDLER] System '{}' failed: {}\nError details: {:?}\nError type: {:?}",
             context.name(),
@@ -147,7 +154,7 @@ fn main() {
             error,
             std::any::type_name_of_val(&error)
         ));
-        
+
         error!(
             "[ERROR_HANDLER] System '{}' failed: {}",
             context.name(),
@@ -164,124 +171,234 @@ fn main() {
         warn!(
             "[ERROR_HANDLER] Application will continue running, but the failed system will be skipped"
         );
-        // Use Bevy's warn handler as fallback for additional context
         bevy_warn(error, context);
     });
+}
 
-    app
-        // === CORE BEVY PLUGINS ===
-        // Must be added first to provide StatesPlugin before CorePlugin initializes states
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(WindowConfig::default().to_window()),
-                    ..default()
-                })
-                .set(AssetPlugin {
-                    // Use project root for assets (works in both dev and release)
-                    // This ensures assets are found whether running from project root or target/release
-                    file_path: "assets".to_string(),
-                    ..default()
-                })
-                .set(bevy::log::LogPlugin {
-                    // Enable detailed logging for debugging - ensure all debug messages are visible
-                    // Base level DEBUG shows all debug/info/warn/error messages
-                    // Override specific noisy Bevy modules to reduce spam
-                    // Set naga to error level to completely suppress shader compiler debug spam
-                    level: bevy::log::Level::DEBUG,
-                    filter: "debug,bevy_ecs=warn,bevy_render=warn,wgpu=error,naga=error".to_string(),
-                    // Disable colors explicitly for PowerShell compatibility
-                    // Colors are already disabled via NO_COLOR env var, but this ensures it
+fn configure_core_plugins(app: &mut App) {
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(WindowConfig::default().to_window()),
+                ..default()
+            })
+            .set(AssetPlugin {
+                file_path: "assets".to_string(),
+                ..default()
+            })
+            .set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(WgpuSettings {
+                    power_preference: PowerPreference::HighPerformance,
                     ..default()
                 }),
+                ..default()
+            })
+            // Disable default LogPlugin to use our custom one
+            .disable::<bevy::log::LogPlugin>(),
+    );
+    app.add_plugins(FileLoggerPlugin);
+    app.add_plugins(CorePlugin);
+}
+
+/// Custom plugin to handle file logging
+pub struct FileLoggerPlugin;
+
+impl Plugin for FileLoggerPlugin {
+    fn build(&self, app: &mut App) {
+        use tracing_subscriber::{layer::SubscriberExt, Layer};
+
+        // Create logs directory
+        let _ = std::fs::create_dir_all("logs");
+
+        // File appender (hourly rolling)
+        let file_appender = tracing_appender::rolling::hourly("logs", "debug");
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        // Keep the guard alive by leaking it (safe for global logger in app lifespan)
+        // In a clearer implementation, we'd store this in a resource, but for strict logger setup
+        // leaking is a common workaround if we can't store it in the app easily during build.
+        // However, Bevy's LogPlugin is safer. Let's try to just ADD a subscriber if possible.
+        // But Bevy sets the global default. We must use Bevy's LogPlugin or replace it.
+        // Actually, better path: Use Bevy's LogPlugin but customize the subscriber if exposed? No.
+        // Best path: tracing_subscriber::fmt() allows multiple layers.
+
+        // Let's rely on standard tracing setup since we disabled Bevy's LogPlugin.
+        // We recreate what Bevy does but add our file layer.
+
+        // Console layer
+        let console_layer = tracing_subscriber::fmt::Layer::new()
+            .with_target(false)
+            .with_filter(tracing_subscriber::EnvFilter::new(
+                "debug,bevy_ecs=warn,bevy_render=warn,wgpu=error,naga=error",
+            ));
+
+        // File layer (no color, full details)
+        let file_layer = tracing_subscriber::fmt::Layer::new()
+            .with_writer(non_blocking)
+            .with_ansi(false)
+            .with_filter(tracing_subscriber::EnvFilter::new(
+                "debug,bevy_ecs=warn,bevy_render=warn,wgpu=error,naga=error",
+            ));
+
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(console_layer)
+            .with(file_layer);
+
+        // Set global default - safely ignore error if already set
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        // We must leak the guard to prevent file writing from stopping immediately
+        Box::leak(Box::new(_guard));
+    }
+}
+
+fn configure_gui_plugins(app: &mut App) {
+    app.add_plugins(EguiPlugin::default());
+    app.add_systems(
+        PreStartup,
+        |mut egui_settings: ResMut<EguiGlobalSettings>| {
+            egui_settings.auto_create_primary_context = false;
+        },
+    );
+    app.add_plugins(
+        WorldInspectorPlugin::default().run_if(input_toggle_active(false, KeyCode::F1)),
+    );
+    app.add_systems(
+        EguiPrimaryContextPass,
+        crate::ui::inspector::inspector_ui.run_if(input_toggle_active(false, KeyCode::F1)),
+    );
+}
+
+fn initialize_resources(app: &mut App) {
+    app.init_resource::<PersistentEguiCamera>();
+    app.init_resource::<crate::assets::LoadingProgress>();
+    app.init_resource::<crate::assets::GameAssets>();
+    app.add_systems(Update, log_system_errors);
+}
+
+fn configure_state_plugins(app: &mut App) {
+    app.add_plugins(MainMenuPlugin);
+    app.add_plugins(SettingsPlugin);
+    app.add_plugins(PausePlugin);
+    app.add_plugins(GameOverPlugin);
+    app.add_plugins(PieceViewerPlugin);
+}
+
+fn configure_game_plugins(app: &mut App) {
+    // app.add_plugins(DefaultPickingPlugins); // Already added by DefaultPlugins in Bevy 0.17+
+    app.add_plugins(MeshPickingPlugin);
+    app.add_plugins(PointerEventsPlugin);
+    app.add_plugins(PiecePlugin);
+    app.add_plugins(BoardPlugin);
+    app.add_plugins(BoardUtils);
+    app.add_plugins(DynamicLightingPlugin);
+    app.add_plugins(GamePlugin);
+}
+
+fn configure_game_state_systems(app: &mut App) {
+    app.add_systems(
+        OnEnter(GameState::InGame),
+        (
+            game::systems::reset_game_resources
+                .before(rendering::pieces::create_pieces)
+                .before(rendering::board::create_board),
+            game::systems::initialize_players.after(game::systems::reset_game_resources),
+            game::systems::initialize_game_sounds.after(game::systems::reset_game_resources),
+            game::systems::play_templeos_sound.after(game::systems::initialize_game_sounds),
+            game::systems::initialize_engine_from_ecs
+                .after(rendering::pieces::create_pieces)
+                .after(rendering::board::create_board),
+            setup_game_scene,
+            setup_game_camera,
+            game::systems::spawn_camera_position_ui,
         )
-        // === CORE PLUGIN ===
-        // Must be added after DefaultPlugins to ensure StatesPlugin is available
-        .add_plugins(CorePlugin)
-        .add_plugins(EguiPlugin::default())
-        // Disable auto-creation of primary Egui context since we manually set it up in MainMenu
-        .add_systems(
-            PreStartup,
-            |mut egui_settings: ResMut<EguiGlobalSettings>| {
-                egui_settings.auto_create_primary_context = false;
-            },
-        )
-        // Inspector (toggle with F1 key) - for development
-        // Use custom inspector that shows game resources, or WorldInspectorPlugin as fallback
-        .add_plugins(WorldInspectorPlugin::default().run_if(input_toggle_active(true, KeyCode::F1)))
-        // Add custom inspector UI system (shows game resources in bottom panel)
-        .add_systems(
-            EguiPrimaryContextPass,
-            crate::ui::inspector::inspector_ui.run_if(input_toggle_active(true, KeyCode::F1)),
-        )
-        // === STATE SYSTEM ===
-        // Menu substates are initialized by CorePlugin
-        // === CORE RESOURCES ===
-        .init_resource::<PersistentEguiCamera>() // Persistent camera for all UI states
-        // === ASSET RESOURCES ===
-        .init_resource::<crate::assets::LoadingProgress>() // Asset loading progress tracker
-        .init_resource::<crate::assets::GameAssets>() // Preloaded asset handles
-        // === DEBUG SYSTEMS ===
-        .add_systems(Update, log_system_errors)
-        // === STATE PLUGINS ===
-        .add_plugins(MainMenuPlugin) // Main menu (with integrated loading)
-        .add_plugins(SettingsPlugin) // Settings menu
-        .add_plugins(PausePlugin) // Pause menu
-        .add_plugins(GameOverPlugin) // Post-game screen
-        .add_plugins(PieceViewerPlugin) // Piece viewer for material customization
-        // === GAME SYSTEMS PLUGINS ===
-        .add_plugins(MeshPickingPlugin) // 3D object picking
-        .add_plugins(PointerEventsPlugin) // Mouse interaction
-        .add_plugins(PiecePlugin) // Chess piece rendering
-        .add_plugins(BoardPlugin) // Chess board rendering
-        .add_plugins(BoardUtils) // Board utilities
-        .add_plugins(DynamicLightingPlugin) // Dynamic orbital lighting
-        .add_plugins(GamePlugin) // Core chess game logic
-        // === GAME STATE SETUP ===
-        // Reset game resources when entering InGame state (must run BEFORE piece/board spawning)
-        // Follows pattern from reference/bevy/examples/state/states.rs
-        // Note: Systems in plugins register their OnEnter systems, then we register ours
-        // We use .before() to ensure reset runs before piece/board creation
-        .add_systems(
-            OnEnter(GameState::InGame),
-            (
-                game::systems::reset_game_resources
-                    .before(rendering::pieces::create_pieces)
-                    .before(rendering::board::create_board),
-                game::systems::initialize_players.after(game::systems::reset_game_resources),
-                game::systems::initialize_game_sounds.after(game::systems::reset_game_resources),
-                game::systems::play_templeos_sound.after(game::systems::initialize_game_sounds),
-                game::systems::initialize_engine_from_ecs
-                    .after(rendering::pieces::create_pieces)
-                    .after(rendering::board::create_board),
-                setup_game_scene,
-            )
-                .chain(),
-        )
-        .add_systems(
-            Update,
-            (
-                handle_pause_input.run_if(in_state(GameState::InGame)),
-                game::systems::check_and_play_templeos_sound.run_if(in_state(GameState::InGame)),
-            ),
-        )
-        // === SETTINGS SYSTEMS ===
-        .add_systems(
-            Update,
-            (
-                rendering::graphics_quality::apply_graphics_quality_camera_system,
-                rendering::graphics_quality::update_graphics_quality_camera_system,
-                rendering::graphics_quality::apply_graphics_quality_lights_system,
-                audio::apply_master_volume_system,
-                core::settings_persistence::save_settings_system,
-            ),
-        )
-        // === GLOBAL SETUP ===
-        // Create persistent camera in PreStartup to ensure it exists before state transitions
-        // Note: OnEnter for default state runs before PreStartup, so we also add error handling
-        .add_systems(PreStartup, setup_persistent_egui_camera)
-        .add_systems(Startup, setup_global_scene)
-        .run();
+            .chain(),
+    );
+    app.add_systems(OnExit(GameState::InGame), reset_game_camera);
+    app.add_systems(
+        Update,
+        (
+            handle_pause_input.run_if(in_state(GameState::InGame)),
+            game::systems::check_and_play_templeos_sound.run_if(in_state(GameState::InGame)),
+            game::systems::update_camera_position_ui.run_if(in_state(GameState::InGame)),
+        ),
+    );
+}
+
+/// Configure the persistent camera for gameplay
+/// Use the existing Egui camera as the main game camera to avoid conflicts
+fn setup_game_camera(
+    mut commands: Commands,
+    persistent_camera: Res<PersistentEguiCamera>,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
+    mut query: Query<(&mut Transform, &mut Camera)>,
+) {
+    // Only configure for standard view (TempleOS handles its own camera/view)
+    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
+        return;
+    }
+
+    if let Some(entity) = persistent_camera.entity {
+        if let Ok((mut transform, mut camera)) = query.get_mut(entity) {
+            // Position for gameplay: behind White, angled down
+            let initial_height = 10.0;
+            let board_center = Vec3::new(3.5, 0.0, 3.5);
+            let camera_pos = Vec3::new(3.5, initial_height, -8.0);
+
+            *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+
+            // Ensure order is correct (0 is standard for 3D)
+            camera.order = 0;
+
+            // Add RTS camera controls
+            commands.entity(entity).insert(CameraController {
+                current_zoom: initial_height,
+                target_zoom: initial_height,
+                min_zoom: 3.0,
+                max_zoom: 30.0,
+                ..Default::default()
+            });
+
+            info!("[CAMERA] Configured Persistent Camera for Gameplay");
+        }
+    }
+}
+
+/// Reset the persistent camera when exiting gameplay
+fn reset_game_camera(
+    mut commands: Commands,
+    persistent_camera: Res<PersistentEguiCamera>,
+    mut query: Query<&mut Camera>,
+) {
+    if let Some(entity) = persistent_camera.entity {
+        // Remove RTS controls
+        commands.entity(entity).remove::<CameraController>();
+
+        // Reset order if needed (though 0 is usually fine for menus too)
+        if let Ok(mut camera) = query.get_mut(entity) {
+            camera.order = 0;
+        }
+
+        info!("[CAMERA] Reset Persistent Camera (Removed Controls)");
+    }
+}
+
+fn configure_settings_systems(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            rendering::graphics_quality::apply_graphics_quality_camera_system,
+            rendering::graphics_quality::update_graphics_quality_camera_system,
+            rendering::graphics_quality::apply_graphics_quality_lights_system,
+            audio::apply_master_volume_system,
+            core::settings_persistence::save_settings_system,
+        ),
+    );
+}
+
+fn configure_global_setup(app: &mut App) {
+    app.add_systems(PreStartup, setup_persistent_egui_camera);
+    app.add_systems(Startup, setup_global_scene);
 }
 
 /// System to log any system execution errors for debugging
@@ -300,7 +417,6 @@ fn setup_global_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-
     // Global background (dark space-like environment)
     // Use safe hex color parsing with fallback
     let background_color = crate::core::error_handling::safe_parse_hex_color(
@@ -327,13 +443,6 @@ fn setup_global_scene(
         brightness: 300.0,
         affects_lightmapped_meshes: true,
     });
-
-}
-
-/// Resource to track the persistent Egui camera entity
-#[derive(Resource, Default)]
-pub struct PersistentEguiCamera {
-    pub entity: Option<Entity>,
 }
 
 /// Setup a persistent camera with Egui context that survives all state transitions
@@ -383,7 +492,6 @@ fn setup_persistent_egui_camera(
 ///
 /// Spawns the game camera, lighting, and chess board.
 fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view_mode::ViewMode>) {
-
     // Set background color based on view mode
     if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
         // Vibrant solid yellow background matching reference image (#FFFF00)
@@ -395,26 +503,10 @@ fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view_mod
 
     // Setup camera based on view mode
     // TempleOS camera is set up by the board plugin, so we only create standard camera here
-    if *view_mode != crate::game::view_mode::ViewMode::TempleOS {
-        // Standard camera with RTS-style controls
-        let initial_height = 20.0; // Camera spawn height
+    // UPDATE: We now reuse the PersistentEguiCamera for standard view (in setup_game_camera system)
+    // so we ONLY need to handle TempleOS specific setup or lights here.
 
-        commands.spawn((
-            Camera3d::default(),
-            Transform::from_matrix(Mat4::from_rotation_translation(
-                Quat::from_xyzw(-0.3, -0.5, -0.3, 0.5).normalize(),
-                Vec3::new(-7.0, initial_height, 4.0),
-            )),
-            CameraController {
-                current_zoom: initial_height,
-                target_zoom: initial_height,
-                ..Default::default()
-            },
-            // Note: Egui context is provided by persistent camera, not this game camera
-            DespawnOnExit(GameState::InGame),
-            Name::new("Game Camera"),
-        ));
-    }
+    // lights...
 
     // Skip lights for TempleOS mode (unlit rendering)
     if *view_mode != crate::game::view_mode::ViewMode::TempleOS {
@@ -452,7 +544,6 @@ fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view_mod
     }
 
     // Note: Ambient light is set globally in setup_global_scene (Startup)
-
 }
 
 /// Handle ESC key to pause the game

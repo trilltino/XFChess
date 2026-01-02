@@ -25,7 +25,7 @@
 //! - `FastBoardState` - Clear bitboards
 //! - `TurnStateContext` - Reset to default phase
 
-use crate::game::ai::resource::{ChessAIResource, GameMode};
+use crate::game::ai::resource::ChessAIResource;
 use crate::game::components::GamePhase;
 use crate::game::components::HasMoved;
 use crate::game::resources::*;
@@ -56,7 +56,6 @@ pub fn reset_game_resources(
     mut game_timer: ResMut<GameTimer>,
     mut captured_pieces: ResMut<CapturedPieces>,
     mut game_over: ResMut<GameOverState>,
-    mut fast_board: ResMut<FastBoardState>,
     mut turn_context: ResMut<TurnStateContext>,
     mut engine: ResMut<ChessEngine>,
 ) {
@@ -100,10 +99,6 @@ pub fn reset_game_resources(
     *game_over = GameOverState::Playing;
     info!("[GAME_INIT] Game over state reset: {:?}", game_over);
 
-    // Clear fast board state (bitboards)
-    fast_board.clear();
-    info!("[GAME_INIT] Fast board state cleared");
-
     // Reset turn state context to default phase
     *turn_context = TurnStateContext::default();
     info!(
@@ -123,10 +118,7 @@ pub fn reset_game_resources(
 /// Loads all sound effect handles and stores them in the GameSounds resource.
 /// This system should run after reset_game_resources to ensure sounds are
 /// available for the new game.
-pub fn initialize_game_sounds(
-    asset_server: Res<AssetServer>,
-    mut commands: Commands,
-) {
+pub fn initialize_game_sounds(asset_server: Res<AssetServer>, mut commands: Commands) {
     info!("[GAME_INIT] Loading game sounds");
     let game_sounds = GameSounds::new(&asset_server);
     commands.insert_resource(game_sounds);
@@ -163,7 +155,10 @@ pub fn play_templeos_sound(
                 info!("[GAME_INIT] TempleOS audio playback started");
             }
             bevy::asset::LoadState::Failed(err) => {
-                error!("[GAME_INIT] TempleOS audio file failed to load: {:?} - skipping playback", err);
+                error!(
+                    "[GAME_INIT] TempleOS audio file failed to load: {:?} - skipping playback",
+                    err
+                );
             }
             bevy::asset::LoadState::NotLoaded => {
                 warn!("[GAME_INIT] TempleOS audio not yet loaded - will be handled by continuous check system");
@@ -250,60 +245,48 @@ pub fn check_and_play_templeos_sound(
 /// System that initializes players based on game mode
 ///
 /// Creates player resources based on the ChessAIResource mode:
-/// - VsHuman: Both players are human
 /// - VsAI: One human, one AI (based on ai_color)
 ///
 /// This system runs when entering InGame state to set up players.
 pub fn initialize_players(mut players: ResMut<Players>, ai_config: Res<ChessAIResource>) {
     info!(
-        "[GAME_INIT] Initializing players based on game mode: {:?}",
+        "[GAME_INIT] Initializing players for AI mode: {:?}",
         ai_config.mode
     );
 
-    match ai_config.mode {
-        GameMode::VsHuman => {
-            // Both players are human
-            *players = Players {
-                player_1: Player::new(1, "Player 1".to_string(), PieceColor::White, true),
-                player_2: Player::new(2, "Player 2".to_string(), PieceColor::Black, true),
-            };
-            info!("[GAME_INIT] Players initialized: Human vs Human");
-        }
-        GameMode::VsAI { ai_color } => {
-            // One human, one AI
-            let human_color = match ai_color {
-                PieceColor::White => PieceColor::Black,
-                PieceColor::Black => PieceColor::White,
-            };
+    let ai_color = ai_config.mode.ai_color();
+    let human_color = match ai_color {
+        PieceColor::White => PieceColor::Black,
+        PieceColor::Black => PieceColor::White,
+    };
 
-            *players = Players {
-                player_1: Player::new(
-                    1,
-                    if human_color == PieceColor::White {
-                        "Player 1".to_string()
-                    } else {
-                        "AI".to_string()
-                    },
-                    PieceColor::White,
-                    human_color == PieceColor::White,
-                ),
-                player_2: Player::new(
-                    2,
-                    if ai_color == PieceColor::Black {
-                        "AI".to_string()
-                    } else {
-                        "Player 1".to_string()
-                    },
-                    PieceColor::Black,
-                    ai_color != PieceColor::Black,
-                ),
-            };
-            info!(
-                "[GAME_INIT] Players initialized: Human ({:?}) vs AI ({:?})",
-                human_color, ai_color
-            );
-        }
-    }
+    *players = Players {
+        player_1: Player::new(
+            1,
+            if human_color == PieceColor::White {
+                "Player 1".to_string()
+            } else {
+                "AI".to_string()
+            },
+            PieceColor::White,
+            human_color == PieceColor::White,
+        ),
+        player_2: Player::new(
+            2,
+            if ai_color == PieceColor::Black {
+                "AI".to_string()
+            } else {
+                "Player 1".to_string()
+            },
+            PieceColor::Black,
+            ai_color != PieceColor::Black,
+        ),
+    };
+
+    info!(
+        "[GAME_INIT] Players initialized: Human ({:?}) vs AI ({:?})",
+        human_color, ai_color
+    );
 
     info!(
         "[GAME_INIT] Player 1: {} ({:?}, human: {})",

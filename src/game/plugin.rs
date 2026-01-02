@@ -52,29 +52,16 @@ use super::systems::*;
 use crate::core::{debug_current_gamestate, GameState};
 use crate::game::components::{GamePhase, HasMoved, MoveRecord, PieceMoveAnimation, SelectedPiece};
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
+use crate::ui::game_ui::game_status_ui;
 use bevy::input::common_conditions::input_toggle_active;
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
+use bevy_egui::EguiPrimaryContextPass;
 
 /// Game plugin for XFChess
 ///
 /// Registers all game systems and resources. This plugin should be added
 /// after CorePlugin and before state-specific plugins.
 pub struct GamePlugin;
-
-
-/// Simple UI that just shows "Press F1 for overlay" text
-///
-/// Disabled by default - no overlays shown on startup.
-/// Only shows when F1 is pressed (inspector active).
-fn simple_game_ui(
-    _contexts: EguiContexts,
-    _keyboard_input: Res<ButtonInput<KeyCode>>,
-) {
-    // Disabled - don't show any UI overlay by default
-    // Only show inspector when F1 is pressed (handled by inspector system)
-    return;
-}
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
@@ -87,7 +74,6 @@ impl Plugin for GamePlugin {
             .init_resource::<CapturedPieces>()
             .init_resource::<GameOverState>()
             .init_resource::<DebugThrottle>()
-            .init_resource::<FastBoardState>()
             .init_resource::<PendingTurnAdvance>()
             .init_resource::<TurnStateContext>()
             .init_resource::<ChessEngine>()
@@ -102,7 +88,6 @@ impl Plugin for GamePlugin {
             .register_type::<MoveHistory>()
             .register_type::<CapturedPieces>()
             .register_type::<GameOverState>()
-            .register_type::<FastBoardState>()
             .register_type::<PendingTurnAdvance>()
             .register_type::<TurnStateContext>()
             .register_type::<TurnPhase>()
@@ -159,40 +144,41 @@ impl Plugin for GamePlugin {
                         *view_mode != super::view_mode::ViewMode::TempleOS
                     }),
                 // Validation set: Sync board state before validation (disabled in TempleOS)
-                sync_fast_board_state
-                    .in_set(GameSystems::Validation)
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
-                    }),
+
                 // Execution set: Update game state (disabled in TempleOS)
-                update_game_phase
-                    .in_set(GameSystems::Execution)
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                update_game_phase.in_set(GameSystems::Execution).run_if(
+                    |view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
-                    }),
-                update_game_timer
-                    .in_set(GameSystems::Execution)
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                    },
+                ),
+                update_game_timer.in_set(GameSystems::Execution).run_if(
+                    |view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
-                    }),
+                    },
+                ),
+                check_game_over_state.in_set(GameSystems::Execution).run_if(
+                    |view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    },
+                ),
                 // Visual set: Update rendering (disabled in TempleOS)
-                highlight_possible_moves
-                    .in_set(GameSystems::Visual)
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                highlight_possible_moves.in_set(GameSystems::Visual).run_if(
+                    |view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
-                    }),
-                animate_piece_movement
-                    .in_set(GameSystems::Visual)
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
+                    },
+                ),
+                animate_piece_movement.in_set(GameSystems::Visual).run_if(
+                    |view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
-                    }),
+                    },
+                ),
             ),
         );
 
         // Add UI system separately (egui requires EguiPrimaryContextPass)
         app.add_systems(
             EguiPrimaryContextPass,
-            simple_game_ui.run_if(in_state(GameState::InGame)),
+            game_status_ui.run_if(in_state(GameState::InGame)),
         );
 
         // Debug system - toggle with F12 key

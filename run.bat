@@ -2,11 +2,10 @@
 REM Set stack size for Bevy's runtime-spawned threads (task pools)
 REM Main thread stack is set in .cargo/config.toml
 set RUST_MIN_STACK=134217728
-REM Always build in release mode before running to ensure changes are applied
-cargo build --release
-if %ERRORLEVEL% EQU 0 (
-    cargo run --release
-) else (
-    echo Build failed, not running
+REM Use dev mode for fast iteration during development
+REM Change to --release if you need optimized performance for testing
+cargo run --package xfchess --bin xfchess -- %*
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to launch xfchess
 )
 pause

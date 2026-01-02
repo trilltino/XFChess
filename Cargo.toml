@@ -6,8 +6,9 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 
-[workspace.profile.dev.package."*"]
-opt-level = 3
+[workspace.profile.dev]
+opt-level = 1
+split-debuginfo = "packed"
 
 [workspace.profile.release]
 # Maximum optimization for release builds
@@ -24,9 +25,6 @@ name = "xfchess"
 version.workspace = true
 edition.workspace = true
 
-[profile.dev.package."*"]
-opt-level = 3
-
 [profile.release]
 # Maximum optimization for release builds
 opt-level = 3
@@ -38,7 +36,7 @@ strip = true
 codegen-units = 1
 
 [dependencies]
-bevy = { version = "0.17.2", features = ["web", "webgl2", "mp3"] }
+bevy = { version = "0.17.3", features = ["web", "webgl2", "mp3"] }
 bevy_egui = "0.37.1"
 bevy-inspector-egui = "0.34.0"
 futures-lite = "2.5.0"
@@ -47,3 +45,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
 chess_engine = { path = "crates/chess_engine" }
+directories = "6.0.0"
+tracing-appender = "0.2.4"
+tracing-subscriber = "0.3.22"
+tracing = "0.1.44"

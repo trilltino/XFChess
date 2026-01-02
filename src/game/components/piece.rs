@@ -245,7 +245,7 @@ mod tests {
             position: (2, 2),
         };
 
-        let cloned = original.clone();
+        let cloned = original;
 
         assert_eq!(original.entity, cloned.entity);
         assert_eq!(original.position, cloned.position);

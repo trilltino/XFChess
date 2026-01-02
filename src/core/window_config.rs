@@ -4,7 +4,7 @@
 //! and modification of window properties.
 
 use bevy::prelude::*;
-use bevy::window::{MonitorSelection, VideoModeSelection, Window};
+use bevy::window::{MonitorSelection, PresentMode, VideoModeSelection, Window};
 
 /// Configuration for the primary application window
 ///
@@ -48,6 +48,7 @@ impl WindowConfig {
             title: self.title.clone(),
             resolution: WindowResolution::new(self.width, self.height),
             resizable: self.resizable,
+            present_mode: PresentMode::AutoVsync,
             mode: if self.fullscreen {
                 bevy::window::WindowMode::Fullscreen(
                     MonitorSelection::Current,
@@ -61,6 +62,7 @@ impl WindowConfig {
     }
 
     /// Update window configuration from an existing window
+    #[allow(dead_code)]
     pub fn from_window(window: &Window) -> Self {
         let resolution = &window.resolution;
         Self {

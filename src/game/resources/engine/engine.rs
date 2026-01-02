@@ -75,20 +75,20 @@ impl ChessEngine {
     ///
     /// # Arguments
     ///
-    /// * `x` - Rank (0-7, where 0 is rank 1)
-    /// * `y` - File (0-7, where 0 is file a)
+    /// * `x` - Rank (0-7, where 0 is rank 1, 7 is rank 8)
+    /// * `y` - File (0-7, where 0 is file a, 7 is file h)
     ///
     /// # Returns
     ///
     /// Engine square index (0-63) where:
-    /// - 0 = a1 (rank 0, file 0)
-    /// - 7 = h1 (rank 0, file 7)
-    /// - 56 = a8 (rank 7, file 0)
-    /// - 63 = h8 (rank 7, file 7)
+    /// - 0 = a1 (x=0, y=0)
+    /// - 7 = h1 (x=0, y=7)
+    /// - 56 = a8 (x=7, y=0)
+    /// - 63 = h8 (x=7, y=7)
     ///
     /// # Formula
     ///
-    /// `index = x * 8 + y`
+    /// `index = x * 8 + y` (x=rank, y=file)
     #[inline]
     pub fn square_to_index(x: u8, y: u8) -> i8 {
         (x * 8 + y) as i8
@@ -103,8 +103,8 @@ impl ChessEngine {
     /// # Returns
     ///
     /// Board coordinates `(x, y)` where:
-    /// - x = rank (0-7)
-    /// - y = file (0-7)
+    /// - x = rank (0-7, where 0=rank 1, 7=rank 8)
+    /// - y = file (0-7, where 0=file a, 7=file h)
     #[inline]
     pub fn index_to_square(index: i8) -> (u8, u8) {
         let idx = index as u8;
@@ -395,18 +395,20 @@ mod tests {
 
     #[test]
     fn test_square_to_index() {
-        assert_eq!(ChessEngine::square_to_index(0, 0), 0); // a1
-        assert_eq!(ChessEngine::square_to_index(0, 7), 7); // h1
-        assert_eq!(ChessEngine::square_to_index(7, 0), 56); // a8
-        assert_eq!(ChessEngine::square_to_index(7, 7), 63); // h8
-        assert_eq!(ChessEngine::square_to_index(3, 4), 28); // e4
+        // x=rank, y=file, formula: x * 8 + y
+        assert_eq!(ChessEngine::square_to_index(0, 0), 0); // a1: rank=0, file=0
+        assert_eq!(ChessEngine::square_to_index(0, 7), 7); // h1: rank=0, file=7
+        assert_eq!(ChessEngine::square_to_index(7, 0), 56); // a8: rank=7, file=0
+        assert_eq!(ChessEngine::square_to_index(7, 7), 63); // h8: rank=7, file=7
+        assert_eq!(ChessEngine::square_to_index(3, 4), 28); // e4: rank=3, file=4
     }
 
     #[test]
     fn test_index_to_square() {
+        // Returns (rank, file)
         assert_eq!(ChessEngine::index_to_square(0), (0, 0)); // a1
-        assert_eq!(ChessEngine::index_to_square(56), (7, 0)); // a8
         assert_eq!(ChessEngine::index_to_square(7), (0, 7)); // h1
+        assert_eq!(ChessEngine::index_to_square(56), (7, 0)); // a8
         assert_eq!(ChessEngine::index_to_square(63), (7, 7)); // h8
         assert_eq!(ChessEngine::index_to_square(28), (3, 4)); // e4
     }

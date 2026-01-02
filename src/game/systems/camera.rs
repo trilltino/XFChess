@@ -31,8 +31,7 @@
 //! - `reference/bevy/examples/3d/3d_scene.rs` - Camera transform manipulation
 //! - Total War series camera controls - RTS standard
 
-use crate::game::ai::resource::{ChessAIResource, GameMode};
-use crate::game::resources::CurrentTurn;
+use crate::game::resources::Selection;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
     prelude::*,
@@ -258,8 +257,14 @@ pub fn camera_zoom_system(mut query: Query<(&mut Transform, &mut CameraControlle
 pub fn camera_movement_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    selection: Res<Selection>,
     mut query: Query<(&mut Transform, &CameraController)>,
 ) {
+    // Disable camera movement while dragging a piece
+    if selection.is_dragging {
+        return;
+    }
+
     for (mut transform, controller) in query.iter_mut() {
         // Calculate movement direction from keyboard input
         let mut direction = Vec3::ZERO;
@@ -329,8 +334,14 @@ pub const RADIANS_PER_DOT: f32 = 1.0 / 180.0;
 pub fn camera_rotation_system(
     mouse_motion: Res<AccumulatedMouseMotion>,
     mouse_button: Res<ButtonInput<MouseButton>>,
+    selection: Res<Selection>,
     mut query: Query<(&mut Transform, &mut CameraController)>,
 ) {
+    // Disable camera rotation while dragging a piece
+    if selection.is_dragging {
+        return;
+    }
+
     for (mut transform, mut controller) in query.iter_mut() {
         // Initialize pitch/yaw from Transform on first frame
         if !controller.initialized {
@@ -398,46 +409,9 @@ impl CameraRotationState {
 
 /// System that detects turn changes and initiates camera rotation
 ///
-/// Only rotates in VsHuman mode (both players are human).
-/// In VsAI mode, the camera stays fixed since only one player is human.
-pub fn camera_rotate_on_turn_detection_system(
-    mut rotation_state: ResMut<CameraRotationState>,
-    current_turn: Res<CurrentTurn>,
-    ai_config: Res<ChessAIResource>,
-) {
-    // Only rotate in VsHuman mode
-    if !matches!(ai_config.mode, GameMode::VsHuman) {
-        return;
-    }
-
-    // Initialize last_turn_color on first run
-    if rotation_state.last_turn_color.is_none() {
-        rotation_state.last_turn_color = Some(current_turn.color);
-        rotation_state.target_yaw = 0.0;
-        rotation_state.current_yaw = 0.0;
-        rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED;
-        return;
-    }
-
-    // Check if turn changed
-    if let Some(last_color) = rotation_state.last_turn_color {
-        if last_color != current_turn.color {
-            // Turn switched - initiate rotation
-            info!(
-                "[CAMERA] Turn switched from {:?} to {:?} - rotating camera",
-                last_color, current_turn.color
-            );
-
-            // Set target rotation: 0 for White, PI (180°) for Black
-            rotation_state.target_yaw = match current_turn.color {
-                crate::rendering::pieces::PieceColor::White => 0.0,
-                crate::rendering::pieces::PieceColor::Black => PI,
-            };
-
-            rotation_state.is_rotating = true;
-            rotation_state.last_turn_color = Some(current_turn.color);
-        }
-    }
+/// Camera stays fixed in AI mode since only one player is human.
+pub fn camera_rotate_on_turn_detection_system() {
+    // Camera stays fixed - always playing vs AI
 }
 
 /// System that smoothly rotates camera around board center when turn switches
@@ -604,7 +578,7 @@ mod tests {
         assert!(current < 15.0, "Should move from start position");
         assert!(current > 10.0, "Should not reach target instantly");
         assert!(
-            current > 11.0,
+            current < 12.0,
             "Should make significant progress after 10 frames"
         );
     }

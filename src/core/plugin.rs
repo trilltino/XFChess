@@ -26,17 +26,23 @@
 //! foundational systems and resources used throughout the application.
 
 use bevy::prelude::*;
-use std::panic;
-use std::sync::{Mutex, OnceLock};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::panic;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use super::{
     settings_persistence::load_settings_system,
+    state_lifecycle::*,
     states::{log_game_state_system, validate_and_log_state_transitions},
     GameSettings, GameState, GameStatistics, InGameplay, InMenus, MenuState, PreviousState,
-    StateLoggerTimer, StateTransitionTimer, WindowConfig,
+    StateLoggerTimer, WindowConfig,
+};
+
+// State-specific cleanup systems (needed because state.get() returns NEW state during OnExit)
+use super::state_lifecycle::{
+    cleanup_game_over, cleanup_in_game, cleanup_main_menu, cleanup_paused, cleanup_settings,
 };
 
 /// Global state tracker for panic reporting
@@ -79,12 +85,14 @@ impl Plugin for CorePlugin {
             .add_computed_state::<InMenus>()
             .add_computed_state::<InGameplay>()
             .init_resource::<PreviousState>()
-            .init_resource::<StateTransitionTimer>()
             .init_resource::<StateLoggerTimer>();
 
         // Initialize core game resources
         // Note: GameSettings will be loaded from file in load_settings_system
         app.init_resource::<GameStatistics>();
+
+        // Initialize state lifecycle auditing
+        app.init_resource::<StateAuditTimer>();
 
         // Register types for reflection
         app.register_type::<WindowConfig>()
@@ -102,7 +110,38 @@ impl Plugin for CorePlugin {
                 log_game_state_system,
                 validate_and_log_state_transitions,
                 update_panic_state_tracker,
+                log_menu_state_transitions,
+                periodic_entity_audit,
+                verify_picking_scope,
             ),
+        );
+
+        // Add state lifecycle logging (OnEnter/OnExit for all states)
+        app.add_systems(OnEnter(GameState::MainMenu), log_state_entry);
+        app.add_systems(OnEnter(GameState::Settings), log_state_entry);
+        app.add_systems(OnEnter(GameState::InGame), log_state_entry);
+        app.add_systems(OnEnter(GameState::Paused), log_state_entry);
+        app.add_systems(OnEnter(GameState::GameOver), log_state_entry);
+
+        app.add_systems(
+            OnExit(GameState::MainMenu),
+            (log_state_exit, audit_despawn_markers, cleanup_main_menu),
+        );
+        app.add_systems(
+            OnExit(GameState::Settings),
+            (log_state_exit, audit_despawn_markers, cleanup_settings),
+        );
+        app.add_systems(
+            OnExit(GameState::InGame),
+            (log_state_exit, audit_despawn_markers, cleanup_in_game),
+        );
+        app.add_systems(
+            OnExit(GameState::Paused),
+            (log_state_exit, audit_despawn_markers, cleanup_paused),
+        );
+        app.add_systems(
+            OnExit(GameState::GameOver),
+            (log_state_exit, audit_despawn_markers, cleanup_game_over),
         );
     }
 
@@ -168,7 +207,7 @@ fn setup_panic_hook() {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         let panic_report = format!(
             "PANIC DETECTED [{}]\n\
             ============================================\n\
@@ -196,6 +235,7 @@ fn setup_panic_hook() {
         if let Ok(mut file) = OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(true)
             .open(&log_file)
         {
             let _ = writeln!(file, "{}", panic_report);

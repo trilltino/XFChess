@@ -7,10 +7,11 @@
 //!
 //! # Plugin Organization
 //!
-//! - `main_menu` - MainMenuPlugin: Primary menu interface (with integrated loading and pyramid scene)
+//! - `main_menu` - MainMenuPlugin: Primary menu interface (starting state)
 //! - `settings` - SettingsPlugin: Game configuration
 //! - `pause` - PausePlugin: In-game pause menu
 //! - `game_over` - GameOverPlugin: Post-game statistics
+//! - `piece_viewer` - PieceViewerPlugin: 3D piece customization view
 //!
 //! The InGame state is handled by the existing GamePlugin.
 //!

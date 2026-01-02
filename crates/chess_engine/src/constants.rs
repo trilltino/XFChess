@@ -319,7 +319,13 @@ pub const FLAG_EP: i32 = 2;
 pub const FLAG_PROMOTION: i32 = 3;
 pub const FLAG_PROCAP: i32 = 4;
 
-pub const TTE_SIZE: usize = 1024 * 1024 * 2;
+// Use smaller TT for WASM to fit within memory limits
+#[cfg(target_arch = "wasm32")]
+pub const TTE_SIZE: usize = 1024 * 64; // 64K entries for WASM
+
+#[cfg(not(target_arch = "wasm32"))]
+pub const TTE_SIZE: usize = 1024 * 1024 * 2; // 2M entries for native
+
 pub const TT_TRY: usize = 5;
 
 pub const CORE_BIT_BUFFER_SIZE: usize = 24;

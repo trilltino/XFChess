@@ -21,30 +21,35 @@
 
 use crate::core::GameSettings;
 use bevy::prelude::*;
+use directories::ProjectDirs;
 use std::fs;
 use std::path::PathBuf;
 
-/// Settings file path (in project root for simplicity)
-const SETTINGS_FILE: &str = "settings.json";
+/// Settings filename
+const SETTINGS_FILENAME: &str = "settings.json";
+
+/// Helper to resolve the settings file path
+///
+/// Returns a path to `settings.json` in the user's configuration directory.
+/// E.g., C:\Users\User\AppData\Roaming\trilltino\XFChess\settings.json
+/// Falls back to local "settings.json" if the system config dir cannot be found.
+fn get_settings_path() -> PathBuf {
+    if let Some(proj_dirs) = ProjectDirs::from("com", "trilltino", "XFChess") {
+        let config_dir = proj_dirs.config_dir();
+        config_dir.join(SETTINGS_FILENAME)
+    } else {
+        // Fallback to current directory
+        PathBuf::from(SETTINGS_FILENAME)
+    }
+}
 
 /// Load settings from file on startup
 ///
-/// Attempts to load settings from `settings.json`. If the file doesn't exist or
+/// Attempts to load settings from the system config directory. If the file doesn't exist or
 /// is invalid, uses default settings. This system should run early in the startup
 /// schedule to ensure settings are available for other systems.
-///
-/// # Errors
-///
-/// This function handles all errors internally and always succeeds, falling back
-/// to default settings if loading fails. Errors are logged for debugging.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// app.add_systems(Startup, load_settings_system.after(StartupSet::Startup));
-/// ```
 pub fn load_settings_system(mut commands: Commands) {
-    let settings_path = PathBuf::from(SETTINGS_FILE);
+    let settings_path = get_settings_path();
 
     if settings_path.exists() {
         match fs::read_to_string(&settings_path) {
@@ -53,27 +58,27 @@ pub fn load_settings_system(mut commands: Commands) {
                     Ok(mut settings) => {
                         // Sync colors from serialized format
                         settings.dynamic_lighting.sync_from_serialized();
-                        info!("[SETTINGS] Loaded settings from {}", SETTINGS_FILE);
+                        info!("[SETTINGS] Loaded settings from {:?}", settings_path);
                         commands.insert_resource(settings);
                         return;
                     }
                     Err(e) => {
                         warn!(
-                            "[SETTINGS] Failed to parse settings file: {}. Using defaults.",
-                            e
+                            "[SETTINGS] Failed to parse settings file at {:?}: {}. Using defaults.",
+                            settings_path, e
                         );
                     }
                 }
             }
             Err(e) => {
                 warn!(
-                    "[SETTINGS] Failed to read settings file: {}. Using defaults.",
-                    e
+                    "[SETTINGS] Failed to read settings file at {:?}: {}. Using defaults.",
+                    settings_path, e
                 );
             }
         }
     } else {
-        info!("[SETTINGS] No settings file found. Using defaults.");
+        info!("[SETTINGS] No settings file found at {:?}. Using defaults.", settings_path);
     }
 
     // Use default settings if load failed
@@ -82,19 +87,8 @@ pub fn load_settings_system(mut commands: Commands) {
 
 /// Save settings to file when they change
 ///
-/// Watches for changes to [`GameSettings`] and automatically saves to `settings.json`.
-/// This system runs in the Update schedule and only saves when settings have changed.
-///
-/// # Errors
-///
-/// Save errors are logged but don't interrupt gameplay. The system will attempt
-/// to save again on the next change.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// app.add_systems(Update, save_settings_system);
-/// ```
+/// Watches for changes to [`GameSettings`] and automatically saves to `settings.json`
+/// in the user's configuration directory.
 pub fn save_settings_system(mut settings: ResMut<GameSettings>) {
     if !settings.is_changed() {
         return;
@@ -103,15 +97,25 @@ pub fn save_settings_system(mut settings: ResMut<GameSettings>) {
     // Sync colors for serialization
     settings.dynamic_lighting.sync_for_serialization();
 
-    let settings_path = PathBuf::from(SETTINGS_FILE);
+    let settings_path = get_settings_path();
+
+    // Ensure the directory exists
+    if let Some(parent) = settings_path.parent() {
+        if !parent.exists() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                error!("[SETTINGS] Failed to create settings directory at {:?}: {}", parent, e);
+                return;
+            }
+        }
+    }
 
     match serde_json::to_string_pretty(settings.as_ref()) {
         Ok(json) => match fs::write(&settings_path, json) {
             Ok(_) => {
-                info!("[SETTINGS] Saved settings to {}", SETTINGS_FILE);
+                info!("[SETTINGS] Saved settings to {:?}", settings_path);
             }
             Err(e) => {
-                error!("[SETTINGS] Failed to write settings file: {}", e);
+                error!("[SETTINGS] Failed to write settings file at {:?}: {}", settings_path, e);
             }
         },
         Err(e) => {

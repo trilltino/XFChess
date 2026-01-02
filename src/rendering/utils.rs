@@ -61,6 +61,10 @@ pub struct SquareMaterials {
     pub grey_color: Handle<StandardMaterial>,
     /// White material for TempleOS view (dark squares in standard view)
     pub templeos_white: Handle<StandardMaterial>,
+    /// Shared mesh for move hints (prevent per-frame allocation)
+    pub hint_mesh: Handle<Mesh>,
+    /// Shared mesh for last move highlights (prevent per-frame allocation)
+    pub highlight_mesh: Handle<Mesh>,
 }
 
 impl FromWorld for SquareMaterials {
@@ -92,12 +96,12 @@ impl FromWorld for SquareMaterials {
         // Matching reference image: dark grey for black squares, white for white squares
         let grey_material = StandardMaterial {
             base_color: Color::srgb(0.35, 0.35, 0.35), // Dark grey for black squares
-            unlit: true, // Unlit for flat 2D appearance
+            unlit: true,                               // Unlit for flat 2D appearance
             ..default()
         };
         let white_material = StandardMaterial {
             base_color: Color::srgb(1.0, 1.0, 1.0), // Pure white for white squares
-            unlit: true, // Unlit for flat 2D appearance
+            unlit: true,                            // Unlit for flat 2D appearance
             ..default()
         };
 
@@ -107,6 +111,12 @@ impl FromWorld for SquareMaterials {
             hover_matl: materials.add(Color::from(AMBER_100)),
             grey_color: materials.add(grey_material), // Dull grey for TempleOS (unlit)
             templeos_white: materials.add(white_material), // Bright white for TempleOS (unlit)
+            hint_mesh: world
+                .resource_mut::<Assets<Mesh>>()
+                .add(Plane3d::default().mesh().size(0.9, 0.9)),
+            highlight_mesh: world
+                .resource_mut::<Assets<Mesh>>()
+                .add(Plane3d::default().mesh().size(0.95, 0.95)),
         }
     }
 }

@@ -13,7 +13,7 @@ use crate::assets::{
     check_asset_loading, handle_asset_loading_errors, handle_untyped_asset_loading_errors,
     start_asset_loading, GameAssets, LoadingProgress,
 };
-use crate::core::{GameState, PreviousState};
+use crate::core::{DespawnOnExit, GameState, PreviousState};
 use crate::game::ai::{AIDifficulty, ChessAIResource, GameMode};
 use crate::game::view_mode::ViewMode;
 use crate::rendering::pieces::PieceColor;
@@ -33,6 +33,7 @@ impl Plugin for MainMenuPlugin {
             OnEnter(GameState::MainMenu),
             (setup_menu_camera, spawn_star_spheres, start_asset_loading),
         )
+        .init_resource::<MenuExpanded>() // Initialize menu state
         .add_systems(
             EguiPrimaryContextPass,
             main_menu_ui_wrapper.run_if(in_state(GameState::MainMenu)),
@@ -62,6 +63,7 @@ fn main_menu_ui_wrapper(
     loading_progress: ResMut<LoadingProgress>,
     game_assets: ResMut<GameAssets>,
     current_menu_state: Option<Res<State<crate::core::MenuState>>>,
+    menu_expanded: ResMut<MenuExpanded>,
 ) {
     info!("[MAIN_MENU] UI wrapper called");
     match main_menu_ui(
@@ -74,6 +76,7 @@ fn main_menu_ui_wrapper(
         loading_progress,
         game_assets,
         current_menu_state,
+        menu_expanded,
     ) {
         Ok(()) => {
             // UI rendered successfully
@@ -87,6 +90,18 @@ fn main_menu_ui_wrapper(
 /// Marker component for menu camera
 #[derive(Component)]
 struct MenuCamera;
+
+/// Resource to track menu expansion state
+#[derive(Resource)]
+pub struct MenuExpanded {
+    pub expanded: bool,
+}
+
+impl Default for MenuExpanded {
+    fn default() -> Self {
+        Self { expanded: false }
+    }
+}
 
 /// Setup camera for main menu with pyramid scene in background
 /// Uses the persistent Egui camera and updates its transform
@@ -148,40 +163,13 @@ fn setup_menu_camera(
         ..default()
     });
 
-    // Four pillars surrounding the pyramid
-    for (x, z) in &[(-1.5, -1.5), (1.5, -1.5), (1.5, 1.5), (-1.5, 1.5)] {
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(1.0, 3.0, 1.0))),
-            MeshMaterial3d(stone.clone()),
-            Transform::from_xyz(*x, 1.5, *z),
-            DespawnOnExit(GameState::MainMenu),
-            Name::new("Pyramid Pillar"),
-        ));
-    }
+    // Four pillars surrounding the pyramid - REMOVED per user request
 
-    // Glowing orb at the top
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::default())),
-        MeshMaterial3d(
-            materials.add(StandardMaterial {
-                base_color: Srgba::hex("126212CC")
-                    .expect("hardcoded hex color '126212CC' is valid")
-                    .into(),
-                reflectance: 1.0,
-                perceptual_roughness: 0.0,
-                metallic: 0.5,
-                emissive: LinearRgba::new(0.1, 0.6, 0.1, 1.0), // Green glow
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
-        ),
-        Transform::from_scale(Vec3::splat(1.75)).with_translation(Vec3::new(0.0, 4.0, 0.0)),
-        DespawnOnExit(GameState::MainMenu),
-        Name::new("Pyramid Orb"),
-    ));
+    // Glowing orb at the top - REMOVED per user request
+    // (User wanted the green ball completely removed)
 
-    // Pyramid steps (50 layers)
-    for i in 0..50 {
+    // Pyramid steps (20 layers to reduce draw calls)
+    for i in 0..20 {
         let half_size = i as f32 / 2.0 + 3.0;
         let y = -i as f32 / 2.0;
         commands.spawn((
@@ -193,64 +181,21 @@ fn setup_menu_camera(
         ));
     }
 
-    // Skybox/Background - Pure black for performance
+    // Skybox/Background - Pure black (user requested complete black, no bluish hue)
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(2.0, 1.0, 1.0))),
-        MeshMaterial3d(
-            materials.add(StandardMaterial {
-                base_color: Color::BLACK, // Pure black - no fog needed
-                unlit: true,
-                cull_mode: None,
-                ..default()
-            }),
-        ),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.0, 0.0, 0.0), // Pure black RGB(0, 0, 0)
+            unlit: true,
+            cull_mode: None,
+            ..default()
+        })),
         Transform::from_scale(Vec3::splat(1_000_000.0)),
         DespawnOnExit(GameState::MainMenu),
         Name::new("Skybox"),
     ));
 
-    // === LIGHTING SETUP ===
-
-    // Main spotlight on the orb (from above)
-    commands.spawn((
-        SpotLight {
-            intensity: 10_000_000.0,           // Very bright
-            color: Color::srgb(0.2, 1.0, 0.2), // Green to match orb
-            shadows_enabled: true,
-            range: 30.0,
-            radius: 1.0,
-            inner_angle: 0.3,
-            outer_angle: 0.8,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 15.0, 0.0).looking_at(Vec3::new(0.0, 4.0, 0.0), Vec3::Z),
-        DespawnOnExit(GameState::MainMenu),
-        Name::new("Orb Spotlight"),
-    ));
-
-    // Rim lights on pillars (4 point lights)
-    let pillar_positions = [
-        (-1.5, 3.0, -1.5),
-        (1.5, 3.0, -1.5),
-        (1.5, 3.0, 1.5),
-        (-1.5, 3.0, 1.5),
-    ];
-
-    for (i, (x, y, z)) in pillar_positions.iter().enumerate() {
-        commands.spawn((
-            PointLight {
-                intensity: 500_000.0,
-                color: Color::srgb(1.0, 0.8, 0.5), // Warm golden light
-                shadows_enabled: false,
-                range: 10.0,
-                radius: 0.5,
-                ..default()
-            },
-            Transform::from_xyz(*x, *y, *z),
-            DespawnOnExit(GameState::MainMenu),
-            Name::new(format!("Pillar Light {}", i)),
-        ));
-    }
+    // Rim lights on pillars - REMOVED (pillars removed)
 
     // Directional light for soft shadows
     commands.spawn((
@@ -283,31 +228,31 @@ fn spawn_star_spheres(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let mut rng = rand::thread_rng();
-    // Reduced from 200 to 30 to prevent GPU memory exhaustion
+    // Reduced from 200 to 12 to prevent GPU memory exhaustion
     // Volumetric lights are very memory-intensive, so we use fewer stars
-    let num_stars = 30;
-    
+    let num_stars = 12;
+
     // White emissive material for stars
     let star_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 1.0, 1.0), // Pure white
+        base_color: Color::srgb(1.0, 1.0, 1.0),        // Pure white
         emissive: LinearRgba::new(1.0, 1.0, 1.0, 1.0), // Bright white glow
-        unlit: true, // Always visible regardless of lighting
+        unlit: true,                                   // Always visible regardless of lighting
         ..default()
     });
-    
+
     // Spawn stars across a vast area
     for i in 0..num_stars {
         // Random positions covering a large area
         let x = rng.gen_range(-150.0..150.0);
         let y = rng.gen_range(-50.0..50.0);
         let z = rng.gen_range(-150.0..150.0);
-        
+
         // Random size variation for visual interest
         let radius = rng.gen_range(0.1..0.3);
-        
+
         // Random light intensity variation
         let intensity = rng.gen_range(2000.0..5000.0);
-        
+
         commands.spawn((
             Mesh3d(meshes.add(Sphere::new(radius))),
             MeshMaterial3d(star_material.clone()),
@@ -326,8 +271,11 @@ fn spawn_star_spheres(
             Name::new(format!("Star {}", i)),
         ));
     }
-    
-    info!("[MAIN_MENU] Spawned {} star spheres (volumetric lights removed to prevent OOM)", num_stars);
+
+    info!(
+        "[MAIN_MENU] Spawned {} star spheres (volumetric lights removed to prevent OOM)",
+        num_stars
+    );
 }
 
 /// Ensure menu camera is set up if it wasn't ready during OnEnter
@@ -401,6 +349,7 @@ fn main_menu_ui(
     mut loading_progress: ResMut<LoadingProgress>,
     mut game_assets: ResMut<GameAssets>,
     current_menu_state: Option<Res<State<crate::core::MenuState>>>,
+    mut menu_expanded: ResMut<MenuExpanded>,
 ) -> Result<(), bevy::ecs::query::QuerySingleError> {
     // Only show main menu UI when MenuState is Main (not PieceViewer or other substates)
     if let Some(menu_state_res) = current_menu_state {
@@ -414,261 +363,210 @@ fn main_menu_ui(
     let ctx = contexts.ctx_mut()?;
     info!("[MAIN_MENU] Context obtained successfully, rendering UI");
 
-    // Full-screen central panel with fully transparent background (no overlay)
-    egui::CentralPanel::default()
+    // Top panel for collapsible menu
+    egui::TopBottomPanel::top("main_menu_panel")
         .frame(egui::Frame {
-            fill: egui::Color32::TRANSPARENT, // Fully transparent - no overlay
+            fill: egui::Color32::from_rgba_premultiplied(0, 0, 0, 200), // Semi-transparent black
             ..Default::default()
         })
-        .show(ctx, |ui| {
-            // Show loading screen if assets aren't loaded yet
-            if !loading_progress.complete {
-                ui.vertical_centered(|ui| {
-                    Layout::section_space(ui);
-                    Layout::section_space(ui);
-                    Layout::section_space(ui);
+        .show(ctx, |ui| -> () {
+            // Toggle button always visible
+            ui.horizontal(|ui| {
+                ui.heading(TextStyle::heading("XFChess", TextSize::LG));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(if menu_expanded.expanded { "▲ Hide Menu" } else { "▼ Menu" }).clicked() {
+                        menu_expanded.expanded = !menu_expanded.expanded;
+                    }
+                });
+            });
 
-                    // Title
-                    ui.heading(TextStyle::heading("XFChess", TextSize::XL));
-                    
+            // Only show full menu if expanded
+            if menu_expanded.expanded {
+                ui.separator();
+
+                // Show loading screen if assets aren't loaded yet
+                if !loading_progress.complete {
+                    ui.vertical_centered(|ui| {
+                        Layout::small_space(ui);
+
+                        // Check if loading failed
+                        if loading_progress.failed {
+                            // Error state
+                            ui.heading(
+                                egui::RichText::new("Asset Loading Failed")
+                                    .size(20.0)
+                                    .color(egui::Color32::from_rgb(220, 50, 50))
+                            );
+
+                            Layout::small_space(ui);
+
+                            // Error message
+                            if let Some(ref error_msg) = loading_progress.error_message {
+                                ui.label(
+                                    egui::RichText::new(error_msg)
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(220, 150, 150))
+                                );
+                            } else {
+                                ui.label(
+                                    egui::RichText::new("Failed to load required assets")
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(220, 150, 150))
+                                );
+                            }
+
+                            Layout::small_space(ui);
+
+                            // Option to continue anyway
+                            if ui.button("Continue Anyway (May cause issues)").clicked() {
+                                warn!("[MAIN_MENU] User chose to continue despite asset loading failure");
+                                loading_progress.complete = true;
+                                loading_progress.progress = 1.0;
+                                game_assets.loaded = true;
+                                info!("[MAIN_MENU] Asset loading marked as complete despite failure");
+                            }
+                        } else {
+                            // Loading state
+                            ui.heading(
+                                egui::RichText::new("Loading...")
+                                    .size(20.0)
+                                    .color(egui::Color32::from_rgb(220, 220, 220))
+                            );
+
+                            Layout::small_space(ui);
+
+                            // Progress bar
+                            let progress_bar = egui::ProgressBar::new(loading_progress.progress)
+                                .desired_width(300.0)
+                                .show_percentage()
+                                .animate(true);
+
+                            ui.add(progress_bar);
+
+                            Layout::small_space(ui);
+
+                            // Status text
+                            ui.label(
+                                egui::RichText::new("Loading assets...")
+                                    .size(12.0)
+                                    .color(egui::Color32::from_rgb(180, 180, 180))
+                            );
+                        }
+
+                        Layout::small_space(ui);
+                    });
+                    return;
+                }
+
+                // Show full menu once assets are loaded
+                ui.vertical_centered(|ui| {
                     Layout::small_space(ui);
                     ui.label(TextStyle::caption("A Modern Chess Experience"));
 
                     Layout::section_space(ui);
-                    Layout::section_space(ui);
 
-                    // Check if loading failed
-                    if loading_progress.failed {
-                        // Error state
-                        ui.heading(
-                            egui::RichText::new("Asset Loading Failed")
-                                .size(24.0)
-                                .color(egui::Color32::from_rgb(220, 50, 50))
-                        );
+                    // === PLAY SECTION ===
+                    StyledPanel::card().show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading(TextStyle::heading("Play Chess", TextSize::MD));
 
-                        Layout::small_space(ui);
+                            Layout::item_space(ui);
 
-                        // Error message
-                        if let Some(ref error_msg) = loading_progress.error_message {
-                            ui.label(
-                                egui::RichText::new(error_msg)
-                                    .size(14.0)
-                                    .color(egui::Color32::from_rgb(220, 150, 150))
-                            );
-                        } else {
-                            ui.label(
-                                egui::RichText::new("Failed to load required assets")
-                                    .size(14.0)
-                                    .color(egui::Color32::from_rgb(220, 150, 150))
-                            );
-                        }
-
-                        Layout::section_space(ui);
-
-                        // Warning message
-                        ui.label(
-                            egui::RichText::new("The game may not function correctly without assets.")
-                                .size(12.0)
-                                .color(egui::Color32::from_rgb(180, 180, 180))
-                        );
-
-                        Layout::small_space(ui);
-
-                        // Option to continue anyway
-                        if ui.button("Continue Anyway (May cause issues)").clicked() {
-                            // Mark as complete to allow game to continue despite missing assets
-                            // This is a workaround - the game may not function correctly
-                            // In production, you might want to implement fallback assets or prevent game start
-                            warn!("[MAIN_MENU] User chose to continue despite asset loading failure");
-                            loading_progress.complete = true;
-                            loading_progress.progress = 1.0;
-                            game_assets.loaded = true; // Mark as loaded to allow game to proceed
-                            info!("[MAIN_MENU] Asset loading marked as complete despite failure - game may not function correctly");
-                        }
-                    } else {
-                        // Loading state
-                        ui.heading(
-                            egui::RichText::new("Loading...")
-                                .size(24.0)
-                                .color(egui::Color32::from_rgb(220, 220, 220))
-                        );
-
-                        Layout::small_space(ui);
-
-                        // Progress bar
-                        let progress_bar = egui::ProgressBar::new(loading_progress.progress)
-                            .desired_width(400.0)
-                            .show_percentage()
-                            .animate(true);
-
-                        ui.add(progress_bar);
-
-                        Layout::small_space(ui);
-
-                        // Status text
-                        ui.label(
-                            egui::RichText::new("Loading assets...")
-                                .size(14.0)
-                                .color(egui::Color32::from_rgb(180, 180, 180))
-                        );
-                    }
-
-                    Layout::section_space(ui);
-                    Layout::section_space(ui);
-                    Layout::section_space(ui);
-                });
-                return;
-            }
-
-            // Show full menu once assets are loaded
-            ui.vertical_centered(|ui| {
-                Layout::section_space(ui);
-
-                // Debug text to confirm UI is rendering
-                ui.colored_label(
-                    egui::Color32::from_rgb(255, 255, 0),
-                    egui::RichText::new("MAIN MENU - UI IS WORKING!").size(32.0)
-                );
-
-                Layout::section_space(ui);
-
-                // === TITLE ===
-                ui.heading(TextStyle::heading("XFChess", TextSize::XL));
-
-                Layout::small_space(ui);
-                ui.label(TextStyle::caption("A Modern Chess Experience"));
-
-                Layout::section_space(ui);
-                Layout::section_space(ui);
-
-                // === PLAY SECTION ===
-                StyledPanel::card().show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading(TextStyle::heading("Play Chess", TextSize::LG));
-
-                        Layout::item_space(ui);
-
-                        // Human vs Human
-                        if StyledButton::primary(ui, "Human vs Human").clicked() {
-                            ai_config.mode = GameMode::VsHuman;
-                            next_state.set(GameState::InGame);
-                        }
-
-                        Layout::small_space(ui);
-
-                        // Human vs AI (Black)
-                        if StyledButton::primary(ui, "vs AI (Play as White)").clicked() {
-                            ai_config.mode = GameMode::VsAI { ai_color: PieceColor::Black };
-                            next_state.set(GameState::InGame);
-                        }
-
-                        Layout::small_space(ui);
-
-                        // Human vs AI (White)
-                        if StyledButton::primary(ui, "vs AI (Play as Black)").clicked() {
-                            ai_config.mode = GameMode::VsAI { ai_color: PieceColor::White };
-                            next_state.set(GameState::InGame);
-                        }
-
-                        Layout::small_space(ui);
-
-                        // TempleOS View button
-                        if StyledButton::primary(ui, "TempleOS View").clicked() {
-                            *view_mode = ViewMode::TempleOS;
-                            info!("[MAIN_MENU] TempleOS View button clicked - transitioning to InGame");
-                            next_state.set(GameState::InGame);
-                        }
-
-                        Layout::item_space(ui);
-
-                        // View Mode selection
-                        ui.heading(TextStyle::heading("View Mode", TextSize::MD));
-                        Layout::small_space(ui);
-                        ui.horizontal(|ui| {
-                            if ui.radio_value(
-                                &mut *view_mode,
-                                ViewMode::Standard,
-                                TextStyle::body("Standard View")
-                            ).clicked() {
-                                info!("[MAIN_MENU] View mode set to Standard");
+                            // Human vs AI (Black)
+                            if StyledButton::primary(ui, "vs AI (Play as White)").clicked() {
+                                ai_config.mode = GameMode::VsAI { ai_color: PieceColor::Black };
+                                next_state.set(GameState::InGame);
+                                menu_expanded.expanded = false; // Collapse on game start
                             }
-                            ui.add_space(10.0);
-                            if ui.radio_value(
-                                &mut *view_mode,
-                                ViewMode::TempleOS,
-                                TextStyle::body("TempleOS View")
-                            ).clicked() {
-                                info!("[MAIN_MENU] View mode set to TempleOS");
-                            }
-                        });
 
-                        Layout::item_space(ui);
-
-                        // AI Difficulty selection
-                        ui.heading(TextStyle::heading("AI Difficulty", TextSize::MD));
-                        Layout::small_space(ui);
-                        ui.horizontal(|ui| {
-                            ui.label(TextStyle::body("AI Difficulty:"));
                             Layout::small_space(ui);
 
-                            ui.radio_value(
-                                &mut ai_config.difficulty,
-                                AIDifficulty::Easy,
-                                TextStyle::body("Easy")
-                            );
-                            ui.radio_value(
-                                &mut ai_config.difficulty,
-                                AIDifficulty::Medium,
-                                TextStyle::body("Medium")
-                            );
-                            ui.radio_value(
-                                &mut ai_config.difficulty,
-                                AIDifficulty::Hard,
-                                TextStyle::body("Hard")
-                            );
+                            // Human vs AI (White)
+                            if StyledButton::primary(ui, "vs AI (Play as Black)").clicked() {
+                                ai_config.mode = GameMode::VsAI { ai_color: PieceColor::White };
+                                next_state.set(GameState::InGame);
+                                menu_expanded.expanded = false;
+                            }
+
+                            Layout::small_space(ui);
+
+                            // TempleOS View button
+                            if StyledButton::primary(ui, "TempleOS View").clicked() {
+                                *view_mode = ViewMode::TempleOS;
+                                info!("[MAIN_MENU] TempleOS View button clicked");
+                                next_state.set(GameState::InGame);
+                                menu_expanded.expanded = false;
+                            }
+
+                            Layout::item_space(ui);
+
+                            // View Mode selection
+                            ui.heading(TextStyle::heading("View Mode", TextSize::SM));
+                            Layout::small_space(ui);
+                            ui.horizontal(|ui| {
+                                if ui.radio_value(
+                                    &mut *view_mode,
+                                    ViewMode::Standard,
+                                    "Standard"
+                                ).clicked() {
+                                    info!("[MAIN_MENU] View mode set to Standard");
+                                }
+                                ui.add_space(5.0);
+                                if ui.radio_value(
+                                    &mut *view_mode,
+                                    ViewMode::TempleOS,
+                                    "TempleOS"
+                                ).clicked() {
+                                    info!("[MAIN_MENU] View mode set to TempleOS");
+                                }
+                            });
+
+                            Layout::item_space(ui);
+
+                            // AI Difficulty selection
+                            ui.heading(TextStyle::heading("AI Difficulty", TextSize::SM));
+                            Layout::small_space(ui);
+                            ui.horizontal(|ui| {
+                                ui.radio_value(&mut ai_config.difficulty, AIDifficulty::Easy, "Easy");
+                                ui.radio_value(&mut ai_config.difficulty, AIDifficulty::Medium, "Med");
+                                ui.radio_value(&mut ai_config.difficulty, AIDifficulty::Hard, "Hard");
+                            });
                         });
                     });
+
+                    Layout::section_space(ui);
+
+                    // === OPTIONS SECTION ===
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+
+                        if StyledButton::secondary(ui, "Settings").clicked() {
+                            previous_state.state = GameState::MainMenu;
+                            next_state.set(GameState::Settings);
+                            menu_expanded.expanded = false;
+                        }
+
+                        if StyledButton::secondary(ui, "Piece Viewer").clicked() {
+                            menu_state.set(crate::core::MenuState::PieceViewer);
+                            menu_expanded.expanded = false;
+                        }
+
+                        if StyledButton::secondary(ui, "Stats").clicked() {
+                            info!("[MAIN_MENU] Statistics button clicked (not implemented)");
+                        }
+
+                        if StyledButton::danger(ui, "Exit").clicked() {
+                            info!("[MAIN_MENU] Exit button clicked");
+                            std::process::exit(0);
+                        }
+                    });
+
+                    Layout::small_space(ui);
+
+                    // === VERSION INFO ===
+                    ui.label(TextStyle::caption("v0.1.0 - Bevy 0.17.3"));
                 });
-
-                Layout::section_space(ui);
-
-                // === OPTIONS SECTION ===
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 15.0;
-
-                    if StyledButton::secondary(ui, "Settings").clicked() {
-                        previous_state.state = GameState::MainMenu;
-                        next_state.set(GameState::Settings);
-                    }
-
-                    if StyledButton::secondary(ui, "Piece Viewer").clicked() {
-                        menu_state.set(crate::core::MenuState::PieceViewer);
-                    }
-
-                    if StyledButton::secondary(ui, "Statistics").clicked() {
-                        // TODO: Implement statistics screen
-                        info!("[MAIN_MENU] Statistics button clicked (not implemented yet)");
-                    }
-
-                    if StyledButton::secondary(ui, "Help").clicked() {
-                        // TODO: Implement help screen
-                        info!("[MAIN_MENU] Help button clicked (not implemented yet)");
-                    }
-                });
-
-                Layout::section_space(ui);
-
-                // === EXIT BUTTON ===
-                if StyledButton::danger(ui, "Exit").clicked() {
-                    info!("[MAIN_MENU] Exit button clicked");
-                    std::process::exit(0);
-                }
-
-                Layout::section_space(ui);
-
-                // === VERSION INFO ===
-                ui.label(TextStyle::caption("Version 0.1.0 - Bevy 0.17.2"));
-            });
+            }
         });
 
     Ok(())

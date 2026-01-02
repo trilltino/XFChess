@@ -5,96 +5,99 @@
 //! in their designated states.
 
 use bevy::prelude::*;
-use xfchess::core::{debug_current_gamestate, GameState, LaunchMenu};
+use xfchess::core::{debug_current_gamestate, GameState};
 
 /// Helper struct to track system executions during tests
 #[derive(Resource, Default, Debug)]
 struct SystemExecutionTracker {
-    launch_menu_executions: u32,
+    main_menu_executions: u32,
     multiplayer_executions: u32,
 }
 
-/// Test system that runs only in LaunchMenu state
-fn track_launch_menu_execution(mut tracker: ResMut<SystemExecutionTracker>) {
-    tracker.launch_menu_executions += 1;
+/// Test system that runs only in MainMenu state
+fn track_main_menu_execution(mut tracker: ResMut<SystemExecutionTracker>) {
+    tracker.main_menu_executions += 1;
 }
 
-/// Test system that runs only in Multiplayer state
+/// Test system that runs only in InGame state
 fn track_multiplayer_execution(mut tracker: ResMut<SystemExecutionTracker>) {
     tracker.multiplayer_executions += 1;
 }
 
 #[test]
-fn test_initial_state_is_launch_menu() {
-    //! Verifies that a new app starts in the LaunchMenu state
+fn test_initial_state_is_main_menu() {
+    //! Verifies that a new app starts in the MainMenu state
     //!
-    //! This ensures users see the launch menu when the game first starts,
+    //! This ensures users see the main menu when the game first starts,
     //! not the active gameplay screen.
 
     let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
     app.init_state::<GameState>();
 
     // Run one update cycle
     app.update();
 
-    // Extract the state and verify it's LaunchMenu
+    // Extract the state and verify it's MainMenu
     let state = app.world().resource::<State<GameState>>();
-    assert_eq!(*state.get(), GameState::LaunchMenu);
+    assert_eq!(*state.get(), GameState::MainMenu);
 }
 
 #[test]
 fn test_state_transition_to_multiplayer() {
-    //! Tests transitioning from LaunchMenu to Multiplayer state
+    //! Tests transitioning from MainMenu to InGame state
     //!
     //! Simulates a user clicking "Start Game" in the menu, which should
     //! transition the app to the active gameplay state.
 
     let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
     app.init_state::<GameState>();
 
     // Trigger state transition
     app.world_mut()
         .resource_mut::<NextState<GameState>>()
-        .set(GameState::Multiplayer);
+        .set(GameState::InGame);
 
     // Update to apply the state change
     app.update();
 
     // Verify state changed
     let state = app.world().resource::<State<GameState>>();
-    assert_eq!(*state.get(), GameState::Multiplayer);
+    assert_eq!(*state.get(), GameState::InGame);
 }
 
 #[test]
-fn test_state_transition_back_to_launch_menu() {
-    //! Tests round-trip state transition: LaunchMenu -> Multiplayer -> LaunchMenu
+fn test_state_transition_back_to_main_menu() {
+    //! Tests round-trip state transition: MainMenu -> InGame -> MainMenu
     //!
     //! Simulates starting a game and then returning to the main menu
     //! (e.g., pressing ESC or finishing a game).
 
     let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
     app.init_state::<GameState>();
 
-    // Start in LaunchMenu (default)
+    // Start in MainMenu (default)
     app.update();
     let state = app.world().resource::<State<GameState>>();
-    assert_eq!(*state.get(), GameState::LaunchMenu);
+    assert_eq!(*state.get(), GameState::MainMenu);
 
-    // Transition to Multiplayer
+    // Transition to InGame
     app.world_mut()
         .resource_mut::<NextState<GameState>>()
-        .set(GameState::Multiplayer);
+        .set(GameState::InGame);
     app.update();
     let state = app.world().resource::<State<GameState>>();
-    assert_eq!(*state.get(), GameState::Multiplayer);
+    assert_eq!(*state.get(), GameState::InGame);
 
-    // Transition back to LaunchMenu
+    // Transition back to MainMenu
     app.world_mut()
         .resource_mut::<NextState<GameState>>()
-        .set(GameState::LaunchMenu);
+        .set(GameState::MainMenu);
     app.update();
     let state = app.world().resource::<State<GameState>>();
-    assert_eq!(*state.get(), GameState::LaunchMenu);
+    assert_eq!(*state.get(), GameState::MainMenu);
 }
 
 #[test]
@@ -105,84 +108,47 @@ fn test_systems_run_conditionally_based_on_state() {
     //! preventing bugs like menu UI appearing during a game.
 
     let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
     app.init_state::<GameState>();
     app.init_resource::<SystemExecutionTracker>();
 
     // Add state-conditional systems
     app.add_systems(
         Update,
-        track_launch_menu_execution.run_if(in_state(GameState::LaunchMenu)),
+        track_main_menu_execution.run_if(in_state(GameState::MainMenu)),
     );
     app.add_systems(
         Update,
-        track_multiplayer_execution.run_if(in_state(GameState::Multiplayer)),
+        track_multiplayer_execution.run_if(in_state(GameState::InGame)),
     );
 
-    // Initially in LaunchMenu - only launch menu system should run
+    // Initially in MainMenu - only launch menu system should run
     app.update();
     {
         let tracker = app.world().resource::<SystemExecutionTracker>();
-        assert_eq!(tracker.launch_menu_executions, 1);
+        assert_eq!(tracker.main_menu_executions, 1);
         assert_eq!(tracker.multiplayer_executions, 0);
     }
 
-    // Transition to Multiplayer
+    // Transition to InGame
     app.world_mut()
         .resource_mut::<NextState<GameState>>()
-        .set(GameState::Multiplayer);
+        .set(GameState::InGame);
     app.update();
 
     // Now only multiplayer system should have run
     {
         let tracker = app.world().resource::<SystemExecutionTracker>();
-        assert_eq!(tracker.launch_menu_executions, 1); // Unchanged
+        assert_eq!(tracker.main_menu_executions, 1); // Unchanged
         assert_eq!(tracker.multiplayer_executions, 1); // Incremented
     }
 
-    // Update again in Multiplayer state
+    // Update again in InGame state
     app.update();
     {
         let tracker = app.world().resource::<SystemExecutionTracker>();
-        assert_eq!(tracker.launch_menu_executions, 1); // Still unchanged
+        assert_eq!(tracker.main_menu_executions, 1); // Still unchanged
         assert_eq!(tracker.multiplayer_executions, 2); // Incremented again
-    }
-}
-
-#[test]
-fn test_computed_state_launch_menu() {
-    //! Tests that the LaunchMenu computed state activates/deactivates correctly
-    //!
-    //! Computed states allow more granular control over system execution
-    //! without checking the main state repeatedly.
-
-    let mut app = App::new();
-    app.init_state::<GameState>();
-    app.add_computed_state::<LaunchMenu>();
-    app.init_resource::<SystemExecutionTracker>();
-
-    // Add system that runs only when LaunchMenu computed state is active
-    app.add_systems(
-        Update,
-        track_launch_menu_execution.run_if(in_state(LaunchMenu)),
-    );
-
-    // Start in LaunchMenu - system should run
-    app.update();
-    {
-        let tracker = app.world().resource::<SystemExecutionTracker>();
-        assert_eq!(tracker.launch_menu_executions, 1);
-    }
-
-    // Transition to Multiplayer - LaunchMenu computed state becomes inactive
-    app.world_mut()
-        .resource_mut::<NextState<GameState>>()
-        .set(GameState::Multiplayer);
-    app.update();
-
-    // System should not have run again
-    {
-        let tracker = app.world().resource::<SystemExecutionTracker>();
-        assert_eq!(tracker.launch_menu_executions, 1); // Unchanged
     }
 }
 
@@ -193,14 +159,15 @@ fn test_multiple_state_transitions() {
     //! Simulates edge cases like rapid menu navigation or game restarts.
 
     let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
     app.init_state::<GameState>();
 
     // Perform multiple transitions
     for i in 0..10 {
         let target_state = if i % 2 == 0 {
-            GameState::Multiplayer
+            GameState::InGame
         } else {
-            GameState::LaunchMenu
+            GameState::MainMenu
         };
 
         app.world_mut()
@@ -221,6 +188,7 @@ fn test_debug_current_gamestate_system() {
     //! safely access the state resource.
 
     let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
     app.init_state::<GameState>();
     app.add_systems(Update, debug_current_gamestate);
 
@@ -230,7 +198,7 @@ fn test_debug_current_gamestate_system() {
 
     // Verify we can still access state after debug system runs
     let state = app.world().resource::<State<GameState>>();
-    assert_eq!(*state.get(), GameState::LaunchMenu);
+    assert_eq!(*state.get(), GameState::MainMenu);
 }
 
 #[test]
@@ -240,19 +208,20 @@ fn test_state_persistence_across_updates() {
     //! Ensures states don't spontaneously change without explicit transitions.
 
     let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
     app.init_state::<GameState>();
 
-    // Set to Multiplayer
+    // Set to InGame
     app.world_mut()
         .resource_mut::<NextState<GameState>>()
-        .set(GameState::Multiplayer);
+        .set(GameState::InGame);
     app.update();
 
     // Run many updates without changing state
     for _ in 0..100 {
         app.update();
         let state = app.world().resource::<State<GameState>>();
-        assert_eq!(*state.get(), GameState::Multiplayer);
+        assert_eq!(*state.get(), GameState::InGame);
     }
 }
 
@@ -262,11 +231,11 @@ fn test_state_is_clonable() {
     //!
     //! Bevy's state system relies on Clone for efficient state management.
 
-    let state1 = GameState::LaunchMenu;
+    let state1 = GameState::MainMenu;
     let state2 = state1.clone();
     assert_eq!(state1, state2);
 
-    let state3 = GameState::Multiplayer;
+    let state3 = GameState::InGame;
     let state4 = state3.clone();
     assert_eq!(state3, state4);
 }
@@ -277,11 +246,11 @@ fn test_state_is_copyable() {
     //!
     //! Copy allows Bevy to pass states by value without heap allocations.
 
-    let state1 = GameState::LaunchMenu;
+    let state1 = GameState::MainMenu;
     let state2 = state1; // Copy, not move
     assert_eq!(state1, state2);
     // state1 is still accessible (Copy, not Move)
-    assert_eq!(state1, GameState::LaunchMenu);
+    assert_eq!(state1, GameState::MainMenu);
 }
 
 #[test]
@@ -290,9 +259,9 @@ fn test_state_debug_format() {
     //!
     //! Good debug formatting helps with logging and troubleshooting.
 
-    let debug_str = format!("{:?}", GameState::LaunchMenu);
-    assert!(debug_str.contains("LaunchMenu"));
+    let debug_str = format!("{:?}", GameState::MainMenu);
+    assert!(debug_str.contains("MainMenu"));
 
-    let debug_str = format!("{:?}", GameState::Multiplayer);
-    assert!(debug_str.contains("Multiplayer"));
+    let debug_str = format!("{:?}", GameState::InGame);
+    assert!(debug_str.contains("InGame"));
 }

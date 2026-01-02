@@ -1,1 +1,43 @@
-/target
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Build artifacts
+/build/
+/dist/
+build.log
+compilation_error.log
+error_ascii*.txt
+
+# Logs
+/logs/
+*.log
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Reference materials (too large for git)
+/reference/
+
+# Web build
+/web/dist/
+/web/pkg/
+/web/target/
+
+# Personal settings (contains user preferences)
+settings.json
+
+# Temporary files
+*.tmp
+*.temp

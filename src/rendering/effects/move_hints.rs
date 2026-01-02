@@ -4,8 +4,7 @@
 
 use crate::core::GameSettings;
 use crate::game::resources::Selection;
-use crate::rendering::utils::{Square, SquareMaterials};
-use crate::rendering::Board;
+use crate::rendering::utils::SquareMaterials;
 use bevy::prelude::*;
 
 /// Marker component for squares showing move hints
@@ -15,42 +14,41 @@ pub struct MoveHint;
 /// System that shows/hides move hints based on selection and settings
 ///
 /// When show_hints is enabled and a piece is selected, highlights all valid move squares.
+/// System that shows/hides move hints based on selection and settings
+///
+/// Optimized to only update when selection or settings change, and reuses shared meshes.
 pub fn update_move_hints_system(
     mut commands: Commands,
     settings: Res<GameSettings>,
     selection: Res<Selection>,
-    square_query: Query<(Entity, &Square), With<Board>>,
-    hint_query: Query<Entity, (With<MoveHint>, Without<Board>)>,
+    hint_query: Query<Entity, With<MoveHint>>,
     materials: Res<SquareMaterials>,
-    mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let should_show_hints = settings.show_hints && selection.is_selected();
+    // Only update if selection or settings changed
+    // Note: We check is_changed() for specific resources to avoid per-frame work
+    if !selection.is_changed() && !settings.is_changed() {
+        return;
+    }
 
-    // First, remove all existing hints
+    // Always clear old hints on change
     for entity in hint_query.iter() {
         commands.entity(entity).despawn();
     }
 
-    if should_show_hints {
-        // Get valid move positions
-        let valid_positions: std::collections::HashSet<(u8, u8)> =
-            selection.possible_moves.iter().copied().collect();
+    if settings.show_hints && selection.is_selected() {
+        let valid_positions = &selection.possible_moves;
 
-        // Add hints to squares that are valid moves
-        for (entity, square) in square_query.iter() {
-            let pos = (square.x, square.y);
-            if valid_positions.contains(&pos) {
-                // Spawn a semi-transparent highlight above the square
-                commands.entity(entity).with_children(|parent| {
-                    parent.spawn((
-                        Mesh3d(meshes.add(Plane3d::default().mesh().size(0.9, 0.9))),
-                        MeshMaterial3d(materials.hover_matl.clone()),
-                        Transform::from_translation(Vec3::new(0.0, 0.01, 0.0)),
-                        MoveHint,
-                        Name::new("Move Hint"),
-                    ));
-                });
-            }
+        // Spawn hints for all valid moves using the shared mesh
+        for &(x, y) in valid_positions {
+            commands.spawn((
+                Mesh3d(materials.hint_mesh.clone()),
+                MeshMaterial3d(materials.hover_matl.clone()),
+                Transform::from_translation(Vec3::new(x as f32, 0.01, y as f32)),
+                MoveHint,
+                Name::new("Move Hint"),
+                // Ensure hints are cleaned up if state exits
+                crate::core::DespawnOnExit(crate::core::GameState::InGame),
+            ));
         }
     }
 }

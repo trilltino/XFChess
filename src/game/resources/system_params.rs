@@ -28,8 +28,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use super::{
-    CapturedPieces, ChessEngine, CurrentGamePhase, CurrentTurn, FastBoardState,
-    GameOverState, GameTimer, MoveHistory, Players, Selection, TurnStateContext,
+    CapturedPieces, ChessEngine, CurrentGamePhase, CurrentTurn, GameOverState, GameTimer,
+    MoveHistory, Players, Selection, TurnStateContext,
 };
 
 /// System parameter grouping game state resources
@@ -128,8 +128,6 @@ pub struct GameHistoryParams<'w> {
 pub struct PlayerInteractionParams<'w> {
     /// Current selection
     pub selection: Res<'w, Selection>,
-    /// Fast board state
-    pub fast_board: Res<'w, FastBoardState>,
 }
 
 /// System parameter grouping turn management resources
