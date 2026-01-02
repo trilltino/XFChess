@@ -24,7 +24,7 @@
 //! # Integration with Chess Rules
 //!
 //! These components are used by:
-//! - [`crate::game::rules::piece_moves`] - Legal move generation
+//! - [`crate::game::resources::ChessEngine`] - Unified chess engine for move validation
 //! - [`crate::game::systems::input`] - Piece selection handling
 //! - [`crate::game::systems::visual`] - Highlighting & animations
 //!
@@ -185,6 +185,40 @@ pub struct HasMoved {
     pub move_count: u32,
 }
 
+/// Component marking a piece as captured
+///
+/// When a piece is captured, it's moved to a capture zone outside the board
+/// instead of being despawned. This component marks pieces that are in the
+/// capture zone and should not be considered part of the active game board.
+#[derive(Component, Clone, Copy, Debug, Default, Reflect)]
+#[reflect(Component)]
+pub struct Captured;
+
+/// Component representing an active straight-line animation for a piece move
+#[derive(Component, Debug, Reflect)]
+#[reflect(Component)]
+pub struct PieceMoveAnimation {
+    pub start: Vec3,
+    pub end: Vec3,
+    pub elapsed: f32,
+    pub duration: f32,
+}
+
+impl PieceMoveAnimation {
+    pub fn new(start: Vec3, end: Vec3, duration: f32) -> Self {
+        Self {
+            start,
+            end,
+            elapsed: 0.0,
+            duration: duration.max(f32::EPSILON),
+        }
+    }
+
+    pub fn progress(&self) -> f32 {
+        (self.elapsed / self.duration).clamp(0.0, 1.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,7 +227,7 @@ mod tests {
     fn test_selected_piece_creation() {
         //! Verifies SelectedPiece can be created with valid data
 
-        let entity = Entity::from_raw(42);
+        let entity = Entity::from_bits(42);
         let position = (3, 4);
 
         let selected = SelectedPiece { entity, position };
@@ -207,11 +241,11 @@ mod tests {
         //! Tests SelectedPiece implements Clone correctly
 
         let original = SelectedPiece {
-            entity: Entity::from_raw(10),
+            entity: Entity::from_bits(10),
             position: (2, 2),
         };
 
-        let cloned = original.clone();
+        let cloned = original;
 
         assert_eq!(original.entity, cloned.entity);
         assert_eq!(original.position, cloned.position);
@@ -222,7 +256,7 @@ mod tests {
         //! Verifies SelectedPiece implements Copy (efficient passing)
 
         let original = SelectedPiece {
-            entity: Entity::from_raw(5),
+            entity: Entity::from_bits(5),
             position: (0, 0),
         };
 
@@ -237,7 +271,7 @@ mod tests {
         //! Tests debug output is useful for logging
 
         let selected = SelectedPiece {
-            entity: Entity::from_raw(7),
+            entity: Entity::from_bits(7),
             position: (4, 4),
         };
 
@@ -298,18 +332,24 @@ mod tests {
         //! Tests the common "can castle?" pattern
 
         let unmoved_king = HasMoved::default();
-        let moved_king = HasMoved { moved: true, move_count: 1 };
+        let moved_king = HasMoved {
+            moved: true,
+            move_count: 1,
+        };
 
         // Castling requires king hasn't moved
         assert!(!unmoved_king.moved); // Can castle
-        assert!(moved_king.moved);     // Cannot castle
+        assert!(moved_king.moved); // Cannot castle
     }
 
     #[test]
     fn test_has_moved_clone() {
         //! Verifies HasMoved can be cloned
 
-        let original = HasMoved { moved: true, move_count: 5 };
+        let original = HasMoved {
+            moved: true,
+            move_count: 5,
+        };
         let cloned = original.clone();
 
         assert_eq!(original.moved, cloned.moved);
@@ -320,7 +360,10 @@ mod tests {
     fn test_has_moved_copy() {
         //! Tests HasMoved implements Copy semantics
 
-        let original = HasMoved { moved: false, move_count: 0 };
+        let original = HasMoved {
+            moved: false,
+            move_count: 0,
+        };
         let copied = original; // Copy, not move
 
         // Original still accessible
@@ -331,10 +374,26 @@ mod tests {
     fn test_has_moved_debug_format() {
         //! Verifies debug output is informative
 
-        let has_moved = HasMoved { moved: true, move_count: 7 };
+        let has_moved = HasMoved {
+            moved: true,
+            move_count: 7,
+        };
         let debug_str = format!("{:?}", has_moved);
 
         assert!(debug_str.contains("HasMoved"));
         assert!(debug_str.contains("true") || debug_str.contains("7"));
+    }
+
+    #[test]
+    fn test_piece_move_animation_new() {
+        let start = Vec3::new(0.0, 0.0, 0.0);
+        let end = Vec3::new(1.0, 0.0, 1.0);
+        let anim = PieceMoveAnimation::new(start, end, 0.3);
+
+        assert_eq!(anim.start, start);
+        assert_eq!(anim.end, end);
+        assert_eq!(anim.elapsed, 0.0);
+        assert!(anim.duration > 0.0);
+        assert_eq!(anim.progress(), 0.0);
     }
 }

@@ -20,12 +20,9 @@
 //!
 //! This ensures AI moves follow the same validation rules as human moves.
 
-use bevy::prelude::*;
-use crate::rendering::pieces::PieceColor;
-
 pub mod resource;
 pub mod systems;
 
 // Re-export for convenience
-pub use resource::{ChessAIResource, GameMode, AIDifficulty};
-pub use systems::{AIPlugin, PendingAIMove, AIStatistics};
+pub use resource::{AIDifficulty, ChessAIResource, GameMode};
+pub use systems::{AIPlugin, AIStatistics, PendingAIMove};

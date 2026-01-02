@@ -1,16 +1,51 @@
-[package]
-name = "XFChess"
+[workspace]
+members = ["crates/*", "web"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 
+[workspace.profile.dev]
+opt-level = 1
+split-debuginfo = "packed"
 
-[profile.dev.package."*"]
+[workspace.profile.release]
+# Maximum optimization for release builds
 opt-level = 3
+# Link-time optimization for better performance (thin LTO is faster to compile than full)
+lto = "thin"
+# Remove debug symbols to reduce binary size
+strip = true
+# Single codegen unit for better optimization (slower compile but better runtime performance)
+codegen-units = 1
+
+[package]
+name = "xfchess"
+version.workspace = true
+edition.workspace = true
+
+[profile.release]
+# Maximum optimization for release builds
+opt-level = 3
+# Link-time optimization for better performance (thin LTO is faster to compile than full)
+lto = "thin"
+# Remove debug symbols to reduce binary size
+strip = true
+# Single codegen unit for better optimization (slower compile but better runtime performance)
+codegen-units = 1
 
 [dependencies]
-bevy = "0.17.2"
+bevy = { version = "0.17.3", features = ["web", "webgl2", "mp3"] }
 bevy_egui = "0.37.1"
 bevy-inspector-egui = "0.34.0"
 futures-lite = "2.5.0"
 rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
 chess_engine = { path = "crates/chess_engine" }
+directories = "6.0.0"
+tracing-appender = "0.2.4"
+tracing-subscriber = "0.3.22"
+tracing = "0.1.44"

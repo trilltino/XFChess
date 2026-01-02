@@ -64,15 +64,13 @@
 //! - `reference/bevy/examples/picking/mesh_picking.rs` - Observer examples
 //! - `reference/chessground/src/events.ts` - Lichess hover UX patterns
 
-use bevy::prelude::*;
-use bevy::picking::pointer::PointerInteraction;
-use bevy::picking::events::{Pointer, Click, Over, Out};
-use bevy::ecs::event::Event;
-use bevy::window::{PrimaryWindow, CursorIcon, SystemCursorIcon};
-use crate::rendering::pieces::{Piece, PieceColor};
-use crate::rendering::utils::Square;
-use crate::game::resources::{Selection, CurrentTurn, GameOverState, CurrentGamePhase};
 use crate::game::components::GamePhase;
+use crate::game::resources::{CurrentGamePhase, CurrentTurn, Selection};
+use crate::rendering::pieces::Piece;
+use crate::rendering::utils::Square;
+use bevy::picking::events::{Out, Over, Pointer};
+use bevy::prelude::*;
+use bevy::window::{CursorIcon, PrimaryWindow};
 
 /// Resource tracking the current cursor position within the game window
 ///
@@ -180,14 +178,16 @@ pub fn cursor_tracking_system(
     mut cursor_state: ResMut<CursorState>,
 ) {
     cursor_state.last_update += time.delta_secs();
-
     if let Ok(window) = q_windows.single() {
         cursor_state.position = window.cursor_position();
-
         // Debug logging (rate-limited to 1 second intervals)
         if cursor_state.last_update >= 1.0 {
             if let Some(position) = cursor_state.position {
-                trace!("[POINTER] Cursor position: ({:.1}, {:.1})", position.x, position.y);
+                trace!(
+                    "[POINTER] Cursor position: ({:.1}, {:.1})",
+                    position.x,
+                    position.y
+                );
             }
             cursor_state.last_update = 0.0;
         }
@@ -227,23 +227,22 @@ pub fn on_piece_hover(
     mut original_materials: ResMut<OriginalMaterials>,
 ) {
     let entity = hover.entity;
-
     // Only highlight pieces during active gameplay
     if !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check) {
         return;
     }
-
     // Get the piece being hovered
     if let Ok(piece) = piece_query.get(entity) {
         // Only highlight if it's this player's turn
         if piece.color != current_turn.color {
             return;
         }
-
         // Get the entity's current material
         if let Ok(mut material_handle) = material_query.get_mut(entity) {
             // Store original material for later restoration
-            original_materials.materials.insert(entity, material_handle.0.clone());
+            original_materials
+                .materials
+                .insert(entity, material_handle.0.clone());
 
             // Create brightened version
             if let Some(original_mat) = materials.get(&material_handle.0) {
@@ -262,7 +261,11 @@ pub fn on_piece_hover(
                 let brightened_handle = materials.add(brightened);
                 material_handle.0 = brightened_handle;
 
-                trace!("[POINTER] Hover effect applied to {:?} piece at entity {:?}", piece.color, entity);
+                trace!(
+                    "[POINTER] Hover effect applied to {:?} piece at entity {:?}",
+                    piece.color,
+                    entity
+                );
             }
         }
     }
@@ -351,7 +354,9 @@ pub fn on_square_hover(
         // Get the entity's current material
         if let Ok(mut material_handle) = material_query.get_mut(entity) {
             // Store original material for later restoration
-            original_materials.materials.insert(entity, material_handle.0.clone());
+            original_materials
+                .materials
+                .insert(entity, material_handle.0.clone());
 
             // Create highlighted version
             if let Some(original_mat) = materials.get(&material_handle.0) {
@@ -370,8 +375,12 @@ pub fn on_square_hover(
                 let highlighted_handle = materials.add(highlighted);
                 material_handle.0 = highlighted_handle;
 
-                trace!("[POINTER] Hover effect applied to square ({}, {}) at entity {:?}",
-                    square.x, square.y, entity);
+                trace!(
+                    "[POINTER] Hover effect applied to square ({}, {}) at entity {:?}",
+                    square.x,
+                    square.y,
+                    entity
+                );
             }
         }
     }
@@ -399,7 +408,10 @@ pub fn on_square_unhover(
     if let Some(original_handle) = original_materials.materials.remove(&entity) {
         if let Ok(mut material_handle) = material_query.get_mut(entity) {
             material_handle.0 = original_handle;
-            trace!("[POINTER] Hover effect removed from square at entity {:?}", entity);
+            trace!(
+                "[POINTER] Hover effect removed from square at entity {:?}",
+                entity
+            );
         }
     }
 }
@@ -418,9 +430,7 @@ pub fn on_square_unhover(
 /// TODO: Implement proper cursor tracking using a resource updated by hover observers
 /// instead of polling PointerInteraction state. This would be more efficient and align
 /// with Bevy 0.17's event-driven picking system.
-pub fn cursor_style_system(
-    mut cursor_style: ResMut<CursorStyle>,
-) {
+pub fn cursor_style_system(mut cursor_style: ResMut<CursorStyle>) {
     // Simplified version: just track cursor state
     // Full cursor icon management will be implemented in a future enhancement
     // TODO: Implement cursor icon changes using Window API when needed
@@ -449,10 +459,7 @@ impl FromWorld for PointerDebugTimer {
 }
 
 /// TODO: Re-implement using event-based approach instead of polling PointerInteraction
-pub fn entity_cursor_debug(
-    time: Res<Time>,
-    mut timer: ResMut<PointerDebugTimer>,
-) {
+pub fn entity_cursor_debug(time: Res<Time>, mut timer: ResMut<PointerDebugTimer>) {
     timer.time += time.delta_secs();
     if timer.time >= 1.0 {
         // Debug logging disabled - will be re-implemented with proper event tracking
@@ -492,28 +499,10 @@ pub fn entity_cursor_debug(
 ///     .observe(create_material_observer::<Out>(original_material.clone()));
 /// ```
 ///
-/// # Performance Note
+/// Note: The `create_material_observer` function has been removed. Use direct observer
+/// functions like `on_piece_hover` instead, which are more performant and can access
+/// game state resources.
 ///
-/// While this function works, using direct observer functions like `on_piece_hover`
-/// is more performant because they can access game state resources (CurrentTurn,
-/// Selection, etc.) to conditionally apply effects. This helper is best used for
-/// simple, unconditional material swaps.
-#[allow(dead_code)] // Kept for reference - direct observers are more performant
-pub fn create_material_observer<E>(
-    new_material: Handle<StandardMaterial>,
-) -> impl Fn(On<Pointer<E>>, Query<&mut MeshMaterial3d<StandardMaterial>>)
-where
-    E: Event + Clone + std::fmt::Debug + Reflect,
-{
-    move |trigger: On<Pointer<E>>, mut query: Query<&mut MeshMaterial3d<StandardMaterial>>| {
-        let entity = trigger.entity;
-        if let Ok(mut material) = query.get_mut(entity) {
-            material.0 = new_material.clone();
-            trace!("[POINTER] Material updated for entity {:?} via observer", entity);
-        }
-    }
-}
-
 /// Plugin that registers all pointer interaction systems and resources
 ///
 /// Sets up the complete pointer interaction system including:
@@ -524,7 +513,7 @@ where
 ///
 /// # Systems Registered
 ///
-/// All systems run during `Update` schedule when in `GameState::Multiplayer`:
+/// All systems run during `Update` schedule when in `GameState::InGame`:
 /// - `cursor_tracking_system`: Tracks cursor position every frame
 /// - `cursor_style_system`: Manages cursor icon changes
 /// - `entity_cursor_debug`: Debug logging (rate-limited)
@@ -561,7 +550,8 @@ impl Plugin for PointerEventsPlugin {
                 cursor_tracking_system,
                 cursor_style_system,
                 entity_cursor_debug,
-            ).run_if(in_state(GameState::Multiplayer)),
+            )
+                .run_if(in_state(GameState::InGame)),
         );
     }
 }
@@ -601,55 +591,5 @@ mod tests {
         let mut world = World::new();
         let timer = PointerDebugTimer::from_world(&mut world);
         assert_eq!(timer.time, 0.0);
-    }
-
-    #[test]
-    fn test_create_material_observer_compiles() {
-        //! Verifies that create_material_observer compiles with correct type constraints
-        //!
-        //! This test ensures the helper function works with Bevy's picking event types.
-        //! While this function is marked as dead_code and not actively used in the codebase,
-        //! it serves as a reference implementation for dynamic observer creation.
-
-        use bevy::asset::Assets;
-        use bevy::render::color::Color;
-
-        // Create a dummy material handle
-        let mut materials = Assets::<StandardMaterial>::default();
-        let test_material = materials.add(StandardMaterial {
-            base_color: Color::LinearRgba(LinearRgba::new(1.0, 0.5, 0.5, 1.0)),
-            ..default()
-        });
-
-        // Verify the function creates observers with correct type signatures
-        let _hover_observer = create_material_observer::<Over>(test_material.clone());
-        let _unhover_observer = create_material_observer::<Out>(test_material.clone());
-
-        // The actual execution of observers requires a full Bevy app context,
-        // so we just verify compilation and type correctness here
-        assert!(true, "Observer creation compiles successfully");
-    }
-
-    #[test]
-    fn test_observer_helper_vs_direct_comparison() {
-        //! Documents the tradeoff between create_material_observer and direct observers
-        //!
-        //! **Helper Function (create_material_observer)**:
-        //! - Pros: Simple, reusable, less code
-        //! - Cons: No access to game state (CurrentTurn, Selection)
-        //! - Use case: Unconditional material swaps
-        //!
-        //! **Direct Observer Functions (on_piece_hover, etc.)**:
-        //! - Pros: Access to game state, conditional logic
-        //! - Cons: More verbose, need separate function per use case
-        //! - Use case: Game-aware interactions (only current player's pieces)
-        //!
-        //! The current implementation uses direct observers because hover effects
-        //! need to check if it's the player's turn before highlighting pieces.
-
-        assert!(
-            true,
-            "This test documents the design decision to use direct observers"
-        );
     }
 }

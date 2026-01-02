@@ -11,8 +11,8 @@
 //! of game state logic independently from Bevy's scheduling and system execution.
 
 use super::*;
-use crate::rendering::pieces::PieceColor;
 use crate::game::components::{GamePhase, MoveRecord};
+use crate::rendering::pieces::PieceColor;
 
 // ============================================================================
 // CurrentTurn Tests
@@ -45,7 +45,10 @@ fn test_turn_switch_white_to_black() {
     turn.switch();
 
     assert_eq!(turn.color, PieceColor::Black, "Should switch to black");
-    assert_eq!(turn.move_number, 1, "Move number should not increment when white moves");
+    assert_eq!(
+        turn.move_number, 1,
+        "Move number should not increment when white moves"
+    );
 }
 
 #[test]
@@ -63,7 +66,10 @@ fn test_turn_switch_black_to_white() {
     turn.switch();
 
     assert_eq!(turn.color, PieceColor::White, "Should switch to white");
-    assert_eq!(turn.move_number, 2, "Move number should increment when black completes their turn");
+    assert_eq!(
+        turn.move_number, 2,
+        "Move number should increment when black completes their turn"
+    );
 }
 
 #[test]
@@ -111,7 +117,11 @@ fn test_game_phase_default() {
     //! requiring explicit initialization code.
 
     let phase = CurrentGamePhase::default();
-    assert_eq!(phase.0, GamePhase::Playing, "Game should start in Playing phase");
+    assert_eq!(
+        phase.0,
+        GamePhase::Playing,
+        "Game should start in Playing phase"
+    );
 }
 
 #[test]
@@ -272,8 +282,11 @@ fn test_move_history_with_capture() {
     history.add_move(move_with_capture);
 
     let last = history.last_move().expect("Should have a last move");
-    assert_eq!(last.captured, Some(crate::rendering::pieces::PieceType::Pawn),
-        "Captured piece should be recorded");
+    assert_eq!(
+        last.captured,
+        Some(crate::rendering::pieces::PieceType::Pawn),
+        "Captured piece should be recorded"
+    );
 }
 
 // ============================================================================
@@ -290,8 +303,14 @@ fn test_game_timer_default() {
 
     let timer = GameTimer::default();
 
-    assert_eq!(timer.white_time_left, 600.0, "White should start with 10 minutes");
-    assert_eq!(timer.black_time_left, 600.0, "Black should start with 10 minutes");
+    assert_eq!(
+        timer.white_time_left, 600.0,
+        "White should start with 10 minutes"
+    );
+    assert_eq!(
+        timer.black_time_left, 600.0,
+        "Black should start with 10 minutes"
+    );
     assert_eq!(timer.increment, 0.0, "Default should have no increment");
     assert!(!timer.is_running, "Timer should not be running initially");
 }
@@ -315,7 +334,10 @@ fn test_fischer_increment_white() {
     timer.apply_increment(PieceColor::White);
 
     assert_eq!(timer.white_time_left, 105.0, "White should gain 5 seconds");
-    assert_eq!(timer.black_time_left, 100.0, "Black time should be unchanged");
+    assert_eq!(
+        timer.black_time_left, 100.0,
+        "Black time should be unchanged"
+    );
 }
 
 #[test]
@@ -335,7 +357,10 @@ fn test_fischer_increment_black() {
 
     timer.apply_increment(PieceColor::Black);
 
-    assert_eq!(timer.white_time_left, 100.0, "White time should be unchanged");
+    assert_eq!(
+        timer.white_time_left, 100.0,
+        "White time should be unchanged"
+    );
     assert_eq!(timer.black_time_left, 105.0, "Black should gain 5 seconds");
 }
 
@@ -356,8 +381,14 @@ fn test_fischer_increment_zero() {
 
     timer.apply_increment(PieceColor::White);
 
-    assert_eq!(timer.white_time_left, 100.0, "White time should be unchanged");
-    assert_eq!(timer.black_time_left, 100.0, "Black time should be unchanged");
+    assert_eq!(
+        timer.white_time_left, 100.0,
+        "White time should be unchanged"
+    );
+    assert_eq!(
+        timer.black_time_left, 100.0,
+        "Black time should be unchanged"
+    );
 }
 
 #[test]
@@ -401,7 +432,7 @@ fn test_custom_time_control() {
     //! increment (3+2), a common online chess format.
 
     let timer = GameTimer {
-        white_time_left: 180.0,  // 3 minutes
+        white_time_left: 180.0, // 3 minutes
         black_time_left: 180.0,
         increment: 2.0,
         is_running: false,

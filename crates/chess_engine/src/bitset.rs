@@ -122,13 +122,16 @@
 //! the fundamental efficiency of using CPU-native operations for game state representation.
 
 #[derive(Copy, Clone, Debug, Default)]
+#[allow(dead_code)] // Part of engine's public API - utility for bitboard operations
 pub struct BitSet(pub u64);
 
 impl BitSet {
+    #[allow(dead_code)] // Part of engine's public API
     pub fn new() -> Self {
         BitSet(0)
     }
 
+    #[allow(dead_code)] // Part of engine's public API
     pub fn insert<T>(&mut self, index: T)
     where
         u64: std::ops::Shl<T, Output = u64>,
@@ -136,6 +139,7 @@ impl BitSet {
         self.0 |= 1 << index;
     }
 
+    #[allow(dead_code)] // Part of engine's public API
     pub fn remove<T>(&mut self, index: T)
     where
         u64: std::ops::Shl<T, Output = u64>,
@@ -143,6 +147,7 @@ impl BitSet {
         self.0 &= !(1 << index);
     }
 
+    #[allow(dead_code)] // Part of engine's public API
     pub fn contains<T>(&self, index: T) -> bool
     where
         u64: std::ops::Shl<T, Output = u64>,
@@ -151,10 +156,12 @@ impl BitSet {
     }
 
     #[inline]
+    #[allow(dead_code)] // Part of engine's public API
     pub fn count_ones(&self) -> u32 {
         self.0.count_ones()
     }
 
+    #[allow(dead_code)] // Part of engine's public API
     pub fn clear(&mut self) {
         self.0 = 0;
     }

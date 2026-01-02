@@ -156,6 +156,7 @@
 
 use core::ops::Range;
 
+#[allow(dead_code)] // Part of engine's public API
 pub const VOID_ID: i8 = 0;
 pub const PAWN_ID: i8 = 1;
 pub const KNIGHT_ID: i8 = 2;
@@ -163,6 +164,7 @@ pub const BISHOP_ID: i8 = 3;
 pub const ROOK_ID: i8 = 4;
 pub const QUEEN_ID: i8 = 5;
 pub const KING_ID: i8 = 6;
+#[allow(dead_code)] // Part of engine's public API
 pub const ARRAY_BASE_6: i8 = 6;
 
 pub const W_PAWN: i8 = PAWN_ID;
@@ -190,13 +192,20 @@ pub const SO: i32 = S + O;
 pub const NW: i32 = N + W;
 pub const SW: i32 = S + W;
 
+#[allow(dead_code)] // Part of engine's public API
 pub const PAWN_DIRS_WHITE: [i32; 4] = [N, NO, NW, N + N];
 
 pub const BISHOP_DIRS: [i32; 4] = [NO, SO, NW, SW];
 pub const ROOK_DIRS: [i32; 4] = [N, O, S, W];
 pub const KNIGHT_DIRS: [i32; 8] = [
-    N + N + O, N + N + W, S + S + O, S + S + W,
-    O + O + N, O + O + S, W + W + N, W + W + S,
+    N + N + O,
+    N + N + W,
+    S + S + O,
+    S + S + W,
+    O + O + N,
+    O + O + S,
+    W + W + N,
+    W + W + S,
 ];
 pub const KING_DIRS: [i32; 8] = [N, O, S, W, NO, SO, NW, SW];
 
@@ -222,59 +231,86 @@ pub const FIGURE_VALUE: [i16; KING_ID as usize + 1] = [
 ];
 
 pub const SETUP: [i8; 64] = [
-    W_ROOK, W_KNIGHT, W_BISHOP, W_KING, W_QUEEN, W_BISHOP, W_KNIGHT, W_ROOK,
-    W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN,
-    B_ROOK, B_KNIGHT, B_BISHOP, B_KING, B_QUEEN, B_BISHOP, B_KNIGHT, B_ROOK,
+    W_ROOK, W_KNIGHT, W_BISHOP, W_KING, W_QUEEN, W_BISHOP, W_KNIGHT, W_ROOK, W_PAWN, W_PAWN,
+    W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN,
+    B_PAWN, B_PAWN, B_ROOK, B_KNIGHT, B_BISHOP, B_KING, B_QUEEN, B_BISHOP, B_KNIGHT, B_ROOK,
 ];
 
+#[allow(dead_code)] // Part of engine's public API - file/rank constants
 pub const BA: usize = 7;
+#[allow(dead_code)] // Part of engine's public API - file/rank constants
 pub const BB: usize = 6;
+#[allow(dead_code)] // Part of engine's public API - file/rank constants
 pub const BC: usize = 5;
+#[allow(dead_code)] // Part of engine's public API - file/rank constants
 pub const BD: usize = 4;
+#[allow(dead_code)] // Part of engine's public API - file/rank constants
 pub const BE: usize = 3;
+#[allow(dead_code)] // Part of engine's public API - file/rank constants
 pub const BF: usize = 2;
+#[allow(dead_code)] // Part of engine's public API - file/rank constants
 pub const BG: usize = 1;
+#[allow(dead_code)] // Part of engine's public API - file/rank constants
 pub const BH: usize = 0;
 
+#[allow(dead_code)] // Part of engine's public API - rank constants
 pub const B1: usize = 0;
+#[allow(dead_code)] // Part of engine's public API - rank constants
 pub const B2: usize = 1;
+#[allow(dead_code)] // Part of engine's public API - rank constants
 pub const B3: usize = 2;
+#[allow(dead_code)] // Part of engine's public API - rank constants
 pub const B4: usize = 3;
+#[allow(dead_code)] // Part of engine's public API - rank constants
 pub const B5: usize = 4;
+#[allow(dead_code)] // Part of engine's public API - rank constants
 pub const B6: usize = 5;
+#[allow(dead_code)] // Part of engine's public API - rank constants
 pub const B7: usize = 6;
+#[allow(dead_code)] // Part of engine's public API - rank constants
 pub const B8: usize = 7;
 
+#[allow(dead_code)] // Part of engine's public API
 pub const POS_RANGE: Range<i8> = 0..64;
+#[allow(dead_code)] // Part of engine's public API
 pub const POS_RANGE_US: Range<usize> = 0..64;
 
 pub const COLOR_BLACK: i64 = -1;
 pub const COLOR_WHITE: i64 = 1;
 
+#[allow(dead_code)] // Part of engine's public API - castling square constants
 pub const WR0: usize = 0;
+#[allow(dead_code)] // Part of engine's public API - castling square constants
 pub const WK3: usize = 3;
+#[allow(dead_code)] // Part of engine's public API - castling square constants
 pub const WR7: usize = 7;
+#[allow(dead_code)] // Part of engine's public API - castling square constants
 pub const BR56: usize = 56;
+#[allow(dead_code)] // Part of engine's public API - castling square constants
 pub const BK59: usize = 59;
+#[allow(dead_code)] // Part of engine's public API - castling square constants
 pub const BR63: usize = 63;
 
-pub const MAX_DEPTH: usize = 15;
+// Reduced from 8 to 6 to prevent stack overflow in async task pool threads
+// Even with iterative implementation, deep searches with many moves can cause issues
+pub const MAX_DEPTH: usize = 6;
 
+#[allow(dead_code)] // Part of engine's public API
 pub const IGNORE_MARKER_LOW_INT16: i16 = i16::MIN;
 pub const INVALID_SCORE: i16 = i16::MIN;
 pub const LOWEST_SCORE: i64 = -i16::MAX as i64;
+#[allow(dead_code)] // Part of engine's public API
 pub const BETH: i64 = i16::MIN as i64;
+#[allow(dead_code)] // Part of engine's public API
 pub const NO_NXT_DIR_IDX: u8 = 100;
 
 pub const STATE_PLAYING: i32 = 0;
 pub const STATE_STALEMATE: i32 = 1;
 pub const STATE_CHECKMATE: i32 = 2;
+#[allow(dead_code)] // Part of engine's public API
 pub const STATE_NO_VALID_MOVE: i32 = 3;
+#[allow(dead_code)] // Part of engine's public API
 pub const STATE_CAN_CAPTURE_KING: i32 = 4;
 
 pub const FLAG_PLAIN: i32 = 0;
@@ -283,10 +319,17 @@ pub const FLAG_EP: i32 = 2;
 pub const FLAG_PROMOTION: i32 = 3;
 pub const FLAG_PROCAP: i32 = 4;
 
-pub const TTE_SIZE: usize = 1024 * 1024 * 2;
+// Use smaller TT for WASM to fit within memory limits
+#[cfg(target_arch = "wasm32")]
+pub const TTE_SIZE: usize = 1024 * 64; // 64K entries for WASM
+
+#[cfg(not(target_arch = "wasm32"))]
+pub const TTE_SIZE: usize = 1024 * 1024 * 2; // 2M entries for native
+
 pub const TT_TRY: usize = 5;
 
 pub const CORE_BIT_BUFFER_SIZE: usize = 24;
+#[allow(dead_code)] // Part of engine's public API - used with salewskiChessDebug feature
 pub const HASH_BIT_BUFFER_SIZE: usize = 32;
 pub const BIT_BUFFER_SIZE: usize = bit_buffer_size();
 
@@ -301,16 +344,28 @@ pub const fn bit_buffer_size() -> usize {
     }
 }
 
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const V_RATIO: i64 = 8;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const RANGE_EXTEND: bool = false;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const SELECT_EXTEND: bool = false;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const CASTLING_EXTEND: bool = true;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const CAPTURE_EXTEND: bool = false;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const EQUAL_CAPTURE_EXTEND: bool = true;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const LARGE_CAPTURE_EXTEND: bool = false;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const PAWN_MARCH_EXTEND: bool = true;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const CHECK_EXTEND: bool = true;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const PROMOTE_EXTEND: bool = true;
+#[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const NO_EXTEND_AT_ALL: bool = false;
 
+#[allow(dead_code)] // Part of engine's public API - piece string representation
 pub const FIG_STR: [&str; 7] = ["  ", "  ", "N_", "B_", "R_", "Q_", "K_"];

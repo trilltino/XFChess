@@ -17,34 +17,54 @@
 //!
 //! # System Execution Order
 //!
-//! Systems are organized into SystemSets for predictable execution order:
+//! Systems are organized into SystemSets for predictable execution order.
+//! The execution order is defined in [`crate::game::system_sets::GameSystems`]
+//! and configured in [`crate::game::plugin::GamePlugin`].
+//!
+//! ## Frame Execution Flow
 //!
 //! ```text
-//! ┌─────────────────┐
-//! │ Input           │  User clicks pieces/squares
-//! │ (Observers)     │  → Updates Selection resource
-//! └────────┬────────┘
-//!          ↓
-//! ┌─────────────────┐
-//! │ BoardSync       │  Rebuilds FastBoardState from ECS
-//! │                 │  → Enables O(1) move validation
-//! └────────┬────────┘
-//!          ↓
-//! ┌─────────────────┐
-//! │ GameLogic       │  Validates moves, detects check/mate
-//! │                 │  → Updates GamePhase, GameOverState
-//! └────────┬────────┘
-//!          ↓
-//! ┌─────────────────┐
-//! │ Visual          │  Updates highlights and animations
-//! │                 │  → Provides player feedback
-//! └────────┬────────┘
-//!          ↓
-//! ┌─────────────────┐
-//! │ Camera          │  Processes WASD movement input
-//! │ (Parallel)      │  → Smooth camera panning
-//! └─────────────────┘
+//! ┌─────────────────────────────────────────────────────────┐
+//! │ Input Set (GameSystems::Input)                         │
+//! │ - User clicks pieces/squares (Observers)               │
+//! │ - Camera movement (WASD)                               │
+//! │ → Updates Selection resource, camera transforms        │
+//! └────────────────────┬──────────────────────────────────┘
+//!                      ↓
+//! ┌─────────────────────────────────────────────────────────┐
+//! │ Validation Set (GameSystems::Validation)               │
+//! │ - sync_fast_board_state                                │
+//! │ → Rebuilds FastBoardState bitboards from ECS           │
+//! │ → Enables O(1) move validation                        │
+//! └────────────────────┬──────────────────────────────────┘
+//!                      ↓
+//! ┌─────────────────────────────────────────────────────────┐
+//! │ Execution Set (GameSystems::Execution)                 │
+//! │ - update_game_phase                                     │
+//! │ - update_game_timer                                     │
+//! │ - AI move computation (if AI turn)                     │
+//! │ → Validates moves, detects check/mate                  │
+//! │ → Updates GamePhase, GameOverState                     │
+//! │ → Decrements timer, checks for timeout                 │
+//! └────────────────────┬──────────────────────────────────┘
+//!                      ↓
+//! ┌─────────────────────────────────────────────────────────┐
+//! │ Visual Set (GameSystems::Visual)                        │
+//! │ - highlight_possible_moves                             │
+//! │ - animate_piece_movement                                │
+//! │ → Updates highlights and animations                    │
+//! │ → Provides player feedback                             │
+//! └─────────────────────────────────────────────────────────┘
 //! ```
+//!
+//! ## State Transition Systems
+//!
+//! Systems that run on state transitions (OnEnter/OnExit) are not part of
+//! the frame execution flow but are critical for game initialization:
+//!
+//! - `reset_game_resources` - Runs `OnEnter(GameState::InGame)`
+//! - `initialize_players` - Runs `OnEnter(GameState::InGame)`
+//! - `initialize_engine_from_ecs` - Runs `OnEnter(GameState::InGame)`
 //!
 //! # Bevy 0.17 System Architecture
 //!
@@ -93,7 +113,7 @@
 //! Most systems only run during active gameplay:
 //!
 //! ```rust,ignore
-//! .add_systems(Update, my_system.run_if(in_state(GameState::Multiplayer)))
+//! .add_systems(Update, my_system.run_if(in_state(GameState::InGame)))
 //! ```
 //!
 //! This prevents gameplay systems from running in menus or other non-game states.
@@ -138,15 +158,19 @@
 //! - `reference/bevy/examples/picking/mesh_picking.rs` - Observer pattern usage
 //! - `reference/bevy-3d-chess/src/systems/` - Alternative chess ECS implementation
 
-pub mod input;
-pub mod visual;
-pub mod game_logic;
 pub mod camera;
-pub mod board_sync;
+pub mod camera_debug_ui;
+pub mod game_init;
+pub mod game_logic;
+pub mod input;
+pub mod picking_debug;
+pub mod shared;
+pub mod visual;
 
 // Re-export all public systems for convenience
-pub use input::*;
-pub use visual::*;
-pub use game_logic::*;
+
 pub use camera::*;
-pub use board_sync::*;
+pub use camera_debug_ui::*;
+pub use game_init::*;
+pub use game_logic::*;
+pub use visual::*;

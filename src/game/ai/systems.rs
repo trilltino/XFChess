@@ -1,27 +1,21 @@
-//! AI systems for move computation and execution
-//!
-//! This module implements the AI opponent logic using the full chess engine
-//! with alpha-beta pruning, transposition tables, and iterative deepening.
-//!
-//! **Bevy 0.17 AsyncComputeTaskPool**: Uses Bevy's task pool for non-blocking AI computation
-//! instead of manual thread spawning. This integrates better with Bevy's ECS and prevents
-//! frame drops during AI thinking.
-
-use bevy::prelude::*;
-use bevy::tasks::{AsyncComputeTaskPool, Task};
-use futures_lite::future;
-use crate::core::GameState;
-use crate::rendering::pieces::{Piece, PieceColor, PieceType};
-use crate::game::components::{GamePhase, HasMoved};
-use crate::game::resources::{CurrentTurn, CurrentGamePhase, Selection, MoveHistory, GameTimer, CapturedPieces};
-use crate::game::components::MoveRecord;
+use super::resource::ChessAIResource;
+use crate::game::components::GamePhase;
+use crate::game::components::HasMoved;
+use crate::game::resources::{
+    CapturedPieces, ChessEngine, CurrentGamePhase, CurrentTurn, MoveHistory,
+};
 use crate::game::system_sets::GameSystems;
-use super::resource::{ChessAIResource, GameMode};
-use chess_engine::{new_game, reply, Game as EngineGame, Move as EngineMove};
+use crate::game::systems::shared::{execute_move, CapturedTarget};
+use crate::rendering::pieces::{Piece, PieceColor};
+use bevy::ecs::system::ParamSet;
+use bevy::prelude::*;
+use bevy::tasks::{block_on, AsyncComputeTaskPool, Task};
+use chess_engine::reply;
+use futures_lite::future;
 
 /// Resource holding the async AI computation task
 #[derive(Resource)]
-pub struct PendingAIMove(pub Task<AIMove>);
+pub struct PendingAIMove(pub Task<Result<AIMove, String>>);
 
 /// AI move representation with engine statistics
 #[derive(Debug, Clone)]
@@ -31,6 +25,7 @@ pub struct AIMove {
     pub score: i64,
     pub depth: i64,
     pub nodes_searched: i64,
+    pub thinking_time: f32,
 }
 
 /// Resource to track AI statistics
@@ -48,87 +43,17 @@ pub struct AIPlugin;
 
 impl Plugin for AIPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<ChessAIResource>()
+        app.init_resource::<ChessAIResource>()
             .init_resource::<AIStatistics>()
             .register_type::<ChessAIResource>()
             .register_type::<AIStatistics>()
             .add_systems(
                 Update,
-                (
-                    spawn_ai_task_system,
-                    poll_ai_task_system,
-                )
-                .chain()
-                .in_set(GameSystems::Execution),
+                (spawn_ai_task_system, poll_ai_task_system)
+                    .chain()
+                    .in_set(GameSystems::Execution),
             );
     }
-}
-
-/// Synchronize ECS board to chess engine format
-///
-/// Copies all pieces and critical game state from the ECS world to the chess engine.
-/// This includes piece positions, castling rights, and move counter.
-fn sync_ecs_to_engine(
-    pieces_with_moved: &Query<(Entity, &Piece, &HasMoved)>,
-    current_turn: &CurrentTurn,
-    engine: &mut EngineGame
-) {
-    // Clear the board
-    engine.board = [0; 64];
-
-    let mut piece_count = 0;
-    let mut white_pieces = 0;
-    let mut black_pieces = 0;
-
-    // Copy all pieces to engine board AND synchronize castling rights in one pass
-    for (_, piece, has_moved) in pieces_with_moved.iter() {
-        let square = (piece.y * 8 + piece.x) as usize;
-        piece_count += 1;
-
-        // Copy piece to board
-        let piece_id = match piece.piece_type {
-            PieceType::Pawn => 1,
-            PieceType::Knight => 2,
-            PieceType::Bishop => 3,
-            PieceType::Rook => 4,
-            PieceType::Queen => 5,
-            PieceType::King => 6,
-        };
-
-        engine.board[square] = if piece.color == PieceColor::White {
-            white_pieces += 1;
-            piece_id
-        } else {
-            black_pieces += 1;
-            -piece_id
-        };
-
-        // Synchronize castling rights
-        if piece.piece_type == PieceType::King {
-            if piece.color == PieceColor::White {
-                engine.white_king_has_moved = has_moved.moved;
-            } else {
-                engine.black_king_has_moved = has_moved.moved;
-            }
-        } else if piece.piece_type == PieceType::Rook {
-            // Check starting positions for rooks
-            match (piece.color, square) {
-                (PieceColor::White, 0) => engine.white_rook_0_has_moved = has_moved.moved,
-                (PieceColor::White, 7) => engine.white_rook_7_has_moved = has_moved.moved,
-                (PieceColor::Black, 56) => engine.black_rook_56_has_moved = has_moved.moved,
-                (PieceColor::Black, 63) => engine.black_rook_63_has_moved = has_moved.moved,
-                _ => {} // Rook not in starting position, doesn't affect castling
-            }
-        }
-    }
-
-    // Synchronize move counter
-    // Chess engines use 0-indexed move counter, so subtract 1
-    engine.move_counter = (current_turn.move_number - 1) as i32;
-
-    // Board sync debug (only in verbose mode to avoid spam)
-    // info!("[AI] Board sync: {} pieces (W:{} B:{})", piece_count, white_pieces, black_pieces);
 }
 
 /// System that spawns an AI computation task when it's the AI's turn
@@ -137,15 +62,16 @@ fn spawn_ai_task_system(
     ai_config: Res<ChessAIResource>,
     current_turn: Res<CurrentTurn>,
     game_phase: Res<CurrentGamePhase>,
-    mut pieces_query: Query<(Entity, &Piece, &HasMoved)>,
+    pieces_query: Query<(Entity, &Piece, &HasMoved)>,
     pending_task: Option<Res<PendingAIMove>>,
+    mut engine: ResMut<ChessEngine>,
+    pending_turn_advance: Option<Res<crate::game::resources::PendingTurnAdvance>>,
 ) {
-    // Don't spawn if:
-    // - A task is already running
-    // - Game is not in Playing phase
-    // - Mode is not VsAI
-    // - It's not the AI's turn
-    if pending_task.is_some() {
+    if pending_task.is_some()
+        || pending_turn_advance
+            .map(|r| r.is_pending())
+            .unwrap_or(false)
+    {
         return;
     }
 
@@ -153,68 +79,86 @@ fn spawn_ai_task_system(
         return;
     }
 
-    let GameMode::VsAI { ai_color } = ai_config.mode else {
-        return;
-    };
+    let ai_color = ai_config.mode.ai_color();
 
     if current_turn.color != ai_color {
         return;
     }
 
-    // Initialize chess engine
-    let mut engine = new_game();
-
-    // Sync ECS board to engine (including castling rights and move counter)
-    sync_ecs_to_engine(
-        &pieces_query,
-        &current_turn,
-        &mut engine
-    );
-
-    // Configure engine
+    engine.sync_ecs_to_engine(&pieces_query, &current_turn);
+    let mut engine_clone = engine.game.clone();
     let think_time = ai_config.difficulty.seconds_per_move();
-    engine.secs_per_move = think_time;
-
-    // Determine color for engine (1 = White, -1 = Black)
+    engine_clone.secs_per_move = think_time;
     let engine_color = if ai_color == PieceColor::White { 1 } else { -1 };
 
     info!("[AI] ========== AI TASK SPAWNED ==========");
-    info!("[AI] AI Color: {:?} | Difficulty: {:?} | Think Time: {:.1}s",
-        ai_color, ai_config.difficulty, think_time);
-    info!("[AI] Move #{} | Game Phase: {:?}", current_turn.move_number, game_phase.0);
+    info!(
+        "[AI] AI Color: {:?} | Difficulty: {:?} | Think Time: {:.1}s",
+        ai_color, ai_config.difficulty, think_time
+    );
+    info!(
+        "[AI] Move #{} | Game Phase: {:?}",
+        current_turn.move_number, game_phase.0
+    );
 
-    // Spawn async task on Bevy's compute task pool (non-blocking)
     let task_pool = AsyncComputeTaskPool::get();
+
+    // Configurable time limit (removed hard 0.5s cap, trusting config)
+    // But keeping a sanity cap to prevent freezing on extremely high settings
+    let limited_think_time = think_time.min(5.0);
+
     let task = task_pool.spawn(async move {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
         use std::time::Instant;
+
         let start = Instant::now();
+        engine_clone.secs_per_move = limited_think_time;
+        let engine_result =
+            catch_unwind(AssertUnwindSafe(|| reply(&mut engine_clone, engine_color)));
 
-        // Run chess engine to find best move for the correct color
-        let engine_move: EngineMove = reply(&mut engine, engine_color);
+        match engine_result {
+            Ok(engine_move) => {
+                let elapsed = start.elapsed().as_secs_f32();
+                let from_x = (engine_move.src % 8) as u8;
+                let from_y = (engine_move.src / 8) as u8;
+                let to_x = (engine_move.dst % 8) as u8;
+                let to_y = (engine_move.dst / 8) as u8;
 
-        let elapsed = start.elapsed().as_secs_f32();
+                info!("[AI] ========== AI COMPUTATION COMPLETE ==========");
+                info!(
+                    "[AI] Best Move: ({},{}) -> ({},{})",
+                    from_x, from_y, to_x, to_y
+                );
+                info!(
+                    "[AI] Evaluation: Score={} | Depth={} | Nodes={} | Time={:.2}s",
+                    engine_move.score, engine_clone.max_depth_so_far, engine_clone.calls, elapsed
+                );
 
-        // Convert engine move to our format
-        let from_x = (engine_move.src % 8) as u8;
-        let from_y = (engine_move.src / 8) as u8;
-        let to_x = (engine_move.dst % 8) as u8;
-        let to_y = (engine_move.dst / 8) as u8;
+                Ok(AIMove {
+                    from: (from_x, from_y),
+                    to: (to_x, to_y),
+                    score: engine_move.score,
+                    depth: engine_clone.max_depth_so_far,
+                    nodes_searched: engine_clone.calls,
+                    thinking_time: elapsed,
+                })
+            }
+            Err(panic_payload) => {
+                let elapsed = start.elapsed().as_secs_f32();
+                let error_msg = if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    format!("Chess engine panicked: {}", s)
+                } else if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    format!("Chess engine panicked: {}", s)
+                } else {
+                    "Chess engine panicked with unknown error".to_string()
+                };
 
-        info!("[AI] ========== AI COMPUTATION COMPLETE ==========");
-        info!("[AI] Best Move: ({},{}) -> ({},{})", from_x, from_y, to_x, to_y);
-        info!("[AI] Evaluation: Score={} | Depth={} | Nodes={} | Time={:.2}s",
-            engine_move.score, engine.max_depth_so_far, engine.calls, elapsed);
+                error!("[AI] ========== AI COMPUTATION FAILED ==========");
+                error!("[AI] {}", error_msg);
+                error!("[AI] Computation time: {:.2}s before panic", elapsed);
 
-        let nps = if elapsed > 0.0 { engine.calls as f32 / elapsed } else { 0.0 };
-        info!("[AI] Performance: {:.0} nodes/sec | Avg depth: {:.1}",
-            nps, engine.max_depth_so_far as f32);
-
-        AIMove {
-            from: (from_x, from_y),
-            to: (to_x, to_y),
-            score: engine_move.score,
-            depth: engine.max_depth_so_far,
-            nodes_searched: engine.calls,
+                Err(error_msg)
+            }
         }
     });
 
@@ -226,140 +170,211 @@ fn spawn_ai_task_system(
 fn poll_ai_task_system(
     mut commands: Commands,
     task_resource: Option<ResMut<PendingAIMove>>,
-    mut pieces_query: Query<(Entity, &mut Piece, &mut HasMoved, &mut Transform)>,
-    mut current_turn: ResMut<CurrentTurn>,
+    mut pieces_queries: ParamSet<(
+        Query<(Entity, &mut Piece, &mut HasMoved)>, // Mutable access for execution
+        Query<(Entity, &Piece, &HasMoved)>,         // Immutable access for scanning
+    )>,
+    current_turn: Res<CurrentTurn>,
     mut move_history: ResMut<MoveHistory>,
-    mut game_timer: ResMut<GameTimer>,
+
     mut captured_pieces: ResMut<CapturedPieces>,
     mut ai_stats: ResMut<AIStatistics>,
+    mut pending_turn: ResMut<crate::game::resources::PendingTurnAdvance>,
+    ai_config: Res<ChessAIResource>,
+    mut engine: ResMut<ChessEngine>,
+    sounds: Option<Res<crate::game::resources::GameSounds>>,
 ) {
-    // Early return if no AI task is running
     let Some(mut task_resource) = task_resource else {
         return;
     };
 
-    // Poll the async task to check if it's complete
-    if let Some(ai_move) = future::block_on(future::poll_once(&mut task_resource.0)) {
-        info!("[AI] ========== AI MOVE READY FOR EXECUTION ==========");
-        info!("[AI] Move: ({},{}) -> ({},{}) | Score: {} | Depth: {} | Nodes: {}",
-              ai_move.from.0, ai_move.from.1, ai_move.to.0, ai_move.to.1,
-              ai_move.score, ai_move.depth, ai_move.nodes_searched);
+    if !task_resource.0.is_finished() {
+        return;
+    }
 
-        // Update AI statistics
-        let score_delta = ai_move.score - ai_stats.last_score;
-        ai_stats.last_score = ai_move.score;
-        ai_stats.last_depth = ai_move.depth;
-        ai_stats.last_nodes = ai_move.nodes_searched;
-
-        if ai_stats.last_score != 0 {
-            info!("[AI] Score Change: {} (previous: {})",
-                if score_delta > 0 { format!("+{}", score_delta) } else { score_delta.to_string() },
-                ai_stats.last_score - score_delta);
+    let ai_move_result = match block_on(future::poll_once(&mut task_resource.0)) {
+        Some(result) => {
+            commands.remove_resource::<PendingAIMove>();
+            result
         }
-
-        // Remove the task resource
-        commands.remove_resource::<PendingAIMove>();
-
-        // Find the piece to move
-        let mut moving_piece_entity = None;
-        let mut moving_piece_data = None;
-
-        for (entity, piece, _, _) in pieces_query.iter() {
-            if piece.x == ai_move.from.0 && piece.y == ai_move.from.1 {
-                moving_piece_entity = Some(entity);
-                moving_piece_data = Some(*piece);
-                break;
-            }
+        None => {
+            warn!("[AI] Task reported finished but result not available");
+            return;
         }
+    };
 
-        if let (Some(entity), Some(_piece_data)) = (moving_piece_entity, moving_piece_data) {
-            // Check for capture
-            let mut captured_entity = None;
-            let mut captured_piece_type = None;
-            let mut captured_piece_color = None;
+    let p1_query = pieces_queries.p1(); // Immutable borrow
+    let fallback_needed = match ai_move_result {
+        Ok(ai_move) => {
+            info!("[AI] ========== AI MOVE READY FOR EXECUTION ==========");
 
-            for (other_entity, other_piece, _, _) in pieces_query.iter() {
-                if other_piece.x == ai_move.to.0 && other_piece.y == ai_move.to.1 {
-                    captured_entity = Some(other_entity);
-                    captured_piece_type = Some(other_piece.piece_type);
-                    captured_piece_color = Some(other_piece.color);
+            // Stats update
+            ai_stats.last_score = ai_move.score;
+            ai_stats.last_depth = ai_move.depth;
+            ai_stats.last_nodes = ai_move.nodes_searched;
+            ai_stats.thinking_time = ai_move.thinking_time;
+
+            // Find entity and prepare move
+            let mut move_data = None;
+            for (entity, piece, has_moved) in p1_query.iter() {
+                if piece.x == ai_move.from.0 && piece.y == ai_move.from.1 {
+                    move_data = Some((entity, *piece, !has_moved.moved));
                     break;
                 }
             }
 
-            // Despawn captured piece if any and track it
-            if let Some(captured) = captured_entity {
-                commands.entity(captured).despawn();
-
-                // Track the capture
-                if let (Some(piece_type), Some(piece_color)) = (captured_piece_type, captured_piece_color) {
-                    captured_pieces.add_capture(piece_color, piece_type);
-                    info!("[AI] CAPTURE! AI took {:?} {:?} at ({}, {})",
-                        piece_color, piece_type, ai_move.to.0, ai_move.to.1);
-
-                    let advantage = captured_pieces.material_advantage();
-                    info!("[AI] Material Advantage: {}",
-                        if advantage > 0 {
-                            format!("White +{} pawns", advantage)
-                        } else if advantage < 0 {
-                            format!("Black +{} pawns", -advantage)
-                        } else {
-                            "Equal".to_string()
-                        });
+            // Check capture (using p1 again)
+            let mut capture_target = None;
+            for (entity, piece, _) in p1_query.iter() {
+                if piece.x == ai_move.to.0 && piece.y == ai_move.to.1 {
+                    capture_target = Some(CapturedTarget {
+                        entity,
+                        piece_type: piece.piece_type,
+                        color: piece.color,
+                    });
+                    break;
                 }
             }
 
-            // Execute the move
-            if let Ok((_, mut piece, mut has_moved, _)) = pieces_query.get_mut(entity) {
-                // Record the move
-                let move_record = MoveRecord {
-                    piece_type: piece.piece_type,
-                    piece_color: piece.color,
-                    from: (piece.x, piece.y),
-                    to: ai_move.to,
-                    captured: captured_piece_type,
-                    is_castling: false,
-                    is_en_passant: false,
-                    is_check: false,
-                    is_checkmate: false,
+            if let Some((entity, piece, was_first_move)) = move_data {
+                // Drop immutable borrow not needed for Copy type
+
+                // Get sound handles
+                let (move_sound, capture_sound) = if let Some(s) = &sounds {
+                    (Some(s.move_piece.clone()), Some(s.capture_piece.clone()))
+                } else {
+                    (None, None)
                 };
-                move_history.add_move(move_record);
 
-                // Update piece position
-                let from_pos = (piece.x, piece.y);
-                piece.x = ai_move.to.0;
-                piece.y = ai_move.to.1;
+                // Execute move using shared logic
+                let success = execute_move(
+                    "AI",
+                    &mut commands,
+                    entity,
+                    piece,
+                    ai_move.to,
+                    capture_target,
+                    was_first_move,
+                    &mut pending_turn,
+                    &mut move_history,
+                    &mut captured_pieces,
+                    &mut engine,
+                    &mut pieces_queries.p0(),
+                    move_sound,
+                    capture_sound,
+                );
 
-                // Mark as moved
-                let was_first_move = !has_moved.moved;
-                has_moved.moved = true;
-                has_moved.move_count += 1;
+                if !success {
+                    error!("[AI] execute_move returned false");
+                    true // Fallback
+                } else {
+                    false // Success
+                }
+            } else {
+                error!("[AI] Piece not found at {:?}", ai_move.from);
+                true // Fallback
+            }
+        }
+        Err(e) => {
+            error!("[AI] Engine error: {}", e);
+            true
+        }
+    };
 
-                info!("[AI] Move Executed: {:?} {:?}: ({},{}) -> ({},{}){}",
-                    piece.color, piece.piece_type,
-                    from_pos.0, from_pos.1, ai_move.to.0, ai_move.to.1,
-                    if was_first_move { " [FIRST MOVE]" } else { "" });
+    if fallback_needed {
+        // Fallback logic
+        warn!("[AI] Attempting fallback move...");
+        let p1_query = pieces_queries.p1();
+        if let Some(fallback_move) =
+            find_fallback_move_fallback(&mut engine, &current_turn, &ai_config, &p1_query)
+        {
+            // drop(p1_query); // Redundant
 
-                // Apply Fischer increment
-                let time_before = match piece.color {
-                    PieceColor::White => game_timer.white_time_left,
-                    PieceColor::Black => game_timer.black_time_left,
-                };
-                game_timer.apply_increment(piece.color);
-                let time_after = match piece.color {
-                    PieceColor::White => game_timer.white_time_left,
-                    PieceColor::Black => game_timer.black_time_left,
-                };
-                info!("[AI] Timer: +{:.1}s increment ({:.1}s -> {:.1}s)",
-                    time_after - time_before, time_before, time_after);
+            // Execute fallback... (simplified: reuse logic above? duplicate limited fallback code here for safety)
+            // We need to find entity again for fallback move
+            // This is getting recursive.
+            // Simplest: just run engine one ply?
+            // Since this is rare, I'll basically copy the execution block or extract it.
+            // But I already extracted `execute_move`.
 
-                // Switch turns
-                current_turn.switch();
-                info!("[AI] Turn Switch: Now {:?}'s turn | Move #{}",
-                    current_turn.color, current_turn.move_number);
-                info!("[AI] Time Remaining: White {:.1}s | Black {:.1}s",
-                    game_timer.white_time_left, game_timer.black_time_left);
+            // Let's implement fallback execution inline quickly
+            let (move_sound, capture_sound) = if let Some(s) = &sounds {
+                (Some(s.move_piece.clone()), Some(s.capture_piece.clone()))
+            } else {
+                (None, None)
+            };
+
+            let p1 = pieces_queries.p1();
+            let mut move_data = None;
+            let mut capture_target = None;
+
+            for (entity, piece, has_moved) in p1.iter() {
+                if piece.x == fallback_move.from.0 && piece.y == fallback_move.from.1 {
+                    move_data = Some((entity, *piece, !has_moved.moved));
+                }
+                if piece.x == fallback_move.to.0 && piece.y == fallback_move.to.1 {
+                    capture_target = Some(CapturedTarget {
+                        entity,
+                        piece_type: piece.piece_type,
+                        color: piece.color,
+                    });
+                }
+            }
+            // drop(p1); // Redundant
+
+            if let Some((entity, piece, was_first_move)) = move_data {
+                execute_move(
+                    "AI_FALLBACK",
+                    &mut commands,
+                    entity,
+                    piece,
+                    fallback_move.to,
+                    capture_target,
+                    was_first_move,
+                    &mut pending_turn,
+                    &mut move_history,
+                    &mut captured_pieces,
+                    &mut engine,
+                    &mut pieces_queries.p0(),
+                    move_sound,
+                    capture_sound,
+                );
             }
         }
     }
+}
+
+/// Find a fallback legal move when the AI engine fails
+fn find_fallback_move_fallback(
+    engine: &mut ResMut<ChessEngine>,
+    current_turn: &CurrentTurn,
+    ai_config: &ChessAIResource,
+    pieces_query: &Query<(Entity, &Piece, &HasMoved)>,
+) -> Option<AIMove> {
+    let ai_color = ai_config.mode.ai_color();
+
+    if current_turn.color != ai_color {
+        return None;
+    }
+
+    engine.sync_ecs_to_engine(pieces_query, current_turn);
+
+    for x in 0..8 {
+        for y in 0..8 {
+            let legal_moves = engine.get_legal_moves_for_square((x, y), ai_color);
+            if !legal_moves.is_empty() {
+                let fallback_to = legal_moves[0];
+                return Some(AIMove {
+                    from: (x, y),
+                    to: fallback_to,
+                    score: 0,
+                    depth: 0,
+                    nodes_searched: 0,
+                    thinking_time: 0.0,
+                });
+            }
+        }
+    }
+
+    None
 }

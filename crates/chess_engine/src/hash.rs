@@ -2,8 +2,8 @@
 //!
 //! Implements position hashing for fast position lookup and caching
 
-use super::types::*;
 use super::constants::*;
+use super::types::*;
 
 /// Simple position hash (simplified Zobrist)
 pub fn position_hash(board: &Board) -> BitBuffer192 {
@@ -72,12 +72,4 @@ pub fn tt_store(game: &mut Game, hash: BitBuffer192, result: HashResult, priorit
         res: result,
         pri: priority,
     };
-}
-
-/// Clear transposition table
-#[allow(dead_code)]
-pub fn tt_clear(game: &mut Game) {
-    for entry in game.tt.iter_mut() {
-        *entry = TTE::default();
-    }
 }

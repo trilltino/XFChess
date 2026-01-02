@@ -32,77 +32,130 @@
 //! - `reference/bevy/examples/3d/3d_shapes.rs` - Material creation and usage
 //! - `reference/bevy/examples/asset/hot_asset_reloading.rs` - Handle management
 
-    use bevy::color::palettes::tailwind::*;
-    use bevy::prelude::*;
+use bevy::color::palettes::tailwind::*;
+use bevy::prelude::*;
 
-    #[derive(Default, Resource, Component, Debug, Clone, Eq, PartialEq)]
-    pub struct Square {
-            pub x: u8,
-            pub y: u8,
-        }
+#[derive(Default, Resource, Component, Debug, Clone, Eq, PartialEq)]
+pub struct Square {
+    pub x: u8,
+    pub y: u8,
+}
 
-    impl Square {
-        /// Returns true if this square should be white in a standard chess board pattern
-        ///
-        /// Uses the formula (x + y + 1) % 2 == 0 to create the traditional checkerboard.
-        /// This method is used during board creation to assign correct square colors.
-        pub fn is_white(&self) -> bool {
-            (self.x + self.y + 1).is_multiple_of(2)
-        }
+impl Square {
+    /// Returns true if this square should be white in a standard chess board pattern
+    ///
+    /// Uses the formula (x + y + 1) % 2 == 0 to create the traditional checkerboard.
+    /// This method is used during board creation to assign correct square colors.
+    pub fn is_white(&self) -> bool {
+        (self.x + self.y + 1).is_multiple_of(2)
     }
+}
 
-        
-    #[derive(Resource, Component)]
-    pub struct SquareMaterials {
-            pub black_color: Handle<StandardMaterial>,
-            pub white_color: Handle<StandardMaterial>,
-            /// Material used for highlighting selected squares and possible move destinations
-            pub hover_matl:  Handle<StandardMaterial>,
-        }
+#[derive(Resource, Component)]
+pub struct SquareMaterials {
+    pub black_color: Handle<StandardMaterial>,
+    pub white_color: Handle<StandardMaterial>,
+    /// Material used for highlighting selected squares and possible move destinations
+    pub hover_matl: Handle<StandardMaterial>,
+    /// Grey material for TempleOS view (light squares)
+    pub grey_color: Handle<StandardMaterial>,
+    /// White material for TempleOS view (dark squares in standard view)
+    pub templeos_white: Handle<StandardMaterial>,
+    /// Shared mesh for move hints (prevent per-frame allocation)
+    pub hint_mesh: Handle<Mesh>,
+    /// Shared mesh for last move highlights (prevent per-frame allocation)
+    pub highlight_mesh: Handle<Mesh>,
+}
 
-    impl FromWorld for SquareMaterials {
-        fn from_world(world: &mut World) -> Self {
-            let mut materials = world.get_resource_mut::<Assets<StandardMaterial>>()
-            .expect("Assets<StandardMaterial> should be initialized before SquareMaterials");
-            SquareMaterials {
-                black_color: materials.add(Color::WHITE),
-                white_color: materials.add(Color::BLACK),
-                hover_matl : materials.add(Color::from(AMBER_100)),
-            }
-        }
-    }
-  
-    #[derive(Debug, Resource)]
-    pub struct ReturnMaterials;
-
-    impl Default for ReturnMaterials {
-        fn default() -> Self {
-            ReturnMaterials
-        }
-    }
-
-    impl ReturnMaterials {
-        /// Returns the original material for a square based on its color
-        ///
-        /// This method is used to restore square colors after hover/selection effects.
-        /// White squares get black_color material, black squares get white_color material.
-        /// Handle is Clone (not Copy), so we clone from Res
-        pub fn get_original_material(&self, square: &Square, materials: &SquareMaterials) -> Handle<StandardMaterial> {
-            if square.is_white() {
-                materials.black_color.clone()
+impl FromWorld for SquareMaterials {
+    fn from_world(world: &mut World) -> Self {
+        // Get GameSettings first (immutable borrow)
+        let (light_color, dark_color) =
+            if let Some(settings) = world.get_resource::<crate::core::GameSettings>() {
+                settings.board_theme.colors()
             } else {
-                materials.white_color.clone()
-            }
-        }
-    }
+                // Default Classic theme colors
+                (Color::srgb(0.93, 0.93, 0.82), Color::srgb(0.46, 0.59, 0.34))
+            };
 
-    pub struct BoardUtils;
-    impl Plugin for BoardUtils {
-        fn build(&self, app: &mut App) {
-            app.init_resource::<SquareMaterials>();
-            app.init_resource::<ReturnMaterials>();
+        // Now get materials (mutable borrow) - settings borrow is dropped
+        // Note: Assets<StandardMaterial> should always be available (part of DefaultPlugins)
+        // but we handle the error case gracefully for robustness
+        let mut materials = match world.get_resource_mut::<Assets<StandardMaterial>>() {
+            Some(m) => m,
+            None => {
+                error!("[RENDERING] Assets<StandardMaterial> not available during SquareMaterials initialization");
+                error!("[RENDERING] This should not happen - DefaultPlugins should provide this resource");
+                // This is a critical error - return a placeholder that will cause issues
+                // but at least won't panic. In practice, this should never happen.
+                panic!("Assets<StandardMaterial> must be initialized before SquareMaterials - check plugin order");
+            }
+        };
+
+        // Create unlit materials for TempleOS mode (flat colors without lighting)
+        // Matching reference image: dark grey for black squares, white for white squares
+        let grey_material = StandardMaterial {
+            base_color: Color::srgb(0.35, 0.35, 0.35), // Dark grey for black squares
+            unlit: true,                               // Unlit for flat 2D appearance
+            ..default()
+        };
+        let white_material = StandardMaterial {
+            base_color: Color::srgb(1.0, 1.0, 1.0), // Pure white for white squares
+            unlit: true,                            // Unlit for flat 2D appearance
+            ..default()
+        };
+
+        SquareMaterials {
+            black_color: materials.add(light_color), // Light squares
+            white_color: materials.add(dark_color),  // Dark squares
+            hover_matl: materials.add(Color::from(AMBER_100)),
+            grey_color: materials.add(grey_material), // Dull grey for TempleOS (unlit)
+            templeos_white: materials.add(white_material), // Bright white for TempleOS (unlit)
+            hint_mesh: world
+                .resource_mut::<Assets<Mesh>>()
+                .add(Plane3d::default().mesh().size(0.9, 0.9)),
+            highlight_mesh: world
+                .resource_mut::<Assets<Mesh>>()
+                .add(Plane3d::default().mesh().size(0.95, 0.95)),
         }
     }
+}
+
+#[derive(Debug, Resource)]
+pub struct ReturnMaterials;
+
+impl Default for ReturnMaterials {
+    fn default() -> Self {
+        ReturnMaterials
+    }
+}
+
+impl ReturnMaterials {
+    /// Returns the original material for a square based on its color
+    ///
+    /// This method is used to restore square colors after hover/selection effects.
+    /// White squares get black_color material, black squares get white_color material.
+    /// Handle is Clone (not Copy), so we clone from Res
+    pub fn get_original_material(
+        &self,
+        square: &Square,
+        materials: &SquareMaterials,
+    ) -> Handle<StandardMaterial> {
+        if square.is_white() {
+            materials.black_color.clone()
+        } else {
+            materials.white_color.clone()
+        }
+    }
+}
+
+pub struct BoardUtils;
+impl Plugin for BoardUtils {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<SquareMaterials>();
+        app.init_resource::<ReturnMaterials>();
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -42,8 +42,8 @@
 //! - `crates/chess_engine/README.md` - Engine architecture and strength
 //! - ELO ratings are approximate based on depth-to-strength correlation studies
 
-use bevy::prelude::*;
 use crate::rendering::pieces::PieceColor;
+use bevy::prelude::*;
 
 /// Main resource for chess AI configuration
 ///
@@ -93,13 +93,14 @@ pub struct ChessAIResource {
 }
 
 impl Default for ChessAIResource {
-    /// Creates a default AI configuration (human vs human, medium difficulty)
+    /// Creates a default AI configuration (AI plays Black, medium difficulty)
     ///
-    /// Default mode is VsHuman to prevent AI from activating unexpectedly
-    /// when the resource is first initialized.
+    /// Default mode has AI playing Black (standard setup).
     fn default() -> Self {
         Self {
-            mode: GameMode::VsHuman,
+            mode: GameMode::VsAI {
+                ai_color: PieceColor::Black,
+            },
             difficulty: AIDifficulty::Medium,
         }
     }
@@ -107,20 +108,15 @@ impl Default for ChessAIResource {
 
 /// Game mode selection
 ///
-/// Determines whether the game is human vs human or human vs AI, and if AI,
-/// which color the AI plays.
+/// Determines which color the AI plays.
 ///
 /// # Variants
 ///
-/// - **VsHuman**: Two humans play locally (hot-seat mode)
 /// - **VsAI**: One human vs AI opponent
 ///
 /// # Examples
 ///
 /// ```rust,ignore
-/// // Human vs Human
-/// let mode = GameMode::VsHuman;
-///
 /// // Human plays White, AI plays Black
 /// let mode = GameMode::VsAI { ai_color: PieceColor::Black };
 ///
@@ -134,9 +130,7 @@ impl Default for ChessAIResource {
 ///
 /// ```rust,ignore
 /// fn spawn_ai_task_system(ai_config: Res<ChessAIResource>, current_turn: Res<CurrentTurn>) {
-///     let GameMode::VsAI { ai_color } = ai_config.mode else {
-///         return; // Human vs Human, AI inactive
-///     };
+///     let ai_color = ai_config.mode.ai_color;
 ///
 ///     if current_turn.color != ai_color {
 ///         return; // Not AI's turn
@@ -147,12 +141,6 @@ impl Default for ChessAIResource {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
 pub enum GameMode {
-    /// Two human players (local multiplayer)
-    ///
-    /// Both white and black pieces are controlled by human input.
-    /// AI systems remain inactive. This is the default mode.
-    VsHuman,
-
     /// Human vs AI opponent
     ///
     /// The specified color is controlled by the AI engine.
@@ -166,8 +154,19 @@ pub enum GameMode {
         ///
         /// When `current_turn.color == ai_color`, AI systems spawn
         /// a move computation task.
-        ai_color: PieceColor
+        ai_color: PieceColor,
     },
+}
+
+impl GameMode {
+    /// Get the AI player's color
+    ///
+    /// Returns the color that the AI is playing.
+    pub fn ai_color(self) -> PieceColor {
+        match self {
+            GameMode::VsAI { ai_color } => ai_color,
+        }
+    }
 }
 
 /// AI difficulty levels corresponding to search time and depth
@@ -317,25 +316,36 @@ mod tests {
 
     #[test]
     fn test_chess_ai_resource_default() {
-        //! Verifies ChessAIResource defaults to VsHuman mode
+        //! Verifies ChessAIResource defaults to VsAI mode with Black AI
         let ai_config = ChessAIResource::default();
-        assert_eq!(ai_config.mode, GameMode::VsHuman);
+        assert!(matches!(
+            ai_config.mode,
+            GameMode::VsAI {
+                ai_color: PieceColor::Black
+            }
+        ));
         assert_eq!(ai_config.difficulty, AIDifficulty::Medium);
     }
 
     #[test]
     fn test_game_mode_equality() {
         //! Tests GameMode equality comparisons
-        assert_eq!(GameMode::VsHuman, GameMode::VsHuman);
         assert_eq!(
-            GameMode::VsAI { ai_color: PieceColor::White },
-            GameMode::VsAI { ai_color: PieceColor::White }
+            GameMode::VsAI {
+                ai_color: PieceColor::White
+            },
+            GameMode::VsAI {
+                ai_color: PieceColor::White
+            }
         );
         assert_ne!(
-            GameMode::VsAI { ai_color: PieceColor::White },
-            GameMode::VsAI { ai_color: PieceColor::Black }
+            GameMode::VsAI {
+                ai_color: PieceColor::White
+            },
+            GameMode::VsAI {
+                ai_color: PieceColor::Black
+            }
         );
-        assert_ne!(GameMode::VsHuman, GameMode::VsAI { ai_color: PieceColor::Black });
     }
 
     #[test]
@@ -385,7 +395,9 @@ mod tests {
     #[test]
     fn test_game_mode_clone() {
         //! Verifies GameMode can be cloned
-        let original = GameMode::VsAI { ai_color: PieceColor::White };
+        let original = GameMode::VsAI {
+            ai_color: PieceColor::White,
+        };
         let cloned = original.clone();
         assert_eq!(original, cloned);
     }
@@ -396,7 +408,9 @@ mod tests {
         let mut ai_config = ChessAIResource::default();
 
         // Start human vs AI with AI playing black
-        ai_config.mode = GameMode::VsAI { ai_color: PieceColor::Black };
+        ai_config.mode = GameMode::VsAI {
+            ai_color: PieceColor::Black,
+        };
         ai_config.difficulty = AIDifficulty::Hard;
 
         if let GameMode::VsAI { ai_color } = ai_config.mode {
