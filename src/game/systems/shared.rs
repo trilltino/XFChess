@@ -1,4 +1,4 @@
-use crate::game::components::{Captured, FadingCapture, HasMoved, MoveRecord, PieceMoveAnimation};
+use crate::game::components::{FadingCapture, HasMoved, MoveRecord, PieceMoveAnimation};
 use crate::game::resources::{CapturedPieces, ChessEngine, MoveHistory, PendingTurnAdvance};
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::audio::{AudioPlayer, AudioSource};

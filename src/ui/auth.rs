@@ -3,9 +3,7 @@ use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use futures_lite::future;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 
 // --- Resources ---
 
@@ -117,7 +115,7 @@ fn auth_ui_system(
 
     // Draw Background
     egui::CentralPanel::default()
-        .frame(egui::Frame::none().fill(egui::Color32::BLACK))
+        .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
         .show(ctx, |ui| {
             if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
                 println!(
@@ -282,6 +280,7 @@ fn auth_ui_system(
         });
 }
 
+#[allow(dead_code)] // May be used when gradient background is re-enabled
 fn draw_dark_gradient(ui: &mut egui::Ui, rect: egui::Rect) {
     let top_color = egui::Color32::from_rgb(25, 25, 30);
     let bottom_color = egui::Color32::from_rgb(5, 5, 8);
@@ -421,7 +420,7 @@ fn perform_auth(auth_state: &mut ResMut<AuthState>, commands: &mut Commands) {
 
 fn handle_auth_task(
     mut commands: Commands,
-    mut auth_task: Option<ResMut<AuthTask>>,
+    auth_task: Option<ResMut<AuthTask>>,
     mut auth_state: ResMut<AuthState>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {

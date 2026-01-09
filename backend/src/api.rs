@@ -1,17 +1,15 @@
 use crate::auth;
 use axum::{
     extract::{Json, State},
-    routing::{get, post},
+    routing::post,
     Router,
 };
 use base64::prelude::*;
-use lightyear::prelude::*;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Sqlite};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 pub struct AppState {

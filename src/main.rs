@@ -69,13 +69,10 @@
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::ecs::error::{warn as bevy_warn, BevyError, ErrorContext};
 use bevy::input::common_conditions::input_toggle_active;
-use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy::render::settings::{PowerPreference, RenderCreation, WgpuSettings};
 use bevy::render::RenderPlugin;
-use bevy_egui::{
-    EguiGlobalSettings, EguiMultipassSchedule, EguiPrimaryContextPass, PrimaryEguiContext,
-};
+use bevy_egui::EguiPrimaryContextPass;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -97,10 +94,9 @@ pub use persistent_camera::PersistentEguiCamera;
 
 // Imports
 use crate::persistent_camera::setup_persistent_egui_camera;
-use core::{CorePlugin, DespawnOnExit, GameState, WindowConfig};
+use core::{CorePlugin, GameState, WindowConfig};
 use game::systems::{reset_game_camera, setup_game_camera, setup_game_scene, setup_global_scene};
-use game::{CameraController, GamePlugin};
-use input::*;
+use game::GamePlugin;
 use rendering::*;
 use states::*;
 

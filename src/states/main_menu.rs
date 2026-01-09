@@ -181,28 +181,28 @@ fn spawn_shooting_stars(
     mut materials: ResMut<Assets<StandardMaterial>>,
     time: Res<Time>,
 ) {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Low chance to spawn per frame, adjusted for delta time
-    if rng.gen_bool(0.01) {
+    if rng.random_bool(0.01) {
         let spawn_distance = 400.0;
 
         // Random start position high up and far away
         let start_pos = Vec3::new(
-            rng.gen_range(-spawn_distance..spawn_distance),
-            rng.gen_range(100.0..300.0), // High up
-            rng.gen_range(-spawn_distance..spawn_distance),
+            rng.random_range(-spawn_distance..spawn_distance),
+            rng.random_range(100.0..300.0), // High up
+            rng.random_range(-spawn_distance..spawn_distance),
         );
 
         // Calculate velocity (moving downwards and across)
         let end_pos = Vec3::new(
-            rng.gen_range(-100.0..100.0),
-            rng.gen_range(-50.0..50.0),
-            rng.gen_range(-100.0..100.0),
+            rng.random_range(-100.0..100.0),
+            rng.random_range(-50.0..50.0),
+            rng.random_range(-100.0..100.0),
         );
 
         // Fast speed for the head
-        let velocity = (end_pos - start_pos).normalize() * rng.gen_range(200.0..350.0);
+        let velocity = (end_pos - start_pos).normalize() * rng.random_range(200.0..350.0);
 
         // Head mesh (small glowing sphere)
         let mesh = meshes.add(Sphere::new(0.5)); // Smaller head
@@ -239,7 +239,7 @@ fn emit_trail_particles(
     mut materials: ResMut<Assets<StandardMaterial>>,
     time: Res<Time>,
 ) {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Shared material for particles (optimization: could be cached resource)
     let particle_material = materials.add(StandardMaterial {
@@ -258,12 +258,12 @@ fn emit_trail_particles(
 
             // Spawn particle at current position with slight randomization
             let jitter = Vec3::new(
-                rng.gen_range(-0.5..0.5),
-                rng.gen_range(-0.5..0.5),
-                rng.gen_range(-0.5..0.5),
+                rng.random_range(-0.5..0.5),
+                rng.random_range(-0.5..0.5),
+                rng.random_range(-0.5..0.5),
             );
 
-            let scale = Vec3::splat(rng.gen_range(0.8..1.2));
+            let scale = Vec3::splat(rng.random_range(0.8..1.2));
 
             commands.spawn((
                 Mesh3d(particle_mesh.clone()),
@@ -293,7 +293,7 @@ fn animate_shooting_stars(
     for (entity, mut transform, mut star) in query.iter_mut() {
         star.lifetime.tick(time.delta());
 
-        if star.lifetime.finished() {
+        if star.lifetime.is_finished() {
             commands.entity(entity).despawn();
             continue;
         }
@@ -312,7 +312,7 @@ fn animate_particles(
     for (entity, mut transform, mut particle) in query.iter_mut() {
         particle.lifetime.tick(time.delta());
 
-        if particle.lifetime.finished() {
+        if particle.lifetime.is_finished() {
             commands.entity(entity).despawn();
             continue;
         }
@@ -531,8 +531,8 @@ fn setup_menu_camera(
 /// Spawn the fog volume entity for intro reveal effect
 fn spawn_fog_volume(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -583,7 +583,7 @@ fn animate_intro_fog(
     )>,
     #[cfg(target_arch = "wasm32")] mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if fog_state.timer.finished() {
+    if fog_state.timer.is_finished() {
         return;
     }
 
@@ -623,7 +623,7 @@ fn spawn_star_spheres(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     // Increased to 2500 stars for deep space density
     let num_stars = 2500;
 
@@ -651,9 +651,9 @@ fn spawn_star_spheres(
         // Random positions with a huge "safe zone" for deep space feel
         // Rejection sampling to keep stars extremely far away
         let (x, y, z) = loop {
-            let x = rng.gen_range(-4000.0..4000.0);
-            let y = rng.gen_range(-2000.0..2000.0); // Flatter galaxy-like spread
-            let z = rng.gen_range(-4000.0..4000.0);
+            let x = rng.random_range(-4000.0..4000.0);
+            let y = rng.random_range(-2000.0..2000.0); // Flatter galaxy-like spread
+            let z = rng.random_range(-4000.0..4000.0);
 
             // Keep stars at least 800 units away from center
             if Vec3::new(x, y, z).length() > 800.0 {
@@ -662,7 +662,7 @@ fn spawn_star_spheres(
         };
 
         // Very large stars to be visible at this extreme distance
-        let radius = rng.gen_range(3.0..6.0);
+        let radius = rng.random_range(3.0..6.0);
 
         let mut star_cmds = commands.spawn((
             Mesh3d(meshes.add(Sphere::new(radius))),

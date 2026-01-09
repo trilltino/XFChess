@@ -762,8 +762,8 @@ fn cleanup_piece_viewer(
 fn piece_viewer_ui_wrapper(
     contexts: EguiContexts,
     next_state: ResMut<NextState<MenuState>>,
-    mut viewer_state: ResMut<PieceViewerState>,
-    mut selected_piece: ResMut<SelectedPieceInfo>,
+    viewer_state: ResMut<PieceViewerState>,
+    selected_piece: ResMut<SelectedPieceInfo>,
 ) {
     match piece_viewer_ui(contexts, next_state, viewer_state, selected_piece) {
         Ok(()) => {
@@ -809,7 +809,7 @@ fn piece_viewer_ui(
                     // Color Selection
                     ui.horizontal(|ui| {
                         ui.label(TextStyle::body("Color:"));
-                        egui::ComboBox::from_id_source("piece_color")
+                        egui::ComboBox::from_id_salt("piece_color")
                             .selected_text(format!("{:?}", current_color))
                             .show_ui(ui, |ui| {
                                 if ui
@@ -840,7 +840,7 @@ fn piece_viewer_ui(
                     // Type Selection
                     ui.horizontal(|ui| {
                         ui.label(TextStyle::body("Type:"));
-                        egui::ComboBox::from_id_source("piece_type")
+                        egui::ComboBox::from_id_salt("piece_type")
                             .selected_text(format!("{:?}", current_type))
                             .show_ui(ui, |ui| {
                                 let types = [

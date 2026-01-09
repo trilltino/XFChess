@@ -157,7 +157,7 @@ fn track_connections(
 fn handle_lobby_messages(
     mut query: Query<(Entity, &RemoteId, &mut MessageReceiver<LobbyMessage>)>,
     mut senders: Query<&mut MessageSender<LobbyMessage>>,
-    mut game_senders: Query<&mut MessageSender<GameMessage>>,
+    game_senders: Query<&mut MessageSender<GameMessage>>,
     mut rooms: ResMut<GameRooms>,
 ) {
     // Collect actions to avoid borrow conflicts

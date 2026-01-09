@@ -32,7 +32,6 @@
 //! - `reference/bevy/examples/3d/3d_shapes.rs` - Material creation and usage
 //! - `reference/bevy/examples/asset/hot_asset_reloading.rs` - Handle management
 
-use bevy::color::palettes::tailwind::*;
 use bevy::prelude::*;
 
 #[derive(Default, Resource, Component, Debug, Clone, Eq, PartialEq)]

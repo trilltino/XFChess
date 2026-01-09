@@ -5,7 +5,7 @@ use crate::networking::client::{
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use lightyear::prelude::*;
-use shared::protocol::{Channel1, LobbyMessage};
+use shared::protocol::LobbyMessage;
 
 pub struct MultiplayerMenuPlugin;
 

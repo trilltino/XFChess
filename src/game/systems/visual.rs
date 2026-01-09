@@ -148,7 +148,7 @@ pub fn animate_capture_fade(
         }
 
         // When fade completes, move to capture zone
-        if fading.timer.finished() {
+        if fading.timer.is_finished() {
             commands.entity(entity).remove::<FadingCapture>();
             commands.entity(entity).insert((
                 Transform::from_translation(fading.capture_zone_pos),

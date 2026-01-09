@@ -22,7 +22,6 @@
 //! transitions). The wrapper function in `game::plugin` handles these errors.
 
 use crate::core::GameState;
-use crate::game::ai::GameMode;
 use crate::game::components::{GamePhase, MoveRecord};
 use crate::rendering::pieces::{PieceColor, PieceType};
 use crate::ui::styles::*;
@@ -220,6 +219,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
 }
 
 /// Format engine score for display
+#[allow(dead_code)] // May be used when move notation panel is re-enabled
 fn format_score(score: i64) -> String {
     if score.abs() > 9000 {
         // Checkmate score
@@ -240,6 +240,7 @@ fn format_score(score: i64) -> String {
 }
 
 /// Format node count with commas
+#[allow(dead_code)] // May be used when move notation panel is re-enabled
 fn format_nodes(nodes: i64) -> String {
     let s = nodes.to_string();
     let mut result = String::new();
@@ -253,6 +254,7 @@ fn format_nodes(nodes: i64) -> String {
 }
 
 /// Convert piece type to text abbreviation
+#[allow(dead_code)] // May be used when move notation panel is re-enabled
 fn piece_unicode(piece_type: PieceType, color: PieceColor) -> String {
     let symbol = match (color, piece_type) {
         (PieceColor::White, PieceType::King) => "K",
@@ -278,6 +280,7 @@ fn piece_unicode(piece_type: PieceType, color: PieceColor) -> String {
 /// - e4, Nf3, O-O, O-O-O
 /// - exd5, Nxe5, Qxf7+
 /// - e8=Q, f8=N#
+#[allow(dead_code)] // May be used when move notation panel is re-enabled
 fn move_to_notation(move_record: &MoveRecord) -> String {
     // Castling notation
     if move_record.is_castling {
@@ -347,6 +350,7 @@ fn move_to_notation(move_record: &MoveRecord) -> String {
 }
 
 /// Convert (x, y) coordinates to chess square notation (e.g., (4, 0) -> "e1")
+#[allow(dead_code)] // May be used when move notation panel is re-enabled
 fn square_to_notation(pos: (u8, u8)) -> String {
     let file = (b'a' + pos.0) as char;
     let rank = (b'1' + pos.1) as char;

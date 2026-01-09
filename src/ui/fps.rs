@@ -2,7 +2,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-use crate::ui::styles::{TextStyle, UiColors};
+use crate::ui::styles::UiColors;
 
 /// System to display FPS counter
 pub fn fps_ui(mut contexts: EguiContexts, diagnostics: Res<DiagnosticsStore>) {
