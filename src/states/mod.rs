@@ -21,8 +21,12 @@
 
 pub mod game_over;
 pub mod main_menu;
+pub mod main_menu_showcase;
+pub mod multiplayer_menu;
 pub mod pause;
 pub mod piece_viewer;
+pub use multiplayer_menu::MultiplayerMenuPlugin;
+
 pub mod settings;
 
 // Re-export plugins for convenience

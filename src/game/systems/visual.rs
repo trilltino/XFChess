@@ -1,17 +1,4 @@
-//! Visual update systems for highlighting and animation
-//!
-//! These systems handle visual feedback for player interactions:
-//! - Square highlighting for selected pieces and valid moves
-//! - Piece movement animations
-//! - Visual state restoration
-//!
-//! # Execution Order
-//!
-//! These systems run in the `Visual` system set, after all game logic
-//! has been processed. This ensures visual updates reflect the current
-//! game state.
-
-use crate::game::components::PieceMoveAnimation;
+use crate::game::components::{Captured, FadingCapture, PieceMoveAnimation};
 use crate::game::resources::{CurrentTurn, GameTimer, PendingTurnAdvance, Selection};
 use crate::rendering::pieces::Piece;
 use crate::rendering::utils::{ReturnMaterials, Square, SquareMaterials};
@@ -133,4 +120,138 @@ pub fn animate_piece_movement(
             );
         }
     }
+}
+
+/// System to animate captured pieces fading out
+///
+/// Pieces with FadingCapture component fade out over time, then move to capture zone.
+pub fn animate_capture_fade(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut query: Query<(
+        Entity,
+        &mut FadingCapture,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (entity, mut fading, material_handle) in query.iter_mut() {
+        fading.timer.tick(time.delta());
+
+        // Calculate fade progress (1.0 = start, 0.0 = end)
+        let alpha = 1.0 - fading.timer.fraction();
+
+        // Update material alpha
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.base_color = material.base_color.with_alpha(alpha);
+            material.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+        }
+
+        // When fade completes, move to capture zone
+        if fading.timer.finished() {
+            commands.entity(entity).remove::<FadingCapture>();
+            commands.entity(entity).insert((
+                Transform::from_translation(fading.capture_zone_pos),
+                Captured,
+            ));
+
+            // Reset alpha to 1.0 for display in capture zone
+            if let Some(material) = materials.get_mut(&material_handle.0) {
+                material.base_color = material.base_color.with_alpha(1.0);
+            }
+        }
+    }
+}
+
+/// Setup global scene elements (persistent background, ambient light)
+///
+/// These elements persist across all game states and provide
+/// a base visual environment.
+pub fn setup_global_scene(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // Global background (pure black environment)
+    let background_color = Color::srgb(0.0, 0.0, 0.0); // Pure black
+
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(2.0, 1.0, 1.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: background_color,
+            unlit: true,
+            cull_mode: None,
+            ..default()
+        })),
+        Transform::from_scale(Vec3::splat(1_000_000.0)),
+        Name::new("Global Background"),
+    ));
+
+    // Global ambient light - set to pure black (changed from blue-gray)
+    commands.insert_resource(AmbientLight {
+        color: Color::srgb(0.0, 0.0, 0.0), // Pure black - no ambient light tint
+        brightness: 0.0,                   // Zero brightness
+        affects_lightmapped_meshes: true,
+    });
+}
+
+/// Setup game scene when entering InGame state
+///
+/// Spawns the game camera, lighting, and chess board.
+pub fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view_mode::ViewMode>) {
+    use crate::core::DespawnOnExit;
+    use crate::core::GameState;
+
+    // Set background color based on view mode
+    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
+        // Vibrant solid yellow background matching reference image (#FFFF00)
+        commands.insert_resource(ClearColor(Color::srgb(1.0, 1.0, 0.0))); // Pure yellow #FFFF00
+    } else {
+        // Default dark background for standard view
+        commands.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0))); // Black
+    }
+
+    // Setup camera based on view mode
+    // TempleOS camera is set up by the board plugin, so we only create standard camera here
+    // UPDATE: We now reuse the PersistentEguiCamera for standard view (in setup_game_camera system)
+    // so we ONLY need to handle TempleOS specific setup or lights here.
+
+    // lights...
+
+    // Skip lights for TempleOS mode (unlit rendering)
+    if *view_mode != crate::game::view_mode::ViewMode::TempleOS {
+        // Main directional light (chess tournament lighting)
+        commands.spawn((
+            DirectionalLight {
+                illuminance: 8000.0,
+                shadows_enabled: true,
+                color: Color::srgb(1.0, 0.98, 0.95), // Warm white
+                ..default()
+            },
+            Transform::from_rotation(Quat::from_euler(
+                EulerRot::XYZ,
+                -std::f32::consts::FRAC_PI_4,
+                std::f32::consts::FRAC_PI_4,
+                0.0,
+            )),
+            DespawnOnExit(GameState::InGame),
+            Name::new("Main Directional Light"),
+        ));
+
+        // Fill light (reduces harsh shadows)
+        commands.spawn((
+            PointLight {
+                intensity: 500_000.0,
+                color: Color::srgb(0.9, 0.9, 1.0), // Slightly blue
+                shadows_enabled: false,
+                range: 30.0,
+                ..default()
+            },
+            Transform::from_xyz(-10.0, 10.0, 10.0),
+            DespawnOnExit(GameState::InGame),
+            Name::new("Fill Light"),
+        ));
+    }
+
+    // Note: Ambient light is set globally in setup_global_scene (Startup)
 }

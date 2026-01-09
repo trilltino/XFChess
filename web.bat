@@ -5,7 +5,7 @@ REM This script uses Trunk to build and serve the application
 setlocal enabledelayedexpansion
 
 echo ========================================
-echo XFChess WebAssembly Build Script
+echo       XFChess Web Launcher
 echo ========================================
 echo.
 
@@ -57,10 +57,14 @@ REM Step 3: Serve with Trunk
 echo [3/3] Starting Trunk Server...
 echo.
 
-REM Set RUSTFLAGS for getrandom v0.3+ WASM support
-set RUSTFLAGS=--cfg getrandom_backend=^"wasm_js^"
+REM Enable detailed logging (RUSTFLAGS now set in .cargo/config.toml for cache consistency)
+set RUST_LOG=info,wgpu=warn
 
-echo The application will be properly built and served by Trunk.
+echo Configuration:
+echo - RUST_LOG: %RUST_LOG%
+echo - RUSTFLAGS: (set in .cargo/config.toml)
+echo.
+echo The application will be built and served by Trunk.
 echo Opening http://localhost:8080 in your browser...
 echo.
 echo Press Ctrl+C to stop the server.
@@ -77,4 +81,3 @@ if errorlevel 1 (
 )
 
 pause
-

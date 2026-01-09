@@ -91,6 +91,9 @@ impl Plugin for CorePlugin {
         // Note: GameSettings will be loaded from file in load_settings_system
         app.init_resource::<GameStatistics>();
 
+        // Set default clear color to pure black for opening scene
+        app.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)));
+
         // Initialize state lifecycle auditing
         app.init_resource::<StateAuditTimer>();
 
@@ -101,6 +104,7 @@ impl Plugin for CorePlugin {
             .register_type::<GameStatistics>();
 
         // Add settings persistence system (runs in Startup schedule)
+        // Initialize settings
         app.add_systems(Startup, load_settings_system);
 
         // Add state logging and validation systems
@@ -148,9 +152,11 @@ impl Plugin for CorePlugin {
     fn finish(&self, _app: &mut App) {
         // Set up panic hook in finish() to ensure it's configured
         // after all plugins are built but before the app runs
+        #[cfg(not(target_arch = "wasm32"))]
         setup_panic_hook();
 
         // Enable full backtraces for debugging
+        #[cfg(not(target_arch = "wasm32"))]
         std::env::set_var("RUST_BACKTRACE", "full");
     }
 }

@@ -66,6 +66,7 @@
 //! - `reference/bevy-inspector-egui/` - Inspector integration
 //! - `reference/bevy-3d-chess/` - Alternative chess implementation
 
+use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::ecs::error::{warn as bevy_warn, BevyError, ErrorContext};
 use bevy::input::common_conditions::input_toggle_active;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
@@ -73,8 +74,7 @@ use bevy::prelude::*;
 use bevy::render::settings::{PowerPreference, RenderCreation, WgpuSettings};
 use bevy::render::RenderPlugin;
 use bevy_egui::{
-    EguiContext, EguiGlobalSettings, EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass,
-    PrimaryEguiContext,
+    EguiGlobalSettings, EguiMultipassSchedule, EguiPrimaryContextPass, PrimaryEguiContext,
 };
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use std::fs::{self, OpenOptions};
@@ -87,6 +87,7 @@ mod audio;
 mod core;
 mod game;
 mod input;
+mod networking;
 mod persistent_camera;
 mod rendering;
 mod states;
@@ -95,7 +96,9 @@ mod ui;
 pub use persistent_camera::PersistentEguiCamera;
 
 // Imports
+use crate::persistent_camera::setup_persistent_egui_camera;
 use core::{CorePlugin, DespawnOnExit, GameState, WindowConfig};
+use game::systems::{reset_game_camera, setup_game_camera, setup_game_scene, setup_global_scene};
 use game::{CameraController, GamePlugin};
 use input::*;
 use rendering::*;
@@ -197,7 +200,9 @@ fn configure_core_plugins(app: &mut App) {
             .disable::<bevy::log::LogPlugin>(),
     );
     app.add_plugins(FileLoggerPlugin);
+    app.register_asset_loader(rendering::obj_loader::ObjLoader);
     app.add_plugins(CorePlugin);
+    app.add_plugins(FrameTimeDiagnosticsPlugin::default());
 }
 
 /// Custom plugin to handle file logging
@@ -253,13 +258,13 @@ impl Plugin for FileLoggerPlugin {
 }
 
 fn configure_gui_plugins(app: &mut App) {
-    app.add_plugins(EguiPlugin::default());
-    app.add_systems(
-        PreStartup,
-        |mut egui_settings: ResMut<EguiGlobalSettings>| {
-            egui_settings.auto_create_primary_context = false;
-        },
-    );
+    app.add_plugins(bevy_egui::EguiPlugin::default());
+    // app.add_systems(
+    //     PreStartup,
+    //     |mut egui_settings: ResMut<EguiGlobalSettings>| {
+    //         egui_settings.auto_create_primary_context = false;
+    //     },
+    // );
     app.add_plugins(
         WorldInspectorPlugin::default().run_if(input_toggle_active(false, KeyCode::F1)),
     );
@@ -267,6 +272,8 @@ fn configure_gui_plugins(app: &mut App) {
         EguiPrimaryContextPass,
         crate::ui::inspector::inspector_ui.run_if(input_toggle_active(false, KeyCode::F1)),
     );
+    app.add_plugins(crate::ui::auth::AuthUiPlugin);
+    app.add_plugins(crate::ui::chat::ChatUiPlugin);
 }
 
 fn initialize_resources(app: &mut App) {
@@ -282,17 +289,19 @@ fn configure_state_plugins(app: &mut App) {
     app.add_plugins(PausePlugin);
     app.add_plugins(GameOverPlugin);
     app.add_plugins(PieceViewerPlugin);
+    app.add_plugins(MultiplayerMenuPlugin);
 }
 
 fn configure_game_plugins(app: &mut App) {
     // app.add_plugins(DefaultPickingPlugins); // Already added by DefaultPlugins in Bevy 0.17+
-    app.add_plugins(MeshPickingPlugin);
-    app.add_plugins(PointerEventsPlugin);
+    // app.add_plugins(MeshPickingPlugin);
+
     app.add_plugins(PiecePlugin);
     app.add_plugins(BoardPlugin);
     app.add_plugins(BoardUtils);
     app.add_plugins(DynamicLightingPlugin);
     app.add_plugins(GamePlugin);
+    app.add_plugins(networking::NetworkingPlugin);
 }
 
 fn configure_game_state_systems(app: &mut App) {
@@ -321,66 +330,9 @@ fn configure_game_state_systems(app: &mut App) {
             handle_pause_input.run_if(in_state(GameState::InGame)),
             game::systems::check_and_play_templeos_sound.run_if(in_state(GameState::InGame)),
             game::systems::update_camera_position_ui.run_if(in_state(GameState::InGame)),
+            toggle_fullscreen, // F11 fullscreen toggle - always active
         ),
     );
-}
-
-/// Configure the persistent camera for gameplay
-/// Use the existing Egui camera as the main game camera to avoid conflicts
-fn setup_game_camera(
-    mut commands: Commands,
-    persistent_camera: Res<PersistentEguiCamera>,
-    view_mode: Res<crate::game::view_mode::ViewMode>,
-    mut query: Query<(&mut Transform, &mut Camera)>,
-) {
-    // Only configure for standard view (TempleOS handles its own camera/view)
-    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
-        return;
-    }
-
-    if let Some(entity) = persistent_camera.entity {
-        if let Ok((mut transform, mut camera)) = query.get_mut(entity) {
-            // Position for gameplay: behind White, angled down
-            let initial_height = 10.0;
-            let board_center = Vec3::new(3.5, 0.0, 3.5);
-            let camera_pos = Vec3::new(3.5, initial_height, -8.0);
-
-            *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
-
-            // Ensure order is correct (0 is standard for 3D)
-            camera.order = 0;
-
-            // Add RTS camera controls
-            commands.entity(entity).insert(CameraController {
-                current_zoom: initial_height,
-                target_zoom: initial_height,
-                min_zoom: 3.0,
-                max_zoom: 30.0,
-                ..Default::default()
-            });
-
-            info!("[CAMERA] Configured Persistent Camera for Gameplay");
-        }
-    }
-}
-
-/// Reset the persistent camera when exiting gameplay
-fn reset_game_camera(
-    mut commands: Commands,
-    persistent_camera: Res<PersistentEguiCamera>,
-    mut query: Query<&mut Camera>,
-) {
-    if let Some(entity) = persistent_camera.entity {
-        // Remove RTS controls
-        commands.entity(entity).remove::<CameraController>();
-
-        // Reset order if needed (though 0 is usually fine for menus too)
-        if let Ok(mut camera) = query.get_mut(entity) {
-            camera.order = 0;
-        }
-
-        info!("[CAMERA] Reset Persistent Camera (Removed Controls)");
-    }
 }
 
 fn configure_settings_systems(app: &mut App) {
@@ -408,144 +360,6 @@ fn log_system_errors() {
     // In the future, we could add more sophisticated error tracking here
 }
 
-/// Setup global scene elements (persistent background, ambient light)
-///
-/// These elements persist across all game states and provide
-/// a base visual environment.
-fn setup_global_scene(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // Global background (dark space-like environment)
-    // Use safe hex color parsing with fallback
-    let background_color = crate::core::error_handling::safe_parse_hex_color(
-        "0a0a15",
-        Srgba::new(0.04, 0.04, 0.08, 1.0), // Fallback: very dark blue
-        "setup_global_scene background",
-    );
-
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(2.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: background_color.into(),
-            unlit: true,
-            cull_mode: None,
-            ..default()
-        })),
-        Transform::from_scale(Vec3::splat(1_000_000.0)),
-        Name::new("Global Background"),
-    ));
-
-    // Global ambient light (persists across all states)
-    commands.insert_resource(AmbientLight {
-        color: Color::srgb(0.3, 0.3, 0.35), // Neutral blue-gray
-        brightness: 300.0,
-        affects_lightmapped_meshes: true,
-    });
-}
-
-/// Setup a persistent camera with Egui context that survives all state transitions
-///
-/// This camera is used by all UI states (MainMenu, Settings, Pause, GameOver)
-/// to avoid conflicts from multiple PrimaryEguiContext cameras.
-fn setup_persistent_egui_camera(
-    mut commands: Commands,
-    mut persistent_camera: ResMut<PersistentEguiCamera>,
-) {
-    info!(
-        "[PRESTARTUP] DEBUG: Current persistent_camera.entity: {:?}",
-        persistent_camera.entity
-    );
-
-    let camera_entity = commands
-        .spawn((
-            Camera3d::default(),
-            // Default position - will be updated by each state
-            Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-            // Add Egui context components
-            EguiContext::default(),
-            PrimaryEguiContext,
-            EguiMultipassSchedule::new(EguiPrimaryContextPass),
-            Name::new("Persistent Egui Camera"),
-        ))
-        .id();
-
-    persistent_camera.entity = Some(camera_entity);
-    info!(
-        "[PRESTARTUP] Persistent Egui camera created with entity ID: {:?}",
-        camera_entity
-    );
-    info!(
-        "[PRESTARTUP] DEBUG: Updated persistent_camera.entity to: {:?}",
-        persistent_camera.entity
-    );
-
-    // Verify the entity was created successfully
-    if persistent_camera.entity.is_some() {
-    } else {
-        error!("[PRESTARTUP] ERROR: Failed to store camera entity in resource!");
-    }
-}
-
-/// Setup game scene when entering InGame state
-///
-/// Spawns the game camera, lighting, and chess board.
-fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view_mode::ViewMode>) {
-    // Set background color based on view mode
-    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
-        // Vibrant solid yellow background matching reference image (#FFFF00)
-        commands.insert_resource(ClearColor(Color::srgb(1.0, 1.0, 0.0))); // Pure yellow #FFFF00
-    } else {
-        // Default dark background for standard view
-        commands.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0))); // Black
-    }
-
-    // Setup camera based on view mode
-    // TempleOS camera is set up by the board plugin, so we only create standard camera here
-    // UPDATE: We now reuse the PersistentEguiCamera for standard view (in setup_game_camera system)
-    // so we ONLY need to handle TempleOS specific setup or lights here.
-
-    // lights...
-
-    // Skip lights for TempleOS mode (unlit rendering)
-    if *view_mode != crate::game::view_mode::ViewMode::TempleOS {
-        // Main directional light (chess tournament lighting)
-        commands.spawn((
-            DirectionalLight {
-                illuminance: 8000.0,
-                shadows_enabled: true,
-                color: Color::srgb(1.0, 0.98, 0.95), // Warm white
-                ..default()
-            },
-            Transform::from_rotation(Quat::from_euler(
-                EulerRot::XYZ,
-                -std::f32::consts::FRAC_PI_4,
-                std::f32::consts::FRAC_PI_4,
-                0.0,
-            )),
-            DespawnOnExit(GameState::InGame),
-            Name::new("Main Directional Light"),
-        ));
-
-        // Fill light (reduces harsh shadows)
-        commands.spawn((
-            PointLight {
-                intensity: 500_000.0,
-                color: Color::srgb(0.9, 0.9, 1.0), // Slightly blue
-                shadows_enabled: false,
-                range: 30.0,
-                ..default()
-            },
-            Transform::from_xyz(-10.0, 10.0, 10.0),
-            DespawnOnExit(GameState::InGame),
-            Name::new("Fill Light"),
-        ));
-    }
-
-    // Note: Ambient light is set globally in setup_global_scene (Startup)
-}
-
 /// Handle ESC key to pause the game
 fn handle_pause_input(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -554,5 +368,23 @@ fn handle_pause_input(
     if keyboard.just_pressed(KeyCode::Escape) {
         info!("[GAME] Pausing game");
         next_state.set(GameState::Paused);
+    }
+}
+
+/// Handle F11 key to toggle fullscreen mode
+fn toggle_fullscreen(keyboard: Res<ButtonInput<KeyCode>>, mut windows: Query<&mut Window>) {
+    if keyboard.just_pressed(KeyCode::F11) {
+        for mut window in windows.iter_mut() {
+            window.mode = match window.mode {
+                bevy::window::WindowMode::Windowed => {
+                    info!("[WINDOW] Switching to fullscreen");
+                    bevy::window::WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+                }
+                _ => {
+                    info!("[WINDOW] Switching to windowed");
+                    bevy::window::WindowMode::Windowed
+                }
+            };
+        }
     }
 }

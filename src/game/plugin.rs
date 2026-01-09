@@ -50,9 +50,14 @@ use super::system_sets::GameSystems;
 use super::systems::picking_debug::PickingDebugPlugin;
 use super::systems::*;
 use crate::core::{debug_current_gamestate, GameState};
-use crate::game::components::{GamePhase, HasMoved, MoveRecord, PieceMoveAnimation, SelectedPiece};
+use crate::game::components::{
+    FadingCapture, GamePhase, HasMoved, MoveRecord, PieceMoveAnimation, SelectedPiece,
+};
+use crate::input::PointerEventsPlugin;
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
+use crate::ui::fps::fps_ui;
 use crate::ui::game_ui::game_status_ui;
+use crate::ui::promotion_ui::promotion_ui_system;
 use bevy::input::common_conditions::input_toggle_active;
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
@@ -79,7 +84,8 @@ impl Plugin for GamePlugin {
             .init_resource::<ChessEngine>()
             .init_resource::<Players>()
             .init_resource::<super::systems::camera::CameraRotationState>()
-            .init_resource::<super::view_mode::ViewMode>();
+            .init_resource::<super::view_mode::ViewMode>()
+            .init_resource::<PendingPromotion>();
 
         // Register types for reflection (needed for inspector)
         app.register_type::<CurrentTurn>()
@@ -98,14 +104,20 @@ impl Plugin for GamePlugin {
             .register_type::<PieceType>()
             .register_type::<HasMoved>()
             .register_type::<PieceMoveAnimation>()
+            .register_type::<FadingCapture>()
             .register_type::<SelectedPiece>()
             .register_type::<CameraController>()
             .register_type::<Player>()
             .register_type::<Players>()
-            .register_type::<super::view_mode::ViewMode>();
+            .register_type::<super::view_mode::ViewMode>()
+            .add_message::<PromotionSelected>()
+            .add_message::<crate::game::events::NetworkMoveEvent>();
 
         // Add AI plugin
         app.add_plugins(AIPlugin);
+
+        // Add Pointer interaction plugin
+        app.add_plugins(PointerEventsPlugin);
 
         // Configure system sets to run in order: Input → Validation → Execution → Visual
         app.configure_sets(
@@ -161,6 +173,20 @@ impl Plugin for GamePlugin {
                         *view_mode != super::view_mode::ViewMode::TempleOS
                     },
                 ),
+                // Promotion detection and handling (disabled in TempleOS)
+                detect_pawn_promotion.in_set(GameSystems::Execution).run_if(
+                    |view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    },
+                ),
+                apply_pawn_promotion.in_set(GameSystems::Execution).run_if(
+                    |view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    },
+                ),
+                // Network Move Verification/Execution
+                crate::game::systems::network_move::handle_network_moves
+                    .in_set(GameSystems::Execution),
                 // Visual set: Update rendering (disabled in TempleOS)
                 highlight_possible_moves.in_set(GameSystems::Visual).run_if(
                     |view_mode: Res<super::view_mode::ViewMode>| {
@@ -172,13 +198,18 @@ impl Plugin for GamePlugin {
                         *view_mode != super::view_mode::ViewMode::TempleOS
                     },
                 ),
+                animate_capture_fade.in_set(GameSystems::Visual).run_if(
+                    |view_mode: Res<super::view_mode::ViewMode>| {
+                        *view_mode != super::view_mode::ViewMode::TempleOS
+                    },
+                ),
             ),
         );
 
         // Add UI system separately (egui requires EguiPrimaryContextPass)
         app.add_systems(
             EguiPrimaryContextPass,
-            game_status_ui.run_if(in_state(GameState::InGame)),
+            (game_status_ui, promotion_ui_system).run_if(in_state(GameState::InGame)),
         );
 
         // Debug system - toggle with F12 key

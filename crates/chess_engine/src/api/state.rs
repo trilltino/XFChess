@@ -13,8 +13,8 @@ use crate::types::*;
 ///
 /// * `game` - The game state
 /// * `color` - The color to move (1 for White, -1 for Black)
-pub fn reply(game: &mut Game, color: i64) -> Move {
-    find_best_move(game, game.secs_per_move, color)
+pub async fn reply(game: &mut Game, color: i64) -> Move {
+    find_best_move(game, game.secs_per_move, color).await
 }
 
 /// Get current game state (playing, checkmate, stalemate)

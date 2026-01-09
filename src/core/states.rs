@@ -44,11 +44,14 @@ use bevy::prelude::*;
 /// Each state has its own plugin that manages setup, update, and cleanup.
 #[derive(Clone, Copy, Resource, PartialEq, Eq, Hash, Debug, Default, States, Reflect)]
 pub enum GameState {
+    /// Authentication state (Login/Register)
+    #[default]
+    Auth,
+
     /// Main menu state (starting state)
     ///
     /// Displays game mode selection, settings access, and exit options.
     /// Background shows animated 3D scene (rotating board).
-    #[default]
     MainMenu,
 
     /// Settings/configuration menu
@@ -75,6 +78,14 @@ pub enum GameState {
     /// Displays move history and material balance.
     /// Can start new game or return to MainMenu.
     GameOver,
+
+    /// Multiplayer Lobby Menu
+    ///
+    /// Host/Join UI for online play.
+    MultiplayerMenu,
+
+    /// Matching state (Connecting/Handshake)
+    Matching,
 }
 
 /// Component marking entities to be despawned when exiting a specific state
@@ -128,7 +139,7 @@ impl ComputedStates for InMenus {
 
     fn compute(sources: GameState) -> Option<Self> {
         match sources {
-            GameState::MainMenu | GameState::Settings => Some(Self),
+            GameState::MainMenu | GameState::Settings | GameState::MultiplayerMenu => Some(Self),
             _ => None,
         }
     }
@@ -244,6 +255,9 @@ fn is_valid_state_transition(from: GameState, to: GameState) -> bool {
         // MainMenu can transition to Settings or InGame
         (GameState::MainMenu, GameState::Settings) => true,
         (GameState::MainMenu, GameState::InGame) => true,
+        (GameState::MainMenu, GameState::MultiplayerMenu) => true,
+        (GameState::MultiplayerMenu, GameState::MainMenu) => true,
+        (GameState::MultiplayerMenu, GameState::InGame) => true, // Start game from lobby
 
         // Settings can return to MainMenu
         (GameState::Settings, GameState::MainMenu) => true,

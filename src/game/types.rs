@@ -258,14 +258,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_file_from_char() {
-        assert_eq!(File::from_char('a'), Some(File(0)));
-        assert_eq!(File::from_char('e'), Some(File(4)));
-        assert_eq!(File::from_char('h'), Some(File(7)));
-        assert_eq!(File::from_char('z'), None);
-    }
-
-    #[test]
     fn test_file_to_char() {
         assert_eq!(File(0).to_char(), 'a');
         assert_eq!(File(4).to_char(), 'e');

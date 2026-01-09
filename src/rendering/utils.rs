@@ -108,7 +108,7 @@ impl FromWorld for SquareMaterials {
         SquareMaterials {
             black_color: materials.add(light_color), // Light squares
             white_color: materials.add(dark_color),  // Dark squares
-            hover_matl: materials.add(Color::from(AMBER_100)),
+            hover_matl: materials.add(Color::srgb(0.8, 0.2, 0.2)), // Red for legal moves
             grey_color: materials.add(grey_material), // Dull grey for TempleOS (unlit)
             templeos_white: materials.add(white_material), // Bright white for TempleOS (unlit)
             hint_mesh: world

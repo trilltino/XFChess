@@ -1,18 +1,16 @@
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
-use bevy_egui::{
-    EguiContext, EguiGlobalSettings, EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass,
-    PrimaryEguiContext,
-};
+use bevy_egui::{EguiGlobalSettings, EguiPlugin};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 // Core infrastructure
-use xfchess::core::{CorePlugin, DespawnOnExit, GameState};
+use xfchess::core::{CorePlugin, GameState};
 
 // Game plugins
 use xfchess::game::GamePlugin;
-use xfchess::input::PointerEventsPlugin;
+// Note: PointerEventsPlugin is added by GamePlugin, not here
 use xfchess::rendering::{BoardPlugin, BoardUtils, DynamicLightingPlugin, PiecePlugin};
 
 // State plugins
@@ -20,17 +18,44 @@ use xfchess::states::{
     GameOverPlugin, MainMenuPlugin, PausePlugin, PieceViewerPlugin, SettingsPlugin,
 };
 
-// Persistent camera (re-exported from xfchess lib)
+// Shared systems and resources
+use xfchess::audio::apply_master_volume_system;
+use xfchess::game::systems::{
+    check_and_play_templeos_sound, initialize_engine_from_ecs, initialize_game_sounds,
+    initialize_players, play_templeos_sound, reset_game_camera, reset_game_resources,
+    setup_game_camera, setup_game_scene, setup_global_scene, spawn_camera_position_ui,
+    update_camera_position_ui,
+};
+use xfchess::persistent_camera::setup_persistent_egui_camera;
+use xfchess::rendering::graphics_quality::{
+    apply_graphics_quality_camera_system, apply_graphics_quality_lights_system,
+    update_graphics_quality_camera_system,
+};
+use xfchess::ui::fps::fps_ui; // FPS counter for web parity
 use xfchess::PersistentEguiCamera;
+
+// Import the hideLoadingScreen function from JavaScript
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = window)]
+    fn hideLoadingScreen();
+}
 
 /// Log a message to the browser console with a prefix
 fn console_log(message: &str) {
     web_sys::console::log_1(&format!("[XFCHESS-WASM] {}", message).into());
 }
 
-/// Log an error to the browser console with a prefix
-fn console_error(message: &str) {
-    web_sys::console::error_1(&format!("[XFCHESS-WASM ERROR] {}", message).into());
+/// System to hide loading screen when assets are loaded
+fn hide_loading_screen_when_ready(
+    game_assets: Res<xfchess::assets::GameAssets>,
+    mut has_hidden: Local<bool>,
+) {
+    if game_assets.loaded && !*has_hidden {
+        console_log("Assets loaded, hiding loading screen");
+        hideLoadingScreen();
+        *has_hidden = true;
+    }
 }
 
 /// Initialize the Bevy chess game for WebAssembly
@@ -72,13 +97,14 @@ pub fn init_bevy(canvas: HtmlCanvasElement) -> Result<(), JsValue> {
                     primary_window: Some(Window {
                         canvas: Some("#bevy".into()),
                         fit_canvas_to_parent: true,
-                        prevent_default_event_handling: false,
+                        prevent_default_event_handling: true,
                         ..default()
                     }),
                     ..default()
                 })
                 .set(AssetPlugin {
                     file_path: "assets".to_string(),
+                    meta_check: bevy::asset::AssetMetaCheck::Never,
                     ..default()
                 })
                 .set(bevy::log::LogPlugin {
@@ -90,21 +116,19 @@ pub fn init_bevy(canvas: HtmlCanvasElement) -> Result<(), JsValue> {
         console_log("DefaultPlugins added successfully");
 
         // ========================================
-        // 2. Core Infrastructure (State Machine, Settings)
+        // 2. Core Infrastructure
         // ========================================
-        console_log("Step 2: Adding CorePlugin...");
+        console_log("Step 2: Adding CorePlugin and Resources...");
         app.add_plugins(CorePlugin);
+        app.init_resource::<PersistentEguiCamera>();
+        app.init_resource::<xfchess::assets::LoadingProgress>();
+        app.init_resource::<xfchess::assets::GameAssets>();
         console_log("CorePlugin added");
 
-        // Initialize PersistentEguiCamera resource (critical for UI)
-        console_log("Step 2b: Initializing PersistentEguiCamera resource...");
-        app.init_resource::<PersistentEguiCamera>();
-        console_log("PersistentEguiCamera resource initialized");
-
         // ========================================
-        // 3. UI Framework
+        // 3. UI Framework & Debugging
         // ========================================
-        console_log("Step 3: Adding EguiPlugin...");
+        console_log("Step 3: Adding EguiPlugin and Inspector...");
         app.add_plugins(EguiPlugin::default());
 
         // Disable auto-creation of primary context (we'll create our own)
@@ -114,14 +138,17 @@ pub fn init_bevy(canvas: HtmlCanvasElement) -> Result<(), JsValue> {
                 egui_settings.auto_create_primary_context = false;
             },
         );
-        console_log("EguiPlugin added");
+
+        // Add World Inspector for debugging (requested feature)
+        app.add_plugins(WorldInspectorPlugin::new());
+        console_log("EguiPlugin and Inspector added");
 
         // ========================================
-        // 4. Input Handling (CRITICAL for piece clicks)
+        // 4. Input Handling
         // ========================================
         console_log("Step 4: Adding input plugins...");
         app.add_plugins(MeshPickingPlugin);
-        app.add_plugins(PointerEventsPlugin);
+        // Note: PointerEventsPlugin is added by GamePlugin, so we don't add it here
         console_log("Input plugins added");
 
         // ========================================
@@ -135,7 +162,7 @@ pub fn init_bevy(canvas: HtmlCanvasElement) -> Result<(), JsValue> {
         console_log("Rendering plugins added");
 
         // ========================================
-        // 6. State Plugins (Menus, Settings, etc.)
+        // 6. State Plugins
         // ========================================
         console_log("Step 6: Adding state plugins...");
         app.add_plugins(MainMenuPlugin);
@@ -153,35 +180,60 @@ pub fn init_bevy(canvas: HtmlCanvasElement) -> Result<(), JsValue> {
         console_log("GamePlugin added");
 
         // ========================================
-        // 8. Global Scene Setup (web-specific initialization)
+        // 8. Global Scene Setup
         // ========================================
         console_log("Step 8: Setting up global scene...");
-
-        // Setup persistent egui camera (runs in PreStartup)
         app.add_systems(PreStartup, setup_persistent_egui_camera);
-
-        // Setup global scene elements (ambient light, background)
-        app.add_systems(Startup, setup_global_scene_web);
-
+        app.add_systems(Startup, setup_global_scene);
         console_log("Global scene setup scheduled");
 
         // ========================================
-        // 9. Game State Systems
+        // 9. Game State Systems (1:1 with Desktop)
         // ========================================
         console_log("Step 9: Configuring game state systems...");
-        app.add_systems(OnEnter(GameState::InGame), setup_game_scene_web);
+        app.add_systems(
+            OnEnter(GameState::InGame),
+            (
+                reset_game_resources
+                    .before(xfchess::rendering::pieces::create_pieces)
+                    .before(xfchess::rendering::board::create_board),
+                initialize_players.after(reset_game_resources),
+                initialize_game_sounds.after(reset_game_resources),
+                play_templeos_sound.after(initialize_game_sounds),
+                initialize_engine_from_ecs
+                    .after(xfchess::rendering::pieces::create_pieces)
+                    .after(xfchess::rendering::board::create_board),
+                setup_game_scene,
+                setup_game_camera,
+                spawn_camera_position_ui,
+            )
+                .chain(),
+        );
+        app.add_systems(OnExit(GameState::InGame), reset_game_camera);
+
+        // Updates
+        app.add_systems(
+            Update,
+            (
+                hide_loading_screen_when_ready, // Hide loading overlay when assets ready
+                handle_pause_input.run_if(in_state(GameState::InGame)),
+                check_and_play_templeos_sound.run_if(in_state(GameState::InGame)),
+                update_camera_position_ui.run_if(in_state(GameState::InGame)),
+                fps_ui.run_if(in_state(GameState::InGame)), // FPS counter (1:1 with desktop)
+                // Settings updates
+                apply_graphics_quality_camera_system,
+                update_graphics_quality_camera_system,
+                apply_graphics_quality_lights_system,
+                apply_master_volume_system,
+            ),
+        );
+
         console_log("Game state systems configured");
 
         // ========================================
         // 10. Start the App
         // ========================================
         console_log("All plugins added. Starting Bevy app...");
-        console_log("====================================");
-        console_log("If you see this, initialization succeeded!");
-        console_log("If the game doesn't appear, check for panics above.");
-        console_log("====================================");
-
-        // Run the app
         app.run();
     });
 
@@ -189,102 +241,12 @@ pub fn init_bevy(canvas: HtmlCanvasElement) -> Result<(), JsValue> {
     Ok(())
 }
 
-/// Setup persistent EGUI camera for web (matches main.rs setup)
-fn setup_persistent_egui_camera(
-    mut commands: Commands,
-    mut persistent_camera: ResMut<PersistentEguiCamera>,
+fn handle_pause_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<GameState>>,
 ) {
-    console_log("Setting up persistent EGUI camera...");
-
-    let camera_entity = commands
-        .spawn((
-            Camera3d::default(),
-            Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-            EguiContext::default(),
-            PrimaryEguiContext,
-            EguiMultipassSchedule::new(EguiPrimaryContextPass),
-            Name::new("Persistent Egui Camera"),
-        ))
-        .id();
-
-    persistent_camera.entity = Some(camera_entity);
-    console_log(&format!(
-        "Persistent EGUI camera created with entity ID: {:?}",
-        camera_entity
-    ));
-}
-
-/// Setup global scene for web (matches main.rs setup_global_scene)
-fn setup_global_scene_web(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    console_log("Setting up global scene (background, ambient light)...");
-
-    // Global background (dark space-like environment)
-    let background_color = Color::srgba(0.04, 0.04, 0.08, 1.0); // Very dark blue
-
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(2.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: background_color,
-            unlit: true,
-            cull_mode: None,
-            ..default()
-        })),
-        Transform::from_scale(Vec3::splat(1_000_000.0)),
-        Name::new("Global Background"),
-    ));
-
-    // Global ambient light
-    commands.insert_resource(AmbientLight {
-        color: Color::srgb(0.3, 0.3, 0.35),
-        brightness: 300.0,
-        affects_lightmapped_meshes: true,
-    });
-
-    console_log("Global scene setup complete");
-}
-
-/// Setup game scene for web (simplified version of main.rs setup_game_scene)
-fn setup_game_scene_web(mut commands: Commands) {
-    console_log("Setting up in-game scene...");
-
-    // Set background color
-    commands.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)));
-
-    // Main directional light
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 8000.0,
-            shadows_enabled: true,
-            color: Color::srgb(1.0, 0.98, 0.95),
-            ..default()
-        },
-        Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ,
-            -std::f32::consts::FRAC_PI_4,
-            std::f32::consts::FRAC_PI_4,
-            0.0,
-        )),
-        DespawnOnExit(GameState::InGame),
-        Name::new("Main Directional Light"),
-    ));
-
-    // Fill light
-    commands.spawn((
-        PointLight {
-            intensity: 500_000.0,
-            color: Color::srgb(0.9, 0.9, 1.0),
-            shadows_enabled: false,
-            range: 30.0,
-            ..default()
-        },
-        Transform::from_xyz(-10.0, 10.0, 10.0),
-        DespawnOnExit(GameState::InGame),
-        Name::new("Fill Light"),
-    ));
-
-    console_log("In-game scene setup complete");
+    if keyboard.just_pressed(KeyCode::Escape) {
+        console_log("Pausing game");
+        next_state.set(GameState::Paused);
+    }
 }

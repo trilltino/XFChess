@@ -7,6 +7,7 @@ use crate::constants::{MAX_DEPTH, TTE_SIZE};
 use crate::move_gen::init_move_tables;
 use crate::types::*;
 use crate::utils;
+use std::sync::{Arc, Mutex};
 
 /// Create a new game with initial position
 pub fn new_game() -> Game {
@@ -31,7 +32,8 @@ pub fn new_game() -> Game {
         // Allocate transposition table directly on heap to avoid stack overflow
         // The transposition table is 2M entries, which would overflow the stack
         // if allocated normally. This helper function safely allocates on the heap.
-        tt: utils::create_boxed_array::<TTE, { TTE_SIZE }>(),
+        // Wrapped in Arc<Mutex> to allow shared access without huge clones stuttering gameplay.
+        tt: Arc::new(Mutex::new(utils::create_boxed_array::<TTE, { TTE_SIZE }>())),
 
         max_depth_so_far: 0,
         abs_max_depth: MAX_DEPTH as i64,

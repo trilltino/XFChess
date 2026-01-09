@@ -33,7 +33,11 @@ pub fn hash_to_index(hash: &BitBuffer192) -> usize {
 /// Probe transposition table (returns copy to avoid borrow issues)
 pub fn tt_probe(game: &Game, hash: &BitBuffer192) -> Option<HashResult> {
     let index = hash_to_index(hash);
-    let tte = &game.tt[index];
+    // Lock the transposition table
+    // In a single-threaded WASM context, this is cheap.
+    // In multi-threaded native, this ensures safety.
+    let tt_guard = game.tt.lock().unwrap();
+    let tte = &tt_guard[index];
 
     for entry in &tte.h {
         if entry.key == *hash && entry.res.hit > 0 {
@@ -47,7 +51,9 @@ pub fn tt_probe(game: &Game, hash: &BitBuffer192) -> Option<HashResult> {
 /// Store position in transposition table
 pub fn tt_store(game: &mut Game, hash: BitBuffer192, result: HashResult, priority: i64) {
     let index = hash_to_index(&hash);
-    let tte = &mut game.tt[index];
+    // Lock the transposition table
+    let mut tt_guard = game.tt.lock().unwrap();
+    let tte = &mut tt_guard[index];
 
     // Find slot to replace (lowest priority)
     let mut min_pri_idx = 0;

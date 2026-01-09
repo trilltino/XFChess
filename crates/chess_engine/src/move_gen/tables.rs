@@ -112,7 +112,7 @@ fn init_rook_moves_from(from: i8) -> KKS {
 /// Vector of `KK` moves representing all possible bishop destinations
 fn init_bishop_moves_from(from: i8) -> KKS {
     let mut moves = Vec::new();
-    let (col, row) = pos_to_square(from);
+    let (from_col, from_row) = pos_to_square(from);
 
     // Bishops move in four diagonal directions: NE, SE, SW, NW
     for &dir in &BISHOP_DIRS {
@@ -133,11 +133,11 @@ fn init_bishop_moves_from(from: i8) -> KKS {
                 break;
             }
 
-            // Check if we wrapped around the board (edge case for direction vectors)
-            // Diagonal moves must maintain equal column and row distance
-            if (new_col - col as i8).abs() > 1
-                && (new_row - row as i8).abs() != (current as i8 - from).abs() / 8
-            {
+            // For diagonal moves, the column distance must equal the row distance
+            // This catches any wrap-around issues at board edges
+            let col_dist = (new_col - from_col).abs();
+            let row_dist = (new_row - from_row).abs();
+            if col_dist != row_dist {
                 break;
             }
 
@@ -248,22 +248,23 @@ fn init_white_pawn_moves_from(from: i8) -> KKS {
     let mut moves = Vec::new();
     let (col, row) = pos_to_square(from);
 
-    // Single push forward (north, -8 squares)
-    let to = from - 8;
-    if to >= 0 {
+    // Single push forward (south/up, +8 squares)
+    let to = from + 8;
+    if to < 64 {
         moves.push(KK::new(from, to, 0, 0));
     }
 
     // Double push from starting position (rank 2, row index 1)
     if row == 1 {
-        let to = from - 16;
-        if to >= 0 {
+        let to = from + 16;
+        if to < 64 {
             moves.push(KK::new(from, to, 0, 0));
         }
     }
 
-    // Diagonal captures (northeast and northwest)
-    for &dir in &[NO, NW] {
+    // Diagonal captures (southeast and southwest - technically North on this board)
+    // Board is 0=A1..63=H8. White moves +8.
+    for &dir in &[SO, SW] {
         let to = from as i32 + dir;
         if is_valid_pos(to) {
             let (new_col, _) = pos_to_square(to as i8);
@@ -300,22 +301,23 @@ fn init_black_pawn_moves_from(from: i8) -> KKS {
     let mut moves = Vec::new();
     let (col, row) = pos_to_square(from);
 
-    // Single push forward (south, +8 squares)
-    let to = from + 8;
-    if to < 64 {
+    // Single push forward (north/down, -8 squares)
+    let to = from - 8;
+    if to >= 0 {
         moves.push(KK::new(from, to, 0, 0));
     }
 
     // Double push from starting position (rank 7, row index 6)
     if row == 6 {
-        let to = from + 16;
-        if to < 64 {
+        let to = from - 16;
+        if to >= 0 {
             moves.push(KK::new(from, to, 0, 0));
         }
     }
 
-    // Diagonal captures (southeast and southwest)
-    for &dir in &[SO, SW] {
+    // Diagonal captures (northeast and northwest - technically South on this board)
+    // Board is 0=A1..63=H8. Black moves -8.
+    for &dir in &[NO, NW] {
         let to = from as i32 + dir;
         if is_valid_pos(to) {
             let (new_col, _) = pos_to_square(to as i8);

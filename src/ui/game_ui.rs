@@ -57,18 +57,54 @@ pub fn game_status_ui(mut params: GameUIParams) {
         return;
     };
 
-    // === TOP BAR: Timer, Turn, Settings ===
-    egui::TopBottomPanel::top("game_top_bar")
+    // === FLOATING TIMER ===
+    egui::Window::new("floating_timer")
+        .title_bar(false)
         .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0]) // Centered below top bar
+        .frame(
+            egui::Frame::default()
+                .fill(UiColors::BG_OVERLAY)
+                .corner_radius(10.0)
+                .inner_margin(15.0)
+                .stroke(egui::Stroke::new(1.0, UiColors::BORDER)),
+        )
         .show(ctx, |ui| {
-            // ... (rest of the code)
+            ui.vertical_centered(|ui| {
+                // Centered Timer Title
+                ui.label(
+                    egui::RichText::new("GAME TIMER")
+                        .size(12.0)
+                        .color(UiColors::TEXT_TERTIARY),
+                );
+                ui.add_space(5.0);
+
+                // White Timer
+                let white_time = format_time(params.game_timer.white_time_left);
+                ui.label(
+                    egui::RichText::new(format!("White: {}", white_time))
+                        .size(16.0)
+                        .color(UiColors::TEXT_PRIMARY)
+                        .strong(),
+                );
+
+                ui.add_space(5.0);
+                ui.separator();
+                ui.add_space(5.0);
+
+                // Black Timer
+                let black_time = format_time(params.game_timer.black_time_left);
+                ui.label(
+                    egui::RichText::new(format!("Black: {}", black_time))
+                        .size(16.0)
+                        .color(UiColors::TEXT_PRIMARY)
+                        .strong(),
+                );
+            });
         });
 
-    // (Note: The rest of the function body remains the same, just removing the final Ok(()))
-    // Wait, replace_file_content requires me to provide the *exact* target content.
-    // I can't just say "rest of the code".
-    // I need to use `multi_replace_file_content` or be very precise with `replace_file_content`.
-    // Since I'm changing the signature at start and return at the end, `multi_replace_file_content` is better.
+    // === TOP BAR: Turn, Settings ===
 
     egui::TopBottomPanel::top("game_top_bar")
         .resizable(false)
@@ -79,33 +115,9 @@ pub fn game_status_ui(mut params: GameUIParams) {
             ui.horizontal(|ui| {
                 ui.set_width(ui.available_width());
 
-                // Left: Game Timer
+                // Left: Spacer (Timer removed)
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
-
-                    // White Timer
-                    let white_time = format_time(params.game_timer.white_time_left);
-                    let white_color = if params.game_state.current_turn.color == PieceColor::White
-                        && params.game_timer.is_running
-                    {
-                        egui::Color32::from_rgb(255, 255, 100) // Highlight active player
-                    } else {
-                        egui::Color32::WHITE
-                    };
-                    ui.colored_label(white_color, format!("White: {}", white_time));
-
-                    ui.add_space(20.0);
-
-                    // Black Timer
-                    let black_time = format_time(params.game_timer.black_time_left);
-                    let black_color = if params.game_state.current_turn.color == PieceColor::Black
-                        && params.game_timer.is_running
-                    {
-                        egui::Color32::from_rgb(255, 255, 100) // Highlight active player
-                    } else {
-                        egui::Color32::WHITE
-                    };
-                    ui.colored_label(black_color, format!("Black: {}", black_time));
                 });
 
                 // Center: Turn Indicator (use available space with manual centering)
@@ -122,43 +134,35 @@ pub fn game_status_ui(mut params: GameUIParams) {
                                 current_player.name, params.game_state.current_turn.color
                             );
                             let turn_color = match params.game_state.current_turn.color {
-                                PieceColor::White => egui::Color32::from_rgb(240, 240, 240),
-                                PieceColor::Black => egui::Color32::from_rgb(50, 50, 50),
+                                PieceColor::White => UiColors::TEXT_PRIMARY,
+                                PieceColor::Black => UiColors::TEXT_SECONDARY,
                             };
                             ui.colored_label(turn_color, egui::RichText::new(turn_text).size(18.0));
 
                             // Show game phase status
                             match params.game_state.game_phase.0 {
                                 GamePhase::Check => {
-                                    ui.colored_label(
-                                        egui::Color32::from_rgb(255, 100, 100),
-                                        "CHECK!",
-                                    );
+                                    ui.colored_label(UiColors::DANGER, "CHECK!");
                                 }
                                 GamePhase::Checkmate => {
-                                    ui.colored_label(
-                                        egui::Color32::from_rgb(255, 0, 0),
-                                        "CHECKMATE!",
-                                    );
+                                    ui.colored_label(UiColors::DANGER, "CHECKMATE!");
                                 }
                                 GamePhase::Stalemate => {
-                                    ui.colored_label(
-                                        egui::Color32::from_rgb(200, 200, 0),
-                                        "STALEMATE",
-                                    );
+                                    ui.colored_label(UiColors::WARNING, "STALEMATE");
                                 }
                                 GamePhase::Playing | GamePhase::Setup => {
                                     if params.ai_params.pending_ai.is_some() {
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(100, 150, 255),
-                                            "AI is thinking...",
-                                        );
+                                        let time = ui.input(|i| i.time);
+                                        let dots = (time * 3.0) as i64 % 4;
+                                        let text =
+                                            format!("AI is thinking{}", ".".repeat(dots as usize));
+                                        ui.colored_label(UiColors::INFO, text);
                                     }
                                 }
                             }
                         } else {
                             ui.colored_label(
-                                egui::Color32::from_rgb(255, 200, 0),
+                                UiColors::ACCENT_GOLD,
                                 egui::RichText::new(params.game_state.game_over.message())
                                     .size(18.0),
                             );
@@ -178,155 +182,41 @@ pub fn game_status_ui(mut params: GameUIParams) {
             ui.add_space(5.0); // Add bottom padding
         });
 
-    // === LEFT SIDE: Move Notation Panel ===
+    // Move Notation Panel removed per user request
+    /*
     egui::SidePanel::left("move_notation_panel")
         .resizable(true)
         .default_width(250.0)
         .min_width(200.0)
         .max_width(400.0)
         .show(ctx, |ui| {
-            ui.heading(TextStyle::heading("Move Notation", TextSize::MD));
-            ui.separator();
-
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    if params.move_history.moves.is_empty() {
-                        ui.label(TextStyle::caption("No moves yet. Make your first move!"));
-                    } else {
-                        // Group moves by move number (White + Black = 1 move)
-                        let mut move_num = 1;
-                        let mut i = 0;
-
-                        while i < params.move_history.moves.len() {
-                            ui.horizontal(|ui| {
-                                // Move number
-                                ui.label(TextStyle::body(format!("{}.", move_num)));
-
-                                // White's move
-                                if i < params.move_history.moves.len() {
-                                    let white_move = &params.move_history.moves[i];
-                                    let notation = move_to_notation(white_move);
-                                    ui.label(TextStyle::body(notation));
-                                    i += 1;
-                                }
-
-                                // Black's move
-                                if i < params.move_history.moves.len() {
-                                    let black_move = &params.move_history.moves[i];
-                                    let notation = move_to_notation(black_move);
-                                    ui.label(TextStyle::body(notation));
-                                    i += 1;
-                                }
-                            });
-
-                            move_num += 1;
-                        }
-                    }
-                });
+             // ... content ...
         });
+    */
 
-    // === RIGHT SIDE: Captured Pieces Panel ===
+    // Captured Pieces Panel removed per user request
+    /*
     egui::SidePanel::right("captured_pieces_panel")
         .resizable(true)
         .default_width(200.0)
         .min_width(150.0)
         .max_width(300.0)
         .show(ctx, |ui| {
-            ui.heading(TextStyle::heading("Captured Pieces", TextSize::MD));
-            ui.separator();
-
-            ui.vertical(|ui| {
-                // White's captures (black pieces taken)
-                ui.label(TextStyle::body("White Captured:"));
-                ui.horizontal_wrapped(|ui| {
-                    if params.game_state.captured.white_captured.is_empty() {
-                        ui.label(TextStyle::caption("None"));
-                    } else {
-                        for piece in &params.game_state.captured.white_captured {
-                            ui.label(piece_unicode(*piece, PieceColor::Black));
-                        }
-                    }
-                });
-
-                ui.add_space(10.0);
-
-                // Black's captures (white pieces taken)
-                ui.label(TextStyle::body("Black Captured:"));
-                ui.horizontal_wrapped(|ui| {
-                    if params.game_state.captured.black_captured.is_empty() {
-                        ui.label(TextStyle::caption("None"));
-                    } else {
-                        for piece in &params.game_state.captured.black_captured {
-                            ui.label(piece_unicode(*piece, PieceColor::White));
-                        }
-                    }
-                });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(5.0);
-
-                // Material advantage
-                let advantage = params.game_state.captured.material_advantage();
-                if advantage > 0 {
-                    ui.label(TextStyle::body(format!("White: +{}", advantage)));
-                } else if advantage < 0 {
-                    ui.label(TextStyle::body(format!("Black: +{}", -advantage)));
-                } else {
-                    ui.label(TextStyle::caption("Material: Equal"));
-                }
-            });
+            // ... content ...
         });
+    */
 
     // === AI Statistics Panel (Bottom Left) - only show when playing vs AI ===
     // === AI Statistics Panel (Bottom Left) - only show when playing vs AI ===
     // Note: Currently GameMode only has VsAI, but we use match for future extensibility
+    // AI Stats Panel removed per user request
+    /*
     match params.ai_params.ai_config.mode {
         GameMode::VsAI { .. } => {
-            egui::Window::new("AI Statistics")
-                .anchor(egui::Align2::LEFT_BOTTOM, [10.0, -10.0])
-                .resizable(false)
-                .collapsible(true)
-                .show(ctx, |ui| {
-                    ui.vertical(|ui| {
-                        ui.heading(TextStyle::heading("Engine Stats", TextSize::SM));
-                        ui.add_space(5.0);
-
-                        if params.ai_params.ai_stats.last_depth > 0 {
-                            ui.label(TextStyle::caption(format!(
-                                "Evaluation: {}",
-                                format_score(params.ai_params.ai_stats.last_score)
-                            )));
-                            ui.label(TextStyle::caption(format!(
-                                "Search depth: {}",
-                                params.ai_params.ai_stats.last_depth
-                            )));
-                            ui.label(TextStyle::caption(format!(
-                                "Nodes: {}",
-                                format_nodes(params.ai_params.ai_stats.last_nodes)
-                            )));
-
-                            if params.ai_params.ai_stats.thinking_time > 0.0 {
-                                ui.label(TextStyle::caption(format!(
-                                    "Thinking time: {:.2}s",
-                                    params.ai_params.ai_stats.thinking_time
-                                )));
-                            }
-
-                            if params.ai_params.pending_ai.is_some() {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(100, 150, 255),
-                                    "Calculating...",
-                                );
-                            }
-                        } else {
-                            ui.label(TextStyle::caption("Waiting for first move..."));
-                        }
-                    });
-                });
+             // ... content ...
         }
     }
+    */
 }
 
 /// Format engine score for display

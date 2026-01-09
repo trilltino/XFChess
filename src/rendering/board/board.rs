@@ -13,7 +13,7 @@ use bevy::prelude::*;
 #[derive(Resource, Component)]
 pub struct Board;
 
-pub(crate) fn create_board(
+pub fn create_board(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<SquareMaterials>,

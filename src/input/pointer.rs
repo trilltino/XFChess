@@ -242,7 +242,8 @@ pub fn on_piece_hover(
             // Store original material for later restoration
             original_materials
                 .materials
-                .insert(entity, material_handle.0.clone());
+                .entry(entity)
+                .or_insert_with(|| material_handle.0.clone());
 
             // Create brightened version
             if let Some(original_mat) = materials.get(&material_handle.0) {
@@ -356,7 +357,8 @@ pub fn on_square_hover(
             // Store original material for later restoration
             original_materials
                 .materials
-                .insert(entity, material_handle.0.clone());
+                .entry(entity)
+                .or_insert_with(|| material_handle.0.clone());
 
             // Create highlighted version
             if let Some(original_mat) = materials.get(&material_handle.0) {

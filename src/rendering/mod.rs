@@ -36,6 +36,7 @@
 pub mod board;
 pub mod camera;
 pub mod effects;
+pub mod obj_loader;
 pub mod pieces;
 
 // Root-level modules

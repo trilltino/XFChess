@@ -5,7 +5,9 @@
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
 
+pub mod promotion;
 pub mod selection;
+pub use promotion::*;
 pub use selection::*;
 
 /// Individual player information

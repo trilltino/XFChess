@@ -10,10 +10,10 @@ use crate::hash::*;
 use crate::move_gen::is_in_check;
 use crate::move_gen::*;
 use crate::types::*;
-use std::time::Instant;
+use instant::Instant;
 
 /// Iterative deepening search
-pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) -> Move {
+pub async fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) -> Move {
     let start_time = Instant::now();
     let mut best_move = Move::default();
     let mut best_score = LOWEST_SCORE as i16;
@@ -25,7 +25,7 @@ pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) ->
 
     for depth in 1..=MAX_DEPTH {
         // Handle search errors gracefully
-        let score = match alphabeta(game, depth as i32, -AB_INF, AB_INF, color) {
+        let score = match alphabeta(game, depth as i32, -AB_INF, AB_INF, color).await {
             Ok(score) => score,
             Err(e) => {
                 // Log the error but continue with fallback
@@ -88,6 +88,6 @@ pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) ->
 }
 
 /// Find best move for current position
-pub fn find_best_move(game: &mut Game, think_time: f32, color: Color) -> Move {
-    iterative_deepening(game, think_time, color)
+pub async fn find_best_move(game: &mut Game, think_time: f32, color: Color) -> Move {
+    iterative_deepening(game, think_time, color).await
 }

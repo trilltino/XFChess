@@ -261,53 +261,6 @@ impl AIDifficulty {
             AIDifficulty::Hard => 3.0,
         }
     }
-
-    /// Get a human-readable description of this difficulty
-    ///
-    /// Returns a string suitable for display in menus or logs,
-    /// including both the difficulty name and time per move.
-    ///
-    /// # Returns
-    ///
-    /// Static string with format "Name (time)"
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let difficulty = AIDifficulty::Medium;
-    /// println!("Playing on: {}", difficulty.description());
-    /// // Output: "Playing on: Medium (1.5s)"
-    /// ```
-    pub fn description(self) -> &'static str {
-        match self {
-            AIDifficulty::Easy => "Easy (0.5s)",
-            AIDifficulty::Medium => "Medium (1.5s)",
-            AIDifficulty::Hard => "Hard (3.0s)",
-        }
-    }
-
-    /// Get estimated ELO rating for this difficulty
-    ///
-    /// Returns an approximate chess rating based on search depth.
-    /// These are rough estimates based on typical depth-to-strength
-    /// correlations in chess engines.
-    ///
-    /// # Returns
-    ///
-    /// Estimated ELO rating as u32
-    ///
-    /// # Note
-    ///
-    /// Actual playing strength depends on many factors including
-    /// evaluation function quality, pruning effectiveness, and
-    /// position type (tactical vs positional).
-    pub fn estimated_elo(self) -> u32 {
-        match self {
-            AIDifficulty::Easy => 800,
-            AIDifficulty::Medium => 1400,
-            AIDifficulty::Hard => 1800,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -354,26 +307,6 @@ mod tests {
         assert_eq!(AIDifficulty::Easy.seconds_per_move(), 0.5);
         assert_eq!(AIDifficulty::Medium.seconds_per_move(), 1.5);
         assert_eq!(AIDifficulty::Hard.seconds_per_move(), 3.0);
-    }
-
-    #[test]
-    fn test_ai_difficulty_descriptions() {
-        //! Tests human-readable difficulty descriptions
-        assert_eq!(AIDifficulty::Easy.description(), "Easy (0.5s)");
-        assert_eq!(AIDifficulty::Medium.description(), "Medium (1.5s)");
-        assert_eq!(AIDifficulty::Hard.description(), "Hard (3.0s)");
-    }
-
-    #[test]
-    fn test_ai_difficulty_estimated_elo() {
-        //! Verifies ELO estimates are reasonable
-        assert_eq!(AIDifficulty::Easy.estimated_elo(), 800);
-        assert_eq!(AIDifficulty::Medium.estimated_elo(), 1400);
-        assert_eq!(AIDifficulty::Hard.estimated_elo(), 1800);
-
-        // Verify ordering (harder = higher ELO)
-        assert!(AIDifficulty::Easy.estimated_elo() < AIDifficulty::Medium.estimated_elo());
-        assert!(AIDifficulty::Medium.estimated_elo() < AIDifficulty::Hard.estimated_elo());
     }
 
     #[test]

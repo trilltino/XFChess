@@ -332,6 +332,8 @@ pub const RADIANS_PER_DOT: f32 = 1.0 / 180.0;
 /// On first frame (initialized == false), extracts current pitch/yaw from
 /// the Transform's rotation to prevent sudden camera jumps.
 pub fn camera_rotation_system(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     mouse_motion: Res<AccumulatedMouseMotion>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     selection: Res<Selection>,
@@ -356,7 +358,24 @@ pub fn camera_rotation_system(
             );
         }
 
-        // Only rotate if right mouse button is pressed AND mouse is moving
+        let mut modified = false;
+
+        // Keyboard Rotation (Q/E)
+        // Q = Rotate Left (Increase Yaw)
+        // E = Rotate Right (Decrease Yaw)
+        // Speed: 2.0 radians per second (adjust as needed)
+        const KEYBOARD_ROTATION_SPEED: f32 = 2.0;
+
+        if keyboard.pressed(KeyCode::KeyQ) {
+            controller.yaw += KEYBOARD_ROTATION_SPEED * time.delta_secs();
+            modified = true;
+        }
+        if keyboard.pressed(KeyCode::KeyE) {
+            controller.yaw -= KEYBOARD_ROTATION_SPEED * time.delta_secs();
+            modified = true;
+        }
+
+        // Mouse Rotation (Right-click drag)
         if mouse_button.pressed(MouseButton::Right) && mouse_motion.delta != Vec2::ZERO {
             // Update pitch (up/down) with clamping to prevent gimbal lock
             // Negative delta.y = move mouse up = look up = increase pitch
@@ -369,7 +388,11 @@ pub fn camera_rotation_system(
             controller.yaw -=
                 mouse_motion.delta.x * RADIANS_PER_DOT * controller.rotation_sensitivity;
 
-            // Apply rotation to Transform
+            modified = true;
+        }
+
+        // Apply rotation to Transform if anything changed
+        if modified {
             // Order: ZYX (roll=0, yaw, pitch) matches Bevy reference
             transform.rotation =
                 Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
@@ -650,7 +673,6 @@ mod tests {
         let scroll_delta: f32 = 1.0;
         let slow_speed: f32 = 1.0;
         let fast_speed: f32 = 3.0;
-        let initial: f32 = 15.0;
 
         let slow_change = -scroll_delta * slow_speed;
         let fast_change = -scroll_delta * fast_speed;
@@ -720,5 +742,63 @@ mod tests {
         }
 
         assert_eq!(target_zoom, 13.0);
+    }
+}
+
+/// Configure the persistent camera for gameplay
+/// Use the existing Egui camera as the main game camera to avoid conflicts
+pub fn setup_game_camera(
+    mut commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
+    mut query: Query<(&mut Transform, &mut Camera)>,
+) {
+    // Only configure for standard view (TempleOS handles its own camera/view)
+    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
+        return;
+    }
+
+    if let Some(entity) = persistent_camera.entity {
+        if let Ok((mut transform, mut camera)) = query.get_mut(entity) {
+            // Position for gameplay: behind White, angled down
+            let initial_height = 10.0;
+            let board_center = Vec3::new(3.5, 0.0, 3.5);
+            let camera_pos = Vec3::new(3.5, initial_height, -8.0);
+
+            *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+
+            // Ensure order is correct (0 is standard for 3D)
+            camera.order = 0;
+
+            // Add RTS camera controls
+            commands.entity(entity).insert(CameraController {
+                current_zoom: initial_height,
+                target_zoom: initial_height,
+                min_zoom: 3.0,
+                max_zoom: 30.0,
+                ..Default::default()
+            });
+
+            info!("[CAMERA] Configured Persistent Camera for Gameplay");
+        }
+    }
+}
+
+/// Reset the persistent camera when exiting gameplay
+pub fn reset_game_camera(
+    mut commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    mut query: Query<&mut Camera>,
+) {
+    if let Some(entity) = persistent_camera.entity {
+        // Remove RTS controls
+        commands.entity(entity).remove::<CameraController>();
+
+        // Reset order if needed (though 0 is usually fine for menus too)
+        if let Ok(mut camera) = query.get_mut(entity) {
+            camera.order = 0;
+        }
+
+        info!("[CAMERA] Reset Persistent Camera (Removed Controls)");
     }
 }

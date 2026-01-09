@@ -47,7 +47,11 @@
 //! The inspector integration is particularly useful for debugging entity hierarchies,
 //! component values, and resource state during development.
 
+pub mod auth;
+pub mod chat;
+pub mod fps;
 pub mod game_ui;
 pub mod inspector;
+pub mod promotion_ui;
 pub mod styles;
 pub mod system_params;

@@ -47,7 +47,7 @@ pub fn generate_pawn_moves(game: &Game, from: i8, color: Color, moves: &mut Vec<
     };
 
     let (from_col, _from_row) = pos_to_square(from);
-    let forward_dir = if color > 0 { -8 } else { 8 };
+    let forward_dir = if color > 0 { 8 } else { -8 };
 
     for candidate in candidates {
         let to = candidate.dst;

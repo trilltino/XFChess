@@ -163,7 +163,9 @@ pub mod camera_debug_ui;
 pub mod game_init;
 pub mod game_logic;
 pub mod input;
+pub mod network_move;
 pub mod picking_debug;
+pub mod promotion;
 pub mod shared;
 pub mod visual;
 
@@ -173,4 +175,5 @@ pub use camera::*;
 pub use camera_debug_ui::*;
 pub use game_init::*;
 pub use game_logic::*;
+pub use promotion::*;
 pub use visual::*;

@@ -92,29 +92,18 @@ pub struct Piece {
 /// This pattern is cleaner, more maintainable, and easier to test than manual spawning.
 ///
 /// Reference: `reference/bevy/examples/ecs/` for data-driven entity spawning patterns
-pub(crate) fn create_pieces(
+pub fn create_pieces(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     view_mode: Res<crate::game::view_mode::ViewMode>,
+    piece_meshes: Res<PieceMeshes>,
 ) {
     // Skip piece creation in TempleOS mode - only board squares are shown
     if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
         info!("[PIECES] Skipping piece creation - TempleOS view mode active");
         return;
     }
-
-    // Load all piece meshes (shared across colors)
-    let piece_meshes = PieceMeshes {
-        king: asset_server.load("models/chess_kit/pieces.glb#Mesh0/Primitive0"),
-        king_cross: asset_server.load("models/chess_kit/pieces.glb#Mesh1/Primitive0"),
-        pawn: asset_server.load("models/chess_kit/pieces.glb#Mesh2/Primitive0"),
-        knight_1: asset_server.load("models/chess_kit/pieces.glb#Mesh3/Primitive0"),
-        knight_2: asset_server.load("models/chess_kit/pieces.glb#Mesh4/Primitive0"),
-        rook: asset_server.load("models/chess_kit/pieces.glb#Mesh5/Primitive0"),
-        bishop: asset_server.load("models/chess_kit/pieces.glb#Mesh6/Primitive0"),
-        queen: asset_server.load("models/chess_kit/pieces.glb#Mesh7/Primitive0"),
-    };
 
     let white_material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
@@ -187,19 +176,33 @@ pub(crate) fn create_pieces(
 }
 
 /// Container for piece mesh handles
-struct PieceMeshes {
-    king: Handle<Mesh>,
-    king_cross: Handle<Mesh>,
-    pawn: Handle<Mesh>,
-    knight_1: Handle<Mesh>,
-    knight_2: Handle<Mesh>,
-    rook: Handle<Mesh>,
-    bishop: Handle<Mesh>,
-    queen: Handle<Mesh>,
+#[derive(Resource)]
+pub struct PieceMeshes {
+    pub king: Handle<Mesh>,
+    pub king_cross: Handle<Mesh>,
+    pub pawn: Handle<Mesh>,
+    pub knight_1: Handle<Mesh>,
+    pub knight_2: Handle<Mesh>,
+    pub rook: Handle<Mesh>,
+    pub bishop: Handle<Mesh>,
+    pub queen: Handle<Mesh>,
+}
+
+fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.insert_resource(PieceMeshes {
+        king: asset_server.load("models/chess_kit/pieces.glb#Mesh0/Primitive0"),
+        king_cross: asset_server.load("models/chess_kit/pieces.glb#Mesh1/Primitive0"),
+        pawn: asset_server.load("models/chess_kit/pieces.glb#Mesh2/Primitive0"),
+        knight_1: asset_server.load("models/chess_kit/pieces.glb#Mesh3/Primitive0"),
+        knight_2: asset_server.load("models/chess_kit/pieces.glb#Mesh4/Primitive0"),
+        rook: asset_server.load("models/chess_kit/pieces.glb#Mesh5/Primitive0"),
+        bishop: asset_server.load("models/chess_kit/pieces.glb#Mesh6/Primitive0"),
+        queen: asset_server.load("models/chess_kit/pieces.glb#Mesh7/Primitive0"),
+    });
 }
 
 /// Unified piece spawning function - dispatches to specific spawner based on type
-fn spawn_piece_at(
+pub fn spawn_piece_at(
     commands: &mut Commands,
     meshes: &PieceMeshes,
     material: Handle<StandardMaterial>,
@@ -566,6 +569,7 @@ pub struct PiecePlugin;
 impl Plugin for PiecePlugin {
     fn build(&self, app: &mut App) {
         use crate::core::GameState;
+        app.add_systems(Startup, load_piece_meshes);
         app.add_systems(OnEnter(GameState::InGame), create_pieces);
     }
 }

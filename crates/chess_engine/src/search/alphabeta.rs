@@ -11,6 +11,7 @@ use crate::error::{ChessEngineError, ChessEngineResult};
 use crate::hash::*;
 use crate::move_gen::*;
 use crate::types::*;
+use futures_lite::future::yield_now;
 
 /// Stack frame for iterative alphabeta search
 ///
@@ -31,7 +32,7 @@ struct SearchFrame {
     extensions_used: i32, // Track cumulative depth extensions to prevent infinite loops
 }
 
-/// Alpha-beta search with negamax (ITERATIVE VERSION - No recursion)
+/// Alpha-beta search with negamax (ITERATIVE VERSION - No recursion - Async)
 ///
 /// This function has been converted from recursive to iterative to eliminate
 /// stack overflow issues. It uses an explicit stack to simulate recursive calls.
@@ -40,7 +41,7 @@ struct SearchFrame {
 ///
 /// Returns an error if the search algorithm encounters stack corruption or
 /// logic errors that prevent proper execution.
-pub(crate) fn alphabeta(
+pub(crate) async fn alphabeta(
     game: &mut Game,
     depth: i32,
     alpha: i16,
@@ -63,11 +64,25 @@ pub(crate) fn alphabeta(
         extensions_used: 0, // Start with no extensions
     }];
 
+    use instant::Instant;
+
+    // Time-based yielding to ensure 60 FPS (max 5ms per chunk)
+    let mut chunk_start = Instant::now();
+
     // Main search loop (replaces recursion)
     while let Some(frame) = stack.last_mut() {
         // === PHASE 1: Frame Initialization (first visit) ===
         if frame.moves.is_empty() && frame.move_index == 0 && frame.returning_score.is_none() {
             game.calls += 1;
+
+            // Check more frequently (every 128 nodes) but only yield if time budget exceeded
+            if game.calls % 128 == 0 {
+                // Yield if we've worked for more than 5ms in this time slice
+                if chunk_start.elapsed().as_millis() > 5 {
+                    yield_now().await;
+                    chunk_start = Instant::now();
+                }
+            }
 
             // Base case: depth 0 - do quiescence search
             if frame.depth <= 0 {

@@ -128,18 +128,22 @@ pub fn start_asset_loading(
 }
 
 /// Resource to track asset loading start time for timeout detection
+/// Note: This struct is kept for backward compatibility but the actual
+/// timeout tracking now uses Bevy's Time resource for WASM compatibility.
 #[derive(Resource, Default)]
 pub struct AssetLoadingTimer {
-    start_time: Option<std::time::Instant>,
+    /// Start time in Bevy elapsed seconds (WASM-compatible)
+    start_elapsed_secs: Option<f32>,
 }
 
 impl AssetLoadingTimer {
-    pub fn start(&mut self) {
-        self.start_time = Some(std::time::Instant::now());
+    pub fn start_with_time(&mut self, elapsed_secs: f32) {
+        self.start_elapsed_secs = Some(elapsed_secs);
     }
 
-    pub fn elapsed_secs(&self) -> Option<f32> {
-        self.start_time.map(|start| start.elapsed().as_secs_f32())
+    pub fn elapsed_secs_with_time(&self, current_elapsed_secs: f32) -> Option<f32> {
+        self.start_elapsed_secs
+            .map(|start| current_elapsed_secs - start)
     }
 }
 
@@ -153,7 +157,8 @@ pub fn check_asset_loading(
     mut progress: ResMut<LoadingProgress>,
     asset_server: Res<AssetServer>,
     gltf_assets: Res<Assets<Gltf>>,
-    mut loading_timer: Local<Option<std::time::Instant>>,
+    time: Res<Time>,
+    mut loading_start_time: Local<Option<f32>>,
 ) {
     // Don't check if already loaded or failed
     if game_assets.loaded || game_assets.failed {
@@ -165,15 +170,17 @@ pub fn check_asset_loading(
         return;
     }
 
+    let elapsed_secs = time.elapsed_secs();
+
     // Initialize timer on first check
-    if loading_timer.is_none() {
-        *loading_timer = Some(std::time::Instant::now());
+    if loading_start_time.is_none() {
+        *loading_start_time = Some(elapsed_secs);
     }
 
     // Check for timeout (30 seconds)
     const TIMEOUT_SECS: f32 = 30.0;
-    if let Some(start_time) = *loading_timer {
-        if start_time.elapsed().as_secs_f32() > TIMEOUT_SECS {
+    if let Some(start_time) = *loading_start_time {
+        if elapsed_secs - start_time > TIMEOUT_SECS {
             let error_msg = format!("Asset loading timeout after {} seconds", TIMEOUT_SECS);
             error!("[ASSETS] {}", error_msg);
 

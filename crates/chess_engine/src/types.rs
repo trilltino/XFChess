@@ -214,7 +214,7 @@ pub struct Game {
     pub white_pawn: [KKS; 64],
     pub black_pawn: [KKS; 64],
 
-    pub tt: Box<[TTE; TTE_SIZE]>,
+    pub tt: std::sync::Arc<std::sync::Mutex<Box<[TTE; TTE_SIZE]>>>,
 
     pub max_depth_so_far: i64,
     pub abs_max_depth: i64,
@@ -365,5 +365,105 @@ impl Default for TTE {
         TTE {
             h: [Guide2::default(); TT_TRY],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_move_default() {
+        let m = Move::default();
+        assert_eq!(m.src, 0);
+        assert_eq!(m.dst, 0);
+        assert_eq!(m.score, LOWEST_SCORE);
+        assert_eq!(m.state, STATE_PLAYING);
+        assert_eq!(m.checkmate_in, 0);
+    }
+
+    #[test]
+    fn test_move_is_copy() {
+        let m1 = Move {
+            src: 12,
+            dst: 28,
+            score: 100,
+            state: STATE_PLAYING,
+            checkmate_in: 0,
+        };
+        let m2 = m1; // Copy
+        assert_eq!(m1.src, m2.src);
+        assert_eq!(m1.dst, m2.dst);
+    }
+
+    #[test]
+    fn test_kk_default() {
+        let kk = KK::default();
+        assert_eq!(kk.score, 0);
+        assert_eq!(kk.src, 0);
+        assert_eq!(kk.dst, 0);
+        assert_eq!(kk.nxt_dir_idx, 0);
+    }
+
+    #[test]
+    fn test_kk_new() {
+        let kk = KK::new(12, 28, 100, 0);
+        assert_eq!(kk.src, 12);
+        assert_eq!(kk.dst, 28);
+        assert_eq!(kk.score, 100);
+        assert_eq!(kk.nxt_dir_idx, 0);
+    }
+
+    #[test]
+    fn test_kk_equality() {
+        let kk1 = KK::new(12, 28, 100, 0);
+        let kk2 = KK::new(12, 28, 100, 0);
+        let kk3 = KK::new(12, 29, 100, 0);
+
+        assert_eq!(kk1, kk2);
+        assert_ne!(kk1, kk3);
+    }
+
+    #[test]
+    fn test_guide1_default() {
+        let g = Guide1::default();
+        assert_eq!(g.ply, 0);
+        assert_eq!(g.score, INVALID_SCORE);
+        assert_eq!(g.best_move_src, 0);
+        assert_eq!(g.best_move_dst, 0);
+    }
+
+    #[test]
+    fn test_guide2_default() {
+        let g = Guide2::default();
+        assert_eq!(g.key, [0; BIT_BUFFER_SIZE]);
+        assert_eq!(g.pri, 0);
+    }
+
+    #[test]
+    fn test_hash_result_default() {
+        let hr = HashResult::default();
+        assert_eq!(hr.depth, 0);
+        assert_eq!(hr.hit, 0);
+    }
+
+    #[test]
+    fn test_tte_default() {
+        let tte = TTE::default();
+        assert_eq!(tte.h.len(), TT_TRY);
+    }
+
+    #[test]
+    fn test_position_type_alias() {
+        let pos: Position = 28; // e4
+        assert_eq!(pos, 28i8);
+    }
+
+    #[test]
+    fn test_color_type_alias() {
+        let white: Color = COLOR_WHITE;
+        let black: Color = COLOR_BLACK;
+        assert!(white > 0);
+        assert!(black < 0);
     }
 }

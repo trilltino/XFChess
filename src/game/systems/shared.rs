@@ -1,4 +1,4 @@
-use crate::game::components::{Captured, HasMoved, MoveRecord, PieceMoveAnimation};
+use crate::game::components::{Captured, FadingCapture, HasMoved, MoveRecord, PieceMoveAnimation};
 use crate::game::resources::{CapturedPieces, ChessEngine, MoveHistory, PendingTurnAdvance};
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::audio::{AudioPlayer, AudioSource};
@@ -36,6 +36,7 @@ pub fn play_move_audio(
 }
 
 /// Apply visual and logical state for a captured piece
+/// Now uses fading animation instead of instant move
 pub fn apply_capture(
     commands: &mut Commands,
     captured_pieces: &mut CapturedPieces,
@@ -63,9 +64,12 @@ pub fn apply_capture(
         target.piece_type,
         count_of_same_type,
     );
-    commands
-        .entity(target.entity)
-        .insert((Transform::from_translation(capture_pos), Captured));
+
+    // Add FadingCapture component for fade-out animation instead of instant move
+    commands.entity(target.entity).insert(FadingCapture {
+        timer: Timer::from_seconds(0.5, TimerMode::Once),
+        capture_zone_pos: capture_pos,
+    });
 }
 
 /// Updates ECS components for a moved piece (position, history, animation)
@@ -193,4 +197,15 @@ pub fn execute_move(
     );
 
     true
+}
+
+/// Helper to find a piece entity at a specific board coordinate
+pub fn find_piece_on_square(
+    pieces: &Query<(Entity, &Piece, &HasMoved, &Transform)>,
+    position: (u8, u8),
+) -> Option<(Entity, Piece)> {
+    pieces
+        .iter()
+        .find(|(_, piece, _, _)| piece.x == position.0 && piece.y == position.1)
+        .map(|(entity, piece, _, _)| (entity, *piece))
 }

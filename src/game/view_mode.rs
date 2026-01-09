@@ -18,13 +18,3 @@ pub enum ViewMode {
     /// TempleOS-inspired view with grey/white board, diagonal camera, and coordinate labels
     TempleOS,
 }
-
-impl ViewMode {
-    /// Returns a human-readable description of the view mode
-    pub fn description(self) -> &'static str {
-        match self {
-            ViewMode::Standard => "Standard View",
-            ViewMode::TempleOS => "TempleOS View",
-        }
-    }
-}

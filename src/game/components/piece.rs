@@ -194,6 +194,16 @@ pub struct HasMoved {
 #[reflect(Component)]
 pub struct Captured;
 
+/// Component for fading out a captured piece before moving to capture zone
+#[derive(Component, Debug, Reflect)]
+#[reflect(Component)]
+pub struct FadingCapture {
+    /// Timer tracking fade duration
+    pub timer: Timer,
+    /// Target position in capture zone (applied after fade completes)
+    pub capture_zone_pos: Vec3,
+}
+
 /// Component representing an active straight-line animation for a piece move
 #[derive(Component, Debug, Reflect)]
 #[reflect(Component)]

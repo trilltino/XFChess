@@ -1,9 +1,10 @@
 [build]
 target = "index.html"
 dist = "dist"
+# Enable file hashing for cache busting in production
+filehash = true
 
 [serve]
 address = "127.0.0.1"
 port = 8080
 open = true
-

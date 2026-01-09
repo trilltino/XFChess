@@ -7,7 +7,8 @@ use crate::core::{DespawnOnExit, MenuState};
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use crate::ui::styles::*;
 use bevy::color::Color;
-use bevy::input::mouse::AccumulatedMouseMotion;
+
+use bevy::input::mouse::{AccumulatedMouseMotion, MouseWheel};
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -22,7 +23,7 @@ impl Plugin for PieceViewerPlugin {
             .add_systems(
                 OnEnter(MenuState::PieceViewer),
                 (
-                    despawn_all_on_enter,
+                    // Removed despawn_all_on_enter - now reuses Main Menu scene
                     setup_piece_viewer_camera,
                     setup_piece_viewer_scene,
                 ),
@@ -34,7 +35,11 @@ impl Plugin for PieceViewerPlugin {
             )
             .add_systems(
                 Update,
-                (update_piece_materials, orbit_camera_system)
+                (
+                    update_piece_materials,
+                    orbit_camera_system,
+                    update_viewer_model,
+                )
                     .run_if(in_state(MenuState::PieceViewer)),
             );
     }
@@ -99,17 +104,27 @@ struct PieceViewerOrbitCamera {
     pub pitch: f32,
     pub yaw: f32,
     pub initialized: bool,
+    pub focus: Vec3, // Focus point (pyramid top)
 }
 
 impl Default for PieceViewerOrbitCamera {
     fn default() -> Self {
         Self {
-            distance: 8.0,
+            distance: 8.0, // Back up a bit to see pyramid
             pitch: 0.3,
             yaw: 0.0,
             initialized: false,
+            focus: Vec3::new(0.0, 0.5, 0.0), // Pyramid top is at Y=0
         }
     }
+}
+
+/// Enum for different viewable model types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewerModelType {
+    #[default]
+    ChessPiece,
+    Human,
 }
 
 /// Resource tracking selected piece and material values
@@ -117,6 +132,9 @@ impl Default for PieceViewerOrbitCamera {
 pub struct PieceViewerState {
     /// Selected piece entity (for material updates)
     pub selected_entity: Option<Entity>,
+
+    /// Current model type being viewed
+    pub model_type: ViewerModelType,
 
     // Material properties
     pub base_color: [f32; 3], // RGB
@@ -215,45 +233,38 @@ fn setup_piece_viewer_camera(
         }
     };
 
-    // Initial orbit position looking at origin (where piece will be)
+    // Initial orbit position looking at pyramid top (where piece will be)
     let orbit = PieceViewerOrbitCamera::default();
     let pitch = orbit.pitch;
     let yaw = orbit.yaw;
     let distance = orbit.distance;
+    let focus = orbit.focus;
 
-    // Calculate camera position from orbit parameters
-    let x = distance * pitch.cos() * yaw.sin();
-    let y = distance * pitch.sin();
-    let z = distance * pitch.cos() * yaw.cos();
+    // Calculate camera position from orbit parameters around the focus point
+    let x = focus.x + distance * pitch.cos() * yaw.sin();
+    let y = focus.y + distance * pitch.sin();
+    let z = focus.z + distance * pitch.cos() * yaw.cos();
 
-    *transform = Transform::from_xyz(x, y, z).looking_at(Vec3::ZERO, Vec3::Y);
+    *transform = Transform::from_xyz(x, y, z).looking_at(focus, Vec3::Y);
 
-    commands.entity(camera_entity).insert((
-        DistanceFog {
-            color: Color::srgb(0.05, 0.05, 0.08),
-            falloff: FogFalloff::Linear {
-                start: 10.0,
-                end: 30.0,
-            },
-            ..default()
-        },
-        ViewerCamera,
-        orbit,
-    ));
+    commands.entity(camera_entity).insert((ViewerCamera, orbit));
 
     info!("[PIECE_VIEWER] Camera set up for orbit viewing");
 }
 
-/// Orbit camera system - rotate around piece with mouse drag
+/// Orbit camera system - rotate around piece with mouse drag, zoom with scroll, and pan with WASD
 fn orbit_camera_system(
+    time: Res<Time>,
     mouse_motion: Res<AccumulatedMouseMotion>,
     mouse_button: Res<ButtonInput<MouseButton>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut scroll_events: EventReader<MouseWheel>,
     mut query: Query<(&mut Transform, &mut PieceViewerOrbitCamera), With<ViewerCamera>>,
 ) {
     for (mut transform, mut orbit) in query.iter_mut() {
         // Initialize pitch/yaw from Transform on first frame
         if !orbit.initialized {
-            let pos = transform.translation;
+            let pos = transform.translation - orbit.focus;
             orbit.distance = pos.length();
 
             // Calculate pitch and yaw from position (spherical coordinates)
@@ -262,6 +273,70 @@ fn orbit_camera_system(
             // Yaw: angle around Y axis (azimuth)
             orbit.yaw = pos.z.atan2(pos.x);
             orbit.initialized = true;
+        }
+
+        let mut needs_update = false;
+
+        // Zoom with scroll wheel
+        for event in scroll_events.read() {
+            const ZOOM_SENSITIVITY: f32 = 0.5;
+            orbit.distance = (orbit.distance - event.y * ZOOM_SENSITIVITY).clamp(1.0, 50.0);
+            needs_update = true;
+        }
+
+        // Keyboard Rotation (Q/E)
+        const KEYBOARD_ROTATION_SPEED: f32 = 2.0;
+        if keyboard_input.pressed(KeyCode::KeyQ) {
+            // Rotate Left = Increase Yaw
+            orbit.yaw += KEYBOARD_ROTATION_SPEED * time.delta_secs();
+            needs_update = true;
+        }
+        if keyboard_input.pressed(KeyCode::KeyE) {
+            // Rotate Right = Decrease Yaw
+            orbit.yaw -= KEYBOARD_ROTATION_SPEED * time.delta_secs();
+            needs_update = true;
+        }
+
+        // WASD Panning
+        let mut pan = Vec3::ZERO;
+        if keyboard_input.pressed(KeyCode::KeyW) {
+            pan.z -= 1.0;
+        }
+        if keyboard_input.pressed(KeyCode::KeyS) {
+            pan.z += 1.0;
+        }
+        if keyboard_input.pressed(KeyCode::KeyA) {
+            pan.x -= 1.0;
+        }
+        if keyboard_input.pressed(KeyCode::KeyD) {
+            pan.x += 1.0;
+        }
+
+        if pan != Vec3::ZERO {
+            pan = pan.normalize() * 0.1; // Pan speed
+
+            // Rotate pan vector by camera yaw to be relative to view
+            // let rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 - orbit.yaw);
+            // Note: orbit.yaw of 0 implies camera at +Z (looking -Z).
+            // In Bevy +X is Right, +Z is Back.
+            // At yaw=0: x=0, z=d.
+            // Bevy coords: Z is South. X is East.
+            // If yaw=0 (South), W should move North (-Z).
+            // pan.z is -1.
+
+            // Let's use simple trigonometry instead of Quat to be sure
+            // Camera forward direction projected on XZ (ignoring pitch)
+            // Camera position: (sin(yaw), cos(yaw)) * d.
+            // Forward vector (from Cam to Focus): (-sin(yaw), -cos(yaw)).
+            // Right vector (Forward rotated -90 deg): (cos(yaw), -sin(yaw)). (x=cos, z=-sin)
+
+            // Move vector = Forward * -pan.z + Right * pan.x
+            let forward = Vec3::new(-orbit.yaw.sin(), 0.0, -orbit.yaw.cos());
+            let right = Vec3::new(orbit.yaw.cos(), 0.0, -orbit.yaw.sin());
+
+            let move_vec = forward * -pan.z + right * pan.x;
+            orbit.focus += move_vec;
+            needs_update = true;
         }
 
         // Rotate on mouse drag (left or right button)
@@ -279,18 +354,19 @@ fn orbit_camera_system(
 
             // Update yaw (left/right) - full rotation
             orbit.yaw -= mouse_motion.delta.x * SENSITIVITY;
+            needs_update = true;
+        }
 
-            // Calculate new camera position using spherical coordinates
-            // x = r * cos(pitch) * sin(yaw)
-            // y = r * sin(pitch)
-            // z = r * cos(pitch) * cos(yaw)
-            let x = orbit.distance * orbit.pitch.cos() * orbit.yaw.sin();
-            let y = orbit.distance * orbit.pitch.sin();
-            let z = orbit.distance * orbit.pitch.cos() * orbit.yaw.cos();
+        // Update camera position if anything changed
+        if needs_update {
+            // Calculate new camera position using spherical coordinates around the focus point
+            let x = orbit.focus.x + orbit.distance * orbit.pitch.cos() * orbit.yaw.sin();
+            let y = orbit.focus.y + orbit.distance * orbit.pitch.sin();
+            let z = orbit.focus.z + orbit.distance * orbit.pitch.cos() * orbit.yaw.cos();
 
-            // Update transform to orbit around origin
+            // Update transform to orbit around focus
             transform.translation = Vec3::new(x, y, z);
-            transform.look_at(Vec3::ZERO, Vec3::Y);
+            transform.look_at(orbit.focus, Vec3::Y);
         }
     }
 }
@@ -322,9 +398,12 @@ fn setup_piece_viewer_scene(
         rook: asset_server.load("models/chess_kit/pieces.glb#Mesh5/Primitive0"),
         bishop: asset_server.load("models/chess_kit/pieces.glb#Mesh6/Primitive0"),
         queen: asset_server.load("models/chess_kit/pieces.glb#Mesh7/Primitive0"),
+        human: asset_server.load("models/human.obj"),
     };
 
-    // Spawn only the selected piece at origin
+    // Spawn only the selected piece at pyramid top
+    let piece_position = Vec3::new(0.0, 8.5, 0.0); // Top of the pyramid
+
     let material = materials.add(StandardMaterial {
         base_color: if piece_color == PieceColor::White {
             Color::WHITE
@@ -334,18 +413,35 @@ fn setup_piece_viewer_scene(
         ..default()
     });
 
-    let piece_entity = spawn_viewer_piece(
+    // Add point light highlighting the pyramid top
+    commands.spawn((
+        PointLight {
+            intensity: 8000.0,
+            range: 50.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 10.0, 5.0),
+        DespawnOnExit(MenuState::PieceViewer),
+    ));
+
+    // Spawn only the selected piece at pyramid top
+    let piece_position = Vec3::new(0.0, 0.25, 0.0); // Top of the pyramid (Layer 0 is at Y=0.25)
+
+    let piece_entity = spawn_viewer_model(
         &mut commands,
         &piece_meshes,
         material,
         piece_color,
+        ViewerModelType::ChessPiece,
         piece_type,
-        Vec3::ZERO, // Center at origin
+        piece_position, // On top of the pyramid
         MenuState::PieceViewer,
     );
 
     // Store entity and initialize material values
     viewer_state.selected_entity = Some(piece_entity);
+    viewer_state.model_type = ViewerModelType::ChessPiece;
     viewer_state.default_base_color = if piece_color == PieceColor::White {
         [1.0, 1.0, 1.0]
     } else {
@@ -362,41 +458,15 @@ fn setup_piece_viewer_scene(
     viewer_state.emissive = viewer_state.default_emissive;
     viewer_state.reflectance = viewer_state.default_reflectance;
 
-    // === LIGHTING ===
-    // Directional light for good visibility
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 3000.0,
-            shadows_enabled: true,
-            color: Color::srgb(1.0, 1.0, 1.0),
-            ..default()
-        },
-        Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ,
-            -std::f32::consts::FRAC_PI_4,
-            std::f32::consts::FRAC_PI_4,
-            0.0,
-        )),
-        DespawnOnExit(MenuState::PieceViewer),
-        Name::new("Viewer Directional Light"),
-    ));
+    // Store meshes resource for model switching
+    commands.insert_resource(piece_meshes);
 
-    // Additional point light for fill
-    commands.spawn((
-        PointLight {
-            intensity: 300_000.0,
-            color: Color::srgb(1.0, 1.0, 1.0),
-            shadows_enabled: false,
-            range: 20.0,
-            ..default()
-        },
-        Transform::from_xyz(5.0, 5.0, 5.0),
-        DespawnOnExit(MenuState::PieceViewer),
-        Name::new("Viewer Fill Light"),
-    ));
+    // Lights are reused from Main Menu scene - no need to spawn new ones
+    info!("[PIECE_VIEWER] Scene setup complete (reusing Main Menu lights)");
 }
 
 /// Helper struct for piece meshes
+#[derive(Resource, Clone)]
 struct PieceMeshes {
     king: Handle<Mesh>,
     king_cross: Handle<Mesh>,
@@ -406,14 +476,17 @@ struct PieceMeshes {
     rook: Handle<Mesh>,
     bishop: Handle<Mesh>,
     queen: Handle<Mesh>,
+    human: Handle<Mesh>,
 }
 
 /// Helper to spawn a piece in the viewer
-fn spawn_viewer_piece(
+/// Helper to spawn a piece in the viewer
+fn spawn_viewer_model(
     commands: &mut Commands,
     meshes: &PieceMeshes,
     material: Handle<StandardMaterial>,
     color: PieceColor,
+    model_type: ViewerModelType,
     piece_type: PieceType,
     position: Vec3,
     despawn_state: MenuState,
@@ -427,8 +500,31 @@ fn spawn_viewer_piece(
     }
 
     let rotation = piece_rotation(color);
-    let scale = Vec3::splat(0.2);
 
+    if model_type == ViewerModelType::Human {
+        let scale = Vec3::splat(0.2); // Match scale of chess pieces
+
+        return commands
+            .spawn((
+                Transform::from_translation(position)
+                    .with_rotation(rotation)
+                    .with_scale(scale),
+                Visibility::Inherited,
+                Name::new("Viewer Human"),
+                DespawnOnExit(despawn_state),
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Mesh3d(meshes.human.clone()),
+                    MeshMaterial3d(material),
+                    Transform::from_xyz(0.0, 0.0, 0.0), // Adjust vertical position
+                ));
+            })
+            .id();
+    }
+
+    // Default: Chess Piece
+    let scale = Vec3::splat(0.2);
     let piece_name = format!("Viewer {:?} {:?}", color, piece_type);
 
     match piece_type {
@@ -584,6 +680,7 @@ fn spawn_viewer_piece(
 }
 
 /// Cleanup on exit - remove viewer-specific components and reset camera
+/// Cleanup on exit - remove viewer-specific components and reset camera
 fn cleanup_piece_viewer(
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut commands: Commands,
@@ -591,8 +688,33 @@ fn cleanup_piece_viewer(
         (&mut Transform, Entity),
         (With<bevy_egui::PrimaryEguiContext>, With<ViewerCamera>),
     >,
+    despawn_query: Query<(Entity, &crate::core::DespawnOnExit<crate::core::MenuState>)>,
+    children_query: Query<&Children>,
 ) {
     info!("[PIECE_VIEWER] Cleaning up on exit");
+
+    // Despawn viewer entities
+    let mut count = 0;
+    for (entity, marker) in despawn_query.iter() {
+        if marker.0 == crate::core::MenuState::PieceViewer {
+            // Manual recursive despawn
+            fn despawn_recursive(
+                commands: &mut Commands,
+                entity: Entity,
+                children_query: &Query<&Children>,
+            ) {
+                if let Ok(children) = children_query.get(entity) {
+                    for child in children.iter() {
+                        despawn_recursive(commands, child, children_query);
+                    }
+                }
+                commands.entity(entity).despawn();
+            }
+            despawn_recursive(&mut commands, entity, &children_query);
+            count += 1;
+        }
+    }
+    info!("[PIECE_VIEWER] Despawned {} entities", count);
 
     // Remove viewer camera components and reset camera transform
     let camera_entity = match persistent_camera.entity {
@@ -613,7 +735,7 @@ fn cleanup_piece_viewer(
             commands
                 .entity(camera_entity)
                 .remove::<PieceViewerOrbitCamera>();
-            commands.entity(camera_entity).remove::<DistanceFog>();
+            // commands.entity(camera_entity).remove::<DistanceFog>();
 
             info!("[PIECE_VIEWER] Camera reset to menu position and viewer components removed");
         }
@@ -626,7 +748,7 @@ fn cleanup_piece_viewer(
             commands
                 .entity(camera_entity)
                 .remove::<PieceViewerOrbitCamera>();
-            commands.entity(camera_entity).remove::<DistanceFog>();
+            // commands.entity(camera_entity).remove::<DistanceFog>();
         }
     }
 
@@ -640,8 +762,8 @@ fn cleanup_piece_viewer(
 fn piece_viewer_ui_wrapper(
     contexts: EguiContexts,
     next_state: ResMut<NextState<MenuState>>,
-    viewer_state: ResMut<PieceViewerState>,
-    selected_piece: Res<SelectedPieceInfo>,
+    mut viewer_state: ResMut<PieceViewerState>,
+    mut selected_piece: ResMut<SelectedPieceInfo>,
 ) {
     match piece_viewer_ui(contexts, next_state, viewer_state, selected_piece) {
         Ok(()) => {
@@ -660,185 +782,276 @@ fn piece_viewer_ui(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<MenuState>>,
     mut viewer_state: ResMut<PieceViewerState>,
-    selected_piece: Res<SelectedPieceInfo>,
+    mut selected_piece: ResMut<SelectedPieceInfo>,
 ) -> Result<(), bevy::ecs::query::QuerySingleError> {
     let ctx = contexts.ctx_mut()?;
 
-    // Right-side control panel
+    // Right-side control panel with transparent background
     egui::SidePanel::right("piece_viewer_controls")
         .resizable(false)
-        .default_width(400.0)
+        .default_width(250.0)
+        .frame(egui::Frame {
+            fill: egui::Color32::TRANSPARENT,
+            inner_margin: egui::Margin::same(15),
+            ..Default::default()
+        })
         .show(ctx, |ui| {
-            StyledPanel::card().show(ui, |ui| {
-                ui.vertical(|ui| {
-                    // Title
-                    ui.heading(TextStyle::heading("Piece Viewer", TextSize::LG));
+            ui.vertical(|ui| {
+                // Title
+                ui.heading(TextStyle::heading("Piece Viewer", TextSize::LG));
+                Layout::item_space(ui);
+
+                if viewer_state.model_type == ViewerModelType::ChessPiece {
+                    let mut current_type = selected_piece.piece_type.unwrap_or(PieceType::King);
+                    let mut current_color = selected_piece.piece_color.unwrap_or(PieceColor::White);
+                    let mut changed = false;
+
+                    // Color Selection
+                    ui.horizontal(|ui| {
+                        ui.label(TextStyle::body("Color:"));
+                        egui::ComboBox::from_id_source("piece_color")
+                            .selected_text(format!("{:?}", current_color))
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_value(
+                                        &mut current_color,
+                                        PieceColor::White,
+                                        "White",
+                                    )
+                                    .clicked()
+                                {
+                                    changed = true;
+                                }
+                                if ui
+                                    .selectable_value(
+                                        &mut current_color,
+                                        PieceColor::Black,
+                                        "Black",
+                                    )
+                                    .clicked()
+                                {
+                                    changed = true;
+                                }
+                            });
+                    });
+
                     Layout::item_space(ui);
 
-                    // Display current piece
-                    if let (Some(piece_type), Some(piece_color)) =
-                        (selected_piece.piece_type, selected_piece.piece_color)
+                    // Type Selection
+                    ui.horizontal(|ui| {
+                        ui.label(TextStyle::body("Type:"));
+                        egui::ComboBox::from_id_source("piece_type")
+                            .selected_text(format!("{:?}", current_type))
+                            .show_ui(ui, |ui| {
+                                let types = [
+                                    PieceType::King,
+                                    PieceType::Queen,
+                                    PieceType::Rook,
+                                    PieceType::Bishop,
+                                    PieceType::Knight,
+                                    PieceType::Pawn,
+                                ];
+                                for p_type in types {
+                                    if ui
+                                        .selectable_value(
+                                            &mut current_type,
+                                            p_type,
+                                            format!("{:?}", p_type),
+                                        )
+                                        .clicked()
+                                    {
+                                        changed = true;
+                                    }
+                                }
+                            });
+                    });
+
+                    if changed {
+                        selected_piece.piece_type = Some(current_type);
+                        selected_piece.piece_color = Some(current_color);
+                    }
+                } else {
+                    ui.label(TextStyle::body("Viewing: Human Model"));
+                }
+
+                Layout::item_space(ui);
+
+                // Model Selection
+                ui.heading(TextStyle::heading("Models", TextSize::MD));
+                Layout::small_space(ui);
+
+                ui.horizontal(|ui| {
+                    if ui
+                        .selectable_label(
+                            viewer_state.model_type == ViewerModelType::ChessPiece,
+                            "Chess Piece",
+                        )
+                        .clicked()
                     {
-                        ui.label(TextStyle::body(format!(
-                            "Viewing: {:?} {:?}",
-                            piece_color, piece_type
-                        )));
-                    } else {
-                        ui.label(TextStyle::body("Viewing: Default Piece"));
+                        viewer_state.model_type = ViewerModelType::ChessPiece;
                     }
-
-                    Layout::item_space(ui);
-
-                    // Rotation instructions
-                    ui.heading(TextStyle::heading("Controls", TextSize::MD));
-                    Layout::small_space(ui);
-                    ui.label(TextStyle::caption("🖱️ Drag with mouse to rotate"));
-                    ui.label(TextStyle::caption("   (Left or Right mouse button)"));
-                    ui.label(TextStyle::caption("   Orbit around the piece"));
-                    Layout::item_space(ui);
-
-                    Layout::section_space(ui);
-
-                    // Back button
-                    if StyledButton::secondary(ui, "← Back to Menu").clicked() {
-                        next_state.set(MenuState::Main);
-                    }
-
-                    Layout::section_space(ui);
-
-                    // === MATERIAL PROPERTIES ===
-                    ui.heading(TextStyle::heading("Material Properties", TextSize::MD));
-                    Layout::item_space(ui);
-
-                    // Base Color
-                    ui.label(TextStyle::body("Base Color"));
-                    ui.horizontal(|ui| {
-                        ui.label(TextStyle::caption("R:"));
-                        ui.add_sized(
-                            [80.0, 0.0],
-                            egui::Slider::new(&mut viewer_state.base_color[0], 0.0..=1.0)
-                                .text("")
-                                .show_value(false),
-                        );
-                        ui.label(TextStyle::caption(format!(
-                            "{:.2}",
-                            viewer_state.base_color[0]
-                        )));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(TextStyle::caption("G:"));
-                        ui.add_sized(
-                            [80.0, 0.0],
-                            egui::Slider::new(&mut viewer_state.base_color[1], 0.0..=1.0)
-                                .text("")
-                                .show_value(false),
-                        );
-                        ui.label(TextStyle::caption(format!(
-                            "{:.2}",
-                            viewer_state.base_color[1]
-                        )));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(TextStyle::caption("B:"));
-                        ui.add_sized(
-                            [80.0, 0.0],
-                            egui::Slider::new(&mut viewer_state.base_color[2], 0.0..=1.0)
-                                .text("")
-                                .show_value(false),
-                        );
-                        ui.label(TextStyle::caption(format!(
-                            "{:.2}",
-                            viewer_state.base_color[2]
-                        )));
-                    });
-
-                    // Color picker
-                    egui::widgets::color_picker::color_edit_button_rgb(
-                        ui,
-                        &mut viewer_state.base_color,
-                    );
-
-                    Layout::item_space(ui);
-
-                    // Metallic
-                    ui.label(TextStyle::body("Metallic"));
-                    ui.add(
-                        egui::Slider::new(&mut viewer_state.metallic, 0.0..=1.0)
-                            .show_value(true)
-                            .text(""),
-                    );
-
-                    Layout::item_space(ui);
-
-                    // Perceptual Roughness
-                    ui.label(TextStyle::body("Roughness"));
-                    ui.add(
-                        egui::Slider::new(&mut viewer_state.perceptual_roughness, 0.089..=1.0)
-                            .show_value(true)
-                            .text(""),
-                    );
-
-                    Layout::item_space(ui);
-
-                    // Emissive
-                    ui.label(TextStyle::body("Emissive Color"));
-                    ui.horizontal(|ui| {
-                        ui.label(TextStyle::caption("R:"));
-                        ui.add_sized(
-                            [60.0, 0.0],
-                            egui::Slider::new(&mut viewer_state.emissive[0], 0.0..=1.0)
-                                .text("")
-                                .show_value(false),
-                        );
-                        ui.label(TextStyle::caption(format!(
-                            "{:.2}",
-                            viewer_state.emissive[0]
-                        )));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(TextStyle::caption("G:"));
-                        ui.add_sized(
-                            [60.0, 0.0],
-                            egui::Slider::new(&mut viewer_state.emissive[1], 0.0..=1.0)
-                                .text("")
-                                .show_value(false),
-                        );
-                        ui.label(TextStyle::caption(format!(
-                            "{:.2}",
-                            viewer_state.emissive[1]
-                        )));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(TextStyle::caption("B:"));
-                        ui.add_sized(
-                            [60.0, 0.0],
-                            egui::Slider::new(&mut viewer_state.emissive[2], 0.0..=1.0)
-                                .text("")
-                                .show_value(false),
-                        );
-                        ui.label(TextStyle::caption(format!(
-                            "{:.2}",
-                            viewer_state.emissive[2]
-                        )));
-                    });
-
-                    Layout::item_space(ui);
-
-                    // Reflectance
-                    ui.label(TextStyle::body("Reflectance"));
-                    ui.add(
-                        egui::Slider::new(&mut viewer_state.reflectance, 0.0..=1.0)
-                            .show_value(true)
-                            .text(""),
-                    );
-
-                    Layout::section_space(ui);
-
-                    // Reset button
-                    if StyledButton::secondary(ui, "Reset to Default").clicked() {
-                        viewer_state.reset_to_defaults();
+                    if ui
+                        .selectable_label(
+                            viewer_state.model_type == ViewerModelType::Human,
+                            "Human",
+                        )
+                        .clicked()
+                    {
+                        viewer_state.model_type = ViewerModelType::Human;
                     }
                 });
+
+                Layout::item_space(ui);
+
+                // Rotation instructions
+                ui.heading(TextStyle::heading("Controls", TextSize::MD));
+                Layout::small_space(ui);
+                ui.label(TextStyle::caption("🖱️ Drag to rotate"));
+                ui.label(TextStyle::caption("🖱️ Scroll to zoom"));
+                ui.label(TextStyle::caption("⌨️ WASD to pan"));
+                Layout::item_space(ui);
+
+                Layout::section_space(ui);
+
+                // Back button
+                if StyledButton::secondary(ui, "← Back to Menu").clicked() {
+                    next_state.set(MenuState::Main);
+                }
+
+                Layout::section_space(ui);
+
+                // === MATERIAL PROPERTIES ===
+                ui.heading(TextStyle::heading("Material Properties", TextSize::MD));
+                Layout::item_space(ui);
+
+                // Base Color
+                ui.label(TextStyle::body("Base Color"));
+                ui.horizontal(|ui| {
+                    ui.label(TextStyle::caption("R:"));
+                    ui.add_sized(
+                        [80.0, 0.0],
+                        egui::Slider::new(&mut viewer_state.base_color[0], 0.0..=1.0)
+                            .text("")
+                            .show_value(false),
+                    );
+                    ui.label(TextStyle::caption(format!(
+                        "{:.2}",
+                        viewer_state.base_color[0]
+                    )));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(TextStyle::caption("G:"));
+                    ui.add_sized(
+                        [80.0, 0.0],
+                        egui::Slider::new(&mut viewer_state.base_color[1], 0.0..=1.0)
+                            .text("")
+                            .show_value(false),
+                    );
+                    ui.label(TextStyle::caption(format!(
+                        "{:.2}",
+                        viewer_state.base_color[1]
+                    )));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(TextStyle::caption("B:"));
+                    ui.add_sized(
+                        [80.0, 0.0],
+                        egui::Slider::new(&mut viewer_state.base_color[2], 0.0..=1.0)
+                            .text("")
+                            .show_value(false),
+                    );
+                    ui.label(TextStyle::caption(format!(
+                        "{:.2}",
+                        viewer_state.base_color[2]
+                    )));
+                });
+
+                // Color picker
+                egui::widgets::color_picker::color_edit_button_rgb(
+                    ui,
+                    &mut viewer_state.base_color,
+                );
+
+                Layout::item_space(ui);
+
+                // Metallic
+                ui.label(TextStyle::body("Metallic"));
+                ui.add(
+                    egui::Slider::new(&mut viewer_state.metallic, 0.0..=1.0)
+                        .show_value(true)
+                        .text(""),
+                );
+
+                Layout::item_space(ui);
+
+                // Perceptual Roughness
+                ui.label(TextStyle::body("Roughness"));
+                ui.add(
+                    egui::Slider::new(&mut viewer_state.perceptual_roughness, 0.089..=1.0)
+                        .show_value(true)
+                        .text(""),
+                );
+
+                Layout::item_space(ui);
+
+                // Emissive
+                ui.label(TextStyle::body("Emissive Color"));
+                ui.horizontal(|ui| {
+                    ui.label(TextStyle::caption("R:"));
+                    ui.add_sized(
+                        [60.0, 0.0],
+                        egui::Slider::new(&mut viewer_state.emissive[0], 0.0..=1.0)
+                            .text("")
+                            .show_value(false),
+                    );
+                    ui.label(TextStyle::caption(format!(
+                        "{:.2}",
+                        viewer_state.emissive[0]
+                    )));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(TextStyle::caption("G:"));
+                    ui.add_sized(
+                        [60.0, 0.0],
+                        egui::Slider::new(&mut viewer_state.emissive[1], 0.0..=1.0)
+                            .text("")
+                            .show_value(false),
+                    );
+                    ui.label(TextStyle::caption(format!(
+                        "{:.2}",
+                        viewer_state.emissive[1]
+                    )));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(TextStyle::caption("B:"));
+                    ui.add_sized(
+                        [60.0, 0.0],
+                        egui::Slider::new(&mut viewer_state.emissive[2], 0.0..=1.0)
+                            .text("")
+                            .show_value(false),
+                    );
+                    ui.label(TextStyle::caption(format!(
+                        "{:.2}",
+                        viewer_state.emissive[2]
+                    )));
+                });
+
+                Layout::item_space(ui);
+
+                // Reflectance
+                ui.label(TextStyle::body("Reflectance"));
+                ui.add(
+                    egui::Slider::new(&mut viewer_state.reflectance, 0.0..=1.0)
+                        .show_value(true)
+                        .text(""),
+                );
+
+                Layout::section_space(ui);
+
+                // Reset button
+                if StyledButton::secondary(ui, "Reset to Default").clicked() {
+                    viewer_state.reset_to_defaults();
+                }
             });
         });
 
@@ -901,5 +1114,69 @@ fn update_piece_materials(
                 selected_entity
             );
         }
+    }
+}
+
+/// System to handle model type switching logic
+fn update_viewer_model(
+    mut commands: Commands,
+    mut viewer_state: ResMut<PieceViewerState>,
+    piece_meshes: Res<PieceMeshes>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    selected_piece: Res<SelectedPieceInfo>,
+    mut last_model_type: Local<Option<ViewerModelType>>,
+) {
+    // Initialize local if needed
+    if last_model_type.is_none() {
+        *last_model_type = Some(viewer_state.model_type);
+        return;
+    }
+
+    if viewer_state.model_type != last_model_type.unwrap() || selected_piece.is_changed() {
+        // Model type changed!
+        let new_model = viewer_state.model_type;
+        *last_model_type = Some(new_model);
+
+        // Despawn old entity
+        if let Some(entity) = viewer_state.selected_entity {
+            commands.entity(entity).despawn();
+        }
+
+        // Spawn new entity
+        let piece_type = selected_piece.piece_type.unwrap_or(PieceType::King);
+        let piece_color = selected_piece.piece_color.unwrap_or(PieceColor::White);
+        let piece_position = Vec3::new(0.0, 0.25, 0.0);
+
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgb(
+                viewer_state.base_color[0],
+                viewer_state.base_color[1],
+                viewer_state.base_color[2],
+            ),
+            metallic: viewer_state.metallic,
+            perceptual_roughness: viewer_state.perceptual_roughness,
+            emissive: bevy::color::LinearRgba::new(
+                viewer_state.emissive[0],
+                viewer_state.emissive[1],
+                viewer_state.emissive[2],
+                viewer_state.emissive[3],
+            ),
+            reflectance: viewer_state.reflectance,
+            ..default()
+        });
+
+        let piece_entity = spawn_viewer_model(
+            &mut commands,
+            &piece_meshes,
+            material,
+            piece_color,
+            new_model,
+            piece_type,
+            piece_position,
+            MenuState::PieceViewer,
+        );
+
+        viewer_state.selected_entity = Some(piece_entity);
+        info!("[PIECE_VIEWER] Switched model to {:?}", new_model);
     }
 }

@@ -7,8 +7,9 @@ use crate::game::resources::Selection;
 use crate::rendering::pieces::Piece;
 use crate::rendering::utils::Square;
 use bevy::ecs::message::MessageReader;
+use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonInput;
-use bevy::picking::events::Pointer;
+use bevy::picking::events::{Click, Pointer};
 use bevy::picking::pointer::{PointerId, PointerInteraction};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -16,6 +17,40 @@ use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 #[derive(Resource, Default)]
 struct SelectionDebugState {
     enabled: bool,
+}
+
+#[derive(SystemParam)]
+pub struct PickingQueries<'w, 's> {
+    pub pieces: Query<
+        'w,
+        's,
+        (Entity, &'static Piece, &'static PointerInteraction),
+        (With<Piece>, With<PointerInteraction>),
+    >,
+    pub squares: Query<
+        'w,
+        's,
+        (Entity, &'static Square, &'static PointerInteraction),
+        (With<Square>, With<PointerInteraction>),
+    >,
+}
+
+#[derive(SystemParam)]
+pub struct PickingSetupParams<'w, 's> {
+    pub pieces: Query<
+        'w,
+        's,
+        (Entity, &'static Piece, Option<&'static PointerInteraction>),
+        (With<Piece>, Without<Square>),
+    >,
+    pub squares: Query<
+        'w,
+        's,
+        (Entity, &'static Square, Option<&'static PointerInteraction>),
+        (With<Square>, Without<Piece>),
+    >,
+    pub cameras: Query<'w, 's, (Entity, &'static Camera3d)>,
+    pub pointers: Query<'w, 's, Entity, With<PointerId>>,
 }
 
 fn toggle_selection_debug(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<SelectionDebugState>) {
@@ -125,11 +160,7 @@ pub fn debug_all_clicks(
 
 /// Debug system that monitors PointerInteraction component states (rate-limited)
 pub fn debug_pointer_interactions(
-    pieces: Query<(Entity, &Piece, &PointerInteraction), (With<Piece>, With<PointerInteraction>)>,
-    squares: Query<
-        (Entity, &Square, &PointerInteraction),
-        (With<Square>, With<PointerInteraction>),
-    >,
+    queries: PickingQueries,
     time: Res<Time>,
     mut last_check: Local<f32>,
 ) {
@@ -144,7 +175,7 @@ pub fn debug_pointer_interactions(
     let mut active_squares = 0;
 
     // Count active interactions instead of logging each one
-    for (entity, _piece, interaction) in pieces.iter() {
+    for (entity, _piece, interaction) in queries.pieces.iter() {
         if let Some((hit_entity, _hit_data)) = interaction.get_nearest_hit() {
             if *hit_entity == entity {
                 active_pieces += 1;
@@ -152,7 +183,7 @@ pub fn debug_pointer_interactions(
         }
     }
 
-    for (entity, _square, interaction) in squares.iter() {
+    for (entity, _square, interaction) in queries.squares.iter() {
         if let Some((hit_entity, _hit_data)) = interaction.get_nearest_hit() {
             if *hit_entity == entity {
                 active_squares += 1;
@@ -170,10 +201,7 @@ pub fn debug_pointer_interactions(
 
 /// Debug system that checks if entities have required components for picking (rate-limited)
 pub fn debug_picking_setup(
-    pieces: Query<(Entity, &Piece, Option<&PointerInteraction>), (With<Piece>, Without<Square>)>,
-    squares: Query<(Entity, &Square, Option<&PointerInteraction>), (With<Square>, Without<Piece>)>,
-    cameras: Query<(Entity, &Camera3d)>,
-    pointers: Query<Entity, With<PointerId>>, // Check for pointers
+    params: PickingSetupParams,
     time: Res<Time>,
     mut last_check: Local<f32>,
 ) {
@@ -184,12 +212,20 @@ pub fn debug_picking_setup(
     }
     *last_check = 0.0;
 
-    let camera_count = cameras.iter().count();
-    let pointer_count = pointers.iter().count();
-    let pieces_with = pieces.iter().filter(|(_, _, i)| i.is_some()).count();
-    let pieces_without = pieces.iter().filter(|(_, _, i)| i.is_none()).count();
-    let squares_with = squares.iter().filter(|(_, _, i)| i.is_some()).count();
-    let squares_without = squares.iter().filter(|(_, _, i)| i.is_none()).count();
+    let camera_count = params.cameras.iter().count();
+    let pointer_count = params.pointers.iter().count();
+    let pieces_with = params.pieces.iter().filter(|(_, _, i)| i.is_some()).count();
+    let pieces_without = params.pieces.iter().filter(|(_, _, i)| i.is_none()).count();
+    let squares_with = params
+        .squares
+        .iter()
+        .filter(|(_, _, i)| i.is_some())
+        .count();
+    let squares_without = params
+        .squares
+        .iter()
+        .filter(|(_, _, i)| i.is_none())
+        .count();
 
     info!(
         "[SETUP] Cameras: {} | Pointers: {} | Pieces: {}/{} | Squares: {}/{}",

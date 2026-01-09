@@ -84,3 +84,145 @@ pub fn crosses_file_boundary(src: i32, dst: i32, _direction: i32) -> bool {
 pub fn init_board() -> Board {
     SETUP
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::constants::{
+        BISHOP_ID, B_BISHOP, B_KING, B_KNIGHT, B_PAWN, B_QUEEN, B_ROOK, COLOR_BLACK, COLOR_WHITE,
+        KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID, W_BISHOP, W_KING, W_KNIGHT, W_PAWN,
+        W_QUEEN, W_ROOK,
+    };
+
+    #[test]
+    fn test_square_to_pos() {
+        // a1 = (0, 0) -> 0
+        assert_eq!(square_to_pos(0, 0), 0);
+        // h1 = (7, 0) -> 7
+        assert_eq!(square_to_pos(7, 0), 7);
+        // a8 = (0, 7) -> 56
+        assert_eq!(square_to_pos(0, 7), 56);
+        // e4 = (4, 3) -> 28
+        assert_eq!(square_to_pos(4, 3), 28);
+        // h8 = (7, 7) -> 63
+        assert_eq!(square_to_pos(7, 7), 63);
+    }
+
+    #[test]
+    fn test_pos_to_square() {
+        assert_eq!(pos_to_square(0), (0, 0)); // a1
+        assert_eq!(pos_to_square(7), (7, 0)); // h1
+        assert_eq!(pos_to_square(56), (0, 7)); // a8
+        assert_eq!(pos_to_square(28), (4, 3)); // e4
+        assert_eq!(pos_to_square(63), (7, 7)); // h8
+    }
+
+    #[test]
+    fn test_square_conversion_round_trip() {
+        for pos in 0..64 {
+            let (col, row) = pos_to_square(pos);
+            assert_eq!(square_to_pos(col, row), pos);
+        }
+    }
+
+    #[test]
+    fn test_is_valid_pos() {
+        // Valid positions
+        assert!(is_valid_pos(0));
+        assert!(is_valid_pos(32));
+        assert!(is_valid_pos(63));
+
+        // Invalid positions
+        assert!(!is_valid_pos(-1));
+        assert!(!is_valid_pos(64));
+        assert!(!is_valid_pos(100));
+    }
+
+    #[test]
+    fn test_is_valid_square() {
+        // Valid squares
+        assert!(is_valid_square(0, 0));
+        assert!(is_valid_square(7, 7));
+        assert!(is_valid_square(4, 3));
+
+        // Invalid squares
+        assert!(!is_valid_square(-1, 0));
+        assert!(!is_valid_square(0, -1));
+        assert!(!is_valid_square(8, 0));
+        assert!(!is_valid_square(0, 8));
+    }
+
+    #[test]
+    fn test_get_piece_at() {
+        let board = init_board();
+
+        // White pieces on first rank
+        assert_eq!(get_piece_at(&board, 0), W_ROOK); // a1
+        assert_eq!(get_piece_at(&board, 3), W_KING); // d1 (engine uses d1 for king)
+
+        // Black pieces on eighth rank
+        assert_eq!(get_piece_at(&board, 56), B_ROOK); // a8
+        assert_eq!(get_piece_at(&board, 59), B_KING); // d8 (engine uses d8 for king)
+
+        // Empty squares in the middle
+        assert_eq!(get_piece_at(&board, 28), 0); // e4
+    }
+
+    #[test]
+    fn test_is_empty() {
+        let board = init_board();
+
+        // Empty squares
+        assert!(is_empty(&board, 28)); // e4
+        assert!(is_empty(&board, 35)); // d5
+
+        // Occupied squares
+        assert!(!is_empty(&board, 0)); // a1 has rook
+        assert!(!is_empty(&board, 12)); // e2 has pawn
+    }
+
+    #[test]
+    fn test_piece_belongs_to() {
+        // White pieces (positive)
+        assert!(piece_belongs_to(PAWN_ID, COLOR_WHITE));
+        assert!(piece_belongs_to(KING_ID, COLOR_WHITE));
+        assert!(!piece_belongs_to(PAWN_ID, COLOR_BLACK));
+
+        // Black pieces (negative)
+        assert!(piece_belongs_to(-PAWN_ID, COLOR_BLACK));
+        assert!(piece_belongs_to(-QUEEN_ID, COLOR_BLACK));
+        assert!(!piece_belongs_to(-PAWN_ID, COLOR_WHITE));
+
+        // Empty square belongs to neither
+        assert!(!piece_belongs_to(0, COLOR_WHITE));
+        assert!(!piece_belongs_to(0, COLOR_BLACK));
+    }
+
+    #[test]
+    fn test_get_piece_color() {
+        assert_eq!(get_piece_color(PAWN_ID), COLOR_WHITE);
+        assert_eq!(get_piece_color(KING_ID), COLOR_WHITE);
+        assert_eq!(get_piece_color(-PAWN_ID), COLOR_BLACK);
+        assert_eq!(get_piece_color(-QUEEN_ID), COLOR_BLACK);
+        assert_eq!(get_piece_color(0), 0);
+    }
+
+    #[test]
+    fn test_init_board_starting_position() {
+        let board = init_board();
+
+        // Verify piece count
+        let white_pieces: i32 = board.iter().filter(|&&p| p > 0).count() as i32;
+        let black_pieces: i32 = board.iter().filter(|&&p| p < 0).count() as i32;
+        assert_eq!(white_pieces, 16, "Should have 16 white pieces");
+        assert_eq!(black_pieces, 16, "Should have 16 black pieces");
+
+        // Verify king positions (engine uses d1/d8 for kings)
+        assert_eq!(board[3], W_KING, "White king should be on d1");
+        assert_eq!(board[59], B_KING, "Black king should be on d8");
+
+        // Verify queens (engine uses e1/e8 for queens)
+        assert_eq!(board[4], W_QUEEN, "White queen should be on e1");
+        assert_eq!(board[60], B_QUEEN, "Black queen should be on e8");
+    }
+}

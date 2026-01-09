@@ -1,129 +1,186 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="XFChess - A modern 3D chess game built with Bevy and Rust. Play against AI with enhanced graphics and smooth gameplay.">
-    <meta name="theme-color" content="#0a0a15">
-    <title>XFChess - 3D Chess Game</title>
-    <link data-trunk rel="rust" data-bin="xfchess-web" data-wasm-opt="z" />
-    <link data-trunk rel="copy-dir" href="../assets" />
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description"
+    content="XFChess - A modern 3D chess game built with Bevy and Rust. Play against AI with enhanced graphics and smooth gameplay.">
+  <meta name="theme-color" content="#0a0a15">
+  <title>XFChess - 3D Chess Game</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+  <link data-trunk rel="rust" data-bin="xfchess-web" data-wasm-opt="z" />
+  <link data-trunk rel="copy-dir" href="../assets" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #0a0a15;
+      overflow: hidden;
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    /* Loading screen */
+    #loading-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(135deg, #0a0a15 0%, #1a1a2e 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      transition: opacity 0.5s ease-out;
+    }
+
+    #loading-screen.hidden {
+      opacity: 0;
+      pointer-events: none;
+      display: none !important;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    #loading-screen h1 {
+      color: #fff;
+      font-size: 2.5rem;
+      font-weight: 300;
+      letter-spacing: 0.2em;
+      margin-bottom: 1rem;
+    }
+
+    #loading-screen p {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 0.9rem;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 1.5rem;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
       }
-      body {
-        background: #0a0a15;
-        overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      }
-      /* Loading screen */
-      #loading-screen {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: linear-gradient(135deg, #0a0a15 0%, #1a1a2e 100%);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-        transition: opacity 0.5s ease-out;
-      }
-      #loading-screen.hidden {
-        opacity: 0;
-        pointer-events: none;
-      }
-      #loading-screen h1 {
-        color: #fff;
-        font-size: 2.5rem;
-        font-weight: 300;
-        letter-spacing: 0.2em;
-        margin-bottom: 1rem;
-      }
-      #loading-screen p {
-        color: rgba(255, 255, 255, 0.6);
-        font-size: 0.9rem;
-      }
-      .spinner {
-        width: 40px;
-        height: 40px;
-        border: 3px solid rgba(255, 255, 255, 0.1);
-        border-top-color: #fff;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin-bottom: 1.5rem;
-      }
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-      /* Debug console (visible in dev mode) */
-      #debug-console {
-        position: fixed;
-        bottom: 10px;
-        left: 10px;
-        background: rgba(0, 0, 0, 0.8);
-        color: #0f0;
-        font-family: monospace;
-        font-size: 11px;
-        padding: 8px 12px;
-        border-radius: 4px;
-        max-width: 400px;
-        max-height: 150px;
-        overflow-y: auto;
-        z-index: 1001;
-        display: none;
-      }
-      #debug-console.visible {
-        display: block;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="loading-screen">
-      <div class="spinner"></div>
-      <h1>XFCHESS</h1>
-      <p>Loading game assets...</p>
-    </div>
-    <div id="debug-console"></div>
-    <script>
-      // Debug logging helper
-      const debugConsole = document.getElementById('debug-console');
-      const originalLog = console.log;
-      const originalError = console.error;
-      
-      // Enable debug console with ?debug query param
-      if (window.location.search.includes('debug')) {
-        debugConsole.classList.add('visible');
-        
-        console.log = function(...args) {
-          originalLog.apply(console, args);
-          const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-          if (msg.includes('[XFCHESS-WASM]')) {
-            debugConsole.innerHTML += msg.replace('[XFCHESS-WASM]', '') + '<br>';
-            debugConsole.scrollTop = debugConsole.scrollHeight;
-          }
-        };
-        
-        console.error = function(...args) {
-          originalError.apply(console, args);
-          const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-          debugConsole.innerHTML += '<span style="color:red">' + msg + '</span><br>';
+    }
+
+    /* Debug console (visible in dev mode) */
+    #debug-console {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      color: #0f0;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      max-width: 400px;
+      max-height: 150px;
+      overflow-y: auto;
+      z-index: 1001;
+      display: none;
+    }
+
+    #debug-console.visible {
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="loading-screen">
+    <div class="spinner"></div>
+    <h1>XFCHESS</h1>
+    <p>Loading game assets...</p>
+  </div>
+  <div id="debug-console"></div>
+  <script>
+    // Debug logging helper
+    const debugConsole = document.getElementById('debug-console');
+    const originalLog = console.log;
+    const originalError = console.error;
+
+    // Enable debug console with ?debug query param
+    if (window.location.search.includes('debug')) {
+      debugConsole.classList.add('visible');
+
+      console.log = function (...args) {
+        originalLog.apply(console, args);
+        const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+        if (msg.includes('[XFCHESS-WASM]')) {
+          debugConsole.innerHTML += msg.replace('[XFCHESS-WASM]', '') + '<br>';
           debugConsole.scrollTop = debugConsole.scrollHeight;
-        };
+        }
+      };
+
+      console.error = function (...args) {
+        originalError.apply(console, args);
+        const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+        debugConsole.innerHTML += '<span style="color:red">' + msg + '</span><br>';
+        debugConsole.scrollTop = debugConsole.scrollHeight;
+      };
+    }
+
+    // Hide loading screen when WASM starts
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        // We handle hiding via Leptos now, but this specific listener is legacy/backup
+      }, 2000);
+    });
+
+    // Global function to hide loading screen - called from Bevy/WASM
+    window.hideLoadingScreen = function () {
+      const loadingScreen = document.getElementById('loading-screen');
+      if (loadingScreen) {
+        loadingScreen.classList.add('hidden');
+        console.log('[XFCHESS-WEB] Loading screen hidden by Bevy');
       }
-      
-      // Hide loading screen when WASM starts
-      window.addEventListener('load', () => {
-        setTimeout(() => {
-          const loading = document.getElementById('loading-screen');
-          loading.classList.add('hidden');
-        }, 2000); // Give Bevy time to initialize
+    };
+
+    // Auto-resume AudioContext on user interaction (Browser Policy fix)
+    (function () {
+      var audioContexts = [];
+      var originalAudioContext = window.AudioContext || window.webkitAudioContext;
+      if (originalAudioContext) {
+        window.AudioContext = function (options) {
+          var ctx = new originalAudioContext(options);
+          audioContexts.push(ctx);
+          return ctx;
+        };
+        window.AudioContext.prototype = originalAudioContext.prototype;
+      }
+
+      function resumeAudio() {
+        audioContexts.forEach(function (ctx) {
+          if (ctx.state === 'suspended') {
+            ctx.resume().then(() => console.log("[XFCHESS-AUDIO] AudioContext resumed"));
+          }
+        });
+      }
+
+      ['click', 'keydown', 'touchstart'].forEach(event => {
+        document.addEventListener(event, resumeAudio, { once: false });
       });
-    </script>
-  </body>
+    })();
+  </script>
+</body>
+
 </html>
