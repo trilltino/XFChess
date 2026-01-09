@@ -442,3 +442,84 @@ fn handle_auth_task(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_auth_state_default() {
+        let state = AuthState::default();
+
+        assert!(state.username.is_empty());
+        assert!(state.email.is_empty());
+        assert!(state.password.is_empty());
+        assert!(state.error.is_none());
+        assert!(!state.is_loading);
+        assert_eq!(state.mode, AuthMode::Login);
+        assert!(state.token.is_none());
+    }
+
+    #[test]
+    fn test_auth_mode_default_is_login() {
+        let mode = AuthMode::default();
+        assert_eq!(mode, AuthMode::Login);
+    }
+
+    #[test]
+    fn test_auth_mode_equality() {
+        assert_eq!(AuthMode::Login, AuthMode::Login);
+        assert_eq!(AuthMode::Register, AuthMode::Register);
+        assert_ne!(AuthMode::Login, AuthMode::Register);
+    }
+
+    #[test]
+    fn test_auth_state_can_store_credentials() {
+        let mut state = AuthState::default();
+
+        state.username = "testuser".to_string();
+        state.email = "test@example.com".to_string();
+        state.password = "securepass123".to_string();
+
+        assert_eq!(state.username, "testuser");
+        assert_eq!(state.email, "test@example.com");
+        assert_eq!(state.password, "securepass123");
+    }
+
+    #[test]
+    fn test_auth_state_loading_toggle() {
+        let mut state = AuthState::default();
+
+        assert!(!state.is_loading);
+        state.is_loading = true;
+        assert!(state.is_loading);
+        state.is_loading = false;
+        assert!(!state.is_loading);
+    }
+
+    #[test]
+    fn test_auth_state_error_handling() {
+        let mut state = AuthState::default();
+
+        assert!(state.error.is_none());
+        state.error = Some("Invalid credentials".to_string());
+        assert_eq!(state.error, Some("Invalid credentials".to_string()));
+        state.error = None;
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn test_auth_response_deserialization() {
+        let json = r#"{
+            "token": "jwt_token_here",
+            "user_id": "user123",
+            "username": "testuser"
+        }"#;
+
+        let response: AuthResponse = serde_json::from_str(json).expect("Should deserialize");
+
+        assert_eq!(response.token, "jwt_token_here");
+        assert_eq!(response.user_id, "user123");
+        assert_eq!(response.username, "testuser");
+    }
+}

@@ -171,3 +171,48 @@ fn send_message_local(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_chat_state_default() {
+        let state = ChatState::default();
+
+        assert!(state.current_input.is_empty());
+        assert!(!state.is_visible);
+        assert!(state.state.messages.is_empty());
+    }
+
+    #[test]
+    fn test_chat_state_visibility_toggle() {
+        let mut state = ChatState::default();
+
+        assert!(!state.is_visible);
+        state.is_visible = true;
+        assert!(state.is_visible);
+        state.is_visible = false;
+        assert!(!state.is_visible);
+    }
+
+    #[test]
+    fn test_chat_state_input_storage() {
+        let mut state = ChatState::default();
+
+        state.current_input = "Hello, world!".to_string();
+        assert_eq!(state.current_input, "Hello, world!");
+
+        state.current_input.clear();
+        assert!(state.current_input.is_empty());
+    }
+
+    #[test]
+    fn test_chat_state_user_id_uniqueness() {
+        let state1 = ChatState::default();
+        let state2 = ChatState::default();
+
+        // Each instance should have a unique user ID
+        assert_ne!(state1.local_user_id, state2.local_user_id);
+    }
+}

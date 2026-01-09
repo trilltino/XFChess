@@ -119,3 +119,101 @@ pub fn generate_pseudo_legal_moves(game: &Game, color: Color) -> Vec<KK> {
 
     moves
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::new_game;
+
+    #[test]
+    fn test_generate_moves_starting_position() {
+        let game = new_game();
+
+        // White should have 20 moves from starting position
+        // 16 pawn moves (8 pawns x 2 each) + 4 knight moves (2 knights x 2 each)
+        let white_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
+        assert_eq!(
+            white_moves.len(),
+            20,
+            "White should have 20 moves in starting position"
+        );
+
+        // Black should also have 20 moves
+        let black_moves = generate_pseudo_legal_moves(&game, COLOR_BLACK);
+        assert_eq!(
+            black_moves.len(),
+            20,
+            "Black should have 20 moves in starting position"
+        );
+    }
+
+    #[test]
+    fn test_generate_moves_includes_pawns() {
+        let game = new_game();
+        let moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
+
+        // Check that pawn moves are included (e2-e3, e2-e4, etc.)
+        // Pawn on e2 (position 12) should be able to move to e3 (20) and e4 (28)
+        let e2_moves: Vec<_> = moves.iter().filter(|m| m.src == 12).collect();
+        assert!(
+            e2_moves.len() >= 2,
+            "Pawn on e2 should have at least 2 moves"
+        );
+    }
+
+    #[test]
+    fn test_generate_moves_includes_knights() {
+        let game = new_game();
+        let moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
+
+        // Knight on b1 (position 1) should be able to move to a3 and c3
+        let b1_moves: Vec<_> = moves.iter().filter(|m| m.src == 1).collect();
+        assert_eq!(b1_moves.len(), 2, "Knight on b1 should have 2 moves");
+    }
+
+    #[test]
+    fn test_move_count_changes_after_move() {
+        let mut game = new_game();
+
+        // After e2-e4, White should have different move count
+        let initial_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE).len();
+
+        // Manually move pawn e2 to e4
+        game.board[12] = 0; // Clear e2
+        game.board[28] = W_PAWN; // Place pawn on e4
+
+        let after_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE).len();
+
+        // Move count should change (opens up for queen and bishop)
+        assert_ne!(
+            initial_moves, after_moves,
+            "Move count should change after pawn move"
+        );
+    }
+
+    #[test]
+    fn test_no_moves_for_empty_board() {
+        let mut game = new_game();
+        // Clear the board
+        for i in 0..64 {
+            game.board[i] = 0;
+        }
+
+        let moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
+        assert_eq!(moves.len(), 0, "Empty board should have no moves");
+    }
+
+    #[test]
+    fn test_king_moves_in_isolation() {
+        let mut game = new_game();
+        // Clear the board except for white king
+        for i in 0..64 {
+            game.board[i] = 0;
+        }
+        game.board[28] = W_KING; // King on e4
+
+        let moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
+        // King in center should have 8 moves
+        assert_eq!(moves.len(), 8, "Lone king in center should have 8 moves");
+    }
+}
