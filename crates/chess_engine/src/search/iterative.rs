@@ -91,3 +91,93 @@ pub async fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Col
 pub async fn find_best_move(game: &mut Game, think_time: f32, color: Color) -> Move {
     iterative_deepening(game, think_time, color).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::new_game;
+
+    // Helper to run async tests in sync context
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        futures_lite::future::block_on(f)
+    }
+
+    #[test]
+    fn test_find_best_move_starting_position() {
+        let mut game = new_game();
+
+        // Find best move with short time limit
+        let best_move = block_on(find_best_move(&mut game, 0.1, COLOR_WHITE));
+
+        // Should return a valid move (non-zero src/dst)
+        assert!(
+            best_move.src != 0 || best_move.dst != 0,
+            "Should find a move"
+        );
+
+        // Source should be a white piece
+        let src = best_move.src as usize;
+        assert!(src < 64, "Source should be valid position");
+        assert!(game.board[src] > 0, "Source should be a white piece");
+    }
+
+    #[test]
+    fn test_find_best_move_returns_legal_move() {
+        let mut game = new_game();
+
+        let best_move = block_on(find_best_move(&mut game, 0.1, COLOR_WHITE));
+
+        // Verify the move is in the list of legal moves
+        let moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
+        let found = moves
+            .iter()
+            .any(|m| m.src == best_move.src as i8 && m.dst == best_move.dst as i8);
+
+        assert!(found, "Best move should be a legal pseudo-legal move");
+    }
+
+    #[test]
+    fn test_iterative_deepening_updates_stats() {
+        let mut game = new_game();
+
+        // Stats should be zero initially
+        game.calls = 0;
+        game.cut = 0;
+
+        let _ = block_on(iterative_deepening(&mut game, 0.1, COLOR_WHITE));
+
+        // After search, stats should be updated
+        assert!(game.calls > 0, "Should have made search calls");
+    }
+
+    #[test]
+    fn test_find_best_move_for_black() {
+        let mut game = new_game();
+
+        // Make a move for white first
+        use super::super::make_unmake::make_move;
+        let moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
+        if let Some(mv) = moves.first() {
+            make_move(&mut game, *mv);
+        }
+
+        // Now find best move for black
+        let best_move = block_on(find_best_move(&mut game, 0.1, COLOR_BLACK));
+
+        // Should return a valid move
+        assert!(
+            best_move.src != 0 || best_move.dst != 0,
+            "Should find a move for black"
+        );
+    }
+
+    #[test]
+    fn test_move_default_values() {
+        let m = Move::default();
+
+        assert_eq!(m.src, 0);
+        assert_eq!(m.dst, 0);
+        assert_eq!(m.state, STATE_PLAYING);
+        assert_eq!(m.checkmate_in, 0);
+    }
+}
