@@ -18,7 +18,7 @@ pub struct AuthState {
     pub token: Option<String>,
 }
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq, Debug)]
 pub enum AuthMode {
     #[default]
     Login,
@@ -106,7 +106,7 @@ fn auth_ui_system(
     let input_border = egui::Color32::from_rgb(60, 60, 60);
 
     // Helper closure for lightening color
-    let lighten = |c: egui::Color32, amount: f32| -> egui::Color32 {
+    let _lighten = |c: egui::Color32, amount: f32| -> egui::Color32 {
         let r = (c.r() as f32 * (1.0 + amount)).min(255.0) as u8;
         let g = (c.g() as f32 * (1.0 + amount)).min(255.0) as u8;
         let b = (c.b() as f32 * (1.0 + amount)).min(255.0) as u8;
@@ -128,7 +128,7 @@ fn auth_ui_system(
             }
             println!("App Loading State: {}", auth_state.is_loading);
 
-            let rect = ui.max_rect();
+            let _rect = ui.max_rect();
             // draw_dark_gradient(ui, rect); // Commented out to test interaction
 
             ui.vertical_centered(|ui| {

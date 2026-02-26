@@ -15,19 +15,12 @@
 //! Move 1: White plays → switch() → Black plays → switch() → Move 2: White plays
 //! ```
 //!
-//! # Example
-//!
-//! ```rust,ignore
-//! fn execute_move(mut current_turn: ResMut<CurrentTurn>) {
-//!     // ... execute the move ...
-//!     current_turn.switch(); // Switch to other player
-//! }
-//! ```
-//!
 //! # Reference
 //!
 //! Standard chess turn tracking following FIDE rules where White moves first
 //! and move numbers increment after Black's move completes.
+//!
+//! For usage examples, see `tests/resources/turn_tests.rs`
 
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
@@ -68,21 +61,7 @@ impl CurrentTurn {
     /// following standard chess notation where a "move" consists of both
     /// White's and Black's turns.
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let mut turn = CurrentTurn::default();
-    /// assert_eq!(turn.color, PieceColor::White);
-    /// assert_eq!(turn.move_number, 1);
-    ///
-    /// turn.switch(); // Now Black's turn, still move 1
-    /// assert_eq!(turn.color, PieceColor::Black);
-    /// assert_eq!(turn.move_number, 1);
-    ///
-    /// turn.switch(); // Now White's turn, move 2
-    /// assert_eq!(turn.color, PieceColor::White);
-    /// assert_eq!(turn.move_number, 2);
-    /// ```
+    /// For usage examples, see `tests/resources/turn_tests.rs`
     pub fn switch(&mut self) {
         self.color = match self.color {
             PieceColor::White => PieceColor::Black,

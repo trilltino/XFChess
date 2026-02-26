@@ -1,29 +1,6 @@
-//! Game plugin - Core chess game logic and systems
-//!
-//! This plugin registers all game systems and resources for the chess game.
-//! Systems are organized with run conditions and explicit ordering to optimize
-//! performance and ensure correct execution order.
-//!
-//! # Plugin Architecture
-//!
-//! The plugin follows Bevy 0.17 best practices:
-//! - Resource initialization in `build()`
-//! - System registration with explicit ordering via SystemSets
-//! - Type registration for reflection support
-//! - Clean separation of concerns
-//!
-//! # Plugin Dependencies
-//!
-//! This plugin depends on:
-//! - [`crate::core::CorePlugin`] - Must be added first for state management
-//! - [`bevy::DefaultPlugins`] - Required for ECS, rendering, and input
-//! - [`bevy_egui::EguiPlugin`] - Required for UI systems
-//!
-//! This plugin should be added before:
-//! - State-specific plugins (MainMenuPlugin, SettingsPlugin, etc.)
-//! - Rendering plugins (PiecePlugin, BoardPlugin)
-//!
-//! # System Organization
+//! Game plugin - Core chess game logic and systems.
+
+//! Systems are organized into sets with explicit ordering:
 //!
 //! Systems are organized into sets with explicit ordering:
 //! - `Input` - Handle user input (camera, piece selection)
@@ -46,20 +23,26 @@
 
 use super::ai::AIPlugin;
 use super::resources::*;
+use super::sync::GameSyncPlugin;
 use super::system_sets::GameSystems;
 use super::systems::picking_debug::PickingDebugPlugin;
 use super::systems::*;
 use crate::core::{debug_current_gamestate, GameState};
+use crate::engine::board_state::ChessEngine;
 use crate::game::components::{
     FadingCapture, GamePhase, HasMoved, MoveRecord, PieceMoveAnimation, SelectedPiece,
 };
-use crate::input::PointerEventsPlugin;
+
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use crate::ui::game_ui::game_status_ui;
 use crate::ui::promotion_ui::promotion_ui_system;
 use bevy::input::common_conditions::input_toggle_active;
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
+
+fn test_event_system(mut reader: MessageReader<crate::game::events::MoveMadeEvent>) {
+    for _ in reader.read() {}
+}
 
 /// Game plugin for XFChess
 ///
@@ -110,13 +93,17 @@ impl Plugin for GamePlugin {
             .register_type::<Players>()
             .register_type::<super::view_mode::ViewMode>()
             .add_message::<PromotionSelected>()
-            .add_message::<crate::game::events::NetworkMoveEvent>();
+            .add_message::<crate::game::events::MoveMadeEvent>()
+            .add_message::<crate::game::events::NetworkMoveEvent>()
+            .add_message::<crate::game::events::ResignEvent>()
+            .add_message::<crate::game::events::DrawOfferEvent>()
+            .add_message::<crate::game::events::DrawResponseEvent>();
 
         // Add AI plugin
         app.add_plugins(AIPlugin);
 
-        // Add Pointer interaction plugin
-        app.add_plugins(PointerEventsPlugin);
+        // Add network sync plugin for P2P multiplayer
+        app.add_plugins(GameSyncPlugin);
 
         // Configure system sets to run in order: Input → Validation → Execution → Visual
         app.configure_sets(
@@ -141,6 +128,7 @@ impl Plugin for GamePlugin {
             (
                 // Input set: Handle user input (camera only in TempleOS)
                 camera_movement_system.in_set(GameSystems::Input),
+                camera_reset_system.in_set(GameSystems::Input),
                 camera_zoom_input_system.in_set(GameSystems::Input),
                 camera_zoom_system.in_set(GameSystems::Input),
                 camera_rotation_system.in_set(GameSystems::Input),
@@ -217,7 +205,38 @@ impl Plugin for GamePlugin {
             debug_current_gamestate.run_if(input_toggle_active(true, KeyCode::F12)),
         );
 
+        // Global visual setup
+        app.add_systems(Startup, setup_global_scene);
+
         // Add picking debug plugin
         app.add_plugins(PickingDebugPlugin);
+
+        // InGame setup systems
+        app.add_systems(
+            OnEnter(GameState::InGame),
+            (
+                reset_game_resources.before(crate::rendering::pieces::create_pieces),
+                initialize_players,
+                setup_game_scene,
+                setup_game_camera,
+                initialize_engine_from_ecs.after(crate::rendering::pieces::create_pieces),
+            )
+        );
+
+        app.add_systems(
+            OnExit(GameState::InGame),
+            (
+                reset_game_camera,
+            )
+        );
+
+        // This must run after pieces are created, we can schedule it in Update temporarily 
+        // or a different state, but let's just use PostStartup or a delayed system?
+        // Wait, PiecePlugin probably spawns pieces on OnEnter(GameState::InGame).
+        // If we add this to OnEnter(GameState::InGame), we should order it after piece spawning.
+        // Piece spawning is in `crate::rendering::pieces::create_pieces`.
+        // Let's just add it to OnEnter(GameState::InGame) for now, Bevy's default ordering might be enough,
+        // or we can use `.after(crate::rendering::pieces::create_pieces)`.
+
     }
 }

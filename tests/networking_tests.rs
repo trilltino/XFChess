@@ -12,7 +12,6 @@ fn test_game_message_submit_move_creation() {
         from: (4, 1),
         to: (4, 3),
     };
-
     match msg {
         GameMessage::SubmitMove { from, to } => {
             assert_eq!(from, (4, 1));
@@ -28,7 +27,6 @@ fn test_game_message_move_made_creation() {
         from: (4, 6),
         to: (4, 4),
     };
-
     match msg {
         GameMessage::MoveMade { from, to } => {
             assert_eq!(from, (4, 6));
@@ -66,28 +64,6 @@ fn test_lobby_message_set_ready() {
     assert_eq!(msg_ready, LobbyMessage::SetReady { ready: true });
     assert_eq!(msg_not_ready, LobbyMessage::SetReady { ready: false });
     assert_ne!(msg_ready, msg_not_ready);
-}
-
-#[test]
-fn test_game_message_chat() {
-    let msg = GameMessage::ChatMessage {
-        sender: "Player1".to_string(),
-        content: "Hello!".to_string(),
-        timestamp: 1234567890,
-    };
-
-    match msg {
-        GameMessage::ChatMessage {
-            sender,
-            content,
-            timestamp,
-        } => {
-            assert_eq!(sender, "Player1");
-            assert_eq!(content, "Hello!");
-            assert_eq!(timestamp, 1234567890);
-        }
-        _ => panic!("Wrong message type"),
-    }
 }
 
 #[test]

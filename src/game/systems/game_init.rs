@@ -24,7 +24,9 @@
 //! - `GameOverState` - Reset to Playing
 //! - `FastBoardState` - Clear bitboards
 //! - `TurnStateContext` - Reset to default phase
+use crate::core::{DespawnOnExit, GameState};
 
+use crate::engine::board_state::ChessEngine;
 use crate::game::ai::resource::ChessAIResource;
 use crate::game::components::GamePhase;
 use crate::game::components::HasMoved;
@@ -43,12 +45,9 @@ use bevy::prelude::*;
 /// This system must run BEFORE piece/board spawning to ensure
 /// resources are reset before entities are created.
 ///
-/// # Example
-///
-/// ```rust,ignore
-/// app.add_systems(OnEnter(GameState::InGame), reset_game_resources);
-/// ```
+/// For usage examples, see `tests/systems_tests.rs`
 pub fn reset_game_resources(
+    mut commands: Commands,
     mut current_turn: ResMut<CurrentTurn>,
     mut game_phase: ResMut<CurrentGamePhase>,
     mut selection: ResMut<Selection>,
@@ -101,6 +100,20 @@ pub fn reset_game_resources(
 
     // Reset turn state context to default phase
     *turn_context = TurnStateContext::default();
+
+    // Spawn overhead light (invisible source) - "Angel Light"
+    // Use high intensity to illuminate board clearly from top-down view
+    commands
+        .spawn(PointLight {
+            intensity: 2_000_000.0, // High intensity for clear visibility
+            range: 100.0,
+            shadows_enabled: true,
+            ..Default::default()
+        })
+        .insert(Transform::from_xyz(3.5, 20.0, 3.5))
+        .insert(GlobalTransform::default())
+        .insert(DespawnOnExit(GameState::InGame))
+        .insert(Name::new("Overhead Light")); // Helpful for debugging
     info!(
         "[GAME_INIT] Turn state context reset: {:?}",
         turn_context.phase
@@ -111,18 +124,6 @@ pub fn reset_game_resources(
     info!("[GAME_INIT] Chess engine reset to starting position");
 
     info!("[GAME_INIT] All game resources reset successfully - ready for new game");
-}
-
-/// System that initializes game sounds when entering InGame state
-///
-/// Loads all sound effect handles and stores them in the GameSounds resource.
-/// This system should run after reset_game_resources to ensure sounds are
-/// available for the new game.
-pub fn initialize_game_sounds(asset_server: Res<AssetServer>, mut commands: Commands) {
-    info!("[GAME_INIT] Loading game sounds");
-    let game_sounds = GameSounds::new(&asset_server);
-    commands.insert_resource(game_sounds);
-    info!("[GAME_INIT] Game sounds loaded successfully");
 }
 
 /// System that plays TempleOS sound when entering InGame state in TempleOS mode
@@ -244,49 +245,123 @@ pub fn check_and_play_templeos_sound(
 
 /// System that initializes players based on game mode
 ///
-/// Creates player resources based on the ChessAIResource mode:
+/// Creates player resources based on:
+/// - Multiplayer: Two human players (White = Host/Player 1, Black = Joiner/Player 2)
 /// - VsAI: One human, one AI (based on ai_color)
 ///
 /// This system runs when entering InGame state to set up players.
-pub fn initialize_players(mut players: ResMut<Players>, ai_config: Res<ChessAIResource>) {
-    info!(
-        "[GAME_INIT] Initializing players for AI mode: {:?}",
-        ai_config.mode
-    );
+pub fn initialize_players(
+    _commands: Commands,
+    mut players: ResMut<Players>,
+    ai_config: Res<ChessAIResource>,
+    connection_state: Option<Res<crate::multiplayer::p2p_connection::P2PConnectionState>>,
+    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
+) {
+    // Determine if we're in a multiplayer game and what color the local player is
+    // Check P2PConnectionState first (uses shakmaty::Color)
+    let p2p_color = connection_state.as_ref().and_then(|s| {
+        if s.status == crate::multiplayer::p2p_connection::P2PConnectionStatus::InGame {
+            s.player_color.map(|c| match c {
+                shakmaty::Color::White => PieceColor::White,
+                shakmaty::Color::Black => PieceColor::Black,
+            })
+        } else {
+            None
+        }
+    });
 
-    let ai_color = ai_config.mode.ai_color();
-    let human_color = match ai_color {
-        PieceColor::White => PieceColor::Black,
-        PieceColor::Black => PieceColor::White,
-    };
-
-    *players = Players {
-        player_1: Player::new(
-            1,
-            if human_color == PieceColor::White {
-                "Player 1".to_string()
+    // Check BraidNetworkState as fallback (uses PlayerColor)
+    let network_color = network_state.as_ref().and_then(|ns| {
+        ns.active_session.as_ref().and_then(|session| {
+            if session.started {
+                session.game_state.as_ref().map(|gs| match gs.my_color {
+                    crate::multiplayer::PlayerColor::White => PieceColor::White,
+                    crate::multiplayer::PlayerColor::Black => PieceColor::Black,
+                })
             } else {
-                "AI".to_string()
-            },
-            PieceColor::White,
-            human_color == PieceColor::White,
-        ),
-        player_2: Player::new(
-            2,
-            if ai_color == PieceColor::Black {
-                "AI".to_string()
-            } else {
-                "Player 1".to_string()
-            },
-            PieceColor::Black,
-            ai_color != PieceColor::Black,
-        ),
-    };
+                None
+            }
+        })
+    });
 
-    info!(
-        "[GAME_INIT] Players initialized: Human ({:?}) vs AI ({:?})",
-        human_color, ai_color
-    );
+    let multiplayer_color = p2p_color.or(network_color);
+
+    if let Some(my_color) = multiplayer_color {
+        // Multiplayer mode: Both players are human
+        let _opponent_color = match my_color {
+            PieceColor::White => PieceColor::Black,
+            PieceColor::Black => PieceColor::White,
+        };
+
+        let is_host = connection_state
+            .as_ref()
+            .map(|s| s.is_host)
+            .unwrap_or(my_color == PieceColor::White);
+
+        let my_name = if is_host { "Player 1 (Host)" } else { "Player 2 (Joiner)" };
+        let opponent_name = if is_host { "Player 2 (Joiner)" } else { "Player 1 (Host)" };
+
+        *players = Players {
+            player_1: Player::new(
+                1,
+                if my_color == PieceColor::White { my_name } else { opponent_name }.to_string(),
+                PieceColor::White,
+                true, // Both players are human in multiplayer
+            ),
+            player_2: Player::new(
+                2,
+                if my_color == PieceColor::Black { my_name } else { opponent_name }.to_string(),
+                PieceColor::Black,
+                true, // Both players are human in multiplayer
+            ),
+        };
+
+        info!(
+            "[GAME_INIT] Multiplayer players initialized: {} (White) vs {} (Black)",
+            if my_color == PieceColor::White { my_name } else { opponent_name },
+            if my_color == PieceColor::Black { my_name } else { opponent_name }
+        );
+    } else {
+        // AI mode: One human, one AI
+        info!(
+            "[GAME_INIT] Initializing players for AI mode: {:?}",
+            ai_config.mode
+        );
+
+        let ai_color = ai_config.mode.ai_color();
+        let human_color = match ai_color {
+            PieceColor::White => PieceColor::Black,
+            PieceColor::Black => PieceColor::White,
+        };
+
+        *players = Players {
+            player_1: Player::new(
+                1,
+                if human_color == PieceColor::White {
+                    "Player 1".to_string()
+                } else {
+                    "AI".to_string()
+                },
+                PieceColor::White,
+                human_color == PieceColor::White,
+            ),
+            player_2: Player::new(
+                2,
+                if ai_color == PieceColor::Black {
+                    "AI".to_string()
+                } else {
+                    "Player 1".to_string()
+                },
+                PieceColor::Black,
+                ai_color != PieceColor::Black,
+            ),
+        };
+
+        info!(
+            "[GAME_INIT] Players initialized: Human ({:?}) vs AI ({:?})",
+            human_color, ai_color
+        );
+    }
 
     info!(
         "[GAME_INIT] Player 1: {} ({:?}, human: {})",
@@ -309,15 +384,7 @@ pub fn initialize_players(mut players: ResMut<Players>, ai_config: Res<ChessAIRe
 /// This system must run AFTER `create_pieces` to ensure pieces exist in ECS
 /// before syncing to the engine.
 ///
-/// # Example
-///
-/// ```rust,ignore
-/// app.add_systems(OnEnter(GameState::InGame), (
-///     reset_game_resources,
-///     create_pieces,
-///     initialize_engine_from_ecs.after(create_pieces),
-/// ).chain());
-/// ```
+/// For usage examples, see `tests/systems_tests.rs`
 pub fn initialize_engine_from_ecs(
     mut engine: ResMut<ChessEngine>,
     pieces_query: Query<(Entity, &Piece, &HasMoved)>,
@@ -338,9 +405,6 @@ pub fn initialize_engine_from_ecs(
 
     let piece_count = pieces_query.iter().count();
     info!("[GAME_INIT] Engine initialized with {} pieces", piece_count);
-    info!(
-        "[GAME_INIT] Engine move counter: {}",
-        engine.game.move_counter
-    );
+    info!("[GAME_INIT] Engine FEN: {}", engine.current_fen());
     info!("[GAME_INIT] Engine ready for move validation");
 }

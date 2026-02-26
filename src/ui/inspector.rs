@@ -1,24 +1,4 @@
-//! Inspector UI for debugging and development
-//!
-//! Provides a comprehensive inspector with:
-//! - Left panel: Entity hierarchy browser (like Unity/Unreal)
-//! - Right panel: Selected entity component inspector
-//! - Bottom panel: Game resources and state
-//!
-//! Toggled with the F1 key.
-//!
-//! # Implementation Notes
-//!
-//! This system uses the `world: &mut World` parameter pattern which is the
-//! idiomatic approach for bevy-inspector-egui integration. This allows direct
-//! world access for querying resources and entities, and is compatible with the
-//! EguiPrimaryContextPass schedule requirement.
-//!
-//! # Reference
-//!
-//! Pattern based on:
-//! - `reference/bevy-inspector-egui/examples/integrations/side_panel.rs`
-//! - `reference/bevy-inspector-egui/examples/basic/resource_inspector_manual.rs`
+//! Inspector UI for debugging and development.
 
 use crate::game::resources::*;
 use bevy::prelude::*;

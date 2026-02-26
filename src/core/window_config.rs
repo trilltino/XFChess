@@ -60,22 +60,4 @@ impl WindowConfig {
             ..default()
         }
     }
-
-    /// Update window configuration from an existing window
-    #[allow(dead_code)]
-    pub fn from_window(window: &Window) -> Self {
-        let resolution = &window.resolution;
-        Self {
-            title: window.title.clone(),
-            width: resolution.width() as u32,
-            height: resolution.height() as u32,
-            resizable: window.resizable,
-            maximized: false, // Window doesn't expose maximized state directly in Bevy 0.17
-            fullscreen: matches!(
-                window.mode,
-                bevy::window::WindowMode::Fullscreen(..)
-                    | bevy::window::WindowMode::BorderlessFullscreen(_)
-            ),
-        }
-    }
 }

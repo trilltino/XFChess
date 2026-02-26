@@ -11,20 +11,21 @@
 
 use crate::assets::{
     check_asset_loading, handle_asset_loading_errors, handle_untyped_asset_loading_errors,
-    start_asset_loading, GameAssets, LoadingProgress,
+    start_asset_loading,
 };
-use crate::core::{DespawnOnExit, GameState, PreviousState};
-use crate::game::ai::{AIDifficulty, ChessAIResource, GameMode};
-use crate::game::view_mode::ViewMode;
-use crate::rendering::pieces::PieceColor;
+use crate::core::{DespawnOnExit, GameMode as CoreGameMode, GameState};
+use crate::game::ai::GameMode;
+#[cfg(feature = "solana")]
+use crate::multiplayer::solana_addon::{CompetitiveMatchState, SolanaGameSync, SolanaWallet};
 use crate::ui::styles::*;
+use crate::ui::system_params::MainMenuUIContext;
 use bevy::color::LinearRgba;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::light::{FogVolume, VolumetricFog};
 use bevy::math::ops;
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+use bevy_egui::{egui, EguiPrimaryContextPass};
 use rand::Rng;
 
 /// Resource tracking intro fog animation state
@@ -70,7 +71,10 @@ impl Plugin for MainMenuPlugin {
         )
         .init_resource::<MenuExpanded>()
         .init_resource::<ShowcaseGameState>()
+        .init_resource::<crate::assets::GameAssets>()
+        .init_resource::<crate::assets::LoadingProgress>()
         .init_resource::<crate::assets::AssetLoadingTimer>()
+        .init_resource::<CompetitiveMenuState>()
         .add_systems(
             EguiPrimaryContextPass,
             main_menu_ui_wrapper.run_if(in_state(GameState::MainMenu)),
@@ -109,31 +113,9 @@ impl Plugin for MainMenuPlugin {
 }
 
 /// Wrapper for main_menu_ui that handles Result
-fn main_menu_ui_wrapper(
-    contexts: EguiContexts,
-    next_state: ResMut<NextState<GameState>>,
-    menu_state: ResMut<NextState<crate::core::MenuState>>,
-    ai_config: ResMut<ChessAIResource>,
-    previous_state: ResMut<PreviousState>,
-    view_mode: ResMut<ViewMode>,
-    loading_progress: ResMut<LoadingProgress>,
-    game_assets: ResMut<GameAssets>,
-    current_menu_state: Option<Res<State<crate::core::MenuState>>>,
-    menu_expanded: ResMut<MenuExpanded>,
-) {
+fn main_menu_ui_wrapper(mut ctx: MainMenuUIContext) {
     info!("[MAIN_MENU] UI wrapper called");
-    match main_menu_ui(
-        contexts,
-        next_state,
-        menu_state,
-        ai_config,
-        previous_state,
-        view_mode,
-        loading_progress,
-        game_assets,
-        current_menu_state,
-        menu_expanded,
-    ) {
+    match main_menu_ui(&mut ctx) {
         Ok(()) => {
             // UI rendered successfully
         }
@@ -151,6 +133,21 @@ struct MenuCamera;
 #[derive(Resource, Default)]
 pub struct MenuExpanded {
     pub expanded: bool,
+}
+
+#[derive(Resource)]
+pub struct CompetitiveMenuState {
+    pub wager_sol: f32,
+    pub game_id_input: String,
+}
+
+impl Default for CompetitiveMenuState {
+    fn default() -> Self {
+        Self {
+            wager_sol: 0.1,
+            game_id_input: String::new(),
+        }
+    }
 }
 
 /// Component for shooting star head
@@ -179,7 +176,7 @@ fn spawn_shooting_stars(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    time: Res<Time>,
+    _time: Res<Time>,
 ) {
     let mut rng = rand::rng();
 
@@ -531,8 +528,10 @@ fn setup_menu_camera(
 /// Spawn the fog volume entity for intro reveal effect
 fn spawn_fog_volume(
     mut commands: Commands,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<StandardMaterial>>,
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))] meshes: ResMut<Assets<Mesh>>,
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))] materials: ResMut<
+        Assets<StandardMaterial>,
+    >,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -783,25 +782,14 @@ fn animate_menu_camera(mut camera_query: Query<&mut Transform, With<MenuCamera>>
 }
 
 /// Main menu UI system
-fn main_menu_ui(
-    mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<GameState>>,
-    mut menu_state: ResMut<NextState<crate::core::MenuState>>,
-    mut ai_config: ResMut<ChessAIResource>,
-    mut previous_state: ResMut<PreviousState>,
-    mut view_mode: ResMut<ViewMode>,
-    mut loading_progress: ResMut<LoadingProgress>,
-    mut game_assets: ResMut<GameAssets>,
-    current_menu_state: Option<Res<State<crate::core::MenuState>>>,
-    mut menu_expanded: ResMut<MenuExpanded>,
-) -> Result<(), bevy::ecs::query::QuerySingleError> {
+fn main_menu_ui(ctx: &mut MainMenuUIContext) -> Result<(), bevy::ecs::query::QuerySingleError> {
     // Only show main menu UI when in a known MenuState (not PieceViewer which has its own system usually,
     // but assuming PieceViewer is handled elsewhere or sharing this?)
     // Actually, PieceViewer is a substate of MainMenu, so it might need its own UI or exit button.
     // For now we handle Main, ModeSelect, About.
 
     // Check if we are in a valid substate
-    let current_substate = if let Some(menu_state_res) = current_menu_state {
+    let current_substate = if let Some(ref menu_state_res) = ctx.current_menu_state {
         *menu_state_res.get()
     } else {
         // Default to Main if state not found (shouldn't happen)
@@ -817,11 +805,31 @@ fn main_menu_ui(
     }
 
     info!("[MAIN_MENU] UI system called, attempting to get context");
-    let ctx = contexts.ctx_mut()?;
+    // Clone the egui Context (Arc-backed, cheap) so we don't hold a mutable borrow
+    // on ctx.contexts across the closures that also need &mut ctx.
+    let egui_ctx = ctx.contexts.ctx_mut()?.clone();
     info!("[MAIN_MENU] Context obtained successfully, rendering UI");
 
+    // Audio Mute Toggle Button (Top-Right Corner)
+    egui::Area::new("audio_toggle_area".into())
+        .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-20.0, 20.0))
+        .show(&egui_ctx, |ui| {
+            let icon = if ctx.settings.muted { "🔇" } else { "🔊" };
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new(icon).size(24.0))
+                        .frame(false)
+                        .fill(egui::Color32::TRANSPARENT),
+                )
+                .clicked()
+            {
+                ctx.settings.muted = !ctx.settings.muted;
+                info!("[MAIN_MENU] Audio mute toggled: {}", ctx.settings.muted);
+            }
+        });
+
     // Bottom panel for "PRESS SPACE TO PLAY" flashing text (centered at bottom)
-    if !menu_expanded.expanded {
+    if !ctx.menu_expanded.expanded {
         egui::TopBottomPanel::bottom("press_space_panel")
             .frame(egui::Frame {
                 fill: egui::Color32::TRANSPARENT,
@@ -829,7 +837,7 @@ fn main_menu_ui(
                 ..Default::default()
             })
             .show_separator_line(false)
-            .show(ctx, |ui| {
+            .show(&egui_ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     // Flashing "PRESS SPACE TO PLAY" text
                     let time = ui.input(|i| i.time);
@@ -847,7 +855,7 @@ fn main_menu_ui(
     }
 
     // Only show menu content if expanded - left side panel
-    if menu_expanded.expanded {
+    if ctx.menu_expanded.expanded {
         egui::SidePanel::left("main_menu_panel")
             .resizable(false)
             .frame(egui::Frame {
@@ -855,10 +863,10 @@ fn main_menu_ui(
                 inner_margin: egui::Margin::same(20),
                 ..Default::default()
             })
-            .show(ctx, |ui| {
+            .show(&egui_ctx, |ui| {
                 // Show loading screen if assets aren't loaded yet
-                if !loading_progress.complete {
-                    render_loading_screen(ui, &mut loading_progress, &mut game_assets);
+                if !ctx.loading_progress.complete {
+                    render_loading_screen(ui, ctx);
                     return;
                 }
 
@@ -876,26 +884,16 @@ fn main_menu_ui(
                 // Main Content Area
                 ui.vertical_centered(|ui| match current_substate {
                     crate::core::MenuState::Main => {
-                        ui_main(
-                            ui,
-                            &mut next_state,
-                            &mut menu_state,
-                            &mut previous_state,
-                            &mut menu_expanded,
-                        );
+                        ui_main(ui, ctx);
                     }
                     crate::core::MenuState::ModeSelect => {
-                        ui_mode_select(
-                            ui,
-                            &mut next_state,
-                            &mut menu_state,
-                            &mut ai_config,
-                            &mut view_mode,
-                            &mut menu_expanded,
-                        );
+                        ui_mode_select(ui, ctx);
+                    }
+                    crate::core::MenuState::BraidLobby => {
+                        ui_braid_lobby(ui, ctx);
                     }
                     crate::core::MenuState::About => {
-                        ui_about(ui, &mut menu_state);
+                        ui_about(ui, ctx);
                     }
                     _ => {}
                 });
@@ -905,16 +903,12 @@ fn main_menu_ui(
     Ok(())
 }
 
-fn render_loading_screen(
-    ui: &mut egui::Ui,
-    loading_progress: &mut ResMut<LoadingProgress>,
-    game_assets: &mut ResMut<GameAssets>,
-) {
+fn render_loading_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ui.vertical_centered(|ui| {
         Layout::small_space(ui);
 
         // Check if loading failed
-        if loading_progress.failed {
+        if ctx.loading_progress.failed {
             // Error state
             ui.heading(
                 egui::RichText::new("Asset Loading Failed")
@@ -925,7 +919,7 @@ fn render_loading_screen(
             Layout::small_space(ui);
 
             // Error message
-            if let Some(ref error_msg) = loading_progress.error_message {
+            if let Some(ref error_msg) = ctx.loading_progress.error_message {
                 ui.label(
                     egui::RichText::new(error_msg)
                         .size(12.0)
@@ -944,9 +938,9 @@ fn render_loading_screen(
             // Option to continue anyway
             if ui.button("Continue Anyway (May cause issues)").clicked() {
                 warn!("[MAIN_MENU] User chose to continue despite asset loading failure");
-                loading_progress.complete = true;
-                loading_progress.progress = 1.0;
-                game_assets.loaded = true;
+                ctx.loading_progress.complete = true;
+                ctx.loading_progress.progress = 1.0;
+                ctx.game_assets.loaded = true;
                 info!("[MAIN_MENU] Asset loading marked as complete despite failure");
             }
         } else {
@@ -960,7 +954,7 @@ fn render_loading_screen(
             Layout::small_space(ui);
 
             // Progress bar
-            let progress_bar = egui::ProgressBar::new(loading_progress.progress)
+            let progress_bar = egui::ProgressBar::new(ctx.loading_progress.progress)
                 .desired_width(300.0)
                 .show_percentage()
                 .animate(true);
@@ -983,13 +977,7 @@ fn render_loading_screen(
 
 // === SUB-MENUS ===
 
-fn ui_main(
-    ui: &mut egui::Ui,
-    next_state: &mut ResMut<NextState<GameState>>,
-    menu_state: &mut ResMut<NextState<crate::core::MenuState>>,
-    previous_state: &mut ResMut<PreviousState>,
-    menu_expanded: &mut ResMut<MenuExpanded>,
-) {
+fn ui_main(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ui.vertical_centered(|ui| {
         Layout::section_space(ui);
 
@@ -1006,45 +994,10 @@ fn ui_main(
             )
             .clicked()
         {
-            menu_state.set(crate::core::MenuState::ModeSelect);
+            ctx.menu_state.set(crate::core::MenuState::ModeSelect);
         }
 
         Layout::item_space(ui);
-
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("MULTIPLAYER")
-                        .size(24.0)
-                        .color(egui::Color32::WHITE),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
-            next_state.set(GameState::MultiplayerMenu);
-            menu_expanded.expanded = true; // Keep expanded
-        }
-
-        Layout::item_space(ui);
-
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("SETTINGS")
-                        .size(22.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
-            previous_state.state = GameState::MainMenu;
-            next_state.set(GameState::Settings);
-            menu_expanded.expanded = false;
-        }
-
-        Layout::small_space(ui);
 
         if ui
             .add(
@@ -1057,8 +1010,8 @@ fn ui_main(
             )
             .clicked()
         {
-            menu_state.set(crate::core::MenuState::PieceViewer);
-            menu_expanded.expanded = false;
+            ctx.menu_state.set(crate::core::MenuState::PieceViewer);
+            ctx.menu_expanded.expanded = false;
         }
 
         Layout::small_space(ui);
@@ -1074,7 +1027,7 @@ fn ui_main(
             )
             .clicked()
         {
-            menu_state.set(crate::core::MenuState::About);
+            ctx.menu_state.set(crate::core::MenuState::About);
         }
 
         Layout::item_space(ui);
@@ -1102,14 +1055,7 @@ fn ui_main(
     );
 }
 
-fn ui_mode_select(
-    ui: &mut egui::Ui,
-    next_state: &mut ResMut<NextState<GameState>>,
-    menu_state: &mut ResMut<NextState<crate::core::MenuState>>,
-    ai_config: &mut ResMut<ChessAIResource>,
-    view_mode: &mut ResMut<ViewMode>,
-    menu_expanded: &mut ResMut<MenuExpanded>,
-) {
+fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ui.vertical_centered(|ui| {
         Layout::section_space(ui);
 
@@ -1125,7 +1071,7 @@ fn ui_mode_select(
             )
             .clicked()
         {
-            menu_state.set(crate::core::MenuState::Main);
+            ctx.menu_state.set(crate::core::MenuState::Main);
         }
 
         Layout::section_space(ui);
@@ -1139,87 +1085,253 @@ fn ui_mode_select(
 
         Layout::item_space(ui);
 
-        // Human vs AI (White)
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("PLAY AS WHITE")
-                        .size(20.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
-            ai_config.mode = GameMode::VsAI {
-                ai_color: PieceColor::Black,
-            };
-            next_state.set(GameState::InGame);
-            menu_expanded.expanded = false;
-        }
-
+        // --- P2P CHESS (IROH/BRAID) ---
+        ui.label(
+            egui::RichText::new("P2P CHESS")
+                .size(24.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
         Layout::small_space(ui);
 
-        // Human vs AI (Black)
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("PLAY AS BLACK")
-                        .size(20.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
-            ai_config.mode = GameMode::VsAI {
-                ai_color: PieceColor::White,
-            };
-            next_state.set(GameState::InGame);
-            menu_expanded.expanded = false;
-        }
+        // Display Node ID
+        ui.label(
+            egui::RichText::new("Your Node ID:")
+                .size(14.0)
+                .color(egui::Color32::from_rgb(150, 150, 150)),
+        );
 
-        Layout::small_space(ui);
+        // Get node ID from network state
+        let node_id_display = if let Some(node_id) = &ctx.network_state.node_id {
+            let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
+            format!("{:.16}...", node_id_str) // Show first 16 chars
+        } else {
+            "Initializing...".to_string()
+        };
 
-        // TempleOS View
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("TEMPLEOS VIEW")
-                        .size(20.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
-            **view_mode = ViewMode::TempleOS;
-            info!("[MAIN_MENU] TempleOS View selected");
-            next_state.set(GameState::InGame);
-            menu_expanded.expanded = false;
+        ui.label(
+            egui::RichText::new(&node_id_display)
+                .size(16.0)
+                .color(egui::Color32::from_rgb(100, 200, 255))
+                .monospace(),
+        );
+
+        if ui.button("📋 Copy Full Node ID").clicked() {
+            if let Some(node_id) = &ctx.network_state.node_id {
+                let full_node_id = bs58::encode(node_id.as_bytes()).into_string();
+                ui.output_mut(|o| {
+                    o.commands
+                        .push(egui::OutputCommand::CopyText(full_node_id.clone()))
+                });
+                info!("[MAIN_MENU] Node ID copied to clipboard: {}", full_node_id);
+            }
         }
 
         Layout::item_space(ui);
+        ui.separator();
+        Layout::item_space(ui);
 
-        // AI Difficulty as plain text
+        // --- HOST GAME ---
         ui.label(
-            egui::RichText::new("AI DIFFICULTY")
+            egui::RichText::new("HOST GAME")
                 .size(16.0)
-                .color(egui::Color32::from_rgb(150, 150, 150)),
+                .color(egui::Color32::from_rgb(100, 255, 150)),
         );
         Layout::small_space(ui);
-        ui.horizontal(|ui| {
-            ui.radio_value(&mut ai_config.difficulty, AIDifficulty::Easy, "Easy");
-            ui.radio_value(&mut ai_config.difficulty, AIDifficulty::Medium, "Med");
-            ui.radio_value(&mut ai_config.difficulty, AIDifficulty::Hard, "Hard");
-        });
+
+        // Show connection status if any
+        match ctx.p2p_state.status {
+            crate::multiplayer::P2PConnectionStatus::Hosting => {
+                ui.label(
+                    egui::RichText::new("⏳ Waiting for peer to connect...")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(100, 255, 150)),
+                );
+            }
+            crate::multiplayer::P2PConnectionStatus::Connecting => {
+                ui.label(
+                    egui::RichText::new("⏳ Sending invite to host...")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(255, 200, 100)),
+                );
+            }
+            crate::multiplayer::P2PConnectionStatus::Connected => {
+                if ctx.p2p_state.is_host {
+                    ui.label(
+                        egui::RichText::new("✅ Peer joined! Starting game...")
+                            .size(14.0)
+                            .color(egui::Color32::from_rgb(100, 255, 100))
+                            .strong(),
+                    );
+                    if let Some(ref peer_id) = ctx.p2p_state.peer_node_id {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Opponent: {}...",
+                                &peer_id[..peer_id.len().min(16)]
+                            ))
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(150, 200, 255))
+                            .monospace(),
+                        );
+                    }
+                } else {
+                    ui.label(
+                        egui::RichText::new("✅ Host accepted! Game starting...")
+                            .size(14.0)
+                            .color(egui::Color32::from_rgb(100, 255, 100))
+                            .strong(),
+                    );
+                }
+            }
+            crate::multiplayer::P2PConnectionStatus::Error(ref msg) => {
+                ui.label(
+                    egui::RichText::new(format!("❌ {}", msg))
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(255, 80, 80)),
+                );
+            }
+            _ => {}
+        }
+
+        if ui.button("Start Hosting").clicked() {
+            // Set AI mode to multiplayer
+            ctx.ai_config.mode = GameMode::Multiplayer;
+            // Emit host game event
+            ctx.host_game_events
+                .write(crate::multiplayer::HostGameEvent);
+            *ctx.core_mode = CoreGameMode::BraidMultiplayer;
+            info!("[MAIN_MENU] Hosting P2P game");
+        }
+
+        ui.label(
+            egui::RichText::new("Wait for a peer to connect using your Node ID")
+                .size(12.0)
+                .color(egui::Color32::from_rgb(150, 150, 150)),
+        );
+
+        Layout::item_space(ui);
+        ui.separator();
+        Layout::item_space(ui);
+
+        // --- JOIN GAME ---
+        ui.label(
+            egui::RichText::new("JOIN GAME")
+                .size(16.0)
+                .color(egui::Color32::from_rgb(255, 200, 100)),
+        );
+        Layout::small_space(ui);
+
+        ui.label(
+            egui::RichText::new("Enter Peer Node ID:")
+                .size(14.0)
+                .color(egui::Color32::from_rgb(150, 150, 150)),
+        );
+
+        // Text input for peer node ID (persisted across frames)
+        let response = ui.text_edit_singleline(&mut ctx.p2p_ui.peer_input);
+
+        // Clear error when user starts typing
+        if response.changed() {
+            ctx.p2p_ui.clear_error();
+        }
+
+        // Display error message if present
+        if let Some(ref error) = ctx.p2p_ui.error_message {
+            Layout::small_space(ui);
+            ui.label(
+                egui::RichText::new(format!("⚠ {}", error))
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(255, 80, 80)),
+            );
+        }
+
+        Layout::small_space(ui);
+
+        if ui.button("Connect to Peer").clicked() {
+            // Validate the node ID before attempting connection
+            match ctx.p2p_ui.validate_node_id() {
+                Ok(()) => {
+                    // Clear any previous errors
+                    ctx.p2p_ui.clear_error();
+
+                    // Set AI mode to multiplayer
+                    ctx.ai_config.mode = GameMode::Multiplayer;
+                    // Emit connect to peer event
+                    ctx.connect_events
+                        .write(crate::multiplayer::ConnectToPeerEvent {
+                            peer_node_id: ctx.p2p_ui.peer_input.trim().to_string(),
+                        });
+                    *ctx.core_mode = CoreGameMode::BraidMultiplayer;
+                    info!(
+                        "[MAIN_MENU] Joining P2P game with peer: {}",
+                        ctx.p2p_ui.peer_input
+                    );
+                }
+                Err(error_msg) => {
+                    ctx.p2p_ui.set_error(error_msg);
+                    warn!(
+                        "[MAIN_MENU] Invalid Node ID entered: {}",
+                        ctx.p2p_ui.peer_input
+                    );
+                }
+            }
+        }
     });
 }
 
-fn ui_about(ui: &mut egui::Ui, menu_state: &mut ResMut<NextState<crate::core::MenuState>>) {
+fn ui_braid_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
+    ui.vertical_centered(|ui| {
+        Layout::section_space(ui);
+
+        if ui.button("⬅ Back").clicked() {
+            ctx.menu_state.set(crate::core::MenuState::ModeSelect);
+        }
+
+        Layout::section_space(ui);
+
+        ui.label(
+            egui::RichText::new("BRAID P2P LOBBY")
+                .size(24.0)
+                .color(egui::Color32::from_rgb(180, 120, 255))
+                .strong(),
+        );
+
+        Layout::item_space(ui);
+
+        ui.group(|ui| {
+            ui.label("Base URL:");
+            ui.text_edit_singleline(&mut ctx.braid_config.base_url);
+
+            Layout::small_space(ui);
+
+            ui.label("Game ID:");
+            ui.text_edit_singleline(&mut ctx.braid_config.game_id);
+        });
+
+        Layout::item_space(ui);
+
+        if ui.button("CONNECT & PLAY").clicked() {
+            ctx.braid_config.active = true;
+            *ctx.core_mode = CoreGameMode::BraidMultiplayer;
+            ctx.next_state.set(GameState::InGame);
+            ctx.menu_expanded.expanded = false;
+        }
+
+        Layout::item_space(ui);
+        ui.label(
+            egui::RichText::new(
+                "Braid protocol uses decentralized HTTP for real-time state synchronization.",
+            )
+            .size(10.0)
+            .color(egui::Color32::from_rgb(150, 150, 150)),
+        );
+    });
+}
+
+fn ui_about(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     Layout::small_space(ui);
     if ui.button("⬅ Back").clicked() {
-        menu_state.set(crate::core::MenuState::Main);
+        ctx.menu_state.set(crate::core::MenuState::Main);
     }
     Layout::section_space(ui);
 

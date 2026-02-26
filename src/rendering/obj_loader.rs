@@ -1,11 +1,11 @@
 use bevy::{
-    asset::{io::Reader, AssetLoader, AsyncReadExt, LoadContext, RenderAssetUsages},
+    asset::{io::Reader, AssetLoader, LoadContext, RenderAssetUsages},
     prelude::*,
     render::render_resource::PrimitiveTopology,
 };
 use thiserror::Error;
 
-#[derive(Default)]
+#[derive(Default, TypePath)]
 pub struct ObjLoader;
 
 #[derive(Error, Debug)]

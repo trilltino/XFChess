@@ -92,7 +92,6 @@ macro_rules! create_cleanup_system {
 
 // Create cleanup systems for each state
 create_cleanup_system!(cleanup_main_menu, GameState::MainMenu);
-create_cleanup_system!(cleanup_settings, GameState::Settings);
 create_cleanup_system!(cleanup_in_game, GameState::InGame);
 create_cleanup_system!(cleanup_paused, GameState::Paused);
 create_cleanup_system!(cleanup_game_over, GameState::GameOver);

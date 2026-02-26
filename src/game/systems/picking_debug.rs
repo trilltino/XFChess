@@ -6,12 +6,13 @@ use crate::core::GameState;
 use crate::game::resources::Selection;
 use crate::rendering::pieces::Piece;
 use crate::rendering::utils::Square;
-use bevy::ecs::message::MessageReader;
+// use bevy::ecs::message::MessageReader; (Removed for Bevy 0.18)
 use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonInput;
 use bevy::picking::events::{Click, Pointer};
 use bevy::picking::pointer::{PointerId, PointerInteraction};
 use bevy::prelude::*;
+// use bevy::ecs::event::EventReader; // EventReader is in prelude
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 
 #[derive(Resource, Default)]

@@ -37,7 +37,7 @@ pub fn promotion_ui_system(
     egui::Area::new(egui::Id::new("promotion_overlay"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            let screen_rect = ui.ctx().screen_rect();
+            let screen_rect = ui.ctx().content_rect();
             ui.painter().rect_filled(
                 screen_rect,
                 0.0,

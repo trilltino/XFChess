@@ -1,16 +1,52 @@
-use crate::game::components::{FadingCapture, HasMoved, MoveRecord, PieceMoveAnimation};
-use crate::game::resources::{CapturedPieces, ChessEngine, MoveHistory, PendingTurnAdvance};
-use crate::rendering::pieces::{Piece, PieceColor, PieceType};
+use crate::engine::board_state::ChessEngine;
+use crate::game::components::{
+    FadingCapture, HasMoved, MoveRecord, Piece, PieceColor, PieceType, PieceMoveAnimation,
+};
+use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
+use crate::rendering::pieces::PIECE_ON_BOARD_Y;
 use bevy::audio::{AudioPlayer, AudioSource};
 use bevy::prelude::*;
-use chess_engine::do_move;
+use crate::game::events::MoveMadeEvent;
 
-/// Data required to identify a captured piece target
+/// Data required to identify a captured piece target.
 #[derive(Clone, Copy, Debug)]
 pub struct CapturedTarget {
     pub entity: Entity,
     pub piece_type: PieceType,
     pub color: PieceColor,
+}
+
+/// Describes a single chess move — the "what" without the "how".
+///
+/// Groups the value-parameters that were previously passed individually
+/// to [`execute_move`], making call sites easier to read and harder to
+/// get wrong (no positional-argument confusion).
+///
+/// # Reference
+///
+/// - <https://stackoverflow.com/questions/40703863> (parameter object pattern)
+#[derive(Clone, Debug)]
+pub struct MoveContext<'a> {
+    /// Label for log messages (e.g. `"ai"`, `"network_move"`, `"local_input"`).
+    pub origin: &'a str,
+    /// Entity being moved.
+    pub entity: Entity,
+    /// Snapshot of the piece component at move time.
+    pub piece: Piece,
+    /// Destination square `(file, rank)`.
+    pub target: (u8, u8),
+    /// Captured piece, if any.
+    pub capture: Option<CapturedTarget>,
+    /// Promotion target type, if pawn reaches last rank.
+    pub promotion: Option<PieceType>,
+    /// Whether this is the piece's first move (enables castling / double-pawn).
+    pub was_first_move: bool,
+    /// `true` when the move originated from a remote peer.
+    pub remote: bool,
+    /// Move sound handle (optional).
+    pub move_sound: Option<Handle<AudioSource>>,
+    /// Capture sound handle (optional).
+    pub capture_sound: Option<Handle<AudioSource>>,
 }
 
 /// Helper to handle audio playback for moves
@@ -20,12 +56,7 @@ pub fn play_move_audio(
     capture_happened: bool,
 ) {
     if capture_happened {
-        // Capture sound handled in trigger_capture/apply_capture usually?
-        // In input.rs, play_move_audio respects capture_happened.
-        // It plays move_sound ONLY IF no capture happened (because capture sound is played separately).
         if let Some(_sound) = move_sound {
-            // commands.spawn(AudioPlayer::new(sound)); // This was playing move sound even on capture?
-            // In input.rs: `if capture_happened { return; }`
             return;
         }
     }
@@ -35,8 +66,8 @@ pub fn play_move_audio(
     }
 }
 
-/// Apply visual and logical state for a captured piece
-/// Now uses fading animation instead of instant move
+/// Apply visual and logical state for a captured piece.
+/// Now uses fading animation instead of instant move.
 pub fn apply_capture(
     commands: &mut Commands,
     captured_pieces: &mut CapturedPieces,
@@ -80,6 +111,7 @@ pub fn update_piece_state(
     target: (u8, u8),
     _was_first_move: bool,
     capture: Option<CapturedTarget>,
+    promotion: Option<PieceType>,
     commands: &mut Commands,
     pieces: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
     move_history: &mut MoveHistory,
@@ -88,13 +120,20 @@ pub fn update_piece_state(
         error!("[SHARED] {origin}: failed to access piece after move");
         return false;
     };
+
+    // Apply promotion if applicable
+    if let Some(new_type) = promotion {
+        debug!("[SHARED] {origin}: Promoting piece to {:?}", new_type);
+        piece_component.piece_type = new_type;
+    }
+
     let move_record = MoveRecord {
         piece_type: piece_component.piece_type,
         piece_color: piece_component.color,
         from: from_pos,
         to: target,
         captured: capture.map(|data| data.piece_type),
-        is_castling: false, // AI/Input logic currently simplifies this (handled by engine state implicit?)
+        is_castling: false,
         is_en_passant: false,
         is_check: false,
         is_checkmate: false,
@@ -102,9 +141,11 @@ pub fn update_piece_state(
     move_history.add_move(move_record);
     piece_component.x = target.0;
     piece_component.y = target.1;
+    // Use PIECE_ON_BOARD_Y so the animation stays on the board surface (y=0.05),
+    // matching the spawn position and the snap target in animate_piece_movement.
     commands.entity(entity).insert(PieceMoveAnimation::new(
-        Vec3::new(from_pos.0 as f32, 0.0, from_pos.1 as f32),
-        Vec3::new(target.0 as f32, 0.0, target.1 as f32),
+        Vec3::new(from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
+        Vec3::new(target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),
         0.25,
     ));
 
@@ -113,66 +154,39 @@ pub fn update_piece_state(
     true
 }
 
-/// Core function to execute a validated move
+/// Core function to execute a validated move.
 ///
-/// Handles:
-/// 1. Engine update
-/// 2. Capture processing (visuals + sound)
-/// 3. Move sound (if no capture)
-/// 4. ECS piece state update (coords, history, animation)
-/// 5. Engine -> ECS sync
-/// 6. Turn advance request
+/// Accepts a [`MoveContext`] (the "what") plus mutable ECS handles (the "how").
+/// This keeps the call-site readable and prevents positional-argument mistakes.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_move(
-    origin: &str,
+    ctx: &MoveContext<'_>,
     commands: &mut Commands,
-    // Move parameters
-    entity: Entity,
-    piece: Piece,
-    target: (u8, u8),
-    capture: Option<CapturedTarget>,
-    was_first_move: bool,
-    // Resources
     pending_turn: &mut PendingTurnAdvance,
     move_history: &mut MoveHistory,
     captured_pieces: &mut CapturedPieces,
-    engine: &mut ChessEngine,
-    // Queries
+    _engine: &mut ChessEngine,
     pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
-    // Sounds
-    move_sound: Option<Handle<AudioSource>>,
-    capture_sound: Option<Handle<AudioSource>>,
+    move_events: Option<&mut MessageWriter<MoveMadeEvent>>,
 ) -> bool {
-    let from_pos = (piece.x, piece.y);
-    let src_index = ChessEngine::square_to_index(from_pos.0, from_pos.1);
-    let dst_index = ChessEngine::square_to_index(target.0, target.1);
-
-    // 1. Update Engine
-    do_move(&mut engine.game, src_index, dst_index, true);
+    // 1. Play Audio
+    play_move_audio(commands, ctx.move_sound.clone(), ctx.capture.is_some());
 
     // 2. Handle Capture
-    let capture_happened = if let Some(target_capture) = capture {
-        apply_capture(commands, captured_pieces, capture_sound, target_capture);
-        true
-    } else {
-        false
-    };
-
-    // 3. Play Move Sound (if not capture)
-    if !capture_happened {
-        if let Some(sound) = move_sound {
-            commands.spawn(AudioPlayer::new(sound));
-        }
+    if let Some(target_cap) = ctx.capture {
+        apply_capture(commands, captured_pieces, ctx.capture_sound.clone(), target_cap);
     }
 
-    // 4. Update ECS Piece
+    // 3. Update Piece State
+    let from_pos = (ctx.piece.x, ctx.piece.y);
     if !update_piece_state(
-        origin,
-        entity,
+        ctx.origin,
+        ctx.entity,
         from_pos,
-        target,
-        was_first_move,
-        capture,
+        ctx.target,
+        ctx.was_first_move,
+        ctx.capture,
+        ctx.promotion,
         commands,
         pieces_query,
         move_history,
@@ -180,21 +194,24 @@ pub fn execute_move(
         return false;
     }
 
-    // 5. Sync Engine -> ECS (updates castling rights, en passant, etc.)
-    engine.sync_engine_to_ecs(commands, pieces_query);
+    // 4. Advance Turn
+    pending_turn.request(ctx.piece.color);
 
-    // 6. Request Turn Advance
-    pending_turn.request(piece.color);
+    // 5. Update Engine — sync happens in update_game_phase system
 
-    // Consolidated move log
-    debug!(
-        "[MOVE] {}{}→{}{}{}",
-        (b'a' + from_pos.1) as char,
-        from_pos.0 + 1,
-        (b'a' + target.1) as char,
-        target.0 + 1,
-        if capture_happened { " (capture)" } else { "" }
-    );
+    // 6. Trigger Event
+    if let Some(writer) = move_events {
+        writer.write(MoveMadeEvent {
+            from: from_pos,
+            to: ctx.target,
+            player: format!("{:?}", ctx.piece.color),
+            piece_type: ctx.piece.piece_type,
+            captured_piece: ctx.capture.map(|c| c.piece_type),
+            promotion: ctx.promotion,
+            remote: ctx.remote,
+            game_id: None,
+        });
+    }
 
     true
 }

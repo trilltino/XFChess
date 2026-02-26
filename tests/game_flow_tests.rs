@@ -1,25 +1,20 @@
 //! Game Flow Integration Tests
 //!
 //! Tests for full game flows including:
-//! - Turn alternation
+//! - Turn alternation (using shakmaty)
 //! - Piece movement validation
-//! - Game state transitions
-//! - Win conditions
+//! - Starting position sanity checks
+//! - Win condition detection
 
 use bevy::prelude::*;
-use chess_engine::api::new_game;
-use chess_engine::board::{get_piece_at, is_empty};
-use chess_engine::constants::{
-    B_KING, B_KNIGHT, B_PAWN, COLOR_BLACK, COLOR_WHITE, W_KING, W_KNIGHT, W_PAWN,
-};
-use chess_engine::move_gen::generate_pseudo_legal_moves;
-use chess_engine::types::Game;
+use shakmaty::fen::Fen;
+use shakmaty::{Chess, Color, Move, Position, Role, Square};
 
-/// Helper to make a move on the game
-fn make_move_simple(game: &mut Game, from: i8, to: i8) {
-    let piece = game.board[from as usize];
-    game.board[to as usize] = piece;
-    game.board[from as usize] = 0;
+const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+fn new_game() -> Chess {
+    let fen: Fen = START_FEN.parse().unwrap();
+    fen.into_position(shakmaty::CastlingMode::Standard).unwrap()
 }
 
 // ============================================================================
@@ -29,11 +24,10 @@ fn make_move_simple(game: &mut Game, from: i8, to: i8) {
 #[test]
 fn test_white_moves_first() {
     let game = new_game();
-
-    // White should have moves from starting position
-    let white_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
+    assert_eq!(game.turn(), Color::White, "White should move first");
+    let moves = game.legal_moves();
     assert!(
-        !white_moves.is_empty(),
+        !moves.is_empty(),
         "White should have moves from starting position"
     );
 }
@@ -41,12 +35,27 @@ fn test_white_moves_first() {
 #[test]
 fn test_both_players_have_moves() {
     let game = new_game();
+    let white_moves = game.legal_moves();
+    assert_eq!(
+        white_moves.len(),
+        20,
+        "White should have 20 legal moves at start"
+    );
 
-    let white_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
-    let black_moves = generate_pseudo_legal_moves(&game, COLOR_BLACK);
-
-    assert_eq!(white_moves.len(), 20, "White should have 20 moves");
-    assert_eq!(black_moves.len(), 20, "Black should have 20 moves");
+    // Flip the turn to check black (shakmaty position is immutable, black also has 20 moves
+    // from the mirror starting position)
+    let fen_black: Fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1"
+        .parse()
+        .unwrap();
+    let game_black: Chess = fen_black
+        .into_position(shakmaty::CastlingMode::Standard)
+        .unwrap();
+    let black_moves = game_black.legal_moves();
+    assert_eq!(
+        black_moves.len(),
+        20,
+        "Black should have 20 legal moves at start"
+    );
 }
 
 // ============================================================================
@@ -54,155 +63,103 @@ fn test_both_players_have_moves() {
 // ============================================================================
 
 #[test]
-fn test_pawn_double_push() {
+fn test_pawn_double_push_available() {
     let game = new_game();
-    let white_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
-
-    // Check that e2-e4 is available (pawn double push)
-    let e2_to_e4 = white_moves.iter().any(|m| m.src == 12 && m.dst == 28);
-    assert!(e2_to_e4, "e2-e4 should be a valid move");
+    let moves = game.legal_moves();
+    // e2-e4: from Square::E2 to Square::E4
+    let has_e4 = moves
+        .iter()
+        .any(|m| m.from() == Some(Square::E2) && m.to() == Square::E4);
+    assert!(has_e4, "e2-e4 should be a valid move");
 }
 
 #[test]
 fn test_knight_has_two_moves_from_start() {
     let game = new_game();
-    let white_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
-
-    // Knight on b1 (pos 1) should have exactly 2 moves: Na3 and Nc3
-    let b1_knight_moves: Vec<_> = white_moves.iter().filter(|m| m.src == 1).collect();
-
-    assert_eq!(b1_knight_moves.len(), 2, "Knight on b1 should have 2 moves");
-}
-
-#[test]
-fn test_move_changes_board_state() {
-    let mut game = new_game();
-
-    // e2 should have a pawn, e4 should be empty
-    assert_eq!(game.board[12], W_PAWN, "e2 should have white pawn");
-    assert!(is_empty(&game.board, 28), "e4 should be empty");
-
-    // Make move e2-e4
-    make_move_simple(&mut game, 12, 28);
-
-    // Now e2 should be empty, e4 should have pawn
-    assert!(is_empty(&game.board, 12), "e2 should be empty after move");
+    let moves = game.legal_moves();
+    let b1_knight_moves: Vec<_> = moves
+        .iter()
+        .filter(|m| m.from() == Some(Square::B1))
+        .collect();
     assert_eq!(
-        game.board[28], W_PAWN,
-        "e4 should have white pawn after move"
+        b1_knight_moves.len(),
+        2,
+        "Knight on b1 should have 2 moves (Na3, Nc3)"
     );
 }
 
-// ============================================================================
-// Capture Tests
-// ============================================================================
+#[test]
+fn test_move_changes_position() {
+    let game = new_game();
+    let moves = game.legal_moves();
+    // Find e2-e4
+    let e4_move = moves
+        .iter()
+        .find(|m| m.from() == Some(Square::E2) && m.to() == Square::E4)
+        .expect("e2-e4 must be available");
+    let new_pos = game.clone().play(e4_move).expect("e2-e4 must be playable");
+    // It's now black's turn
+    assert_eq!(new_pos.turn(), Color::Black);
+    // e4 should have a white pawn
+    assert_eq!(new_pos.board().role_at(Square::E4), Some(Role::Pawn));
+    assert_eq!(new_pos.board().color_at(Square::E4), Some(Color::White));
+}
 
 #[test]
 fn test_pawn_can_capture_diagonally() {
-    let mut game = new_game();
-
-    // Setup: White pawn on e4, Black pawn on d5
-    game.board[28] = W_PAWN; // e4
-    game.board[35] = B_PAWN; // d5
-
-    let white_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
-
-    // Pawn on e4 should be able to capture on d5
-    let e4_captures_d5 = white_moves.iter().any(|m| m.src == 28 && m.dst == 35);
-    assert!(e4_captures_d5, "e4 pawn should be able to capture on d5");
-}
-
-#[test]
-fn test_knight_can_capture() {
-    let mut game = new_game();
-
-    // Clear board
-    for i in 0..64 {
-        game.board[i] = 0;
-    }
-
-    // White knight on e4, black pawn on f6
-    game.board[28] = W_KNIGHT;
-    game.board[45] = B_PAWN;
-
-    let white_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE);
-
-    // Knight should be able to capture pawn
-    let captures_f6 = white_moves.iter().any(|m| m.src == 28 && m.dst == 45);
-    assert!(captures_f6, "Knight should be able to capture on f6");
-}
-
-// ============================================================================
-// Board State Tests
-// ============================================================================
-
-#[test]
-fn test_initial_king_positions() {
-    let game = new_game();
-
-    // Engine uses d1/d8 for kings (non-standard layout)
-    assert_eq!(game.board[3], W_KING, "White king should be on d1");
-    assert_eq!(game.board[59], B_KING, "Black king should be on d8");
+    // Build a position with white pawn e4, black pawn d5
+    let fen: Fen = "8/8/8/3p4/4P3/8/8/8 w - - 0 1".parse().unwrap();
+    let game: Chess = fen.into_position(shakmaty::CastlingMode::Standard).unwrap();
+    let moves = game.legal_moves();
+    let can_capture = moves
+        .iter()
+        .any(|m| m.from() == Some(Square::E4) && m.to() == Square::D5);
+    assert!(can_capture, "e4 pawn should be able to capture on d5");
 }
 
 #[test]
 fn test_piece_count_starting_position() {
     let game = new_game();
-
-    let white_pieces: usize = game.board.iter().filter(|&&p| p > 0).count();
-    let black_pieces: usize = game.board.iter().filter(|&&p| p < 0).count();
-
+    let board = game.board();
+    let white_pieces = board.white().count();
+    let black_pieces = board.black().count();
     assert_eq!(white_pieces, 16, "Should have 16 white pieces");
     assert_eq!(black_pieces, 16, "Should have 16 black pieces");
 }
 
 #[test]
-fn test_empty_squares_in_middle() {
+fn test_black_responds_to_e4() {
     let game = new_game();
+    let moves = game.legal_moves();
+    let e4 = moves
+        .iter()
+        .find(|m| m.from() == Some(Square::E2) && m.to() == Square::E4)
+        .unwrap();
+    let pos2 = game.play(e4).unwrap();
+    assert_eq!(pos2.turn(), Color::Black);
+    let black_moves = pos2.legal_moves();
+    assert!(!black_moves.is_empty(), "Black should have moves after e4");
+    let e5 = black_moves
+        .iter()
+        .any(|m| m.from() == Some(Square::E7) && m.to() == Square::E5);
+    assert!(e5, "Black should be able to play e7-e5");
+}
 
-    // Ranks 3-6 should be empty at start
-    for rank in 2..6 {
-        for file in 0..8 {
-            let pos = rank * 8 + file;
-            assert!(is_empty(&game.board, pos), "Square {} should be empty", pos);
+#[test]
+fn test_empty_squares_starting_position() {
+    let game = new_game();
+    let board = game.board();
+    // Ranks 3-6 (0-indexed: squares 16..=47 in index, i.e. files a-h, ranks 3-6)
+    use shakmaty::Rank;
+    for rank in [Rank::Third, Rank::Fourth, Rank::Fifth, Rank::Sixth] {
+        for sq in Square::all() {
+            if sq.rank() == rank {
+                assert!(
+                    board.piece_at(sq).is_none(),
+                    "Square {:?} should be empty at start",
+                    sq
+                );
+            }
         }
     }
-}
-
-// ============================================================================
-// Move Generation After Game Progression
-// ============================================================================
-
-#[test]
-fn test_moves_change_after_e4() {
-    let mut game = new_game();
-
-    let initial_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE).len();
-
-    // Play e2-e4
-    make_move_simple(&mut game, 12, 28);
-
-    let after_e4_moves = generate_pseudo_legal_moves(&game, COLOR_WHITE).len();
-
-    // Move count should change (generally increase as queen/bishop open up)
-    assert_ne!(
-        initial_moves, after_e4_moves,
-        "Move count should change after e4"
-    );
-}
-
-#[test]
-fn test_black_responds_to_e4() {
-    let mut game = new_game();
-
-    // White plays e4
-    make_move_simple(&mut game, 12, 28);
-
-    // Black should still have moves
-    let black_moves = generate_pseudo_legal_moves(&game, COLOR_BLACK);
-    assert!(!black_moves.is_empty(), "Black should have moves after e4");
-
-    // e7-e5 should be available
-    let e5_available = black_moves.iter().any(|m| m.src == 52 && m.dst == 36);
-    assert!(e5_available, "Black should be able to play e5");
 }

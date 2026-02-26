@@ -141,6 +141,14 @@ impl Default for ChessAIResource {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
 pub enum GameMode {
+    /// Multiplayer mode (Local or Online)
+    ///
+    /// No AI involvement. Both sides controlled by human input (local or network events).
+    Multiplayer,
+
+    /// Multiplayer Competitive mode (Ranked)
+    MultiplayerCompetitive,
+
     /// Human vs AI opponent
     ///
     /// The specified color is controlled by the AI engine.
@@ -165,6 +173,7 @@ impl GameMode {
     pub fn ai_color(self) -> PieceColor {
         match self {
             GameMode::VsAI { ai_color } => ai_color,
+            GameMode::Multiplayer | GameMode::MultiplayerCompetitive => PieceColor::Black,
         }
     }
 }
@@ -234,26 +243,25 @@ pub enum AIDifficulty {
 }
 
 impl AIDifficulty {
-    /// Get the time allocation for this difficulty level
-    ///
-    /// Returns the number of seconds the AI will think per move.
-    /// The chess engine uses this for its time management and
-    /// iterative deepening control.
-    ///
-    /// # Returns
-    ///
-    /// Time in seconds as f32:
-    /// - Easy: 0.5s
-    /// - Medium: 1.5s
-    /// - Hard: 3.0s
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let difficulty = AIDifficulty::Hard;
-    /// engine.secs_per_move = difficulty.seconds_per_move();
-    /// // AI will now think for 3.0 seconds
-    /// ```
+    /// Stockfish search depth for this difficulty.
+    pub fn stockfish_depth(self) -> Option<u8> {
+        match self {
+            AIDifficulty::Easy => Some(5),
+            AIDifficulty::Medium => Some(12),
+            AIDifficulty::Hard => Some(20),
+        }
+    }
+
+    /// Maximum search time in milliseconds (or None for depth-only).
+    pub fn stockfish_movetime_ms(self) -> Option<u64> {
+        match self {
+            AIDifficulty::Easy => Some(500),
+            AIDifficulty::Medium => Some(1_500),
+            AIDifficulty::Hard => Some(3_000),
+        }
+    }
+
+    /// Legacy: get the time allocation for this difficulty level (kept for compat).
     pub fn seconds_per_move(self) -> f32 {
         match self {
             AIDifficulty::Easy => 0.5,

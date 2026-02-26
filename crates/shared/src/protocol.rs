@@ -1,8 +1,7 @@
 use bevy::prelude::*;
-use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Channel1;
 
 /// Lobby-related messages for room management
@@ -34,13 +33,6 @@ pub enum GameMessage {
     },
     Resign,
 
-    // Bidirectional Chat
-    ChatMessage {
-        sender: String,
-        content: String,
-        timestamp: u64,
-    },
-
     // Server → Client (Broadcast)
     MoveMade {
         from: (u8, u8),
@@ -57,20 +49,13 @@ pub enum GameMessage {
         winner: Option<i64>,
         reason: String,
     },
-    CrdtOperation(crate::crdt::MessageOperation),
 }
 
 pub struct ProtocolPlugin;
 
 impl Plugin for ProtocolPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_channel::<Channel1>(ChannelSettings {
-            mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
-            ..default()
-        });
-
-        app.register_message::<LobbyMessage>();
-        app.register_message::<GameMessage>();
+    fn build(&self, _app: &mut App) {
+        // Lightyear channels removed.
     }
 }
 
@@ -161,30 +146,6 @@ mod tests {
         let bytes = bincode::serialize(&msg).expect("Should serialize");
         let decoded: GameMessage = bincode::deserialize(&bytes).expect("Should deserialize");
         assert_eq!(decoded, GameMessage::Resign);
-    }
-
-    #[test]
-    fn test_game_message_chat() {
-        let msg = GameMessage::ChatMessage {
-            sender: "Player1".to_string(),
-            content: "Hello!".to_string(),
-            timestamp: 1234567890,
-        };
-        let bytes = bincode::serialize(&msg).expect("Should serialize");
-        let decoded: GameMessage = bincode::deserialize(&bytes).expect("Should deserialize");
-
-        match decoded {
-            GameMessage::ChatMessage {
-                sender,
-                content,
-                timestamp,
-            } => {
-                assert_eq!(sender, "Player1");
-                assert_eq!(content, "Hello!");
-                assert_eq!(timestamp, 1234567890);
-            }
-            _ => panic!("Wrong message type"),
-        }
     }
 
     #[test]

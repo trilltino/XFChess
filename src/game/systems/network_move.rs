@@ -1,10 +1,10 @@
-use crate::game::components::HasMoved;
+use crate::engine::board_state::ChessEngine;
+use crate::game::components::{HasMoved, Piece, PieceType};
 use crate::game::events::NetworkMoveEvent;
 use crate::game::resources::{
-    CapturedPieces, ChessEngine, GameSounds, MoveHistory, PendingTurnAdvance, Selection,
+    CapturedPieces, GameSounds, MoveHistory, PendingTurnAdvance, Selection,
 };
-use crate::game::systems::shared::{execute_move, CapturedTarget};
-use crate::rendering::pieces::Piece;
+use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
 use bevy::prelude::*;
 
 /// Handle network move events by executing them on the local board
@@ -26,18 +26,17 @@ pub fn handle_network_moves(
         );
 
         // 1. Find Source Entity and Piece Data
-        // We iterate to find the connection, cloning the data to release the borrow
         let source_data = pieces_query
             .iter()
             .find(|(_, piece, _)| piece.x == event.from.0 && piece.y == event.from.1)
-            .map(|(e, p, _)| (e, p.clone()));
+            .map(|(e, p, _)| (e, *p));
 
         if let Some((entity, piece)) = source_data {
             // 2. Find Potential Capture
             let capture_data = pieces_query
                 .iter()
                 .find(|(_, p, _)| p.x == event.to.0 && p.y == event.to.1)
-                .map(|(e, p, _)| (e, p.clone()));
+                .map(|(e, p, _)| (e, *p));
 
             let capture_target = if let Some((cap_entity, cap_piece)) = capture_data {
                 if cap_piece.color != piece.color {
@@ -54,46 +53,45 @@ pub fn handle_network_moves(
                 None
             };
 
-            // 3. Determine if it was first move (for history/notation, though logic usually checks HasMoved before update)
-            // Wait, execute_move uses 'was_first_move' arg?
-            // Yes. I need to know if it was first move.
-            // I can check HasMoved component.
-            // But I can't access it while pieces_query is borrowed by execute_move?
-            // I should get it NOW.
+            // 3. Determine first-move status before execute_move borrows the query
             let was_first_move = if let Ok((_, _, has_moved)) = pieces_query.get(entity) {
                 !has_moved.moved
             } else {
                 false
             };
 
-            // 4. Execute Move
-            execute_move(
-                "network_move",
-                &mut commands,
+            // 4. Map Promotion Piece
+            let promotion_type = event.promotion.and_then(PieceType::from_char);
+
+            // 5. Execute Move
+            let ctx = MoveContext {
+                origin: "network_move",
                 entity,
                 piece,
-                event.to,
-                capture_target,
+                target: event.to,
+                capture: capture_target,
+                promotion: promotion_type,
                 was_first_move,
+                remote: true,
+                move_sound: game_sounds.as_ref().map(|s| s.move_piece.clone()),
+                capture_sound: game_sounds.as_ref().map(|s| s.capture_piece.clone()),
+            };
+
+            execute_move(
+                &ctx,
+                &mut commands,
                 &mut pending_turn,
                 &mut move_history,
                 &mut captured_pieces,
                 &mut engine,
                 &mut pieces_query,
-                game_sounds.as_ref().map(|s| s.move_piece.clone()),
-                game_sounds.as_ref().map(|s| s.capture_piece.clone()),
+                None, // No MoveMadeEvent writer — avoid local echo
             );
 
-            // 5. Update Selection (Clear if we moved selected piece)
-            // If the moved piece was selected, clear selection to avoid weird state
+            // 6. Update Selection (Clear if we moved selected piece)
             if let Some(selected_entity) = selection.selected_entity {
                 if selected_entity == entity {
-                    // We moved the piece we had selected. Clear selection.
                     selection.selected_entity = None;
-                    // We should also strip SelectedPiece component?
-                    // clear_selection_state helper handles this.
-                    // But I don't have access to SelectedPiece query here or helper.
-                    // We can just remove the component manually.
                     commands
                         .entity(entity)
                         .remove::<crate::game::components::SelectedPiece>();

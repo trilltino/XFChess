@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn test_pending_promotion_default() {
         let promo = PendingPromotion::default();
-        
+
         assert!(promo.pawn_entity.is_none());
         assert!(promo.position.is_none());
         assert!(promo.color.is_none());
@@ -85,9 +85,9 @@ mod tests {
     #[test]
     fn test_pending_promotion_start() {
         let mut promo = PendingPromotion::default();
-        
+
         promo.start(Entity::PLACEHOLDER, (4, 7), PieceColor::White);
-        
+
         assert!(promo.pawn_entity.is_some());
         assert_eq!(promo.position, Some((4, 7)));
         assert_eq!(promo.color, Some(PieceColor::White));
@@ -99,9 +99,9 @@ mod tests {
     fn test_pending_promotion_clear() {
         let mut promo = PendingPromotion::default();
         promo.start(Entity::PLACEHOLDER, (4, 7), PieceColor::White);
-        
+
         promo.clear();
-        
+
         assert!(promo.pawn_entity.is_none());
         assert!(promo.position.is_none());
         assert!(promo.color.is_none());

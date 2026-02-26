@@ -23,10 +23,11 @@ impl Plugin for PieceViewerPlugin {
             .add_systems(
                 OnEnter(MenuState::PieceViewer),
                 (
-                    // Removed despawn_all_on_enter - now reuses Main Menu scene
+                    despawn_all_on_enter,
                     setup_piece_viewer_camera,
                     setup_piece_viewer_scene,
-                ),
+                )
+                    .chain(),
             )
             .add_systems(OnExit(MenuState::PieceViewer), cleanup_piece_viewer)
             .add_systems(
@@ -165,7 +166,15 @@ impl PieceViewerState {
 fn despawn_all_on_enter(
     mut commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
-    all_entities: Query<(Entity, Option<&Name>), Without<ViewerCamera>>,
+    all_entities: Query<
+        (Entity, Option<&Name>),
+        (
+            Without<ViewerCamera>,
+            Without<Window>,
+            Without<DirectionalLight>,
+            Without<PointLight>,
+        ),
+    >,
 ) {
     info!("[PIECE_VIEWER] Despawning all entities on enter");
 
@@ -258,7 +267,7 @@ fn orbit_camera_system(
     mouse_motion: Res<AccumulatedMouseMotion>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut scroll_events: EventReader<MouseWheel>,
+    mut scroll_events: MessageReader<MouseWheel>,
     mut query: Query<(&mut Transform, &mut PieceViewerOrbitCamera), With<ViewerCamera>>,
 ) {
     for (mut transform, mut orbit) in query.iter_mut() {
@@ -402,7 +411,6 @@ fn setup_piece_viewer_scene(
     };
 
     // Spawn only the selected piece at pyramid top
-    let piece_position = Vec3::new(0.0, 8.5, 0.0); // Top of the pyramid
 
     let material = materials.add(StandardMaterial {
         base_color: if piece_color == PieceColor::White {
@@ -499,6 +507,16 @@ fn spawn_viewer_model(
         }
     }
 
+    // Helper function for knight rotation - knights face across the board
+    fn knight_rotation(color: PieceColor) -> Quat {
+        match color {
+            // White: Face +Z (toward black's side) - rotate -90° from default
+            PieceColor::White => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+            // Black: Face -Z (toward white's side) - rotate +90° from default
+            PieceColor::Black => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        }
+    }
+
     let rotation = piece_rotation(color);
 
     if model_type == ViewerModelType::Human {
@@ -547,12 +565,12 @@ fn spawn_viewer_model(
                 parent.spawn((
                     Mesh3d(meshes.king.clone()),
                     MeshMaterial3d(material.clone()),
-                    Transform::from_translation(Vec3::new(-0.2, 0.0, -1.9)),
+                    Transform::from_translation(Vec3::ZERO),
                 ));
                 parent.spawn((
                     Mesh3d(meshes.king_cross.clone()),
                     MeshMaterial3d(material),
-                    Transform::from_translation(Vec3::new(-0.2, 0.0, -1.9)),
+                    Transform::from_translation(Vec3::ZERO),
                 ));
             })
             .id(),
@@ -575,7 +593,7 @@ fn spawn_viewer_model(
                 parent.spawn((
                     Mesh3d(meshes.queen.clone()),
                     MeshMaterial3d(material),
-                    Transform::from_translation(Vec3::new(-0.2, 0.0, -0.95)),
+                    Transform::from_translation(Vec3::ZERO),
                 ));
             })
             .id(),
@@ -598,7 +616,7 @@ fn spawn_viewer_model(
                 parent.spawn((
                     Mesh3d(meshes.rook.clone()),
                     MeshMaterial3d(material),
-                    Transform::from_translation(Vec3::new(-0.1, 0.0, 1.8)),
+                    Transform::from_translation(Vec3::ZERO),
                 ));
             })
             .id(),
@@ -621,14 +639,14 @@ fn spawn_viewer_model(
                 parent.spawn((
                     Mesh3d(meshes.bishop.clone()),
                     MeshMaterial3d(material),
-                    Transform::from_translation(Vec3::new(-0.1, 0.0, 0.0)),
+                    Transform::from_translation(Vec3::ZERO),
                 ));
             })
             .id(),
         PieceType::Knight => commands
             .spawn((
                 Transform::from_translation(position)
-                    .with_rotation(rotation)
+                    .with_rotation(knight_rotation(color))
                     .with_scale(scale),
                 Visibility::Inherited,
                 Name::new(piece_name.clone()),
@@ -644,12 +662,12 @@ fn spawn_viewer_model(
                 parent.spawn((
                     Mesh3d(meshes.knight_1.clone()),
                     MeshMaterial3d(material.clone()),
-                    Transform::from_translation(Vec3::new(-0.2, 0.0, 0.9)),
+                    Transform::from_translation(Vec3::ZERO),
                 ));
                 parent.spawn((
                     Mesh3d(meshes.knight_2.clone()),
                     MeshMaterial3d(material),
-                    Transform::from_translation(Vec3::new(-0.2, 0.0, 0.9)),
+                    Transform::from_translation(Vec3::ZERO),
                 ));
             })
             .id(),
@@ -672,7 +690,7 @@ fn spawn_viewer_model(
                 parent.spawn((
                     Mesh3d(meshes.pawn.clone()),
                     MeshMaterial3d(material),
-                    Transform::from_translation(Vec3::new(-0.2, 0.0, 2.6)),
+                    Transform::from_translation(Vec3::ZERO),
                 ));
             })
             .id(),

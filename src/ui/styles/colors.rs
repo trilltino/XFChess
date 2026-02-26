@@ -25,7 +25,7 @@ impl UiColors {
     pub const BG_LIGHT: egui::Color32 = egui::Color32::from_rgb(40, 40, 45);
 
     /// Overlay background (semi-transparent)
-    pub const BG_OVERLAY: egui::Color32 = egui::Color32::from_black_alpha(220);
+    pub const BG_OVERLAY: egui::Color32 = egui::Color32::from_black_alpha(150);
 
     // === Accent Colors ===
 

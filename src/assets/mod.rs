@@ -9,7 +9,6 @@
 //! Provides a centralized resource for asset handles and loading progress.
 
 use bevy::asset::AssetLoadFailedEvent;
-use bevy::ecs::message::MessageReader;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 

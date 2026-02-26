@@ -4,7 +4,7 @@
 //! Shows game results, statistics, and options for next actions.
 
 use crate::core::{GameState, GameStatistics};
-use crate::game::resources::GameOverState;
+use crate::game::resources::{GameOverState, MoveHistory};
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -86,14 +86,19 @@ fn setup_game_over_camera(
 }
 
 /// Record game statistics when entering game over state
-fn record_game_stats(_game_over: Res<GameOverState>, mut stats: ResMut<GameStatistics>) {
-    // Extract winner and move count from game over state
-    // Note: This is simplified - you'd extract actual data from your game
-    let winner = None; // TODO: Extract from game_over.winner
-    let moves = 0; // TODO: Extract from move history
+fn record_game_stats(
+    game_over: Res<GameOverState>,
+    move_history: Res<MoveHistory>,
+    mut stats: ResMut<GameStatistics>,
+) {
+    let winner = game_over.winner();
+    let moves = move_history.len() as u32;
 
     stats.record_game(winner, moves);
-    info!("[GAME_OVER] Game statistics recorded");
+    info!(
+        "[GAME_OVER] Game statistics recorded: winner={:?}, moves={}",
+        winner, moves
+    );
 }
 
 /// Game over UI

@@ -30,10 +30,7 @@ use bevy::prelude::*;
 ///
 /// # Usage
 ///
-/// ```rust,ignore
-/// captured_pieces.add_capture(PieceColor::Black, PieceType::Queen);
-/// let advantage = captured_pieces.material_advantage(); // +9 for White
-/// ```
+/// For usage examples, see `tests/resources/captured_tests.rs`
 #[derive(Resource, Default, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct CapturedPieces {
@@ -51,13 +48,7 @@ impl CapturedPieces {
     /// * `captured_piece_color` - Color of the piece that was captured
     /// * `piece_type` - Type of piece that was captured
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // White captures Black's queen
-    /// captured.add_capture(PieceColor::Black, PieceType::Queen);
-    /// assert_eq!(captured.white_captured.len(), 1);
-    /// ```
+    /// For usage examples, see `tests/resources/captured_tests.rs`
     pub fn add_capture(&mut self, captured_piece_color: PieceColor, piece_type: PieceType) {
         match captured_piece_color {
             // If white piece was captured, black gets credit

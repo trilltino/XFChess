@@ -15,11 +15,7 @@ pub struct File(pub u8);
 impl File {
     /// Create a file from a character ('a'..='h')
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let file = File::from_char('e').unwrap(); // File 4
-    /// ```
+    /// For usage examples, see `tests/types_tests.rs`
     pub fn from_char(c: char) -> Option<Self> {
         match c {
             'a'..='h' => Some(File((c as u8 - b'a') as u8)),
@@ -29,12 +25,7 @@ impl File {
 
     /// Convert file to character ('a'..='h')
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let file = File(4);
-    /// assert_eq!(file.to_char(), 'e');
-    /// ```
+    /// For usage examples, see `tests/types_tests.rs`
     pub fn to_char(self) -> char {
         (b'a' + self.0) as char
     }
@@ -68,11 +59,7 @@ pub struct Rank(pub u8);
 impl Rank {
     /// Create a rank from a number (1-8)
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let rank = Rank::from_number(4).unwrap(); // Rank 3 (0-indexed)
-    /// ```
+    /// For usage examples, see `tests/types_tests.rs`
     pub fn from_number(n: u8) -> Option<Self> {
         if (1..=8).contains(&n) {
             Some(Rank(n - 1))
@@ -83,12 +70,7 @@ impl Rank {
 
     /// Convert rank to number (1-8)
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let rank = Rank(3);
-    /// assert_eq!(rank.to_number(), 4);
-    /// ```
+    /// For usage examples, see `tests/types_tests.rs`
     pub fn to_number(self) -> u8 {
         self.0 + 1
     }
@@ -124,11 +106,7 @@ pub struct Square {
 impl Square {
     /// Create a square from file and rank indices
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let square = Square::new(4, 3); // e4
-    /// ```
+    /// For usage examples, see `tests/types_tests.rs`
     pub fn new(file: u8, rank: u8) -> Self {
         Square {
             file: File::from(file),
@@ -138,11 +116,7 @@ impl Square {
 
     /// Create a square from algebraic notation (e.g., "e4")
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let square = Square::from_algebraic("e4").unwrap();
-    /// ```
+    /// For usage examples, see `tests/types_tests.rs`
     pub fn from_algebraic(s: &str) -> Option<Self> {
         let mut chars = s.chars();
         let file_char = chars.next()?;
@@ -157,12 +131,7 @@ impl Square {
 
     /// Convert square to algebraic notation (e.g., "e4")
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let square = Square::new(4, 3);
-    /// assert_eq!(square.to_algebraic(), "e4");
-    /// ```
+    /// For usage examples, see `tests/types_tests.rs`
     pub fn to_algebraic(self) -> String {
         format!("{}{}", self.file.to_char(), self.rank.to_number())
     }

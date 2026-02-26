@@ -85,9 +85,9 @@ pub fn load_settings_system(mut commands: Commands) {
             match fs::read_to_string(&settings_path) {
                 Ok(contents) => {
                     match serde_json::from_str::<GameSettings>(&contents) {
-                        Ok(mut settings) => {
+                        Ok(settings) => {
                             // Sync colors from serialized format
-                            settings.dynamic_lighting.sync_from_serialized();
+
                             info!("[SETTINGS] Loaded settings from {:?}", settings_path);
                             commands.insert_resource(settings);
                             return;
@@ -123,13 +123,12 @@ pub fn load_settings_system(mut commands: Commands) {
 ///
 /// Watches for changes to [`GameSettings`] and automatically saves to `settings.json`
 /// in the user's configuration directory.
-pub fn save_settings_system(mut settings: ResMut<GameSettings>) {
+pub fn save_settings_system(settings: ResMut<GameSettings>) {
     if !settings.is_changed() {
         return;
     }
 
     // Sync colors for serialization
-    settings.dynamic_lighting.sync_for_serialization();
 
     #[cfg(target_arch = "wasm32")]
     {

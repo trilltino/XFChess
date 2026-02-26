@@ -271,20 +271,36 @@ fn spawn_showcase_piece(
 ) {
     let pos = showcase_world_pos(x, y);
 
-    let rotation = match color {
-        PieceColor::White => Quat::IDENTITY,
-        PieceColor::Black => Quat::from_rotation_y(std::f32::consts::PI),
+    // Calculate rotation based on piece type and color
+    // Knights need special handling because the GLB model faces +X instead of +Z
+    let rotation = match piece_type {
+        PieceType::Knight => match color {
+            // White knights face +Z (toward black's side)
+            PieceColor::White => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+            // Black knights face -Z (toward white's side)
+            PieceColor::Black => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        },
+        _ => match color {
+            PieceColor::White => Quat::IDENTITY,
+            PieceColor::Black => Quat::from_rotation_y(std::f32::consts::PI),
+        },
     };
 
-    // Get mesh and offset based on piece type (from pieces.rs)
+    // Get meshes and offsets based on piece type (from pieces.rs)
     // These offsets are the raw GLTF mesh offsets, applied at mesh scale
-    let (mesh, offset) = match piece_type {
-        PieceType::King => (meshes.king.clone(), Vec3::new(-0.2, 0., -1.9)),
-        PieceType::Queen => (meshes.queen.clone(), Vec3::new(-0.2, 0., -0.95)),
-        PieceType::Bishop => (meshes.bishop.clone(), Vec3::new(-0.1, 0., 0.0)),
-        PieceType::Knight => (meshes.knight_1.clone(), Vec3::new(-0.2, 0., 0.9)),
-        PieceType::Rook => (meshes.rook.clone(), Vec3::new(-0.1, 0., 1.8)),
-        PieceType::Pawn => (meshes.pawn.clone(), Vec3::new(-0.2, 0., 2.6)),
+    let parts: Vec<(Handle<Mesh>, Vec3)> = match piece_type {
+        PieceType::King => vec![
+            (meshes.king.clone(), Vec3::new(-0.2, 0., -1.9)),
+            (meshes.king_cross.clone(), Vec3::new(-0.2, 0., -1.9)),
+        ],
+        PieceType::Queen => vec![(meshes.queen.clone(), Vec3::new(-0.2, 0., -0.95))],
+        PieceType::Bishop => vec![(meshes.bishop.clone(), Vec3::new(-0.1, 0., 0.0))],
+        PieceType::Knight => vec![
+            (meshes.knight_1.clone(), Vec3::new(-0.2, 0., 0.9)),
+            (meshes.knight_2.clone(), Vec3::new(-0.2, 0., 0.9)),
+        ],
+        PieceType::Rook => vec![(meshes.rook.clone(), Vec3::new(-0.1, 0., 1.8))],
+        PieceType::Pawn => vec![(meshes.pawn.clone(), Vec3::new(-0.2, 0., 2.6))],
     };
 
     commands
@@ -302,14 +318,16 @@ fn spawn_showcase_piece(
             Name::new(format!("Showcase {:?} {:?}", color, piece_type)),
         ))
         .with_children(|parent| {
-            // Scale offset by ratio since game uses 0.2 scale, we use 0.12
-            // This keeps pieces centered on their squares
-            parent.spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material.clone()),
-                Transform::from_translation(offset * OFFSET_RATIO)
-                    .with_scale(Vec3::splat(PIECE_MESH_SCALE)),
-            ));
+            for (mesh, offset) in parts {
+                // Scale offset by ratio since game uses 0.2 scale, we use 0.12
+                // This keeps pieces centered on their squares
+                parent.spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_translation(offset * OFFSET_RATIO)
+                        .with_scale(Vec3::splat(PIECE_MESH_SCALE)),
+                ));
+            }
         });
 }
 

@@ -42,7 +42,7 @@ use super::{
 
 // State-specific cleanup systems (needed because state.get() returns NEW state during OnExit)
 use super::state_lifecycle::{
-    cleanup_game_over, cleanup_in_game, cleanup_main_menu, cleanup_paused, cleanup_settings,
+    cleanup_game_over, cleanup_in_game, cleanup_main_menu, cleanup_paused,
 };
 
 /// Global state tracker for panic reporting
@@ -89,7 +89,8 @@ impl Plugin for CorePlugin {
 
         // Initialize core game resources
         // Note: GameSettings will be loaded from file in load_settings_system
-        app.init_resource::<GameStatistics>();
+        app.init_resource::<GameStatistics>()
+            .init_resource::<super::states::GameMode>();
 
         // Set default clear color to pure black for opening scene
         app.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)));
@@ -122,7 +123,6 @@ impl Plugin for CorePlugin {
 
         // Add state lifecycle logging (OnEnter/OnExit for all states)
         app.add_systems(OnEnter(GameState::MainMenu), log_state_entry);
-        app.add_systems(OnEnter(GameState::Settings), log_state_entry);
         app.add_systems(OnEnter(GameState::InGame), log_state_entry);
         app.add_systems(OnEnter(GameState::Paused), log_state_entry);
         app.add_systems(OnEnter(GameState::GameOver), log_state_entry);
@@ -130,10 +130,6 @@ impl Plugin for CorePlugin {
         app.add_systems(
             OnExit(GameState::MainMenu),
             (log_state_exit, audit_despawn_markers, cleanup_main_menu),
-        );
-        app.add_systems(
-            OnExit(GameState::Settings),
-            (log_state_exit, audit_despawn_markers, cleanup_settings),
         );
         app.add_systems(
             OnExit(GameState::InGame),
@@ -147,6 +143,9 @@ impl Plugin for CorePlugin {
             OnExit(GameState::GameOver),
             (log_state_exit, audit_despawn_markers, cleanup_game_over),
         );
+
+        // Check for FORCE_AUTH override on startup
+        app.add_systems(Startup, check_force_auth);
     }
 
     fn finish(&self, _app: &mut App) {
@@ -264,6 +263,17 @@ fn update_panic_state_tracker(
             if let Some(menu_state_res) = menu_state {
                 state_info.menu_state = Some(*menu_state_res.get());
             }
+        }
+    }
+}
+
+/// System to check for FORCE_AUTH environment variable and transition to Auth state
+fn check_force_auth(mut next_state: ResMut<NextState<GameState>>, state: Res<State<GameState>>) {
+    // Only check if we are in MainMenu (default state)
+    if *state.get() == GameState::MainMenu {
+        if std::env::var("FORCE_AUTH").is_ok() {
+            info!("[CORE] FORCE_AUTH detected, transitioning to Auth state");
+            next_state.set(GameState::Auth);
         }
     }
 }

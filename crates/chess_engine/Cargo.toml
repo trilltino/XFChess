@@ -1,11 +1,11 @@
 [package]
 name = "chess_engine"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-thiserror = "2.0.17"
-futures-lite = "2.0"
+thiserror.workspace = true
+futures-lite.workspace = true
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 
 [features]

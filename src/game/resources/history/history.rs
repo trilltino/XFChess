@@ -35,37 +35,8 @@ use bevy::prelude::*;
 ///
 /// - `moves`: Ordered vector of all moves made since game start
 ///
-/// # Examples
 ///
-/// ## Recording moves
-///
-/// ```rust,ignore
-/// fn execute_move_system(mut history: ResMut<MoveHistory>) {
-///     let move_record = MoveRecord {
-///         piece_type: PieceType::Pawn,
-///         piece_color: PieceColor::White,
-///         from: (4, 1),
-///         to: (4, 3),
-///         captured: None,
-///         is_castling: false,
-///         is_en_passant: false,
-///         is_check: false,
-///         is_checkmate: false,
-///     };
-///
-///     history.add_move(move_record);
-/// }
-/// ```
-///
-/// ## Reviewing history
-///
-/// ```rust,ignore
-/// fn display_last_move(history: Res<MoveHistory>) {
-///     if let Some(last) = history.last_move() {
-///         println!("Last move: {:?} to {:?}", last.from, last.to);
-///     }
-/// }
-/// ```
+/// For usage examples, see `tests/resources/history_tests.rs`
 #[derive(Resource, Debug, Default, Reflect)]
 #[reflect(Resource)]
 pub struct MoveHistory {
@@ -88,21 +59,7 @@ impl MoveHistory {
     ///
     /// * `record` - The move record to add
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// history.add_move(MoveRecord {
-    ///     piece_type: PieceType::Knight,
-    ///     piece_color: PieceColor::Black,
-    ///     from: (1, 7),
-    ///     to: (2, 5),
-    ///     captured: None,
-    ///     is_castling: false,
-    ///     is_en_passant: false,
-    ///     is_check: true,  // Knight gives check
-    ///     is_checkmate: false,
-    /// });
-    /// ```
+    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn add_move(&mut self, record: MoveRecord) {
         self.moves.push(record);
     }
@@ -117,19 +74,7 @@ impl MoveHistory {
     /// - `Some(&MoveRecord)` - Reference to the last move made
     /// - `None` - Game just started, no moves yet
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Check if last move was a pawn double-push (for en passant)
-    /// if let Some(last) = history.last_move() {
-    ///     if last.piece_type == PieceType::Pawn {
-    ///         let distance = (last.to.1 as i8 - last.from.1 as i8).abs();
-    ///         if distance == 2 {
-    ///             println!("En passant may be available!");
-    ///         }
-    ///     }
-    /// }
-    /// ```
+    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn last_move(&self) -> Option<&MoveRecord> {
         self.moves.last()
     }
@@ -145,13 +90,7 @@ impl MoveHistory {
     ///
     /// Number of half-moves (0 at game start)
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let ply_count = history.len();
-    /// let full_moves = (ply_count / 2) + 1;
-    /// println!("Move {} (ply {})", full_moves, ply_count);
-    /// ```
+    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn len(&self) -> usize {
         self.moves.len()
     }
@@ -162,13 +101,7 @@ impl MoveHistory {
     ///
     /// `true` if game just started, `false` if at least one move has been made
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// if history.is_empty() {
-    ///     println!("Game just started!");
-    /// }
-    /// ```
+    /// For usage examples, see `tests/resources/history_tests.rs`
     #[allow(dead_code)] // Public API - useful for UI and game logic
     pub fn is_empty(&self) -> bool {
         self.moves.is_empty()
@@ -179,13 +112,7 @@ impl MoveHistory {
     /// Removes all moves from the history. Should be called when starting
     /// a new game or loading a saved game.
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// fn start_new_game(mut history: ResMut<MoveHistory>) {
-    ///     history.clear();
-    /// }
-    /// ```
+    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn clear(&mut self) {
         self.moves.clear();
     }
@@ -201,14 +128,7 @@ impl MoveHistory {
     /// - `Some(&MoveRecord)` - Move at that index
     /// - `None` - Index out of bounds
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Get the opening move (1. e4 or similar)
-    /// if let Some(first_move) = history.get_move(0) {
-    ///     println!("White opened with: {:?}", first_move);
-    /// }
-    /// ```
+    /// For usage examples, see `tests/resources/history_tests.rs`
     #[allow(dead_code)] // Public API - useful for UI and game analysis
     pub fn get_move(&self, index: usize) -> Option<&MoveRecord> {
         self.moves.get(index)
@@ -218,13 +138,7 @@ impl MoveHistory {
     ///
     /// Useful for generating PGN notation or analyzing the full game.
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// for (i, move_record) in history.iter().enumerate() {
-    ///     println!("Move {}: {:?}", i + 1, move_record);
-    /// }
-    /// ```
+    /// For usage examples, see `tests/resources/history_tests.rs`
     #[allow(dead_code)] // Public API - useful for UI and game analysis
     pub fn iter(&self) -> std::slice::Iter<'_, MoveRecord> {
         self.moves.iter()

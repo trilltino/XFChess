@@ -11,11 +11,12 @@
 //! and before visual updates. This ensures game state is updated before
 //! rendering changes.
 
+use crate::engine::board_state::ChessEngine;
 use crate::game::components::GamePhase;
 use crate::game::resources::*;
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
-use chess_engine::{get_game_state, is_in_check, STATE_CHECKMATE, STATE_PLAYING, STATE_STALEMATE};
+use shakmaty::Color;
 
 /// System to update game phase (check, checkmate, etc.)
 ///
@@ -73,75 +74,43 @@ pub fn update_game_phase(
     // Sync ECS → Engine before checking game state
     engine.sync_ecs_to_engine(&pieces_query, &current_turn);
 
-    // Get game state from engine
-    let engine_color = ChessEngine::piece_color_to_engine(current_turn.color);
-    let engine_state = get_game_state(&mut engine.game, engine_color);
+    // Use shakmaty to determine game state
+    let _sm_color = match current_turn.color {
+        PieceColor::White => Color::White,
+        PieceColor::Black => Color::Black,
+    };
 
-    // Check if king is in check (for check detection)
-    let in_check = is_in_check(&engine.game, engine_color);
+    let in_check = engine.is_check();
+    let legal_moves = engine.legal_moves();
+    let has_legal_moves = !legal_moves.is_empty();
 
-    match engine_state {
-        STATE_CHECKMATE => {
-            game_phase.0 = GamePhase::Checkmate;
-            // Set game over state - opponent wins
-            *game_over = match current_turn.color {
-                PieceColor::White => GameOverState::BlackWon,
-                PieceColor::Black => GameOverState::WhiteWon,
-            };
-            info!("[GAME] ========== CHECKMATE! ==========");
-            info!("[GAME] {:?} is in checkmate!", current_turn.color);
-            info!(
-                "[GAME] {} - {}",
-                game_over.message(),
-                game_over
-                    .winner()
-                    .map(|c| format!("{:?} WINS!", c))
-                    .unwrap_or_default()
-            );
-            info!("[GAME] Final Move: #{}", current_turn.move_number);
+    if !has_legal_moves && in_check {
+        // Checkmate
+        game_phase.0 = GamePhase::Checkmate;
+        *game_over = match current_turn.color {
+            PieceColor::White => GameOverState::BlackWon,
+            PieceColor::Black => GameOverState::WhiteWon,
+        };
+        info!("[GAME] ========== CHECKMATE! ==========");
+        info!("[GAME] {:?} is in checkmate!", current_turn.color);
+    } else if !has_legal_moves {
+        // Stalemate
+        game_phase.0 = GamePhase::Stalemate;
+        *game_over = GameOverState::Stalemate;
+        info!("[GAME] ========== STALEMATE! ==========");
+    } else if in_check {
+        if previous_phase != GamePhase::Check {
+            game_phase.0 = GamePhase::Check;
+            info!("[GAME] ========== CHECK DETECTED ==========");
+            info!("[GAME] {:?} King is under attack!", current_turn.color);
+        } else {
+            game_phase.0 = GamePhase::Check;
         }
-        STATE_STALEMATE => {
-            game_phase.0 = GamePhase::Stalemate;
-            *game_over = GameOverState::Stalemate;
-            info!("[GAME] ========== STALEMATE! ==========");
-            info!(
-                "[GAME] {:?} has no legal moves but is not in check",
-                current_turn.color
-            );
-            info!("[GAME] Game ends in a DRAW - {}", game_over.message());
-            info!("[GAME] Final Move: #{}", current_turn.move_number);
+    } else {
+        if previous_phase == GamePhase::Check {
+            info!("[GAME] Check escaped! Game continues normally");
         }
-        STATE_PLAYING => {
-            if in_check {
-                // King is in check but has legal moves
-                if previous_phase != GamePhase::Check {
-                    game_phase.0 = GamePhase::Check;
-                    info!("[GAME] ========== CHECK DETECTED ==========");
-                    info!("[GAME] {:?} King is under attack!", current_turn.color);
-                    info!(
-                        "[GAME] {:?} must defend or move king to escape check",
-                        current_turn.color
-                    );
-                } else {
-                    game_phase.0 = GamePhase::Check;
-                }
-            } else {
-                // Not in check, game continues normally
-                if previous_phase == GamePhase::Check {
-                    game_phase.0 = GamePhase::Playing;
-                    info!("[GAME] Check escaped! Game continues normally");
-                } else {
-                    game_phase.0 = GamePhase::Playing;
-                }
-            }
-        }
-        _ => {
-            warn!(
-                "[GAME] Unknown engine state: {}. Defaulting to Playing phase.",
-                engine_state
-            );
-            game_phase.0 = GamePhase::Playing;
-        }
+        game_phase.0 = GamePhase::Playing;
     }
 }
 

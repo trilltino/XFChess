@@ -1,6 +1,6 @@
 use crate::game::components::{Captured, FadingCapture, PieceMoveAnimation};
 use crate::game::resources::{CurrentTurn, GameTimer, PendingTurnAdvance, Selection};
-use crate::rendering::pieces::Piece;
+use crate::rendering::pieces::{Piece, PIECE_ON_BOARD_Y};
 use crate::rendering::utils::{ReturnMaterials, Square, SquareMaterials};
 use bevy::prelude::*;
 
@@ -91,8 +91,10 @@ pub fn animate_piece_movement(
                 animation_active = true;
             }
         } else {
-            // Rate-limited warning to avoid spam
-            let target = Vec3::new(piece.x as f32, 0.0, piece.y as f32);
+            // Snap to board surface (y = PIECE_ON_BOARD_Y) when not animating.
+            // Pieces must sit on top of the board cuboid (top face at y=0.05),
+            // not at y=0 which clips them into the board geometry.
+            let target = Vec3::new(piece.x as f32, PIECE_ON_BOARD_Y, piece.y as f32);
             if (transform.translation - target).length() > 0.01 {
                 transform.translation = target;
             }
@@ -187,11 +189,11 @@ pub fn setup_global_scene(
         Name::new("Global Background"),
     ));
 
-    // Global ambient light - set to pure black (changed from blue-gray)
-    commands.insert_resource(AmbientLight {
-        color: Color::srgb(0.0, 0.0, 0.0), // Pure black - no ambient light tint
-        brightness: 0.0,                   // Zero brightness
-        affects_lightmapped_meshes: true,
+    // Global ambient light - set to dim gray to prevent crushing blacks
+    commands.spawn(AmbientLight {
+        color: Srgba::gray(0.2).into(), // Dim gray ambient
+        brightness: 200.0,
+        affects_lightmapped_meshes: false,
     });
 }
 
@@ -223,17 +225,12 @@ pub fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view
         // Main directional light (chess tournament lighting)
         commands.spawn((
             DirectionalLight {
-                illuminance: 8000.0,
+                illuminance: 12000.0, // Brighter
                 shadows_enabled: true,
-                color: Color::srgb(1.0, 0.98, 0.95), // Warm white
+                color: Color::srgb(1.0, 1.0, 0.98), // Cleaner white
                 ..default()
             },
-            Transform::from_rotation(Quat::from_euler(
-                EulerRot::XYZ,
-                -std::f32::consts::FRAC_PI_4,
-                std::f32::consts::FRAC_PI_4,
-                0.0,
-            )),
+            Transform::from_xyz(4.0, 15.0, 4.0).looking_at(Vec3::new(3.5, 0.0, 3.5), Vec3::Y), // Overhead centered
             DespawnOnExit(GameState::InGame),
             Name::new("Main Directional Light"),
         ));
@@ -241,13 +238,13 @@ pub fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view
         // Fill light (reduces harsh shadows)
         commands.spawn((
             PointLight {
-                intensity: 500_000.0,
-                color: Color::srgb(0.9, 0.9, 1.0), // Slightly blue
+                intensity: 1_000_000.0,            // Stronger fill
+                color: Color::srgb(1.0, 1.0, 1.0), // White fill
                 shadows_enabled: false,
-                range: 30.0,
+                range: 100.0,
                 ..default()
             },
-            Transform::from_xyz(-10.0, 10.0, 10.0),
+            Transform::from_xyz(3.5, 10.0, 3.5), // Center fill
             DespawnOnExit(GameState::InGame),
             Name::new("Fill Light"),
         ));

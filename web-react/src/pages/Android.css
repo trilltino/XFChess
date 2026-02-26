@@ -1,0 +1,236 @@
+.android-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 5rem 2rem 4rem;
+    position: relative;
+}
+
+.android-header {
+    text-align: center;
+    margin-bottom: 2.5rem;
+}
+
+.android-header h1 {
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 800;
+    color: #fff;
+    margin: 0 0 0.75rem;
+    letter-spacing: -0.02em;
+}
+
+.android-header p {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 1.1rem;
+    max-width: 560px;
+    margin: 0 auto;
+    line-height: 1.6;
+}
+
+/* STATUS BANNER */
+.android-status-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: rgba(230, 57, 70, 0.08);
+    border: 1px solid rgba(230, 57, 70, 0.2);
+    border-radius: 8px;
+    padding: 0.65rem 1.1rem;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 3rem;
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.android-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #e63946;
+    animation: pulse-dot 2s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes pulse-dot {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.5;
+        transform: scale(0.8);
+    }
+}
+
+/* SECTIONS */
+.android-section {
+    margin-bottom: 2rem;
+}
+
+.android-section-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 1.25rem;
+}
+
+.android-section-desc {
+    color: rgba(255, 255, 255, 0.72);
+    line-height: 1.8;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    max-width: 72ch;
+}
+
+.android-section-desc code {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    font-size: 0.88em;
+    color: #e63946;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* FEATURE GRID */
+.android-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.android-feature-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.android-feature-card:hover {
+    border-color: rgba(230, 57, 70, 0.3);
+    background: rgba(230, 57, 70, 0.04);
+}
+
+.android-feature-card h4 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+}
+
+.android-feature-card p {
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.6);
+    line-height: 1.6;
+    margin: 0;
+}
+
+.android-feature-card code {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    padding: 0.1em 0.35em;
+    font-size: 0.82em;
+    color: #e63946;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* DIVIDER */
+.android-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.07);
+    margin: 2.5rem 0;
+}
+
+/* CODE BLOCK */
+.android-code-block {
+    margin-top: 1.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.android-code-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.65rem 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.android-code-file {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.android-code-lang {
+    font-size: 0.75rem;
+    color: #e63946;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.android-code-body {
+    margin: 0;
+    padding: 1.25rem;
+    background: rgba(0, 0, 0, 0.3);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    line-height: 1.65;
+    color: rgba(255, 255, 255, 0.8);
+    overflow-x: auto;
+    white-space: pre;
+}
+
+/* CTA */
+.android-cta-section {
+    text-align: center;
+}
+
+.android-cta-section h2 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.75rem;
+}
+
+.android-cta-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+    padding: 0.7rem 1.5rem;
+    background: #e63946;
+    color: #fff;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-decoration: none;
+    transition: background 0.2s, transform 0.15s;
+}
+
+.android-cta-btn:hover {
+    background: #c1121f;
+    transform: translateY(-1px);
+}
+
+@media (max-width: 600px) {
+    .android-container {
+        padding: 4rem 1.25rem 3rem;
+    }
+
+    .android-feature-grid {
+        grid-template-columns: 1fr;
+    }
+}

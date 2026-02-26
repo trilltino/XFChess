@@ -1,30 +1,20 @@
-//! Promotion system - Handles pawn promotion logic
-//!
-//! This system detects when a pawn reaches the promotion rank and
-//! handles the promotion selection.
+//! Pawn promotion system.
 
-use crate::assets::GameAssets;
 use crate::game::resources::{is_promotion_move, PendingPromotion, PromotionSelected};
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
 
-/// System to detect pawns that need to be promoted
-///
-/// This runs after piece movement to check if a pawn reached the last rank.
-/// If so, it triggers the promotion UI.
+/// Detects pawns that need promotion.
 pub fn detect_pawn_promotion(
     pieces: Query<(Entity, &Piece), Changed<Piece>>,
     mut pending_promotion: ResMut<PendingPromotion>,
 ) {
-    // Skip if a promotion is already pending
     if pending_promotion.is_active() {
         return;
     }
 
     for (entity, piece) in pieces.iter() {
-        // Check if this is a pawn that reached the promotion rank
-        // target_rank is piece.x (rank in our coordinate system)
-        if is_promotion_move(piece.piece_type, piece.color, piece.x) {
+        if is_promotion_move(piece.piece_type, piece.color, piece.y) {
             info!(
                 "[PROMOTION] Pawn at ({}, {}) needs promotion",
                 piece.x, piece.y
@@ -35,16 +25,13 @@ pub fn detect_pawn_promotion(
     }
 }
 
-/// System to apply the selected promotion
-///
-/// When the player selects a piece from the promotion UI, this system
-/// changes the pawn into the selected piece type and updates the visual mesh.
+/// Applies the selected promotion.
 pub fn apply_pawn_promotion(
     mut commands: Commands,
     mut promotion_messages: MessageReader<PromotionSelected>,
     mut pieces: Query<(&mut Piece, &Children)>,
     mut pending_promotion: ResMut<PendingPromotion>,
-    game_assets: Res<GameAssets>,
+    piece_meshes: Res<crate::rendering::pieces::PieceMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for event in promotion_messages.read() {
@@ -54,15 +41,12 @@ pub fn apply_pawn_promotion(
                 event.position.0, event.position.1, event.promoted_to
             );
 
-            // Change the pawn to the selected piece type
             piece.piece_type = event.promoted_to;
 
-            // Despawn old mesh children
             for child in children.iter() {
                 commands.entity(child).despawn();
             }
 
-            // Create new material based on piece color
             let material = if piece.color == PieceColor::White {
                 materials.add(StandardMaterial {
                     base_color: Color::WHITE,
@@ -75,60 +59,65 @@ pub fn apply_pawn_promotion(
                 })
             };
 
-            // Spawn new mesh children for the promoted piece
-            let meshes = &game_assets.piece_meshes;
-
             commands.entity(event.entity).with_children(|parent| {
-                let vertical_correction = Vec3::new(0.0, -0.1, 0.0);
+                // Use the same scale and offsets as the main piece spawning system
+                // These must match the constants in rendering/pieces/pieces.rs
+                const PIECE_MESH_SCALE: f32 = 0.18;
+
+                // Per-piece offsets (must match pieces.rs exactly)
+                const QUEEN_OFFSET: Vec3 = Vec3::new(-0.2, -0.5, -0.95);
+                const ROOK_OFFSET: Vec3 = Vec3::new(-0.1, -0.5, 1.8);
+                const BISHOP_OFFSET: Vec3 = Vec3::new(-0.1, -0.5, 0.0);
+                const KNIGHT_OFFSET: Vec3 = Vec3::new(-0.2, -0.5, 0.9);
 
                 match event.promoted_to {
                     PieceType::Queen => {
-                        let offset = Vec3::new(-0.2, 0., -0.95);
-                        let mut transform =
-                            Transform::from_translation(offset + vertical_correction);
-                        transform.scale = Vec3::splat(0.2);
+                        let mut transform = Transform::from_translation(QUEEN_OFFSET);
+                        transform.scale = Vec3::splat(PIECE_MESH_SCALE);
 
                         parent.spawn((
-                            Mesh3d(meshes.queen.clone().expect("Queen mesh not loaded")),
+                            Mesh3d(piece_meshes.queen.clone()),
                             MeshMaterial3d(material),
                             transform,
                             bevy::picking::Pickable::default(),
                         ));
                     }
                     PieceType::Rook => {
-                        let offset = Vec3::new(-0.1, 0., 1.8);
-                        let mut transform =
-                            Transform::from_translation(offset + vertical_correction);
-                        transform.scale = Vec3::splat(0.2);
+                        let mut transform = Transform::from_translation(ROOK_OFFSET);
+                        transform.scale = Vec3::splat(PIECE_MESH_SCALE);
 
                         parent.spawn((
-                            Mesh3d(meshes.rook.clone().expect("Rook mesh not loaded")),
+                            Mesh3d(piece_meshes.rook.clone()),
                             MeshMaterial3d(material),
                             transform,
                             bevy::picking::Pickable::default(),
                         ));
                     }
                     PieceType::Bishop => {
-                        let offset = Vec3::new(-0.1, 0., 0.0);
-                        let mut transform =
-                            Transform::from_translation(offset + vertical_correction);
-                        transform.scale = Vec3::splat(0.2);
+                        let mut transform = Transform::from_translation(BISHOP_OFFSET);
+                        transform.scale = Vec3::splat(PIECE_MESH_SCALE);
 
                         parent.spawn((
-                            Mesh3d(meshes.bishop.clone().expect("Bishop mesh not loaded")),
+                            Mesh3d(piece_meshes.bishop.clone()),
                             MeshMaterial3d(material),
                             transform,
                             bevy::picking::Pickable::default(),
                         ));
                     }
                     PieceType::Knight => {
-                        let offset = Vec3::new(-0.2, 0., 0.9);
-                        let mut transform =
-                            Transform::from_translation(offset + vertical_correction);
-                        transform.scale = Vec3::splat(0.2);
+                        // Knights have two mesh parts
+                        let mut transform = Transform::from_translation(KNIGHT_OFFSET);
+                        transform.scale = Vec3::splat(PIECE_MESH_SCALE);
 
                         parent.spawn((
-                            Mesh3d(meshes.knight.clone().expect("Knight mesh not loaded")),
+                            Mesh3d(piece_meshes.knight_1.clone()),
+                            MeshMaterial3d(material.clone()),
+                            transform,
+                            bevy::picking::Pickable::default(),
+                        ));
+
+                        parent.spawn((
+                            Mesh3d(piece_meshes.knight_2.clone()),
                             MeshMaterial3d(material),
                             transform,
                             bevy::picking::Pickable::default(),

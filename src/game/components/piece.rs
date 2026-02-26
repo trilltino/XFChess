@@ -34,39 +34,7 @@
 //! - `reference/bevy/examples/ecs/component_change_detection.rs`
 //! - `reference/bevy-3d-chess/src/pieces.rs` (comparison implementation)
 //!
-//! # Examples
-//!
-//! ## Marking a piece as moved
-//!
-//! ```rust
-//! use bevy::prelude::*;
-//! use xfchess::game::components::HasMoved;
-//!
-//! fn move_piece_system(
-//!     mut pieces: Query<&mut HasMoved>,
-//!     /* other params */
-//! ) {
-//!     for mut has_moved in pieces.iter_mut() {
-//!         has_moved.moved = true;
-//!         has_moved.move_count += 1;
-//!     }
-//! }
-//! ```
-//!
-//! ## Checking if a piece is selected
-//!
-//! ```rust
-//! use bevy::prelude::*;
-//! use xfchess::game::components::SelectedPiece;
-//!
-//! fn highlight_system(
-//!     selected: Query<Entity, With<SelectedPiece>>,
-//! ) {
-//!     if let Ok(entity) = selected.get_single() {
-//!         println!("Piece {:?} is selected", entity);
-//!     }
-//! }
-//! ```
+//! For usage examples, see: `tests/components/piece_tests.rs`
 
 use bevy::prelude::*;
 
@@ -95,23 +63,7 @@ use bevy::prelude::*;
 /// - `entity`: The Bevy entity ID of the selected piece (for quick lookups)
 /// - `position`: Board position (x, y) where x,y ∈ [0,7] (for move validation)
 ///
-/// # Example
-///
-/// ```rust
-/// use bevy::prelude::*;
-/// use xfchess::game::components::SelectedPiece;
-///
-/// fn select_piece(
-///     mut commands: Commands,
-///     piece_entity: Entity,
-///     position: (u8, u8),
-/// ) {
-///     commands.entity(piece_entity).insert(SelectedPiece {
-///         entity: piece_entity,
-///         position,
-///     });
-/// }
-/// ```
+/// For usage examples, see `tests/components/piece_tests.rs`
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 pub struct SelectedPiece {
@@ -150,23 +102,7 @@ pub struct SelectedPiece {
 /// 2. **Explicit**: `.insert(HasMoved { moved: true, move_count: 5 })`
 /// 3. **Load from saved game**: Restore exact movement state
 ///
-/// # Example
-///
-/// ```rust
-/// use bevy::prelude::*;
-/// use xfchess::game::components::HasMoved;
-///
-/// // Check if castling is legal (king must not have moved)
-/// fn can_castle(king_has_moved: &HasMoved) -> bool {
-///     !king_has_moved.moved
-/// }
-///
-/// // Update after a move
-/// fn record_move(mut has_moved: Mut<HasMoved>) {
-///     has_moved.moved = true;
-///     has_moved.move_count += 1;
-/// }
-/// ```
+/// For usage examples, see `tests/components/piece_tests.rs`
 #[derive(Component, Clone, Copy, Debug, Default, Reflect)]
 #[reflect(Component)]
 pub struct HasMoved {
