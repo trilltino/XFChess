@@ -71,6 +71,10 @@ pub struct Cli {
     #[arg(long)]
     pub no_pretty_print: bool,
 
+    /// Session config JSON file path
+    #[arg(long)]
+    pub session_config: Option<PathBuf>,
+
     /// Subcommand
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -143,10 +147,53 @@ pub struct DebuggerCli {
     pub follow: bool,
 }
 
+/// Session configuration loaded from JSON file
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SessionConfig {
+    pub game_id: String,
+    pub player_color: String,
+    pub session_key: String,
+    pub session_pubkey: String,
+    pub node_id: String,
+    pub rpc_url: String,
+    pub game_pda: String,
+    pub wager_amount: f64,
+    pub opponent_pubkey: Option<String>,
+}
+
 impl Cli {
     /// Parse CLI arguments from environment
     pub fn parse_args() -> Self {
         <Self as clap::Parser>::parse()
+    }
+
+    /// Load session config from JSON file if specified
+    pub fn load_session_config(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(ref path) = self.session_config {
+            println!("📄 Loading session config from: {}", path.display());
+
+            let contents = std::fs::read_to_string(path)?;
+            let session: SessionConfig = serde_json::from_str(&contents)?;
+
+            // Populate CLI args from session config
+            self.game_id = Some(session.game_id.parse()?);
+            self.player_color = Some(match session.player_color.as_str() {
+                "white" => PlayerColor::White,
+                "black" => PlayerColor::Black,
+                _ => PlayerColor::White,
+            });
+            self.session_key = Some(session.session_key);
+            self.session_pubkey = Some(session.session_pubkey);
+            self.rpc_url = session.rpc_url;
+            self.game_pda = Some(session.game_pda);
+            self.wager_amount = Some(session.wager_amount);
+
+            println!("✅ Session config loaded successfully");
+            println!("   Game ID: {}", self.game_id.unwrap());
+            println!("   Player: {:?}", self.player_color.unwrap());
+            println!("   RPC: {}", self.rpc_url);
+        }
+        Ok(())
     }
 
     /// Check if running in debug mode

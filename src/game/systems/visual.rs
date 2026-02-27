@@ -171,8 +171,19 @@ pub fn animate_capture_fade(
             if let Ok(children) = children_query.get(entity) {
                 for child in children.iter() {
                     if let Ok(material_handle) = material_query.get(child) {
-                        if let Some(material) = materials.get_mut(&material_handle.0) {
-                            material.base_color = material.base_color.with_alpha(1.0);
+                        // Clone the material to ensure we're modifying a unique instance
+                        if let Some(original_material) = materials.get(&material_handle.0) {
+                            let mut new_material = original_material.clone();
+                            // Preserve the original base color (without any alpha modifications)
+                            // by reconstructing it from the rgb components with full alpha
+                            let rgb = original_material.base_color.to_srgba();
+                            new_material.base_color =
+                                Color::srgba(rgb.red, rgb.green, rgb.blue, 1.0);
+                            new_material.alpha_mode = bevy::render::alpha::AlphaMode::Opaque;
+                            // Update the handle to point to the new material
+                            commands
+                                .entity(child)
+                                .insert(MeshMaterial3d(materials.add(new_material)));
                         }
                     }
                 }

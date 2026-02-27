@@ -99,14 +99,8 @@ pub fn create_pieces(
     // See PIECE_Y_OFFSET documentation for how to recalculate if models change
     let visual_offset = Vec3::new(0.0, PIECE_Y_OFFSET, 0.0);
 
-    let white_material = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        ..default()
-    });
-    let black_material = materials.add(StandardMaterial {
-        base_color: Color::BLACK,
-        ..default()
-    });
+    // Each piece will get its own unique material to prevent color bleeding
+    // during capture animations. This ensures fade effects don't affect other pieces.
 
     // Data-driven piece placement using standard chess starting positions
     const BACK_ROW: [PieceType; 8] = [
@@ -122,10 +116,15 @@ pub fn create_pieces(
 
     // Spawn white pieces (rank 0 in chess coordinates = rank 1 on board)
     for (file, &piece_type) in BACK_ROW.iter().enumerate() {
+        // Create unique material for each piece to prevent color bleeding during capture
+        let piece_material = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            ..default()
+        });
         spawn_piece_at(
             &mut commands,
             &piece_meshes,
-            white_material.clone(),
+            piece_material,
             PieceColor::White,
             piece_type,
             (file as u8, 0), // (file, rank) -> world (X, Z)
@@ -135,10 +134,15 @@ pub fn create_pieces(
 
     // Spawn white pawns (rank 1 in chess coordinates = rank 2 on board)
     for file in 0..8 {
+        // Create unique material for each piece to prevent color bleeding during capture
+        let piece_material = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            ..default()
+        });
         spawn_piece_at(
             &mut commands,
             &piece_meshes,
-            white_material.clone(),
+            piece_material,
             PieceColor::White,
             PieceType::Pawn,
             (file, 1), // (file, rank) -> world (X, Z)
@@ -148,10 +152,15 @@ pub fn create_pieces(
 
     // Spawn black pieces (rank 7 in chess coordinates = rank 8 on board)
     for (file, &piece_type) in BACK_ROW.iter().enumerate() {
+        // Create unique material for each piece to prevent color bleeding during capture
+        let piece_material = materials.add(StandardMaterial {
+            base_color: Color::BLACK,
+            ..default()
+        });
         spawn_piece_at(
             &mut commands,
             &piece_meshes,
-            black_material.clone(),
+            piece_material,
             PieceColor::Black,
             piece_type,
             (file as u8, 7), // (file, rank) -> world (X, Z)
@@ -161,10 +170,15 @@ pub fn create_pieces(
 
     // Spawn black pawns (rank 6 in chess coordinates = rank 7 on board)
     for file in 0..8 {
+        // Create unique material for each piece to prevent color bleeding during capture
+        let piece_material = materials.add(StandardMaterial {
+            base_color: Color::BLACK,
+            ..default()
+        });
         spawn_piece_at(
             &mut commands,
             &piece_meshes,
-            black_material.clone(),
+            piece_material,
             PieceColor::Black,
             PieceType::Pawn,
             (file, 6), // (file, rank) -> world (X, Z)
@@ -211,9 +225,9 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
 /// # Coordinate System for Offsets
 ///
 /// Offsets are in the piece's local coordinate space (after Y-rotation is applied):
-/// - X: Left/right adjustment to center on square
+/// - X: Left/right adjustment to center on square (0.5 = center of 1.0 wide square)
 /// - Y: Vertical offset (0.0 = piece base at parent Y position)
-/// - Z: Forward/back adjustment to center on square
+/// - Z: Forward/back adjustment to center on square (0.5 = center of 1.0 deep square)
 ///
 /// # Why Different Z Offsets?
 ///
@@ -221,16 +235,15 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
 /// - King at Z ≈ -1.9, Queen at Z ≈ -0.95, Bishop at Z ≈ 0.0,
 /// - Knight at Z ≈ 0.9, Rook at Z ≈ 1.8, Pawn at Z ≈ 2.6
 ///
-/// These offsets bring each piece to the center of its square (local X=0, Z=0).
+/// These offsets bring each piece to the center of its square (local X=0.5, Z=0.5).
 /// Y=0.0 keeps the piece at the parent's Y position (PIECE_ON_BOARD_Y = 0.05).
-/// The parent entity is already positioned at the board surface, so the mesh
-/// should not have additional vertical offset.
-const KING_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -1.9);
-const QUEEN_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -0.95);
-const BISHOP_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 0.0);
-const KNIGHT_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, 0.9);
-const ROOK_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 1.8);
-const PAWN_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, 2.6);
+/// The parent entity is positioned at the square corner, so we add 0.5 to center it.
+const KING_OFFSET: Vec3 = Vec3::new(0.3, 0.0, -1.4);
+const QUEEN_OFFSET: Vec3 = Vec3::new(0.3, 0.0, -0.45);
+const BISHOP_OFFSET: Vec3 = Vec3::new(0.4, 0.0, 0.5);
+const KNIGHT_OFFSET: Vec3 = Vec3::new(0.3, 0.0, 1.4);
+const ROOK_OFFSET: Vec3 = Vec3::new(0.4, 0.0, 2.3);
+const PAWN_OFFSET: Vec3 = Vec3::new(0.3, 0.0, 3.1);
 
 /// Unified piece spawning function - dispatches to specific spawner based on type
 ///

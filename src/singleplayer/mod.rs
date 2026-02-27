@@ -1,5 +1,4 @@
 //! Singleplayer component entry point
-pub mod local_input;
 
 use bevy::prelude::*;
 

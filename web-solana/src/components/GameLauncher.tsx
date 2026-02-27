@@ -213,16 +213,19 @@ const GameLauncher: React.FC = () => {
             });
 
             if (!response) {
-                // Fallback: Save to file and instruct user
+                // Fallback: Save to file with unique name based on game ID
+                const fileName = session.gameId
+                    ? `xfchess_session_${session.gameId}.json`
+                    : `xfchess_session_${Date.now()}.json`;
                 const blob = new Blob([sessionJson], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'xfchess_session.json';
+                a.download = fileName;
                 a.click();
                 URL.revokeObjectURL(url);
 
-                alert('Session saved to xfchess_session.json. Launch the game with:\n\nlaunch_game_with_wallet.bat xfchess_session.json');
+                alert(`Session saved to ${fileName}. Launch the game with:\n\nlaunch_game_with_session.bat ${fileName}`);
             }
         } catch (err) {
             console.error('Failed to launch game:', err);

@@ -1,12 +1,11 @@
 #![cfg(feature = "solana")]
 use bevy::prelude::*;
-use rand::Rng;
+use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
-use std::str::FromStr;
 
 use crate::game::events::GameStartedEvent;
 use crate::multiplayer::{
@@ -14,13 +13,27 @@ use crate::multiplayer::{
 };
 use crate::solana::{constants::SOLANA_PROGRAM_ID, instructions::authorize_session_key_ix};
 
+/// Devnet RPC endpoint
+pub const DEVNET_RPC_URL: &str = "https://api.devnet.solana.com";
+/// MagicBlock EU Devnet endpoint
+pub const MAGICBLOCK_EU_DEVNET: &str = "https://devnet-eu.magicblock.app";
+/// Program ID for XFChess
+pub const XFCHESS_PROGRAM_ID: &str = "3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP";
+
+/// PDA Seeds matching Anchor program
+pub const GAME_SEED: &[u8] = b"game";
+pub const MOVE_LOG_SEED: &[u8] = b"move_log";
+pub const PROFILE_SEED: &[u8] = b"profile";
+pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
+pub const WAGER_ESCROW_SEED: &[u8] = b"wager_escrow";
+
 // Resource to hold Solana integration state
 #[derive(Resource)]
 pub struct SolanaIntegrationState {
     /// The derived Solana keypair from the Iroh node key
     pub keypair: Option<Keypair>,
-    /// High-level RPC client for XFChess program
-    pub client: Option<solana_chess_client::rpc::ChessRpcClient>,
+    /// Direct RPC client for Solana
+    pub rpc_client: Option<RpcClient>,
     /// Current balance of the wallet
     pub balance: f64,
     /// Whether the handshake with opponent is completed
@@ -29,6 +42,8 @@ pub struct SolanaIntegrationState {
     pub pending_task: Option<tokio::task::JoinHandle<Result<u64, String>>>,
     /// The opponent's public key (for verification)
     pub opponent_pubkey: Option<Pubkey>,
+    /// Program ID for XFChess
+    pub program_id: Pubkey,
 }
 
 impl std::fmt::Debug for SolanaIntegrationState {
@@ -46,12 +61,54 @@ impl Default for SolanaIntegrationState {
     fn default() -> Self {
         Self {
             keypair: None,
-            client: None,
+            rpc_client: None,
             balance: 0.0,
             handshake_completed: false,
             pending_task: None,
             opponent_pubkey: None,
+            program_id: XFCHESS_PROGRAM_ID.parse().unwrap_or_default(),
         }
+    }
+}
+
+impl SolanaIntegrationState {
+    /// Derive a Program Derived Address (PDA) using the program ID
+    pub fn derive_pda(&self, seeds: &[&[u8]]) -> Pubkey {
+        Pubkey::find_program_address(seeds, &self.program_id).0
+    }
+
+    /// Get the game PDA for a given game ID
+    pub fn get_game_pda(&self, game_id: u64) -> Pubkey {
+        self.derive_pda(&[GAME_SEED, &game_id.to_le_bytes()])
+    }
+
+    /// Get the escrow PDA for a given game ID
+    pub fn get_escrow_pda(&self, game_id: u64) -> Pubkey {
+        self.derive_pda(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()])
+    }
+
+    /// Get the profile PDA for a given wallet
+    pub fn get_profile_pda(&self, wallet: &Pubkey) -> Pubkey {
+        self.derive_pda(&[PROFILE_SEED, wallet.as_ref()])
+    }
+
+    /// Get the move log PDA for a given game ID
+    pub fn get_move_log_pda(&self, game_id: u64) -> Pubkey {
+        self.derive_pda(&[MOVE_LOG_SEED, &game_id.to_le_bytes()])
+    }
+
+    /// Get the session delegation PDA for a game and player
+    pub fn get_session_delegation_pda(&self, game_id: u64, player: &Pubkey) -> Pubkey {
+        self.derive_pda(&[
+            SESSION_DELEGATION_SEED,
+            &game_id.to_le_bytes(),
+            player.as_ref(),
+        ])
+    }
+
+    /// Create a new RPC client
+    pub fn create_rpc_client(rpc_url: &str) -> RpcClient {
+        RpcClient::new(rpc_url.to_string())
     }
 }
 
@@ -83,10 +140,9 @@ fn initialize_solana_integration(
                     let pubkey = keypair.pubkey();
                     solana_state.keypair = Some(keypair);
 
-                    let client = solana_chess_client::rpc::ChessRpcClient::new(
-                        "https://api.devnet.solana.com",
-                    );
-                    solana_state.client = Some(client);
+                    // Create direct RPC client instead of using solana_chess_client
+                    let rpc_client = RpcClient::new(DEVNET_RPC_URL.to_string());
+                    solana_state.rpc_client = Some(rpc_client);
 
                     info!("Successfully derived Solana wallet. Pubkey: {}", pubkey);
                 }
@@ -101,47 +157,69 @@ fn initialize_solana_integration(
 /// Updates the wallet balance periodically
 fn update_wallet_balance(mut solana_state: ResMut<SolanaIntegrationState>) {
     if let Some(ref keypair) = solana_state.keypair {
-        if let Some(ref client) = solana_state.client {
+        if let Some(ref rpc_client) = solana_state.rpc_client {
             // In a real app we wouldn't poll every frame
             // But for simplicity in this integration:
-            if let Ok(balance_lamports) = client.rpc.get_balance(&keypair.pubkey()) {
+            if let Ok(balance_lamports) = rpc_client.get_balance(&keypair.pubkey()) {
                 solana_state.balance = balance_lamports as f64 / 1_000_000_000.0;
             }
         }
     }
 }
 
-/// Initiates a new game on-chain
+/// Initiates a new game on-chain using direct RPC calls
 pub async fn initiate_game_on_chain(
-    client: solana_chess_client::rpc::ChessRpcClient,
+    rpc_client: RpcClient,
+    program_id: Pubkey,
     keypair: Keypair,
     wager_amount: u64,
 ) -> Result<u64, String> {
     use rand::Rng;
+    use solana_sdk::instruction::{AccountMeta, Instruction};
+    use solana_sdk::system_program;
+
     let mut rng = rand::thread_rng();
     let game_id: u64 = rng.random();
 
-    let ix = client.create_create_game_ix(
-        keypair.pubkey(),
-        game_id,
-        wager_amount,
-        xfchess_game::state::GameType::PvP,
-    );
+    // Derive PDAs
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let move_log_pda =
+        Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
-    let recent_blockhash = client
-        .rpc
+    // Build create_game instruction manually
+    // Instruction discriminator for create_game (first 8 bytes of hash)
+    let mut data = vec![0]; // discriminator
+    data.extend_from_slice(&game_id.to_le_bytes());
+    data.extend_from_slice(&wager_amount.to_le_bytes());
+    data.push(0); // GameType::PvP
+
+    let ix = Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new(move_log_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(keypair.pubkey(), true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    };
+
+    let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .map_err(|e| format!("Failed to get blockhash: {}", e))?;
 
-    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+    let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&keypair.pubkey()),
-        &[keypair],
+        &[&keypair],
         recent_blockhash,
     );
 
-    client
-        .rpc
+    rpc_client
         .send_and_confirm_transaction(&tx)
         .map_err(|e| format!("Failed to send transaction: {}", e))?;
 
@@ -149,28 +227,49 @@ pub async fn initiate_game_on_chain(
     Ok(game_id)
 }
 
-/// Joins an existing game on-chain
+/// Joins an existing game on-chain using direct RPC calls
 pub async fn join_game_on_chain(
-    client: solana_chess_client::rpc::ChessRpcClient,
+    rpc_client: RpcClient,
+    program_id: Pubkey,
     keypair: Keypair,
     game_id: u64,
 ) -> Result<u64, String> {
-    let ix = client.create_join_game_ix(keypair.pubkey(), game_id);
+    use solana_sdk::instruction::{AccountMeta, Instruction};
+    use solana_sdk::system_program;
 
-    let recent_blockhash = client
-        .rpc
+    // Derive PDAs
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
+
+    // Build join_game instruction manually
+    let mut data = vec![1]; // discriminator for join_game
+    data.extend_from_slice(&game_id.to_le_bytes());
+
+    let ix = Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(keypair.pubkey(), true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    };
+
+    let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .map_err(|e| format!("Failed to get blockhash: {}", e))?;
 
-    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+    let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&keypair.pubkey()),
-        &[keypair],
+        &[&keypair],
         recent_blockhash,
     );
 
-    client
-        .rpc
+    rpc_client
         .send_and_confirm_transaction(&tx)
         .map_err(|e| format!("Failed to send transaction: {}", e))?;
 
@@ -180,7 +279,7 @@ pub async fn join_game_on_chain(
 
 fn monitor_network_handshakes(
     mut solana_state: ResMut<SolanaIntegrationState>,
-    mut network_events: EventReader<crate::multiplayer::NetworkEvent>,
+    mut network_events: MessageReader<crate::multiplayer::NetworkEvent>,
     tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
 ) {
     for event in network_events.read() {
@@ -189,17 +288,18 @@ fn monitor_network_handshakes(
             game_id,
         } = event
         {
-            if let Some(ref client) = solana_state.client {
+            // Copy game_id to owned variable before entering async block
+            let game_id_owned = *game_id;
+            if solana_state.rpc_client.is_some() {
                 if let Some(ref keypair) = solana_state.keypair {
                     info!(
                         "Network Wager Handshake detected! Joining game {} on-chain...",
-                        game_id
+                        game_id_owned
                     );
 
-                    // Create new client and clone keypair for the async task
-                    let client_new = solana_chess_client::rpc::ChessRpcClient::new(
-                        "https://api.devnet.solana.com",
-                    );
+                    // Create new RPC client and clone keypair for the async task
+                    let rpc_client_new = RpcClient::new(DEVNET_RPC_URL.to_string());
+                    let program_id = solana_state.program_id;
                     let keypair_clone = match Keypair::try_from(&keypair.to_bytes()[..]) {
                         Ok(kp) => kp,
                         Err(e) => {
@@ -207,10 +307,10 @@ fn monitor_network_handshakes(
                             continue;
                         }
                     };
-                    let gid = game_id;
 
                     let task = tokio_runtime.0.spawn(async move {
-                        join_game_on_chain(client_new, keypair_clone, gid).await
+                        join_game_on_chain(rpc_client_new, program_id, keypair_clone, game_id_owned)
+                            .await
                     });
 
                     solana_state.pending_task = Some(task);
@@ -274,7 +374,7 @@ struct GameResult {
 /// `SessionKeyManager`, and broadcasts `NetworkMessage::SessionInfo` so
 /// the peer can record our session pubkey.
 fn authorize_session_key_on_game_start(
-    mut game_start_events: EventReader<GameStartedEvent>,
+    mut game_start_events: MessageReader<GameStartedEvent>,
     solana_state: Res<SolanaIntegrationState>,
     mut session_key_manager: ResMut<SessionKeyManager>,
     network_state: Res<BraidNetworkState>,
@@ -289,13 +389,11 @@ fn authorize_session_key_on_game_start(
             }
         };
 
-        let client = match &solana_state.client {
-            Some(c) => c.clone(),
-            None => {
-                warn!("[SESSION] Solana RPC client not yet initialized");
-                continue;
-            }
-        };
+        // Check RPC client is available
+        if solana_state.rpc_client.is_none() {
+            warn!("[SESSION] Solana RPC client not yet initialized");
+            continue;
+        }
 
         // Generate a fresh ephemeral session keypair for this game
         let session_kp = Keypair::new();
@@ -329,17 +427,22 @@ fn authorize_session_key_on_game_start(
         // Calculate expiration (24 hours from now)
         let expires_at = chrono::Utc::now().timestamp() + (24 * 60 * 60);
 
-        let ix = authorize_session_key_ix(
+        let ix_result = authorize_session_key_ix(
             wallet_pubkey, // payer
             game_pda,
             session_pubkey,
             expires_at,
-        )
-        .map_err(|e| format!("Failed to create authorize_session_key instruction: {}", e))?;
+        );
 
         let authorize_result = (|| -> Result<(), String> {
-            let recent_blockhash = client
-                .rpc
+            let ix = ix_result.map_err(|e| {
+                format!("Failed to create authorize_session_key instruction: {}", e)
+            })?;
+            let rpc_client = solana_state
+                .rpc_client
+                .as_ref()
+                .ok_or("RPC client not initialized")?;
+            let recent_blockhash = rpc_client
                 .get_latest_blockhash()
                 .map_err(|e| format!("get_latest_blockhash: {}", e))?;
 
@@ -350,8 +453,7 @@ fn authorize_session_key_on_game_start(
                 recent_blockhash,
             );
 
-            client
-                .rpc
+            rpc_client
                 .send_and_confirm_transaction(&tx)
                 .map_err(|e| format!("send_and_confirm: {}", e))?;
             Ok(())

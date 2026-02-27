@@ -92,7 +92,7 @@ impl Plugin for MultiplayerPlugin {
     }
 }
 
-#[derive(Message, Debug)]
+#[derive(Event, Message, Debug, Clone)]
 pub enum NetworkEvent {
     NetworkInitialized {
         node_id: EndpointId,

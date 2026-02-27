@@ -392,6 +392,7 @@ fn handle_network_events(
                                     // Joiner won't receive its own gossip broadcast,
                                     // so transition to InGame directly here.
                                     game_started.write(GameStartedEvent {
+                                        game_id: *game_id,
                                         white_player,
                                         black_player,
                                     });
@@ -419,6 +420,7 @@ fn handle_network_events(
                             connection_state.status = P2PConnectionStatus::InGame;
 
                             game_started.write(GameStartedEvent {
+                                game_id: *game_id,
                                 white_player: white_player.clone(),
                                 black_player: black_player.clone(),
                             });

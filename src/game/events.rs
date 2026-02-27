@@ -13,14 +13,16 @@ pub struct MoveMadeEvent {
     pub game_id: Option<u64>,
 }
 
-#[derive(Message, Debug, Clone)]
+#[derive(Event, Message, Debug, Clone)]
 pub struct GameStartedEvent {
+    pub game_id: u64,
     pub white_player: String,
     pub black_player: String,
 }
 
-#[derive(Message, Debug, Clone)]
+#[derive(Event, Message, Debug, Clone)]
 pub struct GameEndedEvent {
+    pub game_id: u64,
     pub winner: Option<String>,
     pub reason: String,
 }

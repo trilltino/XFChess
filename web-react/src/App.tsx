@@ -13,6 +13,7 @@ import NFTWagers from './pages/NFTWagers';
 import Wagering from './pages/Wagering';
 import Ecosystem from './pages/Ecosystem';
 import Charity from './pages/Charity';
+import Evidence from './pages/Evidence';
 import tinoPhoto from './assets/tino.webp';
 
 // ═══════════════════════════════════════
@@ -27,6 +28,20 @@ const Navbar = () => {
       </Link>
       <div className="nav-links">
         <Link to="/demo" className="nav-link">Demo</Link>
+
+        {/* Evidence Dropdown */}
+        <div className="dropdown">
+          <span className="nav-link dropdown-toggle">Evidence</span>
+          <div className="dropdown-menu">
+            <Link to="/evidence" className="dropdown-item">Solana</Link>
+            <Link to="/evidence" className="dropdown-item" onClick={() => {
+              setTimeout(() => {
+                const erTab = document.querySelector('[data-tab="er"]') as HTMLElement;
+                if (erTab) erTab.click();
+              }, 100);
+            }}>MagicBlock ER</Link>
+          </div>
+        </div>
 
         {/* 3 W's Dropdown */}
         <div className="dropdown">
@@ -372,6 +387,7 @@ const App = () => {
             <Route path="/demo" element={<Demo />} />
             <Route path="/android" element={<Android />} />
             <Route path="/beyond" element={<XFBeyond />} />
+            <Route path="/evidence" element={<Evidence />} />
           </Routes>
         </AnimatePresence>
       </main>

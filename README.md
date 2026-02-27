@@ -1,240 +1,167 @@
 # XFChess
 
-A high-performance chess game built with Rust, featuring both single-player and multiplayer modes, with Solana blockchain integration for wager-based gameplay.
+**Decentralized Chess with Ephemeral Rollups on Solana**
 
-## Overview
+Play chess competitively with real stakes. Every move is recorded on-chain for provable fairness, powered by MagicBlock ER for sub-second gameplay.
 
-XFChess is a modern chess application that combines a high-performance game engine with peer-to-peer networking and blockchain technology. The project is built using the Rust programming language and leverages the Bevy game engine for rendering and game logic.
+## Quick Start
+
+### Play a Wager Game
+
+1. **Start both player UIs:**
+   ```bash
+   magicblock_e2e_test.bat
+   ```
+
+2. **Player 1** (http://localhost:5173):
+   - Connect wallet → Create wager game → Copy Game ID
+
+3. **Player 2** (http://localhost:5174):
+   - Connect wallet → Join with Game ID
+
+4. **Both players:**
+   - Click "Launch Game" → Download session JSON
+   - Run: `launch_game_with_session.bat xfchess_session_<game_id>.json`
+
+5. **Play!** Moves sync via Solana, winner receives payout.
 
 ## Architecture
 
-The project follows a modular architecture with clear separation of concerns:
-
-- **Core Engine**: Chess move validation, game state management, and AI opponents
-- **Networking**: Peer-to-peer multiplayer using Iroh/Braid protocols
-- **Blockchain**: Solana integration for wagering and game state anchoring
-- **Presentation**: 3D rendering and UI built with Bevy
-
-## Solana Integration
-
-### Program Details
-
-The Solana program (`xfchess-game`) is deployed on devnet and provides on-chain functionality for wager-based chess games.
-
-**Program ID**: `3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP`
-
-**Network**: Devnet (https://api.devnet.solana.com)
-
-### Instructions
-
-The program supports the following instructions:
-
-1. **InitProfile**: Initialize a player profile with ELO rating tracking
-   - Creates a player profile PDA (Program Derived Address)
-   - Initializes ELO rating at 1200
-   - Tracks wins, losses, and games played
-
-2. **CreateGame**: Create a new chess game with optional wager
-   - Parameters: game_id, wager_amount, game_type (PvP or PvAI)
-   - Creates game account and move log account
-   - For PvP: Sets status to WaitingForOpponent
-   - For PvAI: Sets status to Active immediately
-   - If wager_amount > 0: Transfers SOL to escrow PDA
-
-3. **JoinGame**: Join an existing PvP game
-   - Requires matching wager amount to be deposited
-   - Updates game status to Active
-   - Sets black player pubkey
-
-4. **RecordMove**: Record a chess move on-chain
-   - Validates it's the player's turn
-   - For PvAI: Validates AI authority for black moves
-   - Updates game FEN state and move count
-   - Appends move to move log
-
-5. **FinalizeGame**: End a game and distribute wagers
-   - Determines winner or draw
-   - Distributes escrowed SOL to winner(s)
-   - Updates player ELO ratings
-   - Updates win/loss statistics
-
-6. **WithdrawExpiredWager**: Claim wagers from expired games
-   - Allows players to reclaim their wager if opponent never joined
-   - Prevents funds from being locked indefinitely
-
-### Accounts
-
-**Game Account**:
-- game_id: Unique identifier for the game
-- white: Public key of white player
-- black: Public key of black player (or AI authority)
-- status: WaitingForOpponent, Active, Finished, or Expired
-- result: None, Winner(pubkey), or Draw
-- fen: Current board state in FEN notation
-- move_count: Number of moves played
-- turn: Current turn number
-- wager_amount: Amount of SOL wagered
-- game_type: PvP or PvAI
-
-**PlayerProfile Account**:
-- authority: Player's public key
-- elo: ELO rating (starts at 1200)
-- wins: Total wins
-- losses: Total losses
-- games_played: Total games played
-
-**MoveLog Account**:
-- game_id: Reference to game
-- moves: Vector of move strings in UCI format
-
-### PDAs (Program Derived Addresses)
-
-All PDAs are derived using the program ID and specific seeds:
-
-- Game PDA: `["game", game_id.to_le_bytes()]`
-- Move Log PDA: `["move_log", game_id.to_le_bytes()]`
-- Escrow PDA: `["wager_escrow", game_id.to_le_bytes()]`
-- Player Profile PDA: `["profile", player_pubkey]`
-
-### Building the Program
-
-```bash
-cd programs/xfchess-game
-anchor build
 ```
-
-### Deploying to Devnet
-
-```bash
-solana config set --url https://api.devnet.solana.com
-solana program deploy target/deploy/xfchess_game.so --url devnet
+┌─────────────────────────────────────────────────────────────────┐
+│                         XFChess                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐      ┌──────────────┐      ┌──────────────┐  │
+│  │   Website    │      │  Web Lobby   │      │ Native Game  │  │
+│  │  (React)     │<---->|  (React +    |<---->|  (Bevy +     │  │
+│  │  Marketing   │      │   Anchor)    │      │   Solana)    │  │
+│  └──────────────┘      └──────────────┘      └──────────────┘  │
+│         │                     │                     │          │
+│         └─────────────────────┼─────────────────────┘          │
+│                               v                                │
+│                    ┌──────────────────────┐                   │
+│                    │   Solana Devnet      │                   │
+│                    │   Program: xfchess   │                   │
+│                    └──────────────────────┘                   │
+│                               │                                │
+│                    ┌──────────────────────┐                   │
+│                    │   MagicBlock ER      │                   │
+│                    │   (Optional)         │                   │
+│                    └──────────────────────┘                   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-### Testing via CLI
-
-Use the provided batch script to test the deployed program:
-
-```bash
-test_wager_cli.bat
-```
-
-This script will:
-1. Check wallet balances
-2. Generate a random game ID
-3. Display the program status
-4. Show account information
 
 ## Project Structure
 
 ```
 XFChess/
-├── programs/xfchess-game/     # Solana Anchor program
-│   ├── src/
-│   │   ├── lib.rs            # Program entry point
-│   │   ├── instructions/     # Instruction handlers
-│   │   ├── state/            # Account structures
-│   │   ├── constants.rs      # Program constants
-│   │   └── errors.rs         # Error codes
-│   └── tests/
-│       └── game_tests.rs     # Rust unit tests
-├── src/                       # Main game source
-│   ├── engine/               # Chess engine
-│   ├── game/                 # Game systems and logic
-│   ├── multiplayer/          # P2P networking
-│   ├── solana/               # Solana client integration
-│   ├── rendering/            # 3D rendering
-│   └── ui/                   # User interface
-├── crates/                    # Additional crates
-│   ├── solana-chess-client/  # Solana RPC client
-│   ├── braid-iroh/           # P2P networking
-│   └── chess_engine/         # Core chess engine
-├── web-solana/               # Web frontend
-└── scripts/                  # Deployment and test scripts
+├── programs/xfchess-game/     # Solana smart contract
+├── src/                        # Native game (Rust/Bevy)
+│   ├── game/                   # Chess mechanics
+│   ├── multiplayer/            # P2P networking
+│   ├── solana/                 # Blockchain client
+│   └── rendering/              # 3D graphics
+├── web-react/                  # Marketing website
+├── web-solana/                 # Game lobby/wallet
+└── crates/                     # Shared libraries
 ```
 
-## Getting Started
+## Key Features
+
+- **Wager Games** - Bet SOL on chess matches
+- **On-Chain Moves** - Every move recorded on Solana
+- **P2P Networking** - Fast move relay via Iroh
+- **MagicBlock ER** - Sub-second delegated gameplay
+- **Session Keys** - Secure ephemeral signing
+- **3D Graphics** - Beautiful chess board with Bevy
+
+## Program ID
+
+```
+AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp
+```
+
+Deployed on Solana Devnet.
+
+## Building
 
 ### Prerequisites
+- Rust 1.75+
+- Node.js 18+
+- Solana CLI (optional)
 
-- Rust (latest stable)
-- Solana CLI
-- Anchor Framework
-- Node.js (for web frontend)
-
-### Running the Game
-
+### Native Game
 ```bash
-# Build the project
+# Standard build (with Solana)
 cargo build --release
 
-# Run with local wallet
-cargo run --release
-
-# Deploy to devnet
-./deploy_devnet.bat
+# Without Solana (singleplayer only)
+cargo build --release --no-default-features
 ```
 
-### Running Tests
-
+### Web UIs
 ```bash
-# Rust unit tests
-cargo test
+# Marketing site
+cd web-react && npm install && npm run dev
 
-# Solana program tests
+# Game lobby
+cd web-solana && npm install && npm run dev
+```
+
+## Documentation
+
+Each folder contains detailed README:
+
+- [`programs/xfchess-game/`](programs/xfchess-game/README.md) - Smart contract
+- [`src/`](src/README.md) - Native game
+- [`src/solana/`](src/solana/README.md) - Blockchain integration
+- [`src/multiplayer/`](src/multiplayer/README.md) - P2P networking
+- [`web-solana/`](web-solana/README.md) - Game lobby
+- [`web-react/`](web-react/README.md) - Marketing site
+
+## Testing
+
+### Multiplayer Flow
+```bash
+# Start both UIs and test the full flow
+magicblock_e2e_test.bat
+```
+
+### Solana Program
+```bash
 cd programs/xfchess-game
 anchor test
-
-# CLI integration test
-./test_wager_cli.bat
 ```
 
-## Features
+### Native Game
+```bash
+# Singleplayer
+cargo run
 
-### Single Player
-- Play against Stockfish AI engine
-- Multiple difficulty levels
-- Move validation and legal move highlighting
+# With Solana session
+cargo run -- --session-config session.json
+```
 
-### Multiplayer
-- Peer-to-peer gameplay using Iroh networking
-- Session key delegation for gasless moves
-- Real-time synchronization
+## Technology Stack
 
-### Blockchain Integration
-- Wager-based games with SOL escrow
-- On-chain move recording
-- ELO rating system
-- Anti-cheat through state anchoring
-
-## Technical Details
-
-### Chess Engine
-- Bitboard-based move generation
-- Alpha-beta pruning with quiescence search
-- Iterative deepening
-- Transposition tables
-
-### Networking
-- Braid protocol for state synchronization
-- Iroh for peer-to-peer connectivity
-- Ephemeral rollups for low-latency gameplay
-
-### Rendering
-- Bevy game engine
-- 3D piece models
-- Custom shaders for board and pieces
+- **Blockchain:** Solana, Anchor, MagicBlock ER
+- **Game Engine:** Bevy (Rust)
+- **P2P:** Iroh, Braid protocol
+- **Frontend:** React, Vite
+- **Contracts:** Rust (Anchor)
 
 ## License
 
-This project is licensed under the MIT License.
+MIT/Apache-2.0
 
-## Contributing
+## Links
 
-Contributions are welcome. Please ensure your code follows the existing patterns and includes appropriate tests.
+- Website: https://xfchess.io (coming soon)
+- Devnet: https://explorer.solana.com/address/AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp?cluster=devnet
+- MagicBlock: https://docs.magicblock.gg/
 
-## Resources
+---
 
-- [Solana Documentation](https://docs.solana.com/)
-- [Anchor Framework](https://book.anchor-lang.com/)
-- [Bevy Engine](https://bevyengine.org/)
-- [Iroh P2P](https://iroh.computer/)
+**Play Anywhere. Own your History.**

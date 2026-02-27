@@ -15,6 +15,7 @@ mod game;
 mod input;
 mod multiplayer;
 mod persistent_camera;
+mod presentation;
 mod rendering;
 mod singleplayer;
 #[cfg(feature = "solana")]
@@ -29,7 +30,15 @@ pub use xfchess::{GameConfig, PlayerColor};
 #[tokio::main]
 async fn main() {
     // Parse CLI arguments
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // Load session config from file if specified
+    if cli.session_config.is_some() {
+        if let Err(e) = cli.load_session_config() {
+            eprintln!("❌ Failed to load session config: {}", e);
+            std::process::exit(1);
+        }
+    }
 
     println!("╔════════════════════════════════════════════════════════╗");
     println!("║          XFChess - Decentralized Chess                 ║");
@@ -124,15 +133,23 @@ async fn main() {
     )
     .add_plugins(EguiPlugin::default());
 
-    // Add custom plugins
+    // Add custom plugins - split into groups due to Bevy tuple size limits
     app.add_plugins((
         core::CorePlugin,
         game::GamePlugin,
         rendering::RenderingPlugin,
         ui::UiPlugin,
         input::InputPlugin,
+        presentation::PresentationPlugin,
+    ))
+    .add_plugins((
         states::main_menu::MainMenuPlugin,
         states::multiplayer_menu::MultiplayerMenuPlugin,
+        states::game_over::GameOverPlugin,
+        states::pause::PausePlugin,
+        states::piece_viewer::PieceViewerPlugin,
+    ))
+    .add_plugins((
         singleplayer::SingleplayerPlugin,
         #[cfg(feature = "solana")]
         solana::SolanaPlugin,

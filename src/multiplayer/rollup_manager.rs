@@ -174,7 +174,7 @@ impl EphemeralRollupManager {
     }
 }
 
-#[derive(Message, Debug, Clone)]
+#[derive(Event, Message, Debug, Clone)]
 pub enum RollupEvent {
     BatchReady {
         game_id: u64,

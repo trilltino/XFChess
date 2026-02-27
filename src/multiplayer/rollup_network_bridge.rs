@@ -1,13 +1,10 @@
 #![cfg(feature = "solana")]
 use bevy::prelude::*;
 use solana_sdk::{message::Message, pubkey::Pubkey, signature::Signer};
-use std::sync::Arc;
 
 use crate::game::events::{GameEndedEvent, GameStartedEvent};
 use crate::multiplayer::{
-    magicblock_resolver::{
-        MagicBlockError, MagicBlockEvent, MagicBlockResolver, MagicBlockResolverPlugin,
-    },
+    magicblock_resolver::{MagicBlockEvent, MagicBlockResolver},
     network_protocol::{calculate_batch_hash, NetworkMessage},
     rollup_manager::{EphemeralRollupManager, GameStateStatus, RollupEvent}, // GameStateStatus should have PartialEq
     session_key_manager::SessionKeyManager,
@@ -31,7 +28,6 @@ pub struct RollupNetworkBridgePlugin;
 impl Plugin for RollupNetworkBridgePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RollupNetworkBridge>();
-        app.add_event::<MagicBlockEvent>();
 
         // Core network bridge systems
         app.add_systems(Update, handle_rollup_to_network_events);
@@ -56,7 +52,7 @@ fn send_network_msg(state: &BraidNetworkState, msg: NetworkMessage) {
 }
 
 fn handle_rollup_to_network_events(
-    mut rollup_events: EventReader<RollupEvent>,
+    mut rollup_events: MessageReader<RollupEvent>,
     network_state: Res<BraidNetworkState>,
     mut bridge: ResMut<RollupNetworkBridge>,
     rollup_manager: Res<EphemeralRollupManager>,
@@ -69,7 +65,7 @@ fn handle_rollup_to_network_events(
                 next_fens,
             } => {
                 let batch_hash = calculate_batch_hash(
-                    game_id,
+                    *game_id,
                     rollup_manager.committed_turn,
                     moves.as_slice(),
                     next_fens.as_slice(),
@@ -77,7 +73,7 @@ fn handle_rollup_to_network_events(
                 send_network_msg(
                     &network_state,
                     NetworkMessage::BatchPropose {
-                        game_id,
+                        game_id: *game_id,
                         start_turn: rollup_manager.committed_turn,
                         moves: moves.clone(),
                         next_fens: next_fens.clone(),
@@ -91,7 +87,10 @@ fn handle_rollup_to_network_events(
                 info!("Sent BatchPropose for game {}", game_id);
             }
             RollupEvent::BatchFailed { game_id, .. } | RollupEvent::NeedResync { game_id } => {
-                send_network_msg(&network_state, NetworkMessage::ResyncRequest { game_id });
+                send_network_msg(
+                    &network_state,
+                    NetworkMessage::ResyncRequest { game_id: *game_id },
+                );
                 warn!("Requested resync for game {}", game_id);
             }
             _ => {}
@@ -100,14 +99,14 @@ fn handle_rollup_to_network_events(
 }
 
 fn handle_network_to_rollup_events(
-    mut network_events: EventReader<NetworkEvent>,
+    mut network_events: MessageReader<NetworkEvent>,
     network_state: Res<BraidNetworkState>,
-    mut rollup_events: EventWriter<RollupEvent>,
+    mut rollup_events: MessageWriter<RollupEvent>,
     mut bridge: ResMut<RollupNetworkBridge>,
     mut rollup_manager: ResMut<EphemeralRollupManager>,
     session_key_manager: Res<SessionKeyManager>,
     mut magicblock_resolver: ResMut<MagicBlockResolver>,
-    mut magicblock_events: EventWriter<MagicBlockEvent>,
+    mut magicblock_events: MessageWriter<MagicBlockEvent>,
 ) {
     for event in network_events.read() {
         let msg = match event {
@@ -123,14 +122,14 @@ fn handle_network_to_rollup_events(
                 next_fens,
             } => {
                 if !validate_batch_proposal(
-                    start_turn,
+                    *start_turn,
                     moves.as_slice(),
                     next_fens.as_slice(),
                     &rollup_manager,
                 ) {
                     warn!("Rejected invalid BatchPropose for game {}", game_id);
-                    rollup_events.send(RollupEvent::BatchFailed {
-                        game_id,
+                    rollup_events.write(RollupEvent::BatchFailed {
+                        game_id: *game_id,
                         moves: moves.clone(),
                         next_fens: next_fens.clone(),
                     });
@@ -142,21 +141,21 @@ fn handle_network_to_rollup_events(
                 }
 
                 let batch_hash = calculate_batch_hash(
-                    game_id,
-                    start_turn,
+                    *game_id,
+                    *start_turn,
                     moves.as_slice(),
                     next_fens.as_slice(),
                 );
                 send_network_msg(
                     &network_state,
                     NetworkMessage::BatchAccept {
-                        game_id,
+                        game_id: *game_id,
                         batch_hash,
                     },
                 );
 
                 initiate_two_party_signing(
-                    game_id,
+                    *game_id,
                     moves.clone(),
                     next_fens.clone(),
                     &network_state,
@@ -179,20 +178,23 @@ fn handle_network_to_rollup_events(
 
             NetworkMessage::BatchReject { game_id, reason } => {
                 warn!("Peer rejected batch for game {}: {}", game_id, reason);
-                send_network_msg(&network_state, NetworkMessage::ResyncRequest { game_id });
+                send_network_msg(
+                    &network_state,
+                    NetworkMessage::ResyncRequest { game_id: *game_id },
+                );
             }
 
             NetworkMessage::TxMessage {
                 game_id,
                 message_bytes,
             } => {
-                bridge.incoming_tx_message = Some((game_id, message_bytes.clone()));
+                bridge.incoming_tx_message = Some((*game_id, message_bytes.clone()));
                 if let Some(kp) = session_key_manager.get_session_keypair() {
                     let sig = kp.sign_message(message_bytes.as_slice());
                     send_network_msg(
                         &network_state,
                         NetworkMessage::TxSignature {
-                            game_id,
+                            game_id: *game_id,
                             signer_pubkey: kp.pubkey(),
                             signature_bytes: sig.as_ref().to_vec(),
                         },
@@ -207,10 +209,10 @@ fn handle_network_to_rollup_events(
             } => {
                 bridge
                     .incoming_signatures
-                    .insert(signer_pubkey, signature_bytes.clone());
+                    .insert(*signer_pubkey, signature_bytes.clone());
 
                 if let Some((msg_gid, _)) = &bridge.incoming_tx_message {
-                    if *msg_gid == game_id && bridge.incoming_signatures.len() >= 2 {
+                    if *msg_gid == *game_id && bridge.incoming_signatures.len() >= 2 {
                         info!(
                             "All signatures received for game {} — ready to submit",
                             game_id
@@ -225,25 +227,25 @@ fn handle_network_to_rollup_events(
                 new_fen,
                 new_turn,
             } => {
-                if game_id == rollup_manager.game_id {
+                if *game_id == rollup_manager.game_id {
                     rollup_manager.committed_fen = new_fen.clone();
-                    rollup_manager.committed_turn = new_turn;
+                    rollup_manager.committed_turn = *new_turn;
                     rollup_manager.status = GameStateStatus::Synced;
                     info!("Batch committed on-chain, tx: {}", tx_sig);
-                    rollup_events.send(RollupEvent::BatchCommitted {
-                        game_id,
+                    rollup_events.write(RollupEvent::BatchCommitted {
+                        game_id: *game_id,
                         new_fen: new_fen.clone(),
-                        new_turn,
+                        new_turn: *new_turn,
                     });
                 }
             }
 
             NetworkMessage::ResyncRequest { game_id } => {
-                if game_id == rollup_manager.game_id {
+                if *game_id == rollup_manager.game_id {
                     send_network_msg(
                         &network_state,
                         NetworkMessage::ResyncResponse {
-                            game_id,
+                            game_id: *game_id,
                             committed_fen: rollup_manager.committed_fen.clone(),
                             committed_turn: rollup_manager.committed_turn,
                         },
@@ -256,9 +258,9 @@ fn handle_network_to_rollup_events(
                 committed_fen,
                 committed_turn,
             } => {
-                if game_id == rollup_manager.game_id {
+                if *game_id == rollup_manager.game_id {
                     rollup_manager.committed_fen = committed_fen.clone();
-                    rollup_manager.committed_turn = committed_turn;
+                    rollup_manager.committed_turn = *committed_turn;
                     rollup_manager.status = GameStateStatus::Synced;
                     info!(
                         "Resynced game {} from peer, turn {}",
@@ -273,7 +275,7 @@ fn handle_network_to_rollup_events(
                 next_fen,
                 ..
             } => {
-                if game_id == rollup_manager.game_id {
+                if *game_id == rollup_manager.game_id {
                     rollup_manager.add_remote_move(move_uci.clone(), next_fen.clone());
                 }
             }
@@ -285,12 +287,12 @@ fn handle_network_to_rollup_events(
 
 fn process_batch_commit_requests(
     mut rollup_manager: ResMut<EphemeralRollupManager>,
-    mut _rollup_events: EventWriter<RollupEvent>,
+    mut _rollup_events: MessageWriter<RollupEvent>,
     network_state: Res<BraidNetworkState>,
     mut bridge: ResMut<RollupNetworkBridge>,
     session_key_manager: Res<SessionKeyManager>,
     mut magicblock_resolver: ResMut<MagicBlockResolver>,
-    mut magicblock_events: EventWriter<MagicBlockEvent>,
+    mut magicblock_events: MessageWriter<MagicBlockEvent>,
 ) {
     if bridge.awaiting_commit_confirmation {
         return;
@@ -339,7 +341,7 @@ fn initiate_two_party_signing(
     rollup_manager: &EphemeralRollupManager,
     session_key_manager: &SessionKeyManager,
     magicblock_resolver: &mut MagicBlockResolver,
-    mut magicblock_events: Option<&mut EventWriter<MagicBlockEvent>>,
+    mut magicblock_events: Option<&mut MessageWriter<MagicBlockEvent>>,
 ) {
     let session_kp = match session_key_manager.get_session_keypair() {
         Some(kp) => kp,
@@ -364,20 +366,17 @@ fn initiate_two_party_signing(
     // Derive game_pda from game_id using the same seeds as the program
     let game_pda = Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &program_id).0;
 
-    // Convert moves from Vec<String> to Vec<(u8, u8)> - simplified conversion
-    // This is a placeholder - actual implementation would parse UCI notation
+    // Convert moves from UCI notation to compact (from, to) format
+    // UCI format: "e2e4" (from e2 to e4), "e7e8q" (promotion to queen)
     let moves_converted: Vec<(u8, u8)> = moves
         .iter()
-        .map(|m| {
-            // Simple placeholder: convert first two chars to bytes
-            let bytes = m.as_bytes();
-            if bytes.len() >= 2 {
-                (bytes[0], bytes[1])
-            } else {
-                (0u8, 0u8)
-            }
-        })
+        .filter_map(|uci| uci_to_square_indices(uci))
         .collect();
+
+    if moves_converted.is_empty() && !moves.is_empty() {
+        error!("Failed to convert any moves from UCI format");
+        return;
+    }
 
     let ix = commit_move_batch_ix(
         session_kp.pubkey(), // payer
@@ -394,11 +393,11 @@ fn initiate_two_party_signing(
             game_id
         );
 
-        match magicblock_resolver.route_transaction(vec![ix], &session_kp) {
+        match magicblock_resolver.route_transaction(vec![ix.clone()], &session_kp) {
             Ok(signature) => {
                 info!("Batch commit routed to ER with signature: {}", signature);
                 if let Some(ref mut events) = magicblock_events {
-                    events.send(MagicBlockEvent::TransactionRoutedToEr { signature });
+                    events.write(MagicBlockEvent::TransactionRoutedToEr { signature });
                 }
             }
             Err(e) => {
@@ -447,10 +446,10 @@ fn send_network_batch_commit(
 /// This system listens for GameStartedEvent and triggers delegation to the ER
 /// for sub-second transaction processing during gameplay.
 fn handle_game_start_delegation(
-    mut game_started_events: EventReader<GameStartedEvent>,
+    mut game_started_events: MessageReader<GameStartedEvent>,
     mut magicblock_resolver: ResMut<MagicBlockResolver>,
     session_key_manager: Res<SessionKeyManager>,
-    mut magicblock_events: EventWriter<MagicBlockEvent>,
+    mut magicblock_events: MessageWriter<MagicBlockEvent>,
 ) {
     for event in game_started_events.read() {
         let game_id = event.game_id;
@@ -466,7 +465,7 @@ fn handle_game_start_delegation(
             Some(kp) => kp,
             None => {
                 error!("No session keypair available for delegation");
-                magicblock_events.send(MagicBlockEvent::DelegationFailed {
+                magicblock_events.write(MagicBlockEvent::DelegationFailed {
                     game_pda,
                     error: "No session keypair available".to_string(),
                 });
@@ -478,11 +477,11 @@ fn handle_game_start_delegation(
         match magicblock_resolver.delegate_game(game_pda, &session_keypair) {
             Ok(_) => {
                 info!("Successfully delegated game {} to ER", game_id);
-                magicblock_events.send(MagicBlockEvent::GameDelegated { game_pda });
+                magicblock_events.write(MagicBlockEvent::GameDelegated { game_pda });
             }
             Err(e) => {
                 error!("Failed to delegate game {} to ER: {}", game_id, e);
-                magicblock_events.send(MagicBlockEvent::DelegationFailed {
+                magicblock_events.write(MagicBlockEvent::DelegationFailed {
                     game_pda,
                     error: e.to_string(),
                 });
@@ -496,10 +495,10 @@ fn handle_game_start_delegation(
 /// This system listens for GameEndedEvent and triggers undelegation from the ER,
 /// committing the final game state to Solana.
 fn handle_game_end_undelegation(
-    mut game_ended_events: EventReader<GameEndedEvent>,
+    mut game_ended_events: MessageReader<GameEndedEvent>,
     mut magicblock_resolver: ResMut<MagicBlockResolver>,
     session_key_manager: Res<SessionKeyManager>,
-    mut magicblock_events: EventWriter<MagicBlockEvent>,
+    mut magicblock_events: MessageWriter<MagicBlockEvent>,
 ) {
     for event in game_ended_events.read() {
         let game_id = event.game_id;
@@ -520,7 +519,7 @@ fn handle_game_end_undelegation(
             None => {
                 error!("No session keypair available for undelegation");
                 let game_pda = magicblock_resolver.get_delegated_game().unwrap_or_default();
-                magicblock_events.send(MagicBlockEvent::UndelegationFailed {
+                magicblock_events.write(MagicBlockEvent::UndelegationFailed {
                     game_pda,
                     error: "No session keypair available".to_string(),
                 });
@@ -533,12 +532,12 @@ fn handle_game_end_undelegation(
             Ok(_) => {
                 let game_pda = magicblock_resolver.get_delegated_game().unwrap_or_default();
                 info!("Successfully undelegated game {} from ER", game_id);
-                magicblock_events.send(MagicBlockEvent::GameUndelegated { game_pda });
+                magicblock_events.write(MagicBlockEvent::GameUndelegated { game_pda });
             }
             Err(e) => {
                 let game_pda = magicblock_resolver.get_delegated_game().unwrap_or_default();
                 error!("Failed to undelegate game {} from ER: {}", game_id, e);
-                magicblock_events.send(MagicBlockEvent::UndelegationFailed {
+                magicblock_events.write(MagicBlockEvent::UndelegationFailed {
                     game_pda,
                     error: e.to_string(),
                 });
@@ -548,7 +547,7 @@ fn handle_game_end_undelegation(
 }
 
 /// Handles Magic Block events for logging and error handling
-fn handle_magic_block_events(mut magicblock_events: EventReader<MagicBlockEvent>) {
+fn handle_magic_block_events(mut magicblock_events: MessageReader<MagicBlockEvent>) {
     for event in magicblock_events.read() {
         match event {
             MagicBlockEvent::GameDelegated { game_pda } => {
@@ -572,18 +571,100 @@ fn handle_magic_block_events(mut magicblock_events: EventReader<MagicBlockEvent>
             MagicBlockEvent::TransactionRoutedToEr { signature } => {
                 info!("Magic Block: Transaction routed to ER: {}", signature);
             }
-            MagicBlockEvent::TransactionRoutedToSolana { signature } => {
-                info!("Magic Block: Transaction routed to Solana: {}", signature);
-            }
-            MagicBlockEvent::ForceCommitCompleted {
-                game_pda,
-                signature,
-            } => {
-                info!(
-                    "Magic Block: Force commit completed for {}: {}",
-                    game_pda, signature
-                );
-            }
+        }
+    }
+}
+
+/// Convert UCI notation (e.g., "e2e4", "e7e8q") to square indices (0-63)
+///
+/// UCI format:
+/// - First 2 chars: from square (file a-h, rank 1-8)
+/// - Next 2 chars: to square (file a-h, rank 1-8)
+/// - Optional 5th char: promotion piece (q, r, b, n)
+///
+/// Returns: (from_index, to_index) where index is 0-63
+/// (0 = a1, 7 = h1, 56 = a8, 63 = h8)
+fn uci_to_square_indices(uci: &str) -> Option<(u8, u8)> {
+    if uci.len() < 4 {
+        warn!("Invalid UCI move format (too short): {}", uci);
+        return None;
+    }
+
+    let bytes = uci.as_bytes();
+
+    // Parse from square
+    let from_file = bytes[0];
+    let from_rank = bytes[1];
+
+    // Parse to square
+    let to_file = bytes[2];
+    let to_rank = bytes[3];
+
+    // Validate file (a-h)
+    if !((b'a'..=b'h').contains(&from_file) && (b'a'..=b'h').contains(&to_file)) {
+        warn!("Invalid UCI move format (invalid file): {}", uci);
+        return None;
+    }
+
+    // Validate rank (1-8)
+    if !((b'1'..=b'8').contains(&from_rank) && (b'1'..=b'8').contains(&to_rank)) {
+        warn!("Invalid UCI move format (invalid rank): {}", uci);
+        return None;
+    }
+
+    // Convert to indices
+    // File: a=0, b=1, ..., h=7
+    // Rank: 1=0, 2=1, ..., 8=7
+    // Index = rank * 8 + file
+    let from_file_idx = from_file - b'a';
+    let from_rank_idx = from_rank - b'1';
+    let from_index = from_rank_idx * 8 + from_file_idx;
+
+    let to_file_idx = to_file - b'a';
+    let to_rank_idx = to_rank - b'1';
+    let to_index = to_rank_idx * 8 + to_file_idx;
+
+    Some((from_index, to_index))
+}
+
+/// Convert square index (0-63) to UCI notation
+fn square_index_to_uci(index: u8) -> String {
+    let file = (index % 8) + b'a';
+    let rank = (index / 8) + b'1';
+    format!("{}{}", file as char, rank as char)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uci_conversion() {
+        // e2e4: from e2 (index 12) to e4 (index 28)
+        assert_eq!(uci_to_square_indices("e2e4"), Some((12, 28)));
+
+        // e7e8q: from e7 (index 52) to e8 (index 60)
+        assert_eq!(uci_to_square_indices("e7e8q"), Some((52, 60)));
+
+        // a1h8: from a1 (index 0) to h8 (index 63)
+        assert_eq!(uci_to_square_indices("a1h8"), Some((0, 63)));
+
+        // h1a8: from h1 (index 7) to a8 (index 56)
+        assert_eq!(uci_to_square_indices("h1a8"), Some((7, 56)));
+
+        // Invalid moves
+        assert_eq!(uci_to_square_indices("invalid"), None);
+        assert_eq!(uci_to_square_indices("i1a8"), None); // Invalid file
+        assert_eq!(uci_to_square_indices("a9a8"), None); // Invalid rank
+        assert_eq!(uci_to_square_indices("e2"), None); // Too short
+    }
+
+    #[test]
+    fn test_index_to_uci_roundtrip() {
+        for i in 0..64u8 {
+            let uci = square_index_to_uci(i);
+            let parsed = uci_to_square_indices(&uci);
+            assert_eq!(parsed, Some((i, i)), "Roundtrip failed for index {}", i);
         }
     }
 }
