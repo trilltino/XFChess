@@ -671,7 +671,9 @@ export default function Lobby() {
             return
         }
 
-        if (game.black) {
+        // Check if game is full (black is set and not the System Program placeholder)
+        const SYSTEM_PROGRAM = '11111111111111111111111111111111'
+        if (game.black && game.black !== SYSTEM_PROGRAM) {
             setResult({ type: 'error', message: 'Game is full' })
             return
         }
@@ -711,7 +713,7 @@ export default function Lobby() {
         (g) => g.white === publicKey?.toBase58() || g.black === publicKey?.toBase58()
     )
     const openGames = activeGames.filter(
-        (g) => g.status === 'waiting' && g.white !== publicKey?.toBase58() && !g.black
+        (g) => g.status === 'waiting' && g.white !== publicKey?.toBase58() && (!g.black || g.black === '11111111111111111111111111111111')
     )
     const otherGames = activeGames.filter((g) => !myGames.includes(g) && !openGames.includes(g))
 
