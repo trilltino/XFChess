@@ -1,8 +1,8 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Zap, Shield, Clock, Layers, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CodeViewer from '../components/CodeViewer';
-import './XFBeyond.css'; // Using the same styling as other premium pages
+import './XFBeyond.css';
 
 const MagicBlockPage = () => {
   return (
@@ -44,6 +44,99 @@ const MagicBlockPage = () => {
           without sacrificing the security of the Base Layer.
         </p>
 
+        {/* Performance Metrics */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginTop: '2rem' }}>
+          <div style={{ background: 'rgba(230, 57, 70, 0.1)', border: '1px solid rgba(230, 57, 70, 0.3)', borderRadius: '12px', padding: '1.5rem', textAlign: 'center' }}>
+            <Clock size={32} style={{ color: '#e63946', marginBottom: '0.75rem' }} />
+            <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff' }}>&lt;100ms</div>
+            <div style={{ fontSize: '0.85rem', color: '#888' }}>Move Latency</div>
+          </div>
+          <div style={{ background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '12px', padding: '1.5rem', textAlign: 'center' }}>
+            <Zap size={32} style={{ color: '#22c55e', marginBottom: '0.75rem' }} />
+            <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff' }}>10x</div>
+            <div style={{ fontSize: '0.85rem', color: '#888' }}>Speed vs Mainnet</div>
+          </div>
+          <div style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '12px', padding: '1.5rem', textAlign: 'center' }}>
+            <Shield size={32} style={{ color: '#3b82f6', marginBottom: '0.75rem' }} />
+            <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff' }}>100%</div>
+            <div style={{ fontSize: '0.85rem', color: '#888' }}>Base Layer Security</div>
+          </div>
+          <div style={{ background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '12px', padding: '1.5rem', textAlign: 'center' }}>
+            <Layers size={32} style={{ color: '#8b5cf6', marginBottom: '0.75rem' }} />
+            <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff' }}>0</div>
+            <div style={{ fontSize: '0.85rem', color: '#888' }}>Wallet Popups</div>
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works - The Flow */}
+      <section className="architecture-overview" style={{ marginTop: '3rem' }}>
+        <h2>How It Works</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1.5rem' }}>
+
+          {/* Step 1 */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+            <div style={{ width: '40px', height: '40px', background: '#22c55e', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#000', flexShrink: 0 }}>1</div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', color: '#fff' }}>Session Key Authorization</h3>
+              <p style={{ margin: 0, color: '#888', lineHeight: 1.6 }}>
+                Players generate ephemeral session keys and authorize them on-chain via the <code>authorizeSessionKey</code> instruction.
+                These keys can sign moves for 24 hours without wallet popups.
+              </p>
+            </div>
+          </div>
+
+          {/* Arrow */}
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <div style={{ width: '2px', height: '30px', background: 'linear-gradient(to bottom, #22c55e, #3b82f6)' }}></div>
+          </div>
+
+          {/* Step 2 */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+            <div style={{ width: '40px', height: '40px', background: '#3b82f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#fff', flexShrink: 0 }}>2</div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', color: '#fff' }}>Game Delegation to ER</h3>
+              <p style={{ margin: 0, color: '#888', lineHeight: 1.6 }}>
+                The Game PDA is delegated to MagicBlock's ephemeral rollup via the SDK's <code>delegate_account</code> CPI.
+                Game state now processes on high-speed validators.
+              </p>
+            </div>
+          </div>
+
+          {/* Arrow */}
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <div style={{ width: '2px', height: '30px', background: 'linear-gradient(to bottom, #3b82f6, #f59e0b)' }}></div>
+          </div>
+
+          {/* Step 3 */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+            <div style={{ width: '40px', height: '40px', background: '#f59e0b', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#000', flexShrink: 0 }}>3</div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', color: '#fff' }}>Frictionless Gameplay</h3>
+              <p style={{ margin: 0, color: '#888', lineHeight: 1.6 }}>
+                Moves are signed locally with session keys and executed on the ER in &lt;100ms.
+                No wallet popups, no delays—just pure competitive chess.
+              </p>
+            </div>
+          </div>
+
+          {/* Arrow */}
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <div style={{ width: '2px', height: '30px', background: 'linear-gradient(to bottom, #f59e0b, #e63946)' }}></div>
+          </div>
+
+          {/* Step 4 */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+            <div style={{ width: '40px', height: '40px', background: '#e63946', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#fff', flexShrink: 0 }}>4</div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', color: '#fff' }}>Settlement on Solana</h3>
+              <p style={{ margin: 0, color: '#888', lineHeight: 1.6 }}>
+                On game end, <code>undelegate_game</code> commits final state to Solana devnet.
+                Wager payouts execute on-chain with full transparency.
+              </p>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="competitive-features">
@@ -59,7 +152,7 @@ const MagicBlockPage = () => {
           </div>
           <p>
             Players generate temporary session keypairs that are authorized to sign moves on their behalf
-            for the duration of the game. These keys expire after 2 hours and can be revoked at any time.
+            for the duration of the game. These keys expire after 24 hours and can be revoked at any time.
           </p>
           <CodeViewer
             title="programs/xfchess-game/src/instructions/session_delegation.rs"
@@ -82,7 +175,7 @@ const MagicBlockPage = () => {
     session.game_id = game_id;
     session.player = player.key();
     session.session_key = session_pubkey;
-    session.expires_at = Clock::get()?.unix_timestamp + (2 * 60 * 60); // 2 hours
+    session.expires_at = Clock::get()?.unix_timestamp + (24 * 60 * 60); // 24 hours
     session.max_batch_len = 10;
     session.enabled = true;
 
@@ -218,7 +311,7 @@ pub fn handler_delegate_game(
 magicblock = ["dep:ephemeral-rollups-sdk", "ephemeral-rollups-sdk/anchor"]
 
 [dependencies]
-ephemeral-rollups-sdk = { path = "../ephemeral-rollups-sdk/rust/sdk", optional = true }`}
+ephemeral-rollups-sdk = { version = "0.2.2", features = ["cpi"] }`}
           />
           <CodeViewer
             title="src/instructions/delegate_game.rs - SDK Imports"
@@ -325,6 +418,85 @@ fn handle_game_start_delegation(
     }
 }`}
           />
+        </div>
+
+        {/* Security Guarantees Section */}
+        <div className="feature-section" style={{ marginTop: '3rem' }}>
+          <div className="feature-header">
+            <div className="feature-number">06</div>
+            <div>
+              <h3>Security Guarantees</h3>
+              <p className="feature-subtitle">Ephemeral Rollups maintain Solana's security model</p>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem', marginTop: '1rem' }}>
+            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h4 style={{ margin: '0 0 0.75rem 0', color: '#22c55e' }}>Base Layer Anchoring</h4>
+              <p style={{ margin: 0, color: '#888', fontSize: '0.9rem', lineHeight: 1.6 }}>
+                All game state commits back to Solana devnet. Even if ER validators fail,
+                the latest committed state is recoverable.
+              </p>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h4 style={{ margin: '0 0 0.75rem 0', color: '#3b82f6' }}>Session Key Controls</h4>
+              <p style={{ margin: 0, color: '#888', fontSize: '0.9rem', lineHeight: 1.6 }}>
+                Session keys are scoped to a single game and expire automatically.
+                Players can revoke them at any time.
+              </p>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h4 style={{ margin: '0 0 0.75rem 0', color: '#f59e0b' }}>Move Validation</h4>
+              <p style={{ margin: 0, color: '#888', fontSize: '0.9rem', lineHeight: 1.6 }}>
+                Every move is validated using the Shakmaty chess engine on the ER.
+                Invalid moves are rejected before state updates.
+              </p>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h4 style={{ margin: '0 0 0.75rem 0', color: '#e63946' }}>On-Chain Settlement</h4>
+              <p style={{ margin: 0, color: '#888', fontSize: '0.9rem', lineHeight: 1.6 }}>
+                Wager payouts execute on Solana mainnet/devnet. ER only handles move
+                state—funds never leave the base layer.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Program ID Section */}
+        <div className="feature-section" style={{ marginTop: '3rem', textAlign: 'center' }}>
+          <h3 style={{ marginBottom: '1rem' }}>Deployed Program</h3>
+          <div style={{
+            display: 'inline-block',
+            background: 'rgba(230, 57, 70, 0.1)',
+            border: '1px solid rgba(230, 57, 70, 0.3)',
+            borderRadius: '8px',
+            padding: '1rem 2rem',
+            fontFamily: 'monospace',
+            fontSize: '1rem',
+            color: '#e63946',
+            wordBreak: 'break-all'
+          }}>
+            3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP
+          </div>
+          <p style={{ color: '#888', fontSize: '0.85rem', marginTop: '0.75rem' }}>
+            Deployed on Solana Devnet with MagicBlock ER support
+          </p>
+          <a
+            href="https://explorer.solana.com/address/3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP?cluster=devnet"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              color: '#3b82f6',
+              textDecoration: 'none',
+              marginTop: '1rem',
+              fontSize: '0.9rem'
+            }}
+          >
+            <ExternalLink size={16} />
+            View on Solana Explorer
+          </a>
         </div>
       </section>
     </motion.div>
