@@ -1,0 +1,12 @@
+[package]
+name = "shared"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bevy = { workspace = true, default-features = false }
+serde.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+bincode = "3.0.0"

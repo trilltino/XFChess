@@ -1,0 +1,412 @@
+/* Premium Black & Red Theme */
+:root {
+  --xf-black: #0a0a0a;
+  --xf-dark: #121212;
+  --xf-red: #e63946;
+  --xf-red-glow: rgba(230, 57, 70, 0.4);
+  --xf-text-main: #f5f5f5;
+  --xf-text-muted: #a0a0a0;
+  --xf-border: rgba(255, 255, 255, 0.08);
+  --xf-card-bg: rgba(20, 20, 20, 0.7);
+}
+
+.contracts-page,
+.xfbeyond-page {
+  padding: 3rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  font-family: 'Inter', 'Outfit', sans-serif;
+  line-height: 1.7;
+  color: var(--xf-text-main);
+  background-color: transparent;
+  /* Main App handles the grid bg */
+}
+
+.contracts-header,
+.xfbeyond-header {
+  text-align: center;
+  margin-bottom: 4rem;
+  padding-bottom: 2rem;
+  position: relative;
+}
+
+.contracts-header::after,
+.xfbeyond-header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--xf-red), transparent);
+}
+
+.contracts-header h1,
+.xfbeyond-header h1 {
+  font-size: 3.5rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 1rem;
+  letter-spacing: -1px;
+  text-shadow: 0 0 20px var(--xf-red-glow);
+}
+
+.contracts-header p,
+.xfbeyond-header p {
+  font-size: 1.2rem;
+  color: var(--xf-text-muted);
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.architecture-overview,
+.competitive-features,
+.concept-introduction,
+.faction-section,
+.technology-section,
+.future-vision {
+  margin-bottom: 4rem;
+  animation: fadeIn 0.6s ease-out forwards;
+}
+
+h2 {
+  font-size: 2.2rem;
+  color: #fff;
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+h2::before {
+  content: '';
+  display: block;
+  width: 12px;
+  height: 24px;
+  background-color: var(--xf-red);
+  border-radius: 2px;
+  box-shadow: 0 0 10px var(--xf-red-glow);
+}
+
+.contract-modules,
+.piece-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.module-card,
+.piece-card {
+  background: var(--xf-card-bg);
+  border: 1px solid var(--xf-border);
+  border-radius: 12px;
+  padding: 2rem;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.module-card::before,
+.piece-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--xf-red), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.module-card:hover,
+.piece-card:hover {
+  transform: translateY(-5px);
+  border-color: rgba(230, 57, 70, 0.3);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px var(--xf-red-glow);
+}
+
+.module-card:hover::before,
+.piece-card:hover::before {
+  opacity: 1;
+}
+
+.module-card h3,
+.piece-card h3 {
+  color: #fff;
+  margin-bottom: 1rem;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.module-card p,
+.piece-card p {
+  color: var(--xf-text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.feature-section {
+  margin-bottom: 3rem;
+  background: var(--xf-card-bg);
+  border: 1px solid var(--xf-border);
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.feature-section h3 {
+  color: var(--xf-red);
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.feature-section>p {
+  margin-bottom: 1.5rem;
+  color: var(--xf-text-muted);
+}
+
+/* Feature Header Styling */
+.feature-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--xf-border);
+}
+
+.feature-number {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--xf-red);
+  opacity: 0.4;
+  line-height: 1;
+  font-family: 'Inter', monospace;
+}
+
+.feature-header h3 {
+  color: #fff;
+  font-size: 1.4rem;
+  margin-bottom: 0.25rem;
+  margin-top: 0;
+}
+
+.feature-subtitle {
+  color: var(--xf-text-muted);
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.feature-section:hover .feature-number {
+  opacity: 0.8;
+  transition: opacity 0.3s ease;
+}
+
+.technology-section ul,
+.future-vision ul,
+.security-features ul {
+  padding-left: 0;
+  list-style: none;
+}
+
+.technology-section li,
+.future-vision li,
+.security-features li {
+  margin-bottom: 1rem;
+  padding-left: 1.5rem;
+  position: relative;
+  color: var(--xf-text-muted);
+}
+
+.technology-section li::before,
+.future-vision li::before,
+.security-features li::before {
+  content: '▻';
+  position: absolute;
+  left: 0;
+  color: var(--xf-red);
+}
+
+a {
+  color: var(--xf-red);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  text-decoration: underline;
+  color: #ff4d5a;
+}
+
+/* SEASON BOX */
+.beyond-season-box {
+  background: rgba(20, 20, 20, 0.6);
+  border: 1px solid rgba(230, 57, 70, 0.2);
+  border-radius: 16px;
+  padding: 2.5rem;
+  margin-bottom: 4rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.beyond-season-box::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--xf-red), transparent);
+}
+
+.beyond-season-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--xf-red);
+  margin-bottom: 0.4rem;
+}
+
+.beyond-season-title {
+  font-size: 1.8rem !important;
+  font-weight: 800;
+  color: #fff;
+  margin: 0 0 1rem !important;
+}
+
+.beyond-season-title::before {
+  display: none !important;
+}
+
+.beyond-season-intro {
+  color: var(--xf-text-muted);
+  line-height: 1.75;
+  font-size: 0.97rem;
+  max-width: 72ch;
+  margin-bottom: 2rem;
+}
+
+/* FACTIONS */
+.beyond-factions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.beyond-faction {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.beyond-faction-header {
+  padding: 0.65rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.beyond-faction-header--rebels {
+  background: rgba(230, 57, 70, 0.12);
+  color: #e63946;
+  border-bottom: 1px solid rgba(230, 57, 70, 0.2);
+}
+
+.beyond-faction-header--french {
+  background: rgba(59, 130, 246, 0.1);
+  color: #7ab8f5;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.beyond-piece-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.beyond-piece-row {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  align-items: flex-start;
+}
+
+.beyond-piece-row:last-child {
+  border-bottom: none;
+}
+
+.beyond-piece-role {
+  flex-shrink: 0;
+  width: 52px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.35);
+  padding-top: 0.15rem;
+}
+
+.beyond-piece-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.beyond-piece-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.beyond-piece-desc {
+  font-size: 0.8rem;
+  color: var(--xf-text-muted);
+  line-height: 1.55;
+}
+
+@media (max-width: 768px) {
+  .beyond-factions {
+    grid-template-columns: 1fr;
+  }
+
+  .beyond-season-box {
+    padding: 1.5rem;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 768px) {
+
+  .contracts-page,
+  .xfbeyond-page {
+    padding: 1.5rem 1rem;
+  }
+
+  .contracts-header h1,
+  .xfbeyond-header h1 {
+    font-size: 2.2rem;
+  }
+
+  .module-card,
+  .piece-card,
+  .feature-section {
+    padding: 1.5rem;
+  }
+}

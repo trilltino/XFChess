@@ -1,53 +1,4 @@
-//! Chess game resources - Global game state management
-//!
-//! Resources are ECS singletons that provide shared mutable state across systems.
-//! Unlike components (which are attached to entities), resources exist globally
-//! and can be accessed by any system that needs them.
-//!
-//! # Resource Categories
-//!
-//! ## Turn Management
-//! - [`CurrentTurn`] - Tracks whose turn it is and move numbers
-//! - [`CurrentGamePhase`] - Wraps GamePhase as a resource
-//! - [`TurnStateContext`] - Fine-grained turn flow state machine
-//! - [`TurnPhase`] - Turn sub-states (WaitingForInput, AIThinking, etc.)
-//!
-//! ## Player Interaction
-//! - [`Selection`] - Currently selected piece and valid moves
-//!
-//! ## Game History
-//! - [`MoveHistory`] - Complete move record for undo/PGN export
-//! - [`CapturedPieces`] - Material tracking and advantage calculation
-//!
-//! ## Game Timing
-//! - [`GameTimer`] - Fischer increment time control
-//!
-//! ## Game Status
-//! - [`GameOverState`] - Win/loss/draw conditions
-//!
-//! ## Performance
-//! - [`FastBoardState`] - Bitboard representation for O(1) piece lookups
-//!
-//! ## Development
-//! - [`DebugThrottle`] - Throttles debug logging to prevent spam
-//!
-//! # ECS Architecture: Components vs Resources
-//!
-//! **Use Components when:**
-//! - Data is attached to specific entities (piece type, position)
-//! - Multiple instances exist (many pieces, many squares)
-//! - Data is queried per-entity
-//!
-//! **Use Resources when:**
-//! - Data is global (whose turn, game timer)
-//! - Only one instance exists (single selection, single history)
-//! - Many systems need shared access
-//!
-//! # Integration
-//!
-//! All resources are registered in [`crate::game::plugin::GamePlugin`] and
-//! accessed via system parameters. For convenience, use [`SystemParam`] groups
-//! to access related resources together:
+//! Chess game resources - Global game state management.
 //!
 //! ## Using SystemParam Groups (Recommended)
 //!
@@ -101,7 +52,6 @@
 //! - `reference/chess_engine/src/types.rs` - Chess data structures
 
 // Submodules
-pub mod engine;
 pub mod history;
 pub mod player;
 pub mod sounds;
@@ -116,7 +66,6 @@ mod tests;
 
 // Re-export all resources for convenience
 pub use debug::*;
-pub use engine::*;
 pub use history::*;
 pub use player::*;
 pub use sounds::*;

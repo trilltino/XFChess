@@ -1,0 +1,27 @@
+[package]
+name = "xfchess-ai-service"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+solana-sdk.workspace = true
+solana-client.workspace = true
+anchor-lang = "0.32.1"
+tokio.workspace = true
+anyhow.workspace = true
+log = "0.4.29"
+env_logger = "0.11.9"
+serde.workspace = true
+serde_json.workspace = true
+
+# Local crates
+# Local crates
+xfchess-game.workspace = true
+solana-chess-client.workspace = true
+braid_stockfish_ai.workspace = true
+shared.workspace = true
+shakmaty = { workspace = true, features = ["alloc"] }
+
+
+
+bs58 = "0.5.1"

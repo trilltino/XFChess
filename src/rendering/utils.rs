@@ -32,22 +32,38 @@
 //! - `reference/bevy/examples/3d/3d_shapes.rs` - Material creation and usage
 //! - `reference/bevy/examples/asset/hot_asset_reloading.rs` - Handle management
 
-use bevy::color::palettes::tailwind::*;
 use bevy::prelude::*;
 
+/// Represents a square on the chess board.
+/// Uses standard chess coordinates where:
+/// - `x` = file (0-7, corresponds to files a-h)
+/// - `y` = rank (0-7, corresponds to ranks 1-8)
 #[derive(Default, Resource, Component, Debug, Clone, Eq, PartialEq)]
 pub struct Square {
+    /// File (column) - 0 = a, 7 = h
     pub x: u8,
+    /// Rank (row) - 0 = 1, 7 = 8
     pub y: u8,
 }
 
 impl Square {
     /// Returns true if this square should be white in a standard chess board pattern
     ///
-    /// Uses the formula (x + y + 1) % 2 == 0 to create the traditional checkerboard.
-    /// This method is used during board creation to assign correct square colors.
+    /// Uses the formula (file + rank + 1) % 2 == 0 to create the traditional checkerboard.
+    /// Light squares: a1, c1, e1, g1 (files 0, 2, 4, 6 on rank 0)
     pub fn is_white(&self) -> bool {
         (self.x + self.y + 1).is_multiple_of(2)
+    }
+
+    /// Convert to world position (XZ plane)
+    /// Returns (world_x, world_z) where world_x = file, world_z = rank
+    pub fn to_world(&self) -> (f32, f32) {
+        (self.x as f32, self.y as f32)
+    }
+
+    /// Create from chess notation (file 0-7, rank 0-7)
+    pub fn new(file: u8, rank: u8) -> Self {
+        Self { x: file, y: rank }
     }
 }
 
@@ -69,16 +85,11 @@ pub struct SquareMaterials {
 
 impl FromWorld for SquareMaterials {
     fn from_world(world: &mut World) -> Self {
-        // Get GameSettings first (immutable borrow)
-        let (light_color, dark_color) =
-            if let Some(settings) = world.get_resource::<crate::core::GameSettings>() {
-                settings.board_theme.colors()
-            } else {
-                // Default Classic theme colors
-                (Color::srgb(0.93, 0.93, 0.82), Color::srgb(0.46, 0.59, 0.34))
-            };
+        // Use fixed Classic theme colors (Cream and Green)
+        let light_color = Color::srgb(0.93, 0.93, 0.82); // Cream
+        let dark_color = Color::srgb(0.46, 0.59, 0.34); // Green
 
-        // Now get materials (mutable borrow) - settings borrow is dropped
+        // Now get materials (mutable borrow)
         // Note: Assets<StandardMaterial> should always be available (part of DefaultPlugins)
         // but we handle the error case gracefully for robustness
         let mut materials = match world.get_resource_mut::<Assets<StandardMaterial>>() {
@@ -108,7 +119,7 @@ impl FromWorld for SquareMaterials {
         SquareMaterials {
             black_color: materials.add(light_color), // Light squares
             white_color: materials.add(dark_color),  // Dark squares
-            hover_matl: materials.add(Color::from(AMBER_100)),
+            hover_matl: materials.add(Color::srgb(0.8, 0.2, 0.2)), // Red for legal moves
             grey_color: materials.add(grey_material), // Dull grey for TempleOS (unlit)
             templeos_white: materials.add(white_material), // Bright white for TempleOS (unlit)
             hint_mesh: world

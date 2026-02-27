@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+      - name: Check
+        run: cargo check --workspace --all-features
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+      - name: Clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+        continue-on-error: true
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+      - name: Run tests
+        run: cargo test --workspace
+
+  test-chess-engine:
+    name: Chess Engine Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test -p chess_engine --all-features
+
+  test-shared:
+    name: Shared Protocol Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+      - name: Test
+        run: cargo test -p shared
+
+  wasm-build:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build WASM
+        run: cargo build --target wasm32-unknown-unknown -p xfchess
+        continue-on-error: true

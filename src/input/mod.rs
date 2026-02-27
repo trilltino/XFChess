@@ -1,33 +1,15 @@
-//! Input module - Bevy 0.17 picking and observer patterns
-//!
-//! Demonstrates modern Bevy 0.17 input handling using the new observer system and
-//! picking backend, replacing the older Trigger<E> pattern.
-//!
-//! # Bevy 0.17 Migration
-//!
-//! **Updated Patterns**:
-//! - `Trigger<Pointer<Click>>` (Bevy 0.16) - deprecated
-//! - `On<Pointer<Click>>` (Bevy 0.17) - current
-//! - `EventReader<Pointer<Click>>` (Bevy 0.16) - deprecated
-//! - `MessageReader<Pointer<Click>>` (Bevy 0.17) - current
-//!
-//! # Architecture
-//!
-//! - `pointer` - Observer-based pointer event handlers and helpers
-//! - Observer functions for material updates (hover effects)
-//! - Timer resource for input debouncing
-//!
-//! # Reference
-//!
-//! Implementation follows:
-//! - `reference/bevy/examples/picking/observers.rs` - Observer pattern examples
-//! - `reference/bevy/examples/input/mouse_input.rs` - Input handling
-//! - `reference/bevy-inspector-egui/` - Integration with UI systems
-//!
-//! The observer pattern allows decoupled event handling where entities can register
-//! callbacks via `.observe(callback)` instead of global event polling.
+//! Input module - picking and observer patterns.
 
 pub mod pointer;
-
-// Re-export commonly used items
 pub use pointer::*;
+
+use bevy::prelude::*;
+
+pub struct InputPlugin;
+
+impl Plugin for InputPlugin {
+    fn build(&self, _app: &mut App) {
+        // PointerInputPlugin is already included in Bevy's DefaultPlugins
+        // Custom input systems would be added here
+    }
+}

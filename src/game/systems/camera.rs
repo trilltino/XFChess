@@ -10,6 +10,8 @@
 //! - **S**: Move camera backward (toward bottom of board)
 //! - **A**: Strafe camera left
 //! - **D**: Strafe camera right
+//! - **Q**: Rotate camera left
+//! - **E**: Rotate camera right
 //! - **Mouse Wheel Up**: Zoom in (lower camera height)
 //! - **Mouse Wheel Down**: Zoom out (raise camera height)
 //!
@@ -272,9 +274,21 @@ pub fn camera_movement_system(
         // Get camera's basis vectors
         let forward = transform.forward();
         let right = transform.right();
+        let up = transform.up();
 
         // Project onto XZ plane (maintain Y height for RTS-style movement)
-        let forward_xz = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+        // CRITICAL FIX: when looking straight down (Forward = -Y), Forward.xz is zero!
+        // In that case, we must use the UP vector (which points to Board "North") for forward movement.
+        let is_vertical = forward.y.abs() > 0.9;
+
+        // When vertical (top-down), use UP vector for forward/backward
+        // When angled (perspective), use projected FORWARD vector
+        let forward_xz = if is_vertical {
+            Vec3::new(up.x, 0.0, up.z).normalize_or_zero()
+        } else {
+            Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero()
+        };
+
         let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
 
         // Accumulate movement direction based on pressed keys
@@ -332,6 +346,8 @@ pub const RADIANS_PER_DOT: f32 = 1.0 / 180.0;
 /// On first frame (initialized == false), extracts current pitch/yaw from
 /// the Transform's rotation to prevent sudden camera jumps.
 pub fn camera_rotation_system(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     mouse_motion: Res<AccumulatedMouseMotion>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     selection: Res<Selection>,
@@ -356,7 +372,24 @@ pub fn camera_rotation_system(
             );
         }
 
-        // Only rotate if right mouse button is pressed AND mouse is moving
+        let mut modified = false;
+
+        // Keyboard Rotation (Q/E)
+        // Q = Rotate Left (Increase Yaw)
+        // E = Rotate Right (Decrease Yaw)
+        // Speed: 2.0 radians per second (adjust as needed)
+        const KEYBOARD_ROTATION_SPEED: f32 = 2.0;
+
+        if keyboard.pressed(KeyCode::KeyQ) {
+            controller.yaw += KEYBOARD_ROTATION_SPEED * time.delta_secs();
+            modified = true;
+        }
+        if keyboard.pressed(KeyCode::KeyE) {
+            controller.yaw -= KEYBOARD_ROTATION_SPEED * time.delta_secs();
+            modified = true;
+        }
+
+        // Mouse Rotation (Right-click drag)
         if mouse_button.pressed(MouseButton::Right) && mouse_motion.delta != Vec2::ZERO {
             // Update pitch (up/down) with clamping to prevent gimbal lock
             // Negative delta.y = move mouse up = look up = increase pitch
@@ -369,7 +402,11 @@ pub fn camera_rotation_system(
             controller.yaw -=
                 mouse_motion.delta.x * RADIANS_PER_DOT * controller.rotation_sensitivity;
 
-            // Apply rotation to Transform
+            modified = true;
+        }
+
+        // Apply rotation to Transform if anything changed
+        if modified {
             // Order: ZYX (roll=0, yaw, pitch) matches Bevy reference
             transform.rotation =
                 Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
@@ -650,7 +687,6 @@ mod tests {
         let scroll_delta: f32 = 1.0;
         let slow_speed: f32 = 1.0;
         let fast_speed: f32 = 3.0;
-        let initial: f32 = 15.0;
 
         let slow_change = -scroll_delta * slow_speed;
         let fast_change = -scroll_delta * fast_speed;
@@ -720,5 +756,154 @@ mod tests {
         }
 
         assert_eq!(target_zoom, 13.0);
+    }
+}
+
+/// Configure the persistent camera for gameplay
+/// Use the existing Egui camera as the main game camera to avoid conflicts
+pub fn setup_game_camera(
+    mut commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
+    mut query: Query<(&mut Transform, &mut Camera)>,
+    connection_state: Option<Res<crate::multiplayer::p2p_connection::P2PConnectionState>>,
+) {
+    // Only configure for standard view (TempleOS handles its own camera/view)
+    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
+        return;
+    }
+
+    if let Some(entity) = persistent_camera.entity {
+        if let Ok((mut transform, mut camera)) = query.get_mut(entity) {
+            // Position for gameplay: Standard Chess Perspective
+            // High angle, centered behind each player's pieces
+            let initial_height = 12.0;
+            let distance_behind = 8.0; // Distance behind the board edge
+
+            // Joiner is assigned Black; host is assigned White
+            let is_black_view = connection_state
+                .as_ref()
+                .and_then(|s| s.player_color)
+                .map(|c| c == shakmaty::Color::Black)
+                .unwrap_or(false);
+
+            // Camera positioned along Z-axis to view board from player's side
+            // White view: behind rank 1 (negative Z), looking toward center
+            // Black view: behind rank 8 (positive Z), looking toward center
+            // Board center is at (3.5, 0, 3.5)
+
+            let camera_pos = if is_black_view {
+                // Black player: camera behind rank 8 (Z=7), looking toward board
+                Vec3::new(3.5, initial_height, 7.0 + distance_behind)
+            } else {
+                // White player: camera behind rank 1 (Z=0), looking toward board
+                Vec3::new(3.5, initial_height, -distance_behind)
+            };
+
+            let board_center = Vec3::new(3.5, 0.0, 3.5);
+            *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+
+            // Ensure order is correct (0 is standard for 3D)
+            camera.order = 0;
+
+            // Add RTS camera controls
+            // Check if controller already exists to preserve zoom/state if re-running?
+            // Usually setup runs once on Enter.
+            commands.entity(entity).insert(CameraController {
+                current_zoom: initial_height,
+                target_zoom: initial_height,
+                min_zoom: 3.0,
+                max_zoom: 30.0,
+                // Let the system calculate pitch/yaw from the Transform we just set
+                initialized: false,
+                // Initialize yaw correctly for controls (facing toward board center)
+                yaw: if is_black_view {
+                    std::f32::consts::PI // Black looks toward negative Z
+                } else {
+                    0.0 // White looks toward positive Z
+                },
+                ..Default::default()
+            });
+
+            info!(
+                "[CAMERA] Configured Persistent Camera for Standard Perspective. Black View: {}, Pos: {:?}",
+                is_black_view, camera_pos
+            );
+        }
+    }
+}
+
+/// Reset the persistent camera when exiting gameplay
+pub fn reset_game_camera(
+    mut commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    mut query: Query<&mut Camera>,
+) {
+    if let Some(entity) = persistent_camera.entity {
+        // Remove RTS controls
+        commands.entity(entity).remove::<CameraController>();
+
+        // Reset order if needed (though 0 is usually fine for menus too)
+        if let Ok(mut camera) = query.get_mut(entity) {
+            camera.order = 0;
+        }
+
+        info!("[CAMERA] Reset Persistent Camera (Removed Controls)");
+    }
+}
+
+/// System to reset camera to default "Standard Perspective" when 'N' is pressed
+pub fn camera_reset_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut query: Query<(&mut Transform, &mut CameraController)>,
+    connection_state: Option<Res<crate::multiplayer::p2p_connection::P2PConnectionState>>,
+    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyN) {
+        // Determine player color from either P2PConnectionState or BraidNetworkState
+        let player_color = connection_state
+            .as_ref()
+            .and_then(|s| s.player_color)
+            .or_else(|| {
+                network_state.as_ref().and_then(|ns| {
+                    ns.active_session.as_ref().map(|session| {
+                        match session.game_state.as_ref() {
+                            Some(game_state) => match game_state.my_color {
+                                crate::multiplayer::PlayerColor::White => shakmaty::Color::White,
+                                crate::multiplayer::PlayerColor::Black => shakmaty::Color::Black,
+                            },
+                            None => shakmaty::Color::White,
+                        }
+                    })
+                })
+            });
+
+        let is_black_view = player_color
+            .map(|c| c == shakmaty::Color::Black)
+            .unwrap_or(false);
+
+        for (mut transform, mut controller) in query.iter_mut() {
+            // Standard Perspective defaults
+            // Positioned behind player's pieces along Z-axis
+            let initial_height = 12.0;
+            let distance_behind = 8.0;
+            let default_pos = if is_black_view {
+                // Black player: camera behind rank 8, looking toward board
+                Vec3::new(3.5, initial_height, 7.0 + distance_behind)
+            } else {
+                // White player: camera behind rank 1, looking toward board
+                Vec3::new(3.5, initial_height, -distance_behind)
+            };
+            let board_center = Vec3::new(3.5, 0.0, 3.5);
+            let default_zoom = 12.0;
+
+            *transform = Transform::from_translation(default_pos).looking_at(board_center, Vec3::Y);
+
+            controller.current_zoom = default_zoom;
+            controller.target_zoom = default_zoom;
+            controller.yaw = if is_black_view { std::f32::consts::PI } else { 0.0 };
+
+            info!("[CAMERA] Reset to {} Perspective", if is_black_view { "Black" } else { "White" });
+        }
     }
 }

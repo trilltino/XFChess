@@ -105,7 +105,7 @@ fn handle_pause_input(
 fn pause_ui(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
-    mut previous_state: ResMut<PreviousState>,
+    _previous_state: ResMut<PreviousState>,
 ) -> Result<(), bevy::ecs::query::QuerySingleError> {
     let ctx = contexts.ctx_mut()?;
 
@@ -121,23 +121,15 @@ fn pause_ui(
                 Layout::section_space(ui);
 
                 // Resume
-                if StyledButton::primary(ui, "Resume Game").clicked() {
+                if ModernButton::primary(ui, "Resume Game").clicked() {
                     info!("[PAUSE] Resuming game");
                     next_state.set(GameState::InGame);
                 }
 
                 Layout::item_space(ui);
 
-                // Settings
-                if StyledButton::secondary(ui, "Settings").clicked() {
-                    previous_state.state = GameState::Paused;
-                    next_state.set(GameState::Settings);
-                }
-
-                Layout::item_space(ui);
-
                 // Main Menu
-                if StyledButton::danger(ui, "Main Menu").clicked() {
+                if ModernButton::secondary(ui, "Main Menu").clicked() {
                     info!("[PAUSE] Returning to main menu");
                     next_state.set(GameState::MainMenu);
                 }

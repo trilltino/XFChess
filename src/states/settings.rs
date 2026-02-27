@@ -6,7 +6,7 @@
 //! - Board theme
 //! - Game preferences
 
-use crate::core::{BoardTheme, GameSettings, GameState, GraphicsQuality, PreviousState};
+use crate::core::{GameSettings, GameState, PreviousState};
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -115,14 +115,6 @@ fn settings_ui(
             ui.vertical_centered(|ui| {
                 Layout::section_space(ui);
 
-                // Debug text to confirm UI is rendering
-                ui.colored_label(
-                    egui::Color32::from_rgb(255, 255, 0),
-                    egui::RichText::new("SETTINGS - UI IS WORKING!").size(24.0),
-                );
-
-                Layout::small_space(ui);
-
                 ui.heading(TextStyle::heading("Settings", TextSize::LG));
 
                 Layout::section_space(ui);
@@ -153,111 +145,6 @@ fn settings_ui(
 
                     Layout::small_space(ui);
                     ui.label(TextStyle::caption(settings.graphics_quality.description()));
-                });
-
-                Layout::item_space(ui);
-
-                // Board Theme
-                StyledPanel::card().show(ui, |ui| {
-                    ui.heading(TextStyle::heading("Board Theme", TextSize::MD));
-                    Layout::item_space(ui);
-
-                    ui.horizontal(|ui| {
-                        ui.radio_value(&mut settings.board_theme, BoardTheme::Classic, "Classic");
-                        ui.radio_value(&mut settings.board_theme, BoardTheme::Modern, "Modern");
-                        ui.radio_value(&mut settings.board_theme, BoardTheme::Wood, "Wood");
-                        ui.radio_value(&mut settings.board_theme, BoardTheme::Marble, "Marble");
-                    });
-                });
-
-                Layout::item_space(ui);
-
-                // Dynamic Lighting Configuration
-                StyledPanel::card().show(ui, |ui| {
-                    ui.heading(TextStyle::heading("Dynamic Lighting", TextSize::MD));
-                    Layout::item_space(ui);
-
-                    // Enable/Disable toggle
-                    ui.checkbox(
-                        &mut settings.dynamic_lighting.enabled,
-                        "Enable dynamic orbital lighting",
-                    );
-
-                    if settings.dynamic_lighting.enabled {
-                        Layout::item_space(ui);
-
-                        // Light count slider
-                        ui.label(TextStyle::body(format!(
-                            "Number of Lights: {}",
-                            settings.dynamic_lighting.light_count
-                        )));
-                        ui.add(egui::Slider::new(
-                            &mut settings.dynamic_lighting.light_count,
-                            2..=6,
-                        ));
-
-                        // Update colors when count changes
-                        let old_count = settings.dynamic_lighting.light_colors.len() as u32;
-                        if old_count != settings.dynamic_lighting.light_count {
-                            settings.dynamic_lighting.update_colors_for_count();
-                        }
-
-                        Layout::item_space(ui);
-
-                        // Color pickers for each light
-                        ui.label(TextStyle::body("Light Colors:"));
-                        for i in 0..settings.dynamic_lighting.light_count as usize {
-                            if i < settings.dynamic_lighting.light_colors.len() {
-                                let color = &mut settings.dynamic_lighting.light_colors[i];
-                                // Convert Color to RGB values for sliders
-                                let srgba = color.to_srgba();
-                                let mut r = srgba.red;
-                                let mut g = srgba.green;
-                                let mut b = srgba.blue;
-
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("Light {}: ", i + 1));
-                                    ui.add(egui::Slider::new(&mut r, 0.0..=1.0).text("R"));
-                                    ui.add(egui::Slider::new(&mut g, 0.0..=1.0).text("G"));
-                                    ui.add(egui::Slider::new(&mut b, 0.0..=1.0).text("B"));
-
-                                    // Update color if sliders changed
-                                    if r != srgba.red || g != srgba.green || b != srgba.blue {
-                                        *color = Color::srgb(r, g, b);
-                                    }
-                                });
-                            }
-                        }
-
-                        Layout::item_space(ui);
-
-                        // Orbital parameters
-                        ui.label(TextStyle::body("Orbital Radius:"));
-                        ui.add(egui::Slider::new(
-                            &mut settings.dynamic_lighting.orbital_radius,
-                            5.0..=20.0,
-                        ));
-
-                        ui.label(TextStyle::body("Orbital Speed:"));
-                        ui.add(egui::Slider::new(
-                            &mut settings.dynamic_lighting.orbital_speed,
-                            0.1..=2.0,
-                        ));
-
-                        ui.label(TextStyle::body("Light Height:"));
-                        ui.add(egui::Slider::new(
-                            &mut settings.dynamic_lighting.orbital_height,
-                            5.0..=15.0,
-                        ));
-
-                        Layout::item_space(ui);
-
-                        // Shadows toggle
-                        ui.checkbox(
-                            &mut settings.dynamic_lighting.shadows_enabled,
-                            "Cast shadows",
-                        );
-                    }
                 });
 
                 Layout::item_space(ui);

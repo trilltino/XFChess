@@ -29,42 +29,7 @@
 //! - `reference/chess_engine/src/types.rs` - Engine game state representation
 //! - `reference/bevy-3d-chess/src/board.rs` - ECS game state tracking
 //!
-//! # Examples
-//!
-//! ## Checking game phase
-//!
-//! ```rust
-//! use bevy::prelude::*;
-//! use xfchess::game::components::GamePhase;
-//!
-//! fn display_game_status(phase: Res<GamePhase>) {
-//!     match *phase {
-//!         GamePhase::Check => println!("Check!"),
-//!         GamePhase::Checkmate => println!("Checkmate!"),
-//!         GamePhase::Stalemate => println!("Draw by stalemate"),
-//!         _ => {}
-//!     }
-//! }
-//! ```
-//!
-//! ## Recording a move
-//!
-//! ```rust
-//! use xfchess::game::components::MoveRecord;
-//! use xfchess::rendering::pieces::{PieceType, PieceColor};
-//!
-//! let move_record = MoveRecord {
-//!     piece_type: PieceType::Pawn,
-//!     piece_color: PieceColor::White,
-//!     from: (4, 1), // e2
-//!     to: (4, 3),   // e4
-//!     captured: None,
-//!     is_castling: false,
-//!     is_en_passant: false,
-//!     is_check: false,
-//!     is_checkmate: false,
-//! };
-//! ```
+//! For usage examples, see `tests/components/game_state_tests.rs`
 
 use crate::rendering::pieces::{PieceColor, PieceType};
 use bevy::prelude::*;
@@ -89,18 +54,7 @@ use bevy::prelude::*;
 /// - **Checkmate**: Current player's king is in check with no legal moves (game over)
 /// - **Stalemate**: Current player has no legal moves but isn't in check (draw)
 ///
-/// # Usage
-///
-/// Systems can query the phase to enable/disable functionality:
-///
-/// ```rust
-/// use bevy::prelude::*;
-/// use xfchess::game::components::GamePhase;
-///
-/// fn allow_moves_system(phase: Res<GamePhase>) -> bool {
-///     matches!(*phase, GamePhase::Playing | GamePhase::Check)
-/// }
-/// ```
+/// For usage examples, see `tests/components/game_state_tests.rs`
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 pub enum GamePhase {
@@ -168,25 +122,7 @@ pub enum GamePhase {
 /// - `is_check`: Move puts opponent in check
 /// - `is_checkmate`: Move ends the game (checkmate)
 ///
-/// # Example
-///
-/// ```rust
-/// use xfchess::game::components::MoveRecord;
-/// use xfchess::rendering::pieces::{PieceType, PieceColor};
-///
-/// // Scholar's Mate final move: Qf7#
-/// let checkmate_move = MoveRecord {
-///     piece_type: PieceType::Queen,
-///     piece_color: PieceColor::White,
-///     from: (3, 7),  // d8 (assuming queen started there)
-///     to: (5, 6),    // f7
-///     captured: Some(PieceType::Pawn),  // Captures f7 pawn
-///     is_castling: false,
-///     is_en_passant: false,
-///     is_check: true,
-///     is_checkmate: true,
-/// };
-/// ```
+/// For usage examples, see `tests/components/game_state_tests.rs`
 #[derive(Clone, Copy, Debug, Reflect)]
 pub struct MoveRecord {
     /// Type of piece that moved (Pawn, Rook, Knight, Bishop, Queen, King)

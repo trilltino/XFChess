@@ -11,6 +11,20 @@ build.log
 compilation_error.log
 error_ascii*.txt
 
+# Error and check files
+check_errors*.txt
+current_errors.txt
+final_check.txt
+test_run.log
+
+# Analysis and plan files
+REFERENCE_ANALYSIS.md
+FIX_PLAN.md
+
+# Temporary scripts
+temp_clone_repos.bat
+temp_analysis/
+
 # Logs
 /logs/
 *.log
@@ -28,6 +42,7 @@ Thumbs.db
 desktop.ini
 
 # Reference materials (too large for git)
+/references/
 /reference/
 
 # Web build
@@ -41,3 +56,8 @@ settings.json
 # Temporary files
 *.tmp
 *.temp
+
+# P2P identity keys (unique per peer instance)
+xfchess_identity.key
+xfchess_peer_*.key
+launch_peer_*.bat

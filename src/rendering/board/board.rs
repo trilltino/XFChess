@@ -13,7 +13,7 @@ use bevy::prelude::*;
 #[derive(Resource, Component)]
 pub struct Board;
 
-pub(crate) fn create_board(
+pub fn create_board(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<SquareMaterials>,
@@ -48,15 +48,20 @@ pub(crate) fn create_board(
 
     // Pattern from Bevy stress_tests/many_sprites.rs: Collect all squares into Vec, then batch spawn
     // This reduces stack pressure and is more efficient than 64 individual spawn calls
+    //
+    // Chess coordinate system:
+    // - x = file (0-7, a-h), maps to world X
+    // - y = rank (0-7, 1-8), maps to world Z
     let squares: Vec<_> = (0..8)
-        .flat_map(|i| {
+        .flat_map(|rank| {
             // Clone materials and mesh for each row to share across inner closure
             let light_material = light_mat.clone();
             let dark_material = dark_mat.clone();
             let mesh = boardmesh.clone();
 
-            (0..8).map(move |j| {
-                let square = Square { x: i, y: j };
+            (0..8).map(move |file| {
+                // Square uses chess coordinates: x=file, y=rank
+                let square = Square::new(file, rank);
 
                 // Use Square::is_white() method for proper checkerboard pattern
                 let material = if square.is_white() {
@@ -66,20 +71,23 @@ pub(crate) fn create_board(
                 };
 
                 // Generate square name in chess notation (e.g., "Square a1", "Square h8")
-                let file = (b'a' + j) as char;
-                let rank = i + 1;
-                let square_name = format!("Square {}{}", file, rank);
+                let file_char = (b'a' + file) as char;
+                let rank_num = rank + 1;
+                let square_name = format!("Square {}{}", file_char, rank_num);
+
+                // World position: X = file, Z = rank
+                let world_pos = Vec3::new(file as f32, 0., rank as f32);
 
                 // Bundle all components for this square
                 // DespawnOnExit automatically despawns all 64 board squares when exiting Multiplayer
                 // For TempleOS mode with Rectangle (2D quad), rotate to lie flat in XZ plane
                 let transform = if is_templeos {
                     // Rectangle lies in XY plane by default, rotate -90° around X to lie in XZ plane
-                    Transform::from_translation(Vec3::new(i as f32, 0., j as f32))
+                    Transform::from_translation(world_pos)
                         .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
                 } else {
-                    // Plane3d already lies in XZ plane, no rotation needed
-                    Transform::from_translation(Vec3::new(i as f32, 0., j as f32))
+                    // Cuboid already properly oriented, no rotation needed
+                    Transform::from_translation(world_pos)
                 };
 
                 (
@@ -112,7 +120,6 @@ pub struct BoardPlugin;
 
 impl Plugin for BoardPlugin {
     fn build(&self, app: &mut App) {
-        use super::board_theme::update_board_theme_system;
         use super::coordinates::create_coordinate_labels;
         use super::templeos_ui::create_templeos_quote_ui;
         use crate::core::GameState;
@@ -131,12 +138,18 @@ impl Plugin for BoardPlugin {
         .add_systems(
             Update,
             (
-                update_board_theme_system.run_if(in_state(GameState::InGame)),
                 update_move_hints_system.run_if(in_state(GameState::InGame)),
                 update_last_move_highlight_system.run_if(in_state(GameState::InGame)),
                 crate::rendering::templeos_camera_movement_system
                     .run_if(in_state(GameState::InGame)),
+                crate::game::systems::debug_transform::debug_log_transforms
+                    .run_if(in_state(GameState::InGame)),
             ),
         );
+        // Debug markers removed - they were showing colored spheres on the board corners
+        // app.add_systems(
+        //     OnEnter(GameState::InGame),
+        //     crate::game::systems::debug_visuals::spawn_debug_markers,
+        // );
     }
 }

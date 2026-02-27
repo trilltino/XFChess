@@ -2,35 +2,15 @@
 //!
 //! Provides convenient SystemParam types that group related resources together,
 //! following the bevy_egui pattern of using SystemParams for cleaner APIs.
-//!
-//! # Usage
-//!
-//! Instead of:
-//! ```rust,ignore
-//! fn my_system(
-//!     current_turn: Res<CurrentTurn>,
-//!     game_phase: Res<CurrentGamePhase>,
-//!     game_over: Res<GameOverState>,
-//!     captured: Res<CapturedPieces>,
-//! ) {
-//!     // ...
-//! }
-//! ```
-//!
-//! Use:
-//! ```rust,ignore
-//! fn my_system(game_state: GameStateParams) {
-//!     // Access via game_state.current_turn, game_state.game_phase, etc.
-//! }
-//! ```
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use super::{
-    CapturedPieces, ChessEngine, CurrentGamePhase, CurrentTurn, GameOverState, GameTimer,
-    MoveHistory, Players, Selection, TurnStateContext,
+    CapturedPieces, CurrentGamePhase, CurrentTurn, GameOverState, GameTimer, MoveHistory, Players,
+    Selection, TurnStateContext,
 };
+use crate::engine::board_state::ChessEngine;
 
 /// System parameter grouping game state resources
 ///
@@ -43,23 +23,6 @@ use super::{
 /// - [`CurrentGamePhase`] - Current game phase (Playing, Check, etc.)
 /// - [`GameOverState`] - Game end conditions
 /// - [`CapturedPieces`] - Material tracking
-///
-/// # Example
-///
-/// ```rust,ignore
-/// fn check_game_state(game_state: GameStateParams) {
-///     if game_state.game_over.is_game_over() {
-///         return; // Don't process moves when game is over
-///     }
-///
-///     if game_state.current_turn.color == PieceColor::White {
-///         // White's turn logic
-///     }
-/// }
-/// ```
-/// System parameter grouping game state resources
-///
-/// Reserved for future use - provides convenient access to game state resources.
 #[derive(SystemParam)]
 #[allow(dead_code)] // Public API - reserved for future system implementations
 pub struct GameStateParams<'w> {
