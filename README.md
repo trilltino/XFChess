@@ -4,6 +4,11 @@
 
 Play chess competitively with real stakes. Every move is recorded on-chain for provable fairness, powered by MagicBlock ER for sub-second gameplay.
 
+<p align="center">
+  <img src="assets/screenshots/gameplay_1.png" width="45%" alt="XFChess Gameplay" />
+  <img src="assets/screenshots/gameplay_2.png" width="45%" alt="XFChess Board View" />
+</p>
+
 ## Quick Start
 
 ### Play a Wager Game
