@@ -4,10 +4,12 @@
 
 Play chess competitively with real stakes. Every move is recorded on-chain for provable fairness, powered by MagicBlock ER for sub-second gameplay.
 
-<p align="center">
-  <img src="assets/screenshots/gameplay_1.png" width="45%" alt="XFChess Gameplay" />
-  <img src="assets/screenshots/gameplay_2.png" width="45%" alt="XFChess Board View" />
-</p>
+<table align="center">
+  <tr>
+    <td width="400"><img src="assets/screenshots/gameplay_1.png" width="400" height="300" alt="XFChess Gameplay" /></td>
+    <td width="400"><img src="assets/screenshots/gameplay_2.png" width="400" height="300" alt="XFChess Board View" /></td>
+  </tr>
+</table>
 
 ## Quick Start
 
@@ -52,7 +54,7 @@ Play chess competitively with real stakes. Every move is recorded on-chain for p
 │                               │                                │
 │                    ┌──────────────────────┐                   │
 │                    │   MagicBlock ER      │                   │
-│                    │   (Optional)         │                   │
+│                    │   Ephemeral Rollups  │                   │
 │                    └──────────────────────┘                   │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
