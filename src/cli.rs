@@ -149,6 +149,7 @@ pub struct DebuggerCli {
 
 /// Session configuration loaded from JSON file
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionConfig {
     pub game_id: String,
     pub player_color: String,

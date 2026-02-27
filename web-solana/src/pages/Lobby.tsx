@@ -572,6 +572,7 @@ export default function Lobby() {
     const [activeGames, setActiveGames] = useState<GameData[]>([])
     const [isLoadingGames, setIsLoadingGames] = useState(false)
     const [joiningGameId, setJoiningGameId] = useState<string | null>(null)
+    const [dateCutoff, setDateCutoff] = useState<number>(7) // Days to show games from (0 = all)
 
     // Fetch wallet balance
     const fetchBalance = async () => {
@@ -708,14 +709,19 @@ export default function Lobby() {
         }
     }
 
+    // Filter games by date cutoff
+    const now = Math.floor(Date.now() / 1000)
+    const cutoffTimestamp = dateCutoff > 0 ? now - dateCutoff * 24 * 60 * 60 : 0
+    const recentGames = activeGames.filter((g) => g.createdAt >= cutoffTimestamp)
+
     // Categorize games
-    const myGames = activeGames.filter(
+    const myGames = recentGames.filter(
         (g) => g.white === publicKey?.toBase58() || g.black === publicKey?.toBase58()
     )
-    const openGames = activeGames.filter(
+    const openGames = recentGames.filter(
         (g) => g.status === 'waiting' && g.white !== publicKey?.toBase58() && (!g.black || g.black === '11111111111111111111111111111111')
     )
-    const otherGames = activeGames.filter((g) => !myGames.includes(g) && !openGames.includes(g))
+    const otherGames = recentGames.filter((g) => !myGames.includes(g) && !openGames.includes(g))
 
     // Render notification
     const renderNotification = () => {
@@ -772,7 +778,27 @@ export default function Lobby() {
                     </p>
                 </div>
                 {connected && (
-                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                        {/* Date Cutoff Filter */}
+                        <select
+                            value={dateCutoff}
+                            onChange={(e) => setDateCutoff(Number(e.target.value))}
+                            style={{
+                                padding: '0.5rem 0.75rem',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                background: 'var(--bg-secondary)',
+                                color: 'var(--text-primary)',
+                                fontSize: '0.875rem',
+                                cursor: 'pointer',
+                            }}
+                            title="Filter games by date"
+                        >
+                            <option value={1}>Last 24 hours</option>
+                            <option value={7}>Last 7 days</option>
+                            <option value={30}>Last 30 days</option>
+                            <option value={0}>All time</option>
+                        </select>
                         <button
                             onClick={loadActiveGames}
                             disabled={isLoadingGames}
@@ -800,7 +826,7 @@ export default function Lobby() {
                     <span className="spinner" />
                     <p style={{ color: 'var(--text-secondary)', marginTop: '1rem' }}>Loading games...</p>
                 </div>
-            ) : activeGames.length === 0 ? (
+            ) : recentGames.length === 0 ? (
                 <EmptyState onCreate={() => setShowCreateModal(true)} />
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
