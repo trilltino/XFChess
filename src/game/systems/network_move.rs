@@ -18,6 +18,9 @@ pub fn handle_network_moves(
     mut captured_pieces: ResMut<CapturedPieces>,
     mut engine: ResMut<ChessEngine>,
     game_sounds: Option<Res<GameSounds>>,
+    children_query: Query<&Children>,
+    material_query: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for event in events.read() {
         info!(
@@ -87,6 +90,9 @@ pub fn handle_network_moves(
                 &mut pieces_query,
                 None, // No MoveMadeEvent writer — avoid local echo
                 None, // BoardStateSync — network moves don't broadcast
+                &children_query,
+                &material_query,
+                &mut materials,
             );
 
             // 6. Update Selection (Clear if we moved selected piece)

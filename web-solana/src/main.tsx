@@ -13,6 +13,7 @@ import '@solana/wallet-adapter-react-ui/styles.css'
 const network = WalletAdapterNetwork.Devnet
 const endpoint = clusterApiUrl(network)
 
+// Support multiple wallet adapters - browser extensions auto-detected
 const wallets = [
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),

@@ -92,6 +92,9 @@ pub struct AiPollParams<'w, 's> {
     pub ai_config: Res<'w, ChessAIResource>,
     pub engine: ResMut<'w, ChessEngine>,
     pub sounds: Option<Res<'w, crate::game::resources::GameSounds>>,
+    pub children_query: Query<'w, 's, &'static Children>,
+    pub material_query: Query<'w, 's, &'static MeshMaterial3d<StandardMaterial>>,
+    pub materials: ResMut<'w, Assets<StandardMaterial>>,
 }
 
 fn spawn_ai_task_system(
@@ -260,6 +263,9 @@ fn poll_ai_task_system(
                     &mut p0,
                     None,
                     None, // BoardStateSync not available in AI context
+                    &params.children_query,
+                    &params.material_query,
+                    &mut params.materials,
                 );
             } else {
                 warn!("[AI] Could not find valid piece at {:?}", from_coords);

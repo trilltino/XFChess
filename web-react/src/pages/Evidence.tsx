@@ -70,7 +70,7 @@ const erEvidence = [
     }
 ];
 
-const TestCard = ({ test, type }: { test: any; type: 'solana' | 'er' }) => {
+const TestCard = ({ test }: { test: any }) => {
     const [expanded, setExpanded] = useState(false);
 
     const getExplorerUrl = (signature: string) => {
@@ -286,7 +286,7 @@ const Evidence = () => {
 
                             <div className="test-list">
                                 {solanaEvidence.map((test) => (
-                                    <TestCard key={test.id} test={test} type="solana" />
+                                    <TestCard key={test.id} test={test} />
                                 ))}
                             </div>
 
@@ -330,7 +330,7 @@ const Evidence = () => {
 
                             <div className="test-list">
                                 {erEvidence.map((test) => (
-                                    <TestCard key={test.id} test={test} type="er" />
+                                    <TestCard key={test.id} test={test} />
                                 ))}
                             </div>
 

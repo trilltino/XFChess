@@ -74,6 +74,9 @@ pub fn apply_capture(
     captured_pieces: &mut CapturedPieces,
     capture_sound: Option<Handle<AudioSource>>,
     target: CapturedTarget,
+    children_query: &Query<&Children>,
+    material_query: &Query<&MeshMaterial3d<StandardMaterial>>,
+    materials: &mut Assets<StandardMaterial>,
 ) {
     if let Some(sound) = capture_sound {
         commands.spawn(AudioPlayer::new(sound));
@@ -97,11 +100,25 @@ pub fn apply_capture(
         count_of_same_type,
     );
 
+    // Capture the original color from the first child mesh's material
+    let mut original_color = Color::WHITE; // Default fallback
+    if let Ok(children) = children_query.get(target.entity) {
+        for child in children.iter() {
+            if let Ok(material_handle) = material_query.get(child) {
+                if let Some(material) = materials.get(&material_handle.0) {
+                    original_color = material.base_color;
+                    break; // Use the first child's material color
+                }
+            }
+        }
+    }
+
     // Add FadingCapture component for fade-out animation instead of instant move
     // Longer duration (1.0s) for smoother visual effect
     commands.entity(target.entity).insert(FadingCapture {
         timer: Timer::from_seconds(1.0, TimerMode::Once),
         capture_zone_pos: capture_pos,
+        original_color,
     });
 }
 
@@ -145,9 +162,10 @@ pub fn update_piece_state(
     piece_component.y = target.1;
     // Use PIECE_ON_BOARD_Y so the animation stays on the board surface (y=0.05),
     // matching the spawn position and the snap target in animate_piece_movement.
+    // Coordinate system: X = 7 - rank, Z = file (matches reference)
     commands.entity(entity).insert(PieceMoveAnimation::new(
-        Vec3::new(from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
-        Vec3::new(target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),
+        Vec3::new((7 - from_pos.1) as f32, PIECE_ON_BOARD_Y, from_pos.0 as f32),
+        Vec3::new((7 - target.1) as f32, PIECE_ON_BOARD_Y, target.0 as f32),
         0.25,
     ));
 
@@ -171,6 +189,9 @@ pub fn execute_move(
     pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
     move_events: Option<&mut MessageWriter<MoveMadeEvent>>,
     board_sync: Option<&mut BoardStateSync>,
+    children_query: &Query<&Children>,
+    material_query: &Query<&MeshMaterial3d<StandardMaterial>>,
+    materials: &mut Assets<StandardMaterial>,
 ) -> bool {
     // 1. Play Audio
     play_move_audio(commands, ctx.move_sound.clone(), ctx.capture.is_some());
@@ -182,6 +203,9 @@ pub fn execute_move(
             captured_pieces,
             ctx.capture_sound.clone(),
             target_cap,
+            children_query,
+            material_query,
+            materials,
         );
     }
 

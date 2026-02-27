@@ -14,5 +14,5 @@ pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
 // Dedicated AI Authority Pubkey (Example, to be replaced with real AI signer)
 pub mod ai_authority {
     use anchor_lang::prelude::declare_id;
-    declare_id!("AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp");
+    declare_id!("3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP");
 }

@@ -107,7 +107,10 @@ const MagicBlockPage = () => {
           <CodeViewer
             title="programs/xfchess-game/src/instructions/delegate_game.rs"
             language="Rust"
-            code={`pub fn handler_delegate_game(
+            code={`// MagicBlock Ephemeral Rollups SDK imports
+use ephemeral_rollups_sdk::cpi::{delegate_account, DelegateAccounts, DelegateConfig};
+
+pub fn handler_delegate_game(
     ctx: Context<DelegateGameCtx>,
     _game_id: u64,
     valid_until: i64,
@@ -125,13 +128,13 @@ const MagicBlockPage = () => {
     let game_id_bytes = _game_id.to_le_bytes();
     let seeds: &[&[u8]] = &[b"game", &game_id_bytes, &[game.bump]];
 
-    // Configure delegation with commit frequency
+    // Configure delegation with commit frequency via SDK
     let config = DelegateConfig {
         commit_frequency_ms: (valid_until as u32).saturating_mul(1000),
         validator: None, // Any available ER validator
     };
 
-    // Execute delegation CPI to MagicBlock
+    // Execute delegation CPI via MagicBlock SDK
     delegate_account(delegate_accounts, seeds, config)?;
     Ok(())
 }`}

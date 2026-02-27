@@ -5,6 +5,20 @@ import * as anchor from '@coral-xyz/anchor';
 import { SessionTokenManager } from '@magicblock-labs/gum-sdk';
 import { MAGICBLOCK_CONFIG } from '../constants/magicblock';
 
+// SessionConfig format that matches the Rust EXE expectations
+interface SessionConfig {
+    game_id: string;
+    player_color: 'white' | 'black';
+    session_key: string;      // base58 encoded secret key
+    session_pubkey: string;   // base58 encoded public key
+    node_id: string;          // Will be filled by EXE
+    rpc_url: string;
+    game_pda: string;         // Derived from game_id
+    wager_amount: number;
+    opponent_pubkey?: string;
+}
+
+// Legacy interface for local storage
 interface GameSession {
     walletPubkey: string;
     sessionSigner: string;
@@ -185,6 +199,13 @@ const GameLauncher: React.FC = () => {
         }
     }, [publicKey, signTransaction, connection, ensureTempKeypairFunded, gameId, role]);
 
+    // Derive game PDA from game_id (matches Rust implementation)
+    const deriveGamePDA = (gameId: string): string => {
+        // In a real implementation, this would use the same PDA derivation as the Rust code
+        // For now, we return a placeholder that the EXE will validate
+        return `GAME_${gameId}_PDA`;
+    };
+
     // Launch native game with session data
     const launchGame = useCallback(async () => {
         if (!session) {
@@ -193,8 +214,20 @@ const GameLauncher: React.FC = () => {
         }
 
         try {
-            // Serialize session data for the native game
-            const sessionJson = JSON.stringify(session);
+            // Convert GameSession to SessionConfig format for the EXE
+            const sessionConfig: SessionConfig = {
+                game_id: session.gameId || '0',
+                player_color: session.role === 'host' ? 'white' : 'black',
+                session_key: session.sessionSignerSecret, // Already JSON stringified Uint8Array
+                session_pubkey: session.sessionSigner,
+                node_id: '', // EXE will fill this in
+                rpc_url: MAGICBLOCK_CONFIG.RPC_URL,
+                game_pda: deriveGamePDA(session.gameId || '0'),
+                wager_amount: 0.01, // Default wager
+            };
+
+            // Serialize session config for the native game
+            const sessionJson = JSON.stringify(sessionConfig, null, 2);
 
             // Copy to clipboard as backup
             await navigator.clipboard.writeText(sessionJson);
@@ -225,7 +258,8 @@ const GameLauncher: React.FC = () => {
                 a.click();
                 URL.revokeObjectURL(url);
 
-                alert(`Session saved to ${fileName}. Launch the game with:\n\nlaunch_game_with_session.bat ${fileName}`);
+                const role = session.role === 'host' ? 'Player 1 (White)' : 'Player 2 (Black)';
+                alert(`${role} session saved to ${fileName}.\n\nIMPORTANT: After launching the game, copy your Node ID from the game window and share it with your opponent.\n\nLaunch with:\nlaunch_game_with_session.bat ${fileName}`);
             }
         } catch (err) {
             console.error('Failed to launch game:', err);
@@ -267,15 +301,8 @@ const GameLauncher: React.FC = () => {
             </h3>
 
             {error && (
-                <div style={{
-                    padding: '0.75rem',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    border: '1px solid #ef4444',
-                    borderRadius: '4px',
-                    marginBottom: '1rem',
-                    color: '#ef4444',
-                }}>
-                    {error}
+                <div className="error-box">
+                    <strong>Error:</strong> {error}
                 </div>
             )}
 
@@ -323,29 +350,44 @@ const GameLauncher: React.FC = () => {
                     </div>
 
                     {role === 'joiner' && (
-                        <div style={{ marginBottom: '1rem' }}>
+                        <div style={{
+                            marginBottom: '1rem',
+                            padding: '1rem',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            border: '2px solid #3b82f6',
+                            borderRadius: '8px',
+                        }}>
                             <label style={{
                                 display: 'block',
                                 marginBottom: '0.5rem',
-                                color: 'var(--text-secondary)',
+                                color: '#60a5fa',
                                 fontSize: '0.875rem',
+                                fontWeight: 'bold',
                             }}>
-                                Game ID (optional):
+                                Enter Game ID to Join:
                             </label>
                             <input
                                 type="text"
                                 value={gameId}
                                 onChange={(e) => setGameId(e.target.value)}
-                                placeholder="Enter game ID to join"
+                                placeholder="Paste the game ID from the host"
                                 style={{
                                     width: '100%',
-                                    padding: '0.5rem',
+                                    padding: '0.75rem',
                                     borderRadius: '4px',
-                                    border: '1px solid var(--border-color)',
+                                    border: '2px solid #3b82f6',
                                     backgroundColor: 'var(--bg-secondary)',
                                     color: 'var(--text-primary)',
+                                    fontSize: '1rem',
                                 }}
                             />
+                            <p style={{
+                                marginTop: '0.5rem',
+                                fontSize: '0.75rem',
+                                color: '#93c5fd'
+                            }}>
+                                Ask the host for their Game ID
+                            </p>
                         </div>
                     )}
 

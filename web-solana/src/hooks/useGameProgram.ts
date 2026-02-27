@@ -20,8 +20,15 @@ import {
 } from '../utils/pda'
 
 // Type definitions based on the IDL
-type GameType = { PvP: {} } | { PvAI: {} }
-type GameResult = { None: {} } | { Winner: [PublicKey] } | { Draw: {} }
+// IMPORTANT: Enum variants must match the camelCase conversion exactly to avoid
+// "unable to infer src variant" errors during Borsh serialization.
+// The `camelcase` npm package (used by Anchor 0.32.x) converts:
+//   IDL "PvP"  → "pvP"   (NOT "pvp")
+//   IDL "PvAI" → "pvAi"
+// See: https://stackoverflow.com/questions/40703863
+type GameType = { pvP: {} } | { pvAi: {} }
+// IDL GameResult: "None", "Winner", "Draw" (unit enum with tuple variant)
+type GameResult = { none: {} } | { winner: [PublicKey] } | { draw: {} }
 
 interface GameData {
     gameId: string
@@ -126,21 +133,31 @@ export function useGameProgram() {
         setError(null)
 
         try {
+            console.log('[DEBUG] === CREATE GAME V2 (string enum) ===')
             // Generate unique game ID
             const gameId = generateGameId()
+            console.log('[DEBUG] Generated gameId:', gameId.toString())
 
             // Derive PDAs
             const [gamePDA] = deriveGamePDA(gameId)
             const [moveLogPDA] = deriveMoveLogPDA(gameId)
             const [escrowPDA] = deriveEscrowPDA(gameId)
+            console.log('[DEBUG] Derived PDAs:', {
+                gamePDA: gamePDA.toBase58(),
+                moveLogPDA: moveLogPDA.toBase58(),
+                escrowPDA: escrowPDA.toBase58(),
+            })
 
             // Convert wager to lamports
             const wagerLamports = solToLamports(wagerAmount)
+            console.log('[DEBUG] Wager lamports:', wagerLamports.toString())
 
-            // Prepare game type enum
-            const gameTypeValue: GameType = gameType === 'pvp' ? { PvP: {} } : { PvAI: {} }
+            // Prepare game type enum — keys must match camelCase conversion:
+            //   Rust PvP  → IDL "PvP"  → camelcase → "pvP"
+            //   Rust PvAI → IDL "PvAI" → camelcase → "pvAi"
+            const gameTypeValue: GameType = gameType === 'pvp' ? { pvP: {} } : { pvAi: {} }
+            console.log('[DEBUG] Game type enum:', JSON.stringify(gameTypeValue))
 
-            // Build and send transaction
             const signature = await program.methods
                 .createGame(gameId, wagerLamports, gameTypeValue)
                 .accounts({
@@ -152,13 +169,20 @@ export function useGameProgram() {
                 })
                 .rpc()
 
+            console.log('[DEBUG] Transaction successful, signature:', signature)
+
             return {
                 signature,
                 gameId,
                 gamePDA,
             }
         } catch (err) {
+            console.error('[DEBUG] Error caught in createGame:', err)
             const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred'
+            console.error('[DEBUG] Error message:', errorMessage)
+            if (err instanceof Error && err.stack) {
+                console.error('[DEBUG] Error stack:', err.stack)
+            }
             setError(errorMessage)
             throw err
         } finally {
@@ -421,6 +445,10 @@ export function useGameProgram() {
             const status = gameAccount.status as any
             let statusStr: 'waiting' | 'active' | 'finished'
 
+            // Anchor 0.32.x camelCase conversion:
+            //   IDL "WaitingForOpponent" → "waitingForOpponent"
+            //   IDL "Active"             → "active"
+            //   IDL "Finished"           → "finished"
             if (status.waitingForOpponent !== undefined) {
                 statusStr = 'waiting'
             } else if (status.active !== undefined) {

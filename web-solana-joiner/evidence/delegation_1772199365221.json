@@ -1,0 +1,13 @@
+{
+  "phase": "delegation",
+  "timestamp": "2026-02-27T13:36:04.154Z",
+  "gamePda": "F4QtXmUMf2ckyNzYqNmTE3s73uhhNtK6PkHRDq2zWXJy",
+  "payer": "DXbjrdjQRdNbX4wLaGnBLdXuQ2C5ffvpC98Nt1RwqMFV",
+  "delegationSignature": "5QPvDzSUcZifD12vtAPkuACufLFTrr8Z3yVhPQb2K5PR9AxyYMTYmjrM2Xwo2BtwCUdQNARFSQpjNoBuiQvtZQdD",
+  "solanaExplorerUrl": "https://explorer.solana.com/tx/5QPvDzSUcZifD12vtAPkuACufLFTrr8Z3yVhPQb2K5PR9AxyYMTYmjrM2Xwo2BtwCUdQNARFSQpjNoBuiQvtZQdD?cluster=devnet",
+  "erExplorerUrl": null,
+  "preDelegationLamports": 0,
+  "postDelegationLamports": null,
+  "slot": null,
+  "error": "Simulation failed. \nMessage: transaction verification error: Blockhash not found. \n\nCatch the `SendTransactionError` and call `getLogs()` on it for full details."
+}

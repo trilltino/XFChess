@@ -138,6 +138,8 @@ pub struct FadingCapture {
     pub timer: Timer,
     /// Target position in capture zone (applied after fade completes)
     pub capture_zone_pos: Vec3,
+    /// Original base color of the piece (preserved to prevent color corruption)
+    pub original_color: Color,
 }
 
 /// Component representing an active straight-line animation for a piece move

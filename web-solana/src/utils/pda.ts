@@ -1,7 +1,7 @@
 import { PublicKey } from '@solana/web3.js'
 import { BN } from '@coral-xyz/anchor'
 
-// Program ID from the deployed contract
+// Program ID from the deployed contract (must match IDL address)
 export const PROGRAM_ID = new PublicKey('3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP')
 
 // Magic Block program IDs

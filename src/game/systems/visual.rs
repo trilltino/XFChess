@@ -94,7 +94,8 @@ pub fn animate_piece_movement(
             // Snap to board surface (y = PIECE_ON_BOARD_Y) when not animating.
             // Pieces must sit on top of the board cuboid (top face at y=0.05),
             // not at y=0 which clips them into the board geometry.
-            let target = Vec3::new(piece.x as f32, PIECE_ON_BOARD_Y, piece.y as f32);
+            // Use the same coordinate system as the reference: X = 7 - rank, Z = file
+            let target = Vec3::new((7 - piece.y) as f32, PIECE_ON_BOARD_Y, piece.x as f32);
             if (transform.translation - target).length() > 0.01 {
                 transform.translation = target;
             }
@@ -129,6 +130,7 @@ pub fn animate_piece_movement(
 /// Pieces with FadingCapture component fade out over time, then move to capture zone.
 /// Handles parent-child hierarchy where materials are on child meshes.
 /// Each piece gets its own material clone to avoid affecting other pieces.
+/// Uses the original_color stored in FadingCapture to prevent color corruption.
 pub fn animate_capture_fade(
     time: Res<Time>,
     mut commands: Commands,
@@ -151,7 +153,9 @@ pub fn animate_capture_fade(
                     // Clone the material to make it unique to this piece
                     if let Some(original_material) = materials.get(&material_handle.0) {
                         let mut new_material = original_material.clone();
-                        new_material.base_color = new_material.base_color.with_alpha(alpha);
+                        // Apply fade using the stored original color to prevent color corruption
+                        let rgb = fading.original_color.to_srgba();
+                        new_material.base_color = Color::srgba(rgb.red, rgb.green, rgb.blue, alpha);
                         new_material.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
                         material_handle.0 = materials.add(new_material);
                     }
@@ -174,9 +178,8 @@ pub fn animate_capture_fade(
                         // Clone the material to ensure we're modifying a unique instance
                         if let Some(original_material) = materials.get(&material_handle.0) {
                             let mut new_material = original_material.clone();
-                            // Preserve the original base color (without any alpha modifications)
-                            // by reconstructing it from the rgb components with full alpha
-                            let rgb = original_material.base_color.to_srgba();
+                            // Restore the original base color with full alpha
+                            let rgb = fading.original_color.to_srgba();
                             new_material.base_color =
                                 Color::srgba(rgb.red, rgb.green, rgb.blue, 1.0);
                             new_material.alpha_mode = bevy::render::alpha::AlphaMode::Opaque;

@@ -49,9 +49,10 @@ pub fn create_board(
     // Pattern from Bevy stress_tests/many_sprites.rs: Collect all squares into Vec, then batch spawn
     // This reduces stack pressure and is more efficient than 64 individual spawn calls
     //
-    // Chess coordinate system:
-    // - x = file (0-7, a-h), maps to world X
-    // - y = rank (0-7, 1-8), maps to world Z
+    // Chess coordinate system (matches reference implementation):
+    // - World X = 7 - rank (so rank 0 is at X=7, rank 7 is at X=0)
+    // - World Z = file (so file 0 is at Z=0, file 7 is at Z=7)
+    // This places a1 at (7, 0, 0) and h8 at (0, 0, 7)
     let squares: Vec<_> = (0..8)
         .flat_map(|rank| {
             // Clone materials and mesh for each row to share across inner closure
@@ -75,8 +76,8 @@ pub fn create_board(
                 let rank_num = rank + 1;
                 let square_name = format!("Square {}{}", file_char, rank_num);
 
-                // World position: X = file, Z = rank
-                let world_pos = Vec3::new(file as f32, 0., rank as f32);
+                // World position: X = 7 - rank, Z = file (matches reference)
+                let world_pos = Vec3::new((7 - rank) as f32, 0., file as f32);
 
                 // Bundle all components for this square
                 // DespawnOnExit automatically despawns all 64 board squares when exiting Multiplayer

@@ -11,26 +11,25 @@ Play chess competitively with real stakes. Every move is recorded on-chain for p
   </tr>
 </table>
 
-## Quick Start
+## Play a Wager Game
 
-### Play a Wager Game
+Start both player UIs:
 
-1. **Start both player UIs:**
-   ```bash
-   magicblock_e2e_test.bat
-   ```
+```bash
+magicblock_e2e_test.bat
+```
 
-2. **Player 1** (http://localhost:5173):
-   - Connect wallet → Create wager game → Copy Game ID
+**Player 1** (http://localhost:5173):
+- Connect wallet → Create wager game → Copy Game ID
 
-3. **Player 2** (http://localhost:5174):
-   - Connect wallet → Join with Game ID
+**Player 2** (http://localhost:5174):
+- Connect wallet → Join with Game ID
 
-4. **Both players:**
-   - Click "Launch Game" → Download session JSON
-   - Run: `launch_game_with_session.bat xfchess_session_<game_id>.json`
+**Both players:**
+- Click "Launch Game" → Download session JSON
+- Run: `launch_game_with_session.bat xfchess_session_<game_id>.json`
 
-5. **Play!** Moves sync via Solana, winner receives payout.
+**Play!** Moves sync via Solana, winner receives payout.
 
 ## Architecture
 
@@ -87,7 +86,7 @@ XFChess/
 ## Program ID
 
 ```
-AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp
+3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP
 ```
 
 Deployed on Solana Devnet.
@@ -166,7 +165,7 @@ MIT/Apache-2.0
 ## Links
 
 - Website: https://xfchess.io (coming soon)
-- Devnet: https://explorer.solana.com/address/AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp?cluster=devnet
+- Devnet: https://explorer.solana.com/address/3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP?cluster=devnet
 - MagicBlock: https://docs.magicblock.gg/
 
 ---
