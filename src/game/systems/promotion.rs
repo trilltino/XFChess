@@ -65,10 +65,10 @@ pub fn apply_pawn_promotion(
                 const PIECE_MESH_SCALE: f32 = 0.18;
 
                 // Per-piece offsets (must match pieces.rs exactly)
-                const QUEEN_OFFSET: Vec3 = Vec3::new(-0.2, -0.5, -0.95);
-                const ROOK_OFFSET: Vec3 = Vec3::new(-0.1, -0.5, 1.8);
-                const BISHOP_OFFSET: Vec3 = Vec3::new(-0.1, -0.5, 0.0);
-                const KNIGHT_OFFSET: Vec3 = Vec3::new(-0.2, -0.5, 0.9);
+                const QUEEN_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -0.95);
+                const ROOK_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 1.8);
+                const BISHOP_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 0.0);
+                const KNIGHT_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, 0.9);
 
                 match event.promoted_to {
                     PieceType::Queen => {

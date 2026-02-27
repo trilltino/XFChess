@@ -22,7 +22,9 @@ use crate::game::resources::{
     CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingTurnAdvance,
     Selection,
 };
-use crate::game::systems::shared::{execute_move, find_piece_on_square, CapturedTarget, MoveContext};
+use crate::game::systems::shared::{
+    execute_move, find_piece_on_square, CapturedTarget, MoveContext,
+};
 use crate::rendering::pieces::Piece;
 use crate::rendering::utils::Square;
 use bevy::ecs::system::SystemParam;
@@ -184,6 +186,16 @@ fn try_move_sequence(
     let (selected_piece_data, was_first_move) = {
         let q = params.pieces.p1();
         if let Ok((_, p, hm, _)) = q.get(selected_entity) {
+            // Validate that the selected piece belongs to the current player
+            if p.color != params.current_turn.color {
+                warn!("[INPUT] Attempted to move opponent's piece - ignoring");
+                clear_selection_state(
+                    &mut params.commands,
+                    &mut params.selection,
+                    &params.selected_pieces,
+                );
+                return;
+            }
             (*p, !hm.moved)
         } else {
             warn!("[INPUT] Selected piece not found query");
@@ -215,6 +227,7 @@ fn try_move_sequence(
         &mut params.engine,
         &mut params.pieces.p0(),
         Some(&mut params.move_events),
+        None, // BoardStateSync - would need to add to InputSystemParams
     );
 
     if success {
@@ -275,24 +288,26 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
         return;
     }
 
-    // Case 2: Clicked enemy piece -> Capture
-    let target_pos = (clicked_piece.x, clicked_piece.y);
-    let capture_info = Some(CapturedTarget {
-        entity,
-        piece_type: clicked_piece.piece_type,
-        color: clicked_piece.color,
-    });
+    // Case 2: Clicked enemy piece -> Capture (only if we have a piece selected)
+    // and the selected piece belongs to the current player
+    if params.selection.is_selected() {
+        let target_pos = (clicked_piece.x, clicked_piece.y);
+        let capture_info = Some(CapturedTarget {
+            entity,
+            piece_type: clicked_piece.piece_type,
+            color: clicked_piece.color,
+        });
 
-    try_move_sequence(&mut params, target_pos, capture_info, "piece_click_capture");
+        try_move_sequence(&mut params, target_pos, capture_info, "piece_click_capture");
+    } else {
+        debug!("[INPUT] Clicked enemy piece but nothing selected - ignoring");
+    }
 }
 
 /// Observer system: Handle drag start on a piece
 ///
 /// Initiates drag-and-drop by selecting the piece and marking it as dragging.
-pub fn on_piece_drag_start(
-    drag_start: On<Pointer<DragStart>>,
-    mut params: InputSystemParams,
-) {
+pub fn on_piece_drag_start(drag_start: On<Pointer<DragStart>>, mut params: InputSystemParams) {
     if params.game_over.is_game_over() {
         return;
     }
@@ -322,7 +337,10 @@ pub fn on_piece_drag_start(
     try_select_piece(&mut params, entity, piece, false);
     params.selection.begin_drag();
 
-    debug!("[INPUT] Started dragging piece at ({}, {})", piece.x, piece.y);
+    debug!(
+        "[INPUT] Started dragging piece at ({}, {})",
+        piece.x, piece.y
+    );
 }
 
 /// Observer system: Handle drag on a piece
@@ -341,7 +359,6 @@ pub fn on_piece_drag_end(
     drag_end: On<Pointer<DragEnd>>,
     mut params: InputSystemParams,
     square_query: Query<(Entity, &Square, &Transform)>,
-    piece_query: Query<(Entity, &Piece, &Transform)>,
 ) {
     if !params.selection.is_dragging {
         return;
@@ -349,29 +366,33 @@ pub fn on_piece_drag_end(
 
     params.selection.end_drag();
 
-    // Get the piece that was dragged
+    // Get the piece that was dragged from the readonly query in params
     let dragged_entity = drag_end.entity;
-    let dragged_piece = piece_query.get(dragged_entity).ok();
+    let readonly_pieces = params.pieces.p1();
+    let _dragged_piece = readonly_pieces.get(dragged_entity).ok();
 
     // Find which square the piece was dropped on by checking the piece's current position
     // or finding the square under the pointer
-    let target_square = if let Ok((_, _, transform)) = piece_query.get(dragged_entity) {
+    let target_square = if let Ok((_, _, _, transform)) = readonly_pieces.get(dragged_entity) {
         // Calculate board position from world position
         let world_pos = transform.translation;
         let file = world_pos.x.round() as i32;
         let rank = world_pos.z.round() as i32;
 
         // Find square at this board position
-        square_query.iter().find(|(_, square, _)| {
-            square.x as i32 == file && square.y as i32 == rank
-        })
+        square_query
+            .iter()
+            .find(|(_, square, _)| square.x as i32 == file && square.y as i32 == rank)
     } else {
         None
     };
 
     if let Some((_, square, _)) = target_square {
         let target_pos = (square.x, square.y);
-        debug!("[INPUT] Dropped piece on square ({}, {})", square.x, square.y);
+        debug!(
+            "[INPUT] Dropped piece on square ({}, {})",
+            square.x, square.y
+        );
 
         // Check if there's a piece on this square (capture)
         let occupant = {

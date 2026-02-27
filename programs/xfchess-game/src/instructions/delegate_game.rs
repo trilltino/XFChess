@@ -7,14 +7,15 @@ mod inner {
     use crate::state::game::Game;
     use anchor_lang::prelude::*;
     use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
-    use ephemeral_rollups_sdk::cpi::{commit_and_undelegate_accounts, delegate_account};
+    use ephemeral_rollups_sdk::cpi::{delegate_account, DelegateAccounts, DelegateConfig};
+    use ephemeral_rollups_sdk::ephem::deprecated::v0::commit_and_undelegate_accounts;
 
     /// Delegate the Game PDA to the MagicBlock ephemeral rollup so that
     /// subsequent moves can be processed with sub-second latency on the ER.
     /// The payer (white or black) authorises the delegation.
     pub fn handler_delegate_game(
         ctx: Context<DelegateGameCtx>,
-        game_id: u64,
+        _game_id: u64,
         valid_until: i64,
     ) -> Result<()> {
         let game = &ctx.accounts.game;
@@ -24,32 +25,36 @@ mod inner {
             XfchessGameError::UnauthorizedAccess
         );
 
-        let seeds: Vec<Vec<u8>> = vec![
-            b"game".to_vec(),
-            game_id.to_le_bytes().to_vec(),
-            vec![game.bump],
-        ];
+        // Calculate seeds for the game PDA
+        let game_id_bytes = _game_id.to_le_bytes();
+        let seeds: &[&[u8]] = &[b"game", &game_id_bytes, &[game.bump]];
 
-        delegate_account(
-            &ctx.accounts.payer.to_account_info(),
-            &ctx.accounts.game.to_account_info(),
-            &ctx.accounts.owner_program.to_account_info(),
-            &ctx.accounts.buffer.to_account_info(),
-            &ctx.accounts.delegation_record.to_account_info(),
-            &ctx.accounts.delegation_metadata.to_account_info(),
-            &ctx.accounts.delegation_program.to_account_info(),
-            &ctx.accounts.system_program.to_account_info(),
-            &seeds,
-            valid_until,
-            300_000,
-        )?;
+        // Create delegate config with valid_until as commit frequency
+        let config = DelegateConfig {
+            commit_frequency_ms: (valid_until as u32).saturating_mul(1000), // Convert seconds to ms
+            validator: None, // Use any available validator
+        };
+
+        // Prepare delegate accounts struct
+        let delegate_accounts = DelegateAccounts {
+            payer: &ctx.accounts.payer.to_account_info(),
+            pda: &ctx.accounts.game.to_account_info(),
+            owner_program: &ctx.accounts.owner_program.to_account_info(),
+            buffer: &ctx.accounts.buffer.to_account_info(),
+            delegation_record: &ctx.accounts.delegation_record.to_account_info(),
+            delegation_metadata: &ctx.accounts.delegation_metadata.to_account_info(),
+            delegation_program: &ctx.accounts.delegation_program.to_account_info(),
+            system_program: &ctx.accounts.system_program.to_account_info(),
+        };
+
+        delegate_account(delegate_accounts, seeds, config)?;
 
         Ok(())
     }
 
     /// Commit the current ER state for the Game PDA back to the base layer
     /// and undelegate the account so it can be used on mainnet/devnet again.
-    pub fn handler_undelegate_game(ctx: Context<UndelegateGameCtx>, game_id: u64) -> Result<()> {
+    pub fn handler_undelegate_game(ctx: Context<UndelegateGameCtx>, _game_id: u64) -> Result<()> {
         let game = &ctx.accounts.game;
 
         require!(
@@ -57,29 +62,22 @@ mod inner {
             XfchessGameError::UnauthorizedAccess
         );
 
-        let seeds: Vec<Vec<u8>> = vec![
-            b"game".to_vec(),
-            game_id.to_le_bytes().to_vec(),
-            vec![game.bump],
-        ];
-
         commit_and_undelegate_accounts(
             &ctx.accounts.payer.to_account_info(),
             vec![&ctx.accounts.game.to_account_info()],
             &ctx.accounts.magic_context.to_account_info(),
             &ctx.accounts.magic_program.to_account_info(),
-            &seeds,
         )?;
 
         Ok(())
     }
 
     #[derive(Accounts)]
-    #[instruction(game_id: u64)]
+    #[instruction(_game_id: u64)]
     pub struct DelegateGameCtx<'info> {
         #[account(
             mut,
-            seeds = [b"game", game_id.to_le_bytes().as_ref()],
+            seeds = [b"game", _game_id.to_le_bytes().as_ref()],
             bump = game.bump,
         )]
         pub game: Account<'info, Game>,
@@ -110,11 +108,11 @@ mod inner {
     }
 
     #[derive(Accounts)]
-    #[instruction(game_id: u64)]
+    #[instruction(_game_id: u64)]
     pub struct UndelegateGameCtx<'info> {
         #[account(
             mut,
-            seeds = [b"game", game_id.to_le_bytes().as_ref()],
+            seeds = [b"game", _game_id.to_le_bytes().as_ref()],
             bump = game.bump,
         )]
         pub game: Account<'info, Game>,

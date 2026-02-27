@@ -82,7 +82,7 @@ impl CapturedPieces {
 ///
 /// These are standard chess piece values used worldwide.
 /// King has value 0 as it cannot be captured (game ends in checkmate).
-fn piece_value(piece_type: PieceType) -> i32 {
+pub fn piece_value(piece_type: PieceType) -> i32 {
     match piece_type {
         PieceType::Pawn => 1,
         PieceType::Knight => 3,

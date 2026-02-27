@@ -28,6 +28,16 @@ pub struct ChessEngine {
     pub fen: String,
     /// Parsed shakmaty position (kept in sync with `fen`).
     position: Chess,
+    /// Halfmove clock for 50-move rule (number of halfmoves since last capture or pawn move).
+    pub halfmove_clock: u32,
+    /// Full move counter (starts at 1, increments after Black's move).
+    pub fullmove_counter: u32,
+    /// Current side to move.
+    pub current_turn: PieceColor,
+    /// Castling rights in KQkq notation (e.g., "KQkq", "Kq", "-").
+    pub castling_rights: String,
+    /// En passant target square in UCI notation (e.g., "e3", "-" for none).
+    pub en_passant: Option<String>,
 }
 
 impl Default for ChessEngine {
@@ -40,6 +50,11 @@ impl Default for ChessEngine {
         Self {
             fen: STARTING_FEN.to_string(),
             position,
+            halfmove_clock: 0,
+            fullmove_counter: 1,
+            current_turn: PieceColor::White,
+            castling_rights: "KQkq".to_string(),
+            en_passant: None,
         }
     }
 }
@@ -172,7 +187,32 @@ impl ChessEngine {
             }
         }
 
-        self.fen = board_to_fen(&board, current_turn, &castling);
+        // Build complete FEN string from board state
+        let piece_placement = board_to_piece_placement(&board);
+        let side = match current_turn.color {
+            PieceColor::White => 'w',
+            PieceColor::Black => 'b',
+        };
+        let castling_str = castling_to_string(&castling);
+        let en_passant_str = self.en_passant.as_deref().unwrap_or("-");
+
+        // Complete FEN: piece_placement side castling en_passant halfmove fullmove
+        self.fen = format!(
+            "{} {} {} {} {} {}",
+            piece_placement,
+            side,
+            castling_str,
+            en_passant_str,
+            self.halfmove_clock,
+            self.fullmove_counter
+        );
+
+        // Update state fields from ECS
+        self.current_turn = current_turn.color;
+        self.castling_rights = castling_str;
+        // Note: halfmove_clock and en_passant are not updated from ECS sync
+        // They should be updated during move execution
+
         self.refresh_position();
     }
 
@@ -189,11 +229,6 @@ impl ChessEngine {
     pub fn apply_fen(&mut self, new_fen: &str) {
         self.fen = new_fen.to_string();
         self.refresh_position();
-    }
-
-    /// Reset to the starting position.
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 
     // ─── Move generation ────────────────────────────────────────────────────
@@ -245,6 +280,100 @@ impl ChessEngine {
     pub fn legal_moves(&self) -> shakmaty::MoveList {
         self.position.legal_moves()
     }
+
+    // ─── FEN Import/Export ────────────────────────────────────────────────────
+
+    /// Export the current board state to a FEN string.
+    ///
+    /// FEN format: `<piece_placement> <side_to_move> <castling_rights> <en_passant> <halfmove_clock> <fullmove_number>`
+    ///
+    /// Example: `rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1`
+    pub fn to_fen(&self) -> String {
+        let side = match self.current_turn {
+            PieceColor::White => 'w',
+            PieceColor::Black => 'b',
+        };
+
+        let en_passant_str = self.en_passant.as_deref().unwrap_or("-");
+
+        format!(
+            "{} {} {} {} {} {}",
+            self.fen
+                .split_whitespace()
+                .next()
+                .unwrap_or("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"),
+            side,
+            self.castling_rights,
+            en_passant_str,
+            self.halfmove_clock,
+            self.fullmove_counter
+        )
+    }
+
+    /// Load a board state from a FEN string.
+    ///
+    /// # Arguments
+    /// * `fen` - A valid FEN string
+    ///
+    /// # Returns
+    /// * `Ok(())` if the FEN was parsed successfully
+    /// * `Err(String)` if the FEN is invalid
+    ///
+    /// # Example
+    /// ```
+    /// engine.from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")?;
+    /// ```
+    pub fn from_fen(&mut self, fen: &str) -> Result<(), String> {
+        let fen_parsed: Fen = fen.parse().map_err(|e| format!("Invalid FEN: {:?}", e))?;
+        let position: Chess = fen_parsed
+            .clone()
+            .into_position(CastlingMode::Standard)
+            .map_err(|e| format!("Invalid position: {:?}", e))?;
+
+        // Parse FEN fields
+        let parts: Vec<&str> = fen.split_whitespace().collect();
+        if parts.len() < 6 {
+            return Err("FEN must have 6 fields".to_string());
+        }
+
+        // Side to move
+        let current_turn = match parts[1] {
+            "w" => PieceColor::White,
+            "b" => PieceColor::Black,
+            _ => return Err("Invalid side to move".to_string()),
+        };
+
+        // Castling rights
+        let castling_rights = parts[2].to_string();
+
+        // En passant
+        let en_passant = if parts[3] == "-" {
+            None
+        } else {
+            Some(parts[3].to_string())
+        };
+
+        // Halfmove clock
+        let halfmove_clock: u32 = parts[4].parse().map_err(|_| "Invalid halfmove clock")?;
+
+        // Fullmove counter
+        let fullmove_counter: u32 = parts[5].parse().map_err(|_| "Invalid fullmove counter")?;
+
+        self.fen = fen.to_string();
+        self.position = position;
+        self.current_turn = current_turn;
+        self.castling_rights = castling_rights;
+        self.en_passant = en_passant;
+        self.halfmove_clock = halfmove_clock;
+        self.fullmove_counter = fullmove_counter;
+
+        Ok(())
+    }
+
+    /// Reset the engine to the starting position.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 // ─── Castling rights helper ──────────────────────────────────────────────────
@@ -259,8 +388,29 @@ struct CastlingRights {
     bh_rook_moved: bool,
 }
 
-/// Build a FEN string from a raw board array and current turn info.
-fn board_to_fen(board: &[i8; 64], current_turn: &CurrentTurn, rights: &CastlingRights) -> String {
+/// Convert castling rights to KQkq notation string.
+fn castling_to_string(rights: &CastlingRights) -> String {
+    let mut castling_str = String::new();
+    if !rights.white_king_moved && !rights.wh_rook_moved {
+        castling_str.push('K');
+    }
+    if !rights.white_king_moved && !rights.wa_rook_moved {
+        castling_str.push('Q');
+    }
+    if !rights.black_king_moved && !rights.bh_rook_moved {
+        castling_str.push('k');
+    }
+    if !rights.black_king_moved && !rights.ba_rook_moved {
+        castling_str.push('q');
+    }
+    if castling_str.is_empty() {
+        castling_str.push('-');
+    }
+    castling_str
+}
+
+/// Build the piece placement part of a FEN string from a raw board array.
+fn board_to_piece_placement(board: &[i8; 64]) -> String {
     let piece_char = |id: i8| -> char {
         let ch = match id.abs() {
             1 => 'p',
@@ -302,32 +452,22 @@ fn board_to_fen(board: &[i8; 64], current_turn: &CurrentTurn, rights: &CastlingR
         ranks.push(rank_str);
     }
 
+    ranks.join("/")
+}
+
+/// Build a complete FEN string from a raw board array and current turn info.
+fn board_to_fen(board: &[i8; 64], current_turn: &CurrentTurn, rights: &CastlingRights) -> String {
+    let piece_placement = board_to_piece_placement(board);
     let side = if current_turn.color == PieceColor::White {
         'w'
     } else {
         'b'
     };
-
-    let mut castling_str = String::new();
-    if !rights.white_king_moved && !rights.wh_rook_moved {
-        castling_str.push('K');
-    }
-    if !rights.white_king_moved && !rights.wa_rook_moved {
-        castling_str.push('Q');
-    }
-    if !rights.black_king_moved && !rights.bh_rook_moved {
-        castling_str.push('k');
-    }
-    if !rights.black_king_moved && !rights.ba_rook_moved {
-        castling_str.push('q');
-    }
-    if castling_str.is_empty() {
-        castling_str.push('-');
-    }
+    let castling_str = castling_to_string(rights);
 
     format!(
         "{} {} {} - 0 {}",
-        ranks.join("/"),
+        piece_placement,
         side,
         castling_str,
         (current_turn.move_number + 1) / 2

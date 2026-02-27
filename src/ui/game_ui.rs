@@ -1,6 +1,7 @@
 //! In-game UI for chess game display
 use crate::core::GameMode;
 use crate::game::components::GamePhase;
+use crate::game::resources::piece_value;
 use crate::rendering::pieces::PieceColor;
 use crate::ui::styles::*;
 use crate::ui::system_params::GameUIParams;
@@ -131,6 +132,114 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 });
             });
             ui.add_space(5.0);
+        });
+
+    // === CAPTURED PIECES PANEL (Left Side) ===
+    egui::SidePanel::left("captured_pieces_panel")
+        .resizable(false)
+        .default_width(120.0)
+        .show(ctx, |ui| {
+            ui.add_space(60.0); // Space for timer above
+
+            ui.vertical(|ui| {
+                // White's captured pieces (pieces White has taken from Black)
+                ui.colored_label(
+                    UiColors::TEXT_PRIMARY,
+                    egui::RichText::new("White Captures").size(14.0).strong(),
+                );
+                ui.add_space(5.0);
+
+                let white_captures = &params.game_state.captured.white_captured;
+                if white_captures.is_empty() {
+                    ui.label(
+                        egui::RichText::new("None")
+                            .size(12.0)
+                            .color(UiColors::TEXT_TERTIARY),
+                    );
+                } else {
+                    // Count pieces by type
+                    let mut counts = std::collections::HashMap::new();
+                    for piece in white_captures {
+                        *counts.entry(*piece).or_insert(0) += 1;
+                    }
+
+                    // Display counts
+                    for (piece_type, count) in counts {
+                        let piece_name = format!("{:?}", piece_type);
+                        let value = piece_value(piece_type);
+                        ui.label(
+                            egui::RichText::new(format!("{} x{} ({})", piece_name, count, value))
+                                .size(12.0)
+                                .color(UiColors::TEXT_SECONDARY),
+                        );
+                    }
+
+                    // Material advantage
+                    let advantage = params.game_state.captured.material_advantage();
+                    ui.add_space(5.0);
+                    ui.colored_label(
+                        if advantage > 0 {
+                            UiColors::SUCCESS
+                        } else {
+                            UiColors::TEXT_TERTIARY
+                        },
+                        egui::RichText::new(format!("+{} pts", advantage))
+                            .size(12.0)
+                            .strong(),
+                    );
+                }
+
+                ui.add_space(20.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Black's captured pieces (pieces Black has taken from White)
+                ui.colored_label(
+                    UiColors::TEXT_SECONDARY,
+                    egui::RichText::new("Black Captures").size(14.0).strong(),
+                );
+                ui.add_space(5.0);
+
+                let black_captures = &params.game_state.captured.black_captured;
+                if black_captures.is_empty() {
+                    ui.label(
+                        egui::RichText::new("None")
+                            .size(12.0)
+                            .color(UiColors::TEXT_TERTIARY),
+                    );
+                } else {
+                    // Count pieces by type
+                    let mut counts = std::collections::HashMap::new();
+                    for piece in black_captures {
+                        *counts.entry(*piece).or_insert(0) += 1;
+                    }
+
+                    // Display counts
+                    for (piece_type, count) in counts {
+                        let piece_name = format!("{:?}", piece_type);
+                        let value = piece_value(piece_type);
+                        ui.label(
+                            egui::RichText::new(format!("{} x{} ({})", piece_name, count, value))
+                                .size(12.0)
+                                .color(UiColors::TEXT_SECONDARY),
+                        );
+                    }
+
+                    // Material advantage
+                    let advantage = -params.game_state.captured.material_advantage();
+                    ui.add_space(5.0);
+                    ui.colored_label(
+                        if advantage > 0 {
+                            UiColors::SUCCESS
+                        } else {
+                            UiColors::TEXT_TERTIARY
+                        },
+                        egui::RichText::new(format!("+{} pts", advantage))
+                            .size(12.0)
+                            .strong(),
+                    );
+                }
+            });
         });
 
     match *params.game_mode {

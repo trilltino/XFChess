@@ -169,6 +169,43 @@ h2::before {
   color: var(--xf-text-muted);
 }
 
+/* Feature Header Styling */
+.feature-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--xf-border);
+}
+
+.feature-number {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--xf-red);
+  opacity: 0.4;
+  line-height: 1;
+  font-family: 'Inter', monospace;
+}
+
+.feature-header h3 {
+  color: #fff;
+  font-size: 1.4rem;
+  margin-bottom: 0.25rem;
+  margin-top: 0;
+}
+
+.feature-subtitle {
+  color: var(--xf-text-muted);
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.feature-section:hover .feature-number {
+  opacity: 0.8;
+  transition: opacity 0.3s ease;
+}
+
 .technology-section ul,
 .future-vision ul,
 .security-features ul {

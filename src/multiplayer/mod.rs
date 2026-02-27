@@ -18,6 +18,8 @@ use braid_iroh::{BraidGameConfig, BraidIrohNode, DiscoveryConfig};
 pub mod braid_node;
 #[cfg(feature = "solana")]
 pub mod ephemeral_mvp_plugin;
+#[cfg(feature = "solana")]
+pub mod magicblock_resolver;
 pub mod network_protocol;
 pub mod p2p_connection;
 pub mod rollup_manager;
@@ -29,10 +31,14 @@ pub mod session_key_manager;
 pub mod solana_addon;
 #[cfg(feature = "solana")]
 pub mod solana_integration;
+pub mod transaction_debugger;
+pub mod wager_state;
 
 pub use braid_node::*;
 #[cfg(feature = "solana")]
 pub use ephemeral_mvp_plugin::*;
+#[cfg(feature = "solana")]
+pub use magicblock_resolver::*;
 pub use network_protocol::*;
 pub use p2p_connection::*;
 pub use rollup_manager::*;
@@ -44,6 +50,8 @@ pub use session_key_manager::*;
 pub use solana_addon::*;
 #[cfg(feature = "solana")]
 pub use solana_integration::*;
+pub use transaction_debugger::*;
+pub use wager_state::*;
 
 pub struct MultiplayerPlugin;
 

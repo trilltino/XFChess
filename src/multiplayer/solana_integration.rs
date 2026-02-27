@@ -1,6 +1,5 @@
 #![cfg(feature = "solana")]
 use bevy::prelude::*;
-use bevy::ecs::event::EventReader;
 use rand::Rng;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -322,22 +321,21 @@ fn authorize_session_key_on_game_start(
 
         // Build and submit the `authorize_session_key` instruction
         let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
-        
+
         // Derive game_pda from game_id
-        let game_pda = Pubkey::find_program_address(
-            &[b"game", &game_id.to_le_bytes()],
-            &program_id,
-        ).0;
-        
+        let game_pda =
+            Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &program_id).0;
+
         // Calculate expiration (24 hours from now)
         let expires_at = chrono::Utc::now().timestamp() + (24 * 60 * 60);
-        
+
         let ix = authorize_session_key_ix(
             wallet_pubkey, // payer
             game_pda,
             session_pubkey,
             expires_at,
-        ).map_err(|e| format!("Failed to create authorize_session_key instruction: {}", e))?;
+        )
+        .map_err(|e| format!("Failed to create authorize_session_key instruction: {}", e))?;
 
         let authorize_result = (|| -> Result<(), String> {
             let recent_blockhash = client

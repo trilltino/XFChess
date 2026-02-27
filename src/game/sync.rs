@@ -7,11 +7,21 @@ use crate::multiplayer::network_protocol::NetworkMessage;
 use crate::multiplayer::{BraidGameSync, BraidNetworkState, NetworkEvent};
 use braid_core::Patch;
 
+// Board state sync module
+pub mod board_state;
+
+use board_state::{
+    broadcast_state_system, init_board_state_sync, receive_state_system, BoardStateSync,
+};
+
 /// Plugin for game state synchronization
 pub struct GameSyncPlugin;
 
 impl Plugin for GameSyncPlugin {
     fn build(&self, app: &mut App) {
+        // Initialize board state sync on startup
+        app.add_systems(Startup, init_board_state_sync);
+
         app.add_systems(
             Update,
             (
@@ -19,6 +29,9 @@ impl Plugin for GameSyncPlugin {
                 broadcast_local_moves,
                 apply_network_patches,
                 update_board_state_from_network,
+                // New board state sync systems
+                broadcast_state_system,
+                receive_state_system,
             ),
         );
     }

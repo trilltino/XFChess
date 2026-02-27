@@ -35,7 +35,7 @@ const XFBeyond = () => {
             </Link>
 
             <header className="xfbeyond-header">
-                <h1>XFChess Beyond</h1>
+                <h1>Next Steps</h1>
                 <p>Historically-themed 3D chess sets for competitive wagering of money and unique board assets.</p>
             </header>
 

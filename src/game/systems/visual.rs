@@ -127,26 +127,36 @@ pub fn animate_piece_movement(
 /// System to animate captured pieces fading out
 ///
 /// Pieces with FadingCapture component fade out over time, then move to capture zone.
+/// Handles parent-child hierarchy where materials are on child meshes.
+/// Each piece gets its own material clone to avoid affecting other pieces.
 pub fn animate_capture_fade(
     time: Res<Time>,
     mut commands: Commands,
-    mut query: Query<(
-        Entity,
-        &mut FadingCapture,
-        &MeshMaterial3d<StandardMaterial>,
-    )>,
+    mut query: Query<(Entity, &mut FadingCapture)>,
+    children_query: Query<&Children>,
+    mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (entity, mut fading, material_handle) in query.iter_mut() {
+    for (entity, mut fading) in query.iter_mut() {
         fading.timer.tick(time.delta());
 
         // Calculate fade progress (1.0 = start, 0.0 = end)
         let alpha = 1.0 - fading.timer.fraction();
 
-        // Update material alpha
-        if let Some(material) = materials.get_mut(&material_handle.0) {
-            material.base_color = material.base_color.with_alpha(alpha);
-            material.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+        // Update material alpha on all child meshes
+        // Clone materials to avoid affecting other pieces that share the same material
+        if let Ok(children) = children_query.get(entity) {
+            for child in children.iter() {
+                if let Ok(mut material_handle) = material_query.get_mut(child) {
+                    // Clone the material to make it unique to this piece
+                    if let Some(original_material) = materials.get(&material_handle.0) {
+                        let mut new_material = original_material.clone();
+                        new_material.base_color = new_material.base_color.with_alpha(alpha);
+                        new_material.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+                        material_handle.0 = materials.add(new_material);
+                    }
+                }
+            }
         }
 
         // When fade completes, move to capture zone
@@ -157,9 +167,15 @@ pub fn animate_capture_fade(
                 Captured,
             ));
 
-            // Reset alpha to 1.0 for display in capture zone
-            if let Some(material) = materials.get_mut(&material_handle.0) {
-                material.base_color = material.base_color.with_alpha(1.0);
+            // Reset alpha to 1.0 for display in capture zone on all children
+            if let Ok(children) = children_query.get(entity) {
+                for child in children.iter() {
+                    if let Ok(material_handle) = material_query.get(child) {
+                        if let Some(material) = materials.get_mut(&material_handle.0) {
+                            material.base_color = material.base_color.with_alpha(1.0);
+                        }
+                    }
+                }
             }
         }
     }

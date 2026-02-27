@@ -17,21 +17,25 @@ const Contracts = () => {
       </header>
 
       <section className="architecture-overview">
-        <h2>Architecture Overview</h2>
+        <h2>Stakeholder Ecosystem</h2>
         <p>
-          XFChess abandons the standard monolithic approach in favor of a deeply compartmentalized,
-          high-performance Solana workspace. State validation happens at various layers
-          with final settlements and dispute resolutions executing on-chain for maximum security.
+          XFChess creates a vibrant ecosystem where human players, AI bots, and charitable organizations
+          coexist in competitive gameplay. From casual matches to high-stakes bot tournaments,
+          the platform enables diverse wagering scenarios with trustless settlement.
         </p>
 
         <div className="contract-modules">
           <div className="module-card">
-            <h3>Game Engine Core</h3>
-            <p>Handles cryptographic FEN parsing, move validation, and high-performance game state transitions.</p>
+            <h3>Human Players & Grandmasters</h3>
+            <p>Competitive PvP matches with ranked ELO systems, from casual games to professional tournaments with substantial prize pools.</p>
           </div>
           <div className="module-card">
-            <h3>Wagering Protocol</h3>
-            <p>Trustless escrowed wagering for PvP matches with automated on-chain settlements.</p>
+            <h3>Chess Engine Bots</h3>
+            <p>Third-party developers can deploy custom chess engines (Stockfish, Leela, custom algorithms) to compete against humans or other bots for automated wagering.</p>
+          </div>
+          <div className="module-card">
+            <h3>Charity Wager Events</h3>
+            <p>Organized tournaments where proceeds go to charitable causes, creating competitive gaming with social impact.</p>
           </div>
         </div>
       </section>

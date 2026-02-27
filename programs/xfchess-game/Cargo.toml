@@ -8,14 +8,10 @@ crate-type = ["cdylib", "lib"]
 name = "xfchess_game"
 
 [features]
-no-entrypoint = []
-no-idl = []
-no-log-ix-name = []
-cpi = ["no-entrypoint"]
-# magicblock = ["ephemeral-rollups-sdk"]
-move-validation = ["shakmaty"]
 default = ["move-validation"]
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+magicblock = ["dep:ephemeral-rollups-sdk", "ephemeral-rollups-sdk/anchor"]
+move-validation = ["shakmaty"]
 
 [dependencies]
 anchor-lang = "0.32.1"
@@ -24,10 +20,7 @@ anchor-spl = "0.32.1"
 shakmaty = { version = "0.30.0", default-features = false, features = [
     "alloc",
 ], optional = true }
-# ephemeral-rollups-sdk = { path = "../../references/ephemeral-rollups-sdk/rust/sdk", optional = true }
-
-
-
+ephemeral-rollups-sdk = { path = "../../references/ephemeral-rollups-sdk/rust/sdk", optional = true }
 
 [dev-dependencies]
 solana-program-test = "2.2.1"

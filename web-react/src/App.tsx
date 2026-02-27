@@ -9,6 +9,10 @@ import Demo from './pages/Demo';
 import XFBeyond from './pages/XFBeyond';
 import Android from './pages/Android';
 import MagicBlockPage from './pages/MagicBlock';
+import NFTWagers from './pages/NFTWagers';
+import Wagering from './pages/Wagering';
+import Ecosystem from './pages/Ecosystem';
+import Charity from './pages/Charity';
 import tinoPhoto from './assets/tino.webp';
 
 // ═══════════════════════════════════════
@@ -34,26 +38,26 @@ const Navbar = () => {
           </div>
         </div>
 
-        {/* Roadmap Dropdown */}
-        <div className="dropdown">
-          <span className="nav-link dropdown-toggle">Roadmap</span>
-          <div className="dropdown-menu">
-            <Link to="/android" className="dropdown-item">Android</Link>
-            <Link to="/beyond" className="dropdown-item">Beyond</Link>
-          </div>
-        </div>
-
         {/* Networking Dropdown */}
         <div className="dropdown">
           <span className="nav-link dropdown-toggle">Networking</span>
           <div className="dropdown-menu">
             <Link to="/multiplayer" className="dropdown-item">Multiplayer</Link>
-            <Link to="/solana" className="dropdown-item">Solana</Link>
             <Link to="/magicblock" className="dropdown-item">MagicBlock</Link>
           </div>
         </div>
 
-        <a href="https://github.com/trilltino/XFChess/releases" className="nav-link" target="_blank" rel="noreferrer">Download</a>
+        {/* Financialised Layer Dropdown */}
+        <div className="dropdown">
+          <span className="nav-link dropdown-toggle">Financialised Layer</span>
+          <div className="dropdown-menu">
+            <Link to="/contracts" className="dropdown-item">Contracts</Link>
+            <Link to="/wagering" className="dropdown-item">Wagering</Link>
+            <Link to="/nft-wagers" className="dropdown-item">NFT Wagers</Link>
+            <Link to="/ecosystem" className="dropdown-item">Players & Bots</Link>
+            <Link to="/charity" className="dropdown-item">Charity Events</Link>
+          </div>
+        </div>
       </div>
     </nav>
   );
@@ -331,8 +335,8 @@ const WhyPage = () => {
             </div>
           </div>
           <div className="why-prose">
-            <p>Financialised gaming on Solana has a credibility problem. The space is littered with projects that bolt a token onto a shallow game loop, extract value from players, and disappear. The result is a justified scepticism among both gamers and developers: the idea that on-chain economies and genuine gameplay are fundamentally incompatible. XFChess exists to challenge that assumption directly. Chess is a game of pure skill — there is no randomness, no pay-to-win mechanic, no artificial scarcity. When you wager SOL on a match in XFChess, the outcome is determined entirely by the quality of your play, enforced by smart contracts that neither player can manipulate.</p>
-            <p>The financial layer in XFChess is designed to be minimal, transparent, and fair. Wager escrows are governed by Anchor programs that release funds automatically on game conclusion — no intermediary, no withdrawal delays, no hidden fees. ELO ratings are stored in Program Derived Addresses and updated on-chain after every match, creating a reputation system that is globally verifiable and impossible to fake. The goal is not to make chess a vehicle for speculation, but to demonstrate that skill-based, financially-settled games can be built on Solana in a way that respects players and strengthens the ecosystem's reputation. If XFChess succeeds, it becomes a reference point for what responsible financialised gaming looks like — and a foundation that other developers can build on.</p>
+            <p>Financialised gaming on Solana faces a fundamental challenge: real-time gameplay demands millisecond responsiveness, but mainnet confirmations take seconds. Every move in a chess match cannot wait for a block to finalise — the experience would be unplayable. Yet gamers rightfully demand that financial settlements — wagers, rankings, reputation — remain fully on-chain where they are transparent and immutable. XFChess solves this through ephemeral rollups: game state executes at native speed in a dedicated runtime, then commits to Solana only when the match concludes.</p>
+            <p>Ephemeral rollups transform what is possible for skill-based, financially-settled games. Moves propagate instantly between players through Braid P2P networking while the rollup maintains authoritative game state. Wager escrows lock on mainnet at match start, then release automatically when the rollup submits the final signed outcome — no intermediary, no withdrawal delays, no per-move fees. ELO ratings update on-chain only after match completion, creating a globally verifiable reputation system without burdening the base layer with every half-second board update. This architecture proves that genuine competitive gameplay and Solana-grade financial security are not opposing forces — they are complementary layers of the same stack. If XFChess succeeds, it becomes a reference implementation for how ephemeral rollups enable real-time games to settle on Solana without compromise.</p>
           </div>
         </div>
       </section>
@@ -358,10 +362,13 @@ const App = () => {
             <Route path="/what" element={<WhatPage />} />
             <Route path="/who" element={<WhoPage />} />
             <Route path="/why" element={<WhyPage />} />
-            <Route path="/solana" element={<ContractsPage />} />
             <Route path="/contracts" element={<ContractsPage />} />
             <Route path="/multiplayer" element={<Multiplayer />} />
             <Route path="/magicblock" element={<MagicBlockPage />} />
+            <Route path="/nft-wagers" element={<NFTWagers />} />
+            <Route path="/wagering" element={<Wagering />} />
+            <Route path="/ecosystem" element={<Ecosystem />} />
+            <Route path="/charity" element={<Charity />} />
             <Route path="/demo" element={<Demo />} />
             <Route path="/android" element={<Android />} />
             <Route path="/beyond" element={<XFBeyond />} />

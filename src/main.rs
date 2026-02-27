@@ -5,8 +5,10 @@ use bevy::{
     prelude::*,
 };
 use bevy_egui::EguiPlugin;
+use clap::Parser;
 
 mod assets;
+mod cli;
 mod core;
 mod engine;
 mod game;
@@ -20,13 +22,62 @@ mod solana;
 mod states;
 mod ui;
 
+pub use cli::{Cli, PlayerColor as CliPlayerColor};
 pub use persistent_camera::PersistentEguiCamera;
+pub use xfchess::{GameConfig, PlayerColor};
 
 #[tokio::main]
 async fn main() {
+    // Parse CLI arguments
+    let cli = Cli::parse();
+
+    println!("╔════════════════════════════════════════════════════════╗");
+    println!("║          XFChess - Decentralized Chess                 ║");
+    println!("║          Ephemeral Rollups on Solana                   ║");
+    println!("╚════════════════════════════════════════════════════════╝");
+    println!();
+
+    // Build game config from CLI
+    let game_config = GameConfig {
+        game_id: cli.game_id,
+        player_color: cli.player_color.map(|c| match c {
+            CliPlayerColor::White => PlayerColor::White,
+            CliPlayerColor::Black => PlayerColor::Black,
+        }),
+        rpc_url: cli.rpc_url,
+        session_key: cli.session_key,
+        session_pubkey: cli.session_pubkey,
+        p2p_port: cli.p2p_port,
+        bootstrap_node: cli.bootstrap_node,
+        game_pda: cli.game_pda,
+        wager_amount: cli.wager_amount,
+        debug: cli.debug,
+        log_file: cli.log_file.to_string_lossy().to_string(),
+    };
+
+    if game_config.game_id.is_some() {
+        println!("🎮 Game ID: {}", game_config.game_id.unwrap());
+        println!("🎨 Player: {:?}", game_config.player_color);
+        if let Some(wager) = game_config.wager_amount {
+            println!("💰 Wager: {} SOL", wager);
+        }
+        println!(
+            "🔑 Session: {}...",
+            game_config
+                .session_pubkey
+                .as_ref()
+                .unwrap_or(&"N/A".to_string())
+                .get(..8)
+                .unwrap_or("")
+        );
+        println!("🌐 RPC: {}", game_config.rpc_url);
+        println!();
+    }
+
     let handle = tokio::runtime::Handle::current();
     let mut app = App::new();
     app.insert_resource(multiplayer::TokioRuntime(handle))
+        .insert_resource(game_config)
         .init_resource::<PersistentEguiCamera>()
         .add_systems(PreStartup, persistent_camera::setup_persistent_egui_camera);
 
@@ -88,7 +139,21 @@ async fn main() {
         multiplayer::MultiplayerPlugin,
         #[cfg(feature = "solana")]
         multiplayer::ephemeral_mvp_plugin::EphemeralMvpPlugin,
+        multiplayer::wager_state::WagerPlugin,
     ));
+
+    // Add transaction debugger if debug mode enabled
+    if cli.debug {
+        println!("🔍 Transaction debugger enabled");
+        let log_file = std::path::PathBuf::from(&cli.log_file);
+        app.add_plugins(
+            multiplayer::transaction_debugger::TransactionDebuggerPlugin {
+                log_file: Some(log_file),
+                pretty_print: !cli.no_pretty_print,
+                game_id: cli.game_id,
+            },
+        );
+    }
 
     // Run the app
     app.run();

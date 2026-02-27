@@ -86,6 +86,7 @@ pub fn handle_network_moves(
                 &mut engine,
                 &mut pieces_query,
                 None, // No MoveMadeEvent writer — avoid local echo
+                None, // BoardStateSync — network moves don't broadcast
             );
 
             // 6. Update Selection (Clear if we moved selected piece)

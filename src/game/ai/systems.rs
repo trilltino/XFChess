@@ -2,9 +2,9 @@ use super::resource::ChessAIResource;
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::GamePhase;
 use crate::game::components::HasMoved;
+use crate::game::components::Piece;
 use crate::game::resources::{CapturedPieces, CurrentGamePhase, CurrentTurn, MoveHistory};
 use crate::game::system_sets::GameSystems;
-use crate::game::components::Piece;
 use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
 use bevy::ecs::system::{ParamSet, SystemParam};
 use bevy::prelude::*;
@@ -259,6 +259,7 @@ fn poll_ai_task_system(
                     &mut params.engine,
                     &mut p0,
                     None,
+                    None, // BoardStateSync not available in AI context
                 );
             } else {
                 warn!("[AI] Could not find valid piece at {:?}", from_coords);

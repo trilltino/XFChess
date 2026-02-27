@@ -1,13 +1,15 @@
 //! Local input handling for singleplayer games.
 
 use crate::engine::board_state::ChessEngine;
+use crate::game::components::Piece;
 use crate::game::components::{HasMoved, SelectedPiece};
 use crate::game::resources::{
     CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingTurnAdvance,
     Selection,
 };
-use crate::game::components::Piece;
-use crate::game::systems::shared::{execute_move, find_piece_on_square, CapturedTarget, MoveContext};
+use crate::game::systems::shared::{
+    execute_move, find_piece_on_square, CapturedTarget, MoveContext,
+};
 use crate::rendering::utils::Square;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::events::{Click, Pointer};
@@ -149,6 +151,7 @@ fn try_move_sequence(
         &mut params.engine,
         &mut params.pieces.p0(),
         Some(&mut params.move_events),
+        None, // BoardStateSync not available in this context
     );
 
     if success {

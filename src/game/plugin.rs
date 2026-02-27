@@ -208,6 +208,9 @@ impl Plugin for GamePlugin {
         // Global visual setup
         app.add_systems(Startup, setup_global_scene);
 
+        // Add mesh picking plugin for 3D picking support (required in Bevy 0.18)
+        app.add_plugins(MeshPickingPlugin);
+
         // Add picking debug plugin
         app.add_plugins(PickingDebugPlugin);
 
@@ -220,23 +223,17 @@ impl Plugin for GamePlugin {
                 setup_game_scene,
                 setup_game_camera,
                 initialize_engine_from_ecs.after(crate::rendering::pieces::create_pieces),
-            )
+            ),
         );
 
-        app.add_systems(
-            OnExit(GameState::InGame),
-            (
-                reset_game_camera,
-            )
-        );
+        app.add_systems(OnExit(GameState::InGame), (reset_game_camera,));
 
-        // This must run after pieces are created, we can schedule it in Update temporarily 
+        // This must run after pieces are created, we can schedule it in Update temporarily
         // or a different state, but let's just use PostStartup or a delayed system?
         // Wait, PiecePlugin probably spawns pieces on OnEnter(GameState::InGame).
         // If we add this to OnEnter(GameState::InGame), we should order it after piece spawning.
         // Piece spawning is in `crate::rendering::pieces::create_pieces`.
         // Let's just add it to OnEnter(GameState::InGame) for now, Bevy's default ordering might be enough,
         // or we can use `.after(crate::rendering::pieces::create_pieces)`.
-
     }
 }

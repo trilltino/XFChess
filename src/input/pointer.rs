@@ -112,12 +112,24 @@ pub fn on_piece_hover(
     piece_query: Query<&Piece>,
     current_turn: Res<CurrentTurn>,
     game_phase: Res<CurrentGamePhase>,
-    hover_materials: Res<HoverMaterials>,
+    hover_materials: Option<Res<HoverMaterials>>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut original_materials: ResMut<OriginalMaterials>,
-    mut cursor_style: ResMut<CursorStyle>,
+    original_materials: Option<ResMut<OriginalMaterials>>,
+    cursor_style: Option<ResMut<CursorStyle>>,
 ) {
+    let hover_materials = match hover_materials {
+        Some(res) => res,
+        None => return, // Skip hover effect if resource not initialized
+    };
+    let mut original_materials = match original_materials {
+        Some(res) => res,
+        None => return,
+    };
+    let mut cursor_style = match cursor_style {
+        Some(res) => res,
+        None => return,
+    };
     let entity = hover.entity;
     if !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check) {
         return;
@@ -163,9 +175,17 @@ pub fn on_piece_hover(
 pub fn on_piece_unhover(
     unhover: On<Pointer<Out>>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    mut original_materials: ResMut<OriginalMaterials>,
-    mut cursor_style: ResMut<CursorStyle>,
+    original_materials: Option<ResMut<OriginalMaterials>>,
+    cursor_style: Option<ResMut<CursorStyle>>,
 ) {
+    let mut original_materials = match original_materials {
+        Some(res) => res,
+        None => return,
+    };
+    let mut cursor_style = match cursor_style {
+        Some(res) => res,
+        None => return,
+    };
     let entity = unhover.entity;
 
     if let Some(original_handle) = original_materials.materials.remove(&entity) {
@@ -185,12 +205,24 @@ pub fn on_square_hover(
     square_query: Query<&Square>,
     selection: Res<Selection>,
     game_phase: Res<CurrentGamePhase>,
-    hover_materials: Res<HoverMaterials>,
+    hover_materials: Option<Res<HoverMaterials>>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut original_materials: ResMut<OriginalMaterials>,
-    mut cursor_style: ResMut<CursorStyle>,
+    original_materials: Option<ResMut<OriginalMaterials>>,
+    cursor_style: Option<ResMut<CursorStyle>>,
 ) {
+    let hover_materials = match hover_materials {
+        Some(res) => res,
+        None => return, // Skip hover effect if resource not initialized
+    };
+    let mut original_materials = match original_materials {
+        Some(res) => res,
+        None => return,
+    };
+    let mut cursor_style = match cursor_style {
+        Some(res) => res,
+        None => return,
+    };
     let entity = hover.entity;
 
     if !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check) {
@@ -246,9 +278,17 @@ pub fn on_square_hover(
 pub fn on_square_unhover(
     unhover: On<Pointer<Out>>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    mut original_materials: ResMut<OriginalMaterials>,
-    mut cursor_style: ResMut<CursorStyle>,
+    original_materials: Option<ResMut<OriginalMaterials>>,
+    cursor_style: Option<ResMut<CursorStyle>>,
 ) {
+    let mut original_materials = match original_materials {
+        Some(res) => res,
+        None => return,
+    };
+    let mut cursor_style = match cursor_style {
+        Some(res) => res,
+        None => return,
+    };
     let entity = unhover.entity;
 
     if let Some(original_handle) = original_materials.materials.remove(&entity) {

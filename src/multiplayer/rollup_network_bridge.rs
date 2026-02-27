@@ -1,9 +1,13 @@
 #![cfg(feature = "solana")]
 use bevy::prelude::*;
-use bevy::ecs::event::{EventReader, EventWriter};
 use solana_sdk::{message::Message, pubkey::Pubkey, signature::Signer};
+use std::sync::Arc;
 
+use crate::game::events::{GameEndedEvent, GameStartedEvent};
 use crate::multiplayer::{
+    magicblock_resolver::{
+        MagicBlockError, MagicBlockEvent, MagicBlockResolver, MagicBlockResolverPlugin,
+    },
     network_protocol::{calculate_batch_hash, NetworkMessage},
     rollup_manager::{EphemeralRollupManager, GameStateStatus, RollupEvent}, // GameStateStatus should have PartialEq
     session_key_manager::SessionKeyManager,
@@ -27,9 +31,19 @@ pub struct RollupNetworkBridgePlugin;
 impl Plugin for RollupNetworkBridgePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RollupNetworkBridge>();
+        app.add_event::<MagicBlockEvent>();
+
+        // Core network bridge systems
         app.add_systems(Update, handle_rollup_to_network_events);
         app.add_systems(Update, handle_network_to_rollup_events);
         app.add_systems(Update, process_batch_commit_requests);
+
+        // Magic Block ER delegation systems
+        app.add_systems(Update, handle_game_start_delegation);
+        app.add_systems(Update, handle_game_end_undelegation);
+        app.add_systems(Update, handle_magic_block_events);
+
+        info!("RollupNetworkBridgePlugin initialized with Magic Block ER support");
     }
 }
 
@@ -77,10 +91,7 @@ fn handle_rollup_to_network_events(
                 info!("Sent BatchPropose for game {}", game_id);
             }
             RollupEvent::BatchFailed { game_id, .. } | RollupEvent::NeedResync { game_id } => {
-                send_network_msg(
-                    &network_state,
-                    NetworkMessage::ResyncRequest { game_id },
-                );
+                send_network_msg(&network_state, NetworkMessage::ResyncRequest { game_id });
                 warn!("Requested resync for game {}", game_id);
             }
             _ => {}
@@ -95,6 +106,8 @@ fn handle_network_to_rollup_events(
     mut bridge: ResMut<RollupNetworkBridge>,
     mut rollup_manager: ResMut<EphemeralRollupManager>,
     session_key_manager: Res<SessionKeyManager>,
+    mut magicblock_resolver: ResMut<MagicBlockResolver>,
+    mut magicblock_events: EventWriter<MagicBlockEvent>,
 ) {
     for event in network_events.read() {
         let msg = match event {
@@ -109,7 +122,12 @@ fn handle_network_to_rollup_events(
                 moves,
                 next_fens,
             } => {
-                if !validate_batch_proposal(start_turn, moves.as_slice(), next_fens.as_slice(), &rollup_manager) {
+                if !validate_batch_proposal(
+                    start_turn,
+                    moves.as_slice(),
+                    next_fens.as_slice(),
+                    &rollup_manager,
+                ) {
                     warn!("Rejected invalid BatchPropose for game {}", game_id);
                     rollup_events.send(RollupEvent::BatchFailed {
                         game_id,
@@ -123,7 +141,12 @@ fn handle_network_to_rollup_events(
                     rollup_manager.add_remote_move(uci.clone(), fen.clone());
                 }
 
-                let batch_hash = calculate_batch_hash(game_id, start_turn, moves.as_slice(), next_fens.as_slice());
+                let batch_hash = calculate_batch_hash(
+                    game_id,
+                    start_turn,
+                    moves.as_slice(),
+                    next_fens.as_slice(),
+                );
                 send_network_msg(
                     &network_state,
                     NetworkMessage::BatchAccept {
@@ -139,6 +162,8 @@ fn handle_network_to_rollup_events(
                     &network_state,
                     &rollup_manager,
                     &session_key_manager,
+                    &mut magicblock_resolver,
+                    Some(&mut magicblock_events),
                 );
             }
 
@@ -154,10 +179,7 @@ fn handle_network_to_rollup_events(
 
             NetworkMessage::BatchReject { game_id, reason } => {
                 warn!("Peer rejected batch for game {}: {}", game_id, reason);
-                send_network_msg(
-                    &network_state,
-                    NetworkMessage::ResyncRequest { game_id },
-                );
+                send_network_msg(&network_state, NetworkMessage::ResyncRequest { game_id });
             }
 
             NetworkMessage::TxMessage {
@@ -263,10 +285,12 @@ fn handle_network_to_rollup_events(
 
 fn process_batch_commit_requests(
     mut rollup_manager: ResMut<EphemeralRollupManager>,
-    mut rollup_events: EventWriter<RollupEvent>,
+    mut _rollup_events: EventWriter<RollupEvent>,
     network_state: Res<BraidNetworkState>,
     mut bridge: ResMut<RollupNetworkBridge>,
     session_key_manager: Res<SessionKeyManager>,
+    mut magicblock_resolver: ResMut<MagicBlockResolver>,
+    mut magicblock_events: EventWriter<MagicBlockEvent>,
 ) {
     if bridge.awaiting_commit_confirmation {
         return;
@@ -282,6 +306,8 @@ fn process_batch_commit_requests(
             &network_state,
             &rollup_manager,
             &session_key_manager,
+            &mut magicblock_resolver,
+            Some(&mut magicblock_events),
         );
         bridge.awaiting_commit_confirmation = true;
     }
@@ -312,6 +338,8 @@ fn initiate_two_party_signing(
     network_state: &BraidNetworkState,
     rollup_manager: &EphemeralRollupManager,
     session_key_manager: &SessionKeyManager,
+    magicblock_resolver: &mut MagicBlockResolver,
+    mut magicblock_events: Option<&mut EventWriter<MagicBlockEvent>>,
 ) {
     let session_kp = match session_key_manager.get_session_keypair() {
         Some(kp) => kp,
@@ -320,7 +348,7 @@ fn initiate_two_party_signing(
             return;
         }
     };
-    let (white_session, black_session) = match rollup_manager.session_keys {
+    let (_white_session, _black_session) = match rollup_manager.session_keys {
         Some(keys) => keys,
         None => {
             error!(
@@ -332,16 +360,14 @@ fn initiate_two_party_signing(
     };
 
     let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
-    
+
     // Derive game_pda from game_id using the same seeds as the program
-    let game_pda = Pubkey::find_program_address(
-        &[b"game", &game_id.to_le_bytes()],
-        &program_id,
-    ).0;
-    
+    let game_pda = Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &program_id).0;
+
     // Convert moves from Vec<String> to Vec<(u8, u8)> - simplified conversion
     // This is a placeholder - actual implementation would parse UCI notation
-    let moves_converted: Vec<(u8, u8)> = moves.iter()
+    let moves_converted: Vec<(u8, u8)> = moves
+        .iter()
         .map(|m| {
             // Simple placeholder: convert first two chars to bytes
             let bytes = m.as_bytes();
@@ -352,15 +378,49 @@ fn initiate_two_party_signing(
             }
         })
         .collect();
-    
+
     let ix = commit_move_batch_ix(
         session_kp.pubkey(), // payer
         game_pda,
         moves_converted,
         vec![], // signatures - empty for now
-    ).expect("Failed to create commit_move_batch instruction");
+    )
+    .expect("Failed to create commit_move_batch instruction");
 
-    let message = Message::new(&[ix], Some(&session_kp.pubkey()));
+    // Check if we should route through Magic Block ER
+    if magicblock_resolver.is_delegated() {
+        info!(
+            "Routing batch commit through Magic Block ER for game {}",
+            game_id
+        );
+
+        match magicblock_resolver.route_transaction(vec![ix], &session_kp) {
+            Ok(signature) => {
+                info!("Batch commit routed to ER with signature: {}", signature);
+                if let Some(ref mut events) = magicblock_events {
+                    events.send(MagicBlockEvent::TransactionRoutedToEr { signature });
+                }
+            }
+            Err(e) => {
+                error!("Failed to route batch commit to ER: {}", e);
+                // Fall back to network-based signing
+                send_network_batch_commit(network_state, game_id, &session_kp, vec![ix]);
+            }
+        }
+    } else {
+        // Use traditional network-based signing
+        send_network_batch_commit(network_state, game_id, &session_kp, vec![ix]);
+    }
+}
+
+/// Helper function to send batch commit via network (traditional approach)
+fn send_network_batch_commit(
+    network_state: &BraidNetworkState,
+    game_id: u64,
+    session_kp: &solana_sdk::signature::Keypair,
+    instructions: Vec<solana_sdk::instruction::Instruction>,
+) {
+    let message = Message::new(&instructions, Some(&session_kp.pubkey()));
     let message_bytes = message.serialize();
     let sig = session_kp.sign_message(&message_bytes);
 
@@ -380,4 +440,150 @@ fn initiate_two_party_signing(
         },
     );
     info!("Sent TxMessage + TxSignature for game {}", game_id);
+}
+
+/// Handles game start events to delegate the game PDA to the Ephemeral Rollup
+///
+/// This system listens for GameStartedEvent and triggers delegation to the ER
+/// for sub-second transaction processing during gameplay.
+fn handle_game_start_delegation(
+    mut game_started_events: EventReader<GameStartedEvent>,
+    mut magicblock_resolver: ResMut<MagicBlockResolver>,
+    session_key_manager: Res<SessionKeyManager>,
+    mut magicblock_events: EventWriter<MagicBlockEvent>,
+) {
+    for event in game_started_events.read() {
+        let game_id = event.game_id;
+        info!("Game {} started - initiating ER delegation", game_id);
+
+        // Derive the game PDA
+        let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+        let game_pda =
+            Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &program_id).0;
+
+        // Get session keypair for signing
+        let session_keypair = match session_key_manager.get_session_keypair() {
+            Some(kp) => kp,
+            None => {
+                error!("No session keypair available for delegation");
+                magicblock_events.send(MagicBlockEvent::DelegationFailed {
+                    game_pda,
+                    error: "No session keypair available".to_string(),
+                });
+                continue;
+            }
+        };
+
+        // Delegate game to ER
+        match magicblock_resolver.delegate_game(game_pda, &session_keypair) {
+            Ok(_) => {
+                info!("Successfully delegated game {} to ER", game_id);
+                magicblock_events.send(MagicBlockEvent::GameDelegated { game_pda });
+            }
+            Err(e) => {
+                error!("Failed to delegate game {} to ER: {}", game_id, e);
+                magicblock_events.send(MagicBlockEvent::DelegationFailed {
+                    game_pda,
+                    error: e.to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// Handles game end events to undelegate the game PDA from the Ephemeral Rollup
+///
+/// This system listens for GameEndedEvent and triggers undelegation from the ER,
+/// committing the final game state to Solana.
+fn handle_game_end_undelegation(
+    mut game_ended_events: EventReader<GameEndedEvent>,
+    mut magicblock_resolver: ResMut<MagicBlockResolver>,
+    session_key_manager: Res<SessionKeyManager>,
+    mut magicblock_events: EventWriter<MagicBlockEvent>,
+) {
+    for event in game_ended_events.read() {
+        let game_id = event.game_id;
+        info!("Game {} ended - initiating ER undelegation", game_id);
+
+        // Check if game is currently delegated
+        if !magicblock_resolver.is_delegated() {
+            info!(
+                "Game {} was not delegated to ER, skipping undelegation",
+                game_id
+            );
+            continue;
+        }
+
+        // Get session keypair for signing
+        let session_keypair = match session_key_manager.get_session_keypair() {
+            Some(kp) => kp,
+            None => {
+                error!("No session keypair available for undelegation");
+                let game_pda = magicblock_resolver.get_delegated_game().unwrap_or_default();
+                magicblock_events.send(MagicBlockEvent::UndelegationFailed {
+                    game_pda,
+                    error: "No session keypair available".to_string(),
+                });
+                continue;
+            }
+        };
+
+        // Undelegate game from ER
+        match magicblock_resolver.undelegate_game(&session_keypair) {
+            Ok(_) => {
+                let game_pda = magicblock_resolver.get_delegated_game().unwrap_or_default();
+                info!("Successfully undelegated game {} from ER", game_id);
+                magicblock_events.send(MagicBlockEvent::GameUndelegated { game_pda });
+            }
+            Err(e) => {
+                let game_pda = magicblock_resolver.get_delegated_game().unwrap_or_default();
+                error!("Failed to undelegate game {} from ER: {}", game_id, e);
+                magicblock_events.send(MagicBlockEvent::UndelegationFailed {
+                    game_pda,
+                    error: e.to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// Handles Magic Block events for logging and error handling
+fn handle_magic_block_events(mut magicblock_events: EventReader<MagicBlockEvent>) {
+    for event in magicblock_events.read() {
+        match event {
+            MagicBlockEvent::GameDelegated { game_pda } => {
+                info!("Magic Block: Game {} delegated to ER", game_pda);
+            }
+            MagicBlockEvent::GameUndelegated { game_pda } => {
+                info!("Magic Block: Game {} undelegated from ER", game_pda);
+            }
+            MagicBlockEvent::DelegationFailed { game_pda, error } => {
+                error!(
+                    "Magic Block: Failed to delegate game {}: {}",
+                    game_pda, error
+                );
+            }
+            MagicBlockEvent::UndelegationFailed { game_pda, error } => {
+                error!(
+                    "Magic Block: Failed to undelegate game {}: {}",
+                    game_pda, error
+                );
+            }
+            MagicBlockEvent::TransactionRoutedToEr { signature } => {
+                info!("Magic Block: Transaction routed to ER: {}", signature);
+            }
+            MagicBlockEvent::TransactionRoutedToSolana { signature } => {
+                info!("Magic Block: Transaction routed to Solana: {}", signature);
+            }
+            MagicBlockEvent::ForceCommitCompleted {
+                game_pda,
+                signature,
+            } => {
+                info!(
+                    "Magic Block: Force commit completed for {}: {}",
+                    game_pda, signature
+                );
+            }
+        }
+    }
 }

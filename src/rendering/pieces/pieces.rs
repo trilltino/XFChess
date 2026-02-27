@@ -212,7 +212,7 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
 ///
 /// Offsets are in the piece's local coordinate space (after Y-rotation is applied):
 /// - X: Left/right adjustment to center on square
-/// - Y: Vertical offset (0.0 = piece base at parent origin, matching showcase)
+/// - Y: Vertical offset (0.0 = piece base at parent Y position)
 /// - Z: Forward/back adjustment to center on square
 ///
 /// # Why Different Z Offsets?
@@ -222,8 +222,9 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
 /// - Knight at Z ≈ 0.9, Rook at Z ≈ 1.8, Pawn at Z ≈ 2.6
 ///
 /// These offsets bring each piece to the center of its square (local X=0, Z=0).
-/// Y=0.0 keeps the piece base at the parent's position (PIECE_ON_BOARD_Y),
-/// matching the working main_menu_showcase.rs offsets.
+/// Y=0.0 keeps the piece at the parent's Y position (PIECE_ON_BOARD_Y = 0.05).
+/// The parent entity is already positioned at the board surface, so the mesh
+/// should not have additional vertical offset.
 const KING_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -1.9);
 const QUEEN_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -0.95);
 const BISHOP_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 0.0);
@@ -252,16 +253,66 @@ pub fn spawn_piece_at(
 
     // Handle is Clone (not Copy), need .clone() from shared ref
     match piece_type {
-        PieceType::King => spawn_king(commands, material, color, world_pos, meshes, KING_OFFSET, file, rank),
-        PieceType::Queen => spawn_queen(commands, material, color, world_pos, meshes, QUEEN_OFFSET, file, rank),
-        PieceType::Rook => spawn_rook(commands, material, color, world_pos, meshes, ROOK_OFFSET, file, rank),
-        PieceType::Bishop => {
-            spawn_bishop(commands, material, color, world_pos, meshes, BISHOP_OFFSET, file, rank)
-        }
-        PieceType::Knight => {
-            spawn_knight(commands, material, color, world_pos, meshes, KNIGHT_OFFSET, file, rank)
-        }
-        PieceType::Pawn => spawn_pawn(commands, material, color, world_pos, meshes, PAWN_OFFSET, file, rank),
+        PieceType::King => spawn_king(
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            KING_OFFSET,
+            file,
+            rank,
+        ),
+        PieceType::Queen => spawn_queen(
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            QUEEN_OFFSET,
+            file,
+            rank,
+        ),
+        PieceType::Rook => spawn_rook(
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            ROOK_OFFSET,
+            file,
+            rank,
+        ),
+        PieceType::Bishop => spawn_bishop(
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            BISHOP_OFFSET,
+            file,
+            rank,
+        ),
+        PieceType::Knight => spawn_knight(
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            KNIGHT_OFFSET,
+            file,
+            rank,
+        ),
+        PieceType::Pawn => spawn_pawn(
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            PAWN_OFFSET,
+            file,
+            rank,
+        ),
     }
 }
 
@@ -292,7 +343,7 @@ fn knight_rotation(color: PieceColor) -> Quat {
 }
 
 /// Helper function to generate piece name for inspector
-/// 
+///
 /// # Arguments
 /// * `file` - File index 0-7 (a-h)
 /// * `rank` - Rank index 0-7 (1-8)
@@ -319,8 +370,9 @@ macro_rules! spawn_piece_visual {
             Mesh3d($mesh),
             MeshMaterial3d($material),
             piece_mesh_transform($offset),
-            // No Pickable here — picking events bubble from child mesh hits
-            // up to the parent entity where observers are registered.
+            // Pickable required for child meshes to generate pointer events
+            // Events bubble up to parent entity where observers are registered
+            bevy::picking::Pickable::default(),
         ));
     };
 }
