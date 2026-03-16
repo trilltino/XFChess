@@ -7,6 +7,10 @@ edition = "2021"
 name = "xfchess"
 path = "src/main.rs"
 
+[[bin]]
+name = "opera_test"
+path = "opera_test.rs"
+
 [workspace]
 members = [
     "crates/braid-blob",
