@@ -61,3 +61,22 @@ settings.json
 xfchess_identity.key
 xfchess_peer_*.key
 launch_peer_*.bat
+
+# Sensitive wallet and key files
+*.json
+!web-react/package.json
+!Cargo.toml
+!Anchor.toml
+!programs/xfchess-game/Cargo.toml
+!backend/Cargo.toml
+!crates/*/Cargo.toml
+!wallet-popup/Cargo.toml
+!web-react/tsconfig.json
+!web-react/package.json
+!web-react/vite.config.ts
+!web-react/eslint.config.js
+!wallet-popup/tauri.conf.json
+
+# Exclude all JSON files except specific ones
+!idl.json
+!idl_full.json
