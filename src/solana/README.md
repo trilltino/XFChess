@@ -123,7 +123,7 @@ Loaded from session JSON:
 
 ### Environment Variables
 ```rust
-const PROGRAM_ID: &str = "3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP";
+const PROGRAM_ID: &str = "AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp";
 const DEFAULT_RPC: &str = "https://api.devnet.solana.com";
 ```
 

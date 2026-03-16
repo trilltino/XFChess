@@ -3,8 +3,8 @@
 use anyhow::Result;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
-/// Program ID constant - XFChess program on Solana devnet
-pub const PROGRAM_ID: &str = "3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP";
+/// Program ID constant - should be replaced with actual program ID
+pub const PROGRAM_ID: &str = "XFChessGame1111111111111111111111111111111";
 
 /// Create instruction to initialize player profile
 pub fn init_profile_ix(_payer: Pubkey) -> Instruction {
@@ -20,21 +20,24 @@ pub fn init_profile_ix(_payer: Pubkey) -> Instruction {
 /// Create instruction to create a new game
 pub fn create_game_ix(program_id: Pubkey, payer: Pubkey, game_id: u64) -> Instruction {
     use solana_sdk::instruction::AccountMeta;
-
+    
     // Derive game PDA
-    let game_pda = Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &program_id).0;
-
+    let game_pda = Pubkey::find_program_address(
+        &[b"game", &game_id.to_le_bytes()],
+        &program_id,
+    ).0;
+    
     // Build the instruction data
     let data = {
         let mut data = vec![0]; // Instruction discriminator for create_game
         data.extend_from_slice(&game_id.to_le_bytes());
         data
     };
-
+    
     Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(payer, true),     // payer, signer
+            AccountMeta::new(payer, true), // payer, signer
             AccountMeta::new(game_pda, false), // game_pda
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false), // system_program
         ],
@@ -50,10 +53,10 @@ pub fn make_move_instruction(
     to: u8,
 ) -> Result<Instruction> {
     use solana_sdk::instruction::AccountMeta;
-
+    
     // Get program ID
     let program_id: Pubkey = PROGRAM_ID.parse()?;
-
+    
     // Build the instruction data
     let data = {
         let mut data = vec![1]; // Instruction discriminator for record_move
@@ -61,11 +64,11 @@ pub fn make_move_instruction(
         data.push(to);
         data
     };
-
+    
     Ok(Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(payer, true),     // payer, signer
+            AccountMeta::new(payer, true), // payer, signer
             AccountMeta::new(game_pda, false), // game_pda
         ],
         data,
@@ -79,17 +82,17 @@ pub fn finish_game_instruction(
     _winner: Pubkey,
 ) -> Result<Instruction> {
     use solana_sdk::instruction::AccountMeta;
-
+    
     // Get program ID
     let program_id: Pubkey = PROGRAM_ID.parse()?;
-
+    
     // Build the instruction data
     let data = vec![2]; // Instruction discriminator for finalize_game
-
+    
     Ok(Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(payer, true),     // payer, signer
+            AccountMeta::new(payer, true), // payer, signer
             AccountMeta::new(game_pda, false), // game_pda
         ],
         data,
@@ -104,10 +107,10 @@ pub fn commit_move_batch_ix(
     signatures: Vec<[u8; 64]>,
 ) -> Result<Instruction> {
     use solana_sdk::instruction::AccountMeta;
-
+    
     // Get program ID
     let program_id: Pubkey = PROGRAM_ID.parse()?;
-
+    
     // Build the instruction data
     let mut data = vec![3]; // Instruction discriminator for commit_move_batch
     data.extend_from_slice(&(moves.len() as u16).to_le_bytes());
@@ -118,11 +121,11 @@ pub fn commit_move_batch_ix(
     for sig in signatures {
         data.extend_from_slice(&sig);
     }
-
+    
     Ok(Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(payer, true),     // payer, signer
+            AccountMeta::new(payer, true), // payer, signer
             AccountMeta::new(game_pda, false), // game_pda
         ],
         data,
@@ -137,20 +140,20 @@ pub fn authorize_session_key_ix(
     expires_at: i64,
 ) -> Result<Instruction> {
     use solana_sdk::instruction::AccountMeta;
-
+    
     // Get program ID
     let program_id: Pubkey = PROGRAM_ID.parse()?;
-
+    
     // Build the instruction data
     let mut data = vec![4]; // Instruction discriminator for authorize_session
     data.extend_from_slice(session_key.as_ref());
     data.extend_from_slice(&expires_at.to_le_bytes());
-
+    
     Ok(Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(payer, true),                 // payer, signer
-            AccountMeta::new(game_pda, false),             // game_pda
+            AccountMeta::new(payer, true), // payer, signer
+            AccountMeta::new(game_pda, false), // game_pda
             AccountMeta::new_readonly(session_key, false), // session_key
         ],
         data,
@@ -159,7 +162,5 @@ pub fn authorize_session_key_ix(
 
 /// Re-export program ID for convenience
 pub fn get_program_id() -> Result<Pubkey> {
-    PROGRAM_ID
-        .parse()
-        .map_err(|e| anyhow::anyhow!("Invalid program ID: {}", e))
+    PROGRAM_ID.parse().map_err(|e| anyhow::anyhow!("Invalid program ID: {}", e))
 }

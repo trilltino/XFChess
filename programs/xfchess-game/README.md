@@ -5,7 +5,7 @@ The XFChess Solana Program is the on-chain smart contract that powers decentrali
 
 ## Program ID
 ```
-3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP
+AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp
 ```
 
 ## Impact on Game

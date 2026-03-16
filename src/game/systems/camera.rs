@@ -787,19 +787,17 @@ pub fn setup_game_camera(
                 .map(|c| c == shakmaty::Color::Black)
                 .unwrap_or(false);
 
-            // Camera positioned BEHIND the player's side of the board
-            // Positioned at the edge of the board (X=0 or X=7) rather than center (X=3.5)
-            // so the player views from their side as if sitting at the chess table
-            // White view: behind rank 1 (negative Z), at X=0 (queen's side edge)
-            // Black view: behind rank 8 (positive Z), at X=7 (king's side edge)
+            // Camera positioned along Z-axis to view board from player's side
+            // White view: behind rank 1 (negative Z), looking toward center
+            // Black view: behind rank 8 (positive Z), looking toward center
             // Board center is at (3.5, 0, 3.5)
 
             let camera_pos = if is_black_view {
-                // Black player: camera behind rank 8 (Z=7), at X=7 edge, looking toward board
-                Vec3::new(7.0, initial_height, 7.0 + distance_behind)
+                // Black player: camera behind rank 8 (Z=7), looking toward board
+                Vec3::new(3.5, initial_height, 7.0 + distance_behind)
             } else {
-                // White player: camera behind rank 1 (Z=0), at X=0 edge, looking toward board
-                Vec3::new(0.0, initial_height, -distance_behind)
+                // White player: camera behind rank 1 (Z=0), looking toward board
+                Vec3::new(3.5, initial_height, -distance_behind)
             };
 
             let board_center = Vec3::new(3.5, 0.0, 3.5);
@@ -868,15 +866,15 @@ pub fn camera_reset_system(
             .and_then(|s| s.player_color)
             .or_else(|| {
                 network_state.as_ref().and_then(|ns| {
-                    ns.active_session
-                        .as_ref()
-                        .map(|session| match session.game_state.as_ref() {
+                    ns.active_session.as_ref().map(|session| {
+                        match session.game_state.as_ref() {
                             Some(game_state) => match game_state.my_color {
                                 crate::multiplayer::PlayerColor::White => shakmaty::Color::White,
                                 crate::multiplayer::PlayerColor::Black => shakmaty::Color::Black,
                             },
                             None => shakmaty::Color::White,
-                        })
+                        }
+                    })
                 })
             });
 
@@ -886,15 +884,15 @@ pub fn camera_reset_system(
 
         for (mut transform, mut controller) in query.iter_mut() {
             // Standard Perspective defaults
-            // Positioned behind player's side at board edge (not center)
+            // Positioned behind player's pieces along Z-axis
             let initial_height = 12.0;
             let distance_behind = 8.0;
             let default_pos = if is_black_view {
-                // Black player: camera behind rank 8, at X=7 edge, looking toward board
-                Vec3::new(7.0, initial_height, 7.0 + distance_behind)
+                // Black player: camera behind rank 8, looking toward board
+                Vec3::new(3.5, initial_height, 7.0 + distance_behind)
             } else {
-                // White player: camera behind rank 1, at X=0 edge, looking toward board
-                Vec3::new(0.0, initial_height, -distance_behind)
+                // White player: camera behind rank 1, looking toward board
+                Vec3::new(3.5, initial_height, -distance_behind)
             };
             let board_center = Vec3::new(3.5, 0.0, 3.5);
             let default_zoom = 12.0;
@@ -903,16 +901,9 @@ pub fn camera_reset_system(
 
             controller.current_zoom = default_zoom;
             controller.target_zoom = default_zoom;
-            controller.yaw = if is_black_view {
-                std::f32::consts::PI
-            } else {
-                0.0
-            };
+            controller.yaw = if is_black_view { std::f32::consts::PI } else { 0.0 };
 
-            info!(
-                "[CAMERA] Reset to {} Perspective",
-                if is_black_view { "Black" } else { "White" }
-            );
+            info!("[CAMERA] Reset to {} Perspective", if is_black_view { "Black" } else { "White" });
         }
     }
 }

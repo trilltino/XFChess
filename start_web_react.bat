@@ -22,32 +22,6 @@ set WEB_DIR=web-solana
 set PORT=5173
 set URL=http://localhost:%PORT%
 
-REM Check if server is already running on port 5173
-echo 🔍 Checking if server is already running on port %PORT%...
-curl -s -o nul -w "%%{http_code}" %URL% | findstr "200" >nul
-if not errorlevel 1 (
-    echo.
-    echo ⚠️  Server is ALREADY running on %URL%
-    echo    Opening browser to existing server...
-    start %URL%
-    echo.
-    echo Press any key to close this window...
-    pause >nul
-    exit /b 0
-)
-
-REM Check if there's already a Vite Dev Server window open
-tasklist /FI "WINDOWTITLE eq Vite Dev Server" 2>nul | find /I "cmd.exe" >nul
-if not errorlevel 1 (
-    echo.
-    echo ⚠️  A dev server window is already open!
-    echo    Please close the existing "Vite Dev Server" window first.
-    echo.
-    echo Press any key to close this window...
-    pause >nul
-    exit /b 1
-)
-
 REM Check if web-solana directory exists
 if not exist %WEB_DIR% (
     echo ❌ Error: %WEB_DIR% directory not found!
@@ -103,8 +77,8 @@ echo ✅ Server is ready!
 echo.
 
 :open_browser
-REM Auto-open browser when server is ready
-start %URL%
+echo 🌐 Opening Chrome browser...
+start chrome %URL%
 
 echo.
 echo ═══════════════════════════════════════════════════════════════

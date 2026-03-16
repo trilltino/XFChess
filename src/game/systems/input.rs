@@ -63,9 +63,6 @@ pub struct InputSystemParams<'w, 's> {
     pub captured_pieces: ResMut<'w, CapturedPieces>,
     pub game_sounds: Option<Res<'w, GameSounds>>,
     pub move_events: MessageWriter<'w, crate::game::events::MoveMadeEvent>,
-    pub children_query: Query<'w, 's, &'static Children>,
-    pub material_query: Query<'w, 's, &'static MeshMaterial3d<StandardMaterial>>,
-    pub materials: ResMut<'w, Assets<StandardMaterial>>,
 }
 
 // Helper alias for Option<Res> if needed, or just use Option<Res>
@@ -231,9 +228,6 @@ fn try_move_sequence(
         &mut params.pieces.p0(),
         Some(&mut params.move_events),
         None, // BoardStateSync - would need to add to InputSystemParams
-        &params.children_query,
-        &params.material_query,
-        &mut params.materials,
     );
 
     if success {

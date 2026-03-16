@@ -33,22 +33,6 @@ const PIECE_Y_OFFSET: f32 = 0.0;
 /// Note: This must be 0.2 to match the GLTF mesh offsets (designed for bevy_chess reference)
 const PIECE_MESH_SCALE: f32 = 0.2;
 
-// ============================================================================
-// GLB MESH OFFSETS (from main_menu_showcase.rs - VERIFIED WORKING)
-// ============================================================================
-// These are the EXACT same offsets used in main_menu_showcase.rs.
-// The showcase multiplies these by OFFSET_RATIO (0.6) because it uses scale 0.12.
-// The game uses scale 0.2 directly, so we apply these offsets WITHOUT scaling.
-
-const PAWN_MESH_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, 2.6);
-const KNIGHT_1_MESH_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, 0.9);
-const KNIGHT_2_MESH_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, 0.9);
-const BISHOP_MESH_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 0.0);
-const ROOK_MESH_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 1.8);
-const QUEEN_MESH_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -0.95);
-const KING_BASE_MESH_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -1.9);
-const KING_CROSS_MESH_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -1.9);
-
 /// Y position for piece parent entities on the board.
 ///
 /// The board squares are `Cuboid::new(1.0, 0.1, 1.0)` centered at y=0,
@@ -232,22 +216,34 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 }
 
-// No offsets needed - the GLB models should be centered correctly at their local origin.
-// Pieces are spawned directly at their board positions without offsets.
-// This matches the reference implementation at references/bevy-3d-chess/src/main.rs
-
-/// Convert chess board position to world position.
+/// Per-piece-type offsets to center meshes on squares.
 ///
-/// Uses the same coordinate system as the reference implementation:
-/// - World X = 7 - rank (so rank 0 is at X=7, rank 7 is at X=0)
-/// - World Z = file (so file 0 is at Z=0, file 7 is at Z=7)
-/// - Y = board surface height
+/// These offsets compensate for the GLB mesh origins being at different positions
+/// within the model file. Each piece type in the chess_kit has its mesh center
+/// at a different location, requiring specific offsets to center the piece on its square.
 ///
-/// This places a1 (file=0, rank=0) at world position (7, 0.05, 0)
-/// and h8 (file=7, rank=7) at world position (0, 0.05, 7).
-pub fn board_pos_to_world(file: u8, rank: u8) -> Vec3 {
-    Vec3::new((7 - rank) as f32, PIECE_ON_BOARD_Y, file as f32)
-}
+/// # Coordinate System for Offsets
+///
+/// Offsets are in the piece's local coordinate space (after Y-rotation is applied):
+/// - X: Left/right adjustment to center on square (0.5 = center of 1.0 wide square)
+/// - Y: Vertical offset (0.0 = piece base at parent Y position)
+/// - Z: Forward/back adjustment to center on square (0.5 = center of 1.0 deep square)
+///
+/// # Why Different Z Offsets?
+///
+/// The chess_kit GLB file has each piece type at a different Z position:
+/// - King at Z ≈ -1.9, Queen at Z ≈ -0.95, Bishop at Z ≈ 0.0,
+/// - Knight at Z ≈ 0.9, Rook at Z ≈ 1.8, Pawn at Z ≈ 2.6
+///
+/// These offsets bring each piece to the center of its square (local X=0.5, Z=0.5).
+/// Y=0.0 keeps the piece at the parent's Y position (PIECE_ON_BOARD_Y = 0.05).
+/// The parent entity is positioned at the square corner, so we add 0.5 to center it.
+const KING_OFFSET: Vec3 = Vec3::new(0.3, 0.0, -1.4);
+const QUEEN_OFFSET: Vec3 = Vec3::new(0.3, 0.0, -0.45);
+const BISHOP_OFFSET: Vec3 = Vec3::new(0.4, 0.0, 0.5);
+const KNIGHT_OFFSET: Vec3 = Vec3::new(0.3, 0.0, 1.4);
+const ROOK_OFFSET: Vec3 = Vec3::new(0.4, 0.0, 2.3);
+const PAWN_OFFSET: Vec3 = Vec3::new(0.3, 0.0, 3.1);
 
 /// Unified piece spawning function - dispatches to specific spawner based on type
 ///
@@ -262,19 +258,13 @@ pub fn spawn_piece_at(
     color: PieceColor,
     piece_type: PieceType,
     position: (u8, u8),
-    _visual_offset: Vec3, // Kept for API compatibility, no longer used
+    _visual_offset: Vec3, // Kept for API compatibility, but we use per-piece offsets now
 ) {
     let (file, rank) = position;
-    // World position using reference coordinate system
-    let world_pos = board_pos_to_world(file, rank);
+    // World position: X = file, Y = board surface, Z = rank
+    let world_pos = Vec3::new(file as f32, PIECE_ON_BOARD_Y, rank as f32);
 
-    // DEBUG: Log spawn position for verification
-    info!(
-        "[SPAWN] {:?} {:?} at file={}, rank={} -> world_pos={:?}",
-        color, piece_type, file, rank, world_pos
-    );
-
-    // Spawn at calculated board position
+    // Handle is Clone (not Copy), need .clone() from shared ref
     match piece_type {
         PieceType::King => spawn_king(
             commands,
@@ -282,7 +272,7 @@ pub fn spawn_piece_at(
             color,
             world_pos,
             meshes,
-            Vec3::ZERO,
+            KING_OFFSET,
             file,
             rank,
         ),
@@ -292,7 +282,7 @@ pub fn spawn_piece_at(
             color,
             world_pos,
             meshes,
-            Vec3::ZERO,
+            QUEEN_OFFSET,
             file,
             rank,
         ),
@@ -302,7 +292,7 @@ pub fn spawn_piece_at(
             color,
             world_pos,
             meshes,
-            Vec3::ZERO,
+            ROOK_OFFSET,
             file,
             rank,
         ),
@@ -312,7 +302,7 @@ pub fn spawn_piece_at(
             color,
             world_pos,
             meshes,
-            Vec3::ZERO,
+            BISHOP_OFFSET,
             file,
             rank,
         ),
@@ -322,7 +312,7 @@ pub fn spawn_piece_at(
             color,
             world_pos,
             meshes,
-            Vec3::ZERO,
+            KNIGHT_OFFSET,
             file,
             rank,
         ),
@@ -332,22 +322,15 @@ pub fn spawn_piece_at(
             color,
             world_pos,
             meshes,
-            Vec3::ZERO,
+            PAWN_OFFSET,
             file,
             rank,
         ),
     }
 }
 
-/// Creates a transform for piece mesh.
-///
-/// Applies the mesh offset (from GLB baked positions) and sets the scale.
-/// This matches the showcase implementation exactly.
-fn piece_mesh_transform(_visual_offset: Vec3, mesh_offset: Vec3) -> Transform {
-    // Apply mesh offset directly - this centers the mesh on the piece parent
-    // The showcase does: offset * OFFSET_RATIO, but game uses full scale
-    // so we apply the offset directly without additional scaling
-    let mut t = Transform::from_translation(mesh_offset);
+fn piece_mesh_transform(offset: Vec3) -> Transform {
+    let mut t = Transform::from_translation(offset);
     t.scale = Vec3::splat(PIECE_MESH_SCALE);
     t
 }
@@ -394,20 +377,12 @@ fn piece_name(piece_type: PieceType, color: PieceColor, file: u8, rank: u8) -> S
     let rank_num = rank + 1;
     format!("{} {} {}{}", color_str, piece_str, file_char, rank_num)
 }
-/// Spawns a piece mesh with proper offset correction.
-///
-/// # Arguments
-/// * `$parent` - The parent commands scope
-/// * `$mesh` - The mesh handle to spawn
-/// * `$material` - The material handle
-/// * `$visual_offset` - Additional visual offset (usually ZERO)
-/// * `$mesh_offset` - GLB baked-position counter-offset (mesh-specific constant)
 macro_rules! spawn_piece_visual {
-    ($parent:expr, $mesh:expr, $material:expr, $visual_offset:expr, $mesh_offset:expr) => {
+    ($parent:expr, $mesh:expr, $material:expr, $offset:expr) => {
         $parent.spawn((
             Mesh3d($mesh),
             MeshMaterial3d($material),
-            piece_mesh_transform($visual_offset, $mesh_offset),
+            piece_mesh_transform($offset),
             // Pickable required for child meshes to generate pointer events
             // Events bubble up to parent entity where observers are registered
             bevy::picking::Pickable::default(),
@@ -450,20 +425,8 @@ pub fn spawn_king(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(
-                parent,
-                mesh,
-                material.clone(),
-                visual_offset,
-                KING_BASE_MESH_OFFSET
-            );
-            spawn_piece_visual!(
-                parent,
-                mesh_cross,
-                material,
-                visual_offset,
-                KING_CROSS_MESH_OFFSET
-            );
+            spawn_piece_visual!(parent, mesh, material.clone(), visual_offset);
+            spawn_piece_visual!(parent, mesh_cross, material, visual_offset);
         });
 }
 
@@ -501,20 +464,8 @@ pub fn spawn_knight(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(
-                parent,
-                mesh_1,
-                material.clone(),
-                visual_offset,
-                KNIGHT_1_MESH_OFFSET
-            );
-            spawn_piece_visual!(
-                parent,
-                mesh_2,
-                material,
-                visual_offset,
-                KNIGHT_2_MESH_OFFSET
-            );
+            spawn_piece_visual!(parent, mesh_1, material.clone(), visual_offset);
+            spawn_piece_visual!(parent, mesh_2, material, visual_offset);
         });
 }
 
@@ -551,7 +502,7 @@ pub fn spawn_queen(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material, visual_offset, QUEEN_MESH_OFFSET);
+            spawn_piece_visual!(parent, mesh, material, visual_offset);
         });
 }
 
@@ -588,7 +539,7 @@ pub fn spawn_bishop(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material, visual_offset, BISHOP_MESH_OFFSET);
+            spawn_piece_visual!(parent, mesh, material, visual_offset);
         });
 }
 
@@ -625,7 +576,7 @@ pub fn spawn_rook(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material, visual_offset, ROOK_MESH_OFFSET);
+            spawn_piece_visual!(parent, mesh, material, visual_offset);
         });
 }
 
@@ -662,7 +613,7 @@ pub fn spawn_pawn(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material, visual_offset, PAWN_MESH_OFFSET);
+            spawn_piece_visual!(parent, mesh, material, visual_offset);
         });
 }
 
