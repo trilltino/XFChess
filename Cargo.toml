@@ -11,6 +11,10 @@ path = "src/main.rs"
 name = "opera_test"
 path = "opera_test.rs"
 
+[[bin]]
+name = "run_opera_game_test"
+path = "run_opera_game_test.rs"
+
 [workspace]
 members = [
     "crates/braid-blob",

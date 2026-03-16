@@ -108,7 +108,7 @@ npm run build
 Create `.env`:
 ```bash
 VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
-VITE_PROGRAM_ID=3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP
+VITE_PROGRAM_ID=AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp
 ```
 
 ### Wallet Adapter
