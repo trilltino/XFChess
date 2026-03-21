@@ -1,4 +1,4 @@
-#![cfg(feature = "solana")]
+// Solana program constants
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 
 // Program ID for our Solana program

@@ -1,28 +1,19 @@
 [package]
 name = "xfchess-game"
 version = "0.1.0"
+description = "Created with Anchor"
 edition = "2021"
-
-[lib]
-crate-type = ["cdylib", "lib"]
-name = "xfchess_game"
 
 [features]
 default = ["move-validation"]
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
-magicblock = ["dep:ephemeral-rollups-sdk", "ephemeral-rollups-sdk/anchor"]
-move-validation = ["shakmaty"]
+move-validation = ["chess-logic-on-chain"]
 
 [dependencies]
 anchor-lang = "0.32.1"
 anchor-spl = "0.32.1"
 # solana-program version pulled in by anchor-lang
-shakmaty = { version = "0.30.0", default-features = false, features = [
-    "alloc",
-], optional = true }
-ephemeral-rollups-sdk = { path = "../../references/ephemeral-rollups-sdk/rust/sdk", optional = true }
+chess-logic-on-chain = { workspace = true, features = ["alloc"], optional = true }
+ephemeral-rollups-sdk = { path = "../../references/ephemeral-rollups-sdk/rust/sdk", features = ["anchor"] }
 
 [dev-dependencies]
-solana-program-test = "2.2.1"
-solana-sdk = "2.2.1"
-tokio = "1.49.0"

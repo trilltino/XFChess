@@ -23,6 +23,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "solana")]
 use crate::multiplayer::rollup_manager::RollupEvent;
 
 /// Status of a rollup transaction
@@ -128,6 +129,7 @@ impl TransactionDebugger {
     }
 
     /// Log a rollup event
+    #[cfg(feature = "solana")]
     pub fn log_rollup_event(&mut self, event: &RollupEvent) {
         let timestamp = current_timestamp();
 

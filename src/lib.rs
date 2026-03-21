@@ -2,6 +2,7 @@ pub mod assets;
 pub mod cli;
 pub mod core;
 pub mod engine;
+pub mod opera_game_metadata;
 pub mod game;
 pub mod input;
 pub mod multiplayer;

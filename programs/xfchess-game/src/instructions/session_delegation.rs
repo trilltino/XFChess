@@ -29,7 +29,7 @@ pub fn handler_authorize_session_key(
     Ok(())
 }
 
-pub fn handler_revoke_session_key(ctx: Context<RevokeSessionCtx>, game_id: u64) -> Result<()> {
+pub fn handler_revoke_session_key(ctx: Context<RevokeSessionCtx>, _game_id: u64) -> Result<()> {
     let session_delegation = &mut ctx.accounts.session_delegation;
     let player = &ctx.accounts.player;
 

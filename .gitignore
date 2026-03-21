@@ -76,6 +76,11 @@ launch_peer_*.bat
 !web-react/vite.config.ts
 !web-react/eslint.config.js
 !wallet-popup/tauri.conf.json
+!tauri/tauri.conf.json
+!tauri/wallet-ui/package.json
+!tauri/wallet-ui/tsconfig.json
+!tauri/wallet-ui/vite.config.ts
+!tauri/Cargo.toml
 
 # Exclude all JSON files except specific ones
 !idl.json

@@ -10,7 +10,6 @@ pub mod withdraw_expired_wager;
 
 pub use commit_move_batch::*;
 pub use create_game::*;
-#[cfg(feature = "magicblock")]
 pub use delegate_game::*;
 pub use finalize_game::*;
 pub use init_profile::*;

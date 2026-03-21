@@ -1,4 +1,3 @@
-#![cfg(feature = "solana")]
 //! Solana-specific UI components for competitive mode
 //!
 //! Includes wallet connection status, ELO stats, and wagering UI.

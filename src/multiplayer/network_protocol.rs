@@ -2,6 +2,17 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "solana")]
 use solana_sdk::pubkey::Pubkey;
 
+#[cfg(not(feature = "solana"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+pub struct Pubkey(pub [u8; 32]);
+
+#[cfg(not(feature = "solana"))]
+impl std::fmt::Display for Pubkey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", bs58::encode(self.0).into_string())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
     Move {
@@ -10,7 +21,6 @@ pub enum NetworkMessage {
         move_uci: String,
         next_fen: String,
     },
-    #[cfg(feature = "solana")]
     SessionInfo {
         game_id: u64,
         player_pubkey: Pubkey,
@@ -35,7 +45,6 @@ pub enum NetworkMessage {
         game_id: u64,
         message_bytes: Vec<u8>,
     },
-    #[cfg(feature = "solana")]
     TxSignature {
         game_id: u64,
         signer_pubkey: Pubkey,
@@ -81,13 +90,11 @@ impl NetworkMessage {
     pub fn game_id(&self) -> u64 {
         match self {
             NetworkMessage::Move { game_id, .. } => *game_id,
-            #[cfg(feature = "solana")]
             NetworkMessage::SessionInfo { game_id, .. } => *game_id,
             NetworkMessage::BatchPropose { game_id, .. } => *game_id,
             NetworkMessage::BatchAccept { game_id, .. } => *game_id,
             NetworkMessage::BatchReject { game_id, .. } => *game_id,
             NetworkMessage::TxMessage { game_id, .. } => *game_id,
-            #[cfg(feature = "solana")]
             NetworkMessage::TxSignature { game_id, .. } => *game_id,
             NetworkMessage::Committed { game_id, .. } => *game_id,
             NetworkMessage::ResyncRequest { game_id, .. } => *game_id,

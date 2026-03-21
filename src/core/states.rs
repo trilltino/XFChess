@@ -35,7 +35,6 @@ pub enum GameState {
 pub enum GameMode {
     SinglePlayer,
     MultiplayerLocal,
-    #[cfg(feature = "solana")]
     MultiplayerCompetitive,
     BraidMultiplayer,
 }
@@ -64,6 +63,10 @@ pub enum MenuState {
 
     /// Braid Multiplayer Lobby
     BraidLobby,
+
+    /// Solana Multiplayer Lobby
+    #[cfg(feature = "solana")]
+    SolanaLobby,
 
     /// Credits/about screen
     About,

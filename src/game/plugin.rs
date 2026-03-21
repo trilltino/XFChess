@@ -67,7 +67,8 @@ impl Plugin for GamePlugin {
             .init_resource::<Players>()
             .init_resource::<super::systems::camera::CameraRotationState>()
             .init_resource::<super::view_mode::ViewMode>()
-            .init_resource::<PendingPromotion>();
+            .init_resource::<PendingPromotion>()
+            .init_resource::<GameSounds>();
 
         // Register types for reflection (needed for inspector)
         app.register_type::<CurrentTurn>()
@@ -185,11 +186,7 @@ impl Plugin for GamePlugin {
                         *view_mode != super::view_mode::ViewMode::TempleOS
                     },
                 ),
-                animate_capture_fade.in_set(GameSystems::Visual).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
-                    },
-                ),
+                // Capture fade removed — captured pieces now despawn immediately
             ),
         );
 

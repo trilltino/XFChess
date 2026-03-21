@@ -16,86 +16,62 @@ pub struct Board;
 pub fn create_board(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    materials: Res<SquareMaterials>,
+    asset_server: Res<AssetServer>,
     view_mode: Res<ViewMode>,
 ) {
     use crate::core::{DespawnOnExit, GameState};
 
-    // Extract view mode value to avoid move issues in closures
     let is_templeos = *view_mode == ViewMode::TempleOS;
 
     // Use Rectangle (2D quad) for TempleOS mode, Cuboid (3D box) for standard mode
-    // We use a thin Cuboid instead of Plane3d to ensure reliable raycasting/picking
     let boardmesh = if is_templeos {
-        // 2D rectangle quad for true 2D board rendering
         meshes.add(Rectangle::new(1.0, 1.0))
     } else {
-        // 3D thin box for standard mode - better for picking
         meshes.add(Cuboid::new(1.0, 0.1, 1.0))
     };
 
-    // Choose materials based on view mode
-    let (light_mat, dark_mat) = if is_templeos {
-        // TempleOS: grey for light squares, white for dark squares
-        (
-            materials.grey_color.clone(),
-            materials.templeos_white.clone(),
-        )
-    } else {
-        // Standard: white for light squares, black for dark squares
-        (materials.black_color.clone(), materials.white_color.clone())
-    };
+    // Load materials from wooden_chess_board.glb like the reference
+    let mat_light: Handle<StandardMaterial> =
+        asset_server.load("models/wooden_chess_board.glb#Material0");
+    let mat_dark: Handle<StandardMaterial> =
+        asset_server.load("models/wooden_chess_board.glb#Material1");
 
-    // Pattern from Bevy stress_tests/many_sprites.rs: Collect all squares into Vec, then batch spawn
-    // This reduces stack pressure and is more efficient than 64 individual spawn calls
-    //
-    // Chess coordinate system:
-    // - x = file (0-7, a-h), maps to world X
-    // - y = rank (0-7, 1-8), maps to world Z
     let squares: Vec<_> = (0..8)
         .flat_map(|rank| {
-            // Clone materials and mesh for each row to share across inner closure
-            let light_material = light_mat.clone();
-            let dark_material = dark_mat.clone();
             let mesh = boardmesh.clone();
+            let mat_light_row = mat_light.clone();
+            let mat_dark_row = mat_dark.clone();
 
             (0..8).map(move |file| {
-                // Square uses chess coordinates: x=file, y=rank
                 let square = Square::new(file, rank);
+                let is_white_square = square.is_white();
 
-                // Use Square::is_white() method for proper checkerboard pattern
-                let material = if square.is_white() {
-                    light_material.clone()
+                // Use GLB materials like reference: Material0 for light, Material1 for dark
+                let base_mat = if is_white_square {
+                    mat_light_row.clone()
                 } else {
-                    dark_material.clone()
+                    mat_dark_row.clone()
                 };
 
-                // Generate square name in chess notation (e.g., "Square a1", "Square h8")
                 let file_char = (b'a' + file) as char;
                 let rank_num = rank + 1;
                 let square_name = format!("Square {}{}", file_char, rank_num);
 
-                // World position: X = file, Z = rank
                 let world_pos = Vec3::new(file as f32, 0., rank as f32);
 
-                // Bundle all components for this square
-                // DespawnOnExit automatically despawns all 64 board squares when exiting Multiplayer
-                // For TempleOS mode with Rectangle (2D quad), rotate to lie flat in XZ plane
                 let transform = if is_templeos {
-                    // Rectangle lies in XY plane by default, rotate -90° around X to lie in XZ plane
                     Transform::from_translation(world_pos)
                         .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
                 } else {
-                    // Cuboid already properly oriented, no rotation needed
                     Transform::from_translation(world_pos)
                 };
 
                 (
                     Mesh3d(mesh.clone()),
-                    MeshMaterial3d(material),
+                    MeshMaterial3d(base_mat),
                     transform,
                     PointerInteraction::default(),
-                    bevy::picking::Pickable::default(), // Required for picking
+                    bevy::picking::Pickable::default(),
                     square,
                     Board,
                     Name::new(square_name),
@@ -105,8 +81,6 @@ pub fn create_board(
         })
         .collect();
 
-    // Spawn all 64 squares in a single batch operation
-    // Then attach observers to each (click, hover, unhover)
     for square_bundle in squares {
         commands
             .spawn(square_bundle)

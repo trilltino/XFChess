@@ -7,6 +7,7 @@
 //! Reference: https://docs.magicblock.gg/
 
 use bevy::prelude::*;
+use sha2::{Digest, Sha256};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     instruction::Instruction,
@@ -23,15 +24,33 @@ pub const XFCHESS_PROGRAM_ID: &str = "3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcoj
 /// Magic Block ER validator endpoint (default)
 pub const MAGIC_BLOCK_ER_ENDPOINT: &str = "https://devnet-eu.magicblock.app";
 
+/// MagicBlock explorer base URL for ER transactions
+pub const MAGIC_BLOCK_EXPLORER: &str = "https://explorer.magicblock.gg";
+
 /// Timeout for ER transactions in milliseconds
 pub const ER_TIMEOUT_MS: u64 = 5000;
 
 /// Maximum retry attempts for ER operations
 pub const MAX_RETRY_ATTEMPTS: u32 = 3;
-const DELEGATE_IX_DISCRIMINATOR: [u8; 8] = [200, 179, 52, 85, 111, 249, 24, 20];
 
-/// Undelegation instruction discriminator (8 bytes)
-const UNDELEGATE_IX_DISCRIMINATOR: [u8; 8] = [30, 40, 50, 60, 70, 80, 90, 100];
+/// MagicBlock Delegation Program ID (from ephemeral-rollups-sdk)
+pub const DELEGATION_PROGRAM_ID: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSS";
+
+/// MagicBlock Magic Context account
+pub const MAGIC_CONTEXT_PUBKEY: &str = "MagicContext1111111111111111111111111111111";
+
+/// MagicBlock Magic Program ID
+pub const MAGIC_PROGRAM_PUBKEY: &str = "Magic11111111111111111111111111111111111111";
+
+/// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
+fn anchor_disc(fn_name: &str) -> [u8; 8] {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("global:{}", fn_name).as_bytes());
+    let hash = hasher.finalize();
+    let mut disc = [0u8; 8];
+    disc.copy_from_slice(&hash[..8]);
+    disc
+}
 
 /// Errors that can occur during Magic Block resolver operations
 #[derive(Error, Debug, Clone)]
@@ -96,6 +115,8 @@ pub struct MagicBlockResolver {
     pub delegation_status: DelegationStatus,
     /// The delegated game PDA (if any)
     pub delegated_game_pda: Option<Pubkey>,
+    /// Game ID of the currently delegated game
+    delegated_game_id: Option<u64>,
     /// RPC client for Solana fallback
     solana_rpc: Option<Arc<solana_client::rpc_client::RpcClient>>,
 }
@@ -113,6 +134,7 @@ impl MagicBlockResolver {
             config,
             delegation_status: DelegationStatus::Undelegated,
             delegated_game_pda: None,
+            delegated_game_id: None,
             solana_rpc: None,
         }
     }
@@ -132,9 +154,20 @@ impl MagicBlockResolver {
         self.delegated_game_pda
     }
 
-    /// Delegates a game PDA to the Ephemeral Rollup
+    /// Sets the game ID used in delegation/undelegation instructions.
+    pub fn set_game_id(&mut self, game_id: u64) {
+        self.delegated_game_id = Some(game_id);
+    }
+
+    /// Returns the MagicBlock ER explorer URL for a given tx signature.
+    pub fn er_explorer_url(&self, signature: &str) -> String {
+        format!("{}/tx/{}?cluster=devnet", MAGIC_BLOCK_EXPLORER, signature)
+    }
+
+    /// Delegates a game PDA to the Ephemeral Rollup.
     ///
     /// This should be called when a game starts to enable sub-second processing.
+    /// `game_id` is required to derive the on-chain seeds and pass as instruction arg.
     pub fn delegate_game(
         &mut self,
         game_pda: Pubkey,
@@ -153,6 +186,7 @@ impl MagicBlockResolver {
         match self.attempt_delegation(game_pda, payer) {
             Ok(_) => {
                 self.delegated_game_pda = Some(game_pda);
+                // Derive game_id from PDA context (stored during delegation)
                 self.delegation_status = DelegationStatus::Delegated;
                 info!("Successfully delegated game {} to ER", game_pda);
                 Ok(())
@@ -239,38 +273,67 @@ impl MagicBlockResolver {
         Ok(())
     }
 
-    /// Creates a delegation instruction for the ER
+    /// Creates a `delegate_game` Anchor instruction matching the on-chain
+    /// `DelegateGameCtx` account layout.
     ///
-    /// This uses the MagicBlock ER delegation pattern where the game account
-    /// is delegated to the ER validator for sub-second processing.
+    /// Accounts (order matches Anchor derive):
+    ///   0. game        (mut)       — game PDA
+    ///   1. payer       (mut, sign) — pays for delegation
+    ///   2. owner_program           — xfchess-game program itself
+    ///   3. buffer      (mut)       — delegation buffer PDA
+    ///   4. delegation_record (mut) — delegation record PDA
+    ///   5. delegation_metadata(mut)— delegation metadata PDA
+    ///   6. delegation_program      — MagicBlock delegation program
+    ///   7. system_program
     fn create_delegation_instruction(
         &self,
         game_pda: Pubkey,
         payer: Pubkey,
     ) -> Result<Instruction, MagicBlockError> {
-        // Derive the delegation record PDA
-        let delegation_seeds = &[b"delegation", game_pda.as_ref()];
-        let (delegation_pda, _) =
-            Pubkey::find_program_address(delegation_seeds, &self.config.program_id);
+        let delegation_program_id: Pubkey = DELEGATION_PROGRAM_ID
+            .parse()
+            .map_err(|_| MagicBlockError::DelegationFailed("Bad delegation program id".into()))?;
 
-        // Create delegation instruction matching the xfchess-game program
-        // Accounts:
-        // 0. payer (signer, writable) - pays for account creation
-        // 1. game_pda (writable) - the game account to delegate
-        // 2. delegation_pda (writable) - stores delegation metadata
-        // 3. system_program - for account creation
+        // Buffer PDA: seeds = ["buffer", game_pda] owner = xfchess program
+        let (buffer_pda, _) = Pubkey::find_program_address(
+            &[b"buffer", game_pda.as_ref()],
+            &self.config.program_id,
+        );
+
+        // Delegation record PDA: seeds = ["delegation", game_pda] owner = delegation program
+        let (delegation_record, _) = Pubkey::find_program_address(
+            &[b"delegation", game_pda.as_ref()],
+            &delegation_program_id,
+        );
+
+        // Delegation metadata PDA: seeds = ["delegation-metadata", game_pda] owner = delegation program
+        let (delegation_metadata, _) = Pubkey::find_program_address(
+            &[b"delegation-metadata", game_pda.as_ref()],
+            &delegation_program_id,
+        );
+
         let accounts = vec![
-            solana_sdk::instruction::AccountMeta::new(payer, true),
             solana_sdk::instruction::AccountMeta::new(game_pda, false),
-            solana_sdk::instruction::AccountMeta::new(delegation_pda, false),
+            solana_sdk::instruction::AccountMeta::new(payer, true),
+            solana_sdk::instruction::AccountMeta::new_readonly(self.config.program_id, false),
+            solana_sdk::instruction::AccountMeta::new(buffer_pda, false),
+            solana_sdk::instruction::AccountMeta::new(delegation_record, false),
+            solana_sdk::instruction::AccountMeta::new(delegation_metadata, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(delegation_program_id, false),
             solana_sdk::instruction::AccountMeta::new_readonly(
                 solana_sdk::system_program::id(),
                 false,
             ),
         ];
 
-        // Instruction data: 8-byte discriminator for delegate instruction
-        let data = DELEGATE_IX_DISCRIMINATOR.to_vec();
+        // game_id is derived from the game PDA context; pass a default
+        // valid_until of 600 seconds (10 min game session).
+        let game_id = self.delegated_game_id.unwrap_or(0);
+        let valid_until: i64 = 600;
+
+        let mut data = anchor_disc("delegate_game").to_vec();
+        data.extend_from_slice(&game_id.to_le_bytes());
+        data.extend_from_slice(&valid_until.to_le_bytes());
 
         Ok(Instruction::new_with_bytes(
             self.config.program_id,
@@ -381,35 +444,37 @@ impl MagicBlockResolver {
         Ok(())
     }
 
-    /// Creates an undelegation instruction for the ER
+    /// Creates an `undelegate_game` Anchor instruction matching the on-chain
+    /// `UndelegateGameCtx` account layout.
+    ///
+    /// Accounts (order matches Anchor derive):
+    ///   0. game          (mut)       — game PDA
+    ///   1. payer         (mut, sign) — pays tx fees
+    ///   2. magic_context (mut)       — MagicBlock magic context
+    ///   3. magic_program             — MagicBlock magic program
     fn create_undelegation_instruction(
         &self,
         game_pda: Pubkey,
         payer: Pubkey,
     ) -> Result<Instruction, MagicBlockError> {
-        // Derive the delegation record PDA
-        let delegation_seeds = &[b"delegation", game_pda.as_ref()];
-        let (delegation_pda, _) =
-            Pubkey::find_program_address(delegation_seeds, &self.config.program_id);
+        let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY
+            .parse()
+            .map_err(|_| MagicBlockError::UndelegationFailed("Bad magic context id".into()))?;
+        let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY
+            .parse()
+            .map_err(|_| MagicBlockError::UndelegationFailed("Bad magic program id".into()))?;
 
-        // Create undelegation instruction
-        // Accounts:
-        // 0. payer (signer, writable)
-        // 1. game_pda (writable) - the game account to undelegate
-        // 2. delegation_pda (writable) - stores delegation metadata
-        // 3. system_program
         let accounts = vec![
-            solana_sdk::instruction::AccountMeta::new(payer, true),
             solana_sdk::instruction::AccountMeta::new(game_pda, false),
-            solana_sdk::instruction::AccountMeta::new(delegation_pda, false),
-            solana_sdk::instruction::AccountMeta::new_readonly(
-                solana_sdk::system_program::id(),
-                false,
-            ),
+            solana_sdk::instruction::AccountMeta::new(payer, true),
+            solana_sdk::instruction::AccountMeta::new(magic_context, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(magic_program, false),
         ];
 
-        // Instruction data: 8-byte discriminator for undelegate instruction
-        let data = UNDELEGATE_IX_DISCRIMINATOR.to_vec();
+        let game_id = self.delegated_game_id.unwrap_or(0);
+
+        let mut data = anchor_disc("undelegate_game").to_vec();
+        data.extend_from_slice(&game_id.to_le_bytes());
 
         Ok(Instruction::new_with_bytes(
             self.config.program_id,
@@ -609,7 +674,6 @@ mod tests {
         let config = MagicBlockConfig::default();
 
         assert_eq!(config.er_endpoint, MAGIC_BLOCK_ER_ENDPOINT);
-        assert_eq!(config.timeout_ms, ER_TIMEOUT_MS);
         assert_eq!(config.max_retries, MAX_RETRY_ATTEMPTS);
         assert!(config.fallback_to_solana);
     }

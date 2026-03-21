@@ -4,7 +4,7 @@ use crate::state::*;
 use anchor_lang::prelude::*;
 
 #[cfg(feature = "move-validation")]
-use shakmaty::{fen::Fen, uci::UciMove, Chess, Position};
+use chess_logic_on_chain::shakmaty::{fen::Fen, uci::UciMove, Chess, Position};
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
@@ -55,7 +55,7 @@ pub fn handler(
         let setup =
             Fen::from_ascii(game.fen.as_bytes()).map_err(|_| GameErrorCode::InvalidBoardState)?;
         let pos: Chess = setup
-            .into_position(shakmaty::CastlingMode::Standard)
+            .into_position(chess_logic_on_chain::shakmaty::CastlingMode::Standard)
             .map_err(|_| GameErrorCode::InvalidBoardState)?;
 
         // 2. Parse incoming UCI move string
@@ -63,17 +63,17 @@ pub fn handler(
         let m = uci.to_move(&pos).map_err(|_| GameErrorCode::InvalidMove)?;
 
         // 3. Check move legality
-        require!(pos.is_legal(m), GameErrorCode::InvalidMove);
+        require!(pos.is_legal(&m), GameErrorCode::InvalidMove);
 
         // 4. Apply the legal move
         let mut next_pos = pos.clone();
-        next_pos.play_unchecked(m.clone());
+        next_pos.play_unchecked(&m);
 
         // 5. Verify the client's provided next_fen perfectly matches the applied move consequence
         let next_setup =
             Fen::from_ascii(next_fen.as_bytes()).map_err(|_| GameErrorCode::InvalidBoardState)?;
         let client_next_pos: Chess = next_setup
-            .into_position(shakmaty::CastlingMode::Standard)
+            .into_position(chess_logic_on_chain::shakmaty::CastlingMode::Standard)
             .map_err(|_| GameErrorCode::InvalidBoardState)?;
 
         require!(

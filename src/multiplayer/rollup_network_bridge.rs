@@ -1,4 +1,4 @@
-#![cfg(feature = "solana")]
+// Rollup Network Bridge for MagicBlock ER
 use bevy::prelude::*;
 use solana_sdk::{message::Message, pubkey::Pubkey, signature::Signer};
 

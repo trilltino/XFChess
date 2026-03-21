@@ -73,7 +73,6 @@ pub mod xfchess_game {
         instructions::commit_move_batch::handler_commit_move_batch(ctx, game_id, moves, next_fens)
     }
 
-    #[cfg(feature = "magicblock")]
     pub fn delegate_game(
         ctx: Context<DelegateGameCtx>,
         game_id: u64,
@@ -82,7 +81,6 @@ pub mod xfchess_game {
         instructions::delegate_game::handler_delegate_game(ctx, game_id, valid_until)
     }
 
-    #[cfg(feature = "magicblock")]
     pub fn undelegate_game(ctx: Context<UndelegateGameCtx>, game_id: u64) -> Result<()> {
         instructions::delegate_game::handler_undelegate_game(ctx, game_id)
     }

@@ -15,13 +15,11 @@ serde.workspace = true
 serde_json.workspace = true
 
 # Local crates
-# Local crates
-xfchess-game.workspace = true
-solana-chess-client.workspace = true
-braid_stockfish_ai.workspace = true
-shared.workspace = true
-shakmaty = { workspace = true, features = ["alloc"] }
-
-
+xfchess-game = { path = "../../programs/xfchess-game" }
+solana-chess-client = { path = "../solana-chess-client" }
+braid_stockfish_ai = { path = "../braid_stockfish_ai" }
+shared = { path = "../shared" }
+# Use host-vendored shakmaty
+shakmaty = { package = "shakmaty-host-vendored", path = "../shakmaty-host-vendored", default-features = false, features = ["alloc"] }
 
 bs58 = "0.5.1"

@@ -1,7 +1,5 @@
-#[cfg(feature = "magicblock")]
 pub use self::inner::*;
 
-#[cfg(feature = "magicblock")]
 mod inner {
     use crate::errors::XfchessGameError;
     use crate::state::game::Game;
@@ -101,7 +99,7 @@ mod inner {
         pub delegation_metadata: AccountInfo<'info>,
 
         /// CHECK: MagicBlock delegation program.
-        #[account(address = DELEGATION_PROGRAM_ID)]
+        #[account(address = ephemeral_rollups_sdk::id())]
         pub delegation_program: AccountInfo<'info>,
 
         pub system_program: Program<'info, System>,

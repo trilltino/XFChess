@@ -254,6 +254,7 @@ pub fn initialize_players(
     _commands: Commands,
     mut players: ResMut<Players>,
     ai_config: Res<ChessAIResource>,
+    core_mode: Res<crate::core::states::GameMode>,
     connection_state: Option<Res<crate::multiplayer::p2p_connection::P2PConnectionState>>,
     network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
 ) {
@@ -286,7 +287,14 @@ pub fn initialize_players(
 
     let multiplayer_color = p2p_color.or(network_color);
 
-    if let Some(my_color) = multiplayer_color {
+    // If core_mode is MultiplayerLocal, set both players as human without network dependency
+    if let crate::core::states::GameMode::MultiplayerLocal = *core_mode {
+        *players = Players {
+            player_1: Player::new(1, "Player 1".to_string(), PieceColor::White, true),
+            player_2: Player::new(2, "Player 2".to_string(), PieceColor::Black, true),
+        };
+        info!("[GAME_INIT] Local PvP players initialized (both human)");
+    } else if let Some(my_color) = multiplayer_color {
         // Multiplayer mode: Both players are human
         let _opponent_color = match my_color {
             PieceColor::White => PieceColor::Black,

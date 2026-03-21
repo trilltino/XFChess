@@ -16,7 +16,7 @@ pub struct OperaGameMove {
     pub tactical_analysis: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Player {
     White,
     Black,

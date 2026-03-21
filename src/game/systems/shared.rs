@@ -1,6 +1,6 @@
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{
-    FadingCapture, HasMoved, MoveRecord, Piece, PieceColor, PieceMoveAnimation, PieceType,
+    HasMoved, MoveRecord, Piece, PieceColor, PieceMoveAnimation, PieceType,
 };
 use crate::game::events::MoveMadeEvent;
 use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
@@ -68,7 +68,7 @@ pub fn play_move_audio(
 }
 
 /// Apply visual and logical state for a captured piece.
-/// Now uses fading animation instead of instant move.
+/// Despawns the 3D entity immediately; the 2D tally panel shows captures.
 pub fn apply_capture(
     commands: &mut Commands,
     captured_pieces: &mut CapturedPieces,
@@ -78,31 +78,8 @@ pub fn apply_capture(
     if let Some(sound) = capture_sound {
         commands.spawn(AudioPlayer::new(sound));
     }
-    let count_of_same_type = match target.color {
-        PieceColor::White => captured_pieces
-            .black_captured
-            .iter()
-            .filter(|&&piece| piece == target.piece_type)
-            .count(),
-        PieceColor::Black => captured_pieces
-            .white_captured
-            .iter()
-            .filter(|&&piece| piece == target.piece_type)
-            .count(),
-    };
     captured_pieces.add_capture(target.color, target.piece_type);
-    let capture_pos = crate::rendering::pieces::calculate_capture_position(
-        target.color,
-        target.piece_type,
-        count_of_same_type,
-    );
-
-    // Add FadingCapture component for fade-out animation instead of instant move
-    // Longer duration (1.0s) for smoother visual effect
-    commands.entity(target.entity).insert(FadingCapture {
-        timer: Timer::from_seconds(1.0, TimerMode::Once),
-        capture_zone_pos: capture_pos,
-    });
+    commands.entity(target.entity).despawn();
 }
 
 /// Updates ECS components for a moved piece (position, history, animation)
@@ -145,6 +122,7 @@ pub fn update_piece_state(
     piece_component.y = target.1;
     // Use PIECE_ON_BOARD_Y so the animation stays on the board surface (y=0.05),
     // matching the spawn position and the snap target in animate_piece_movement.
+    // Integer coordinates match GLB mesh design and board square positions.
     commands.entity(entity).insert(PieceMoveAnimation::new(
         Vec3::new(from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
         Vec3::new(target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),

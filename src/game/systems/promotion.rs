@@ -1,7 +1,7 @@
 //! Pawn promotion system.
 
 use crate::game::resources::{is_promotion_move, PendingPromotion, PromotionSelected};
-use crate::rendering::pieces::{Piece, PieceColor, PieceType};
+use crate::rendering::pieces::{Piece, PieceColor, PieceType, PIECE_MESH_SCALE};
 use bevy::prelude::*;
 
 /// Detects pawns that need promotion.
@@ -60,66 +60,13 @@ pub fn apply_pawn_promotion(
             };
 
             commands.entity(event.entity).with_children(|parent| {
-                // Use the same scale and offsets as the main piece spawning system
-                // These must match the constants in rendering/pieces/pieces.rs
-                const PIECE_MESH_SCALE: f32 = 0.18;
-
-                // Per-piece offsets (must match pieces.rs exactly)
-                const QUEEN_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, -0.95);
-                const ROOK_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 1.8);
-                const BISHOP_OFFSET: Vec3 = Vec3::new(-0.1, 0.0, 0.0);
-                const KNIGHT_OFFSET: Vec3 = Vec3::new(-0.2, 0.0, 0.9);
-
+                let mesh = piece_meshes.get(event.promoted_to, piece.color);
                 match event.promoted_to {
-                    PieceType::Queen => {
-                        let mut transform = Transform::from_translation(QUEEN_OFFSET);
-                        transform.scale = Vec3::splat(PIECE_MESH_SCALE);
-
+                    PieceType::Queen | PieceType::Rook | PieceType::Bishop | PieceType::Knight => {
                         parent.spawn((
-                            Mesh3d(piece_meshes.queen.clone()),
+                            Mesh3d(mesh),
                             MeshMaterial3d(material),
-                            transform,
-                            bevy::picking::Pickable::default(),
-                        ));
-                    }
-                    PieceType::Rook => {
-                        let mut transform = Transform::from_translation(ROOK_OFFSET);
-                        transform.scale = Vec3::splat(PIECE_MESH_SCALE);
-
-                        parent.spawn((
-                            Mesh3d(piece_meshes.rook.clone()),
-                            MeshMaterial3d(material),
-                            transform,
-                            bevy::picking::Pickable::default(),
-                        ));
-                    }
-                    PieceType::Bishop => {
-                        let mut transform = Transform::from_translation(BISHOP_OFFSET);
-                        transform.scale = Vec3::splat(PIECE_MESH_SCALE);
-
-                        parent.spawn((
-                            Mesh3d(piece_meshes.bishop.clone()),
-                            MeshMaterial3d(material),
-                            transform,
-                            bevy::picking::Pickable::default(),
-                        ));
-                    }
-                    PieceType::Knight => {
-                        // Knights have two mesh parts
-                        let mut transform = Transform::from_translation(KNIGHT_OFFSET);
-                        transform.scale = Vec3::splat(PIECE_MESH_SCALE);
-
-                        parent.spawn((
-                            Mesh3d(piece_meshes.knight_1.clone()),
-                            MeshMaterial3d(material.clone()),
-                            transform,
-                            bevy::picking::Pickable::default(),
-                        ));
-
-                        parent.spawn((
-                            Mesh3d(piece_meshes.knight_2.clone()),
-                            MeshMaterial3d(material),
-                            transform,
+                            Transform::from_scale(Vec3::splat(PIECE_MESH_SCALE)),
                             bevy::picking::Pickable::default(),
                         ));
                     }

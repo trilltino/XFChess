@@ -70,7 +70,7 @@ const erEvidence = [
     }
 ];
 
-const TestCard = ({ test, type }: { test: any; type: 'solana' | 'er' }) => {
+const TestCard = ({ test }: { test: any; type: 'solana' | 'er' }) => {
     const [expanded, setExpanded] = useState(false);
 
     const getExplorerUrl = (signature: string) => {

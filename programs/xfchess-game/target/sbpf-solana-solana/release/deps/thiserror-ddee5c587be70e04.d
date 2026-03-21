@@ -1,0 +1,10 @@
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\thiserror-ddee5c587be70e04.d: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\aserror.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\display.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\provide.rs
+
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\libthiserror-ddee5c587be70e04.rlib: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\aserror.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\display.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\provide.rs
+
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\libthiserror-ddee5c587be70e04.rmeta: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\aserror.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\display.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\provide.rs
+
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\lib.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\aserror.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\display.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-1.0.69\src\provide.rs:

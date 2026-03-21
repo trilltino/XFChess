@@ -1,18 +1,21 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::sync::RwLock;
 use tracing_subscriber;
 
 use braid_iroh::{Node, NodeId};
 use iroh_gossip::net::Gossip;
 use shared::{GameStateMessage, BoardState};
+use backend::db::{GameRepository, GameRecord, MoveRecord, GameStats};
 
 // Struct to hold our application state
 #[derive(Clone)]
@@ -21,10 +24,15 @@ struct AppState {
     node: Arc<Node>,
     /// Gossip topic for XFChess
     gossip_topic: Arc<Gossip>,
-    /// Indexed game states
-    indexed_games: Arc<RwLock<Vec<GameRecord>>>,
+    /// Database connection pool
+    db_pool: SqlitePool,
+    /// Game repository for database operations
+    game_repo: Arc<GameRepository>,
     /// Active observers tracking ongoing games
     active_observers: Arc<RwLock<Vec<NodeId>>>,
+    indexed_games: Arc<RwLock<Vec<GameRecord>>>,
+    /// New field: game_index
+    game_index: Arc<RwLock<HashMap<String, GameRecord>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,11 +65,19 @@ async fn main() {
     
     println!("Joined XFChess gossip topic");
 
+    // Initialize database
+    let db_url = std::env::var("XFCHESS_DB_URL").unwrap_or_else(|_| "sqlite:xfchess.db".to_string());
+    let db_pool = backend::db::init_db(&db_url).await.expect("Failed to initialize database");
+    let game_repo = Arc::new(GameRepository::new(db_pool.clone()));
+    
+    println!("Database initialized: {}", db_url);
+
     // Create application state
     let app_state = AppState {
         node: Arc::new(node),
         gossip_topic: Arc::new(topic.clone()),
-        indexed_games: Arc::new(RwLock::new(Vec::new())),
+        db_pool,
+        game_repo,
         active_observers: Arc::new(RwLock::new(Vec::new())),
     };
 
@@ -76,6 +92,8 @@ async fn main() {
         .route("/health", get(health_handler))
         .route("/games", get(list_games_handler))
         .route("/games/:id", get(get_game_handler))
+        .route("/games/:id/moves", get(get_game_moves_handler))
+        .route("/stats", get(get_stats_handler))
         .route("/observe", post(start_observing_handler))
         .with_state(app_state);
 
@@ -99,48 +117,48 @@ async fn observe_network(state: AppState) {
                 if let Ok(game_msg) = serde_json::from_slice::<GameStateMessage>(&data) {
                     match game_msg.message_type.as_str() {
                         "game_start" => {
-                            let game_record = GameRecord {
-                                id: game_msg.game_id.clone(),
-                                players: [game_msg.player1.unwrap_or_default(), game_msg.player2.unwrap_or_default()],
-                                stake_amount: game_msg.stake_amount.unwrap_or(0.0),
-                                start_time: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs(),
-                                moves: vec![],
-                                end_time: None,
-                                winner: None,
-                            };
-                            
-                            state.indexed_games.write().await.push(game_record);
-                            tracing::info!("Indexed new game: {}", game_msg.game_id);
+                            if let (Some(player1), Some(player2)) = (game_msg.player1, game_msg.player2) {
+                                match state.game_repo.create_game(
+                                    &game_msg.game_id,
+                                    &player1,
+                                    &player2,
+                                    game_msg.stake_amount.unwrap_or(0.0),
+                                ).await {
+                                    Ok(_) => tracing::info!("Created game in DB: {}", game_msg.game_id),
+                                    Err(e) => tracing::error!("Failed to create game: {}", e),
+                                }
+                            }
                         }
                         "move_made" => {
-                            // Find the game and add the move
-                            let mut games = state.indexed_games.write().await;
-                            if let Some(game) = games.iter_mut().find(|g| g.id == game_msg.game_id) {
-                                if let Some(movement) = game_msg.move_details {
-                                    game.moves.push(movement);
-                                    tracing::info!("Recorded move for game {}: {}", game_msg.game_id, movement);
+                            if let Some(move_uci) = game_msg.move_details {
+                                // Get current move count for this game
+                                if let Ok(moves) = state.game_repo.get_moves(&game_msg.game_id).await {
+                                    let move_number = moves.len() as i32 + 1;
+                                    
+                                    match state.game_repo.add_move(
+                                        &game_msg.game_id,
+                                        move_number,
+                                        &move_uci,
+                                        None, // SAN notation
+                                        None, // FEN before
+                                        None, // FEN after
+                                        "unknown", // player - could be extracted from message
+                                    ).await {
+                                        Ok(_) => tracing::info!("Recorded move for game {}: {}", game_msg.game_id, move_uci),
+                                        Err(e) => tracing::error!("Failed to record move: {}", e),
+                                    }
                                 }
                             }
                         }
                         "game_end" => {
-                            // Find the game and mark it as ended
-                            let mut games = state.indexed_games.write().await;
-                            if let Some(game) = games.iter_mut().find(|g| g.id == game_msg.game_id) {
-                                game.end_time = Some(
-                                    std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_secs()
-                                );
-                                
-                                if let Some(winner) = game_msg.winner {
-                                    game.winner = Some(winner);
-                                }
-                                
-                                tracing::info!("Game {} ended. Winner: {:?}", game_msg.game_id, game.winner);
+                            match state.game_repo.end_game(
+                                &game_msg.game_id,
+                                game_msg.winner.as_deref(),
+                                None, // final_fen
+                                "completed",
+                            ).await {
+                                Ok(_) => tracing::info!("Game {} ended. Winner: {:?}", game_msg.game_id, game_msg.winner),
+                                Err(e) => tracing::error!("Failed to end game: {}", e),
                             }
                         }
                         _ => {
@@ -161,24 +179,76 @@ async fn observe_network(state: AppState) {
 }
 
 // Health check handler
-async fn health_handler(State(_state): State<AppState>) -> &'static str {
-    "OK"
+async fn health_handler(State(state): State<AppState>) -> Result<Json<HealthStatus>, StatusCode> {
+    // Check database connectivity
+    let db_healthy = sqlx::query("SELECT 1")
+        .fetch_one(&state.db_pool)
+        .await
+        .is_ok();
+    
+    let status = HealthStatus {
+        status: if db_healthy { "healthy" } else { "unhealthy" },
+        database: db_healthy,
+        node_id: state.node.node_id().to_string(),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    };
+    
+    Ok(Json(status))
+}
+
+#[derive(Serialize)]
+struct HealthStatus {
+    status: &'static str,
+    database: bool,
+    node_id: String,
+    timestamp: u64,
 }
 
 // Handler to list all indexed games
-async fn list_games_handler(State(state): State<AppState>) -> Json<Vec<GameRecord>> {
-    let games = state.indexed_games.read().await.clone();
-    Json(games)
+async fn list_games_handler(State(state): State<AppState>) -> Result<Json<Vec<GameRecord>>, StatusCode> {
+    match state.game_repo.list_games(None, None).await {
+        Ok(games) => Ok(Json(games)),
+        Err(e) => {
+            tracing::error!("Failed to list games: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 // Handler to get a specific game by ID
 async fn get_game_handler(Path(game_id): Path<String>, State(state): State<AppState>) -> Result<Json<GameRecord>, StatusCode> {
-    let games = state.indexed_games.read().await;
-    let game = games.iter().find(|g| g.id == game_id);
-    
-    match game {
-        Some(game) => Ok(Json(game.clone())),
-        None => Err(StatusCode::NOT_FOUND),
+    match state.game_repo.get_game(&game_id).await {
+        Ok(Some(game)) => Ok(Json(game)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::error!("Failed to get game {}: {}", game_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+// Handler to get all moves for a specific game
+async fn get_game_moves_handler(Path(game_id): Path<String>, State(state): State<AppState>) -> Result<Json<Vec<MoveRecord>>, StatusCode> {
+    match state.game_repo.get_moves(&game_id).await {
+        Ok(moves) => Ok(Json(moves)),
+        Err(e) => {
+            tracing::error!("Failed to get moves for game {}: {}", game_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+// Handler to get game statistics
+async fn get_stats_handler(State(state): State<AppState>) -> Result<Json<GameStats>, StatusCode> {
+    match state.game_repo.get_stats().await {
+        Ok(stats) => Ok(Json(stats)),
+        Err(e) => {
+            tracing::error!("Failed to get stats: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 

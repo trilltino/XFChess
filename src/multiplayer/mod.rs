@@ -22,6 +22,7 @@ pub mod ephemeral_mvp_plugin;
 pub mod magicblock_resolver;
 pub mod network_protocol;
 pub mod p2p_connection;
+#[cfg(feature = "solana")]
 pub mod rollup_manager;
 #[cfg(feature = "solana")]
 pub mod rollup_network_bridge;
@@ -32,6 +33,7 @@ pub mod solana_addon;
 #[cfg(feature = "solana")]
 pub mod solana_integration;
 pub mod transaction_debugger;
+#[cfg(feature = "solana")]
 pub mod wager_state;
 
 pub use braid_node::*;
@@ -41,6 +43,7 @@ pub use ephemeral_mvp_plugin::*;
 pub use magicblock_resolver::*;
 pub use network_protocol::*;
 pub use p2p_connection::*;
+#[cfg(feature = "solana")]
 pub use rollup_manager::*;
 #[cfg(feature = "solana")]
 pub use rollup_network_bridge::*;
@@ -51,6 +54,7 @@ pub use solana_addon::*;
 #[cfg(feature = "solana")]
 pub use solana_integration::*;
 pub use transaction_debugger::*;
+#[cfg(feature = "solana")]
 pub use wager_state::*;
 
 pub struct MultiplayerPlugin;
@@ -58,12 +62,12 @@ pub struct MultiplayerPlugin;
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
         // Register sub-plugins
+        app.add_plugins(p2p_connection::P2PConnectionPlugin);
+
+        #[cfg(feature = "solana")]
         app.add_plugins((
             rollup_manager::EphemeralRollupPlugin,
-            p2p_connection::P2PConnectionPlugin,
-            #[cfg(feature = "solana")]
             rollup_network_bridge::RollupNetworkBridgePlugin,
-            #[cfg(feature = "solana")]
             solana_integration::SolanaIntegrationPlugin,
         ));
 
@@ -78,17 +82,18 @@ impl Plugin for MultiplayerPlugin {
         #[cfg(feature = "solana")]
         app.init_resource::<session_key_manager::SessionKeyManager>();
 
+        #[cfg(feature = "solana")]
+        app.add_systems(
+            Update,
+            (
+                feed_local_moves_to_rollup,
+                handle_session_info_from_network,
+                finalize_game_on_end,
+            ),
+        );
+
         app.add_systems(Startup, initialize_braid_network)
-            .add_systems(
-                Update,
-                (
-                    handle_network_events,
-                    feed_local_moves_to_rollup,
-                    #[cfg(feature = "solana")]
-                    handle_session_info_from_network,
-                    finalize_game_on_end,
-                ),
-            );
+            .add_systems(Update, handle_network_events);
     }
 }
 
@@ -539,6 +544,7 @@ fn handle_network_events(
 
 /// Converts each `MoveMadeEvent` to a UCI string and feeds it into the
 /// `EphemeralRollupManager` as a local move, pulling the new FEN from `ChessEngine`.
+#[cfg(feature = "solana")]
 fn feed_local_moves_to_rollup(
     mut move_events: MessageReader<MoveMadeEvent>,
     mut rollup_manager: ResMut<rollup_manager::EphemeralRollupManager>,
@@ -627,6 +633,7 @@ fn handle_session_info_from_network(
 
 /// On `GameEndedEvent`, force-flush any pending rollup batch so all moves are
 /// committed on-chain before `finalize_game_ix` runs.
+#[cfg(feature = "solana")]
 fn finalize_game_on_end(
     mut game_end_events: MessageReader<GameEndedEvent>,
     mut rollup_manager: ResMut<rollup_manager::EphemeralRollupManager>,
@@ -655,8 +662,8 @@ fn finalize_game_on_end(
 
 fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
     // Allow overriding identity file via environment variable for multi-instance testing
-    // Example: XFCHESS_IDENTITY=player1.key cargo run
-    let mut key_file = if let Ok(env_path) = std::env::var("XFCHESS_IDENTITY") {
+    // Example: XFCHESS_IDENTITY=keys/player1.key cargo run
+    let key_file = if let Ok(env_path) = std::env::var("XFCHESS_IDENTITY") {
         PathBuf::from(env_path)
     } else {
         let mut default_path = PathBuf::from("xfchess_identity.key");
@@ -667,6 +674,13 @@ fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
         }
         default_path
     };
+
+    // Ensure parent directory exists (e.g., for keys/ folder)
+    if let Some(parent) = key_file.parent() {
+        if !parent.as_os_str().is_empty() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
 
     if let Ok(bytes) = std::fs::read(&key_file) {
         if bytes.len() == 32 {

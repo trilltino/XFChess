@@ -18,7 +18,7 @@ use crate::multiplayer::solana_addon::{
     CompetitiveMatchState, SolanaGameSync, SolanaProfile, SolanaWallet,
 };
 use crate::multiplayer::{BraidNetworkState, BraidP2PConfig};
-use crate::states::main_menu::{CompetitiveMenuState, MenuExpanded};
+use crate::states::main_menu::{CompetitiveMenuState, MenuExpanded, PlayerColorChoice};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
@@ -68,6 +68,7 @@ pub struct MainMenuUIContext<'w, 's> {
     pub p2p_state: Res<'w, P2PConnectionState>,
     pub host_game_events: MessageWriter<'w, HostGameEvent>,
     pub connect_events: MessageWriter<'w, ConnectToPeerEvent>,
+    pub color_choice: ResMut<'w, PlayerColorChoice>,
     #[cfg(feature = "solana")]
     pub wallet: Option<ResMut<'w, SolanaWallet>>,
     #[cfg(feature = "solana")]

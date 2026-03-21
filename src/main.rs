@@ -149,15 +149,16 @@ async fn main() {
         states::pause::PausePlugin,
         states::piece_viewer::PieceViewerPlugin,
     ))
-    .add_plugins((
-        singleplayer::SingleplayerPlugin,
-        #[cfg(feature = "solana")]
+    .add_plugins(singleplayer::SingleplayerPlugin);
+
+    #[cfg(feature = "solana")]
+    app.add_plugins((
         solana::SolanaPlugin,
-        multiplayer::MultiplayerPlugin,
-        #[cfg(feature = "solana")]
         multiplayer::ephemeral_mvp_plugin::EphemeralMvpPlugin,
         multiplayer::wager_state::WagerPlugin,
     ));
+
+    app.add_plugins(multiplayer::MultiplayerPlugin);
 
     // Add transaction debugger if debug mode enabled
     if cli.debug {

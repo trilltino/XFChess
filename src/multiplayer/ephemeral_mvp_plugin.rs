@@ -1,4 +1,4 @@
-#![cfg(feature = "solana")]
+// Ephemeral MVP Plugin for MagicBlock ER
 use bevy::prelude::*;
 
 use crate::multiplayer::{
@@ -48,29 +48,26 @@ fn broadcast_session_info(
     rollup_manager: Res<EphemeralRollupManager>,
     session_key_manager: Res<SessionKeyManager>,
     network_state: Res<BraidNetworkState>,
-    #[cfg(feature = "solana")] wallet: Option<Res<SolanaWallet>>,
+    wallet: Option<Res<SolanaWallet>>,
 ) {
     if !mvp_state.is_initialized {
         return;
     }
-    #[cfg(feature = "solana")]
-    {
-        let Some(wallet_ref) = wallet else { return };
-        let Some(session_pubkey) = session_key_manager.get_session_pubkey() else {
-            return;
-        };
+    let Some(wallet_ref) = wallet else { return };
+    let Some(session_pubkey) = session_key_manager.get_session_pubkey() else {
+        return;
+    };
 
-        let expires_at = chrono::Utc::now().timestamp() + (2 * 60 * 60);
+    let expires_at = chrono::Utc::now().timestamp() + (2 * 60 * 60);
 
-        if let Some(tx) = &network_state.message_sender {
-            if let Some(player_pubkey) = wallet_ref.pubkey {
-                let _ = tx.send(NetworkMessage::SessionInfo {
-                    game_id: rollup_manager.game_id,
-                    player_pubkey,
-                    session_pubkey,
-                    expires_at,
-                });
-            }
+    if let Some(tx) = &network_state.message_sender {
+        if let Some(player_pubkey) = wallet_ref.pubkey {
+            let _ = tx.send(NetworkMessage::SessionInfo {
+                game_id: rollup_manager.game_id,
+                player_pubkey,
+                session_pubkey,
+                expires_at,
+            });
         }
     }
 }

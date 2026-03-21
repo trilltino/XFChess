@@ -1,6 +1,5 @@
 use bevy::prelude::*; // Events are in prelude
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "solana")]
 use solana_sdk::pubkey::Pubkey;
 use std::time::{Duration, Instant};
 
@@ -37,7 +36,6 @@ pub struct EphemeralRollupManager {
     pub max_batch_size: usize,
     pub flush_interval: Duration,
     pub game_id: u64,
-    #[cfg(feature = "solana")]
     pub session_keys: Option<(Pubkey, Pubkey)>, // (white_session_key, black_session_key)
 }
 
@@ -60,7 +58,6 @@ impl EphemeralRollupManager {
             max_batch_size: 10,
             flush_interval: Duration::from_secs(10),
             game_id,
-            #[cfg(feature = "solana")]
             session_keys: None,
         }
     }
@@ -168,7 +165,6 @@ impl EphemeralRollupManager {
         self.status = GameStateStatus::Synced;
     }
 
-    #[cfg(feature = "solana")]
     pub fn set_session_keys(&mut self, white_session_key: Pubkey, black_session_key: Pubkey) {
         self.session_keys = Some((white_session_key, black_session_key));
     }

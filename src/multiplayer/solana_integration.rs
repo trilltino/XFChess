@@ -1,4 +1,4 @@
-#![cfg(feature = "solana")]
+// Solana Program Integration and Wallet Management
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{

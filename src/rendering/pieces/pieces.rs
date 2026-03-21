@@ -30,8 +30,8 @@ pub use crate::game::components::piece_types::{Piece, PieceColor, PieceType};
 const PIECE_Y_OFFSET: f32 = 0.0;
 
 /// Scale factor for piece meshes — fits the chess kit models to board squares
-/// Note: This must be 0.2 to match the GLTF mesh offsets (designed for bevy_chess reference)
-const PIECE_MESH_SCALE: f32 = 0.2;
+/// Reference uses 1.0 scale for wooden_chess_board.glb
+pub const PIECE_MESH_SCALE: f32 = 1.0;
 
 /// Y position for piece parent entities on the board.
 ///
@@ -65,23 +65,10 @@ pub fn create_pieces(
         return;
     }
 
-    // Skip piece creation in TempleOS mode
-    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
-        info!("[PIECES] Skipping piece creation - TempleOS view mode active");
-        return;
-    }
+    // Pieces are rendered in all modes to ensure full game state visibility
 
     // Check if all piece meshes are loaded
-    let meshes_to_check = [
-        piece_meshes.king.id(),
-        piece_meshes.king_cross.id(),
-        piece_meshes.queen.id(),
-        piece_meshes.rook.id(),
-        piece_meshes.bishop.id(),
-        piece_meshes.knight_1.id(),
-        piece_meshes.knight_2.id(),
-        piece_meshes.pawn.id(),
-    ];
+    let meshes_to_check = piece_meshes.all_ids();
 
     for mesh_id in meshes_to_check.iter() {
         match asset_server.load_state(*mesh_id) {
@@ -190,30 +177,78 @@ pub fn create_pieces(
     info!("[PIECES] All 32 pieces spawned successfully");
 }
 
-/// Container for piece mesh handles
+/// Container for piece mesh handles - using wooden_chess_board.glb like the reference
+///
+/// Mesh indices derived from reference ENGINE_TO_MODEL mapping:
+///   Bishop=Mesh0/18, King=Mesh2/20, Knight=Mesh3/21,
+///   Pawn=Mesh5/23, Queen=Mesh13/31, Rook=Mesh14/32
 #[derive(Resource)]
 pub struct PieceMeshes {
-    pub king: Handle<Mesh>,
-    pub king_cross: Handle<Mesh>,
-    pub pawn: Handle<Mesh>,
-    pub knight_1: Handle<Mesh>,
-    pub knight_2: Handle<Mesh>,
-    pub rook: Handle<Mesh>,
-    pub bishop: Handle<Mesh>,
-    pub queen: Handle<Mesh>,
+    pub white_king: Handle<Mesh>,
+    pub white_queen: Handle<Mesh>,
+    pub white_rook: Handle<Mesh>,
+    pub white_bishop: Handle<Mesh>,
+    pub white_knight: Handle<Mesh>,
+    pub white_pawn: Handle<Mesh>,
+    pub black_king: Handle<Mesh>,
+    pub black_queen: Handle<Mesh>,
+    pub black_rook: Handle<Mesh>,
+    pub black_bishop: Handle<Mesh>,
+    pub black_knight: Handle<Mesh>,
+    pub black_pawn: Handle<Mesh>,
+}
+
+impl PieceMeshes {
+    pub fn get(&self, piece_type: PieceType, color: PieceColor) -> Handle<Mesh> {
+        match (piece_type, color) {
+            (PieceType::King, PieceColor::White) => self.white_king.clone(),
+            (PieceType::Queen, PieceColor::White) => self.white_queen.clone(),
+            (PieceType::Rook, PieceColor::White) => self.white_rook.clone(),
+            (PieceType::Bishop, PieceColor::White) => self.white_bishop.clone(),
+            (PieceType::Knight, PieceColor::White) => self.white_knight.clone(),
+            (PieceType::Pawn, PieceColor::White) => self.white_pawn.clone(),
+            (PieceType::King, PieceColor::Black) => self.black_king.clone(),
+            (PieceType::Queen, PieceColor::Black) => self.black_queen.clone(),
+            (PieceType::Rook, PieceColor::Black) => self.black_rook.clone(),
+            (PieceType::Bishop, PieceColor::Black) => self.black_bishop.clone(),
+            (PieceType::Knight, PieceColor::Black) => self.black_knight.clone(),
+            (PieceType::Pawn, PieceColor::Black) => self.black_pawn.clone(),
+        }
+    }
+
+    pub fn all_ids(&self) -> [bevy::asset::AssetId<Mesh>; 12] {
+        [
+            self.white_king.id(), self.white_queen.id(), self.white_rook.id(),
+            self.white_bishop.id(), self.white_knight.id(), self.white_pawn.id(),
+            self.black_king.id(), self.black_queen.id(), self.black_rook.id(),
+            self.black_bishop.id(), self.black_knight.id(), self.black_pawn.id(),
+        ]
+    }
 }
 
 fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.insert_resource(PieceMeshes {
-        king: asset_server.load("models/chess_kit/pieces.glb#Mesh0/Primitive0"),
-        king_cross: asset_server.load("models/chess_kit/pieces.glb#Mesh1/Primitive0"),
-        pawn: asset_server.load("models/chess_kit/pieces.glb#Mesh2/Primitive0"),
-        knight_1: asset_server.load("models/chess_kit/pieces.glb#Mesh3/Primitive0"),
-        knight_2: asset_server.load("models/chess_kit/pieces.glb#Mesh4/Primitive0"),
-        rook: asset_server.load("models/chess_kit/pieces.glb#Mesh5/Primitive0"),
-        bishop: asset_server.load("models/chess_kit/pieces.glb#Mesh6/Primitive0"),
-        queen: asset_server.load("models/chess_kit/pieces.glb#Mesh7/Primitive0"),
-    });
+    info!("[PIECES] Loading piece meshes from wooden_chess_board.glb");
+    
+    // Correct mapping from reference ENGINE_TO_MODEL:
+    //   Bishop=Mesh0/18, King=Mesh2/20, Knight=Mesh3/21,
+    //   Pawn=Mesh5/23, Queen=Mesh13/31, Rook=Mesh14/32
+    let meshes = PieceMeshes {
+        white_bishop: asset_server.load("models/wooden_chess_board.glb#Mesh18/Primitive0"),
+        white_king:   asset_server.load("models/wooden_chess_board.glb#Mesh20/Primitive0"),
+        white_knight: asset_server.load("models/wooden_chess_board.glb#Mesh21/Primitive0"),
+        white_pawn:   asset_server.load("models/wooden_chess_board.glb#Mesh23/Primitive0"),
+        white_queen:  asset_server.load("models/wooden_chess_board.glb#Mesh31/Primitive0"),
+        white_rook:   asset_server.load("models/wooden_chess_board.glb#Mesh32/Primitive0"),
+        black_bishop: asset_server.load("models/wooden_chess_board.glb#Mesh0/Primitive0"),
+        black_king:   asset_server.load("models/wooden_chess_board.glb#Mesh2/Primitive0"),
+        black_knight: asset_server.load("models/wooden_chess_board.glb#Mesh3/Primitive0"),
+        black_pawn:   asset_server.load("models/wooden_chess_board.glb#Mesh5/Primitive0"),
+        black_queen:  asset_server.load("models/wooden_chess_board.glb#Mesh13/Primitive0"),
+        black_rook:   asset_server.load("models/wooden_chess_board.glb#Mesh14/Primitive0"),
+    };
+    
+    commands.insert_resource(meshes);
+    info!("[PIECES] Mesh handles created - waiting for assets to load");
 }
 
 /// Per-piece-type offsets to center meshes on squares.
@@ -238,12 +273,12 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
 /// These offsets bring each piece to the center of its square (local X=0.5, Z=0.5).
 /// Y=0.0 keeps the piece at the parent's Y position (PIECE_ON_BOARD_Y = 0.05).
 /// The parent entity is positioned at the square corner, so we add 0.5 to center it.
-const KING_OFFSET: Vec3 = Vec3::new(0.3, 0.0, -1.4);
-const QUEEN_OFFSET: Vec3 = Vec3::new(0.3, 0.0, -0.45);
-const BISHOP_OFFSET: Vec3 = Vec3::new(0.4, 0.0, 0.5);
-const KNIGHT_OFFSET: Vec3 = Vec3::new(0.3, 0.0, 1.4);
-const ROOK_OFFSET: Vec3 = Vec3::new(0.4, 0.0, 2.3);
-const PAWN_OFFSET: Vec3 = Vec3::new(0.3, 0.0, 3.1);
+pub const KING_OFFSET: Vec3 = Vec3::new(0.0, 0.0, 1.83);
+pub const QUEEN_OFFSET: Vec3 = Vec3::new(0.0, 0.0, 0.92);
+pub const BISHOP_OFFSET: Vec3 = Vec3::new(0.0, 0.0, 0.0);
+pub const KNIGHT_OFFSET: Vec3 = Vec3::new(0.0, 0.0, -0.92);
+pub const ROOK_OFFSET: Vec3 = Vec3::new(0.0, 0.0, -1.82);
+pub const PAWN_OFFSET: Vec3 = Vec3::new(0.0, 0.0, -2.63);
 
 /// Unified piece spawning function - dispatches to specific spawner based on type
 ///
@@ -258,73 +293,35 @@ pub fn spawn_piece_at(
     color: PieceColor,
     piece_type: PieceType,
     position: (u8, u8),
-    _visual_offset: Vec3, // Kept for API compatibility, but we use per-piece offsets now
+    _visual_offset: Vec3, // Kept for API compatibility - reference assets are already centered
 ) {
     let (file, rank) = position;
     // World position: X = file, Y = board surface, Z = rank
+    // GLB meshes from wooden_chess_board.glb are designed for integer-coordinate placement
     let world_pos = Vec3::new(file as f32, PIECE_ON_BOARD_Y, rank as f32);
+
+    // Reference assets are already centered - no offsets needed
+    let offset = Vec3::ZERO;
 
     // Handle is Clone (not Copy), need .clone() from shared ref
     match piece_type {
         PieceType::King => spawn_king(
-            commands,
-            material,
-            color,
-            world_pos,
-            meshes,
-            KING_OFFSET,
-            file,
-            rank,
+            commands, material, color, world_pos, meshes, offset, file, rank,
         ),
         PieceType::Queen => spawn_queen(
-            commands,
-            material,
-            color,
-            world_pos,
-            meshes,
-            QUEEN_OFFSET,
-            file,
-            rank,
+            commands, material, color, world_pos, meshes, offset, file, rank,
         ),
         PieceType::Rook => spawn_rook(
-            commands,
-            material,
-            color,
-            world_pos,
-            meshes,
-            ROOK_OFFSET,
-            file,
-            rank,
+            commands, material, color, world_pos, meshes, offset, file, rank,
         ),
         PieceType::Bishop => spawn_bishop(
-            commands,
-            material,
-            color,
-            world_pos,
-            meshes,
-            BISHOP_OFFSET,
-            file,
-            rank,
+            commands, material, color, world_pos, meshes, offset, file, rank,
         ),
         PieceType::Knight => spawn_knight(
-            commands,
-            material,
-            color,
-            world_pos,
-            meshes,
-            KNIGHT_OFFSET,
-            file,
-            rank,
+            commands, material, color, world_pos, meshes, offset, file, rank,
         ),
         PieceType::Pawn => spawn_pawn(
-            commands,
-            material,
-            color,
-            world_pos,
-            meshes,
-            PAWN_OFFSET,
-            file,
-            rank,
+            commands, material, color, world_pos, meshes, offset, file, rank,
         ),
     }
 }
@@ -348,10 +345,10 @@ fn piece_rotation(color: PieceColor) -> Quat {
 /// This function adds a 90° rotation to make knights face the opponent.
 fn knight_rotation(color: PieceColor) -> Quat {
     match color {
-        // White: Base 0° + (-90°) = -90° → rotates from +X to +Z (toward black's side)
-        PieceColor::White => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
-        // Black: Base 180° + 90° = 270° (-90°) → rotates from -X to -Z (toward white's side)
-        PieceColor::Black => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        // White: Faces opponent (+Z). Asset faces +X, so rotate +90 degrees.
+        PieceColor::White => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        // Black: Faces opponent (-Z). Asset faces +X, so rotate -90 degrees.
+        PieceColor::Black => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
     }
 }
 
@@ -397,14 +394,13 @@ pub fn spawn_king(
     piece_color: PieceColor,
     world_pos: Vec3,
     piece_meshes: &PieceMeshes,
-    visual_offset: Vec3,
+    _visual_offset: Vec3,
     file: u8,
     rank: u8,
 ) {
     use crate::core::{DespawnOnExit, GameState};
 
-    let mesh = piece_meshes.king.clone();
-    let mesh_cross = piece_meshes.king_cross.clone(); // The cross on top of the king
+    let mesh = piece_meshes.get(PieceType::King, piece_color);
 
     commands
         .spawn((
@@ -414,7 +410,7 @@ pub fn spawn_king(
             Visibility::default(),
             DespawnOnExit(GameState::InGame),
             PointerInteraction::default(),
-            bevy::picking::Pickable::default(), // Required for picking
+            bevy::picking::Pickable::default(),
             Name::new(piece_name(PieceType::King, piece_color, file, rank)),
             HasMoved::default(),
         ))
@@ -425,8 +421,7 @@ pub fn spawn_king(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material.clone(), visual_offset);
-            spawn_piece_visual!(parent, mesh_cross, material, visual_offset);
+            spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
         });
 }
 
@@ -436,14 +431,13 @@ pub fn spawn_knight(
     piece_color: PieceColor,
     world_pos: Vec3,
     piece_meshes: &PieceMeshes,
-    visual_offset: Vec3,
+    _visual_offset: Vec3,
     file: u8,
     rank: u8,
 ) {
     use crate::core::GameState;
 
-    let mesh_1 = piece_meshes.knight_1.clone();
-    let mesh_2 = piece_meshes.knight_2.clone();
+    let mesh = piece_meshes.get(PieceType::Knight, piece_color);
 
     commands
         .spawn((
@@ -464,8 +458,7 @@ pub fn spawn_knight(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh_1, material.clone(), visual_offset);
-            spawn_piece_visual!(parent, mesh_2, material, visual_offset);
+            spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
         });
 }
 
@@ -475,13 +468,13 @@ pub fn spawn_queen(
     piece_color: PieceColor,
     world_pos: Vec3,
     piece_meshes: &PieceMeshes,
-    visual_offset: Vec3,
+    _visual_offset: Vec3,
     file: u8,
     rank: u8,
 ) {
     use crate::core::GameState;
 
-    let mesh = piece_meshes.queen.clone();
+    let mesh = piece_meshes.get(PieceType::Queen, piece_color);
 
     commands
         .spawn((
@@ -502,7 +495,7 @@ pub fn spawn_queen(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material, visual_offset);
+            spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
         });
 }
 
@@ -512,13 +505,13 @@ pub fn spawn_bishop(
     piece_color: PieceColor,
     world_pos: Vec3,
     piece_meshes: &PieceMeshes,
-    visual_offset: Vec3,
+    _visual_offset: Vec3,
     file: u8,
     rank: u8,
 ) {
     use crate::core::GameState;
 
-    let mesh = piece_meshes.bishop.clone();
+    let mesh = piece_meshes.get(PieceType::Bishop, piece_color);
 
     commands
         .spawn((
@@ -539,7 +532,7 @@ pub fn spawn_bishop(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material, visual_offset);
+            spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
         });
 }
 
@@ -549,13 +542,13 @@ pub fn spawn_rook(
     piece_color: PieceColor,
     world_pos: Vec3,
     piece_meshes: &PieceMeshes,
-    visual_offset: Vec3,
+    _visual_offset: Vec3,
     file: u8,
     rank: u8,
 ) {
     use crate::core::GameState;
 
-    let mesh = piece_meshes.rook.clone();
+    let mesh = piece_meshes.get(PieceType::Rook, piece_color);
 
     commands
         .spawn((
@@ -576,7 +569,7 @@ pub fn spawn_rook(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material, visual_offset);
+            spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
         });
 }
 
@@ -586,13 +579,13 @@ pub fn spawn_pawn(
     piece_color: PieceColor,
     world_pos: Vec3,
     piece_meshes: &PieceMeshes,
-    visual_offset: Vec3,
+    _visual_offset: Vec3,
     file: u8,
     rank: u8,
 ) {
     use crate::core::GameState;
 
-    let mesh = piece_meshes.pawn.clone();
+    let mesh = piece_meshes.get(PieceType::Pawn, piece_color);
 
     commands
         .spawn((
@@ -613,7 +606,7 @@ pub fn spawn_pawn(
         .observe(on_piece_hover)
         .observe(on_piece_unhover)
         .with_children(|parent| {
-            spawn_piece_visual!(parent, mesh, material, visual_offset);
+            spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
         });
 }
 

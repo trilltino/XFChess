@@ -36,61 +36,57 @@ pub fn create_coordinate_labels(
         ..default() // Uses default font
     };
 
-    // Spawn number labels (1-8) along the left edge (Z = -0.5) and right edge (Z = 7.5)
+    // Spawn number labels (1-8) along the vertical Z-axis (Ranks)
     for rank in 1..=8 {
-        // Rank corresponds to X position (0 to 7)
-        let x_pos = (rank - 1) as f32 + 0.5;
+        // Rank 1 (index 0) is at Z=0.0
+        let z_pos = (rank - 1) as f32;
 
-        // Left side label (near File A)
+        // Left side labels (near File A, X = -0.7)
         commands.spawn((
             Text2d::new(rank.to_string()),
             text_style.clone(),
-            TextColor(Color::srgb(0.0, 0.0, 0.0)), // Black text
-            TextLayout::default(),
-            Transform::from_translation(Vec3::new(x_pos, 0.1, -0.5)),
+            TextColor(Color::srgb(0.0, 0.0, 0.0)),
+            Transform::from_translation(Vec3::new(-0.7, 0.1, z_pos)),
             CoordinateLabel,
             DespawnOnExit(GameState::InGame),
             Name::new(format!("Label Rank {}", rank)),
         ));
 
-        // Right side label (near File H)
+        // Right side labels (near File H, X = 7.7)
         commands.spawn((
             Text2d::new(rank.to_string()),
             text_style.clone(),
-            TextColor(Color::srgb(0.0, 0.0, 0.0)), // Black text
-            TextLayout::default(),
-            Transform::from_translation(Vec3::new(x_pos, 0.1, 7.5)),
+            TextColor(Color::srgb(0.0, 0.0, 0.0)),
+            Transform::from_translation(Vec3::new(7.7, 0.1, z_pos)),
             CoordinateLabel,
             DespawnOnExit(GameState::InGame),
             Name::new(format!("Label Rank {} Right", rank)),
         ));
     }
 
-    // Spawn letter labels (A-H) along the bottom edge (X = -0.5) and top edge (X = 7.5)
+    // Spawn letter labels (A-H) along the horizontal X-axis (Files)
     for (file_idx, file_char) in ('a'..='h').enumerate() {
-        // File corresponds to Z position (0 to 7)
-        let z_pos = file_idx as f32 + 0.5;
+        // File A (index 0) is at X=0.0
+        let x_pos = file_idx as f32;
         let label = file_char.to_uppercase().to_string();
 
-        // Bottom edge label (near Rank 1)
+        // Front edge labels (near Rank 1, Z = -0.7)
         commands.spawn((
             Text2d::new(label.clone()),
             text_style.clone(),
-            TextColor(Color::srgb(0.0, 0.0, 0.0)), // Black text
-            TextLayout::default(),
-            Transform::from_translation(Vec3::new(-0.5, 0.1, z_pos)),
+            TextColor(Color::srgb(0.0, 0.0, 0.0)),
+            Transform::from_translation(Vec3::new(x_pos, 0.1, -0.7)),
             CoordinateLabel,
             DespawnOnExit(GameState::InGame),
             Name::new(format!("Label File {}", file_char)),
         ));
 
-        // Top edge label (near Rank 8)
+        // Back edge labels (near Rank 8, Z = 7.7)
         commands.spawn((
             Text2d::new(label),
             text_style.clone(),
-            TextColor(Color::srgb(0.0, 0.0, 0.0)), // Black text
-            TextLayout::default(),
-            Transform::from_translation(Vec3::new(7.5, 0.1, z_pos)),
+            TextColor(Color::srgb(0.0, 0.0, 0.0)),
+            Transform::from_translation(Vec3::new(x_pos, 0.1, 7.7)),
             CoordinateLabel,
             DespawnOnExit(GameState::InGame),
             Name::new(format!("Label File {} Back", file_char)),

@@ -1,5 +1,5 @@
 use crate::multiplayer::solana_addon::{SolanaGameSync, SolanaResult, SolanaWallet};
-use crate::solana::instructions::create_game_ix;
+use crate::solana::instructions::{create_game_ix, GameType};
 use bevy::tasks::IoTaskPool;
 use bevy::{prelude::*, ui::Interaction};
 use solana_client::rpc_client::RpcClient;
@@ -80,7 +80,13 @@ pub fn handle_game_interactions(
                         IoTaskPool::get()
                             .spawn(async move {
                                 let rpc = RpcClient::new(rpc_url);
-                                let ix = create_game_ix(program_id, player, game_id);
+                                let ix = match create_game_ix(program_id, player, game_id, 0, GameType::PvP) {
+                                    Ok(ix) => ix,
+                                    Err(e) => {
+                                        let _ = tx_sender.send(SolanaResult::Error(e.to_string()));
+                                        return;
+                                    }
+                                };
 
                                 let mut tx = Transaction::new_with_payer(&[ix], Some(&player));
 

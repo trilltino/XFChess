@@ -94,6 +94,7 @@ pub fn animate_piece_movement(
             // Snap to board surface (y = PIECE_ON_BOARD_Y) when not animating.
             // Pieces must sit on top of the board cuboid (top face at y=0.05),
             // not at y=0 which clips them into the board geometry.
+            // Integer coordinates match GLB mesh design and board square positions.
             let target = Vec3::new(piece.x as f32, PIECE_ON_BOARD_Y, piece.y as f32);
             if (transform.translation - target).length() > 0.01 {
                 transform.translation = target;

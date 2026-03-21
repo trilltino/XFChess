@@ -1,0 +1,17 @@
+[package]
+name = "chess-logic-shared"
+version = "0.1.0"
+edition = "2021"
+authors = ["trilltino"]
+description = "Shared chess logic and validation for XFChess (Host version)"
+
+[dependencies]
+shakmaty = { package = "shakmaty-host-vendored", path = "../shakmaty-host-vendored", default-features = false }
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[features]
+default = ["std", "uci"]
+std = ["shakmaty/std"]
+uci = ["shakmaty/uci", "std"]
+
+[dev-dependencies]

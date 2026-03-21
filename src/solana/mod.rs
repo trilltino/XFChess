@@ -1,4 +1,4 @@
-#![cfg(feature = "solana")]
+// Solana program integration module
 pub mod constants;
 pub mod errors;
 pub mod instructions;

@@ -22,6 +22,7 @@ use crate::game::resources::{
     CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingTurnAdvance,
     Selection,
 };
+use crate::game::resources::player::Players;
 use crate::game::systems::shared::{
     execute_move, find_piece_on_square, CapturedTarget, MoveContext,
 };
@@ -63,6 +64,12 @@ pub struct InputSystemParams<'w, 's> {
     pub captured_pieces: ResMut<'w, CapturedPieces>,
     pub game_sounds: Option<Res<'w, GameSounds>>,
     pub move_events: MessageWriter<'w, crate::game::events::MoveMadeEvent>,
+    pub players: Res<'w, Players>,
+}
+
+/// Returns true if the current turn belongs to a human player.
+fn is_human_turn(params: &InputSystemParams) -> bool {
+    params.players.current(params.current_turn.color).is_human
 }
 
 // Helper alias for Option<Res> if needed, or just use Option<Res>
@@ -253,6 +260,10 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
         return;
     }
 
+    if !is_human_turn(&params) {
+        return;
+    }
+
     // Skip click handling if we're currently dragging (drag_end will handle it)
     if params.selection.is_dragging {
         return;
@@ -260,27 +271,14 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
 
     let entity = click.entity;
 
-    let piece_data = {
-        let q = params.pieces.p1();
-        if let Ok((_, piece, _, _)) = q.get(entity) {
-            Some(*piece)
-        } else {
-            None
-        }
-    };
+    let piece_data = params.pieces.p1().get(entity).ok().map(|(_, p, _, _)| *p);
 
     let Some(clicked_piece) = piece_data else {
-        debug!(
-            "[INPUT] Clicked entity {:?} has no Piece component – ignoring",
-            entity
-        );
+        debug!("[INPUT] Clicked entity {:?} has no Piece component – ignoring", entity);
         return;
     };
 
-    debug!(
-        "[INPUT] Clicked piece: {:?} {:?} at ({}, {})",
-        clicked_piece.color, clicked_piece.piece_type, clicked_piece.x, clicked_piece.y
-    );
+    info!("[INPUT] Clicked piece: {:?} {:?} at ({}, {}) | Current turn: {:?}", clicked_piece.color, clicked_piece.piece_type, clicked_piece.x, clicked_piece.y, params.current_turn.color);
 
     // Case 1: Clicked our own piece -> Select
     if clicked_piece.color == params.current_turn.color {
@@ -289,19 +287,27 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
     }
 
     // Case 2: Clicked enemy piece -> Capture (only if we have a piece selected)
-    // and the selected piece belongs to the current player
-    if params.selection.is_selected() {
-        let target_pos = (clicked_piece.x, clicked_piece.y);
-        let capture_info = Some(CapturedTarget {
-            entity,
-            piece_type: clicked_piece.piece_type,
-            color: clicked_piece.color,
-        });
-
-        try_move_sequence(&mut params, target_pos, capture_info, "piece_click_capture");
-    } else {
-        debug!("[INPUT] Clicked enemy piece but nothing selected - ignoring");
+    // AND it's our turn (can only capture on our turn)
+    if params.selection.is_selected() && clicked_piece.color != params.current_turn.color {
+        if let Some(selected) = params.selection.selected_entity {
+            // Validate that we have a selected piece and it belongs to us
+            if let Ok((_, selected_piece, _, _)) = params.pieces.p1().get(selected) {
+                if selected_piece.color == params.current_turn.color {
+                    try_move_sequence(&mut params, (clicked_piece.x, clicked_piece.y), Some(CapturedTarget {
+                        entity,
+                        piece_type: clicked_piece.piece_type,
+                        color: clicked_piece.color,
+                    }), "piece_click_capture");
+                } else {
+                    warn!("[INPUT] Cannot capture: selected piece is not ours");
+                }
+            }
+        }
+        return;
     }
+
+    // Case 3: Clicked enemy piece without selection -> Ignore (can't select enemy pieces)
+    warn!("[INPUT] Cannot select enemy piece: clicked {:?} but it's {:?}'s turn", clicked_piece.color, params.current_turn.color);
 }
 
 /// Observer system: Handle drag start on a piece
@@ -309,6 +315,10 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
 /// Initiates drag-and-drop by selecting the piece and marking it as dragging.
 pub fn on_piece_drag_start(drag_start: On<Pointer<DragStart>>, mut params: InputSystemParams) {
     if params.game_over.is_game_over() {
+        return;
+    }
+
+    if !is_human_turn(&params) {
         return;
     }
 
@@ -430,6 +440,10 @@ pub fn on_square_click(
         return;
     }
     if params.game_over.is_game_over() {
+        return;
+    }
+
+    if !is_human_turn(&params) {
         return;
     }
 

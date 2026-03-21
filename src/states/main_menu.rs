@@ -70,6 +70,7 @@ impl Plugin for MainMenuPlugin {
             ),
         )
         .init_resource::<MenuExpanded>()
+        .init_resource::<PlayerColorChoice>()
         .init_resource::<ShowcaseGameState>()
         .init_resource::<crate::assets::GameAssets>()
         .init_resource::<crate::assets::LoadingProgress>()
@@ -133,6 +134,18 @@ struct MenuCamera;
 #[derive(Resource, Default)]
 pub struct MenuExpanded {
     pub expanded: bool,
+}
+
+/// Resource to track the player's chosen color when playing vs AI
+#[derive(Resource)]
+pub struct PlayerColorChoice {
+    pub play_as_white: bool,
+}
+
+impl Default for PlayerColorChoice {
+    fn default() -> Self {
+        Self { play_as_white: true }
+    }
 }
 
 #[derive(Resource)]
@@ -1085,11 +1098,91 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::item_space(ui);
 
+        // --- LOCAL PLAY ---
+        ui.label(
+            egui::RichText::new("LOCAL PLAY")
+                .size(20.0)
+                .color(egui::Color32::from_rgb(200, 200, 200))
+                .strong(),
+        );
+        Layout::small_space(ui);
+
+        if ui.button("♟ VS Local Friend (PvP)").clicked() {
+            ctx.ai_config.mode = GameMode::Multiplayer;
+            *ctx.core_mode = CoreGameMode::MultiplayerLocal;
+            ctx.next_state.set(GameState::InGame);
+            ctx.menu_expanded.expanded = false;
+            info!("[MAIN_MENU] Starting Local PvP game");
+        }
+
+        Layout::small_space(ui);
+
+        ui.horizontal(|ui| {
+            ui.label("Play as:");
+            if ui.selectable_label(ctx.color_choice.play_as_white, "♔ White").clicked() {
+                ctx.color_choice.play_as_white = true;
+            }
+            if ui.selectable_label(!ctx.color_choice.play_as_white, "♚ Black").clicked() {
+                ctx.color_choice.play_as_white = false;
+            }
+        });
+
+        Layout::small_space(ui);
+
+        let ai_color = if ctx.color_choice.play_as_white {
+            crate::rendering::pieces::PieceColor::Black
+        } else {
+            crate::rendering::pieces::PieceColor::White
+        };
+
+        ui.horizontal(|ui| {
+            ui.label("VS Stockfish:");
+            for (label, difficulty) in [
+                ("Easy", crate::game::ai::resource::AIDifficulty::Easy),
+                ("Medium", crate::game::ai::resource::AIDifficulty::Medium),
+                ("Hard", crate::game::ai::resource::AIDifficulty::Hard),
+            ] {
+                if ui.button(label).clicked() {
+                    ctx.ai_config.mode = GameMode::VsAI { ai_color };
+                    ctx.ai_config.difficulty = difficulty;
+                    *ctx.core_mode = CoreGameMode::SinglePlayer;
+                    ctx.next_state.set(GameState::InGame);
+                    ctx.menu_expanded.expanded = false;
+                    info!("[MAIN_MENU] Starting VS Stockfish ({:?}) - AI plays {:?}", difficulty, ai_color);
+                }
+            }
+        });
+
+        Layout::item_space(ui);
+        ui.separator();
+        Layout::item_space(ui);
+
+        #[cfg(feature = "solana")]
+        {
+            // --- SOLANA P2P ---
+            ui.label(
+                egui::RichText::new("SOLANA P2P")
+                    .size(20.0)
+                    .color(egui::Color32::from_rgb(255, 150, 100))
+                    .strong(),
+            );
+            Layout::small_space(ui);
+
+            if ui.button("Solana Lobby").clicked() {
+                ctx.menu_state.set(crate::core::MenuState::SolanaLobby);
+                info!("[MAIN_MENU] Entering Solana Lobby");
+            }
+
+            Layout::item_space(ui);
+            ui.separator();
+            Layout::item_space(ui);
+        }
+
         // --- P2P CHESS (IROH/BRAID) ---
         ui.label(
-            egui::RichText::new("P2P CHESS")
-                .size(24.0)
-                .color(egui::Color32::WHITE)
+            egui::RichText::new("GLOBAL P2P")
+                .size(20.0)
+                .color(egui::Color32::from_rgb(100, 200, 255))
                 .strong(),
         );
         Layout::small_space(ui);
@@ -1340,7 +1433,7 @@ fn ui_about(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         Layout::item_space(ui);
 
         ui.label(
-            egui::RichText::new("An experimental chess engine built with Bevy 0.17")
+            egui::RichText::new("An experimental chess engine built with Bevy 0.18")
                 .color(egui::Color32::LIGHT_GRAY),
         );
         Layout::small_space(ui);

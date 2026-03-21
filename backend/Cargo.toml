@@ -40,14 +40,15 @@ bevy = { workspace = true, features = [
     "bevy_winit",
 ] }
 dotenv = "0.15.0"
-bincode = "3.0.0"
+bincode = "2.0.0"
 base64 = "0.22.1"
+anyhow = "1.0.75"
 
 # Braid/Iroh dependencies
 braid-iroh = { path = "../crates/braid-iroh" }
 iroh-gossip = { path = "../crates/iroh-gossip" }
 braid-core = { path = "../crates/braid-core" }
-braid-uri = { path = "../crates/braid-uri" }
+braid_uri = { path = "../crates/braid_uri" }
 
 # Solana dependencies
 solana-sdk = { workspace = true }

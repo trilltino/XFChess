@@ -767,6 +767,7 @@ pub fn setup_game_camera(
     view_mode: Res<crate::game::view_mode::ViewMode>,
     mut query: Query<(&mut Transform, &mut Camera)>,
     connection_state: Option<Res<crate::multiplayer::p2p_connection::P2PConnectionState>>,
+    ai_config: Res<crate::game::ai::ChessAIResource>,
 ) {
     // Only configure for standard view (TempleOS handles its own camera/view)
     if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
@@ -780,12 +781,19 @@ pub fn setup_game_camera(
             let initial_height = 12.0;
             let distance_behind = 8.0; // Distance behind the board edge
 
-            // Joiner is assigned Black; host is assigned White
-            let is_black_view = connection_state
-                .as_ref()
-                .and_then(|s| s.player_color)
-                .map(|c| c == shakmaty::Color::Black)
-                .unwrap_or(false);
+            // Determine if the human player is Black:
+            // 1. In AI mode: human plays the opposite color of ai_color
+            // 2. In multiplayer: joiner is Black, host is White
+            let is_black_view = match &ai_config.mode {
+                crate::game::ai::resource::GameMode::VsAI { ai_color } => {
+                    *ai_color == crate::rendering::pieces::PieceColor::White
+                }
+                _ => connection_state
+                    .as_ref()
+                    .and_then(|s| s.player_color)
+                    .map(|c| c == shakmaty::Color::Black)
+                    .unwrap_or(false),
+            };
 
             // Camera positioned along Z-axis to view board from player's side
             // White view: behind rank 1 (negative Z), looking toward center

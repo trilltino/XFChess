@@ -137,113 +137,41 @@ pub fn game_status_ui(mut params: GameUIParams) {
     // === CAPTURED PIECES PANEL (Left Side) ===
     egui::SidePanel::left("captured_pieces_panel")
         .resizable(false)
-        .default_width(120.0)
+        .default_width(140.0)
+        .frame(
+            egui::Frame::default()
+                .fill(UiColors::BG_OVERLAY)
+                .inner_margin(10.0)
+                .stroke(egui::Stroke::new(1.0, UiColors::BORDER)),
+        )
         .show(ctx, |ui| {
-            ui.add_space(60.0); // Space for timer above
+            ui.add_space(50.0);
 
             ui.vertical(|ui| {
-                // White's captured pieces (pieces White has taken from Black)
-                ui.colored_label(
-                    UiColors::TEXT_PRIMARY,
-                    egui::RichText::new("White Captures").size(14.0).strong(),
+                render_capture_section(
+                    ui,
+                    "White Captures",
+                    &params.game_state.captured.white_captured,
+                    params.game_state.captured.material_advantage(),
+                    true,
                 );
-                ui.add_space(5.0);
 
-                let white_captures = &params.game_state.captured.white_captured;
-                if white_captures.is_empty() {
-                    ui.label(
-                        egui::RichText::new("None")
-                            .size(12.0)
-                            .color(UiColors::TEXT_TERTIARY),
-                    );
-                } else {
-                    // Count pieces by type
-                    let mut counts = std::collections::HashMap::new();
-                    for piece in white_captures {
-                        *counts.entry(*piece).or_insert(0) += 1;
-                    }
-
-                    // Display counts
-                    for (piece_type, count) in counts {
-                        let piece_name = format!("{:?}", piece_type);
-                        let value = piece_value(piece_type);
-                        ui.label(
-                            egui::RichText::new(format!("{} x{} ({})", piece_name, count, value))
-                                .size(12.0)
-                                .color(UiColors::TEXT_SECONDARY),
-                        );
-                    }
-
-                    // Material advantage
-                    let advantage = params.game_state.captured.material_advantage();
-                    ui.add_space(5.0);
-                    ui.colored_label(
-                        if advantage > 0 {
-                            UiColors::SUCCESS
-                        } else {
-                            UiColors::TEXT_TERTIARY
-                        },
-                        egui::RichText::new(format!("+{} pts", advantage))
-                            .size(12.0)
-                            .strong(),
-                    );
-                }
-
-                ui.add_space(20.0);
+                ui.add_space(15.0);
                 ui.separator();
                 ui.add_space(10.0);
 
-                // Black's captured pieces (pieces Black has taken from White)
-                ui.colored_label(
-                    UiColors::TEXT_SECONDARY,
-                    egui::RichText::new("Black Captures").size(14.0).strong(),
+                render_capture_section(
+                    ui,
+                    "Black Captures",
+                    &params.game_state.captured.black_captured,
+                    -params.game_state.captured.material_advantage(),
+                    false,
                 );
-                ui.add_space(5.0);
-
-                let black_captures = &params.game_state.captured.black_captured;
-                if black_captures.is_empty() {
-                    ui.label(
-                        egui::RichText::new("None")
-                            .size(12.0)
-                            .color(UiColors::TEXT_TERTIARY),
-                    );
-                } else {
-                    // Count pieces by type
-                    let mut counts = std::collections::HashMap::new();
-                    for piece in black_captures {
-                        *counts.entry(*piece).or_insert(0) += 1;
-                    }
-
-                    // Display counts
-                    for (piece_type, count) in counts {
-                        let piece_name = format!("{:?}", piece_type);
-                        let value = piece_value(piece_type);
-                        ui.label(
-                            egui::RichText::new(format!("{} x{} ({})", piece_name, count, value))
-                                .size(12.0)
-                                .color(UiColors::TEXT_SECONDARY),
-                        );
-                    }
-
-                    // Material advantage
-                    let advantage = -params.game_state.captured.material_advantage();
-                    ui.add_space(5.0);
-                    ui.colored_label(
-                        if advantage > 0 {
-                            UiColors::SUCCESS
-                        } else {
-                            UiColors::TEXT_TERTIARY
-                        },
-                        egui::RichText::new(format!("+{} pts", advantage))
-                            .size(12.0)
-                            .strong(),
-                    );
-                }
             });
         });
 
+    #[cfg(feature = "solana")]
     match *params.game_mode {
-        #[cfg(feature = "solana")]
         GameMode::MultiplayerCompetitive => {
             egui::SidePanel::right("solana_sidebar")
                 .resizable(true)
@@ -265,7 +193,99 @@ pub fn game_status_ui(mut params: GameUIParams) {
     }
 }
 
-/// Format engine score for display
+/// Unicode chess symbol for a piece type
+fn piece_symbol(piece_type: crate::rendering::pieces::PieceType, is_white_section: bool) -> &'static str {
+    use crate::rendering::pieces::PieceType;
+    if is_white_section {
+        // White captured black pieces — show black symbols
+        match piece_type {
+            PieceType::King => "\u{265A}",
+            PieceType::Queen => "\u{265B}",
+            PieceType::Rook => "\u{265C}",
+            PieceType::Bishop => "\u{265D}",
+            PieceType::Knight => "\u{265E}",
+            PieceType::Pawn => "\u{265F}",
+        }
+    } else {
+        // Black captured white pieces — show white symbols
+        match piece_type {
+            PieceType::King => "\u{2654}",
+            PieceType::Queen => "\u{2655}",
+            PieceType::Rook => "\u{2656}",
+            PieceType::Bishop => "\u{2657}",
+            PieceType::Knight => "\u{2658}",
+            PieceType::Pawn => "\u{2659}",
+        }
+    }
+}
+
+/// Render one side's captured-pieces section.
+fn render_capture_section(
+    ui: &mut egui::Ui,
+    title: &str,
+    captures: &[crate::rendering::pieces::PieceType],
+    advantage: i32,
+    is_white_section: bool,
+) {
+    use crate::rendering::pieces::PieceType;
+
+    let title_color = if is_white_section {
+        UiColors::TEXT_PRIMARY
+    } else {
+        UiColors::TEXT_SECONDARY
+    };
+
+    ui.colored_label(title_color, egui::RichText::new(title).size(14.0).strong());
+    ui.add_space(4.0);
+
+    if captures.is_empty() {
+        ui.label(
+            egui::RichText::new("—")
+                .size(12.0)
+                .color(UiColors::TEXT_TERTIARY),
+        );
+    } else {
+        // Sorted display order: Queen, Rook, Bishop, Knight, Pawn
+        let order = [
+            PieceType::Queen,
+            PieceType::Rook,
+            PieceType::Bishop,
+            PieceType::Knight,
+            PieceType::Pawn,
+        ];
+
+        // Build a single-line tally string: e.g. "♛♜♜♟♟♟"
+        let mut tally = String::new();
+        for &pt in &order {
+            let count = captures.iter().filter(|&&p| p == pt).count();
+            for _ in 0..count {
+                tally.push_str(piece_symbol(pt, is_white_section));
+            }
+        }
+
+        ui.label(egui::RichText::new(&tally).size(20.0));
+
+        // Point total
+        let total: i32 = captures.iter().map(|p| piece_value(*p)).sum();
+        let adv_text = if advantage > 0 {
+            format!("{} pts (+{})", total, advantage)
+        } else {
+            format!("{} pts", total)
+        };
+
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new(adv_text)
+                .size(11.0)
+                .color(if advantage > 0 {
+                    UiColors::SUCCESS
+                } else {
+                    UiColors::TEXT_TERTIARY
+                }),
+        );
+    }
+}
+
 /// Format time in seconds to MM:SS format
 fn format_time(seconds: f32) -> String {
     let total_seconds = seconds.max(0.0) as u32;

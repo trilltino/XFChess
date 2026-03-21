@@ -4,7 +4,7 @@ use crate::state::move_log::MoveLog;
 use anchor_lang::prelude::*;
 
 #[cfg(feature = "move-validation")]
-use shakmaty::{fen::Fen, uci::UciMove, CastlingMode, Chess, EnPassantMode, Position};
+use chess_logic_on_chain::shakmaty::{fen::Fen, uci::UciMove, CastlingMode, Chess, EnPassantMode, Position};
 
 #[derive(Accounts)]
 pub struct CommitMoveBatchCtx<'info> {
@@ -104,10 +104,10 @@ pub fn handler_commit_move_batch(
                 .to_move(&current_pos)
                 .map_err(|_| XfchessGameError::InvalidMove)?;
             let new_pos = current_pos
-                .play(chess_move)
+                .play(&chess_move)
                 .map_err(|_| XfchessGameError::InvalidMove)?;
 
-            let computed_fen = Fen::from_position(&new_pos, EnPassantMode::Legal);
+            let computed_fen = Fen::from_position(new_pos.clone(), EnPassantMode::Legal);
 
             let provided_fen = Fen::from_ascii(next_fen_str.as_bytes())
                 .map_err(|_| XfchessGameError::InvalidNextFen)?;
@@ -123,7 +123,7 @@ pub fn handler_commit_move_batch(
                 .push(format!("{}. {}", game.move_count / 2 + 1, move_str));
         }
 
-        game.fen = Fen::from_position(&current_pos, EnPassantMode::Legal).to_string();
+        game.fen = Fen::from_position(current_pos, EnPassantMode::Legal).to_string();
     }
 
     #[cfg(not(feature = "move-validation"))]
