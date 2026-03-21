@@ -36,7 +36,7 @@ use crate::game::components::{
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use crate::ui::game_ui::game_status_ui;
 use crate::ui::promotion_ui::promotion_ui_system;
-use bevy::input::common_conditions::input_toggle_active;
+use bevy::input::common_conditions::{input_toggle_active, input_just_pressed};
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
 
