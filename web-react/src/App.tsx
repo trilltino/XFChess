@@ -16,6 +16,39 @@ const Navbar = () => {
   const [isDemoDropdownOpen, setIsDemoDropdownOpen] = useState(false);
   const [isRevenueDropdownOpen, setIsRevenueDropdownOpen] = useState(false);
 
+  const closeAllDropdowns = () => {
+    setIsLegalDropdownOpen(false);
+    setIsDemoDropdownOpen(false);
+    setIsRevenueDropdownOpen(false);
+  };
+
+  const handleLegalDropdownClick = () => {
+    if (isLegalDropdownOpen) {
+      setIsLegalDropdownOpen(false);
+    } else {
+      closeAllDropdowns();
+      setIsLegalDropdownOpen(true);
+    }
+  };
+
+  const handleDemoDropdownClick = () => {
+    if (isDemoDropdownOpen) {
+      setIsDemoDropdownOpen(false);
+    } else {
+      closeAllDropdowns();
+      setIsDemoDropdownOpen(true);
+    }
+  };
+
+  const handleRevenueDropdownClick = () => {
+    if (isRevenueDropdownOpen) {
+      setIsRevenueDropdownOpen(false);
+    } else {
+      closeAllDropdowns();
+      setIsRevenueDropdownOpen(true);
+    }
+  };
+
   return (
     <nav className="navbar">
       <Link to="/" className="nav-logo">
@@ -26,7 +59,7 @@ const Navbar = () => {
         <div className="nav-legal-dropdown">
           <button 
             className="nav-link dropdown-toggle"
-            onClick={() => setIsLegalDropdownOpen(!isLegalDropdownOpen)}
+            onClick={handleLegalDropdownClick}
           >
             Legal <ChevronDown size={16} className={`dropdown-icon ${isLegalDropdownOpen ? 'open' : ''}`} />
           </button>
@@ -47,7 +80,7 @@ const Navbar = () => {
         <div className="nav-demo-dropdown">
           <button 
             className="nav-link dropdown-toggle"
-            onClick={() => setIsDemoDropdownOpen(!isDemoDropdownOpen)}
+            onClick={handleDemoDropdownClick}
           >
             Demo <ChevronDown size={16} className={`dropdown-icon ${isDemoDropdownOpen ? 'open' : ''}`} />
           </button>
@@ -65,7 +98,7 @@ const Navbar = () => {
         <div className="nav-revenue-dropdown">
           <button 
             className="nav-link dropdown-toggle"
-            onClick={() => setIsRevenueDropdownOpen(!isRevenueDropdownOpen)}
+            onClick={handleRevenueDropdownClick}
           >
             Revenue <ChevronDown size={16} className={`dropdown-icon ${isRevenueDropdownOpen ? 'open' : ''}`} />
           </button>

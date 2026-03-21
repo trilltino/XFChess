@@ -61,65 +61,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
             });
         });
 
-    // Top bar: turn indicator
-    egui::TopBottomPanel::top("game_top_bar")
-        .resizable(false)
-        .show(ctx, |ui| {
-            ui.add_space(5.0); // Add top padding
-            ui.set_min_height(40.0); // Ensure minimum height
-
-            ui.horizontal(|ui| {
-                ui.set_width(ui.available_width());
-
-                // Left: Spacer (Timer removed)
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add_space(10.0);
-                });
-
-                // Center: Turn Indicator (use available space with manual centering)
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), 0.0),
-                    egui::Layout::top_down(egui::Align::Center),
-                    |ui| {
-                        if !params.game_state.game_over.is_game_over() {
-                            // Show game phase status only
-                            match params.game_state.game_phase.0 {
-                                GamePhase::Check => {
-                                    ui.colored_label(UiColors::DANGER, "CHECK!");
-                                }
-                                GamePhase::Checkmate => {
-                                    ui.colored_label(UiColors::DANGER, "CHECKMATE!");
-                                }
-                                GamePhase::Stalemate => {
-                                    ui.colored_label(UiColors::WARNING, "STALEMATE");
-                                }
-                                GamePhase::Playing | GamePhase::Setup => {
-                                    if params.ai_params.pending_ai.is_some() {
-                                        let time = ui.input(|i| i.time);
-                                        let dots = (time * 3.0) as i64 % 4;
-                                        let text =
-                                            format!("AI is thinking{}", ".".repeat(dots as usize));
-                                        ui.colored_label(UiColors::INFO, text);
-                                    }
-                                }
-                            }
-                        } else {
-                            ui.colored_label(
-                                UiColors::ACCENT_GOLD,
-                                egui::RichText::new(params.game_state.game_over.message())
-                                    .size(18.0),
-                            );
-                        }
-                    },
-                );
-
-                // Right: Spacer (Settings button removed)
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(10.0);
-                });
-            });
-            ui.add_space(5.0);
-        });
+    // Top bar removed - no turn indicator displayed
 
     // === CAPTURED PIECES PANEL (Left Side) ===
     egui::SidePanel::left("captured_pieces_panel")
@@ -128,7 +70,8 @@ pub fn game_status_ui(mut params: GameUIParams) {
         .frame(
             egui::Frame::default()
                 .fill(UiColors::BG_OVERLAY)
-                .inner_margin(10.0),
+                .inner_margin(10.0)
+                .stroke(egui::Stroke::NONE),
         )
         .show(ctx, |ui| {
             ui.add_space(50.0);
@@ -161,6 +104,15 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     ui.add_space(15.0);
 
                     ui.vertical_centered(|ui| {
+                        // Prominent CHECKMATE label
+                        if params.game_state.game_over.is_checkmate() {
+                            ui.colored_label(
+                                UiColors::DANGER,
+                                egui::RichText::new("CHECKMATE").size(16.0).strong(),
+                            );
+                            ui.add_space(6.0);
+                        }
+
                         // Winner declaration
                         let (winner_text, winner_color) = match params.game_state.game_over.winner() {
                             Some(PieceColor::White) => ("White Wins!", UiColors::TEXT_PRIMARY),
@@ -173,25 +125,15 @@ pub fn game_status_ui(mut params: GameUIParams) {
                             egui::RichText::new(winner_text).size(18.0).strong(),
                         );
 
-                        ui.add_space(5.0);
-
-                        // Game over reason
-                        let reason_text = params.game_state.game_over.message();
-                        ui.label(
-                            egui::RichText::new(reason_text)
-                                .size(12.0)
-                                .color(UiColors::TEXT_TERTIARY),
-                        );
-
                         ui.add_space(15.0);
 
                         // Exit to Menu button
                         if ui
                             .add_sized(
-                                [120.0, 40.0],
+                                [120.0, 35.0],
                                 egui::Button::new(
                                     egui::RichText::new("Exit Game")
-                                        .size(14.0)
+                                        .size(13.0)
                                         .strong(),
                                 )
                                 .fill(UiColors::DANGER),

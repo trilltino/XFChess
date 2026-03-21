@@ -82,10 +82,16 @@ fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bool {
         return false;
     }
 
-    // Check if we're in an active network game
+    // Check if we're in an active network game.
+    // Include Connected status: the host enters InGame game-state while still
+    // in Connected P2P status (InGame is set only after the GameStart echo arrives).
     if let Some(conn) = params.connection_state.as_ref() {
-        if conn.status == crate::multiplayer::p2p_connection::P2PConnectionStatus::InGame {
-            // In network games, only allow moving our assigned color
+        let is_active = matches!(
+            conn.status,
+            crate::multiplayer::p2p_connection::P2PConnectionStatus::Connected
+                | crate::multiplayer::p2p_connection::P2PConnectionStatus::InGame
+        );
+        if is_active {
             if let Some(my_color) = conn.player_color {
                 let my_piece_color = match my_color {
                     shakmaty::Color::White => PieceColor::White,

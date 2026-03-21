@@ -216,6 +216,53 @@ body {
     background: rgba(230, 57, 70, 0.25);
 }
 
+/* NAVBAR REVENUE DROPDOWN */
+.nav-revenue-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.nav-revenue-dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    z-index: 1000;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    min-width: 200px;
+    margin-top: 8px;
+}
+
+.nav-revenue-dropdown-item {
+    display: block;
+    padding: 12px 20px;
+    color: #fff;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.nav-revenue-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.nav-revenue-dropdown-item:hover {
+    background: rgba(230, 57, 70, 0.15);
+    color: var(--primary);
+    padding-left: 24px;
+}
+
+.nav-revenue-dropdown-item:active {
+    background: rgba(230, 57, 70, 0.25);
+}
+
 /* DROPDOWN MENU */
 .dropdown {
     position: relative;
@@ -3514,5 +3561,110 @@ body {
     
     .tier-header h5 {
         font-size: 1.2rem;
+    }
+}
+
+/* DOWNLOAD PAGE STYLING */
+.download-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 40px;
+    text-align: center;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s ease;
+}
+
+.download-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(230, 57, 70, 0.3);
+    transform: translateY(-5px);
+    box-shadow: 0 30px 60px rgba(230, 57, 70, 0.15);
+}
+
+.download-icon {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 80px;
+    height: 80px;
+    background: rgba(230, 57, 70, 0.1);
+    border: 2px solid rgba(230, 57, 70, 0.25);
+    border-radius: 20px;
+    margin: 0 auto 24px;
+    transition: all 0.3s ease;
+}
+
+.download-card:hover .download-icon {
+    background: rgba(230, 57, 70, 0.15);
+    border-color: rgba(230, 57, 70, 0.4);
+    transform: scale(1.05);
+}
+
+.download-card h3 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 12px;
+}
+
+.download-card p {
+    color: var(--text-dim);
+    line-height: 1.6;
+    margin-bottom: 24px;
+    font-size: 1rem;
+}
+
+.download-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 32px;
+    background: var(--primary);
+    color: #fff;
+    text-decoration: none;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    border: none;
+    cursor: pointer;
+}
+
+.download-btn:hover {
+    background: #d12f3d;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(230, 57, 70, 0.3);
+    color: #fff;
+    text-decoration: none;
+}
+
+.download-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 5px 15px rgba(230, 57, 70, 0.3);
+}
+
+/* Responsive design for download page */
+@media (max-width: 768px) {
+    .download-card {
+        padding: 32px 24px;
+        margin: 0 16px;
+    }
+    
+    .download-icon {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 20px;
+    }
+    
+    .download-card h3 {
+        font-size: 1.3rem;
+    }
+    
+    .download-btn {
+        padding: 14px 28px;
+        font-size: 0.9rem;
     }
 }
