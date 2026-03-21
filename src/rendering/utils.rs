@@ -73,6 +73,8 @@ pub struct SquareMaterials {
     pub white_color: Handle<StandardMaterial>,
     /// Material used for highlighting selected squares and possible move destinations
     pub hover_matl: Handle<StandardMaterial>,
+    /// Material for selected piece border (soft black)
+    pub selected_border_matl: Handle<StandardMaterial>,
     /// Grey material for TempleOS view (light squares)
     pub grey_color: Handle<StandardMaterial>,
     /// White material for TempleOS view (dark squares in standard view)
@@ -119,7 +121,18 @@ impl FromWorld for SquareMaterials {
         SquareMaterials {
             black_color: materials.add(light_color), // Light squares
             white_color: materials.add(dark_color),  // Dark squares
-            hover_matl: materials.add(Color::srgb(0.8, 0.2, 0.2)), // Red for legal moves
+            hover_matl: materials.add(StandardMaterial {
+                base_color: Color::srgba(0.8, 0.2, 0.2, 0.3), // Soft transparent red
+                alpha_mode: AlphaMode::Blend,
+                unlit: true, // Make it unlit so it shows consistently
+                ..default()
+            }),
+            selected_border_matl: materials.add(StandardMaterial {
+                base_color: Color::srgba(0.0, 0.0, 0.0, 0.5), // Soft black border
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            }),
             grey_color: materials.add(grey_material), // Dull grey for TempleOS (unlit)
             templeos_white: materials.add(white_material), // Bright white for TempleOS (unlit)
             hint_mesh: world

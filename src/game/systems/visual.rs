@@ -4,6 +4,10 @@ use crate::rendering::pieces::{Piece, PIECE_ON_BOARD_Y};
 use crate::rendering::utils::{ReturnMaterials, Square, SquareMaterials};
 use bevy::prelude::*;
 
+/// Marker component for selected piece borders
+#[derive(Component)]
+pub struct SelectedBorder;
+
 /// System to visually highlight possible moves and selected square
 ///
 /// Updates square materials to provide visual feedback for:
@@ -25,20 +29,35 @@ pub fn highlight_possible_moves(
     square_materials: Res<SquareMaterials>,
     return_materials: Res<ReturnMaterials>,
     mut squares_query: Query<(Entity, &Square, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut commands: Commands,
+    border_query: Query<Entity, With<SelectedBorder>>,
 ) {
-    for (_, square, mut material) in squares_query.iter_mut() {
+    // Clean up old borders first
+    for entity in border_query.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    for (entity, square, mut material) in squares_query.iter_mut() {
         let pos = (square.x, square.y);
 
-        // Check if this square should be highlighted
-        let should_highlight = selection.is_selected()
-            && (
-                selection.selected_position == Some(pos) || // Selected square
-            selection.possible_moves.contains(&pos)
-                // Valid move destination
-            );
+        // Check if this is the selected square
+        let is_selected = selection.selected_position == Some(pos);
+        
+        // Check if this is a valid move destination
+        let is_valid_move = selection.is_selected() && selection.possible_moves.contains(&pos);
 
-        if should_highlight {
-            // Handle is Clone (not Copy), need .clone() from Res
+        if is_selected {
+            // Add soft black border for selected piece
+            commands.spawn((
+                Mesh3d(square_materials.highlight_mesh.clone()),
+                MeshMaterial3d(square_materials.selected_border_matl.clone()),
+                Transform::from_translation(Vec3::new(square.x as f32, 0.02, square.y as f32)),
+                SelectedBorder,
+                Name::new("Selected Border"),
+                crate::core::DespawnOnExit(crate::core::GameState::InGame),
+            ));
+        } else if is_valid_move {
+            // Use soft transparent red for valid moves
             material.0 = square_materials.hover_matl.clone();
         } else {
             // Restore original color
