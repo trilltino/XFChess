@@ -2,7 +2,11 @@
 
 A modern chess game with blockchain integration built with Rust, Bevy, and Solana.
 
-![XFChess Gameplay](XFChess_gameplay.png)
+## Screenshots
+
+![XFChess Screenshot 1](screenshot1.png)
+![XFChess Screenshot 2](screenshot2.png)
+![XFChess Screenshot 3](screenshot3.png)
 
 ## Features
 
