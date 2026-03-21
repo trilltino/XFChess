@@ -666,13 +666,12 @@ fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
     let key_file = if let Ok(env_path) = std::env::var("XFCHESS_IDENTITY") {
         PathBuf::from(env_path)
     } else {
-        let mut default_path = PathBuf::from("xfchess_identity.key");
-        if let Some(proj_dirs) = directories::ProjectDirs::from("com", "xfchess", "xfchess") {
-            let dir = proj_dirs.data_dir();
-            let _ = std::fs::create_dir_all(dir);
-            default_path = dir.join("identity.key");
-        }
-        default_path
+        // For production, always generate random key - don't save to file
+        // This ensures each run gets a fresh random node ID
+        let sk = SecretKey::generate(&mut rand::rng());
+        let bytes = sk.to_bytes();
+        info!("Generated new random identity (not saved to file)");
+        return (sk, bytes);
     };
 
     // Ensure parent directory exists (e.g., for keys/ folder)

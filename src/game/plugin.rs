@@ -202,6 +202,12 @@ impl Plugin for GamePlugin {
             debug_current_gamestate.run_if(input_toggle_active(true, KeyCode::F12)),
         );
 
+        // Fullscreen toggle - F11 key
+        app.add_systems(
+            Update,
+            toggle_fullscreen.run_if(input_just_pressed(KeyCode::F11)),
+        );
+
         // Global visual setup
         app.add_systems(Startup, setup_global_scene);
 

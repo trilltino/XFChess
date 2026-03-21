@@ -82,20 +82,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         if !params.game_state.game_over.is_game_over() {
-                            // Get current player
-                            let current_player =
-                                params.players.current(params.game_state.current_turn.color);
-                            let turn_text = format!(
-                                "{} ({:?}) to Move",
-                                current_player.name, params.game_state.current_turn.color
-                            );
-                            let turn_color = match params.game_state.current_turn.color {
-                                PieceColor::White => UiColors::TEXT_PRIMARY,
-                                PieceColor::Black => UiColors::TEXT_SECONDARY,
-                            };
-                            ui.colored_label(turn_color, egui::RichText::new(turn_text).size(18.0));
-
-                            // Show game phase status
+                            // Show game phase status only
                             match params.game_state.game_phase.0 {
                                 GamePhase::Check => {
                                     ui.colored_label(UiColors::DANGER, "CHECK!");
@@ -141,8 +128,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
         .frame(
             egui::Frame::default()
                 .fill(UiColors::BG_OVERLAY)
-                .inner_margin(10.0)
-                .stroke(egui::Stroke::new(1.0, UiColors::BORDER)),
+                .inner_margin(10.0),
         )
         .show(ctx, |ui| {
             ui.add_space(50.0);
@@ -167,6 +153,55 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     -params.game_state.captured.material_advantage(),
                     false,
                 );
+
+                // Game Over Section - Show winner and exit button when game ends
+                if params.game_state.game_over.is_game_over() {
+                    ui.add_space(30.0);
+                    ui.separator();
+                    ui.add_space(15.0);
+
+                    ui.vertical_centered(|ui| {
+                        // Winner declaration
+                        let (winner_text, winner_color) = match params.game_state.game_over.winner() {
+                            Some(PieceColor::White) => ("White Wins!", UiColors::TEXT_PRIMARY),
+                            Some(PieceColor::Black) => ("Black Wins!", UiColors::TEXT_SECONDARY),
+                            None => ("Draw!", UiColors::WARNING),
+                        };
+
+                        ui.colored_label(
+                            winner_color,
+                            egui::RichText::new(winner_text).size(18.0).strong(),
+                        );
+
+                        ui.add_space(5.0);
+
+                        // Game over reason
+                        let reason_text = params.game_state.game_over.message();
+                        ui.label(
+                            egui::RichText::new(reason_text)
+                                .size(12.0)
+                                .color(UiColors::TEXT_TERTIARY),
+                        );
+
+                        ui.add_space(15.0);
+
+                        // Exit to Menu button
+                        if ui
+                            .add_sized(
+                                [120.0, 40.0],
+                                egui::Button::new(
+                                    egui::RichText::new("Exit Game")
+                                        .size(14.0)
+                                        .strong(),
+                                )
+                                .fill(UiColors::DANGER),
+                            )
+                            .clicked()
+                        {
+                            params.next_state.set(crate::core::GameState::MainMenu);
+                        }
+                    });
+                }
             });
         });
 

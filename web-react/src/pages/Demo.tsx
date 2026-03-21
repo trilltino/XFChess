@@ -1,162 +1,209 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, Play } from 'lucide-react';
+import { ArrowLeft, Monitor, Wallet, Play, Download, Zap, Shield, Gamepad2, ChevronDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import './Demo.css';
 
-const Demo = () => {
-    return (
-        <motion.div
-            className="demo-container"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.5 }}
-        >
-            <Link to="/" className="back-btn demo-back">
-                <ArrowLeft size={18} /> Back
-            </Link>
+const DemoPage = () => {
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="content-wrap page-overlay">
+      <section className="section">
+        <Link to="/" className="back-btn"><ArrowLeft size={18} /> Back</Link>
 
-            {/* VIDEO / DEMO EMBED */}
-            <div className="demo-video-wrap">
-                <div className="demo-video-inner">
-                    <div className="demo-play-overlay">
-                        <div className="demo-play-btn">
-                            <Play size={32} fill="#fff" color="#fff" />
-                        </div>
-                        <p className="demo-coming-soon">Demo video coming soon</p>
-                    </div>
-                    <div className="demo-board-preview">
-                        <div className="demo-board-grid">
-                            {Array.from({ length: 64 }).map((_, i) => {
-                                const row = Math.floor(i / 8);
-                                const col = i % 8;
-                                const isLight = (row + col) % 2 === 0;
-                                return (
-                                    <div
-                                        key={i}
-                                        className={`demo-square ${isLight ? 'light' : 'dark'}`}
-                                    />
-                                );
-                            })}
-                        </div>
-                        <div className="demo-board-overlay">
-                            <span className="demo-xf-badge"><span style={{ color: '#e63946' }}>XF</span>Chess</span>
-                        </div>
-                    </div>
-                </div>
+        <div className="section-label">Demo</div>
+        <h2>XFChess <span className="accent">Demo</span></h2>
+
+        <p>Experience XFChess in different modes - from standalone desktop gameplay to blockchain-powered Solana integration.</p>
+
+        {/* Demo Dropdown */}
+        <div className="compliance-dropdown-container">
+          <div className="demo-dropdown">
+            <button className="dropdown-button">
+              Select Demo Mode
+              <ChevronDown size={20} />
+            </button>
+            <div className="dropdown-menu">
+              <button className="dropdown-item">
+                <Monitor size={16} /> Standalone
+              </button>
+              <button className="dropdown-item">
+                <Wallet size={16} /> Solana
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Standalone Demo Section */}
+        <div className="demo-sections">
+          <div className="demo-section">
+            <div className="demo-header">
+              <div className="demo-icon">
+                <Monitor size={48} color="#e63946" />
+              </div>
+              <div className="demo-info">
+                <h3>Standalone Demo</h3>
+                <p>Desktop-native chess gaming experience with local multiplayer and AI opponents</p>
+              </div>
             </div>
 
-            {/* MULTIPLAYER TESTING INSTRUCTIONS */}
-            <div className="demo-section" style={{ marginTop: '3rem', padding: '2rem', background: 'rgba(20, 20, 20, 0.5)', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-                    <div style={{ width: '12px', height: '12px', background: '#22c55e', borderRadius: '50%' }}></div>
-                    <h2 style={{ margin: 0, fontSize: '1.5rem' }}>Multiplayer Testing Guide</h2>
+            <div className="demo-content">
+              <div className="demo-features">
+                <h4>Features</h4>
+                <div className="feature-grid">
+                  <div className="feature-card">
+                    <Gamepad2 size={24} color="#e63946" />
+                    <h5>Local Multiplayer</h5>
+                    <p>Play against friends on the same device with intuitive controls</p>
+                  </div>
+                  <div className="feature-card">
+                    <Zap size={24} color="#e63946" />
+                    <h5>AI Opponents</h5>
+                    <p>Challenge built-in AI with adjustable difficulty levels</p>
+                  </div>
+                  <div className="feature-card">
+                    <Shield size={24} color="#e63946" />
+                    <h5>Secure Gaming</h5>
+                    <p>Offline gameplay with no internet connection required</p>
+                  </div>
                 </div>
-                <p style={{ color: '#a0a0a0', lineHeight: '1.6', marginBottom: '2rem' }}>
-                    Test the full wager flow with two players on Solana devnet. Each player runs a separate browser instance and launches the native game client.
-                </p>
+              </div>
 
-                <div style={{ display: 'grid', gap: '1.5rem' }}>
-                    {/* Step 1 */}
-                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.5rem', borderRadius: '8px', borderLeft: '4px solid #22c55e' }}>
-                        <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem', color: '#fff' }}>Step 1: Start Both Player UIs</h3>
-                        <p style={{ margin: '0 0 1rem 0', color: '#888', fontSize: '0.9rem' }}>Run the E2E test script to start both browser instances:</p>
-                        <code style={{ display: 'block', background: '#111', padding: '0.75rem', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.85rem', color: '#22c55e' }}>
-                            magicblock_e2e_test.bat
-                        </code>
-                        <p style={{ margin: '0.75rem 0 0 0', color: '#666', fontSize: '0.8rem' }}>This opens Player 1 on port 5173 and Player 2 on port 5174</p>
-                    </div>
-
-                    {/* Step 2 */}
-                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.5rem', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
-                        <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem', color: '#fff' }}>Step 2: Player 1 Creates Game</h3>
-                        <ol style={{ margin: 0, paddingLeft: '1.25rem', color: '#888', fontSize: '0.9rem', lineHeight: '1.6' }}>
-                            <li>Open <strong>http://localhost:5173</strong> (Player 1)</li>
-                            <li>Connect your Solana wallet (devnet)</li>
-                            <li>Click <strong>"Create Wager Game"</strong></li>
-                            <li>Set wager amount (e.g., 0.01 SOL)</li>
-                            <li>Copy the <strong>Game ID</strong> shown</li>
-                        </ol>
-                    </div>
-
-                    {/* Step 3 */}
-                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.5rem', borderRadius: '8px', borderLeft: '4px solid #8b5cf6' }}>
-                        <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem', color: '#fff' }}>Step 3: Player 2 Joins Game</h3>
-                        <ol style={{ margin: 0, paddingLeft: '1.25rem', color: '#888', fontSize: '0.9rem', lineHeight: '1.6' }}>
-                            <li>Open <strong>http://localhost:5174</strong> (Player 2)</li>
-                            <li>Connect a different Solana wallet (devnet)</li>
-                            <li>Click <strong>"Join Game"</strong></li>
-                            <li>Paste the <strong>Game ID</strong> from Player 1</li>
-                            <li>Confirm the wager match</li>
-                        </ol>
-                    </div>
-
-                    {/* Step 4 */}
-                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.5rem', borderRadius: '8px', borderLeft: '4px solid #f59e0b' }}>
-                        <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem', color: '#fff' }}>Step 4: Launch Game Clients</h3>
-                        <p style={{ margin: '0 0 1rem 0', color: '#888', fontSize: '0.9rem' }}>Both players click <strong>"Launch Game"</strong> in their browsers:</p>
-                        <ul style={{ margin: '0 0 1rem 0', paddingLeft: '1.25rem', color: '#888', fontSize: '0.9rem', lineHeight: '1.6' }}>
-                            <li>Downloads <code>xfchess_session_&lt;game_id&gt;.json</code> (unique filename per game)</li>
-                            <li>Run the batch file to start the native game:</li>
-                        </ul>
-                        <code style={{ display: 'block', background: '#111', padding: '0.75rem', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.85rem', color: '#f59e0b' }}>
-                            cd C:\Users\isich\XFChess
-                            <br />
-                            launch_game_with_session.bat %USERPROFILE%\Downloads\xfchess_session_&lt;game_id&gt;.json
-                        </code>
-                    </div>
-
-                    {/* Step 5 */}
-                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.5rem', borderRadius: '8px', borderLeft: '4px solid #e63946' }}>
-                        <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem', color: '#fff' }}>Step 5: Play & Verify</h3>
-                        <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#888', fontSize: '0.9rem', lineHeight: '1.6' }}>
-                            <li>Game launches with players assigned White/Black</li>
-                            <li>Each move is recorded on Solana devnet</li>
-                            <li>Game state synced via on-chain Game PDA</li>
-                            <li>Winner receives payout on <strong>finalizeGame</strong></li>
-                        </ul>
-                    </div>
+              <div className="demo-actions">
+                <h4>Get Started</h4>
+                <div className="action-buttons">
+                  <button className="btn-primary">
+                    <Download size={16} />
+                    Download Standalone
+                  </button>
+                  <button className="btn-secondary">
+                    <Play size={16} />
+                    Play in Browser
+                  </button>
                 </div>
+              </div>
 
-                <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(230, 57, 70, 0.1)', borderRadius: '8px', border: '1px solid rgba(230, 57, 70, 0.3)' }}>
-                    <p style={{ margin: 0, color: '#e63946', fontSize: '0.85rem', fontWeight: 600 }}>⚠️ Requirements:</p>
-                    <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', color: '#888', fontSize: '0.8rem' }}>
-                        <li>Both players need devnet SOL (get from <a href="https://faucet.solana.com/" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>faucet.solana.com</a>)</li>
-                        <li>Game client must be built: <code style={{ background: '#111', padding: '0.2rem 0.4rem', borderRadius: '3px' }}>cargo build --release</code></li>
-                        <li>Program ID: <code style={{ background: '#111', padding: '0.2rem 0.4rem', borderRadius: '3px' }}>AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp</code></li>
-                    </ul>
+              <div className="demo-requirements">
+                <h4>System Requirements</h4>
+                <div className="requirements-grid">
+                  <div className="requirement-item">
+                    <strong>OS:</strong> Windows 10/11, macOS 10.15+, Linux
+                  </div>
+                  <div className="requirement-item">
+                    <strong>Memory:</strong> 4GB RAM minimum
+                  </div>
+                  <div className="requirement-item">
+                    <strong>Storage:</strong> 500MB available space
+                  </div>
+                  <div className="requirement-item">
+                    <strong>Graphics:</strong> OpenGL 3.3 compatible
+                  </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Solana Demo Section */}
+          <div className="demo-section">
+            <div className="demo-header">
+              <div className="demo-icon">
+                <Wallet size={48} color="#e63946" />
+              </div>
+              <div className="demo-info">
+                <h3>Solana Demo</h3>
+                <p>Blockchain-powered chess with wagering, NFT rewards, and decentralized gameplay</p>
+              </div>
             </div>
 
-            {/* TRANSACTION EVIDENCE SECTION */}
-            <div className="demo-section" style={{ marginTop: '4rem', padding: '2rem', background: 'rgba(20, 20, 20, 0.5)', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-                    <div style={{ width: '12px', height: '12px', background: '#e63946', borderRadius: '50%' }}></div>
-                    <h2 style={{ margin: 0, fontSize: '1.5rem' }}>Transaction Evidence</h2>
+            <div className="demo-content">
+              <div className="demo-features">
+                <h4>Blockchain Features</h4>
+                <div className="feature-grid">
+                  <div className="feature-card">
+                    <Wallet size={24} color="#e63946" />
+                    <h5>Solana Integration</h5>
+                    <p>Fast, low-cost transactions on the Solana blockchain</p>
+                  </div>
+                  <div className="feature-card">
+                    <Zap size={24} color="#e63946" />
+                    <h5>Smart Contract Wagering</h5>
+                    <p>Secure peer-to-peer betting with automated payouts</p>
+                  </div>
+                  <div className="feature-card">
+                    <Shield size={24} color="#e63946" />
+                    <h5>Provably Fair</h5>
+                    <p>Transparent gameplay with on-chain verification</p>
+                  </div>
                 </div>
-                <p style={{ color: '#a0a0a0', lineHeight: '1.6', marginBottom: '2rem' }}>
-                    Every game on XFChess leaves an immutable trail on the Solana blockchain.
-                    Explore real transaction data, verify game outcomes, and audit the fairness
-                    of every match through our transparent on-chain records.
-                </p>
-                <div style={{
-                    background: 'rgba(0, 0, 0, 0.5)',
-                    borderRadius: '8px',
-                    padding: '2rem',
-                    border: '1px dashed rgba(230, 57, 70, 0.3)',
-                    textAlign: 'center'
-                }}>
-                    <p style={{ color: '#666', fontStyle: 'italic', margin: 0 }}>
-                        Transaction explorer coming soon...
-                    </p>
-                    <p style={{ color: '#444', fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                        Real-time game verification and on-chain proof of play
-                    </p>
-                </div>
-            </div>
+              </div>
 
-        </motion.div>
-    );
+              <div className="demo-actions">
+                <h4>Connect Wallet</h4>
+                <div className="wallet-options">
+                  <button className="wallet-btn phantom">
+                    <div className="wallet-icon">👻</div>
+                    Phantom Wallet
+                  </button>
+                  <button className="wallet-btn solflare">
+                    <div className="wallet-icon">☀️</div>
+                    Solflare Wallet
+                  </button>
+                </div>
+              </div>
+
+              <div className="demo-requirements">
+                <h4>Requirements</h4>
+                <div className="requirements-grid">
+                  <div className="requirement-item">
+                    <strong>Wallet:</strong> Phantom, Solflare, or compatible Solana wallet
+                  </div>
+                  <div className="requirement-item">
+                    <strong>SOL Balance:</strong> Minimum 0.1 SOL for gas fees
+                  </div>
+                  <div className="requirement-item">
+                    <strong>Network:</strong> Solana Mainnet Beta or Devnet
+                  </div>
+                  <div className="requirement-item">
+                    <strong>Browser:</strong> Chrome, Firefox, Safari, or Edge
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="divider" />
+
+        <div className="demo-showcase">
+          <h3>Experience <span className="accent">XFChess</span></h3>
+          <p>Choose your preferred gaming mode and start playing chess the way you want.</p>
+          
+          <div className="showcase-comparison">
+            <div className="comparison-card standalone">
+              <h4>Standalone Mode</h4>
+              <ul>
+                <li>✓ No internet required</li>
+                <li>✓ Instant gameplay</li>
+                <li>✓ Local multiplayer</li>
+                <li>✓ AI opponents</li>
+                <li>✓ One-time purchase</li>
+              </ul>
+            </div>
+            
+            <div className="vs-divider">VS</div>
+            
+            <div className="comparison-card solana">
+              <h4>Solana Mode</h4>
+              <ul>
+                <li>✓ Blockchain rewards</li>
+                <li>✓ Peer-to-peer wagering</li>
+                <li>✓ NFT collectibles</li>
+                <li>✓ Global tournaments</li>
+                <li>✓ Play-to-earn</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+    </motion.div>
+  );
 };
 
-export default Demo;
+export default DemoPage;

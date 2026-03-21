@@ -17,5 +17,6 @@ pub mod visual;
 pub use camera::*;
 pub use game_init::*;
 pub use game_logic::*;
+pub use input::*;
 pub use promotion::*;
 pub use visual::*;

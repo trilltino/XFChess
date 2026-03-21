@@ -26,7 +26,7 @@ use crate::game::resources::player::Players;
 use crate::game::systems::shared::{
     execute_move, find_piece_on_square, CapturedTarget, MoveContext,
 };
-use crate::rendering::pieces::Piece;
+use crate::rendering::pieces::{Piece, PieceColor};
 use crate::rendering::utils::Square;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::events::{Click, Drag, DragEnd, DragStart, Pointer};
@@ -65,11 +65,53 @@ pub struct InputSystemParams<'w, 's> {
     pub game_sounds: Option<Res<'w, GameSounds>>,
     pub move_events: MessageWriter<'w, crate::game::events::MoveMadeEvent>,
     pub players: Res<'w, Players>,
+    pub connection_state: Option<Res<'w, crate::multiplayer::p2p_connection::P2PConnectionState>>,
 }
 
 /// Returns true if the current turn belongs to a human player.
 fn is_human_turn(params: &InputSystemParams) -> bool {
     params.players.current(params.current_turn.color).is_human
+}
+
+/// Returns true if the human player is allowed to move pieces of the given color.
+/// In PvP (vs AI) mode, the human chose a specific color and can only move that color's pieces.
+/// In network games, only the local player's color can be moved.
+fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bool {
+    // First check if it's a human turn at all
+    if !is_human_turn(params) {
+        return false;
+    }
+
+    // Check if we're in an active network game
+    if let Some(conn) = params.connection_state.as_ref() {
+        if conn.status == crate::multiplayer::p2p_connection::P2PConnectionStatus::InGame {
+            // In network games, only allow moving our assigned color
+            if let Some(my_color) = conn.player_color {
+                let my_piece_color = match my_color {
+                    shakmaty::Color::White => PieceColor::White,
+                    shakmaty::Color::Black => PieceColor::Black,
+                };
+                return piece_color == my_piece_color;
+            }
+        }
+    }
+
+    // Check if we're in PvP (vs AI) mode by seeing if both players are human
+    let both_human = params.players.player_1.is_human && params.players.player_2.is_human;
+
+    if both_human {
+        // In local multiplayer (both human), allow moving current turn's color
+        piece_color == params.current_turn.color
+    } else {
+        // In PvP vs AI mode, human can only move their own color pieces
+        // Find which color the human player has
+        let human_color = if params.players.player_1.is_human {
+            params.players.player_1.color
+        } else {
+            params.players.player_2.color
+        };
+        piece_color == human_color
+    }
 }
 
 // Helper alias for Option<Res> if needed, or just use Option<Res>
@@ -114,6 +156,15 @@ fn try_select_piece(
     piece: Piece,
     is_square_click: bool,
 ) {
+    // Validate that the piece belongs to the current player
+    if piece.color != params.current_turn.color {
+        warn!(
+            "[INPUT] Cannot select piece: piece color {:?} != current turn {:?}",
+            piece.color, params.current_turn.color
+        );
+        return;
+    }
+
     // If already selected, deselect
     if params.selection.selected_entity == Some(entity) {
         clear_selection_state(
@@ -280,6 +331,12 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
 
     info!("[INPUT] Clicked piece: {:?} {:?} at ({}, {}) | Current turn: {:?}", clicked_piece.color, clicked_piece.piece_type, clicked_piece.x, clicked_piece.y, params.current_turn.color);
 
+    // Validate that the human player can move this color piece
+    if !can_move_color(&params, clicked_piece.color) {
+        warn!("[INPUT] Cannot interact with {:?} piece: you can only move your own color pieces", clicked_piece.color);
+        return;
+    }
+
     // Case 1: Clicked our own piece -> Select
     if clicked_piece.color == params.current_turn.color {
         try_select_piece(&mut params, entity, clicked_piece, false);
@@ -291,15 +348,16 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
     if params.selection.is_selected() && clicked_piece.color != params.current_turn.color {
         if let Some(selected) = params.selection.selected_entity {
             // Validate that we have a selected piece and it belongs to us
-            if let Ok((_, selected_piece, _, _)) = params.pieces.p1().get(selected) {
-                if selected_piece.color == params.current_turn.color {
+            let selected_color = params.pieces.p1().get(selected).ok().map(|(_, p, _, _)| p.color);
+            if let Some(color) = selected_color {
+                if can_move_color(&params, color) {
                     try_move_sequence(&mut params, (clicked_piece.x, clicked_piece.y), Some(CapturedTarget {
                         entity,
                         piece_type: clicked_piece.piece_type,
                         color: clicked_piece.color,
                     }), "piece_click_capture");
                 } else {
-                    warn!("[INPUT] Cannot capture: selected piece is not ours");
+                    warn!("[INPUT] Cannot capture: selected piece is not yours");
                 }
             }
         }
@@ -338,8 +396,9 @@ pub fn on_piece_drag_start(drag_start: On<Pointer<DragStart>>, mut params: Input
         return;
     };
 
-    // Only allow dragging our own pieces
-    if piece.color != params.current_turn.color {
+    // Only allow dragging our own pieces (pieces of the color we control)
+    if !can_move_color(&params, piece.color) {
+        warn!("[INPUT] Cannot drag {:?} piece: you can only move your own color pieces", piece.color);
         return;
     }
 
@@ -465,7 +524,8 @@ pub fn on_square_click(
     };
 
     if let Some((piece_entity, piece)) = occupant {
-        if piece.color == params.current_turn.color {
+        // Only select if it's a piece we control
+        if can_move_color(&params, piece.color) && piece.color == params.current_turn.color {
             try_select_piece(&mut params, piece_entity, piece, true);
             return;
         }
@@ -488,4 +548,21 @@ pub fn on_piece_hover(_: On<Pointer<DragStart>>) {
 /// Observer system: Handle unhover on a piece
 pub fn on_piece_unhover(_: On<Pointer<DragStart>>) {
     // Could remove hover visual feedback here
+}
+
+/// System: Toggle fullscreen mode when F11 is pressed
+pub fn toggle_fullscreen(
+    mut window_query: Query<&mut Window>,
+) {
+    for mut window in window_query.iter_mut() {
+        window.mode = match window.mode {
+            bevy::window::WindowMode::Windowed => {
+                bevy::window::WindowMode::Fullscreen(
+                    bevy::window::MonitorSelection::Current,
+                    bevy::window::VideoModeSelection::Current,
+                )
+            }
+            _ => bevy::window::WindowMode::Windowed,
+        };
+    }
 }
