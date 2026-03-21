@@ -131,7 +131,14 @@ fn spawn_ai_task_system(
         fen, depth, movetime_ms
     );
 
-    if let Some(braid_manager) = braid_manager {
+    // Check if BraidNodeManager has Stockfish sidecar properly initialized
+    let has_stockfish_sidecar = braid_manager
+        .as_ref()
+        .and_then(|bm| bm.sidecar_fen_tx.as_ref())
+        .is_some();
+
+    if has_stockfish_sidecar {
+        let braid_manager = braid_manager.unwrap();
         // Trigger Stockfish sidecar via channel
         if let Some(tx) = &braid_manager.sidecar_fen_tx {
             let _ = tx.send(fen.clone());
@@ -143,8 +150,8 @@ fn spawn_ai_task_system(
         let task = AsyncComputeTaskPool::get().spawn(task_pool);
         commands.insert_resource(PendingAIMove(task));
     } else {
-        // No BraidNodeManager - spawn Stockfish directly
-        info!("[AI] BraidNodeManager unavailable, spawning Stockfish process directly");
+        // No BraidNodeManager or sidecar not initialized - spawn Stockfish directly
+        info!("[AI] BraidNodeManager unavailable or sidecar not initialized, spawning Stockfish process directly");
         
         let depth = depth.unwrap_or(12);
         let movetime = movetime_ms.unwrap_or(1500);
