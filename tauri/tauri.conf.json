@@ -1,12 +1,12 @@
 {
-  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/v2.10.3/crates/tauri-config-schema/schema.json",
   "productName": "XFChess",
   "version": "0.1.0",
   "identifier": "com.xfchess.app",
   "build": {
     "frontendDist": "./wallet-ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "cd wallet-ui && npm install && npm run build",
+    "beforeBuildCommand": "",
     "beforeDevCommand": "cd wallet-ui && npm run dev"
   },
   "app": {

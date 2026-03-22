@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, AlertTriangle, Shield, Gamepad2, Users, Bot, Clock, Eye, CheckCircle } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Users, Bot, Clock, Eye, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const AntiCheatPage = () => {

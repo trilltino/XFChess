@@ -1,8 +1,10 @@
 pub use self::inner::*;
 
 mod inner {
+    use crate::constants::MOVE_LOG_SEED;
     use crate::errors::XfchessGameError;
     use crate::state::game::Game;
+    use crate::state::move_log::MoveLog;
     use anchor_lang::prelude::*;
     use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
     use ephemeral_rollups_sdk::cpi::{delegate_account, DelegateAccounts, DelegateConfig};
@@ -23,17 +25,21 @@ mod inner {
             XfchessGameError::UnauthorizedAccess
         );
 
-        // Calculate seeds for the game PDA
+        // Seeds WITHOUT bump — delegate_account adds the bump internally
         let game_id_bytes = _game_id.to_le_bytes();
-        let seeds: &[&[u8]] = &[b"game", &game_id_bytes, &[game.bump]];
+        let seeds: &[&[u8]] = &[b"game", &game_id_bytes];
 
         // Create delegate config with valid_until as commit frequency
+        // EU devnet validator for devnet-eu.magicblock.app
+        let eu_validator = "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e"
+            .parse::<Pubkey>()
+            .unwrap();
         let config = DelegateConfig {
             commit_frequency_ms: (valid_until as u32).saturating_mul(1000), // Convert seconds to ms
-            validator: None, // Use any available validator
+            validator: Some(eu_validator),
         };
 
-        // Prepare delegate accounts struct
+        // Delegate the game PDA
         let delegate_accounts = DelegateAccounts {
             payer: &ctx.accounts.payer.to_account_info(),
             pda: &ctx.accounts.game.to_account_info(),
@@ -45,7 +51,23 @@ mod inner {
             system_program: &ctx.accounts.system_program.to_account_info(),
         };
 
-        delegate_account(delegate_accounts, seeds, config)?;
+        delegate_account(delegate_accounts, seeds, config.clone())?;
+
+        // Delegate the move_log PDA
+        let ml_seeds: &[&[u8]] = &[MOVE_LOG_SEED, &game_id_bytes];
+
+        let ml_delegate_accounts = DelegateAccounts {
+            payer: &ctx.accounts.payer.to_account_info(),
+            pda: &ctx.accounts.move_log.to_account_info(),
+            owner_program: &ctx.accounts.owner_program.to_account_info(),
+            buffer: &ctx.accounts.ml_buffer.to_account_info(),
+            delegation_record: &ctx.accounts.ml_delegation_record.to_account_info(),
+            delegation_metadata: &ctx.accounts.ml_delegation_metadata.to_account_info(),
+            delegation_program: &ctx.accounts.delegation_program.to_account_info(),
+            system_program: &ctx.accounts.system_program.to_account_info(),
+        };
+
+        delegate_account(ml_delegate_accounts, ml_seeds, config)?;
 
         Ok(())
     }
@@ -80,23 +102,42 @@ mod inner {
         )]
         pub game: Account<'info, Game>,
 
+        #[account(
+            mut,
+            seeds = [MOVE_LOG_SEED, _game_id.to_le_bytes().as_ref()],
+            bump,
+        )]
+        pub move_log: Account<'info, MoveLog>,
+
         #[account(mut)]
         pub payer: Signer<'info>,
 
         /// CHECK: The xfchess-game program itself (owner).
         pub owner_program: AccountInfo<'info>,
 
-        /// CHECK: Temporary buffer used during delegation (MagicBlock protocol).
+        /// CHECK: Temporary buffer for game PDA delegation.
         #[account(mut)]
         pub buffer: AccountInfo<'info>,
 
-        /// CHECK: Delegation record PDA managed by the delegation program.
+        /// CHECK: Delegation record for game PDA.
         #[account(mut)]
         pub delegation_record: AccountInfo<'info>,
 
-        /// CHECK: Delegation metadata PDA managed by the delegation program.
+        /// CHECK: Delegation metadata for game PDA.
         #[account(mut)]
         pub delegation_metadata: AccountInfo<'info>,
+
+        /// CHECK: Temporary buffer for move_log PDA delegation.
+        #[account(mut)]
+        pub ml_buffer: AccountInfo<'info>,
+
+        /// CHECK: Delegation record for move_log PDA.
+        #[account(mut)]
+        pub ml_delegation_record: AccountInfo<'info>,
+
+        /// CHECK: Delegation metadata for move_log PDA.
+        #[account(mut)]
+        pub ml_delegation_metadata: AccountInfo<'info>,
 
         /// CHECK: MagicBlock delegation program.
         #[account(address = ephemeral_rollups_sdk::id())]

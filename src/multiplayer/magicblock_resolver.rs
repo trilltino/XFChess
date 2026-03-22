@@ -18,14 +18,21 @@ use solana_sdk::{
 use std::sync::Arc;
 use thiserror::Error;
 
+#[cfg(feature = "solana")]
+use ephemeral_rollups_sdk::pda::{
+    delegate_buffer_pda_from_delegated_account_and_owner_program,
+    delegation_metadata_pda_from_delegated_account,
+    delegation_record_pda_from_delegated_account,
+};
+
 /// The XFChess program ID on Solana
-pub const XFCHESS_PROGRAM_ID: &str = "3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP";
+pub const XFCHESS_PROGRAM_ID: &str = "AhkTK5LVJHvR51gmDXbsJsqq4wg381AH6vTiaFGGJPWm";
 
 /// Magic Block ER validator endpoint (default)
 pub const MAGIC_BLOCK_ER_ENDPOINT: &str = "https://devnet-eu.magicblock.app";
 
-/// MagicBlock explorer base URL for ER transactions
-pub const MAGIC_BLOCK_EXPLORER: &str = "https://explorer.magicblock.gg";
+/// Solana Explorer with custom RPC for viewing ER transactions
+pub const MAGIC_BLOCK_EXPLORER: &str = "https://explorer.solana.com";
 
 /// Timeout for ER transactions in milliseconds
 pub const ER_TIMEOUT_MS: u64 = 5000;
@@ -33,8 +40,8 @@ pub const ER_TIMEOUT_MS: u64 = 5000;
 /// Maximum retry attempts for ER operations
 pub const MAX_RETRY_ATTEMPTS: u32 = 3;
 
-/// MagicBlock Delegation Program ID (from ephemeral-rollups-sdk)
-pub const DELEGATION_PROGRAM_ID: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSS";
+/// MagicBlock Delegation Program ID
+pub const DELEGATION_PROGRAM_ID: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 
 /// MagicBlock Magic Context account
 pub const MAGIC_CONTEXT_PUBKEY: &str = "MagicContext1111111111111111111111111111111";
@@ -161,7 +168,11 @@ impl MagicBlockResolver {
 
     /// Returns the MagicBlock ER explorer URL for a given tx signature.
     pub fn er_explorer_url(&self, signature: &str) -> String {
-        format!("{}/tx/{}?cluster=devnet", MAGIC_BLOCK_EXPLORER, signature)
+        let endpoint = self.config.er_endpoint.trim_end_matches('/');
+        format!(
+            "{}/tx/{}?cluster=custom&customUrl={}",
+            MAGIC_BLOCK_EXPLORER, signature, endpoint,
+        )
     }
 
     /// Delegates a game PDA to the Ephemeral Rollup.
@@ -258,10 +269,30 @@ impl MagicBlockResolver {
             recent_blockhash,
         );
 
-        // Send and confirm the delegation transaction
+        // Skip preflight simulation — the MagicBlock delegation program may not
+        // be available for simulation on all devnet RPC nodes.
+        let rpc_config = solana_client::rpc_config::RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        };
+
         let signature = rpc_client
-            .send_and_confirm_transaction(&transaction)
-            .map_err(|e| format!("Delegation transaction failed: {}", e))?;
+            .send_transaction_with_config(&transaction, rpc_config)
+            .map_err(|e| {
+                error!("Delegation transaction send failed: {:?}", e);
+                format!("Delegation transaction send failed: {}", e)
+            })?;
+
+        println!("  Delegation tx sent: {}", signature);
+
+        // Wait for confirmation
+        let commitment = solana_sdk::commitment_config::CommitmentConfig::confirmed();
+        rpc_client
+            .confirm_transaction_with_spinner(&signature, &recent_blockhash, commitment)
+            .map_err(|e| {
+                error!("Delegation transaction confirmation failed: {:?}", e);
+                format!("Delegation confirmation failed: {}", e)
+            })?;
 
         info!("Delegation transaction confirmed: {}", signature);
 
@@ -277,14 +308,18 @@ impl MagicBlockResolver {
     /// `DelegateGameCtx` account layout.
     ///
     /// Accounts (order matches Anchor derive):
-    ///   0. game        (mut)       — game PDA
-    ///   1. payer       (mut, sign) — pays for delegation
-    ///   2. owner_program           — xfchess-game program itself
-    ///   3. buffer      (mut)       — delegation buffer PDA
-    ///   4. delegation_record (mut) — delegation record PDA
-    ///   5. delegation_metadata(mut)— delegation metadata PDA
-    ///   6. delegation_program      — MagicBlock delegation program
-    ///   7. system_program
+    ///   0.  game                  (mut) — game PDA
+    ///   1.  move_log              (mut) — move_log PDA
+    ///   2.  payer          (mut, sign)  — pays for delegation
+    ///   3.  owner_program               — xfchess-game program itself
+    ///   4.  buffer                (mut) — game delegation buffer PDA
+    ///   5.  delegation_record     (mut) — game delegation record PDA
+    ///   6.  delegation_metadata   (mut) — game delegation metadata PDA
+    ///   7.  ml_buffer             (mut) — move_log delegation buffer PDA
+    ///   8.  ml_delegation_record  (mut) — move_log delegation record PDA
+    ///   9.  ml_delegation_metadata(mut) — move_log delegation metadata PDA
+    ///  10.  delegation_program          — MagicBlock delegation program
+    ///  11.  system_program
     fn create_delegation_instruction(
         &self,
         game_pda: Pubkey,
@@ -294,41 +329,72 @@ impl MagicBlockResolver {
             .parse()
             .map_err(|_| MagicBlockError::DelegationFailed("Bad delegation program id".into()))?;
 
-        // Buffer PDA: seeds = ["buffer", game_pda] owner = xfchess program
-        let (buffer_pda, _) = Pubkey::find_program_address(
-            &[b"buffer", game_pda.as_ref()],
+        let game_id = self.delegated_game_id.unwrap_or(0);
+
+        // Derive move_log PDA
+        let move_log_pda = Pubkey::find_program_address(
+            &[b"move_log", &game_id.to_le_bytes()],
             &self.config.program_id,
-        );
+        ).0;
 
-        // Delegation record PDA: seeds = ["delegation", game_pda] owner = delegation program
-        let (delegation_record, _) = Pubkey::find_program_address(
-            &[b"delegation", game_pda.as_ref()],
-            &delegation_program_id,
-        );
+        // --- Game PDA delegation accounts ---
+        let buffer_pda = {
+            let pda = delegate_buffer_pda_from_delegated_account_and_owner_program(
+                &game_pda.to_bytes().into(),
+                &self.config.program_id.to_bytes().into(),
+            );
+            Pubkey::new_from_array(pda.to_bytes())
+        };
+        let delegation_record = {
+            let pda = delegation_record_pda_from_delegated_account(&game_pda.to_bytes().into());
+            Pubkey::new_from_array(pda.to_bytes())
+        };
+        let delegation_metadata = {
+            let pda = delegation_metadata_pda_from_delegated_account(&game_pda.to_bytes().into());
+            Pubkey::new_from_array(pda.to_bytes())
+        };
 
-        // Delegation metadata PDA: seeds = ["delegation-metadata", game_pda] owner = delegation program
-        let (delegation_metadata, _) = Pubkey::find_program_address(
-            &[b"delegation-metadata", game_pda.as_ref()],
-            &delegation_program_id,
-        );
+        // --- MoveLog PDA delegation accounts ---
+        let ml_buffer_pda = {
+            let pda = delegate_buffer_pda_from_delegated_account_and_owner_program(
+                &move_log_pda.to_bytes().into(),
+                &self.config.program_id.to_bytes().into(),
+            );
+            Pubkey::new_from_array(pda.to_bytes())
+        };
+        let ml_delegation_record = {
+            let pda = delegation_record_pda_from_delegated_account(&move_log_pda.to_bytes().into());
+            Pubkey::new_from_array(pda.to_bytes())
+        };
+        let ml_delegation_metadata = {
+            let pda = delegation_metadata_pda_from_delegated_account(&move_log_pda.to_bytes().into());
+            Pubkey::new_from_array(pda.to_bytes())
+        };
+
+        // EU devnet validator for devnet-eu.magicblock.app
+        let eu_validator: Pubkey = "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e"
+            .parse()
+            .map_err(|_| MagicBlockError::DelegationFailed("Bad validator pubkey".into()))?;
 
         let accounts = vec![
             solana_sdk::instruction::AccountMeta::new(game_pda, false),
+            solana_sdk::instruction::AccountMeta::new(move_log_pda, false),
             solana_sdk::instruction::AccountMeta::new(payer, true),
             solana_sdk::instruction::AccountMeta::new_readonly(self.config.program_id, false),
             solana_sdk::instruction::AccountMeta::new(buffer_pda, false),
             solana_sdk::instruction::AccountMeta::new(delegation_record, false),
             solana_sdk::instruction::AccountMeta::new(delegation_metadata, false),
+            solana_sdk::instruction::AccountMeta::new(ml_buffer_pda, false),
+            solana_sdk::instruction::AccountMeta::new(ml_delegation_record, false),
+            solana_sdk::instruction::AccountMeta::new(ml_delegation_metadata, false),
             solana_sdk::instruction::AccountMeta::new_readonly(delegation_program_id, false),
             solana_sdk::instruction::AccountMeta::new_readonly(
                 solana_sdk::system_program::id(),
                 false,
             ),
+            solana_sdk::instruction::AccountMeta::new_readonly(eu_validator, false),
         ];
 
-        // game_id is derived from the game PDA context; pass a default
-        // valid_until of 600 seconds (10 min game session).
-        let game_id = self.delegated_game_id.unwrap_or(0);
         let valid_until: i64 = 600;
 
         let mut data = anchor_disc("delegate_game").to_vec();

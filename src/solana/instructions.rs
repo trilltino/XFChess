@@ -16,7 +16,7 @@ use solana_sdk::{
 pub use xfchess_game::state::game::GameType;
 
 /// Deployed program ID (must match `declare_id!` in xfchess-game).
-pub const PROGRAM_ID: &str = "3D2EnKUfbev1HqU5rMLrZXXwJ4zxbtQ7hUiEYNMcojXP";
+pub const PROGRAM_ID: &str = "AhkTK5LVJHvR51gmDXbsJsqq4wg381AH6vTiaFGGJPWm";
 
 /// PDA seeds — kept in sync with `programs/xfchess-game/src/constants.rs`.
 pub const GAME_SEED: &[u8] = b"game";

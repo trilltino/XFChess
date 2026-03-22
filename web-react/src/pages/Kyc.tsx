@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, Shield, UserCheck, Camera, FileText, AlertTriangle, Clock, Eye, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Shield, UserCheck, Camera, FileText, AlertTriangle, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const KycPage = () => {
