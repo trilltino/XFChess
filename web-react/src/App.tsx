@@ -10,6 +10,7 @@ import DemoPage from './pages/Demo';
 import LegalPage from './pages/Legal';
 import AntiCheatPage from './pages/AntiCheat';
 import KycPage from './pages/Kyc';
+import TestPage from './pages/Test';
 
 const Navbar = () => {
   const [isLegalDropdownOpen, setIsLegalDropdownOpen] = useState(false);
@@ -91,6 +92,9 @@ const Navbar = () => {
               </Link>
               <Link to="/demo" className="nav-demo-dropdown-item" onClick={() => setIsDemoDropdownOpen(false)}>
                 Solana
+              </Link>
+              <Link to="/test" className="nav-demo-dropdown-item" onClick={() => setIsDemoDropdownOpen(false)}>
+                ER Test Results
               </Link>
             </div>
           )}
@@ -196,6 +200,7 @@ const App = () => {
             <Route path="/anti-cheat" element={<AntiCheatPage />} />
             <Route path="/kyc" element={<KycPage />} />
             <Route path="/demo" element={<DemoPage />} />
+            <Route path="/test" element={<TestPage />} />
             <Route path="/business" element={<BusinessPage />} />
             <Route path="/membership" element={<MembershipPage />} />
           </Routes>
