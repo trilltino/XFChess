@@ -156,3 +156,14 @@ pub enum GameStatus {
 - Replay attack prevention 100% effective
 
 This plan ensures comprehensive protection of user funds while maintaining the game's playability and providing clear resolution paths for disputes.
+
+
+Activate creator marketplace slice with fee capture
+Enable a simple creator flow to mint a board, list it, sell it, and pay out the creator while collecting your fee. Record each step on‑chain, show receipts in‑app, and verify the fee lands in your account on both first sale and resale.
+
+Resources & Tools
+
+
+
+Activate creator marketplace slice with fee capture
+Enable a simple creator flow to mint a board, list it, sell it, and pay out the creator while collecting your fee. Record each step on‑chain, show receipts in‑app, and verify the fee lands in your account on both first sale and resale.

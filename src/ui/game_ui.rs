@@ -2,6 +2,7 @@
 use crate::core::GameMode;
 use crate::game::components::GamePhase;
 use crate::game::resources::piece_value;
+use crate::game::resources::system_params::GameStateParams;
 use crate::rendering::pieces::PieceColor;
 use crate::ui::styles::*;
 use crate::ui::system_params::GameUIParams;
@@ -60,6 +61,13 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 );
             });
         });
+
+    // === CHECK/CHECKMATE BANNER ===
+    match params.game_state.game_phase.0 {
+        GamePhase::Check => render_check_banner(&ctx),
+        GamePhase::Checkmate => render_checkmate_banner(&ctx, &params.game_state),
+        _ => {} // No banner for Playing or Stalemate
+    }
 
     // Top bar removed - no turn indicator displayed
 
@@ -313,6 +321,83 @@ fn render_capture_section(
                 }),
         );
     }
+}
+
+/// Render a prominent "CHECK!" banner at the top of the screen
+fn render_check_banner(ctx: &egui::Context) {
+    egui::Window::new("check_banner")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 20.0]) // Above timer
+        .frame(
+            egui::Frame::default()
+                .fill(egui::Color32::from_rgba_unmultiplied(255, 140, 0, 200)) // Orange with transparency
+                .corner_radius(12.0)
+                .inner_margin(20.0)
+                .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(255, 100, 0))), // Dark orange border
+        )
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new("⚠️ CHECK!")
+                        .size(32.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+                ui.add_space(5.0);
+                ui.label(
+                    egui::RichText::new("Your king is under attack!")
+                        .size(14.0)
+                        .color(egui::Color32::from_rgb(255, 220, 200)),
+                );
+            });
+        });
+}
+
+/// Render a prominent "CHECKMATE!" banner with winner information
+fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
+    let (winner_text, winner_color) = match game_state.game_over.winner() {
+        Some(PieceColor::White) => ("White Wins!", egui::Color32::from_rgb(240, 240, 240)),
+        Some(PieceColor::Black) => ("Black Wins!", egui::Color32::from_rgb(80, 80, 80)),
+        None => ("Draw!", egui::Color32::from_rgb(255, 220, 100)),
+    };
+
+    egui::Window::new("checkmate_banner")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 20.0]) // Above timer
+        .frame(
+            egui::Frame::default()
+                .fill(egui::Color32::from_rgba_unmultiplied(220, 20, 60, 230)) // Red with transparency
+                .corner_radius(15.0)
+                .inner_margin(25.0)
+                .stroke(egui::Stroke::new(4.0, egui::Color32::from_rgb(150, 0, 0))), // Dark red border
+        )
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new("♟️ CHECKMATE!")
+                        .size(40.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(winner_text)
+                        .size(24.0)
+                        .color(winner_color)
+                        .strong(),
+                );
+                ui.add_space(5.0);
+                ui.label(
+                    egui::RichText::new("Game Over")
+                        .size(16.0)
+                        .color(egui::Color32::from_rgb(255, 200, 200)),
+                );
+            });
+        });
 }
 
 /// Format time in seconds to MM:SS format

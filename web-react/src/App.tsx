@@ -12,7 +12,6 @@ import AntiCheatPage from './pages/AntiCheat';
 import KycPage from './pages/Kyc';
 import TestPage from './pages/Test';
 import EarlyAccessPage from './pages/EarlyAccess';
-import ClubOfferPage from './pages/ClubOffer';
 import CreatorPage from './pages/Creator';
 
 const Navbar = () => {
@@ -122,7 +121,6 @@ const Navbar = () => {
         </div>
         <Link to="/compliance" className="nav-link">Compliance</Link>
         <Link to="/creator" className="nav-link">Creators</Link>
-        <Link to="/club-offer" className="nav-link">Club Partners</Link>
         <Link to="/early-access" className="nav-link nav-cta">Early Access</Link>
       </div>
     </nav>
@@ -208,7 +206,6 @@ const App = () => {
             <Route path="/demo" element={<DemoPage />} />
             <Route path="/test" element={<TestPage />} />
             <Route path="/early-access" element={<EarlyAccessPage />} />
-            <Route path="/club-offer" element={<ClubOfferPage />} />
             <Route path="/creator" element={<CreatorPage />} />
             <Route path="/business" element={<BusinessPage />} />
             <Route path="/membership" element={<MembershipPage />} />

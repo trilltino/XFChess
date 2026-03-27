@@ -3,7 +3,7 @@ echo ============================================================
 echo Starting XFChess (Local Build - AI ^& PvP)
 echo ============================================================
 echo.
-cd ..
+cd /d "%~dp0.."
 set RUST_LOG=warn
 cargo run --bin xfchess
 pause

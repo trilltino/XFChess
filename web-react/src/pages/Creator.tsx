@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, Palette, Upload, DollarSign, Rocket, CheckCircle, AlertCircle, Star } from 'lucide-react';
+import { ArrowLeft, Palette, Upload, Rocket, CheckCircle, AlertCircle, Star } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const CreatorPage = () => {
@@ -66,35 +66,35 @@ const CreatorPage = () => {
               <h4><AlertCircle size={20} color="#3b82f6" /> Review Criteria</h4>
               <div className="criteria-grid">
                 <div className="criteria-item">
-                  <div className="criteria-icon">🎨</div>
+                  <div className="criteria-icon">Visual</div>
                   <div className="criteria-text">
                     <strong>Visual quality and detail</strong>
                     <p>High-quality textures, proper lighting, and attention to detail</p>
                   </div>
                 </div>
                 <div className="criteria-item">
-                  <div className="criteria-icon">⚡</div>
+                  <div className="criteria-icon">Speed</div>
                   <div className="criteria-text">
                     <strong>Performance optimization</strong>
                     <p>Optimized poly counts and efficient texture usage</p>
                   </div>
                 </div>
                 <div className="criteria-item">
-                  <div className="criteria-icon">💡</div>
+                  <div className="criteria-icon">Idea</div>
                   <div className="criteria-text">
                     <strong>Originality and creativity</strong>
                     <p>Unique designs that stand out in the marketplace</p>
                   </div>
                 </div>
                 <div className="criteria-item">
-                  <div className="criteria-icon">🔧</div>
+                  <div className="criteria-icon">Tech</div>
                   <div className="criteria-text">
                     <strong>Technical compliance</strong>
                     <p>Adherence to our technical specifications</p>
                   </div>
                 </div>
                 <div className="criteria-item">
-                  <div className="criteria-icon">📄</div>
+                  <div className="criteria-icon">Doc</div>
                   <div className="criteria-text">
                     <strong>Licensing verification</strong>
                     <p>Proper licensing and ownership verification</p>
@@ -108,67 +108,7 @@ const CreatorPage = () => {
           </div>
         </div>
 
-        {/* Step 3: Set Pricing & Royalties */}
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <div className="card-header">
-            <div className="card-icon" style={{ background: 'rgba(245, 158, 11, 0.1)', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
-              <DollarSign size={48} color="#f59e0b" />
-            </div>
-            <div className="card-title-area">
-              <h3 className="card-title">3. Set Pricing & Royalties</h3>
-              <p className="card-subtitle">Choose your pricing model and royalty structure. We handle payments and distribution.</p>
-            </div>
-          </div>
-
-          <div className="card-content">
-            <div className="pricing-options">
-              <h4><DollarSign size={20} color="#f59e0b" /> Pricing Options</h4>
-              <div className="pricing-grid">
-                <div className="pricing-card">
-                  <div className="pricing-header">
-                    <h5>Fixed Price Sales</h5>
-                    <div className="royalty-split">
-                      <span className="creator-share">70% Creator</span>
-                      <span className="platform-share">30% Platform</span>
-                    </div>
-                  </div>
-                  <p>One-time purchases with immediate access to assets</p>
-                </div>
-                <div className="pricing-card">
-                  <div className="pricing-header">
-                    <h5>Subscription Access</h5>
-                    <div className="royalty-split">
-                      <span className="creator-share">60% Creator</span>
-                      <span className="platform-share">40% Platform</span>
-                    </div>
-                  </div>
-                  <p>Monthly recurring revenue from premium asset collections</p>
-                </div>
-                <div className="pricing-card">
-                  <div className="pricing-header">
-                    <h5>Tournament Exclusives</h5>
-                    <div className="royalty-split">
-                      <span className="creator-share">50% Creator</span>
-                      <span className="platform-share">50% Platform</span>
-                    </div>
-                  </div>
-                  <p>Limited edition assets for special tournaments and events</p>
-                </div>
-                <div className="pricing-card">
-                  <div className="pricing-header">
-                    <h5>Charity Collaborations</h5>
-                    <div className="royalty-split">
-                      <span className="creator-share">80% Creator</span>
-                      <span className="platform-share">20% Platform</span>
-                    </div>
-                  </div>
-                  <p>Special charity partnerships with enhanced creator revenue</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
+        
         {/* Step 4: Launch & Promote */}
         <div className="card" style={{ marginBottom: '2rem' }}>
           <div className="card-header">
@@ -186,35 +126,35 @@ const CreatorPage = () => {
               <h4><Rocket size={20} color="#ef4444" /> Marketing Support</h4>
               <div className="marketing-grid">
                 <div className="marketing-item">
-                  <div className="marketing-icon">⭐</div>
+                  <div className="marketing-icon">Star</div>
                   <div className="marketing-text">
                     <strong>Featured placement</strong>
                     <p>New releases section and homepage highlights</p>
                   </div>
                 </div>
                 <div className="marketing-item">
-                  <div className="marketing-icon">📱</div>
+                  <div className="marketing-icon">Social</div>
                   <div className="marketing-text">
                     <strong>Social media promotion</strong>
                     <p>Twitter, Instagram, and Discord features</p>
                   </div>
                 </div>
                 <div className="marketing-item">
-                  <div className="marketing-icon">🏆</div>
+                  <div className="marketing-icon">Trophy</div>
                   <div className="marketing-text">
                     <strong>Tournament spotlight</strong>
                     <p>Assets featured in competitive tournaments</p>
                   </div>
                 </div>
                 <div className="marketing-item">
-                  <div className="marketing-icon">👤</div>
+                  <div className="marketing-icon">Profile</div>
                   <div className="marketing-text">
                     <strong>Creator profile</strong>
                     <p>Portfolio and creator showcase pages</p>
                   </div>
                 </div>
                 <div className="marketing-item">
-                  <div className="marketing-icon">📊</div>
+                  <div className="marketing-icon">Data</div>
                   <div className="marketing-text">
                     <strong>Analytics dashboard</strong>
                     <p>Sales data and performance insights</p>

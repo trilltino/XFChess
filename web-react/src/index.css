@@ -4793,8 +4793,10 @@ body {
 }
 
 .criteria-icon {
-    font-size: 1.5rem;
+    font-size: 0.9rem;
     flex-shrink: 0;
+    color: var(--text-dim);
+    font-weight: 600;
 }
 
 .criteria-text strong {
@@ -4925,8 +4927,10 @@ body {
 }
 
 .marketing-icon {
-    font-size: 1.5rem;
+    font-size: 0.9rem;
     flex-shrink: 0;
+    color: var(--text-dim);
+    font-weight: 600;
 }
 
 .marketing-text strong {
