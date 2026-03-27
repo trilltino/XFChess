@@ -1,0 +1,10 @@
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\solana_instruction-4455e22f2f38633c.d: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\account_meta.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\error.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\syscalls.rs
+
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\libsolana_instruction-4455e22f2f38633c.rlib: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\account_meta.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\error.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\syscalls.rs
+
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\libsolana_instruction-4455e22f2f38633c.rmeta: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\account_meta.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\error.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\syscalls.rs
+
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\lib.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\account_meta.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\error.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\solana-instruction-2.3.3\src\syscalls.rs:

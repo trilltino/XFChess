@@ -1,0 +1,194 @@
+[package]
+name = "xfchess"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "xfchess"
+path = "src/main.rs"
+
+[[bin]]
+name = "opera_test"
+path = "opera_test.rs"
+
+
+[workspace]
+members = [
+    "crates/braid-core",
+    "crates/braid-http",
+    "crates/braid-iroh",
+    "crates/braid_stockfish_ai",
+    "crates/braid_uri",
+    "crates/chess-logic-shared",
+    "crates/chess-logic-on-chain",
+    "crates/shakmaty-no-std",
+    "crates/shakmaty-host-vendored",
+    "crates/iroh-gossip",
+    "crates/iroh-h3",
+    "crates/iroh-h3-axum",
+    "crates/iroh-h3-client",
+    "crates/shared",
+    "crates/solana-chess-client",
+    "crates/xfchess-ai-service",
+    "programs/xfchess-game",
+    "references/ephemeral-rollups-sdk/rust/sdk",
+    "tauri",
+    "backend",
+]
+resolver = "2"
+
+[profile.release]
+overflow-checks = true
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+authors = ["trilltino"]
+publish = false
+license = "MIT/Apache-2.0"
+repository = "https://github.com/trilltino/XFChess"
+documentation = "https://github.com/trilltino/XFChess"
+homepage = "https://github.com/trilltino/XFChess"
+keywords = ["solana", "chess", "gaming"]
+
+[workspace.dependencies]
+bevy = { version = "0.18.1", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf"] }
+bevy_sprite = "0.18.1"
+bevy_text = "0.18.1"
+bevy_ui = "0.18.1"
+tokio = { version = "1.49.0", features = ["full"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+bincode = "1.3.3"
+json = { package = "sonic-rs", version = "0.3" }
+futures = "0.3"
+parking_lot = "0.12"
+url = { version = "2.5", features = ["serde"] }
+websocket = { package = "tokio-websockets", version = "0.10", features = ["client", "simd", "native-tls", "fastrand", "openssl"] }
+humantime = "2.1"
+base64 = "0.22"
+zstd = "0.13"
+scc = "2.2.5"
+smallvec = { version = "1.13", features = ["serde"] }
+magic-domain-program = { version = "0.2.0" }
+rand = "0.9"
+thiserror = "2.0.18"
+anyhow = "1.0.102"
+futures-lite = "2.6.1"
+async-trait = "0.1.89"
+uuid = { version = "1.21.0", features = ["v4", "fast-rng"] }
+tracing = "0.1.44"
+reqwest = { version = "0.13.2", features = ["json", "blocking"] }
+bs58 = "0.5.1"
+crossbeam-channel = "0.5.15"
+web-time = "1.1"
+anchor-lang = "0.32.1"
+chrono = { version = "0.4.38", features = ["serde"] }
+serde_bytes = "0.11.15"
+clap = { version = "4.5", features = ["derive"] }
+egui = "0.29"
+solana-sdk = "2.2.1"
+solana-client = "2.2.1"
+solana-program = "2.2.1"
+solana-instruction = "2.2.1"
+solana-pubkey = "2.2.1"
+solana-account = "2.2.1"
+solana-account-info = "2.2.1"
+solana-cpi = "2.2.1"
+solana-program-error = "2.2.1"
+solana-program-memory = "2.2.1"
+solana-sysvar = "2.2.1"
+sdk = { package = "solana-sdk", version = "2.2.1" }
+rpc = { package = "solana-rpc-client", version = "2.2.1" }
+rpc-api = { package = "solana-rpc-client-api", version = "2.2.1" }
+magic-resolver = { path = "references/ephemeral-rollups-sdk/rust/resolver" }
+solana-secp256k1-program = "2.2.3"
+borsh = { version = "1.5.1", features = ["derive"] }
+ephemeral-rollups-sdk = { path = "references/ephemeral-rollups-sdk/rust/sdk" }
+iroh = "0.96.1"
+iroh-base = "0.96.1"
+bevy_egui = "0.39.1"
+shakmaty = { package = "shakmaty-host-vendored", path = "crates/shakmaty-host-vendored" }
+
+# Internal Workspace Crates
+braid-core = { path = "crates/braid-core" }
+braid-http = { path = "crates/braid-http" }
+braid-iroh = { path = "crates/braid-iroh" }
+braid_uri = { path = "crates/braid_uri" }
+iroh-gossip = { path = "crates/iroh-gossip" }
+shared = { path = "crates/shared" }
+solana-chess-client = { path = "crates/solana-chess-client" }
+braid_stockfish_ai = { path = "crates/braid_stockfish_ai" }
+chess-logic-shared = { path = "crates/chess-logic-shared" }
+chess-logic-on-chain = { path = "crates/chess-logic-on-chain" }
+xfchess-game = { path = "programs/xfchess-game" }
+
+[features]
+default = []
+solana = [
+    "anchor-lang",
+    "solana-sdk",
+    "solana-client",
+    "solana-chess-client",
+    "solana-secp256k1-program",
+    "solana-program",
+    "magic-resolver",
+    "xfchess-game",
+    "ephemeral-rollups-sdk",
+]
+
+[dependencies]
+bevy.workspace = true
+bevy_sprite = { workspace = true }
+bevy_text = { workspace = true }
+bevy_ui = { workspace = true }
+tokio.workspace = true
+futures-lite.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+directories = "6.0.0"
+tracing.workspace = true
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+uuid.workspace = true
+web-time.workspace = true
+reqwest.workspace = true
+anchor-lang = { workspace = true, optional = true }
+shakmaty = { workspace = true }
+bevy_egui = { workspace = true }
+solana-sdk = { workspace = true, optional = true }
+solana-client = { workspace = true, optional = true }
+webbrowser = "1.1.0"
+braid_uri.workspace = true
+braid-iroh.workspace = true
+braid-core.workspace = true
+iroh-gossip.workspace = true
+solana-chess-client = { workspace = true, optional = true }
+sha2 = "0.10.8"
+dirs = "5.0.1"
+chrono.workspace = true
+serde_bytes.workspace = true
+solana-secp256k1-program = { workspace = true, optional = true }
+openssl = { version = "0.10", features = ["vendored"] }
+shared.workspace = true
+iroh.workspace = true
+crossbeam-channel.workspace = true
+thiserror.workspace = true
+solana-program = { workspace = true, optional = true }
+bs58.workspace = true
+borsh = { workspace = true }
+anyhow = { workspace = true }
+clap.workspace = true
+egui.workspace = true
+bincode.workspace = true
+base64.workspace = true
+magic-resolver = { workspace = true, optional = true }
+xfchess-game = { workspace = true, optional = true }
+ephemeral-rollups-sdk = { workspace = true, optional = true }
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+chess-logic-shared = { workspace = true, features = ["std", "uci"] }
+
+[patch.crates-io]
+ephemeral-rollups-sdk = { path = "references/ephemeral-rollups-sdk/rust/sdk" }

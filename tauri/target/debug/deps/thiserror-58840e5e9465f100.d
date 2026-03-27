@@ -1,0 +1,15 @@
+C:\Users\isich\XFChess\tauri\target\debug\deps\thiserror-58840e5e9465f100.d: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\provide.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs C:\Users\isich\XFChess\tauri\target\debug\build\thiserror-2741f14ec777af54\out/private.rs
+
+C:\Users\isich\XFChess\tauri\target\debug\deps\libthiserror-58840e5e9465f100.rlib: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\provide.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs C:\Users\isich\XFChess\tauri\target\debug\build\thiserror-2741f14ec777af54\out/private.rs
+
+C:\Users\isich\XFChess\tauri\target\debug\deps\libthiserror-58840e5e9465f100.rmeta: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\provide.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs C:\Users\isich\XFChess\tauri\target\debug\build\thiserror-2741f14ec777af54\out/private.rs
+
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\provide.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs:
+C:\Users\isich\XFChess\tauri\target\debug\build\thiserror-2741f14ec777af54\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\isich\\XFChess\\tauri\\target\\debug\\build\\thiserror-2741f14ec777af54\\out

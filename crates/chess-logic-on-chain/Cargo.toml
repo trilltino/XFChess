@@ -1,0 +1,16 @@
+[package]
+name = "chess-logic-on-chain"
+version = "0.1.0"
+edition = "2021"
+authors = ["trilltino"]
+description = "Shared chess logic and validation for XFChess (On-chain version)"
+
+[dependencies]
+shakmaty-on-chain = { package = "shakmaty-no-std", path = "../shakmaty-no-std", default-features = false }
+serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
+
+[features]
+default = ["alloc"]
+alloc = ["shakmaty-on-chain/alloc"]
+
+[dev-dependencies]

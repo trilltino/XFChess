@@ -1,0 +1,18 @@
+[package]
+name = "braid_uri"
+version.workspace = true
+edition.workspace = true
+description = "Braid-HTTP chess game messaging – typed URIs, move messages, publisher, and subscriber"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+sha2 = "0.10.9"
+hex = "0.4.3"
+bytes = "1.11.1"
+async-channel = "2.5.0"
+tokio.workspace = true
+tracing.workspace = true
+braid-http.workspace = true

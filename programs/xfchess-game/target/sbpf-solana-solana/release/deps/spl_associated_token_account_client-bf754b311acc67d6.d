@@ -1,0 +1,9 @@
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\spl_associated_token_account_client-bf754b311acc67d6.d: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\address.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\instruction.rs
+
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\libspl_associated_token_account_client-bf754b311acc67d6.rlib: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\address.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\instruction.rs
+
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\libspl_associated_token_account_client-bf754b311acc67d6.rmeta: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\address.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\instruction.rs
+
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\lib.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\address.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spl-associated-token-account-client-2.0.0\src\instruction.rs:

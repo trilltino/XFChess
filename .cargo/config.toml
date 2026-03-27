@@ -1,0 +1,19 @@
+[target.wasm32-unknown-unknown]
+runner = "wasm-server-runner"
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+
+# ── Fast iteration builds ────────────────────────────────────────────────────
+# Use rust-lld (bundled with Rust ≥ 1.71) — much faster than MSVC link.exe
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
+[profile.dev]
+opt-level = 1       # slight opt keeps Bevy/Solana runtime usable, still fast compile
+debug = 1           # line tables only (not full DWARF) — cuts link time significantly
+incremental = true  # default, being explicit
+
+# Compile dependencies at opt-level 3 so they are fast at runtime and
+# stay cached between rebuilds — only YOUR changed code recompiles.
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
