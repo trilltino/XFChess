@@ -1,71 +1,47 @@
-# xfchess-ai-service
+# XFChess AI Service
 
-## Purpose
+AI service for XFChess with Stockfish integration.
 
-Standalone AI service for PvAI (Player vs AI) wagered games on Solana. Monitors the blockchain for game invites and plays as an AI opponent.
+## Features
 
-## Role in XFChess
+- REST API for chess move evaluation
+- Stockfish engine integration
+- Health check endpoints
+- Async/await support
 
-**Server-side AI opponent for wagered games.**
+## API Endpoints
 
-Runs as a separate binary (not part of main XFChess client):
-- Polls Solana for new game invitations
-- Accepts wagers on behalf of the AI
-- Uses Stockfish to compute optimal moves
-- Signs and submits transactions
-- Handles game finalization
+### GET /health
+Returns service health status.
 
-## Architecture
+### POST /move
+Accepts a FEN position and returns the best move.
 
-```
-┌─────────────────────────────────────────┐
-│         Solana Blockchain               │
-│  ┌─────────┐      ┌─────────────────┐  │
-│  │ Game PDA│◄────►│ xfchess-game    │  │
-│  │ Wager   │      │ program         │  │
-│  └────┬────┘      └─────────────────┘  │
-└───────┬─────────────────────────────────┘
-        │
-        │ Poll for games
-        ▼
-┌─────────────────────────────────────────┐
-│   xfchess-ai-service                    │ ◄── YOU ARE HERE
-│   ┌─────────────────────────────────┐   │
-│   │ 1. Monitor on-chain games       │   │
-│   │ 2. Accept AI vs Player invites  │   │
-│   │ 3. Compute moves (Stockfish)    │   │
-│   │ 4. Submit signed transactions   │   │
-│   └─────────────────────────────────┘   │
-└──────────────────┬──────────────────────┘
-                   │
-                   ▼
-         ┌─────────────────────┐
-         │  braid_stockfish_ai │
-         │  - Stockfish UCI    │
-         │  - Move evaluation  │
-         └─────────────────────┘
+Request:
+```json
+{
+  "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+  "player_side": "white"
+}
 ```
 
-## Configuration
+Response:
+```json
+{
+  "best_move": "e2e4",
+  "evaluation": 0,
+  "depth": 15
+}
+```
 
-Requires `ai-authority.json` keypair file for signing transactions.
-
-## Usage
+## Running
 
 ```bash
-# Run the AI service
-cargo run -p xfchess-ai-service
+cargo run --bin xfchess-ai-service
 ```
 
-## Dependencies
+The service will start on `http://localhost:8080`.
 
-- `solana-chess-client` - RPC client
-- `braid_stockfish_ai` - Stockfish integration
-- `solana-sdk` - Transaction signing
+## Development
 
-## Notes
-
-- **Separate binary** - not linked to main XFChess app
-- **Server-side** - runs on infrastructure, not player machines
-- **NOT required for ER integration** - this is for AI opponents only
-- Can be deployed independently from the main game
+This is a placeholder implementation. In production, it would integrate with the Stockfish chess engine for accurate move evaluation.

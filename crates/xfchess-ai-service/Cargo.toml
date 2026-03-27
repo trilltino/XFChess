@@ -2,24 +2,24 @@
 name = "xfchess-ai-service"
 version.workspace = true
 edition.workspace = true
+description = "AI service for XFChess with Stockfish integration"
+license.workspace = true
+repository = "https://github.com/trilltino/XFChess"
 
 [dependencies]
-solana-sdk.workspace = true
-solana-client.workspace = true
-anchor-lang = "0.32.1"
-tokio.workspace = true
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 anyhow.workspace = true
-log = "0.4.29"
-env_logger = "0.11.9"
-serde.workspace = true
-serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = "0.6"
 
-# Local crates
-xfchess-game = { path = "../../programs/xfchess-game" }
-solana-chess-client = { path = "../solana-chess-client" }
-braid_stockfish_ai = { path = "../braid_stockfish_ai" }
-shared = { path = "../shared" }
-# Use host-vendored shakmaty
-shakmaty = { package = "shakmaty-host-vendored", path = "../shakmaty-host-vendored", default-features = false, features = ["alloc"] }
+[lib]
+path = "src/lib.rs"
 
-bs58 = "0.5.1"
+[[bin]]
+name = "xfchess-ai-service"
+path = "src/main.rs"

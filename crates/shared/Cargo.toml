@@ -1,12 +1,13 @@
 [package]
 name = "shared"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-bevy = { workspace = true, default-features = false }
-serde.workspace = true
-uuid.workspace = true
+bevy = { version = "0.17.3", default-features = false }
+lightyear = { version = "0.25.5", features = ["leafwing"] }
+serde = { version = "1.0", features = ["derive"] }
+uuid = { version = "1.10", features = ["serde", "v4", "js"] }
 
 [dev-dependencies]
-bincode = "3.0.0"
+bincode = "1.3"
