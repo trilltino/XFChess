@@ -2,7 +2,7 @@ pub use self::inner::*;
 
 mod inner {
     use crate::constants::MOVE_LOG_SEED;
-    use crate::state::game::Game;
+    use crate::state::Game;
     use crate::state::move_log::MoveLog;
     use anchor_lang::prelude::*;
     use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;

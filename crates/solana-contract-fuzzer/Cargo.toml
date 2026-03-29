@@ -1,0 +1,34 @@
+[package]
+name = "solana-contract-fuzzer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+proptest = "1.4"
+anchor-lang = "0.32.1"
+solana-client = { workspace = true }
+solana-sdk = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+ed25519-dalek = { version = "1", features = ["std"] }
+rand = "0.8"
+chrono = { workspace = true }
+dirs = "5.0"
+blake3 = "1.5"
+sha2 = "0.10"
+
+# Local deps
+xfchess-game = { path = "../../programs/xfchess-game" }
+chess-logic-shared = { path = "../chess-logic-shared" }
+solana-chess-client = { path = "../solana-chess-client" }
+
+[[bin]]
+name = "solana-contract-fuzzer"
+path = "src/main.rs"

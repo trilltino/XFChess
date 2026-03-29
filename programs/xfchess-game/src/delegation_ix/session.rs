@@ -1,5 +1,5 @@
 use crate::errors::XfchessGameError;
-use crate::state::game::{Game, GameStatus, SessionDelegation};
+use crate::state::{Game, GameStatus, SessionDelegation};
 use anchor_lang::prelude::*;
 
 pub fn handler_authorize_session_key(

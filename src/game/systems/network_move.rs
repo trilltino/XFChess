@@ -1,6 +1,6 @@
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, Piece, PieceType};
-use crate::game::events::NetworkMoveEvent;
+use crate::game::events::{NetworkMoveEvent, RemoteMoveApplied};
 use crate::game::resources::{
     CapturedPieces, GameSounds, MoveHistory, PendingTurnAdvance, Selection,
 };
@@ -18,6 +18,7 @@ pub fn handle_network_moves(
     mut captured_pieces: ResMut<CapturedPieces>,
     mut engine: ResMut<ChessEngine>,
     game_sounds: Option<Res<GameSounds>>,
+    mut remote_applied: MessageWriter<RemoteMoveApplied>,
 ) {
     for event in events.read() {
         info!(
@@ -89,6 +90,28 @@ pub fn handle_network_moves(
                 None, // No MoveMadeEvent writer — avoid local echo
                 None, // BoardStateSync — network moves don't broadcast
             );
+
+            // Emit RemoteMoveApplied so the rollup can record the opponent's move on-chain.
+            // The engine is fully updated by execute_move above, so current_fen() is correct.
+            {
+                let from_col = (b'a' + event.from.0) as char;
+                let from_row = event.from.1 + 1;
+                let to_col = (b'a' + event.to.0) as char;
+                let to_row = event.to.1 + 1;
+                let mut uci = format!("{}{}{}{}", from_col, from_row, to_col, to_row);
+                if let Some(promo) = event.promotion {
+                    let promo_char = match PieceType::from_char(promo) {
+                        Some(crate::game::components::PieceType::Queen) => 'q',
+                        Some(crate::game::components::PieceType::Rook) => 'r',
+                        Some(crate::game::components::PieceType::Bishop) => 'b',
+                        Some(crate::game::components::PieceType::Knight) => 'n',
+                        _ => 'q',
+                    };
+                    uci.push(promo_char);
+                }
+                let fen_after = engine.current_fen().to_string();
+                remote_applied.write(RemoteMoveApplied { uci, next_fen: fen_after });
+            }
 
             // 6. Update Selection (Clear if we moved selected piece)
             if let Some(selected_entity) = selection.selected_entity {

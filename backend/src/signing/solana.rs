@@ -39,18 +39,35 @@ fn borsh_string(s: &str) -> Vec<u8> {
 pub fn record_move_ix(
     program_id: &Pubkey,
     session_pubkey: &Pubkey,
+    wallet_pubkey: &Pubkey,
     game_id: u64,
     move_str: &str,
     next_fen: &str,
+    nonce: u64,
+    signature: Option<Vec<u8>>,
 ) -> Instruction {
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let move_log_pda =
         Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], program_id).0;
+    let session_delegation_pda = Pubkey::find_program_address(
+        &[SESSION_DELEGATION_SEED, &game_id.to_le_bytes(), wallet_pubkey.as_ref()],
+        program_id,
+    ).0;
 
     let mut data = anchor_discriminator("record_move").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend(borsh_string(move_str));
     data.extend(borsh_string(next_fen));
+    data.extend_from_slice(&nonce.to_le_bytes());
+    
+    // Optional Vec<u8> (Borsh encoding)
+    if let Some(sig) = signature {
+        data.push(1); // Some
+        data.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+        data.extend_from_slice(&sig);
+    } else {
+        data.push(0); // None
+    }
 
     Instruction {
         program_id: *program_id,
@@ -58,6 +75,7 @@ pub fn record_move_ix(
             AccountMeta::new(game_pda, false),
             AccountMeta::new(move_log_pda, false),
             AccountMeta::new_readonly(*session_pubkey, true),
+            AccountMeta::new_readonly(session_delegation_pda, false),
         ],
         data,
     }

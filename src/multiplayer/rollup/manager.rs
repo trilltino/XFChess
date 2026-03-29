@@ -181,6 +181,13 @@ pub enum RollupEvent {
         moves: Vec<String>,
         next_fens: Vec<String>,
     },
+    /// Final batch at game end — submitted directly to VPS without BatchPropose/Accept
+    /// so the peer disconnect after checkmate cannot block on-chain recording.
+    GameEndBatch {
+        game_id: u64,
+        moves: Vec<String>,
+        next_fens: Vec<String>,
+    },
     BatchCommitted {
         game_id: u64,
         new_fen: String,

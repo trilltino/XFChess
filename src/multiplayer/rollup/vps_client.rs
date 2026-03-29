@@ -45,6 +45,7 @@ struct RecordMoveReq<'a> {
     game_id: u64,
     move_uci: &'a str,
     next_fen: &'a str,
+    nonce: u64,
 }
 
 #[derive(Serialize)]
@@ -115,10 +116,10 @@ pub fn activate_session(game_id: u64, signed_tx_bytes: &[u8]) -> Result<String, 
 }
 
 /// Ask VPS to build, sign, and submit a `record_move` instruction on the ER.
-pub fn record_move(game_id: u64, move_uci: &str, next_fen: &str) -> Result<String, String> {
+pub fn record_move(game_id: u64, move_uci: &str, next_fen: &str, nonce: u64) -> Result<String, String> {
     let response = client()
         .post(format!("{}/move/record", vps_base()))
-        .json(&RecordMoveReq { game_id, move_uci, next_fen })
+        .json(&RecordMoveReq { game_id, move_uci, next_fen, nonce })
         .send()
         .map_err(|e| format!("vps record_move: {e}"))?;
     if !response.status().is_success() {

@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::state::game::{Game, SessionDelegation};
+use crate::state::{Game, SessionDelegation};
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]

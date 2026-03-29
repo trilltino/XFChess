@@ -216,6 +216,7 @@ pub fn execute_move(
 
     // 7. Trigger Event
     if let Some(writer) = move_events {
+        let fen_after = engine.current_fen().to_string();
         writer.write(MoveMadeEvent {
             from: from_pos,
             to: ctx.target,
@@ -225,6 +226,7 @@ pub fn execute_move(
             promotion: ctx.promotion,
             remote: ctx.remote,
             game_id: ctx.game_id,
+            next_fen: fen_after,
         });
     }
 

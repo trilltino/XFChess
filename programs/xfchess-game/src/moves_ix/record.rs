@@ -13,7 +13,20 @@ pub struct RecordMove<'info> {
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [MOVE_LOG_SEED, &game_id.to_le_bytes()], bump)]
     pub move_log: Account<'info, MoveLog>,
+    /// Session key — must match the session_delegation registered for this game.
     pub player: Signer<'info>,
+    /// Session delegation account linking session_key → wallet for this game.
+    #[account(
+        seeds = [
+            b"session_delegation",
+            &game_id.to_le_bytes(),
+            session_delegation.player.as_ref(),
+        ],
+        bump = session_delegation.bump,
+        constraint = session_delegation.session_key == player.key() @ GameErrorCode::InvalidSessionKey,
+        constraint = session_delegation.enabled @ GameErrorCode::SessionExpiredOrDisabled,
+    )]
+    pub session_delegation: Account<'info, SessionDelegation>,
 }
 
 pub fn handler(
@@ -21,6 +34,8 @@ pub fn handler(
     _game_id: u64,
     move_str: String,
     next_fen: String,
+    nonce: u64,
+    signature: Option<Vec<u8>>,
 ) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let move_log = &mut ctx.accounts.move_log;
@@ -30,23 +45,9 @@ pub fn handler(
         GameErrorCode::GameNotActive
     );
 
-    let player = ctx.accounts.player.key();
-
-    // Turn and Identity Validation
-    if game.turn % 2 != 0 {
-        // White's turn
-        require!(player == game.white, GameErrorCode::NotPlayerTurn);
-    } else {
-        // Black's turn (or AI's turn)
-        if game.game_type == GameType::PvAI {
-            require!(
-                player == crate::constants::ai_authority::ID,
-                GameErrorCode::NotPlayerTurn
-            );
-        } else {
-            require!(player == game.black, GameErrorCode::NotPlayerTurn);
-        }
-    }
+    // Replay Protection
+    require!(nonce == move_log.nonce + 1, GameErrorCode::InvalidNonce);
+    move_log.nonce = nonce;
 
     // --- ON-CHAIN CHESS VALIDATION ---
     #[cfg(feature = "move-validation")]
@@ -85,9 +86,16 @@ pub fn handler(
     game.fen = next_fen;
     game.move_count += 1;
     game.turn += 1;
-    game.updated_at = Clock::get()?.unix_timestamp;
+    let timestamp = Clock::get()?.unix_timestamp;
+    game.updated_at = timestamp;
 
     move_log.moves.push(move_str);
+    move_log.timestamps.push(timestamp);
+    if let Some(sig) = signature {
+        move_log.player_signatures.push(sig);
+    } else {
+        move_log.player_signatures.push(Vec::new());
+    }
 
     Ok(())
 }

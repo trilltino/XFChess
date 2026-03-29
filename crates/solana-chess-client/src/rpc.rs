@@ -171,6 +171,8 @@ impl ChessRpcClient {
         game_id: u64,
         move_str: String,
         next_fen: String,
+        nonce: u64,
+        signature: Option<Vec<u8>>,
     ) -> Instruction {
         let game_pda = self.get_game_pda(game_id);
         let move_log_pda = self.get_move_log_pda(game_id);
@@ -186,6 +188,8 @@ impl ChessRpcClient {
                 game_id,
                 move_str,
                 next_fen,
+                nonce,
+                signature,
             }
             .data(),
         }

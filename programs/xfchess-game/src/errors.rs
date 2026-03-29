@@ -38,6 +38,16 @@ pub enum GameErrorCode {
     InvalidBatchLength,
     #[msg("Batch size exceeds maximum allowed.")]
     BatchTooLarge,
+    #[msg("Invalid nonce provided for replay protection.")]
+    InvalidNonce,
+    #[msg("Game is not in the required status for this operation.")]
+    InvalidGameStatus,
+    #[msg("Game is not currently disputed.")]
+    GameNotDisputed,
+    #[msg("Unauthorized to resolve this dispute.")]
+    UnauthorizedDisputeResolution,
+    #[msg("Wager amount exceeds the maximum allowed.")]
+    WagerTooHigh,
 }
 
 pub use GameErrorCode as XfchessGameError;

@@ -68,13 +68,18 @@ impl Plugin for MultiplayerPlugin {
         app.add_systems(
             Update,
             (
-                feed_local_moves_to_rollup,
+                // Step 1: feed moves into rollup batch AFTER GameSystems::Execution has applied them
+                (feed_local_moves_to_rollup, feed_remote_moves_to_rollup)
+                    .after(crate::game::system_sets::GameSystems::Execution),
+                // Step 2: detect game over (reads GameOverState set by check_game_over_state)
+                emit_game_ended_event
+                    .after(crate::game::system_sets::GameSystems::Execution),
+                // Step 3: flush batch AFTER feeds have added all moves and event is emitted
+                finalize_game_on_end
+                    .after(feed_local_moves_to_rollup)
+                    .after(feed_remote_moves_to_rollup)
+                    .after(emit_game_ended_event),
                 handle_session_info_from_network,
-                finalize_game_on_end,
-                emit_game_ended_event,
-                // handle_pending_finalize removed — finalization now handled
-                // by handle_game_end_undelegation in rollup_network_bridge.rs
-                // via VPS session key (no wallet popup).
             ),
         );
 
@@ -527,30 +532,31 @@ fn handle_network_events(
     }
 }
 
-/// Converts each `MoveMadeEvent` to a UCI string and feeds it into the
-/// `EphemeralRollupManager` as a local move, pulling the new FEN from `ChessEngine`.
+/// Converts each local `MoveMadeEvent` to a UCI string and feeds it into the
+/// `EphemeralRollupManager`. Uses `event.next_fen` which is captured atomically
+/// inside `execute_move` — no frame-delay race with the engine.
 #[cfg(feature = "solana")]
 fn feed_local_moves_to_rollup(
     mut move_events: MessageReader<MoveMadeEvent>,
     mut rollup_manager: ResMut<rollup::manager::EphemeralRollupManager>,
-    engine: Res<ChessEngine>,
     network_state: Res<BraidNetworkState>,
 ) {
-    // Only active when we are in a networked session
     if network_state.active_session.is_none() {
         return;
     }
 
     for event in move_events.read() {
-        // Build UCI notation: e.g. "e2e4" from (col, row) coords
-        let from_col = (b'a' + event.from.1) as char;
-        let from_row = event.from.0 + 1;
-        let to_col = (b'a' + event.to.1) as char;
-        let to_row = event.to.0 + 1;
+        if event.remote {
+            continue; // remote moves handled by feed_remote_moves_to_rollup
+        }
+
+        let from_col = (b'a' + event.from.0) as char;
+        let from_row = event.from.1 + 1;
+        let to_col = (b'a' + event.to.0) as char;
+        let to_row = event.to.1 + 1;
 
         let mut uci = format!("{}{}{}{}", from_col, from_row, to_col, to_row);
 
-        // Append promotion piece character when applicable
         if let Some(promo) = event.promotion {
             let promo_char = match promo {
                 PieceType::Queen => 'q',
@@ -562,9 +568,30 @@ fn feed_local_moves_to_rollup(
             uci.push(promo_char);
         }
 
-        let fen = engine.current_fen().to_string();
-        info!("[ROLLUP] Local move {} → rollup (fen: {})", uci, fen);
-        rollup_manager.add_local_move(uci, fen);
+        info!("[ROLLUP] Local move {} → rollup (fen: {})", uci, event.next_fen);
+        rollup_manager.add_local_move(uci, event.next_fen.clone());
+    }
+}
+
+/// Records the opponent's moves into the rollup batch so ALL moves reach the chain.
+/// Only the delegator (creator/white) accumulates both sides — they submit the
+/// full batch via VPS after the peer accepts it.
+#[cfg(feature = "solana")]
+fn feed_remote_moves_to_rollup(
+    mut remote_events: MessageReader<crate::game::events::RemoteMoveApplied>,
+    mut rollup_manager: ResMut<rollup::manager::EphemeralRollupManager>,
+    network_state: Res<BraidNetworkState>,
+) {
+    if network_state.active_session.is_none() {
+        return;
+    }
+    if !rollup_manager.is_creator {
+        return;
+    }
+
+    for event in remote_events.read() {
+        info!("[ROLLUP] Remote move {} → rollup (fen: {})", event.uci, event.next_fen);
+        rollup_manager.add_local_move(event.uci.clone(), event.next_fen.clone());
     }
 }
 
@@ -575,6 +602,7 @@ fn handle_session_info_from_network(
     mut network_events: MessageReader<NetworkEvent>,
     mut rollup_manager: ResMut<rollup::manager::EphemeralRollupManager>,
     mut session_key_manager: ResMut<rollup::session_keys::SessionKeyManager>,
+    mut solana_state: Option<ResMut<solana::integration::state::SolanaIntegrationState>>,
 ) {
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(NetworkMessage::SessionInfo {
@@ -591,6 +619,11 @@ fn handle_session_info_from_network(
                 "[SESSION] Received SessionInfo for game {} — peer session key: {}",
                 game_id, session_pubkey
             );
+            // Store peer's wallet pubkey so finalization can resolve white/black addresses.
+            if let Some(ref mut state) = solana_state {
+                state.opponent_pubkey = Some(*player_pubkey);
+            }
+
             // Update session_key_manager game id so it manages the correct slot
             session_key_manager.set_game_id(*game_id);
 
@@ -636,7 +669,7 @@ fn finalize_game_on_end(
         );
 
         if let Some((moves, next_fens)) = rollup_manager.force_flush() {
-            rollup_events.write(rollup::manager::RollupEvent::BatchReady {
+            rollup_events.write(rollup::manager::RollupEvent::GameEndBatch {
                 game_id: rollup_manager.game_id,
                 moves,
                 next_fens,

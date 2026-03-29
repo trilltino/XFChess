@@ -96,6 +96,7 @@ impl Plugin for GamePlugin {
             .add_message::<PromotionSelected>()
             .add_message::<crate::game::events::MoveMadeEvent>()
             .add_message::<crate::game::events::NetworkMoveEvent>()
+            .add_message::<crate::game::events::RemoteMoveApplied>()
             .add_message::<crate::game::events::ResignEvent>()
             .add_message::<crate::game::events::DrawOfferEvent>()
             .add_message::<crate::game::events::DrawResponseEvent>();

@@ -16,3 +16,5 @@ pub mod ai_authority {
     use anchor_lang::prelude::declare_id;
     declare_id!("AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp");
 }
+
+pub const MAX_WAGER_AMOUNT: u64 = 10 * 1_000_000_000; // 10 SOL

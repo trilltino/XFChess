@@ -95,9 +95,9 @@ fn broadcast_local_moves(
 
                 let network_message = NetworkMessage::Move {
                     game_id,
-                    turn: 0, // Should probably be tracked in MoveMadeEvent if needed
+                    turn: 0,
                     move_uci,
-                    next_fen: String::new(), // Optional
+                    next_fen: local_move.next_fen.clone(),
                 };
 
                 info!(

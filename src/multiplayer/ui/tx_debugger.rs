@@ -196,6 +196,24 @@ impl TransactionDebugger {
                     p2p_message: None,
                 });
             }
+            RollupEvent::GameEndBatch {
+                game_id,
+                moves,
+                next_fens: _,
+            } => {
+                let batch_hash = calculate_batch_hash(*game_id, moves, &[]);
+                self.log_event(RollupTransaction {
+                    timestamp,
+                    game_id: *game_id,
+                    tx_type: TransactionType::BatchProposed,
+                    status: TransactionStatus::Pending,
+                    batch_hash,
+                    moves: moves.clone(),
+                    solana_signature: None,
+                    error: None,
+                    p2p_message: None,
+                });
+            }
             RollupEvent::NeedResync { game_id } => {
                 if self.pretty_print {
                     println!("\x1b[33m[!]\x1b[0m Game {} needs resync", game_id);

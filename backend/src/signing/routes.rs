@@ -5,8 +5,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Signer;
 use std::str::FromStr;
 use tracing::{error, info, warn};
+use sha2::{Digest, Sha256};
 
 use super::{AppState, solana};
 
@@ -35,6 +37,8 @@ pub struct RecordMoveReq {
     pub game_id: u64,
     pub move_uci: String,
     pub next_fen: String,
+    #[serde(default)]
+    pub nonce: u64,
 }
 
 #[derive(Serialize)]
@@ -149,10 +153,29 @@ pub async fn record_move(
     }
 
     let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let session_kp = entry.keypair();
     let session_pk = entry.session_pubkey();
+    let session_kp = entry.keypair();
 
-    let ix = solana::record_move_ix(&program_id, &session_pk, req.game_id, &req.move_uci, &req.next_fen);
+    // Internal signing for data-level replay protection
+    // Signature = sign(session_key, hash(game_id, move_uci, next_fen, nonce))
+    let mut hasher = Sha256::new();
+    hasher.update(req.game_id.to_le_bytes());
+    hasher.update(req.move_uci.as_bytes());
+    hasher.update(req.next_fen.as_bytes());
+    hasher.update(req.nonce.to_le_bytes());
+    let hash = hasher.finalize();
+    let sig_bytes = session_kp.sign_message(&hash).as_ref().to_vec();
+
+    let ix = solana::record_move_ix(
+        &program_id,
+        &session_pk,
+        &entry.wallet_pubkey,
+        req.game_id,
+        &req.move_uci,
+        &req.next_fen,
+        req.nonce,
+        Some(sig_bytes),
+    );
     let er_rpc = solana::make_rpc(&state.config.er_rpc_url);
 
     let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {

@@ -13,6 +13,7 @@ use crate::multiplayer::{
     BraidNetworkState,
     NetworkEvent,
 };
+use crate::multiplayer::rollup::magicblock::DelegationStatus;
 use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
 use crate::solana::instructions::PROGRAM_ID as SOLANA_PROGRAM_ID;
 
@@ -47,13 +48,25 @@ pub struct RollupNetworkBridge {
     pending_game_id: Option<u64>,
     /// Channel receiving delegation result from async task.
     delegation_rx: Option<oneshot::Receiver<Result<Pubkey, String>>>,
+    /// Monotonically increasing nonce for record_move replay protection.
+    /// Starts at 1 because the program requires nonce == move_log.nonce + 1 (on-chain starts at 0).
+    move_nonce: u64,
+}
+
+impl RollupNetworkBridge {
+    fn new() -> Self {
+        Self {
+            move_nonce: 1,
+            ..Default::default()
+        }
+    }
 }
 
 pub struct RollupNetworkBridgePlugin;
 
 impl Plugin for RollupNetworkBridgePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RollupNetworkBridge>();
+        app.insert_resource(RollupNetworkBridge::new());
 
         let mut resolver = MagicBlockResolver::default();
         resolver.set_solana_rpc(Arc::new(RpcClient::new(
@@ -124,6 +137,34 @@ fn handle_rollup_to_network_events(
                 bridge.last_sent_batch_hash = Some(batch_hash);
                 bridge.awaiting_commit_confirmation = true;
                 info!("Sent BatchPropose for game {}", game_id);
+            }
+            // Final game-end batch: skip BatchPropose/Accept and submit directly to VPS.
+            // This ensures moves are recorded even if the peer disconnects after checkmate.
+            RollupEvent::GameEndBatch {
+                game_id,
+                moves,
+                next_fens,
+            } => {
+                let gid = *game_id;
+                let base_nonce = bridge.move_nonce;
+                bridge.move_nonce += moves.len() as u64;
+                let moves_owned = moves.clone();
+                let fens_owned = next_fens.clone();
+                info!(
+                    "[VPS] Game-end direct submit: {} moves for game {}",
+                    moves_owned.len(), gid
+                );
+                bevy::tasks::IoTaskPool::get()
+                    .spawn(async move {
+                        use crate::multiplayer::rollup::vps_client;
+                        for (i, (mv, fen)) in moves_owned.iter().zip(fens_owned.iter()).enumerate() {
+                            match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
+                                Ok(sig) => info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig),
+                                Err(e) => error!("[VPS] record_move failed {} game {}: {}", mv, gid, e),
+                            }
+                        }
+                    })
+                    .detach();
             }
             RollupEvent::BatchFailed { game_id, .. } | RollupEvent::NeedResync { game_id } => {
                 send_network_msg(
@@ -210,6 +251,23 @@ fn handle_network_to_rollup_events(
                 if bridge.last_sent_batch_hash.as_deref() == Some(batch_hash.as_str()) {
                     bridge.awaiting_commit_confirmation = false;
                 }
+                // Submit the accepted batch via VPS record_move on the ER.
+                if let Some((moves, next_fens)) = bridge.pending_batches.remove(batch_hash.as_str()) {
+                    let gid = *game_id;
+                    let base_nonce = bridge.move_nonce;
+                    bridge.move_nonce += moves.len() as u64;
+                    bevy::tasks::IoTaskPool::get()
+                        .spawn(async move {
+                            use crate::multiplayer::rollup::vps_client;
+                            for (i, (mv, fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
+                                match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
+                                    Ok(sig) => info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig),
+                                    Err(e) => error!("[VPS] record_move failed {} game {}: {}", mv, gid, e),
+                                }
+                            }
+                        })
+                        .detach();
+                }
             }
 
             NetworkMessage::BatchReject { game_id, reason } => {
@@ -294,10 +352,13 @@ fn process_batch_commit_requests(
     }
 
     if let Some((moves, next_fens)) = rollup_manager.prepare_batch_for_commit() {
+        let base_nonce = bridge.move_nonce;
+        bridge.move_nonce += moves.len() as u64;
         submit_moves_via_vps(
             rollup_manager.game_id,
             &moves,
             &next_fens,
+            base_nonce,
             &mut magicblock_events,
             &mut recent_txs,
         );
@@ -326,13 +387,14 @@ fn submit_moves_via_vps(
     game_id: u64,
     moves: &[String],
     next_fens: &[String],
+    base_nonce: u64,
     magicblock_events: &mut MessageWriter<MagicBlockEvent>,
     recent_txs: &mut RecentTransactions,
 ) {
     use crate::multiplayer::rollup::vps_client;
 
-    for (move_str, next_fen) in moves.iter().zip(next_fens.iter()) {
-        match vps_client::record_move(game_id, move_str, next_fen) {
+    for (i, (move_str, next_fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
+        match vps_client::record_move(game_id, move_str, next_fen, base_nonce + i as u64) {
             Ok(sig) => {
                 info!("[VPS] Move {} recorded for game {}: {}", move_str, game_id, sig);
                 recent_txs.push(move_str.clone(), sig.clone());
@@ -468,12 +530,15 @@ async fn spawn_delegation_task(
 /// Polls the delegation async task and emits events on completion.
 fn poll_delegation_tasks(
     mut bridge: ResMut<RollupNetworkBridge>,
+    mut magicblock_resolver: ResMut<MagicBlockResolver>,
     mut magicblock_events: MessageWriter<MagicBlockEvent>,
 ) {
     if let Some(ref mut rx) = bridge.delegation_rx {
         match rx.try_recv() {
             Ok(Ok(game_pda)) => {
                 info!("Delegation completed for game {}", game_pda);
+                magicblock_resolver.delegation_status = DelegationStatus::Delegated;
+                magicblock_resolver.delegated_game_pda = Some(game_pda);
                 magicblock_events.write(MagicBlockEvent::GameDelegated { game_pda });
                 bridge.delegation_rx = None;
             }
@@ -577,6 +642,15 @@ fn handle_game_end_undelegation(
         info!("[FINALIZE] Game {} ended (winner={:?} reason={}) — preparing on-chain finalization",
             game_id, event.winner, event.reason);
 
+        // Derive and log the move_log PDA so the user can look up moves on Solscan.
+        let program_id: solana_sdk::pubkey::Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+        let move_log_pda = solana_sdk::pubkey::Pubkey::find_program_address(
+            &[b"move_log", &game_id.to_le_bytes()],
+            &program_id,
+        ).0;
+        info!("[FINALIZE] move_log PDA: {}", move_log_pda);
+        info!("[FINALIZE] Solscan: https://solscan.io/account/{}?cluster=devnet", move_log_pda);
+
         let is_delegated = magicblock_resolver.is_delegated();
         let game_pda = magicblock_resolver.get_delegated_game().unwrap_or_default();
 
@@ -615,14 +689,19 @@ fn handle_game_end_undelegation(
             .spawn(async move {
                 use crate::multiplayer::rollup::vps_client;
 
-                if is_delegated {
-                    match vps_client::vps_undelegate_game(game_id) {
-                        Ok(sig) => info!("[UNDELEGATE] ER committed for game {} sig {}", game_id, sig),
-                        Err(e) => error!("[UNDELEGATE] Failed for game {}: {e} — continuing to finalize", game_id),
-                    }
-                    // Allow ER → devnet commit to propagate before finalizing.
-                    std::thread::sleep(std::time::Duration::from_secs(3));
+                if !is_delegated {
+                    info!("[FINALIZE] Game {} — not delegator, skipping undelegate+finalize", game_id);
+                    return;
                 }
+
+                // Wait for any in-flight record_move calls to complete before undelegating.
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                match vps_client::vps_undelegate_game(game_id) {
+                    Ok(sig) => info!("[UNDELEGATE] ER committed for game {} sig {}", game_id, sig),
+                    Err(e) => error!("[UNDELEGATE] Failed for game {}: {e} — continuing to finalize", game_id),
+                }
+                // Allow ER → devnet commit to propagate before finalizing.
+                std::thread::sleep(std::time::Duration::from_secs(15));
 
                 let w_str = white_pk.to_string();
                 let b_str = black_pk.to_string();

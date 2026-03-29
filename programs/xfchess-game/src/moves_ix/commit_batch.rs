@@ -1,5 +1,5 @@
 use crate::errors::XfchessGameError;
-use crate::state::game::{Game, GameStatus, SessionDelegation};
+use crate::state::{Game, GameStatus, SessionDelegation};
 use crate::state::move_log::MoveLog;
 use anchor_lang::prelude::*;
 

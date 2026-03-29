@@ -1,5 +1,6 @@
 use crate::constants::*;
 use crate::state::*;
+use crate::errors::*;
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -16,7 +17,7 @@ pub struct CreateGame<'info> {
     #[account(
         init, 
         payer = player, 
-        space = 8 + 4 + (100 * 10), // Increased space for moves: 100 moves * 10 chars
+        space = 10240, // Sufficient space for moves, timestamps, and signatures
         seeds = [MOVE_LOG_SEED, &game_id.to_le_bytes()], 
         bump
     )]
@@ -66,6 +67,8 @@ pub fn handler(
     game.game_type = game_type;
     game.bump = ctx.bumps.game;
 
+    require!(wager_amount <= MAX_WAGER_AMOUNT, GameErrorCode::WagerTooHigh);
+
     if wager_amount > 0 {
         anchor_lang::system_program::transfer(
             CpiContext::new(
@@ -82,6 +85,9 @@ pub fn handler(
     let move_log = &mut ctx.accounts.move_log;
     move_log.game_id = game_id;
     move_log.moves = Vec::new();
+    move_log.timestamps = Vec::new();
+    move_log.player_signatures = Vec::new();
+    move_log.nonce = 0;
 
     // Bootstrap profile if this is the player's first game.
     let profile = &mut ctx.accounts.player_profile;

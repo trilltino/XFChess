@@ -28,7 +28,7 @@ set SIGNING_PORT=8090
 set JWT_SECRET=change-me-in-production-32-bytes!!
 set SOLANA_RPC_URL=https://api.devnet.solana.com
 set ER_RPC_URL=https://devnet-eu.magicblock.app/
-set PROGRAM_ID=AhkTK5LVJHvR51gmDXBsJsqq4wg381AH6vTiaFGGJPWm
+set PROGRAM_ID=FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX
 set SIGNING_SERVICE_URL=http://127.0.0.1:8090
 set XFCHESS_SOLANA=1
 
@@ -112,9 +112,10 @@ echo   5. Mode Select ^> Global P2P ^> share Node IDs to start.
 echo   6. Play — moves submit silently via VPS (no popups).
 echo.
 echo  Fee-payer key  : keys\fee-payer.json
-echo  Fee-payer addr : 5jFy6rn5q4FpHbJiyDFJ2Q6duVbMrN8Xsd4mZySKKZjJ
+echo  Fee-payer addr : HSop46SMkLyCSVTizeY1BspuqJn8T2bRNQhUyVgoaC44
 echo.
 echo  Ensure the fee-payer has devnet SOL before playing:
-echo    solana airdrop 2 5jFy6rn5q4FpHbJiyDFJ2Q6duVbMrN8Xsd4mZySKKZjJ --url devnet
+echo    solana airdrop 2 HSop46SMkLyCSVTizeY1BspuqJn8T2bRNQhUyVgoaC44 --url devnet
+echo    OR fund via web: https://faucet.solana.com
 echo.
 pause

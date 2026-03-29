@@ -11,6 +11,17 @@ pub struct MoveMadeEvent {
     pub promotion: Option<PieceType>,
     pub remote: bool,
     pub game_id: Option<u64>,
+    /// FEN string of the board position *after* this move was applied.
+    pub next_fen: String,
+}
+
+/// Emitted by `handle_network_moves` after a remote move has been applied to the
+/// chess engine. Used by `feed_remote_moves_to_rollup` to record opponent moves
+/// on-chain without a frame-delay FEN race.
+#[derive(Message, Debug, Clone)]
+pub struct RemoteMoveApplied {
+    pub uci: String,
+    pub next_fen: String,
 }
 
 #[derive(Event, Message, Debug, Clone)]

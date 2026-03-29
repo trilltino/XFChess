@@ -36,6 +36,9 @@ pub struct SessionDelegation {
 pub enum GameStatus {
     WaitingForOpponent,
     Active,
+    Inactive,
+    Disputed,
+    Cancelled,
     Finished,
     Expired,
 }

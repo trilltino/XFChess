@@ -9,7 +9,7 @@ crate-type = ["cdylib", "lib"]
 name = "xfchess_game"
 
 [features]
-default = ["move-validation"]
+default = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 move-validation = ["chess-logic-on-chain"]
 
