@@ -118,7 +118,7 @@ pub async fn activate_session(
     // Fund session key from fee-payer pool
     let entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
     let fee_payer = state.feepayer.next();
-    const FUND_LAMPORTS: u64 = 2_000_000; // 0.002 SOL covers ~400 TXs
+    const FUND_LAMPORTS: u64 = 10_000_000; // 0.01 SOL covers ~2000 TXs
     if let Err(e) = solana::fund_account(&rpc, fee_payer, &entry.session_pubkey(), FUND_LAMPORTS) {
         warn!("[VPS] Could not fund session key for game {}: {e}", req.game_id);
     }

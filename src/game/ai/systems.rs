@@ -461,6 +461,7 @@ fn poll_ai_task_system(
                     &mut p0,
                     None,
                     None, // BoardStateSync not available in AI context
+                    &params.current_turn,
                 );
             } else {
                 warn!("[AI] Could not find valid piece at {:?}", from_coords);

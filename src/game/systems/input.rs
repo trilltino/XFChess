@@ -302,6 +302,7 @@ fn try_move_sequence(
         &mut params.pieces.p0(),
         Some(&mut params.move_events),
         None, // BoardStateSync - would need to add to InputSystemParams
+        &params.current_turn,
     );
 
     if success {

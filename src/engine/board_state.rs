@@ -128,6 +128,27 @@ impl ChessEngine {
 
     // ─── Board sync ─────────────────────────────────────────────────────────
 
+    /// Rebuild the internal FEN from ECS piece components (mutable query version).
+    ///
+    /// This version accepts &mut Query which is what execute_move has.
+    pub fn sync_ecs_to_engine_mut(
+        &mut self,
+        pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
+        current_turn: &CurrentTurn,
+    ) {
+        // Collect piece data first to avoid borrow issues
+        let pieces_data: Vec<(Entity, Piece, HasMoved)> = pieces_query
+            .iter_mut()
+            .map(|(e, p, h)| (e, *p, *h))
+            .collect();
+        
+        // Now call the impl with the collected data as references
+        self.sync_ecs_to_engine_impl(
+            pieces_data.iter().map(|(e, p, h)| (*e, p, h)),
+            current_turn,
+        );
+    }
+
     /// Rebuild the internal FEN from ECS piece components.
     ///
     /// This is called before AI move generation to ensure Stockfish sees the
@@ -189,7 +210,9 @@ impl ChessEngine {
 
         // Build complete FEN string from board state
         let piece_placement = board_to_piece_placement(&board);
-        let side = match current_turn.color {
+        // Use self.current_turn which was already updated by update_engine_state_after_move
+        // The passed current_turn is the OLD turn before the move
+        let side = match self.current_turn {
             PieceColor::White => 'w',
             PieceColor::Black => 'b',
         };
@@ -207,8 +230,8 @@ impl ChessEngine {
             self.fullmove_counter
         );
 
-        // Update state fields from ECS
-        self.current_turn = current_turn.color;
+        // Only update castling_rights from ECS, NOT current_turn
+        // current_turn was already set correctly by update_engine_state_after_move
         self.castling_rights = castling_str;
         // Note: halfmove_clock and en_passant are not updated from ECS sync
         // They should be updated during move execution

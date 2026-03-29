@@ -53,6 +53,8 @@ pub fn record_move_ix(
         &[SESSION_DELEGATION_SEED, &game_id.to_le_bytes(), wallet_pubkey.as_ref()],
         program_id,
     ).0;
+    let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY.parse().expect("magic context pubkey");
+    let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY.parse().expect("magic program pubkey");
 
     let mut data = anchor_discriminator("record_move").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
@@ -76,6 +78,8 @@ pub fn record_move_ix(
             AccountMeta::new(move_log_pda, false),
             AccountMeta::new_readonly(*session_pubkey, true),
             AccountMeta::new_readonly(session_delegation_pda, false),
+            AccountMeta::new(magic_context, false),
+            AccountMeta::new_readonly(magic_program, false),
         ],
         data,
     }

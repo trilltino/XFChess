@@ -4,6 +4,7 @@ use crate::game::components::{
 };
 use crate::game::events::MoveMadeEvent;
 use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
+use crate::game::resources::turn::CurrentTurn;
 use crate::game::sync::board_state::{BoardMove, BoardStateSync, ChessEngineExt};
 use crate::rendering::pieces::PIECE_ON_BOARD_Y;
 use bevy::audio::{AudioPlayer, AudioSource};
@@ -151,6 +152,7 @@ pub fn execute_move(
     pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
     move_events: Option<&mut MessageWriter<MoveMadeEvent>>,
     board_sync: Option<&mut BoardStateSync>,
+    current_turn: &CurrentTurn,
 ) -> bool {
     // 1. Play Audio
     play_move_audio(commands, ctx.move_sound.clone(), ctx.capture.is_some());
@@ -214,7 +216,10 @@ pub fn execute_move(
         }
     }
 
-    // 7. Trigger Event
+    // 7. Sync ECS to Engine BEFORE getting FEN for event
+    engine.sync_ecs_to_engine_mut(pieces_query, current_turn);
+
+    // 8. Trigger Event with correct FEN
     if let Some(writer) = move_events {
         let fen_after = engine.current_fen().to_string();
         writer.write(MoveMadeEvent {

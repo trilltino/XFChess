@@ -2,7 +2,7 @@ use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, Piece, PieceType};
 use crate::game::events::{NetworkMoveEvent, RemoteMoveApplied};
 use crate::game::resources::{
-    CapturedPieces, GameSounds, MoveHistory, PendingTurnAdvance, Selection,
+    CapturedPieces, CurrentTurn, GameSounds, MoveHistory, PendingTurnAdvance, Selection,
 };
 use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
 use bevy::prelude::*;
@@ -18,6 +18,7 @@ pub fn handle_network_moves(
     mut captured_pieces: ResMut<CapturedPieces>,
     mut engine: ResMut<ChessEngine>,
     game_sounds: Option<Res<GameSounds>>,
+    current_turn: Res<CurrentTurn>,
     mut remote_applied: MessageWriter<RemoteMoveApplied>,
 ) {
     for event in events.read() {
@@ -89,6 +90,7 @@ pub fn handle_network_moves(
                 &mut pieces_query,
                 None, // No MoveMadeEvent writer — avoid local echo
                 None, // BoardStateSync — network moves don't broadcast
+                &current_turn,
             );
 
             // Emit RemoteMoveApplied so the rollup can record the opponent's move on-chain.

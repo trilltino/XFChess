@@ -83,11 +83,18 @@ pub fn handler(
         );
     }
 
-    game.fen = next_fen;
+    game.fen = next_fen.clone();
     game.move_count += 1;
     game.turn += 1;
     let timestamp = Clock::get()?.unix_timestamp;
     game.updated_at = timestamp;
+
+    // Emit move details to program logs for Explorer visibility
+    msg!("XFChess: RecordMove");
+    msg!("  move: {}", move_str);
+    msg!("  fen: {}", next_fen);
+    msg!("  nonce: {}", nonce);
+    msg!("  timestamp: {}", timestamp);
 
     move_log.moves.push(move_str);
     move_log.timestamps.push(timestamp);
