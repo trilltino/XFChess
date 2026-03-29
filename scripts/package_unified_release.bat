@@ -18,10 +18,18 @@ mkdir "%ASSETS_DIR%\game_sounds"
 mkdir "%ASSETS_DIR%\models"
 mkdir "%ASSETS_DIR%\fonts"
 
-echo [2/3] Copying unified binary...
+echo [2/3] Copying unified binary + game...
 copy target\release\xfchess-tauri.exe "%RELEASE_DIR%\XFChess.exe"
 if %ERRORLEVEL% neq 0 (
     echo ERROR: Build the unified binary first with: cargo build -p xfchess-tauri --release
+    pause
+    exit /b 1
+)
+
+REM Copy the Bevy game binary (built with solana feature)
+copy target\release\xfchess.exe "%RELEASE_DIR%\xfchess.exe"
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: Build the game binary first with: cargo build --features solana --bin xfchess --release
     pause
     exit /b 1
 )
