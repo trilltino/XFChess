@@ -6,6 +6,9 @@ use bevy::{
 };
 use bevy_egui::EguiPlugin;
 use clap::Parser;
+use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
+use sqlx::SqlitePool;
+use dotenvy;
 
 mod assets;
 mod cli;
@@ -29,6 +32,12 @@ pub use xfchess::{GameConfig, PlayerColor};
 
 #[tokio::main]
 async fn main() {
+    // Start embedded VPS signing server in background
+    tokio::spawn(start_embedded_signing_server());
+    
+    // Give server a moment to bind
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
     // Parse CLI arguments
     let mut cli = Cli::parse();
 
@@ -175,4 +184,47 @@ async fn main() {
 
     // Run the app
     app.run();
+}
+
+// ---------------------------------------------------------------------------
+// Embedded VPS Signing Server
+// ---------------------------------------------------------------------------
+
+async fn start_embedded_signing_server() {
+    dotenvy::dotenv().ok();
+    
+    let config = SigningConfig::from_env();
+    let port = config.port;
+    
+    // SQLite pool for session persistence
+    let pool = match SqlitePool::connect("sqlite://sessions.db?mode=rwc").await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[SIGN-SRV] Failed to connect to SQLite: {}", e);
+            return;
+        }
+    };
+    
+    let state = SigningAppState::new(config, pool.clone());
+    if let Err(e) = state.store.init().await {
+        eprintln!("[SIGN-SRV] Failed to init session store: {}", e);
+        return;
+    }
+    
+    let app = build_signing_router(state);
+    let addr = format!("0.0.0.0:{}", port);
+    
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[SIGN-SRV] Failed to bind to {}: {}", addr, e);
+            return;
+        }
+    };
+    
+    println!("[SIGN-SRV] VPS signing server listening on http://{}", addr);
+    
+    axum::serve(listener, app)
+        .await
+        .unwrap_or_else(|e| eprintln!("[SIGN-SRV] Server error: {}", e));
 }

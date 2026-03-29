@@ -188,6 +188,10 @@ base64.workspace = true
 magic-resolver = { workspace = true, optional = true }
 xfchess-game = { workspace = true, optional = true }
 ephemeral-rollups-sdk = { workspace = true, optional = true }
+backend = { path = "backend" }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+dotenvy = "0.15"
+axum = "0.8.8"
 
 [target.'cfg(not(target_os = "solana"))'.dependencies]
 chess-logic-shared = { workspace = true, features = ["std", "uci"] }
