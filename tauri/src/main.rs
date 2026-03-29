@@ -10,6 +10,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tauri::Manager;
+use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
+use sqlx::SqlitePool;
+use tracing_subscriber::EnvFilter;
+use dotenvy;
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -388,6 +392,49 @@ async fn resolve_signed_tx(_signed_b64: String) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Embedded Signing Server (VPS)
+// ---------------------------------------------------------------------------
+
+async fn start_embedded_signing_server() {
+    dotenvy::dotenv().ok();
+    
+    let config = SigningConfig::from_env();
+    let port = config.port;
+    
+    // SQLite pool for session persistence
+    let pool = match SqlitePool::connect("sqlite://sessions.db?mode=rwc").await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[SIGN-SRV] Failed to connect to SQLite: {}", e);
+            return;
+        }
+    };
+    
+    let state = SigningAppState::new(config, pool.clone());
+    if let Err(e) = state.store.init().await {
+        eprintln!("[SIGN-SRV] Failed to init session store: {}", e);
+        return;
+    }
+    
+    let app = build_signing_router(state);
+    let addr = format!("0.0.0.0:{}", port);
+    
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[SIGN-SRV] Failed to bind to {}: {}", addr, e);
+            return;
+        }
+    };
+    
+    println!("[SIGN-SRV] VPS signing server listening on http://{}", addr);
+    
+    if let Err(e) = axum::serve(listener, app).await {
+        eprintln!("[SIGN-SRV] Server error: {}", e);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -414,6 +461,9 @@ fn main() {
             let p2 = pending_for_setup.clone();
             let w2 = pubkey_for_setup.clone();
             tauri::async_runtime::spawn(tcp_signing_server(p2, w2));
+
+            // Start embedded VPS signing server.
+            tauri::async_runtime::spawn(start_embedded_signing_server());
 
             // Launch the Bevy game and exit when it closes.
             let wallet_mode = std::env::var("XFCHESS_SOLANA").unwrap_or_default() == "1";
