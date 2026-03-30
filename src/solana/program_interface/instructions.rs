@@ -348,6 +348,7 @@ pub fn authorize_session_key_ix(
     player: Pubkey,
     game_id: u64,
     session_pubkey: Pubkey,
+    duration_seconds: i64,
 ) -> Result<Instruction> {
     let game_pda = Pubkey::find_program_address(
         &[GAME_SEED, &game_id.to_le_bytes()],
@@ -363,6 +364,7 @@ pub fn authorize_session_key_ix(
     let mut data = anchor_discriminator("authorize_session_key").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(session_pubkey.as_ref());
+    data.extend_from_slice(&duration_seconds.to_le_bytes());
 
     Ok(Instruction {
         program_id,

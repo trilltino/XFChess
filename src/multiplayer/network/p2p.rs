@@ -21,6 +21,8 @@ pub struct P2PConnectionState {
     pub is_host: bool,
     /// Player color (White = host, Black = joiner for now)
     pub player_color: Option<Color>,
+    /// When we entered Connecting state (for timeout)
+    pub connecting_since: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -138,6 +140,7 @@ impl Plugin for P2PConnectionPlugin {
                     handle_network_events,
                     handle_accept_invite,
                     handle_reject_invite,
+                    tick_connection_timeout,
                 ),
             );
     }
@@ -171,6 +174,15 @@ fn handle_connect_to_peer(
     network_state: Res<BraidNetworkState>,
 ) {
     for event in events.read() {
+        // Guard: don't re-connect if already connecting/connected/in-game
+        match &connection_state.status {
+            P2PConnectionStatus::Connecting | P2PConnectionStatus::Connected | P2PConnectionStatus::InGame => {
+                info!("Ignoring duplicate connect request — already {:?}", connection_state.status);
+                continue;
+            }
+            _ => {}
+        }
+
         let game_id: u64 = rand::random();
 
         connection_state.local_node_id = network_state.node_id.clone();
@@ -178,6 +190,7 @@ fn handle_connect_to_peer(
         connection_state.game_id = Some(game_id);
         connection_state.is_host = false;
         connection_state.status = P2PConnectionStatus::Connecting;
+        connection_state.connecting_since = Some(std::time::Instant::now());
         connection_state.player_color = Some(Color::Black);
 
         // Decode peer ID from bs58
@@ -369,10 +382,12 @@ fn handle_network_events(
                                 connection_state.status = P2PConnectionStatus::InGame;
 
                                 if let Some(tx) = &network_state.message_sender {
-                                    let local_str = bs58::encode(
-                                        connection_state.local_node_id.as_ref().unwrap().as_bytes(),
-                                    )
-                                    .into_string();
+                                    let local_str = connection_state
+                                        .local_node_id
+                                        .as_ref()
+                                        .or(network_state.node_id.as_ref())
+                                        .map(|id| bs58::encode(id.as_bytes()).into_string())
+                                        .unwrap_or_default();
                                     let peer_str =
                                         connection_state.peer_node_id.clone().unwrap_or_default();
 
@@ -456,6 +471,21 @@ fn handle_accept_invite(
                 } else {
                     info!("Accepted invite for game {}", event.game_id);
                 }
+            }
+        }
+    }
+}
+
+/// Reset Connecting state to Error after 12s so the user can retry.
+fn tick_connection_timeout(mut connection_state: ResMut<P2PConnectionState>) {
+    if let P2PConnectionStatus::Connecting = &connection_state.status {
+        if let Some(since) = connection_state.connecting_since {
+            if since.elapsed().as_secs() >= 12 {
+                warn!("[P2P] Connection timed out after 12s — resetting to allow retry");
+                connection_state.status = P2PConnectionStatus::Error(
+                    "Connection timed out — try again".to_string(),
+                );
+                connection_state.connecting_since = None;
             }
         }
     }

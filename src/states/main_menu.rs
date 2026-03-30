@@ -1346,32 +1346,45 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::small_space(ui);
 
-        if ui.button("Connect to Peer").clicked() {
-            // Validate the node ID before attempting connection
-            match ctx.p2p_ui.validate_node_id() {
-                Ok(()) => {
-                    // Clear any previous errors
-                    ctx.p2p_ui.clear_error();
+        let is_connecting = matches!(
+            ctx.p2p_state.status,
+            crate::multiplayer::P2PConnectionStatus::Connecting
+        );
+        let is_error = matches!(
+            ctx.p2p_state.status,
+            crate::multiplayer::P2PConnectionStatus::Error(_)
+        );
 
-                    // Set AI mode to multiplayer
-                    ctx.ai_config.mode = GameMode::Multiplayer;
-                    // Emit connect to peer event
-                    ctx.connect_events
-                        .write(crate::multiplayer::ConnectToPeerEvent {
-                            peer_node_id: ctx.p2p_ui.peer_input.trim().to_string(),
-                        });
-                    *ctx.core_mode = CoreGameMode::BraidMultiplayer;
-                    info!(
-                        "[MAIN_MENU] Joining P2P game with peer: {}",
-                        ctx.p2p_ui.peer_input
-                    );
-                }
-                Err(error_msg) => {
-                    ctx.p2p_ui.set_error(error_msg);
-                    warn!(
-                        "[MAIN_MENU] Invalid Node ID entered: {}",
-                        ctx.p2p_ui.peer_input
-                    );
+        if is_connecting {
+            ui.label(
+                egui::RichText::new("⏳ Connecting... (up to 12s)")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(255, 200, 100)),
+            );
+        } else {
+            let btn_label = if is_error { "🔗 Retry Connect" } else { "Connect to Peer" };
+            if ui.button(btn_label).clicked() {
+                match ctx.p2p_ui.validate_node_id() {
+                    Ok(()) => {
+                        ctx.p2p_ui.clear_error();
+                        ctx.ai_config.mode = GameMode::Multiplayer;
+                        ctx.connect_events
+                            .write(crate::multiplayer::ConnectToPeerEvent {
+                                peer_node_id: ctx.p2p_ui.peer_input.trim().to_string(),
+                            });
+                        *ctx.core_mode = CoreGameMode::BraidMultiplayer;
+                        info!(
+                            "[MAIN_MENU] Joining P2P game with peer: {}",
+                            ctx.p2p_ui.peer_input
+                        );
+                    }
+                    Err(error_msg) => {
+                        ctx.p2p_ui.set_error(error_msg);
+                        warn!(
+                            "[MAIN_MENU] Invalid Node ID entered: {}",
+                            ctx.p2p_ui.peer_input
+                        );
+                    }
                 }
             }
         }

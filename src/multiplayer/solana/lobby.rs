@@ -255,7 +255,7 @@ async fn async_create_game(
 
     let create_ix = create_game_ix(program_id, wallet_pubkey, game_id, wager_lamports, GameType::PvP)
         .map_err(|e| format!("build create_game_ix: {e}"))?;
-    let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey)
+    let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
         .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
 
     let mut ixs: Vec<solana_sdk::instruction::Instruction> = Vec::new();
@@ -404,7 +404,7 @@ async fn async_join_game(
 
     let join_ix = join_game_ix(program_id, wallet_pubkey, game_id)
         .map_err(|e| format!("build join_game_ix: {e}"))?;
-    let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey)
+    let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
         .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
 
     let mut ixs: Vec<solana_sdk::instruction::Instruction> = Vec::new();

@@ -22,7 +22,7 @@ REM                  Leave blank for ephemeral keypair (dev only, worthless unti
 REM  PROGRAM_ID      on-chain XFChess program address.
 REM  JWT_SECRET      must be 32+ bytes in production.
 REM  SIGNING_PORT    VPS HTTP port (default 8090).
-set RUST_LOG=info,wgpu_hal=off,wgpu_core=off,wgpu=off,bevy_gltf=off,bevy_image=off,bevy_render=error,bevy_winit=warn,bevy_diagnostic=off,bevy_egui=warn,relay_actor=off,braid_iroh=warn,xfchess::states::main_menu_showcase=off
+set RUST_LOG=info,wgpu_hal=off,wgpu_core=off,wgpu=off,bevy_gltf=off,bevy_image=off,bevy_render=error,bevy_winit=warn,bevy_diagnostic=off,bevy_egui=warn,relay_actor=off,braid_iroh=warn,xfchess::states::main_menu_showcase=off,iroh::address_lookup::pkarr=off,iroh::net_report=off,iroh_quinn_udp=off,iroh_quinn_proto=off,pkarr=off
 set FEE_PAYER_KEYS=keys\fee-payer.json
 set SIGNING_PORT=8090
 set JWT_SECRET=change-me-in-production-32-bytes!!
