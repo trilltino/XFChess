@@ -1,0 +1,29 @@
+[package]
+name = "iroh-h3-axum"
+version = "0.2.0"
+edition = "2024"
+description = "Axum integration for serving and consuming HTTP/3 over the Iroh QUIC P2P transport."
+license = "MIT"
+repository = "https://github.com/Le-Maz/iroh-h3"
+# readme = "../README.md"
+keywords = ["axum", "quic", "http3", "p2p", "iroh"]
+categories = ["network-programming", "asynchronous", "web-programming"]
+
+[dependencies]
+iroh-h3 = { version = "0.1.0", path = "../iroh-h3" }
+bytes = "1.11.1"
+futures-lite = "2.6.1"
+h3 = "0.0.8"
+iroh = "0.96.1"
+tokio = { version = "1.49.0", features = ["rt"], default-features = false }
+axum = { version = "0.8.8", default-features = false }
+http = "1.4.0"
+tower-service = "0.3.3"
+http-body = "1.0.1"
+
+# Use n0-futures to support both OS and WASM/web use
+n0-future = "0.3.2"
+
+[dev-dependencies]
+iroh-h3-client = { path = "../iroh-h3-client", features = ["json"] }
+wasm-bindgen-test = "0.3.61"

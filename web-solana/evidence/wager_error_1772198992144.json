@@ -1,0 +1,22 @@
+{
+  "phase": "wager_complete",
+  "timestamp": "2026-02-27T13:29:51.359Z",
+  "gamePda": "FCHKT1nQnDN4Wk4wpU4dagfmdo7fXE5N9wYyYSZQhsDq",
+  "player1": "DXbjrdjQRdNbX4wLaGnBLdXuQ2C5ffvpC98Nt1RwqMFV",
+  "player2": "M5fTDBkDmRuVGk3SHzyQp9aZYaEMtxXi7dkR1jKYaYm",
+  "wagerAmount": 0.01,
+  "steps": {
+    "gameInitialized": null,
+    "player2Joined": null,
+    "delegated": null,
+    "moves": [],
+    "undelegated": null
+  },
+  "balances": {
+    "player1Before": 0,
+    "player1After": 0,
+    "player2Before": 0,
+    "player2After": 0
+  },
+  "error": "Simulation failed. \nMessage: Transaction simulation failed: Attempt to debit an account but found no record of a prior credit.. \nLogs: \n[]. \nCatch the `SendTransactionError` and call `getLogs()` on it for full details."
+}

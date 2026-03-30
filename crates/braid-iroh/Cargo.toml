@@ -1,0 +1,52 @@
+[package]
+name = "braid-iroh"
+version.workspace = true
+edition.workspace = true
+description = "Braid-HTTP over Iroh P2P - Pure Rust Backend Integration"
+license.workspace = true
+
+[features]
+default = ["proxy"]
+proxy = []
+
+[dependencies]
+# ── Iroh P2P stack ──────────────────────────────────────────────
+iroh = { version = "0.96.1", features = ["test-utils"] }
+n0-future = "0.3.2"
+iroh-gossip = { path = "../iroh-gossip", features = ["net"] }
+iroh-h3-axum = { path = "../iroh-h3-axum" }
+iroh-h3-client = { path = "../iroh-h3-client" }
+
+braid-core = { workspace = true, features = ["server", "client"] }
+
+# ── Web framework ──────────────────────────────────────────────
+axum = { version = "0.8.8", features = ["ws"] }
+tower = "0.5.3"
+tower-http = { version = "0.6.8", features = ["cors", "trace", "fs"] }
+http = "1.4.0"
+
+# ── Async runtime ──────────────────────────────────────────────
+tokio.workspace = true
+tokio-stream = { version = "0.1.18", features = ["sync"] }
+futures = "0.3"
+
+# ── Serialization ──────────────────────────────────────────────
+serde.workspace = true
+serde_json.workspace = true
+bytes = "1"
+
+# ── Hashing ────────────────────────────────────────────────────
+blake3 = "1.8.3"
+
+# ── Utilities ──────────────────────────────────────────────────
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+parking_lot = "0.12"
+clap = { version = "4.5", features = ["derive"] }
+rand.workspace = true
+
+[dev-dependencies]
+rand = "0.10"

@@ -1,0 +1,25 @@
+# Implementation Plan - Fix xfchess-game Compilation
+
+The `xfchess-game` Solana program is currently failing to compile with the error:
+`unresolved import crate: could not find __client_accounts_crate in the crate root`.
+
+This is a known issue in Anchor 0.30+ where the `#[program]` macro fails to find the necessary `anchor_lang` context, often when it's wrapped or preceded by other attribute macros like `#[ephemeral]`.
+
+## Proposed Changes
+
+### [MODIFY] [lib.rs](file:///c:/Users/isich/XFChess/programs/xfchess-game/src/lib.rs)
+
+- Add `use anchor_lang as __client_accounts_crate;` at the top level.
+- Add `use anchor_lang as __client_accounts_crate;` inside the `xfchess_game` module.
+- Use `instructions::Account` and `state::Type` instead of `crate::` or `super::` prefixes where possible, using the imports from `use super::*;`.
+- Remove redundant `pub use instructions::*;` and `pub use state::*;` from the root to avoid shadowing.
+
+## Verification Plan
+
+### Automated Tests
+- Run `cargo build -p xfchess-game --features move-validation` to verify the program compiles.
+- Run `scripts\run_multiplayer.bat` to ensure the full build pipeline works.
+
+## Open Questions
+
+- None at the moment. If this doesn't fix it, we may need to investigate the `ephemeral-rollups-sdk`'s macro implementation further.

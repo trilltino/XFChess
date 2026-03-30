@@ -1,0 +1,25 @@
+[package]
+name = "xfchess-ai-service"
+version.workspace = true
+edition.workspace = true
+description = "AI service for XFChess with Stockfish integration"
+license.workspace = true
+repository = "https://github.com/trilltino/XFChess"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = "0.6"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "xfchess-ai-service"
+path = "src/main.rs"

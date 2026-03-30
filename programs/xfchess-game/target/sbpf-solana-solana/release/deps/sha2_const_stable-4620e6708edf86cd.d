@@ -1,0 +1,10 @@
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\sha2_const_stable-4620e6708edf86cd.d: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\constants.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\sha.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\util.rs
+
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\libsha2_const_stable-4620e6708edf86cd.rlib: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\constants.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\sha.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\util.rs
+
+\\?\C:\Users\isich\XFChess\programs\xfchess-game\target\sbpf-solana-solana\release\deps\libsha2_const_stable-4620e6708edf86cd.rmeta: C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\lib.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\constants.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\sha.rs C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\util.rs
+
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\lib.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\constants.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\sha.rs:
+C:\Users\isich\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha2-const-stable-0.1.0\src\util.rs:
