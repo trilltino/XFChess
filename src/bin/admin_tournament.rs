@@ -24,8 +24,8 @@ use solana_sdk::{
 const PROGRAM_ID: &str = "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX";
 const DEVNET_RPC: &str = "https://api.devnet.solana.com";
 const TOURNAMENT_SEED: &[u8] = b"tournament";
-const TOURNAMENT_ESCROW_SEED: &[u8] = b"tournament_escrow";
-const TOURNAMENT_MATCH_SEED: &[u8] = b"tournament_match";
+const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
+const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 const DEFAULT_KEYPAIR: &str = "keys/fee-payer.json";
 const DEFAULT_VPS: &str = "http://127.0.0.1:8090";
 
@@ -401,7 +401,7 @@ fn record_match_result_ix(program_id: Pubkey, authority: Pubkey, id: u64, match_
         accounts: vec![
             AccountMeta::new(tournament_pda(program_id, id), false),
             AccountMeta::new(match_pda(program_id, id, match_index), false),
-            AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new_readonly(Pubkey::default(), false), // Placeholder for game PDA (Unchecked)
             AccountMeta::new(authority, true),
         ],
         data,

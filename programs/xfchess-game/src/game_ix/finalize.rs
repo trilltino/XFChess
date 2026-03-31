@@ -104,6 +104,16 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64, result: GameResult) -> Resu
     let white_profile = &mut ctx.accounts.white_profile;
     let black_profile = &mut ctx.accounts.black_profile;
 
+    // Handle legacy profiles (created before username fields were added)
+    if white_profile.username.len() > 20 {
+        white_profile.username = String::new();
+        white_profile.username_set = false;
+    }
+    if black_profile.username.len() > 20 {
+        black_profile.username = String::new();
+        black_profile.username_set = false;
+    }
+
     let ea =
         1.0 / (1.0 + 10.0f64.powf((black_profile.elo as f64 - white_profile.elo as f64) / 400.0));
     let eb = 1.0 - ea;

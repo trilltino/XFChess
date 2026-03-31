@@ -1,6 +1,18 @@
 @echo off
 cd /d "%~dp0.."
 
+REM Check for Stockfish
+if not exist "stockfish.exe" (
+    echo Stockfish not found. Downloading...
+    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.exe' -OutFile 'stockfish.exe'"
+    if not exist "stockfish.exe" (
+        echo Failed to download Stockfish. Please download manually and place in project root.
+        pause
+        exit /b 1
+    )
+    echo Stockfish downloaded successfully.
+)
+
 taskkill /IM xfchess-tauri.exe /F >nul 2>&1
 taskkill /IM xfchess.exe /F >nul 2>&1
 taskkill /IM signing-server.exe /F >nul 2>&1
@@ -31,3 +43,7 @@ timeout /t 3 /nobreak >nul
 set XFCHESS_IDENTITY=keys\peer_2.key
 set XFCHESS_WALLET_PORT=7464
 start "Player 2" target\debug\xfchess-tauri.exe
+
+echo.
+echo Game instances launched. Close this window to stop all processes.
+pause

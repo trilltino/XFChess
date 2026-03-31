@@ -7,9 +7,14 @@ pub const MOVE_LOG_SEED: &[u8] = b"move_log";
 #[constant]
 pub const PROFILE_SEED: &[u8] = b"profile";
 #[constant]
+pub const USERNAME_SEED: &[u8] = b"username";
+#[constant]
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 #[constant]
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
+pub const TOURNAMENT_SEED: &[u8] = b"tournament";
+pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
+pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 
 // Dedicated AI Authority Pubkey (Example, to be replaced with real AI signer)
 pub mod ai_authority {

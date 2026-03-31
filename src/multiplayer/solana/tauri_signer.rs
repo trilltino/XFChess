@@ -15,9 +15,8 @@ use solana_sdk::{
     instruction::Instruction,
     message::{v0, VersionedMessage},
     pubkey::Pubkey,
-    signature::{Keypair, Signature, Signer},
-    signer::null_signer::NullSigner,
-    transaction::VersionedTransaction,
+    signature::{Keypair, Signature, Signer, NullSigner},
+    transaction::{Transaction, VersionedTransaction},
 };
 
 /// Maximum seconds to wait for the user to approve the transaction in Phantom.
@@ -60,18 +59,20 @@ pub fn sign_via_tauri_only(
     let blockhash = rpc
         .get_latest_blockhash()
         .map_err(|e| format!("get_latest_blockhash: {}", e))?;
-    let message = v0::Message::try_compile(&wallet_pubkey, instructions, &[], blockhash)
-        .map_err(|e| format!("compile_message: {}", e))?;
-    let wallet_null = NullSigner::new(&wallet_pubkey);
-    let mut dyn_signers: Vec<&dyn Signer> = vec![&wallet_null as &dyn Signer];
-    for k in local_signers {
-        dyn_signers.push(*k as &dyn Signer);
+    
+    // Use legacy Transaction to match wallet UI
+    let mut tx = Transaction::new_with_payer(instructions, Some(&wallet_pubkey));
+    
+    // Add local signers first (if any)
+    for keypair in local_signers {
+        tx.try_sign(&[*keypair], blockhash)
+            .map_err(|e| format!("local_sign: {}", e))?;
     }
-    let tx = VersionedTransaction::try_new(
-        VersionedMessage::V0(message),
-        dyn_signers.as_slice(),
-    )
-    .map_err(|e| format!("build_tx: {}", e))?;
+    
+    // Partially sign with wallet as NullSigner placeholder
+    tx.try_partial_sign(&[&NullSigner::new(&wallet_pubkey)], blockhash)
+        .map_err(|e| format!("partial_sign: {}", e))?;
+    
     let tx_bytes = bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
     send_to_tauri_blocking(&tx_bytes)
 }

@@ -35,6 +35,21 @@ pub struct SolanaIntegrationState {
     pub opponent_pubkey: Option<Pubkey>,
     /// Program ID for XFChess
     pub program_id: Pubkey,
+    /// Profile status for the connected wallet
+    pub profile_status: ProfileStatus,
+    /// Whether profile check is in progress
+    pub checking_profile: bool,
+    /// Pending async profile check task
+    pub pending_profile_check: Option<tokio::task::JoinHandle<Result<ProfileStatus, String>>>,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub enum ProfileStatus {
+    #[default]
+    Unknown,
+    NoProfile,
+    HasProfileNoUsername,
+    HasProfileWithUsername,
 }
 
 impl std::fmt::Debug for SolanaIntegrationState {
@@ -59,6 +74,9 @@ impl Default for SolanaIntegrationState {
             pending_task: None,
             opponent_pubkey: None,
             program_id: SOLANA_PROGRAM_ID.parse().unwrap_or_default(),
+            profile_status: ProfileStatus::Unknown,
+            checking_profile: false,
+            pending_profile_check: None,
         }
     }
 }

@@ -6,6 +6,7 @@ pub mod auth;
 pub mod game_ui;
 // pub mod inspector;
 pub mod multiplayer_menu;
+pub mod profile_creation;
 pub mod promotion_ui;
 #[cfg(feature = "solana")]
 pub mod solana_panel;

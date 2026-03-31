@@ -25,5 +25,7 @@ pub fn handler(ctx: Context<InitProfile>) -> Result<()> {
     profile.wins = 0;
     profile.losses = 0;
     profile.draws = 0;
+    profile.username = String::new();
+    profile.username_set = false;
     Ok(())
 }

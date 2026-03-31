@@ -8,10 +8,11 @@ pub mod game_ix;
 pub mod governance_ix;
 pub mod moves_ix;
 pub mod state;
+pub mod tournament_ix;
 
 // Re-export account structs at crate root so Anchor's generated __private::__global handlers
 // can find them via their `use super::*` chain.
-pub use account_ix::{InitProfile, WithdrawExpiredWager};
+pub use account_ix::{InitProfile, SetUsername, WithdrawExpiredWager};
 pub use delegation_ix::{
     AuthorizeSessionCtx, DelegateGameCtx, InitializeAfterUndelegation, RevokeSessionCtx,
     UndelegateGameCtx,
@@ -19,6 +20,10 @@ pub use delegation_ix::{
 pub use game_ix::{CancelGame, CreateGame, EndGame, JoinGame};
 pub use governance_ix::{DisputeGame, ResolveDispute};
 pub use moves_ix::{CommitMoveBatchCtx, RecordMove};
+pub use tournament_ix::{
+    AdvanceFinal, CancelTournament, ClaimTournamentPrize, InitializeTournament,
+    RecordMatchResult, RegisterPlayer, StartTournament,
+};
 
 // Anchor 0.32 #[program] generates `pub use crate::__client_accounts_<snake>::*` at the crate
 // root for every instruction accounts struct. The derive macro generates these as pub(crate)
@@ -26,6 +31,9 @@ pub use moves_ix::{CommitMoveBatchCtx, RecordMove};
 // pub mod wrappers here that re-export the pub *contents* of each pub(crate) module.
 pub mod __client_accounts_init_profile {
     pub use crate::account_ix::profile::__client_accounts_init_profile::*;
+}
+pub mod __client_accounts_set_username {
+    pub use crate::account_ix::set_username::__client_accounts_set_username::*;
 }
 pub mod __client_accounts_withdraw_expired_wager {
     pub use crate::account_ix::withdraw::__client_accounts_withdraw_expired_wager::*;
@@ -69,6 +77,27 @@ pub mod __client_accounts_commit_move_batch_ctx {
 pub mod __client_accounts_record_move {
     pub use crate::moves_ix::record::__client_accounts_record_move::*;
 }
+pub mod __client_accounts_initialize_tournament {
+    pub use crate::tournament_ix::initialize::__client_accounts_initialize_tournament::*;
+}
+pub mod __client_accounts_register_player {
+    pub use crate::tournament_ix::register::__client_accounts_register_player::*;
+}
+pub mod __client_accounts_start_tournament {
+    pub use crate::tournament_ix::start::__client_accounts_start_tournament::*;
+}
+pub mod __client_accounts_record_match_result {
+    pub use crate::tournament_ix::record_result::__client_accounts_record_match_result::*;
+}
+pub mod __client_accounts_advance_final {
+    pub use crate::tournament_ix::record_result::__client_accounts_advance_final::*;
+}
+pub mod __client_accounts_claim_tournament_prize {
+    pub use crate::tournament_ix::claim_prize::__client_accounts_claim_tournament_prize::*;
+}
+pub mod __client_accounts_cancel_tournament {
+    pub use crate::tournament_ix::cancel::__client_accounts_cancel_tournament::*;
+}
 
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
@@ -78,7 +107,7 @@ declare_id!("FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX");
 #[program]
 pub mod xfchess_game {
     use super::*;
-    use crate::account_ix::{InitProfile, WithdrawExpiredWager};
+    use crate::account_ix::{InitProfile, SetUsername, WithdrawExpiredWager};
     use crate::delegation_ix::{
         AuthorizeSessionCtx, DelegateGameCtx, InitializeAfterUndelegation, RevokeSessionCtx,
         UndelegateGameCtx,
@@ -90,6 +119,10 @@ pub mod xfchess_game {
 
     pub fn init_profile(ctx: Context<InitProfile>) -> Result<()> {
         crate::account_ix::profile::handler(ctx)
+    }
+
+    pub fn set_username(ctx: Context<SetUsername>, username: String) -> Result<()> {
+        crate::account_ix::set_username::handler(ctx, username)
     }
 
     pub fn create_game(
@@ -207,5 +240,46 @@ pub mod xfchess_game {
             account_seeds,
         )?;
         Ok(())
+    }
+
+    pub fn initialize_tournament(
+        ctx: Context<InitializeTournament>,
+        tournament_id: u64,
+        name: String,
+        entry_fee: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::initialize::handler(ctx, tournament_id, name, entry_fee)
+    }
+
+    pub fn register_player(ctx: Context<RegisterPlayer>, tournament_id: u64) -> Result<()> {
+        crate::tournament_ix::register::handler(ctx, tournament_id)
+    }
+
+    pub fn start_tournament(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> {
+        crate::tournament_ix::start::handler(ctx, tournament_id)
+    }
+
+    pub fn record_match_result(
+        ctx: Context<RecordMatchResult>,
+        tournament_id: u64,
+        match_index: u8,
+        winner: Pubkey,
+    ) -> Result<()> {
+        crate::tournament_ix::record_result::handler(ctx, tournament_id, match_index, winner)
+    }
+
+    pub fn advance_final(ctx: Context<AdvanceFinal>, tournament_id: u64) -> Result<()> {
+        crate::tournament_ix::record_result::handler_advance_final(ctx, tournament_id)
+    }
+
+    pub fn claim_tournament_prize(
+        ctx: Context<ClaimTournamentPrize>,
+        tournament_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::claim_prize::handler(ctx, tournament_id)
+    }
+
+    pub fn cancel_tournament(ctx: Context<CancelTournament>, tournament_id: u64) -> Result<()> {
+        crate::tournament_ix::cancel::handler(ctx, tournament_id)
     }
 }

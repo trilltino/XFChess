@@ -201,7 +201,6 @@ pub fn build_create_game_ix(
     const GAME_SEED: &[u8] = b"game";
     const MOVE_LOG_SEED: &[u8] = b"move_log";
     const WAGER_ESCROW_SEED: &[u8] = b"escrow";
-    const PROFILE_SEED: &[u8] = b"profile";
 
     let game_pda = Pubkey::find_program_address(
         &[GAME_SEED, &game_id.to_le_bytes()],
@@ -213,10 +212,6 @@ pub fn build_create_game_ix(
     ).0;
     let escrow_pda = Pubkey::find_program_address(
         &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    ).0;
-    let player_profile = Pubkey::find_program_address(
-        &[PROFILE_SEED, payer.as_ref()],
         &program_id,
     ).0;
 
@@ -235,7 +230,6 @@ pub fn build_create_game_ix(
             AccountMeta::new(game_pda, false),
             AccountMeta::new(move_log_pda, false),
             AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(player_profile, false),
             AccountMeta::new(payer, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],

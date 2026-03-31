@@ -10,6 +10,7 @@ pub struct ResolveDispute<'info> {
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [b"dispute", &game_id.to_le_bytes()], bump)]
     pub dispute_record: Account<'info, DisputeRecord>,
+    /// CHECK: Escrow PDA validated by seeds in constraint
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
     /// CHECK: Admin authority to resolve disputes

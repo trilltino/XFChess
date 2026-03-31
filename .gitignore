@@ -85,3 +85,7 @@ launch_peer_*.bat
 # Exclude all JSON files except specific ones
 !idl.json
 !idl_full.json
+
+# Node modules (filename too long issues)
+node_modules/
+**/node_modules/

@@ -69,8 +69,6 @@ async fn test_create_game_pvai() {
         Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], &program_id);
     let (escrow_pda, _) =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id);
-    let (player_profile, _) =
-        Pubkey::find_program_address(&[PROFILE_SEED, payer.pubkey().as_ref()], &program_id);
 
     let ix = solana_sdk::instruction::Instruction {
         program_id,
@@ -78,7 +76,6 @@ async fn test_create_game_pvai() {
             game: game_pda,
             move_log: move_log_pda,
             escrow_pda,
-            player_profile,
             player: payer.pubkey(),
             system_program: system_program::id(),
         }
@@ -120,10 +117,6 @@ async fn test_join_game_pvp() {
         Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], &program_id);
     let (escrow_pda, _) =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id);
-    let (white_profile, _) =
-        Pubkey::find_program_address(&[PROFILE_SEED, payer.pubkey().as_ref()], &program_id);
-    let (black_profile, _) =
-        Pubkey::find_program_address(&[PROFILE_SEED, opponent.pubkey().as_ref()], &program_id);
 
     // 1. Create Game
     let create_ix = solana_sdk::instruction::Instruction {
@@ -132,7 +125,6 @@ async fn test_join_game_pvp() {
             game: game_pda,
             move_log: move_log_pda,
             escrow_pda,
-            player_profile: white_profile,
             player: payer.pubkey(),
             system_program: system_program::id(),
         }
@@ -155,7 +147,6 @@ async fn test_join_game_pvp() {
         accounts: xfchess_game::accounts::JoinGame {
             game: game_pda,
             escrow_pda,
-            player_profile: black_profile,
             player: opponent.pubkey(),
             system_program: system_program::id(),
         }
@@ -189,8 +180,6 @@ async fn test_record_move_ai_security() {
         Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], &program_id);
     let (escrow_pda, _) =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id);
-    let (player_profile, _) =
-        Pubkey::find_program_address(&[PROFILE_SEED, payer.pubkey().as_ref()], &program_id);
 
     // 1. Create PvAI Game (Starts Active)
     let create_ix = solana_sdk::instruction::Instruction {
@@ -199,7 +188,6 @@ async fn test_record_move_ai_security() {
             game: game_pda,
             move_log: move_log_pda,
             escrow_pda,
-            player_profile,
             player: payer.pubkey(),
             system_program: system_program::id(),
         }
@@ -222,12 +210,15 @@ async fn test_record_move_ai_security() {
             game: game_pda,
             move_log: move_log_pda,
             player: payer.pubkey(),
+            session_delegation: payer.pubkey(),
         }
         .to_account_metas(None),
         data: xfchess_game::instruction::RecordMove {
             game_id,
             move_str: "e2e4".to_string(),
             next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
+            nonce: 0,
+            signature: None,
         }
         .data(),
     };
@@ -242,12 +233,15 @@ async fn test_record_move_ai_security() {
             game: game_pda,
             move_log: move_log_pda,
             player: payer.pubkey(), // Payer is NOT AI authority
+            session_delegation: payer.pubkey(),
         }
         .to_account_metas(None),
         data: xfchess_game::instruction::RecordMove {
             game_id,
             move_str: "e7e5".to_string(),
             next_fen: "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2".to_string(),
+            nonce: 0,
+            signature: None,
         }
         .data(),
     };
@@ -308,7 +302,6 @@ async fn test_finalize_game_elo() {
             game: game_pda,
             move_log: move_log_pda,
             escrow_pda,
-            player_profile: white_profile,
             player: white,
             system_program: system_program::id(),
         }
@@ -325,7 +318,6 @@ async fn test_finalize_game_elo() {
         accounts: xfchess_game::accounts::JoinGame {
             game: game_pda,
             escrow_pda,
-            player_profile: black_profile,
             player: black.pubkey(),
             system_program: system_program::id(),
         }

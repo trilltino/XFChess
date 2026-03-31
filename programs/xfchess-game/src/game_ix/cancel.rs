@@ -8,6 +8,7 @@ use anchor_lang::prelude::*;
 pub struct CancelGame<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
+    /// CHECK: Escrow PDA validated by seeds in constraint
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
     #[account(mut)]

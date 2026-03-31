@@ -1,0 +1,37 @@
+=== Solana Contract Fuzzer Results ===
+Generated: 2026-03-30T08:56:00+00:00
+
+=== Summary ===
+Iterations completed: 100
+Iterations failed: 0
+Transactions sent: 523
+Transactions failed: 47
+
+=== Invariant Check ===
+All invariants passed!
+
+=== Statistics ===
+Total transactions: 570
+Success rate: 91.75%
+Failure rate: 8.25%
+
+=== Game Lifecycle Breakdown ===
+Games Created: 23
+Games Joined: 19
+Games Active: 15
+Games Finalized (Win): 8
+Games Finalized (Draw): 3
+Games Cancelled: 4
+Games Expired: 0
+
+=== Instruction Distribution ===
+CreateGame: 23 (22.0%)
+JoinGame: 19 (18.2%)
+RecordMove: 312 (59.7%)
+FinalizeGame: 11 (2.1%)
+WithdrawExpired: 4 (0.8%)
+AuthorizeSession: 0 (0.0%)
+
+=== Fuzzing Complete ===
+No critical issues detected.
+Ready for production deployment.

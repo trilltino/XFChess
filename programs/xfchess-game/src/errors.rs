@@ -48,6 +48,22 @@ pub enum GameErrorCode {
     UnauthorizedDisputeResolution,
     #[msg("Wager amount exceeds the maximum allowed.")]
     WagerTooHigh,
+    #[msg("Tournament is not in registration phase.")]
+    TournamentNotInRegistration,
+    #[msg("Tournament is full.")]
+    TournamentFull,
+    #[msg("Player is already registered for this tournament.")]
+    AlreadyRegistered,
+    #[msg("Unauthorized: Not the tournament authority.")]
+    NotTournamentAuthority,
+    #[msg("Invalid tournament match status.")]
+    InvalidMatchStatus,
+    #[msg("Tournament is not completed.")]
+    TournamentNotCompleted,
+    #[msg("No prize pool to claim or not the winner.")]
+    NoPrizeToClaim,
+    #[msg("Tournament is not active.")]
+    TournamentNotActive,
 }
 
 pub use GameErrorCode as XfchessGameError;

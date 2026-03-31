@@ -23312,6 +23312,8 @@ dependencies = [
  "anchor-lang",
  "anyhow",
  "async-trait",
+ "axum",
+ "backend",
  "base64 0.22.1",
  "bevy 0.18.1",
  "bevy_egui",
@@ -23330,6 +23332,7 @@ dependencies = [
  "crossbeam-channel",
  "directories",
  "dirs 5.0.1",
+ "dotenvy",
  "egui 0.29.1",
  "ephemeral-rollups-sdk",
  "futures-lite",
@@ -23350,6 +23353,7 @@ dependencies = [
  "solana-program 2.3.0",
  "solana-sdk",
  "solana-secp256k1-program",
+ "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -23393,15 +23397,19 @@ name = "xfchess-tauri"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "backend",
  "base64 0.22.1",
  "bs58",
+ "dotenvy",
  "open",
  "serde",
  "serde_json",
+ "sqlx",
  "tauri",
  "tauri-build",
  "tokio",
  "tower-http",
+ "tracing-subscriber",
 ]
 
 [[package]]

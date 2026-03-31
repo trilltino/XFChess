@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 
 use crate::multiplayer::solana::integration::DEVNET_RPC_URL;
 use crate::solana::instructions::{
-    authorize_session_key_ix, create_game_ix, init_profile_ix, join_game_ix, GameType, GAME_SEED,
+    authorize_session_key_ix, create_game_ix, join_game_ix, GameType, GAME_SEED,
     PROGRAM_ID as SOLANA_PROGRAM_ID, WAGER_ESCROW_SEED,
 };
 
@@ -244,28 +244,12 @@ async fn async_create_game(
         .parse()
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
 
-    // 2. Build instructions — include init_profile if not yet created (no extra popup).
-    use crate::solana::instructions::PROFILE_SEED;
-    let rpc_check = RpcClient::new(rpc_url.clone());
-    let profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, wallet_pubkey.as_ref()],
-        &program_id,
-    ).0;
-    let needs_profile = rpc_check.get_account(&profile_pda).is_err();
-
     let create_ix = create_game_ix(program_id, wallet_pubkey, game_id, wager_lamports, GameType::PvP)
         .map_err(|e| format!("build create_game_ix: {e}"))?;
     let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
         .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
 
-    let mut ixs: Vec<solana_sdk::instruction::Instruction> = Vec::new();
-    if needs_profile {
-        if let Ok(ix) = init_profile_ix(program_id, wallet_pubkey) {
-            ixs.push(ix);
-        }
-    }
-    ixs.push(create_ix);
-    ixs.push(auth_ix);
+    let ixs = vec![create_ix, auth_ix];
 
     // 3. ONE wallet popup — signs everything together.
     let signed_bytes = sign_via_tauri_only(&rpc_url, wallet_pubkey, &ixs, &[])
@@ -384,9 +368,6 @@ async fn async_join_game(
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::tauri_signer::sign_via_tauri_only;
     use crate::multiplayer::rollup::vps_client;
-    use crate::solana::instructions::PROFILE_SEED;
-
-    let rpc = RpcClient::new(&rpc_url);
 
     // 1. Ask VPS for a session keypair for this game.
     let session_pubkey_str = vps_client::create_session(game_id, &wallet_pubkey.to_string())
@@ -395,26 +376,12 @@ async fn async_join_game(
         .parse()
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
 
-    // 2. Build instructions — include init_profile if not yet created (no extra popup).
-    let profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, wallet_pubkey.as_ref()],
-        &program_id,
-    ).0;
-    let needs_profile = rpc.get_account(&profile_pda).is_err();
-
     let join_ix = join_game_ix(program_id, wallet_pubkey, game_id)
         .map_err(|e| format!("build join_game_ix: {e}"))?;
     let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
         .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
 
-    let mut ixs: Vec<solana_sdk::instruction::Instruction> = Vec::new();
-    if needs_profile {
-        if let Ok(ix) = init_profile_ix(program_id, wallet_pubkey) {
-            ixs.push(ix);
-        }
-    }
-    ixs.push(join_ix);
-    ixs.push(auth_ix);
+    let ixs = vec![join_ix, auth_ix];
 
     // 3. ONE wallet popup — signs everything together.
     let signed_bytes = sign_via_tauri_only(&rpc_url, wallet_pubkey, &ixs, &[])

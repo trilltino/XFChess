@@ -22,8 +22,12 @@ pub const PROGRAM_ID: &str = "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX";
 pub const GAME_SEED: &[u8] = b"game";
 pub const MOVE_LOG_SEED: &[u8] = b"move_log";
 pub const PROFILE_SEED: &[u8] = b"profile";
+pub const USERNAME_SEED: &[u8] = b"username";
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
+pub const TOURNAMENT_SEED: &[u8] = b"tournament";
+pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
+pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 
 /// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
 fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
@@ -98,19 +102,12 @@ pub fn create_game_ix(
         GameType::PvAI => 1,
     });
 
-    let player_profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, payer.as_ref()],
-        &program_id,
-    )
-    .0;
-
     Ok(Instruction {
         program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
             AccountMeta::new(move_log_pda, false),
             AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(player_profile_pda, false),
             AccountMeta::new(payer, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
@@ -147,18 +144,11 @@ pub fn join_game_ix(
     let mut data = anchor_discriminator("join_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
 
-    let player_profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, player.as_ref()],
-        &program_id,
-    )
-    .0;
-
     Ok(Instruction {
         program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
             AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(player_profile_pda, false),
             AccountMeta::new(player, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
@@ -182,12 +172,12 @@ pub fn join_game_ix(
 pub fn record_move_ix(
     program_id: Pubkey,
     player: Pubkey,
+    player_wallet: Pubkey, // Base wallet for session delegation PDA
     game_id: u64,
     move_str: String,
     next_fen: String,
-    _annotation: Option<String>,
-    _move_time: Option<String>,
-    _prev_hash: &[u8; 32],
+    nonce: u64,
+    signature: Option<Vec<u8>>,
 ) -> Result<Instruction> {
     let game_pda = Pubkey::find_program_address(
         &[GAME_SEED, &game_id.to_le_bytes()],
@@ -199,18 +189,40 @@ pub fn record_move_ix(
         &program_id,
     )
     .0;
+    let session_delegation_pda = Pubkey::find_program_address(
+        &[
+            b"session_delegation",
+            &game_id.to_le_bytes(),
+            player_wallet.as_ref(),
+        ],
+        &program_id,
+    )
+    .0;
 
     let mut data = anchor_discriminator("record_move").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend(borsh_string(&move_str));
     data.extend(borsh_string(&next_fen));
+    data.extend_from_slice(&nonce.to_le_bytes());
+    
+    // Borsh Option<Vec<u8>> encoding:
+    // 0 -> None
+    // 1 -> Some(...)
+    if let Some(sig) = signature {
+        data.push(1);
+        data.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+        data.extend_from_slice(&sig);
+    } else {
+        data.push(0);
+    }
 
     Ok(Instruction {
         program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
             AccountMeta::new(move_log_pda, false),
-            AccountMeta::new_readonly(player, true),
+            AccountMeta::new(player, true),
+            AccountMeta::new_readonly(session_delegation_pda, false),
         ],
         data,
     })
@@ -406,6 +418,209 @@ pub fn init_profile_ix(program_id: Pubkey, player: Pubkey) -> Result<Instruction
         accounts: vec![
             AccountMeta::new(player_profile_pda, false),
             AccountMeta::new(player, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+/// Build a `set_username` instruction.
+///
+/// On-chain signature:
+/// ```ignore
+/// pub fn set_username(ctx, username: String)
+/// ```
+///
+/// Accounts:
+///   0. player_profile  (mut, seeds=["profile", player])
+///   1. username_record (init, seeds=["username", username.as_bytes()])
+///   2. player          (mut, signer)
+///   3. authority       (must match profile.authority)
+///   4. system_program
+pub fn set_username_ix(
+    program_id: Pubkey,
+    player: Pubkey,
+    username: &str,
+) -> Result<Instruction> {
+    let player_profile_pda = Pubkey::find_program_address(
+        &[PROFILE_SEED, player.as_ref()],
+        &program_id,
+    )
+    .0;
+
+    let username_record_pda = Pubkey::find_program_address(
+        &[USERNAME_SEED, username.as_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("set_username").to_vec();
+    data.extend(borsh_string(username));
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(player_profile_pda, false),
+            AccountMeta::new(username_record_pda, false),
+            AccountMeta::new(player, true),
+            AccountMeta::new_readonly(player, false), // authority = player
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+/// Build an `initialize_tournament` instruction.
+pub fn initialize_tournament_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+    name: &str,
+    entry_fee: u64,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("initialize_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend(borsh_string(name));
+    data.extend_from_slice(&entry_fee.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(authority, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+/// Build a `register_player` instruction.
+pub fn register_player_ix(
+    program_id: Pubkey,
+    player: Pubkey,
+    tournament_id: u64,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let player_profile_pda = Pubkey::find_program_address(
+        &[PROFILE_SEED, player.as_ref()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("register_player").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new_readonly(player_profile_pda, false),
+            AccountMeta::new(player, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+/// Build a `start_tournament` instruction.
+pub fn start_tournament_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("start_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(authority, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+/// Build a `record_match_result` instruction.
+pub fn record_match_result_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+    match_index: u8,
+    winner: Pubkey,
+    game_pda: Pubkey,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("record_match_result").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.push(match_index);
+    data.extend_from_slice(winner.as_ref());
+    data.extend_from_slice(game_pda.as_ref());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(authority, true),
+        ],
+        data,
+    })
+}
+
+/// Build an `advance_final` instruction.
+pub fn advance_final_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("advance_final").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(authority, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,

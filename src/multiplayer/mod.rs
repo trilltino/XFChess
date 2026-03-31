@@ -229,7 +229,7 @@ fn initialize_braid_network(
 
         let config = BraidGameConfig {
             secret_key: Some(secret_key),
-            discovery: DiscoveryConfig::Real,
+            discovery: DiscoveryConfig::Real, // Revert to Real discovery
             proxy_config: None,
         };
 

@@ -1,0 +1,956 @@
+﻿anchor : warning: profiles for the non root package will be 
+ignored, specify profiles at the workspace root:
+At line:1 char:1
++ anchor build 2>&1 | Out-File -FilePath 
+C:\Users\isich\XFChess\build_o ...
++ ~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: 
+profil..    .workspace root::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+package:   
+\\?\C:\Users\isich\XFChess\crates\iroh-gossip\Cargo.toml
+workspace: \\?\C:\Users\isich\XFChess\Cargo.toml
+   Compiling ephemeral-rollups-sdk v0.8.5 (C:\Users\isich\XFC
+hess\references\ephemeral-rollups-sdk\rust\sdk)
+warning: unexpected `cfg` condition value: `modular-sdk`
+ --> references\ephemeral-rollups-sdk\rust\sdk\src\lib.rs:9:5
+  |
+9 |     feature = "modular-sdk",
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: expected values for `feature` are: `anchor`, 
+`anchor-lang`, `default`, `num-derive`, `num-traits`, 
+`solana-account`, `solana-account-info`, `solana-cpi`, 
+`solana-instruction`, `solana-program`, 
+`solana-program-error`, `solana-program-memory`, 
+`solana-pubkey`, `solana-system-interface`, `solana-sysvar`, 
+`spl-associated-token-account-interface`, and `thiserror`
+  = help: consider adding `modular-sdk` as a feature in 
+`Cargo.toml`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition value: `access-control`
+  --> 
+references\ephemeral-rollups-sdk\rust\sdk\src\lib.rs:17:7
+   |
+17 | #[cfg(feature = "access-control")]
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `anchor`, 
+`anchor-lang`, `default`, `num-derive`, `num-traits`, 
+`solana-account`, `solana-account-info`, `solana-cpi`, 
+`solana-instruction`, `solana-program`, 
+`solana-program-error`, `solana-program-memory`, 
+`solana-pubkey`, `solana-system-interface`, `solana-sysvar`, 
+`spl-associated-token-account-interface`, and `thiserror`
+   = help: consider adding `access-control` as a feature in 
+`Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+
+warning: unexpected `cfg` condition value: `spl`
+  --> 
+references\ephemeral-rollups-sdk\rust\sdk\src\lib.rs:19:7
+   |
+19 | #[cfg(feature = "spl")]
+   |       ^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `anchor`, 
+`anchor-lang`, `default`, `num-derive`, `num-traits`, 
+`solana-account`, `solana-account-info`, `solana-cpi`, 
+`solana-instruction`, `solana-program`, 
+`solana-program-error`, `solana-program-memory`, 
+`solana-pubkey`, `solana-system-interface`, `solana-sysvar`, 
+`spl-associated-token-account-interface`, and `thiserror`
+   = help: consider adding `spl` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+
+warning: unexpected `cfg` condition value: `modular-sdk`
+ --> references\ephemeral-rollups-sdk\rust\sdk\src\solana_com
+pat.rs:1:15
+  |
+1 | #[cfg(all(not(feature = "modular-sdk"), not(feature = 
+"anchor")))]
+  |               ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: expected values for `feature` are: `anchor`, 
+`anchor-lang`, `default`, `num-derive`, `num-traits`, 
+`solana-account`, `solana-account-info`, `solana-cpi`, 
+`solana-instruction`, `solana-program`, 
+`solana-program-error`, `solana-program-memory`, 
+`solana-pubkey`, `solana-system-interface`, `solana-sysvar`, 
+`spl-associated-token-account-interface`, and `thiserror`
+  = help: consider adding `modular-sdk` as a feature in 
+`Cargo.toml`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+
+warning: unexpected `cfg` condition value: `modular-sdk`
+  --> references\ephemeral-rollups-sdk\rust\sdk\src\solana_co
+mpat.rs:31:11
+   |
+31 | #[cfg(all(feature = "modular-sdk", not(feature = 
+"anchor")))]
+   |           ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `anchor`, 
+`anchor-lang`, `default`, `num-derive`, `num-traits`, 
+`solana-account`, `solana-account-info`, `solana-cpi`, 
+`solana-instruction`, `solana-program`, 
+`solana-program-error`, `solana-program-memory`, 
+`solana-pubkey`, `solana-system-interface`, `solana-sysvar`, 
+`spl-associated-token-account-interface`, and `thiserror`
+   = help: consider adding `modular-sdk` as a feature in 
+`Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+
+warning: unexpected `cfg` condition value: `disable-realloc`
+  --> references\ephemeral-rollups-sdk\rust\sdk\src\solana_co
+mpat.rs:82:19
+   |
+82 |         #[cfg(not(feature = "disable-realloc"))]
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `anchor`, 
+`anchor-lang`, `default`, `num-derive`, `num-traits`, 
+`solana-account`, `solana-account-info`, `solana-cpi`, 
+`solana-instruction`, `solana-program`, 
+`solana-program-error`, `solana-program-memory`, 
+`solana-pubkey`, `solana-system-interface`, `solana-sysvar`, 
+`spl-associated-token-account-interface`, and `thiserror`
+   = help: consider adding `disable-realloc` as a feature in 
+`Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+
+warning: unexpected `cfg` condition value: `disable-realloc`
+  --> references\ephemeral-rollups-sdk\rust\sdk\src\solana_co
+mpat.rs:88:15
+   |
+88 |         #[cfg(feature = "disable-realloc")]
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `anchor`, 
+`anchor-lang`, `default`, `num-derive`, `num-traits`, 
+`solana-account`, `solana-account-info`, `solana-cpi`, 
+`solana-instruction`, `solana-program`, 
+`solana-program-error`, `solana-program-memory`, 
+`solana-pubkey`, `solana-system-interface`, `solana-sysvar`, 
+`spl-associated-token-account-interface`, and `thiserror`
+   = help: consider adding `disable-realloc` as a feature in 
+`Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+
+warning: `ephemeral-rollups-sdk` (lib) generated 7 warnings
+   Compiling xfchess-game v0.1.0 
+(C:\Users\isich\XFChess\programs\xfchess-game)
+warning: unexpected `cfg` condition value: `no-entrypoint`
+   --> src\lib.rs:107:1
+    |
+107 | #[program]
+    | ^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a attribute macro will use 
+the cfgs from the destination crate and not the ones from 
+the defining crate
+    = help: try referring to `program` crate for guidance on 
+how handle this unexpected cfg
+    = help: the attribute macro `program` may come from an 
+old version of the `anchor_attribute_program` crate, try 
+updating your dependency with `cargo update -p 
+anchor_attribute_program`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+    = note: this warning originates in the attribute macro 
+`program` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `cpi`
+   --> src\lib.rs:107:1
+    |
+107 | #[program]
+    | ^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a attribute macro will use 
+the cfgs from the destination crate and not the ones from 
+the defining crate
+    = help: try referring to `program` crate for guidance on 
+how handle this unexpected cfg
+    = help: the attribute macro `program` may come from an 
+old version of the `anchor_attribute_program` crate, try 
+updating your dependency with `cargo update -p 
+anchor_attribute_program`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: this warning originates in the attribute macro 
+`program` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `custom-heap`
+   --> src\lib.rs:107:1
+    |
+107 | #[program]
+    | ^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a macro will use the cfgs 
+from the destination crate and not the ones from the 
+defining crate
+    = help: try referring to `$crate::custom_heap_default` 
+crate for guidance on how handle this unexpected cfg
+    = help: the macro `$crate::custom_heap_default` may come 
+from an old version of the `solana_program_entrypoint` 
+crate, try updating your dependency with `cargo update -p 
+solana_program_entrypoint`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: this warning originates in the macro 
+`$crate::custom_heap_default` which comes from the expansion 
+of the attribute macro `program` (in Nightly builds, run 
+with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition value: `custom-panic`
+   --> src\lib.rs:107:1
+    |
+107 | #[program]
+    | ^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a macro will use the cfgs 
+from the destination crate and not the ones from the 
+defining crate
+    = help: try referring to `$crate::custom_panic_default` 
+crate for guidance on how handle this unexpected cfg
+    = help: the macro `$crate::custom_panic_default` may 
+come from an old version of the `solana_program_entrypoint` 
+crate, try updating your dependency with `cargo update -p 
+solana_program_entrypoint`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: this warning originates in the macro 
+`$crate::custom_panic_default` which comes from the 
+expansion of the attribute macro `program` (in Nightly 
+builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\account_ix\profile.rs:5:10
+  |
+5 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\account_ix\set_username.rs:5:10
+  |
+5 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\account_ix\withdraw.rs:7:10
+  |
+7 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unused import: 
+`ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID`
+ --> src\delegation_ix\delegate.rs:8:9
+  |
+8 |     use 
+ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
+  |         
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+  --> src\delegation_ix\delegate.rs:84:14
+   |
+84 |     #[derive(Accounts)]
+   |              ^^^^^^^^
+   |
+   = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+   = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+   = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+   = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+   = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+   --> src\delegation_ix\delegate.rs:138:14
+    |
+138 |     #[derive(Accounts)]
+    |              ^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+    = help: try referring to `Accounts` crate for guidance 
+on how handle this unexpected cfg
+    = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unused import: `GameStatus`
+ --> src\delegation_ix\session.rs:2:26
+  |
+2 | use crate::state::{Game, GameStatus, SessionDelegation};
+  |                          ^^^^^^^^^^
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+  --> src\delegation_ix\session.rs:49:10
+   |
+49 | #[derive(Accounts)]
+   |          ^^^^^^^^
+   |
+   = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+   = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+   = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+   = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+   = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+  --> src\delegation_ix\session.rs:74:10
+   |
+74 | #[derive(Accounts)]
+   |          ^^^^^^^^
+   |
+   = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+   = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+   = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+   = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+   = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\delegation_ix\undelegation.rs:3:10
+  |
+3 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\game_ix\cancel.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\game_ix\create.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\game_ix\finalize.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\game_ix\join.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\governance_ix\dispute.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\governance_ix\resolve.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\moves_ix\commit_batch.rs:9:10
+  |
+9 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\moves_ix\record.rs:9:10
+  |
+9 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\tournament_ix\initialize.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\tournament_ix\register.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\tournament_ix\start.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\tournament_ix\record_result.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+  --> src\tournament_ix\record_result.rs:72:10
+   |
+72 | #[derive(Accounts)]
+   |          ^^^^^^^^
+   |
+   = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+   = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+   = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+   = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check
+-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+   = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\tournament_ix\claim_prize.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+ --> src\tournament_ix\cancel.rs:6:10
+  |
+6 | #[derive(Accounts)]
+  |          ^^^^^^^^
+  |
+  = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+  = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+  = help: try referring to `Accounts` crate for guidance on 
+how handle this unexpected cfg
+  = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-
+cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+  = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+   --> src\lib.rs:107:1
+    |
+107 | #[program]
+    | ^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a attribute macro will use 
+the cfgs from the destination crate and not the ones from 
+the defining crate
+    = help: try referring to `program` crate for guidance on 
+how handle this unexpected cfg
+    = help: the attribute macro `program` may come from an 
+old version of the `anchor_attribute_program` crate, try 
+updating your dependency with `cargo update -p 
+anchor_attribute_program`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: this warning originates in the attribute macro 
+`program` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `no-idl`
+   --> src\lib.rs:107:1
+    |
+107 | #[program]
+    | ^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a attribute macro will use 
+the cfgs from the destination crate and not the ones from 
+the defining crate
+    = help: try referring to `program` crate for guidance on 
+how handle this unexpected cfg
+    = help: the attribute macro `program` may come from an 
+old version of the `anchor_attribute_program` crate, try 
+updating your dependency with `cargo update -p 
+anchor_attribute_program`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: this warning originates in the attribute macro 
+`program` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+   --> src\lib.rs:107:1
+    |
+107 | #[program]
+    | ^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a derive macro will use the 
+cfgs from the destination crate and not the ones from the 
+defining crate
+    = help: try referring to `Accounts` crate for guidance 
+on how handle this unexpected cfg
+    = help: the derive macro `Accounts` may come from an old 
+version of the `anchor_derive_accounts` crate, try updating 
+your dependency with `cargo update -p anchor_derive_accounts`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: this warning originates in the derive macro 
+`Accounts` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unexpected `cfg` condition value: `no-log-ix-name`
+   --> src\lib.rs:107:1
+    |
+107 | #[program]
+    | ^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: 
+`chess-logic-on-chain`, `default`, `idl-build`, and 
+`move-validation`
+    = note: using a cfg inside a attribute macro will use 
+the cfgs from the destination crate and not the ones from 
+the defining crate
+    = help: try referring to `program` crate for guidance on 
+how handle this unexpected cfg
+    = help: the attribute macro `program` may come from an 
+old version of the `anchor_attribute_program` crate, try 
+updating your dependency with `cargo update -p 
+anchor_attribute_program`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/chec
+k-cfg/cargo-specifics.html> for more information about 
+checking conditional configuration
+    = note: this warning originates in the attribute macro 
+`program` (in Nightly builds, run with -Z macro-backtrace 
+for more info)
+
+warning: unused variable: `pot`
+  --> src\game_ix\cancel.rs:53:13
+   |
+53 |         let pot = if game.status == 
+GameStatus::Cancelled && game.black != Pubkey::default() && 
+game.move_count > 0 {
+   |             ^^^ help: if this is intentional, prefix it 
+with an underscore: `_pot`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: `xfchess-game` (lib) generated 39 warnings (5 
+duplicates) (run `cargo fix --lib -p xfchess-game` to apply 
+2 suggestions)
+    Finished `release` profile [optimized] target(s) in 9.52s
+warning: profiles for the non root package will be ignored, 
+specify profiles at the workspace root:
+package:   
+\\?\C:\Users\isich\XFChess\crates\iroh-gossip\Cargo.toml
+workspace: \\?\C:\Users\isich\XFChess\Cargo.toml
+    Finished `test` profile [optimized + debuginfo] 
+target(s) in 2.04s
+     Running unittests src\lib.rs (\\?\C:\Users\isich\XFChess
+\target\debug\deps\xfchess_game-2682bef9b20565b6.exe)
+     Running tests\game_tests.rs (\\?\C:\Users\isich\XFChess\
+target\debug\deps\game_tests-f9567ce3e4586346.exe)

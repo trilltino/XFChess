@@ -68,6 +68,9 @@ pub enum MenuState {
     #[cfg(feature = "solana")]
     SolanaLobby,
 
+    /// Profile creation / username selection
+    ProfileCreation,
+
     /// Credits/about screen
     About,
 

@@ -25,15 +25,6 @@ pub struct CreateGame<'info> {
     /// CHECK: PDA for escrowing SOL.
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// Player profile — created on first game if it doesn't exist yet.
-    #[account(
-        init_if_needed,
-        payer = player,
-        space = 8 + PlayerProfile::INIT_SPACE,
-        seeds = [PROFILE_SEED, player.key().as_ref()],
-        bump
-    )]
-    pub player_profile: Account<'info, PlayerProfile>,
     #[account(mut)]
     pub player: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -88,13 +79,6 @@ pub fn handler(
     move_log.timestamps = Vec::new();
     move_log.player_signatures = Vec::new();
     move_log.nonce = 0;
-
-    // Bootstrap profile if this is the player's first game.
-    let profile = &mut ctx.accounts.player_profile;
-    if profile.elo == 0 {
-        profile.authority = ctx.accounts.player.key();
-        profile.elo = 1200;
-    }
 
     msg!(
         "Game {} created. Type: {:?}. Wager: {} SOL",

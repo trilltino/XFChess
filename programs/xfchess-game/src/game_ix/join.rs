@@ -11,15 +11,6 @@ pub struct JoinGame<'info> {
     /// CHECK: Escrow PDA
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// Player profile — created on first game if it doesn't exist yet.
-    #[account(
-        init_if_needed,
-        payer = player,
-        space = 8 + PlayerProfile::INIT_SPACE,
-        seeds = [PROFILE_SEED, player.key().as_ref()],
-        bump
-    )]
-    pub player_profile: Account<'info, PlayerProfile>,
     #[account(mut)]
     pub player: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -55,13 +46,6 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
             ),
             game.wager_amount,
         )?;
-    }
-
-    // Bootstrap profile if this is the joiner's first game.
-    let profile = &mut ctx.accounts.player_profile;
-    if profile.elo == 0 {
-        profile.authority = ctx.accounts.player.key();
-        profile.elo = 1200;
     }
 
     msg!("Player joined game. Match started!");

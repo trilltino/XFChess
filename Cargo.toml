@@ -7,10 +7,6 @@ edition = "2021"
 name = "xfchess"
 path = "src/main.rs"
 
-[[bin]]
-name = "opera_test"
-path = "opera_test.rs"
-
 
 [workspace]
 members = [
@@ -87,7 +83,7 @@ web-time = "1.1"
 anchor-lang = "0.32.1"
 chrono = { version = "0.4.38", features = ["serde"] }
 serde_bytes = "0.11.15"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "env"] }
 egui = "0.29"
 solana-sdk = "2.2.1"
 solana-client = "2.2.1"

@@ -20,7 +20,7 @@ import {
   PhantomWalletAdapter,
   SolflareWalletAdapter,
 } from "@solana/wallet-adapter-wallets";
-import { clusterApiUrl, LAMPORTS_PER_SOL, VersionedTransaction } from "@solana/web3.js";
+import { clusterApiUrl, LAMPORTS_PER_SOL, Transaction } from "@solana/web3.js";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 /* ------------------------------------------------------------------ */
@@ -429,9 +429,9 @@ function WalletPanel() {
 
             try {
               const txBytes = Uint8Array.from(atob(txB64), (c) => c.charCodeAt(0));
-              const tx = VersionedTransaction.deserialize(txBytes);
+              const tx = Transaction.from(txBytes);
               const signed = await signTransaction(tx as never);
-              const signedBytes = (signed as VersionedTransaction).serialize();
+              const signedBytes = (signed as Transaction).serialize();
               const signedB64 = btoa(String.fromCharCode(...signedBytes));
               await fetch(`${BRIDGE}/resolved`, {
                 method: "POST",

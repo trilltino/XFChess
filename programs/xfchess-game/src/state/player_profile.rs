@@ -9,4 +9,7 @@ pub struct PlayerProfile {
     pub draws: u32,
     pub games_played: u32,
     pub elo: u16,
+    #[max_len(20)]
+    pub username: String,
+    pub username_set: bool,
 }
