@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Solana addon types for multiplayer integration
 //!
 //! Provides types for Solana wallet, game sync, and competitive match state.
@@ -81,6 +82,7 @@ pub struct SolanaProfile {
     pub wins: u32,
     pub losses: u32,
     pub draws: u32,
+    pub is_verified: bool,
 }
 
 impl SolanaProfile {

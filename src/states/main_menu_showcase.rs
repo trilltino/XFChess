@@ -37,10 +37,11 @@ pub struct ShowcaseMoveAnimation {
     pub duration: f32,
 }
 
-/// Fade animation for captured showcase pieces
+/// Scale-down animation for captured showcase pieces
 #[derive(Component)]
 pub struct ShowcaseFadeOut {
     pub timer: Timer,
+    pub initial_scale: f32,
 }
 
 /// Resource tracking showcase game state
@@ -49,61 +50,56 @@ pub struct ShowcaseGameState {
     pub move_timer: Timer,
     pub move_index: usize,
     pub game_over: bool,
+    pub restart_timer: Option<Timer>,
 }
 
 impl Default for ShowcaseGameState {
     fn default() -> Self {
         Self {
-            move_timer: Timer::from_seconds(3.5, TimerMode::Repeating), // Slower moves
+            move_timer: Timer::from_seconds(3.5, TimerMode::Repeating),
             move_index: 0,
             game_over: false,
+            restart_timer: None,
         }
     }
 }
 
-/// 40 moves from a real game (Italian Game / Giuoco Piano)
-const SHOWCASE_MOVES: [(u8, u8, u8, u8, bool); 40] = [
-    // (from_x, from_y, to_x, to_y, is_capture)
+/// 33 moves from a real game (Ruy Lopez / Spanish)
+const SHOWCASE_MOVES: [(u8, u8, u8, u8, bool); 33] = [
+    // (from_rank, from_file, to_rank, to_file, is_capture)
     (1, 4, 3, 4, false), // 1. e4
     (6, 4, 4, 4, false), // 1... e5
     (0, 6, 2, 5, false), // 2. Nf3
     (7, 1, 5, 2, false), // 2... Nc6
-    (0, 5, 3, 2, false), // 3. Bc4
-    (7, 5, 4, 2, false), // 3... Bc5
-    (1, 2, 2, 2, false), // 4. c3
+    (0, 5, 4, 1, false), // 3. Bb5 (Ruy Lopez)
+    (1, 0, 2, 0, false), // 3... a6
+    (4, 1, 3, 2, false), // 4. Ba4
     (6, 6, 5, 6, false), // 4... Nf6
-    (1, 3, 3, 3, false), // 5. d4
-    (4, 4, 3, 3, true),  // 5... exd4
-    (2, 2, 3, 3, true),  // 6. cxd4
-    (4, 2, 5, 1, false), // 6... Bb4+
-    (0, 1, 2, 2, false), // 7. Nc3
-    (5, 6, 3, 4, true),  // 7... Nxe4
-    (0, 0, 0, 0, false), // 8. O-O (simplified - no castle)
-    (3, 4, 2, 2, true),  // 8... Nxc3
-    (1, 1, 2, 2, true),  // 9. bxc3
-    (5, 1, 2, 4, false), // 9... Bxc3?
-    (0, 3, 1, 4, false), // 10. Qb3
-    (2, 4, 0, 2, true),  // 10... Bxa1
-    (0, 5, 6, 5, false), // 11. Bxf7+
-    (7, 4, 7, 5, false), // 11... Kf8 (simplified)
-    (1, 4, 5, 4, false), // 12. Qe3+ (check)
-    (6, 3, 5, 3, false), // 12... d6
-    (6, 5, 5, 4, false), // 13. Bxe4? (error but keeps game going)
-    (5, 2, 4, 3, false), // 13... Nd4
-    (2, 5, 4, 4, false), // 14. Nxd4
-    (0, 2, 1, 3, false), // 14... Qxd4
-    (5, 4, 6, 3, true),  // 15. Bxd6+
-    (7, 5, 6, 5, false), // 15... Kg8
-    (6, 3, 4, 5, false), // 16. Be7
-    (6, 2, 5, 2, false), // 16... c6
-    (4, 5, 5, 6, false), // 17. Bf6
-    (1, 3, 3, 5, false), // 17... Qf4
-    (5, 6, 6, 7, true),  // 18. Bxg7
-    (7, 7, 6, 7, true),  // 18... Rxg7
-    (3, 5, 6, 5, false), // 19. Qf6
-    (6, 7, 5, 7, false), // 19... Rg7
-    (6, 5, 7, 6, false), // 20. Qh8# (checkmate)
-    (5, 7, 6, 7, false), // game ends
+    (0, 0, 0, 0, false), // 5. O-O (skip)
+    (6, 5, 5, 5, false), // 5... Be7
+    (0, 7, 0, 5, false), // 6. Re1
+    (1, 1, 2, 1, false), // 6... b5
+    (3, 2, 4, 1, false), // 7. Bb3
+    (1, 3, 3, 3, false), // 7... d6
+    (1, 2, 2, 2, false), // 8. c3
+    (7, 6, 5, 7, false), // 8... Na5
+    (4, 1, 3, 2, false), // 9. Bc2
+    (2, 2, 4, 2, false), // 9... c5 (pawn was already at c3)
+    (3, 3, 4, 3, false), // 10. d4→d5 (pawn was already at d4)
+    (7, 3, 5, 3, false), // 10... Qc7
+    (0, 1, 2, 2, false), // 11. Nbd2
+    (5, 5, 4, 5, false), // 11... Bd7 (piece was already at f6)
+    (2, 5, 4, 4, false), // 12. Nf1→e4
+    (4, 4, 3, 3, true),  // 12... cxd4
+    (2, 2, 3, 3, true),  // 13. cxd4
+    (5, 2, 3, 4, false), // 13... Nc4
+    (3, 3, 4, 4, false), // 14. d5
+    (3, 4, 2, 2, false), // 14... Nb6
+    (1, 6, 2, 6, false), // 15. g3
+    (5, 7, 3, 6, false), // 15... Na4
+    (2, 2, 4, 0, false), // 16. Bd3
+    (3, 6, 4, 4, false), // 16... Nc5
+    (4, 4, 3, 5, false), // 17. Nd2
 ];
 
 /// Convert showcase board position to world position
@@ -154,7 +150,7 @@ pub fn spawn_showcase_board(
         }
     }
 
-    info!("[SHOWCASE] Spawned showcase board on pyramid");
+    // info!("[SHOWCASE] Spawned showcase board on pyramid");
 }
 
 /// Spawn showcase pieces using the same wooden_chess_board.glb assets as in-game
@@ -162,6 +158,15 @@ pub fn spawn_showcase_pieces(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    do_spawn_showcase_pieces(&mut commands, &asset_server, &mut materials);
+}
+
+/// Inner piece-spawn logic — shared between initial spawn and restart.
+fn do_spawn_showcase_pieces(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
     // Load from wooden_chess_board.glb — same mesh indices as PieceMeshes in pieces.rs
     let meshes = ShowcaseMeshes {
@@ -202,7 +207,7 @@ pub fn spawn_showcase_pieces(
     // White pieces (rank 0)
     for (y, &piece_type) in BACK_ROW.iter().enumerate() {
         spawn_showcase_piece(
-            &mut commands,
+            commands,
             &meshes,
             &white_mat,
             PieceColor::White,
@@ -213,7 +218,7 @@ pub fn spawn_showcase_pieces(
     }
     for y in 0..8u8 {
         spawn_showcase_piece(
-            &mut commands,
+            commands,
             &meshes,
             &white_mat,
             PieceColor::White,
@@ -226,7 +231,7 @@ pub fn spawn_showcase_pieces(
     // Black pieces (rank 7)
     for (y, &piece_type) in BACK_ROW.iter().enumerate() {
         spawn_showcase_piece(
-            &mut commands,
+            commands,
             &meshes,
             &black_mat,
             PieceColor::Black,
@@ -237,7 +242,7 @@ pub fn spawn_showcase_pieces(
     }
     for y in 0..8u8 {
         spawn_showcase_piece(
-            &mut commands,
+            commands,
             &meshes,
             &black_mat,
             PieceColor::Black,
@@ -247,7 +252,7 @@ pub fn spawn_showcase_pieces(
         );
     }
 
-    info!("[SHOWCASE] Spawned 32 showcase pieces with GLTF models");
+    // info!("[SHOWCASE] Spawned 32 showcase pieces with GLTF models");
 }
 
 struct ShowcaseMeshes {
@@ -295,13 +300,14 @@ fn spawn_showcase_piece(
 ) {
     let pos = showcase_world_pos(x, y);
 
-    // Rotation matches in-game pieces.rs logic exactly
+    // Showcase board maps rank→world X, file→world Z (opposite of in-game).
+    // White at x=0, black at x=7: knights need to be flipped 180° from current.
     let rotation = match piece_type {
         PieceType::Knight => match color {
-            // White: faces opponent (+Z). Asset faces +X, rotate +90°.
-            PieceColor::White => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            // Black: faces opponent (-Z). Asset faces +X, rotate -90°.
-            PieceColor::Black => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+            // White: flipped 180° from IDENTITY
+            PieceColor::White => Quat::from_rotation_y(std::f32::consts::PI),
+            // Black: flipped 180° from PI to IDENTITY
+            PieceColor::Black => Quat::IDENTITY,
         },
         _ => match color {
             PieceColor::White => Quat::IDENTITY,
@@ -357,12 +363,13 @@ pub fn run_showcase_game(
             return;
         }
 
-        // If capture, find and fade out piece at destination
+        // If capture, find and scale-down the captured piece
         if is_capture {
-            for (entity, piece, _) in pieces.iter() {
+            for (entity, piece, transform) in pieces.iter() {
                 if piece.x == to_x && piece.y == to_y {
                     commands.entity(entity).insert(ShowcaseFadeOut {
-                        timer: Timer::from_seconds(0.4, TimerMode::Once),
+                        timer: Timer::from_seconds(0.5, TimerMode::Once),
+                        initial_scale: transform.scale.x,
                     });
                     break;
                 }
@@ -370,6 +377,7 @@ pub fn run_showcase_game(
         }
 
         // Find and animate moving piece
+        let mut moved = false;
         for (entity, mut showcase_piece, transform) in pieces.iter_mut() {
             if showcase_piece.x == from_x && showcase_piece.y == from_y {
                 let start = transform.translation;
@@ -387,17 +395,31 @@ pub fn run_showcase_game(
                 showcase_piece.y = to_y;
 
                 game_state.move_index += 1;
+                moved = true;
+                /*
                 info!(
                     "[SHOWCASE] Move {}: ({},{}) -> ({},{}) capture={}",
                     game_state.move_index, from_x, from_y, to_x, to_y, is_capture
                 );
+                */
                 break;
             }
+        }
+
+        // Safety: if no piece was at the expected position (stale coordinates),
+        // advance the index so the sequence never stalls.
+        if !moved {
+            warn!(
+                "[SHOWCASE] Move {}: no piece at ({},{}) — skipping stale entry",
+                game_state.move_index, from_x, from_y
+            );
+            game_state.move_index += 1;
         }
     }
 }
 
-/// Animate showcase piece movement
+/// Smooth arc-motion animation for moving showcase pieces.
+/// Uses ease-in-out cubic + a sine arc lift so pieces glide naturally.
 pub fn animate_showcase_pieces(
     time: Res<Time>,
     mut commands: Commands,
@@ -405,34 +427,90 @@ pub fn animate_showcase_pieces(
 ) {
     for (entity, mut transform, mut anim) in query.iter_mut() {
         anim.elapsed += time.delta_secs();
-        let progress = (anim.elapsed / anim.duration).min(1.0);
+        let t = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
 
-        // Smooth ease-in-out
-        let t = progress * progress * (3.0 - 2.0 * progress);
-        transform.translation = anim.start.lerp(anim.end, t);
+        // Smooth ease-in-out (cubic Hermite)
+        let smooth_t = t * t * (3.0 - 2.0 * t);
 
-        if progress >= 1.0 {
+        // Arc: lift the piece at the midpoint of its path
+        let arc_height = 0.25;
+        let arc = (std::f32::consts::PI * t).sin() * arc_height;
+
+        let lerped = anim.start.lerp(anim.end, smooth_t);
+        transform.translation = Vec3::new(lerped.x, lerped.y + arc, lerped.z);
+
+        if t >= 1.0 {
+            transform.translation = anim.end;
             commands.entity(entity).remove::<ShowcaseMoveAnimation>();
         }
     }
 }
 
-/// Fade out and despawn captured showcase pieces (using scale shrink)
+/// Scale captured pieces down to zero, then despawn.
 pub fn animate_showcase_captures(
     time: Res<Time>,
     mut commands: Commands,
-    mut query: Query<(Entity, &mut ShowcaseFadeOut, &mut Transform)>,
+    mut query: Query<(Entity, &mut Transform, &mut ShowcaseFadeOut)>,
 ) {
-    for (entity, mut fade, mut transform) in query.iter_mut() {
+    for (entity, mut transform, mut fade) in query.iter_mut() {
         fade.timer.tick(time.delta());
         let progress = fade.timer.fraction();
-
-        // Shrink piece as it fades
-        let scale = 1.0 - progress;
-        transform.scale = Vec3::splat(scale.max(0.01));
-
-        if fade.timer.just_finished() {
+        // Ease-out shrink
+        let scale = fade.initial_scale * (1.0 - progress * progress);
+        transform.scale = Vec3::splat(scale);
+        if fade.timer.fraction() >= 1.0 {
             commands.entity(entity).despawn();
         }
+    }
+}
+
+/// After all showcase moves finish, wait 5 s then despawn all pieces and restart from scratch.
+pub fn restart_showcase_when_complete(
+    time: Res<Time>,
+    mut game_state: ResMut<ShowcaseGameState>,
+    mut commands: Commands,
+    pieces: Query<Entity, With<ShowcasePiece>>,
+    asset_server: Res<AssetServer>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if game_state.move_index < SHOWCASE_MOVES.len() {
+        return;
+    }
+
+    // Start restart countdown on first frame after sequence ends
+    if game_state.restart_timer.is_none() {
+        game_state.restart_timer = Some(Timer::from_seconds(5.0, TimerMode::Once));
+        return;
+    }
+
+    let finished = if let Some(t) = &mut game_state.restart_timer {
+        t.tick(time.delta());
+        t.just_finished()
+    } else {
+        false
+    };
+
+    if finished {
+        for entity in pieces.iter() {
+            commands.entity(entity).despawn();
+        }
+        do_spawn_showcase_pieces(&mut commands, &asset_server, &mut materials);
+        *game_state = ShowcaseGameState::default();
+        // info!("[SHOWCASE] Restarted showcase game loop");
+    }
+}
+
+/// Gentle idle float for all stationary showcase pieces.
+/// Each piece bobs at a slightly different phase based on its board position.
+pub fn animate_showcase_idle_float(
+    time: Res<Time>,
+    mut query: Query<(&ShowcasePiece, &mut Transform), Without<ShowcaseMoveAnimation>>,
+) {
+    let t = time.elapsed_secs();
+    for (piece, mut transform) in query.iter_mut() {
+        // Phase offset so neighbouring pieces don't all bob in sync
+        let phase = (piece.x as f32 * 1.3 + piece.y as f32 * 0.9) % std::f32::consts::TAU;
+        let float_y = (t * 0.6 + phase).sin() * 0.018;
+        transform.translation.y = SHOWCASE_Y + float_y;
     }
 }

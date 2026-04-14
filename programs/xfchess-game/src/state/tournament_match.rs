@@ -1,11 +1,16 @@
+//! State definitions representing a single match bracket within a tournament.
+//! Supports dynamic single-elimination brackets of any size.
+
 use anchor_lang::prelude::*;
 
 #[account]
 #[derive(InitSpace)]
 pub struct TournamentMatch {
     pub tournament_id: u64,
-    pub match_index: u8,   // 0 = SF1, 1 = SF2, 2 = Final
-    pub round: u8,         // 0 = semi-finals, 1 = final
+    /// Match index within the tournament (0 to total_matches-1).
+    pub match_index: u16,
+    /// Round number (0 = first round, 1 = second round, etc.).
+    pub round: u8,
     pub player_white: Option<Pubkey>,
     pub player_black: Option<Pubkey>,
     pub winner: Option<Pubkey>,
@@ -13,6 +18,10 @@ pub struct TournamentMatch {
     pub game_pda: Option<Pubkey>,
     pub game_id: Option<u64>,
     pub status: MatchStatus,
+    /// Index of the next match the winner advances to (None for final).
+    pub next_match_for_winner: Option<u16>,
+    /// Slot in the next match (0 = white, 1 = black).
+    pub next_match_slot: u8,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
     pub bump: u8,

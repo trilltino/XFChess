@@ -22,8 +22,12 @@ async fn test_init_profile() {
     let program_id = xfchess_game::ID;
 
     let player = Keypair::new();
+    let username = "tester123".to_string();
     let (profile_pda, _) =
         Pubkey::find_program_address(&[PROFILE_SEED, player.pubkey().as_ref()], &program_id);
+    let (username_record, _) =
+        Pubkey::find_program_address(&[USERNAME_SEED, username.as_bytes()], &program_id);
+
 
     let (mut banks_client, payer, recent_blockhash) = program_test.start().await;
 
@@ -31,11 +35,13 @@ async fn test_init_profile() {
         program_id,
         accounts: xfchess_game::accounts::InitProfile {
             player_profile: profile_pda,
+            username_record,
             player: player.pubkey(),
             system_program: system_program::id(),
         }
         .to_account_metas(None),
-        data: xfchess_game::instruction::InitProfile {}.data(),
+        data: xfchess_game::instruction::InitProfile { username: username.clone() }.data(),
+
     };
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
@@ -51,7 +57,9 @@ async fn test_init_profile() {
         anchor_lang::AccountDeserialize::try_deserialize(&mut &account.data[..]).unwrap();
 
     assert_eq!(profile.authority, player.pubkey());
-    assert_eq!(profile.elo, 1200);
+    assert_eq!(profile.elo_rating, 120000);
+    assert_eq!(profile.username, username);
+    assert_eq!(profile.username_set, true);
 }
 
 #[tokio::test]
@@ -264,8 +272,13 @@ async fn test_finalize_game_elo() {
 
     let (white_profile, _) =
         Pubkey::find_program_address(&[PROFILE_SEED, white.as_ref()], &program_id);
+    let (white_username_rec, _) =
+        Pubkey::find_program_address(&[USERNAME_SEED, b"white_p"], &program_id);
     let (black_profile, _) =
         Pubkey::find_program_address(&[PROFILE_SEED, black.pubkey().as_ref()], &program_id);
+    let (black_username_rec, _) =
+        Pubkey::find_program_address(&[USERNAME_SEED, b"black_p"], &program_id);
+
     let (game_pda, _) =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id);
     let (move_log_pda, _) =
@@ -278,22 +291,25 @@ async fn test_finalize_game_elo() {
         program_id,
         accounts: xfchess_game::accounts::InitProfile {
             player_profile: white_profile,
+            username_record: white_username_rec,
             player: white,
             system_program: system_program::id(),
         }
         .to_account_metas(None),
-        data: xfchess_game::instruction::InitProfile {}.data(),
+        data: xfchess_game::instruction::InitProfile { username: "white_p".to_string() }.data(),
     };
     let init_black = solana_sdk::instruction::Instruction {
         program_id,
         accounts: xfchess_game::accounts::InitProfile {
             player_profile: black_profile,
+            username_record: black_username_rec,
             player: black.pubkey(),
             system_program: system_program::id(),
         }
         .to_account_metas(None),
-        data: xfchess_game::instruction::InitProfile {}.data(),
+        data: xfchess_game::instruction::InitProfile { username: "black_p".to_string() }.data(),
     };
+
 
     // 2. Create and Join Game
     let create_ix = solana_sdk::instruction::Instruction {
@@ -368,8 +384,8 @@ async fn test_finalize_game_elo() {
     let black_data: PlayerProfile =
         anchor_lang::AccountDeserialize::try_deserialize(&mut &black_acc.data[..]).unwrap();
 
-    assert!(white_data.elo > 1200);
-    assert!(black_data.elo < 1200);
+    assert!(white_data.elo_rating > 120000);
+    assert!(black_data.elo_rating < 120000);
     assert_eq!(white_data.wins, 1);
     assert_eq!(black_data.losses, 1);
 

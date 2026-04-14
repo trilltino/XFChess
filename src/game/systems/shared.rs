@@ -1,6 +1,6 @@
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{
-    HasMoved, MoveRecord, Piece, PieceColor, PieceMoveAnimation, PieceType,
+    FadingCapture, HasMoved, MoveRecord, Piece, PieceColor, PieceMoveAnimation, PieceType,
 };
 use crate::game::events::MoveMadeEvent;
 use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
@@ -71,7 +71,7 @@ pub fn play_move_audio(
 }
 
 /// Apply visual and logical state for a captured piece.
-/// Despawns the 3D entity immediately; the 2D tally panel shows captures.
+/// Inserts a FadingCapture (scale-to-zero) component; the 2D tally panel shows captures.
 pub fn apply_capture(
     commands: &mut Commands,
     captured_pieces: &mut CapturedPieces,
@@ -82,7 +82,10 @@ pub fn apply_capture(
         commands.spawn(AudioPlayer::new(sound));
     }
     captured_pieces.add_capture(target.color, target.piece_type);
-    commands.entity(target.entity).despawn();
+    commands.entity(target.entity).insert(FadingCapture {
+        timer: bevy::time::Timer::from_seconds(0.35, bevy::time::TimerMode::Once),
+        capture_zone_pos: bevy::math::Vec3::ZERO,
+    });
 }
 
 /// Updates ECS components for a moved piece (position, history, animation)
@@ -152,7 +155,7 @@ pub fn execute_move(
     pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
     move_events: Option<&mut MessageWriter<MoveMadeEvent>>,
     board_sync: Option<&mut BoardStateSync>,
-    current_turn: &CurrentTurn,
+    _current_turn: &CurrentTurn,
 ) -> bool {
     // 1. Play Audio
     play_move_audio(commands, ctx.move_sound.clone(), ctx.capture.is_some());
@@ -217,7 +220,7 @@ pub fn execute_move(
     }
 
     // 7. Sync ECS to Engine BEFORE getting FEN for event
-    engine.sync_ecs_to_engine_mut(pieces_query, current_turn);
+    engine.sync_ecs_to_engine_mut(pieces_query);
 
     // 8. Trigger Event with correct FEN
     if let Some(writer) = move_events {

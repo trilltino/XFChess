@@ -215,59 +215,9 @@ impl GameOverState {
         }
     }
 
-    /// Check if the game ended in a draw
-    ///
-    /// Returns `true` for stalemate and insufficient material.
-    ///
-    /// # Returns
-    ///
-    /// `true` if game ended in a draw, `false` otherwise
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// if game_over.is_draw() {
-    ///     println!("Game ended in a draw: {}", game_over.message());
-    /// }
-    /// ```
-    #[allow(dead_code)] // Public API - useful for UI and game logic
-    pub fn is_draw(&self) -> bool {
-        matches!(
-            self,
-            GameOverState::Stalemate | GameOverState::InsufficientMaterial
-        )
-    }
-
-    /// Check if the game ended by timeout
-    ///
-    /// Returns `true` if either player ran out of time.
-    ///
-    /// # Returns
-    ///
-    /// `true` if game ended on time, `false` otherwise
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// if game_over.is_timeout() {
-    ///     println!("Game ended on time!");
-    /// }
-    /// ```
-    #[allow(dead_code)] // Public API - useful for UI and game logic
-    pub fn is_timeout(&self) -> bool {
-        matches!(
-            self,
-            GameOverState::WhiteWonByTime | GameOverState::BlackWonByTime
-        )
-    }
-
     /// Check if the game ended by checkmate
     ///
-    /// Returns `true` if either player delivered checkmate.
-    ///
-    /// # Returns
-    ///
-    /// `true` if game ended in checkmate, `false` otherwise
+    /// Returns `true` if the game ended by checkmate (not timeout or draw).
     ///
     /// # Example
     ///
@@ -276,7 +226,6 @@ impl GameOverState {
     ///     println!("Checkmate! {}", game_over.message());
     /// }
     /// ```
-    #[allow(dead_code)] // Public API - useful for UI and game logic
     pub fn is_checkmate(&self) -> bool {
         matches!(self, GameOverState::WhiteWon | GameOverState::BlackWon)
     }
@@ -439,55 +388,6 @@ mod tests {
         //! Tests that ongoing game has no winner
         let state = GameOverState::Playing;
         assert_eq!(state.winner(), None);
-    }
-
-    #[test]
-    fn test_is_draw_stalemate() {
-        //! Tests that stalemate is identified as a draw
-        let state = GameOverState::Stalemate;
-        assert!(state.is_draw());
-    }
-
-    #[test]
-    fn test_is_draw_insufficient_material() {
-        //! Tests that insufficient material is identified as a draw
-        let state = GameOverState::InsufficientMaterial;
-        assert!(state.is_draw());
-    }
-
-    #[test]
-    fn test_is_draw_white_won() {
-        //! Tests that checkmate is not a draw
-        let state = GameOverState::WhiteWon;
-        assert!(!state.is_draw());
-    }
-
-    #[test]
-    fn test_is_draw_timeout() {
-        //! Tests that timeout is not a draw
-        let state = GameOverState::WhiteWonByTime;
-        assert!(!state.is_draw());
-    }
-
-    #[test]
-    fn test_is_timeout_white() {
-        //! Tests timeout detection for White win
-        let state = GameOverState::WhiteWonByTime;
-        assert!(state.is_timeout());
-    }
-
-    #[test]
-    fn test_is_timeout_black() {
-        //! Tests timeout detection for Black win
-        let state = GameOverState::BlackWonByTime;
-        assert!(state.is_timeout());
-    }
-
-    #[test]
-    fn test_is_timeout_checkmate() {
-        //! Tests that checkmate is not a timeout
-        let state = GameOverState::WhiteWon;
-        assert!(!state.is_timeout());
     }
 
     #[test]

@@ -7,8 +7,7 @@
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
-use std::path::PathBuf;
+use solana_sdk::pubkey::Pubkey;
 
 /// Session data passed from web app to native game
 #[derive(Debug, Clone, Serialize, Deserialize, Resource)]
@@ -60,9 +59,6 @@ pub enum SessionError {
 
     #[error("Session expired")]
     Expired,
-
-    #[error("Invalid session data: {0}")]
-    InvalidData(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -125,24 +121,6 @@ impl GameSession {
         Ok(None)
     }
 
-    /// Get the session keypair for signing transactions
-    pub fn keypair(&self) -> Result<Keypair, SessionError> {
-        let secret_key: [u8; 64] = self
-            .session_signer_secret
-            .as_slice()
-            .try_into()
-            .map_err(|_| SessionError::InvalidData("Invalid secret key length".to_string()))?;
-
-        Keypair::try_from(&secret_key[..])
-            .map_err(|e| SessionError::InvalidData(format!("Invalid keypair: {}", e)))
-    }
-
-    /// Check if session is still valid
-    pub fn is_valid(&self) -> bool {
-        let now = chrono::Utc::now().timestamp_millis();
-        self.expires_at > now
-    }
-
     /// Time remaining in seconds
     pub fn time_remaining(&self) -> i64 {
         let now = chrono::Utc::now().timestamp_millis();
@@ -197,17 +175,6 @@ fn initialize_session(mut session_state: ResMut<SessionState>) {
         Err(e) => {
             error!("Failed to load session: {}", e);
             session_state.last_error = Some(e.to_string());
-        }
-    }
-}
-
-/// System to check session validity periodically
-pub fn check_session_validity(mut session_state: ResMut<SessionState>) {
-    if let Some(ref session) = session_state.session {
-        if !session.is_valid() {
-            warn!("Session has expired");
-            session_state.session = None;
-            session_state.last_error = Some("Session expired".to_string());
         }
     }
 }

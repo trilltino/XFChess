@@ -17,7 +17,6 @@ mod engine;
 mod game;
 mod input;
 mod multiplayer;
-mod persistent_camera;
 mod presentation;
 mod rendering;
 mod singleplayer;
@@ -27,16 +26,20 @@ mod states;
 mod ui;
 
 pub use cli::{Cli, PlayerColor as CliPlayerColor};
-pub use persistent_camera::PersistentEguiCamera;
+pub use core::persistent_camera::PersistentEguiCamera;
 pub use xfchess::{GameConfig, PlayerColor};
 
 #[tokio::main]
 async fn main() {
-    // Start embedded VPS signing server in background
-    tokio::spawn(start_embedded_signing_server());
-    
-    // Give server a moment to bind
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // Start embedded VPS signing server in background (unless running under Tauri/Mobile)
+    // DISABLED: Using external HTTP-only backend to avoid braid-iroh route conflict
+    let wallet_mode = std::env::var("XFCHESS_WALLET_MODE").unwrap_or_default() == "tauri";
+    if !wallet_mode {
+        println!("🚀 XFChess running in standalone mode — using external HTTP backend at http://localhost:8090");
+        println!("   (Embedded signing server disabled - use start_xfchess.bat to start backend)");
+    } else {
+        println!("🚀 XFChess running in Tauri mode — using system-provided signing server.");
+    }
 
     // Parse CLI arguments
     let mut cli = Cli::parse();
@@ -49,14 +52,31 @@ async fn main() {
         }
     }
 
+    // Check for CLI-only commands before launching game client
+    if let Some(cmd) = &cli.command {
+        match cmd {
+            cli::Commands::Tournament { action } => {
+                let rpc = cli.rpc_url.clone();
+                let vps = "http://127.0.0.1:8090".to_string(); // Or from env
+                let keypair = "keys/fee-payer.json"; // Default
+                #[cfg(feature = "solana")]
+                cli::tournament_admin::run(action, &rpc, &vps, keypair);
+                #[cfg(not(feature = "solana"))]
+                eprintln!("Tournament admin tools require the 'solana' feature to be enabled during compilation!");
+                return;
+            }
+            _ => {}
+        }
+    }
+
     println!("╔════════════════════════════════════════════════════════╗");
     println!("║          XFChess - Decentralized Chess                 ║");
     println!("║          Ephemeral Rollups on Solana                   ║");
     println!("╚════════════════════════════════════════════════════════╝");
     println!();
 
-    // Build game config from CLI
-    let game_config = GameConfig {
+    // Build game config from CLI + Env
+    let mut game_config = GameConfig {
         game_id: cli.game_id,
         player_color: cli.player_color.map(|c| match c {
             CliPlayerColor::White => PlayerColor::White,
@@ -71,7 +91,20 @@ async fn main() {
         wager_amount: cli.wager_amount,
         debug: cli.debug,
         log_file: cli.log_file.to_string_lossy().to_string(),
+        ai_difficulty: std::env::var("XFCHESS_AI_DIFFICULTY").ok().and_then(|v| v.parse().ok()),
+        ai_side: std::env::var("XFCHESS_AI_SIDE").ok().map(|v| {
+            if v.to_lowercase() == "white" { PlayerColor::White } else { PlayerColor::Black }
+        }),
     };
+
+    // If AI side is specified but player color isn't, we are playing VS AI
+    if game_config.player_color.is_none() && game_config.ai_side.is_some() {
+        // Player plays the opposite of AI
+        game_config.player_color = Some(match game_config.ai_side.unwrap() {
+            PlayerColor::White => PlayerColor::Black,
+            PlayerColor::Black => PlayerColor::White,
+        });
+    }
 
     if game_config.game_id.is_some() {
         println!("🎮 Game ID: {}", game_config.game_id.unwrap());
@@ -94,10 +127,31 @@ async fn main() {
 
     let handle = tokio::runtime::Handle::current();
     let mut app = App::new();
+    
+    // Configure AI if requested
+    if let Some(diff_val) = game_config.ai_difficulty {
+        use crate::game::ai::resource::{ChessAIResource, GameMode, AIDifficulty};
+        use crate::rendering::pieces::PieceColor;
+        
+        let difficulty = AIDifficulty::from_u8(diff_val);
+        let ai_color = match game_config.ai_side.unwrap_or(PlayerColor::Black) {
+            PlayerColor::White => PieceColor::White,
+            PlayerColor::Black => PieceColor::Black,
+        };
+        
+        info!("[AI] Initialising VS Computer Match: {} (Side: {:?})", 
+            difficulty.description(), ai_color);
+            
+        app.insert_resource(ChessAIResource {
+            mode: GameMode::VsAI { ai_color },
+            difficulty,
+        });
+    }
+
     app.insert_resource(multiplayer::TokioRuntime(handle))
         .insert_resource(game_config)
         .init_resource::<PersistentEguiCamera>()
-        .add_systems(PreStartup, persistent_camera::setup_persistent_egui_camera);
+        .add_systems(PreStartup, core::persistent_camera::setup_persistent_egui_camera);
 
     // Add core plugins
     app.add_plugins(
@@ -108,10 +162,18 @@ async fn main() {
                 // Use the project root assets folder so the game works regardless of
                 // which directory the executable is launched from.
                 #[cfg(not(target_arch = "wasm32"))]
-                file_path: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("assets")
-                    .to_string_lossy()
-                    .into_owned(),
+                file_path: {
+                    let cwd_assets = std::path::PathBuf::from("assets");
+                    if cwd_assets.exists() && cwd_assets.is_dir() {
+                        "assets".to_string()
+                    } else {
+                        // Fallback to absolute path from manifest (dev-only)
+                        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                            .join("assets")
+                            .to_string_lossy()
+                            .into_owned()
+                    }
+                },
                 ..default()
             })
             .set(WindowPlugin {
@@ -133,7 +195,7 @@ async fn main() {
             // Disable console logging in release mode to reduce WASM size
             .set(LogPlugin {
                 filter: if cfg!(debug_assertions) {
-                    "info,wgpu_core=warn,wgpu_hal=warn,xfchess=debug".to_string()
+                    "info,wgpu_core=warn,wgpu_hal=warn,xfchess=info,bevy_gltf=error,bevy_image=error".to_string()
                 } else {
                     "error".to_string()
                 },
@@ -200,12 +262,25 @@ async fn start_embedded_signing_server() {
     let pool = match SqlitePool::connect("sqlite://sessions.db?mode=rwc").await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[SIGN-SRV] Failed to connect to SQLite: {}", e);
+            eprintln!("[SIGN-SRV] Failed to connect to SQLite sessions.db: {}", e);
             return;
         }
     };
     
-    let state = SigningAppState::new(config, pool.clone());
+    // SQLite pool for vault persistence
+    let vault_pool = match sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect("sqlite://vault.db?mode=rwc")
+        .await 
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[SIGN-SRV] Failed to connect to SQLite vault.db: {}", e);
+            return;
+        }
+    };
+    
+    let state = SigningAppState::new(config, pool.clone(), vault_pool.clone());
     if let Err(e) = state.store.init().await {
         eprintln!("[SIGN-SRV] Failed to init session store: {}", e);
         return;

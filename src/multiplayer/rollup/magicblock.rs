@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Magic Block Ephemeral Rollups Resolver Integration
 //!
 //! This module provides integration with Magic Block's Ephemeral Rollups (ER) for sub-second
@@ -216,7 +217,7 @@ impl MagicBlockResolver {
         game_pda: Pubkey,
         payer: &Keypair,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut last_error = None;
+        let mut _last_error = None;
 
         for attempt in 1..=self.config.max_retries {
             match self.execute_delegation(game_pda, payer) {
@@ -226,7 +227,7 @@ impl MagicBlockResolver {
                         "Delegation attempt {} failed for game {}: {}",
                         attempt, game_pda, e
                     );
-                    last_error = Some(e);
+                    _last_error = Some(e);
 
                     if attempt < self.config.max_retries {
                         // Exponential backoff: 100ms, 200ms, 400ms
@@ -540,7 +541,7 @@ impl MagicBlockResolver {
         game_pda: Pubkey,
         payer: &Keypair,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut last_error = None;
+        let mut _last_error = None;
 
         for attempt in 1..=self.config.max_retries {
             match self.execute_undelegation(game_pda, payer) {
@@ -550,7 +551,7 @@ impl MagicBlockResolver {
                         "Undelegation attempt {} failed for game {}: {}",
                         attempt, game_pda, e
                     );
-                    last_error = Some(e);
+                    _last_error = Some(e);
 
                     if attempt < self.config.max_retries {
                         let delay = std::time::Duration::from_millis(100 * 2_u64.pow(attempt - 1));
@@ -655,7 +656,7 @@ impl MagicBlockResolver {
         info!("Routing transaction to Magic Block ER");
 
         // Attempt to send to ER with retry logic
-        let mut last_error = None;
+        let mut _last_error = None;
 
         for attempt in 1..=self.config.max_retries {
             match self.send_to_er(&instructions, payer) {
@@ -665,7 +666,7 @@ impl MagicBlockResolver {
                 }
                 Err(e) => {
                     warn!("ER routing attempt {} failed: {}", attempt, e);
-                    last_error = Some(e);
+                    _last_error = Some(e);
 
                     if attempt < self.config.max_retries {
                         let delay = std::time::Duration::from_millis(50 * 2_u64.pow(attempt - 1));
@@ -682,7 +683,7 @@ impl MagicBlockResolver {
         }
 
         Err(MagicBlockError::TransactionRoutingFailed(
-            last_error.unwrap_or_else(|| "Unknown error".to_string()),
+            _last_error.unwrap_or_else(|| "Unknown error".to_string()),
         ))
     }
 

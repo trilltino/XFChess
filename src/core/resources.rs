@@ -22,6 +22,10 @@ pub struct GameSettings {
 
     /// Whether to highlight last move
     pub highlight_last_move: bool,
+
+    /// Whether to use VPS relay for P2P connections
+    #[serde(default)]
+    pub use_vps_relay: bool,
 }
 
 impl Default for GameSettings {
@@ -31,6 +35,7 @@ impl Default for GameSettings {
             muted: false,
             show_hints: true,
             highlight_last_move: true,
+            use_vps_relay: true,
         }
     }
 }

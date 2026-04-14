@@ -1,5 +1,7 @@
+//! Instruction for authorizing session keys for passwordless gameplay.
+
 use crate::errors::XfchessGameError;
-use crate::state::{Game, GameStatus, SessionDelegation};
+use crate::state::{Game, SessionDelegation};
 use anchor_lang::prelude::*;
 
 pub fn handler_authorize_session_key(

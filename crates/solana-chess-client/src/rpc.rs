@@ -10,6 +10,7 @@ use xfchess_game::constants::{
     GAME_SEED, MOVE_LOG_SEED, PROFILE_SEED, SESSION_DELEGATION_SEED, WAGER_ESCROW_SEED,
 };
 use xfchess_game::state::{Game, GameType, PlayerProfile};
+use xfchess_game::state::game::MatchType;
 
 /// Get the system program Pubkey (11111...1).
 fn system_program_id() -> Pubkey {
@@ -103,17 +104,20 @@ impl ChessRpcClient {
     }
 
     /// Creates an instruction to initialize a player profile.
-    pub fn create_init_profile_ix(&self, player: Pubkey) -> Instruction {
+    pub fn create_init_profile_ix(&self, player: Pubkey, username: String) -> Instruction {
         let profile_pda = self.get_profile_pda(&player);
+        // Derive the username record PDA (needed by the Anchor accounts struct).
+        let username_record_pda = self.derive_pda(&[b"username", username.as_bytes()]);
 
         Instruction {
             program_id: self.program_id,
             accounts: vec![
                 AccountMeta::new(profile_pda, false),
+                AccountMeta::new(username_record_pda, false),
                 AccountMeta::new(player, true),
                 AccountMeta::new_readonly(system_program_id(), false),
             ],
-            data: xfchess_game::instruction::InitProfile {}.data(),
+            data: xfchess_game::instruction::InitProfile { username }.data(),
         }
     }
 
@@ -142,6 +146,9 @@ impl ChessRpcClient {
                 game_id,
                 wager_amount,
                 game_type,
+                country: "US".to_string(), // Default country, should be passed from UI
+                match_type: MatchType::Free, // Default match type (Free), should be passed from UI
+                time_per_move: 600, // Default 10 minutes per move
             }
             .data(),
         }
@@ -202,7 +209,7 @@ impl ChessRpcClient {
         game_id: u64,
         white: Pubkey,
         black: Pubkey,
-        result: xfchess_game::state::GameResult,
+        _result: xfchess_game::state::GameResult,
     ) -> Instruction {
         let game_pda = self.get_game_pda(game_id);
         let white_profile = self.get_profile_pda(&white);
@@ -220,7 +227,7 @@ impl ChessRpcClient {
                 AccountMeta::new(escrow_pda, false),
                 AccountMeta::new_readonly(system_program_id(), false),
             ],
-            data: xfchess_game::instruction::FinalizeGame { game_id, result }.data(),
+            data: xfchess_game::instruction::FinalizeGame { game_id }.data(),
         }
     }
 
@@ -297,10 +304,12 @@ impl ChessRpcClient {
             accounts: vec![
                 AccountMeta::new(game_pda, false),
                 AccountMeta::new(move_log_pda, false),
-                AccountMeta::new(white_session, true),
-                AccountMeta::new(black_session, true),
-                AccountMeta::new_readonly(white_delegation, false),
-                AccountMeta::new_readonly(black_delegation, false),
+                AccountMeta::new(white_delegation, false),
+                AccountMeta::new(black_delegation, false),
+                AccountMeta::new_readonly(white, false),
+                AccountMeta::new_readonly(black, false),
+                AccountMeta::new_readonly(white_session, false),
+                AccountMeta::new_readonly(black_session, false),
             ],
             data: xfchess_game::instruction::CommitMoveBatch {
                 game_id,

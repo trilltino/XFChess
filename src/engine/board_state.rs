@@ -10,7 +10,6 @@
 //! generation; this resource handles move *validation* only.
 
 use crate::game::components::HasMoved;
-use crate::game::resources::turn::CurrentTurn;
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
 use shakmaty::{fen::Fen, CastlingMode, Chess, Color, Position, Square};
@@ -100,20 +99,7 @@ impl ChessEngine {
         (rank * 8 + file) as i8
     }
 
-    #[inline]
-    pub fn index_to_square(index: i8) -> (u8, u8) {
-        let idx = index as u8;
-        (idx % 8, idx / 8) // (file, rank)
-    }
-
     // ─── Piece helpers ───────────────────────────────────────────────────────
-
-    pub fn piece_color_to_engine(color: PieceColor) -> i64 {
-        match color {
-            PieceColor::White => 1,
-            PieceColor::Black => -1,
-        }
-    }
 
     pub fn piece_type_to_id(piece_type: PieceType) -> i8 {
         match piece_type {
@@ -134,7 +120,6 @@ impl ChessEngine {
     pub fn sync_ecs_to_engine_mut(
         &mut self,
         pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
-        current_turn: &CurrentTurn,
     ) {
         // Collect piece data first to avoid borrow issues
         let pieces_data: Vec<(Entity, Piece, HasMoved)> = pieces_query
@@ -145,7 +130,6 @@ impl ChessEngine {
         // Now call the impl with the collected data as references
         self.sync_ecs_to_engine_impl(
             pieces_data.iter().map(|(e, p, h)| (*e, p, h)),
-            current_turn,
         );
     }
 
@@ -156,26 +140,22 @@ impl ChessEngine {
     pub fn sync_ecs_to_engine(
         &mut self,
         pieces_query: &Query<(Entity, &Piece, &HasMoved)>,
-        current_turn: &CurrentTurn,
     ) {
-        self.sync_ecs_to_engine_impl(pieces_query.iter(), current_turn);
+        self.sync_ecs_to_engine_impl(pieces_query.iter());
     }
 
     pub fn sync_ecs_to_engine_with_transform(
         &mut self,
         pieces_query: &Query<(Entity, &Piece, &HasMoved, &Transform)>,
-        current_turn: &CurrentTurn,
     ) {
         self.sync_ecs_to_engine_impl(
             pieces_query.iter().map(|(e, p, h, _)| (e, p, h)),
-            current_turn,
         );
     }
 
     pub fn sync_ecs_to_engine_impl<'a>(
         &mut self,
         pieces: impl Iterator<Item = (Entity, &'a Piece, &'a HasMoved)>,
-        current_turn: &CurrentTurn,
     ) {
         // Build an 8×8 board array (same encoding as old chess_engine for compat)
         let mut board = [0i8; 64];
@@ -248,11 +228,6 @@ impl ChessEngine {
         }
     }
 
-    /// Update the FEN after a move (call after apply_uci_move succeeds).
-    pub fn apply_fen(&mut self, new_fen: &str) {
-        self.fen = new_fen.to_string();
-        self.refresh_position();
-    }
 
     // ─── Move generation ────────────────────────────────────────────────────
 
@@ -331,66 +306,6 @@ impl ChessEngine {
             self.halfmove_clock,
             self.fullmove_counter
         )
-    }
-
-    /// Load a board state from a FEN string.
-    ///
-    /// # Arguments
-    /// * `fen` - A valid FEN string
-    ///
-    /// # Returns
-    /// * `Ok(())` if the FEN was parsed successfully
-    /// * `Err(String)` if the FEN is invalid
-    ///
-    /// # Example
-    /// ```
-    /// engine.from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")?;
-    /// ```
-    pub fn from_fen(&mut self, fen: &str) -> Result<(), String> {
-        let fen_parsed: Fen = fen.parse().map_err(|e| format!("Invalid FEN: {:?}", e))?;
-        let position: Chess = fen_parsed
-            .clone()
-            .into_position(CastlingMode::Standard)
-            .map_err(|e| format!("Invalid position: {:?}", e))?;
-
-        // Parse FEN fields
-        let parts: Vec<&str> = fen.split_whitespace().collect();
-        if parts.len() < 6 {
-            return Err("FEN must have 6 fields".to_string());
-        }
-
-        // Side to move
-        let current_turn = match parts[1] {
-            "w" => PieceColor::White,
-            "b" => PieceColor::Black,
-            _ => return Err("Invalid side to move".to_string()),
-        };
-
-        // Castling rights
-        let castling_rights = parts[2].to_string();
-
-        // En passant
-        let en_passant = if parts[3] == "-" {
-            None
-        } else {
-            Some(parts[3].to_string())
-        };
-
-        // Halfmove clock
-        let halfmove_clock: u32 = parts[4].parse().map_err(|_| "Invalid halfmove clock")?;
-
-        // Fullmove counter
-        let fullmove_counter: u32 = parts[5].parse().map_err(|_| "Invalid fullmove counter")?;
-
-        self.fen = fen.to_string();
-        self.position = position;
-        self.current_turn = current_turn;
-        self.castling_rights = castling_rights;
-        self.en_passant = en_passant;
-        self.halfmove_clock = halfmove_clock;
-        self.fullmove_counter = fullmove_counter;
-
-        Ok(())
     }
 
     /// Reset the engine to the starting position.
@@ -478,24 +393,6 @@ fn board_to_piece_placement(board: &[i8; 64]) -> String {
     ranks.join("/")
 }
 
-/// Build a complete FEN string from a raw board array and current turn info.
-fn board_to_fen(board: &[i8; 64], current_turn: &CurrentTurn, rights: &CastlingRights) -> String {
-    let piece_placement = board_to_piece_placement(board);
-    let side = if current_turn.color == PieceColor::White {
-        'w'
-    } else {
-        'b'
-    };
-    let castling_str = castling_to_string(rights);
-
-    format!(
-        "{} {} {} - 0 {}",
-        piece_placement,
-        side,
-        castling_str,
-        (current_turn.move_number + 1) / 2
-    )
-}
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -533,51 +430,4 @@ mod tests {
         assert_eq!(ChessEngine::square_to_index(7, 7), 63);
     }
 
-    #[test]
-    fn test_board_to_fen_initial() {
-        // Quick integration test checking if the start position builds correctly
-        let mut board = [0i8; 64];
-        // Set up White pieces on ranks 0 and 1
-        board[0..8].copy_from_slice(&[4, 2, 3, 5, 6, 3, 2, 4]); // rank 0
-        board[8..16].copy_from_slice(&[1; 8]); // rank 1
-                                               // Set up Black pieces on ranks 6 and 7
-        board[48..56].copy_from_slice(&[-1; 8]); // rank 6
-        board[56..64].copy_from_slice(&[-4, -2, -3, -5, -6, -3, -2, -4]); // rank 7
-
-        // Blank spaces from 16 to 48 are already 0
-        let current_turn = CurrentTurn {
-            color: PieceColor::White,
-            move_number: 1,
-        };
-        let rights = CastlingRights::default(); // all false, meaning all castling allowed
-
-        let fen = board_to_fen(&board, &current_turn, &rights);
-        assert_eq!(
-            fen,
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-        );
-    }
-
-    #[test]
-    fn test_board_to_fen_moved_kings() {
-        let mut board = [0i8; 64];
-        board[0] = 6; // white king on a1
-        board[63] = -6; // black king on h8
-
-        let current_turn = CurrentTurn {
-            color: PieceColor::Black,
-            move_number: 6,
-        };
-        let rights = CastlingRights {
-            white_king_moved: true,
-            black_king_moved: true,
-            ..Default::default()
-        };
-
-        let fen = board_to_fen(&board, &current_turn, &rights);
-        // Both kings moved, no castling rights at all -> "-"
-        // Turn is Black -> "b"
-        // Move is 6 -> full move (6+1)/2 = 3
-        assert_eq!(fen, "7k/8/8/8/8/8/8/K7 b - - 0 3");
-    }
 }

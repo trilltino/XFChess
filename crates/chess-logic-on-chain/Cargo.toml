@@ -12,5 +12,7 @@ serde = { version = "1.0", default-features = false, features = ["derive"], opti
 [features]
 default = ["alloc"]
 alloc = ["shakmaty-on-chain/alloc"]
+std = ["shakmaty-on-chain/std", "alloc"]
+uci = ["shakmaty-on-chain/variant", "alloc"]
 
 [dev-dependencies]

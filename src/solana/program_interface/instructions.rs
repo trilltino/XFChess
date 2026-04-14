@@ -10,8 +10,9 @@ use sha2::{Digest, Sha256};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
-    system_program,
 };
+#[allow(deprecated)]
+use solana_sdk::system_program;
 
 pub use xfchess_game::state::game::GameType;
 
@@ -22,11 +23,16 @@ pub const PROGRAM_ID: &str = "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX";
 pub const GAME_SEED: &[u8] = b"game";
 pub const MOVE_LOG_SEED: &[u8] = b"move_log";
 pub const PROFILE_SEED: &[u8] = b"profile";
+#[allow(dead_code)]
 pub const USERNAME_SEED: &[u8] = b"username";
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
+#[allow(dead_code)]
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
+#[allow(dead_code)]
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";
+#[allow(dead_code)]
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
+#[allow(dead_code)]
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 
 /// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
@@ -40,24 +46,12 @@ fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
 }
 
 /// Encode a Borsh-style `String` (u32 length prefix + utf-8 bytes).
+#[allow(dead_code)]
 fn borsh_string(s: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(4 + s.len());
     buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
     buf.extend_from_slice(s.as_bytes());
     buf
-}
-
-/// Encode a Borsh-style `Option<String>`.
-#[allow(dead_code)]
-fn borsh_option_string(opt: &Option<String>) -> Vec<u8> {
-    match opt {
-        Some(s) => {
-            let mut buf = vec![1u8];
-            buf.extend(borsh_string(s));
-            buf
-        }
-        None => vec![0u8],
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +163,7 @@ pub fn join_game_ix(
 ///
 /// `annotation`, `move_time`, and `prev_hash` are client-side metadata used
 /// for local hash-chaining and display; they are **not** sent on-chain.
+#[allow(dead_code)]
 pub fn record_move_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -245,7 +240,6 @@ pub fn record_move_ix(
 ///   2 → `GameResult::Draw`
 pub fn finalize_game_ix(
     program_id: Pubkey,
-    payer: Pubkey,
     game_id: u64,
     result_code: u8,
     white_pubkey: Pubkey,
@@ -303,37 +297,6 @@ pub fn finalize_game_ix(
             AccountMeta::new(black_pubkey, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// commit_move_batch  (used by rollup_network_bridge)
-// ---------------------------------------------------------------------------
-
-/// Build a `commit_move_batch` instruction.
-#[allow(dead_code)]
-pub fn commit_move_batch_ix(
-    payer: Pubkey,
-    game_pda: Pubkey,
-    moves: Vec<(u8, u8)>,
-    _signatures: Vec<[u8; 64]>,
-) -> Result<Instruction> {
-    let program_id: Pubkey = PROGRAM_ID.parse()?;
-
-    let mut data = anchor_discriminator("commit_move_batch").to_vec();
-    data.extend_from_slice(&(moves.len() as u16).to_le_bytes());
-    for (from, to) in moves {
-        data.push(from);
-        data.push(to);
-    }
-
-    Ok(Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(payer, true),
-            AccountMeta::new(game_pda, false),
         ],
         data,
     })
@@ -404,6 +367,7 @@ pub fn authorize_session_key_ix(
 ///   0. player_profile  (init, seeds=["profile", player])
 ///   1. player          (mut, signer)
 ///   2. system_program
+#[allow(dead_code)]
 pub fn init_profile_ix(program_id: Pubkey, player: Pubkey) -> Result<Instruction> {
     let player_profile_pda = Pubkey::find_program_address(
         &[PROFILE_SEED, player.as_ref()],
@@ -424,6 +388,38 @@ pub fn init_profile_ix(program_id: Pubkey, player: Pubkey) -> Result<Instruction
     })
 }
 
+/// Build a `verify_profile` instruction.
+///
+/// On-chain signature:
+/// ```ignore
+/// pub fn verify_profile(ctx)
+/// ```
+///
+/// Accounts:
+///   0. player_profile  (mut, seeds=["profile", player])
+///   1. admin           (mut, signer)
+///   2. player          (pubkey only)
+#[allow(dead_code)]
+pub fn verify_profile_ix(program_id: Pubkey, admin: Pubkey, player: Pubkey) -> Result<Instruction> {
+    let player_profile_pda = Pubkey::find_program_address(
+        &[PROFILE_SEED, player.as_ref()],
+        &program_id,
+    )
+    .0;
+
+    let data = anchor_discriminator("verify_profile").to_vec();
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(player_profile_pda, false),
+            AccountMeta::new(admin, true), // The KYC authority fee-payer
+            AccountMeta::new_readonly(player, false),
+        ],
+        data,
+    })
+}
+
 /// Build a `set_username` instruction.
 ///
 /// On-chain signature:
@@ -437,6 +433,7 @@ pub fn init_profile_ix(program_id: Pubkey, player: Pubkey) -> Result<Instruction
 ///   2. player          (mut, signer)
 ///   3. authority       (must match profile.authority)
 ///   4. system_program
+#[allow(dead_code)]
 pub fn set_username_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -471,6 +468,7 @@ pub fn set_username_ix(
 }
 
 /// Build an `initialize_tournament` instruction.
+#[allow(dead_code)]
 pub fn initialize_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -507,6 +505,7 @@ pub fn initialize_tournament_ix(
 }
 
 /// Build a `register_player` instruction.
+#[allow(dead_code)]
 pub fn register_player_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -545,6 +544,7 @@ pub fn register_player_ix(
 }
 
 /// Build a `start_tournament` instruction.
+#[allow(dead_code)]
 pub fn start_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -571,6 +571,7 @@ pub fn start_tournament_ix(
 }
 
 /// Build a `record_match_result` instruction.
+#[allow(dead_code)]
 pub fn record_match_result_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -602,6 +603,7 @@ pub fn record_match_result_ix(
 }
 
 /// Build an `advance_final` instruction.
+#[allow(dead_code)]
 pub fn advance_final_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -628,6 +630,7 @@ pub fn advance_final_ix(
 }
 
 /// Re-export program ID for convenience.
+#[allow(dead_code)]
 pub fn get_program_id() -> Result<Pubkey> {
     PROGRAM_ID
         .parse()

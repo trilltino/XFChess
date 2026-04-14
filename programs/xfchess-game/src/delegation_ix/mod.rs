@@ -1,3 +1,5 @@
+//! Delegation and Ephemeral Rollup integration instructions.
+
 pub mod delegate;
 pub mod session;
 pub mod undelegation;

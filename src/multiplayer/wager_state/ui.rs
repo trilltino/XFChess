@@ -48,6 +48,54 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                     );
                 });
 
+                ui.separator();
+
+                // Fee breakdown (only show for ranked/wager/tournament games)
+                if wager_state.match_type.as_deref() != Some("Free") {
+                    ui.label(egui::RichText::new("Fee Breakdown").strong().size(13.0));
+                    ui.add_space(4.0);
+                    
+                    // Country fee
+                    if let Some(country_fee) = wager_state.country_fee {
+                        ui.horizontal(|ui| {
+                            ui.label("Country Fee:");
+                            ui.label(
+                                egui::RichText::new(format!("{} SOL", country_fee))
+                                    .color(egui::Color32::LIGHT_BLUE)
+                                    .small(),
+                            );
+                        });
+                    }
+
+                    // ELO fee
+                    if let Some(elo_fee) = wager_state.elo_fee {
+                        ui.horizontal(|ui| {
+                            ui.label("ELO Fee:");
+                            ui.label(
+                                egui::RichText::new(format!("{} SOL", elo_fee))
+                                    .color(egui::Color32::LIGHT_BLUE)
+                                    .small(),
+                            );
+                        });
+                    }
+
+                    ui.separator();
+
+                    // Total fees
+                    let total_fees = wager_state.country_fee.unwrap_or(0.0) + wager_state.elo_fee.unwrap_or(0.0);
+                    if total_fees > 0.0 {
+                        ui.horizontal(|ui| {
+                            ui.label("Total Fees:");
+                            ui.label(
+                                egui::RichText::new(format!("{} SOL", total_fees))
+                                    .color(egui::Color32::YELLOW)
+                                    .strong()
+                                    .small(),
+                            );
+                        });
+                    }
+                }
+
                 // Player color
                 if let Some(ref player_color) = wager_state.player_color {
                     ui.horizontal(|ui| {

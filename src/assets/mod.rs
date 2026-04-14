@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Asset management module
 //!
 //! Handles preloading and tracking of all game assets including:

@@ -1,0 +1,280 @@
+//! Identity registration routes for KYC/PII data with GDPR compliance.
+//!
+//! This module handles identity verification with:
+//! - AES-256-GCM encryption for PII data
+//! - Audit logging for GDPR compliance
+//! - Right to be forgotten (data deletion)
+//! - Consent tracking
+//! - KYC status verification
+
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use solana_sdk::{pubkey::Pubkey, signature::Signature, signer::Signer};
+use sqlx::Row;
+use std::str::FromStr;
+use std::sync::Arc;
+use tracing::{error, info, warn};
+
+use crate::signing::AppState;
+
+/// Identity registration payload with GDPR consent.
+///
+/// All PII fields are encrypted before storage. Consent is recorded for GDPR compliance.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IdentityPayload {
+    /// Wallet public key (base58)
+    pub pubkey: String,
+    /// Full legal name
+    pub full_name: String,
+    /// Date of birth (YYYY-MM-DD)
+    pub dob: String,
+    /// Residential address
+    pub address: String,
+    /// Country code (ISO 3166-1 alpha-2)
+    pub country: String,
+    /// Tax ID / SSN / National ID
+    pub tax_id: String,
+    /// Wallet signature over "register_identity:{pubkey}:{timestamp}"
+    pub signature: String,
+    /// Unix timestamp for replay protection
+    pub timestamp: u64,
+    /// GDPR consent: "I consent to the collection and processing of my personal data"
+    pub consent_kyc: bool,
+    /// Consent for data retention period (years)
+    pub consent_retention_years: u8,
+}
+
+/// KYC status response.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KycStatus {
+    pub verified: bool,
+    pub verified_at: Option<i64>,
+    pub country: Option<String>,
+    pub requires_kyc: bool,
+}
+
+/// GDPR data deletion request.
+#[derive(Clone, Debug, Deserialize)]
+pub struct DeleteDataRequest {
+    pub pubkey: String,
+    pub signature: String,
+    pub timestamp: u64,
+    pub reason: Option<String>,
+}
+
+/// Creates the identity routes router.
+///
+/// # Returns
+/// An Axum Router with identity registration endpoints
+pub fn identity_routes() -> Router<AppState> {
+    Router::new()
+        .route("/register", post(register_identity))
+        .route("/status/{pubkey}", get(check_kyc_status))
+        .route("/delete", post(delete_identity_data))
+}
+
+/// Handles POST /identity/register - registers and vaults user identity.
+///
+/// # Flow
+/// 1. Verify wallet signature authentication
+/// 2. Check timestamp for replay protection (5 minute window)
+/// 3. Generate blind index for tax ID (searchable hash)
+/// 4. Encrypt all PII data using AES-256-GCM
+/// 5. Store encrypted blob in SQLite vault database
+/// 6. Submit on-chain verification transaction to mark user as verified
+///
+/// # Arguments
+/// * `state` - Application state containing vault and config
+/// * `payload` - Identity registration payload
+///
+/// # Returns
+/// Empty JSON response on success, error tuple on failure
+async fn register_identity(
+    State(state): State<AppState>,
+    Json(payload): Json<IdentityPayload>,
+) -> Result<Json<()>, (StatusCode, String)> {
+    // 1. Verify Authentication
+    let pk = Pubkey::from_str(&payload.pubkey)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        
+    let sig = Signature::from_str(&payload.signature)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let msg = format!("register_identity:{}:{}", payload.pubkey, payload.timestamp);
+    if !sig.verify(pk.as_ref(), msg.as_bytes()) {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Signature".to_string()));
+    }
+
+    // Protect replay attacks
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    if now > payload.timestamp && now - payload.timestamp > 300 {
+        return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
+    }
+
+    // 2. Encryption
+    let blind_index = state.identity_vault.generate_blind_index(&payload.tax_id);
+    
+    let privacy_json = serde_json::json!({
+        "full_name": payload.full_name,
+        "dob": payload.dob,
+        "address": payload.address,
+        "country": payload.country,
+        "tax_id": payload.tax_id, 
+    }).to_string();
+    
+    let encrypted_blob = state.identity_vault.encrypt(&privacy_json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let registered_at = now as i64;
+
+    // 3. Vault Storage
+    let pool = &state.vault_pool;
+    
+    // Reject if GDPR consent was not given
+    if !payload.consent_kyc {
+        return Err((StatusCode::BAD_REQUEST, "GDPR consent is required to store identity data".to_string()));
+    }
+
+    let result = sqlx::query(
+        "INSERT INTO users (pubkey, blind_index_hash, encrypted_blob, registered_at, consent_kyc, consent_retention_years) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .bind(&payload.pubkey)
+    .bind(blind_index)
+    .bind(encrypted_blob)
+    .bind(registered_at)
+    .bind(payload.consent_kyc)
+    .bind(payload.consent_retention_years as i32)
+    .execute(&**pool)
+    .await;
+
+    if let Err(e) = result {
+        if e.to_string().contains("UNIQUE") {
+            return Err((StatusCode::CONFLICT, "Tax ID or Wallet already registered".to_string()));
+        }
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+    
+    // 4. On-Chain Sync: VPS signs the instruction to flag the user as verified
+    let admin_keypair = state.feepayer.next();
+    let program_id = Pubkey::from_str(&state.config.program_id).unwrap_or_else(|_| "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX".parse().unwrap());
+    
+    let ix = crate::signing::solana::verify_profile_ix(&program_id, &admin_keypair.pubkey(), &pk);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    
+    match crate::signing::solana::sign_and_submit(&rpc, admin_keypair, &[ix]) {
+        Ok(sig) => tracing::info!("[Identity] On-chain verification tx confirmed: {}", sig),
+        Err(e) => tracing::error!("[Identity] Failed to submit verification tx on-chain: {}", e),
+    }
+    
+    info!("[Identity] Successfully registered and vaulted user {} securely", payload.pubkey);
+
+    // 5. Log audit event for GDPR compliance
+    log_audit_event(&payload.pubkey, "KYC_REGISTERED", &state.vault_pool).await;
+
+    Ok(Json(()))
+}
+
+/// GET /identity/status/{pubkey} - Check KYC verification status.
+async fn check_kyc_status(
+    Path(pubkey): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<KycStatus>, StatusCode> {
+    let pool = &state.vault_pool;
+    
+    // Check if user exists and get basic info (without decrypting PII)
+    let row = sqlx::query(
+        "SELECT registered_at, blind_index_hash FROM users WHERE pubkey = ?"
+    )
+    .bind(&pubkey)
+    .fetch_optional(&**pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let verified = row.is_some();
+    let verified_at = row.as_ref().map(|r| r.get::<i64, _>("registered_at"));
+    
+    // Log access for GDPR audit trail
+    log_audit_event(&pubkey, "KYC_STATUS_CHECKED", pool).await;
+
+    Ok(Json(KycStatus {
+        verified,
+        verified_at,
+        country: None, // Would need to decrypt to get this - avoid for status checks
+        requires_kyc: true, // Mainnet wagering always requires KYC
+    }))
+}
+
+/// POST /identity/delete - GDPR right to be forgotten.
+async fn delete_identity_data(
+    State(state): State<AppState>,
+    Json(req): Json<DeleteDataRequest>,
+) -> Result<Json<()>, (StatusCode, String)> {
+    // 1. Verify Authentication
+    let pk = Pubkey::from_str(&req.pubkey)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        
+    let sig = Signature::from_str(&req.signature)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let msg = format!("delete_identity:{}:{}", req.pubkey, req.timestamp);
+    if !sig.verify(pk.as_ref(), msg.as_bytes()) {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Signature".to_string()));
+    }
+
+    // 2. Protect replay attacks
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    if now > req.timestamp && now - req.timestamp > 300 {
+        return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
+    }
+
+    let pool = &state.vault_pool;
+
+    // 3. Log deletion request before deleting (for audit)
+    let reason = req.reason.as_deref().unwrap_or("User request");
+    warn!("[GDPR] Identity deletion requested for {}. Reason: {}", req.pubkey, reason);
+    log_audit_event(&req.pubkey, "KYC_DELETION_REQUESTED", pool).await;
+
+    // 4. Delete user data
+    let result = sqlx::query("DELETE FROM users WHERE pubkey = ?")
+        .bind(&req.pubkey)
+        .execute(&**pool)
+        .await;
+
+    match result {
+        Ok(res) => {
+            if res.rows_affected() == 0 {
+                return Err((StatusCode::NOT_FOUND, "No data found for this wallet".to_string()));
+            }
+            info!("[GDPR] Identity data deleted for {}", req.pubkey);
+            log_audit_event(&req.pubkey, "KYC_DATA_DELETED", pool).await;
+            Ok(Json(()))
+        }
+        Err(e) => {
+            error!("[GDPR] Failed to delete identity data for {}: {}", req.pubkey, e);
+            Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        }
+    }
+}
+
+/// Logs audit events for GDPR compliance.
+async fn log_audit_event(pubkey: &str, action: &str, pool: &Arc<sqlx::SqlitePool>) {
+    let timestamp = Utc::now().timestamp();
+    let result = sqlx::query(
+        "INSERT INTO audit_log (pubkey, action, timestamp) VALUES (?, ?, ?)"
+    )
+    .bind(pubkey)
+    .bind(action)
+    .bind(timestamp)
+    .execute(pool.as_ref())
+    .await;
+    
+    if let Err(e) = result {
+        tracing::warn!("[Audit] Failed to log audit event: {}", e);
+    }
+}

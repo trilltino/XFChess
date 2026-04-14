@@ -15,7 +15,6 @@ pub use shakmaty::uci::UciMove as Uci;
 /// Re-export commonly used types and functions for move validation
 pub mod validation {
     use super::*;
-    use alloc::string::String;
     
     /// Parses a FEN and move string to validate if the move is legal
     pub fn is_move_legal(fen_str: &str, move_uci: &str) -> bool {

@@ -8,7 +8,6 @@ use crate::game::components::{PieceColor, PieceType};
 use crate::game::resources::CapturedPieces;
 use bevy::prelude::*;
 use braid_core::core::merge::simpleton::SimpletonMergeType;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 /// Resource for synchronizing board state between peers
@@ -18,8 +17,6 @@ pub struct BoardStateSync {
     pub merge_type: SimpletonMergeType,
     /// Last serialized state we know about
     pub last_known_state: String,
-    /// Our peer ID for identification
-    pub peer_id: String,
     /// Pending moves that haven't been acknowledged
     pub pending_moves: Vec<BoardMove>,
     /// Sync status for UI display
@@ -35,12 +32,6 @@ pub enum SyncStatus {
     Synchronized,
     /// Local changes pending sync
     PendingLocal,
-    /// Remote changes to apply
-    PendingRemote,
-    /// Conflict detected, resolving
-    Resolving,
-    /// Error state
-    Error(String),
 }
 
 /// A chess move in serializable format
@@ -55,28 +46,12 @@ pub struct BoardMove {
     pub move_number: u32,
 }
 
-/// Serialized board state format:
-/// FEN|move_counter|turn|last_move_from|last_move_to|captured_white|captured_black|hash
-/// Example:
-/// rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR|1|white|4|1|4|3||+|a3f2b8c...
-#[derive(Debug, Clone)]
-pub struct SerializedBoardState {
-    pub fen: String,
-    pub move_counter: u32,
-    pub current_turn: PieceColor,
-    pub last_move: Option<((u8, u8), (u8, u8))>,
-    pub captured_white: Vec<PieceType>,
-    pub captured_black: Vec<PieceType>,
-    pub hash: String,
-}
-
 impl BoardStateSync {
-    /// Create a new BoardStateSync with a unique peer ID
-    pub fn new(peer_id: &str) -> Self {
+    /// Create a new BoardStateSync
+    pub fn new() -> Self {
         Self {
-            merge_type: SimpletonMergeType::new(peer_id),
+            merge_type: SimpletonMergeType::new("default"),
             last_known_state: String::new(),
-            peer_id: peer_id.to_string(),
             pending_moves: Vec::new(),
             sync_status: SyncStatus::Initializing,
         }
@@ -132,109 +107,6 @@ impl BoardStateSync {
         format!("{}|{}", state, hash)
     }
 
-    /// Parse a serialized board state string
-    pub fn deserialize_state(state_str: &str) -> Result<SerializedBoardState, SyncError> {
-        let parts: Vec<&str> = state_str.split('|').collect();
-        if parts.len() != 8 {
-            return Err(SyncError::InvalidFormat(format!(
-                "Expected 8 parts, got {}",
-                parts.len()
-            )));
-        }
-
-        let fen = parts[0].to_string();
-        let move_counter = parts[1]
-            .parse::<u32>()
-            .map_err(|e| SyncError::InvalidFormat(format!("Invalid move_counter: {}", e)))?;
-        let current_turn = match parts[2] {
-            "w" => PieceColor::White,
-            "b" => PieceColor::Black,
-            _ => {
-                return Err(SyncError::InvalidFormat(format!(
-                    "Invalid turn: {}",
-                    parts[2]
-                )))
-            }
-        };
-
-        // Parse last move
-        let last_move = if parts[3].is_empty() {
-            None
-        } else {
-            let from_x = parts[3]
-                .parse::<u8>()
-                .map_err(|_| SyncError::InvalidFormat("Invalid from_x".to_string()))?;
-            let from_y = parts[4]
-                .parse::<u8>()
-                .map_err(|_| SyncError::InvalidFormat("Invalid from_y".to_string()))?;
-            let to_x = parts[5]
-                .parse::<u8>()
-                .map_err(|_| SyncError::InvalidFormat("Invalid to_x".to_string()))?;
-            let to_y = parts[6]
-                .parse::<u8>()
-                .map_err(|_| SyncError::InvalidFormat("Invalid to_y".to_string()))?;
-            Some(((from_x, from_y), (to_x, to_y)))
-        };
-
-        // Parse captured pieces
-        let captured_white = parts[5].chars().filter_map(char_to_piece_type).collect();
-        let captured_black = parts[6].chars().filter_map(char_to_piece_type).collect();
-
-        // Verify hash
-        let content = format!(
-            "{}|{}|{}|{}|{}|{}",
-            fen, move_counter, parts[2], parts[3], parts[4], parts[5]
-        );
-        let expected_hash = calculate_state_hash(&content);
-        if expected_hash != parts[7] {
-            return Err(SyncError::HashMismatch);
-        }
-
-        Ok(SerializedBoardState {
-            fen,
-            move_counter,
-            current_turn,
-            last_move,
-            captured_white,
-            captured_black,
-            hash: parts[7].to_string(),
-        })
-    }
-
-    /// Apply a remote state to the local game
-    pub fn apply_remote_state(
-        &mut self,
-        state_str: &str,
-        current_move_counter: u32,
-    ) -> Result<StateDiff, SyncError> {
-        let remote_state = Self::deserialize_state(state_str)?;
-
-        // Determine what to do based on move counter
-        match remote_state.move_counter.cmp(&current_move_counter) {
-            std::cmp::Ordering::Less => {
-                // Remote is behind - ignore or help them catch up
-                self.sync_status = SyncStatus::PendingLocal;
-                Ok(StateDiff::NoAction)
-            }
-            std::cmp::Ordering::Equal => {
-                // Same move count - check if states match
-                if self.last_known_state == state_str {
-                    self.sync_status = SyncStatus::Synchronized;
-                    Ok(StateDiff::NoAction)
-                } else {
-                    // Different states at same move - conflict!
-                    self.sync_status = SyncStatus::Resolving;
-                    Err(SyncError::Conflict)
-                }
-            }
-            std::cmp::Ordering::Greater => {
-                // Remote is ahead - apply their state
-                self.sync_status = SyncStatus::PendingRemote;
-                Ok(StateDiff::ApplyState(remote_state))
-            }
-        }
-    }
-
     /// Update the last known state after local move
     pub fn on_local_move(&mut self, move_record: BoardMove, serialized_state: String) {
         self.pending_moves.push(move_record);
@@ -250,26 +122,6 @@ impl BoardStateSync {
     }
 }
 
-/// Difference between local and remote state
-#[derive(Debug)]
-pub enum StateDiff {
-    /// No action needed
-    NoAction,
-    /// Apply this remote state
-    ApplyState(SerializedBoardState),
-    /// Replay these moves
-    ReplayMoves(Vec<BoardMove>),
-}
-
-/// Errors that can occur during sync
-#[derive(Debug, Clone)]
-pub enum SyncError {
-    InvalidFormat(String),
-    HashMismatch,
-    InvalidFen,
-    Conflict,
-    EngineError(String),
-}
 
 /// Calculate a simple hash for state verification
 fn calculate_state_hash(state: &str) -> String {
@@ -291,18 +143,6 @@ fn piece_type_to_char(piece: PieceType) -> char {
     }
 }
 
-/// Convert character to PieceType
-fn char_to_piece_type(c: char) -> Option<PieceType> {
-    match c {
-        'K' => Some(PieceType::King),
-        'Q' => Some(PieceType::Queen),
-        'R' => Some(PieceType::Rook),
-        'B' => Some(PieceType::Bishop),
-        'N' => Some(PieceType::Knight),
-        'P' => Some(PieceType::Pawn),
-        _ => None,
-    }
-}
 
 /// Extension trait for ChessEngine to get FEN string
 pub trait ChessEngineExt {
@@ -350,8 +190,8 @@ pub fn broadcast_state_system(
 
 /// System to receive and apply remote state
 pub fn receive_state_system(
-    mut board_sync: ResMut<BoardStateSync>,
-    mut engine: ResMut<ChessEngine>,
+    _board_sync: ResMut<BoardStateSync>,
+    _engine: ResMut<ChessEngine>,
     // Add braid network reader here when integrated
 ) {
     // TODO: Read from braid-blob file or receive via braid-iroh
@@ -378,10 +218,8 @@ pub fn receive_state_system(
 
 /// Initialize BoardStateSync on startup
 pub fn init_board_state_sync(mut commands: Commands) {
-    // Generate unique peer ID
-    let peer_id = format!("peer_{}", rand::random::<u16>());
-    commands.insert_resource(BoardStateSync::new(&peer_id));
-    info!("[BOARD_SYNC] Initialized with peer ID: {}", peer_id);
+    commands.insert_resource(BoardStateSync::new());
+    info!("[BOARD_SYNC] Initialized board state sync");
 }
 
 #[cfg(test)]

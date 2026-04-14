@@ -7,6 +7,35 @@ edition = "2021"
 name = "xfchess"
 path = "src/main.rs"
 
+[[bin]]
+name = "pda"
+path = "src/bin/pda.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "read_game"
+path = "src/bin/read_game.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "tournament_test"
+path = "src/bin/tournament_test.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "tournament_real_test"
+path = "src/bin/tournament_real_test.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "tournament_data_gen"
+path = "src/bin/tournament_data_gen.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "debugger"
+path = "src/bin/debugger.rs"
+
 
 [workspace]
 members = [
@@ -34,8 +63,21 @@ members = [
 ]
 resolver = "2"
 
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
 overflow-checks = true
+
 
 [workspace.package]
 edition = "2021"
@@ -69,6 +111,7 @@ scc = "2.2.5"
 smallvec = { version = "1.13", features = ["serde"] }
 magic-domain-program = { version = "0.2.0" }
 rand = "0.9"
+regex = "1.11"
 thiserror = "2.0.18"
 anyhow = "1.0.102"
 futures-lite = "2.6.1"
@@ -81,6 +124,7 @@ bs58 = "0.5.1"
 crossbeam-channel = "0.5.15"
 web-time = "1.1"
 anchor-lang = "0.32.1"
+aes-gcm = "0.10"
 chrono = { version = "0.4.38", features = ["serde"] }
 serde_bytes = "0.11.15"
 clap = { version = "4.5", features = ["derive", "env"] }
@@ -88,8 +132,8 @@ egui = "0.29"
 solana-sdk = "2.2.1"
 solana-client = "2.2.1"
 solana-program = "2.2.1"
-solana-instruction = "2.2.1"
-solana-pubkey = "2.2.1"
+solana-instruction = "=2.3.3"
+solana-pubkey = "=2.2.1"
 solana-account = "2.2.1"
 solana-account-info = "2.2.1"
 solana-cpi = "2.2.1"
@@ -107,6 +151,7 @@ iroh = "0.96.1"
 iroh-base = "0.96.1"
 bevy_egui = "0.39.1"
 shakmaty = { package = "shakmaty-host-vendored", path = "crates/shakmaty-host-vendored" }
+webbrowser = "1.0"
 
 # Internal Workspace Crates
 braid-core = { path = "crates/braid-core" }
@@ -130,7 +175,6 @@ solana = [
     "solana-chess-client",
     "solana-secp256k1-program",
     "solana-program",
-    "magic-resolver",
     "xfchess-game",
     "ephemeral-rollups-sdk",
 ]
@@ -181,6 +225,8 @@ clap.workspace = true
 egui.workspace = true
 bincode.workspace = true
 base64.workspace = true
+aes-gcm.workspace = true
+regex.workspace = true
 magic-resolver = { workspace = true, optional = true }
 xfchess-game = { workspace = true, optional = true }
 ephemeral-rollups-sdk = { workspace = true, optional = true }
@@ -194,3 +240,6 @@ chess-logic-shared = { workspace = true, features = ["std", "uci"] }
 
 [patch.crates-io]
 ephemeral-rollups-sdk = { path = "references/ephemeral-rollups-sdk/rust/sdk" }
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "allow" }

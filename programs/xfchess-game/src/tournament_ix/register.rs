@@ -1,3 +1,5 @@
+//! Instruction allowing players to opt-in and pay their entry fee for the tournament.
+
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -38,7 +40,7 @@ pub fn handler(ctx: Context<RegisterPlayer>, _tournament_id: u64) -> Result<()> 
         GameErrorCode::TournamentNotInRegistration
     );
     require!(
-        tournament.registered_count < 4,
+        tournament.registered_count < tournament.max_players,
         GameErrorCode::TournamentFull
     );
 
@@ -47,9 +49,9 @@ pub fn handler(ctx: Context<RegisterPlayer>, _tournament_id: u64) -> Result<()> 
         require!(*existing != player_key, GameErrorCode::AlreadyRegistered);
     }
 
-    let slot = tournament.registered_count as usize;
-    tournament.players[slot] = player_key;
-    tournament.player_elos[slot] = ctx.accounts.player_profile.elo as u32;
+    // Add player to vectors
+    tournament.players.push(player_key);
+    tournament.player_elos.push((ctx.accounts.player_profile.elo_rating / 100.0) as u32);
     tournament.registered_count += 1;
 
     // Transfer entry fee to escrow
@@ -68,10 +70,11 @@ pub fn handler(ctx: Context<RegisterPlayer>, _tournament_id: u64) -> Result<()> 
     }
 
     msg!(
-        "Player {} registered for tournament {} (slot {}/4)",
+        "Player {} registered for tournament {} (slot {}/{})",
         player_key,
         tournament.tournament_id,
-        tournament.registered_count
+        tournament.registered_count,
+        tournament.max_players
     );
     Ok(())
 }

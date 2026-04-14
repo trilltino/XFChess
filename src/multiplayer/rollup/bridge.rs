@@ -156,7 +156,7 @@ fn handle_rollup_to_network_events(
                 );
                 bevy::tasks::IoTaskPool::get()
                     .spawn(async move {
-                        use crate::multiplayer::rollup::vps_client;
+                        use crate::multiplayer::vps_client;
                         for (i, (mv, fen)) in moves_owned.iter().zip(fens_owned.iter()).enumerate() {
                             match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
                                 Ok(sig) => info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig),
@@ -258,7 +258,7 @@ fn handle_network_to_rollup_events(
                     bridge.move_nonce += moves.len() as u64;
                     bevy::tasks::IoTaskPool::get()
                         .spawn(async move {
-                            use crate::multiplayer::rollup::vps_client;
+                            use crate::multiplayer::vps_client;
                             for (i, (mv, fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
                                 match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
                                     Ok(sig) => info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig),
@@ -391,7 +391,7 @@ fn submit_moves_via_vps(
     magicblock_events: &mut MessageWriter<MagicBlockEvent>,
     recent_txs: &mut RecentTransactions,
 ) {
-    use crate::multiplayer::rollup::vps_client;
+    use crate::multiplayer::vps_client;
 
     for (i, (move_str, next_fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
         match vps_client::record_move(game_id, move_str, next_fen, base_nonce + i as u64) {
@@ -495,7 +495,7 @@ async fn spawn_delegation_task(
     wallet_pubkey: Pubkey,
     rpc_client: Arc<RpcClient>,
 ) -> Result<Pubkey, String> {
-    use crate::multiplayer::solana::integration::DEVNET_RPC_URL;
+    use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
     use crate::multiplayer::solana::tauri_signer;
 
     info!(
@@ -569,7 +569,7 @@ fn retry_pending_delegation(
     mut bridge: ResMut<RollupNetworkBridge>,
     magicblock_resolver: Res<MagicBlockResolver>,
     solana_state: Option<Res<SolanaIntegrationState>>,
-    mut magicblock_events: MessageWriter<MagicBlockEvent>,
+    magicblock_events: MessageWriter<MagicBlockEvent>,
 ) {
     if bridge.delegation_rx.is_some() {
         return;
@@ -687,7 +687,7 @@ fn handle_game_end_undelegation(
 
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
-                use crate::multiplayer::rollup::vps_client;
+                use crate::multiplayer::vps_client;
 
                 if !is_delegated {
                     info!("[FINALIZE] Game {} — not delegator, skipping undelegate+finalize", game_id);

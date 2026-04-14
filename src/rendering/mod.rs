@@ -9,7 +9,6 @@ pub mod pieces;
 pub mod utils;
 
 // Re-export commonly used items
-pub use board::*;
 pub use camera::*;
 pub use effects::*;
 pub use pieces::*;

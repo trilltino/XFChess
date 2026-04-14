@@ -10,6 +10,7 @@
 //! ```
 
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::net::TcpListener;
@@ -18,12 +19,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-/// Simple transaction log entry
-#[derive(Debug, Clone)]
+/// Log entry structure for the debugger
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct LogEntry {
     timestamp: u64,
     game_id: u64,
-    event_type: String,
+    level: String,
     message: String,
 }
 
@@ -135,7 +136,7 @@ fn process_stdin(
                 let entry = LogEntry {
                     timestamp: current_timestamp(),
                     game_id,
-                    event_type: "stdin".to_string(),
+                    level: "info".to_string(),
                     message: line.clone(),
                 };
 
@@ -193,7 +194,7 @@ fn monitor_simulation(
         let entry = LogEntry {
             timestamp,
             game_id,
-            event_type: event_type.to_string(),
+            level: event_type.to_string(),
             message: format!("Batch {}", batch_hash),
         };
 

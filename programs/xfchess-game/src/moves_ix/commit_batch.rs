@@ -1,3 +1,5 @@
+//! Instruction for syncing batched moves from an ephemeral session to the base layer.
+
 use crate::errors::XfchessGameError;
 use crate::state::{Game, GameStatus, SessionDelegation};
 use crate::state::move_log::MoveLog;

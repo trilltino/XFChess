@@ -1,10 +1,12 @@
+//! Instruction for validating and recording a single state-transitioning chess move.
+
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
 #[cfg(feature = "move-validation")]
-use chess_logic_on_chain::shakmaty::{fen::Fen, uci::UciMove, Chess, Position};
+use chess_logic_on_chain::shakmaty::{fen::Fen, uci::UciMove, Chess, Position, MoveList};
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
@@ -37,6 +39,8 @@ pub fn handler(
     nonce: u64,
     signature: Option<Vec<u8>>,
 ) -> Result<()> {
+    // Capture before mutable borrows to avoid split-borrow issues inside cfg blocks
+    let _moving_player = ctx.accounts.session_delegation.player;
     let game = &mut ctx.accounts.game;
     let move_log = &mut ctx.accounts.move_log;
 
@@ -81,6 +85,24 @@ pub fn handler(
             next_pos == client_next_pos,
             GameErrorCode::InvalidBoardState
         );
+
+        // 6. Auto-detect checkmate / stalemate
+        // legal_moves() on the post-move position checks the side whose turn it now is.
+        // If that side has no legal moves it is either checkmate (in check) or stalemate.
+        let legal_moves: MoveList = next_pos.legal_moves();
+        if legal_moves.is_empty() {
+            if next_pos.checkers().any() {
+                // Checkmate — the player who just moved wins
+                game.result = GameResult::Winner(_moving_player);
+                game.status = GameStatus::Finished;
+                msg!("XFChess: CHECKMATE — {} wins", _moving_player);
+            } else {
+                // Stalemate — draw
+                game.result = GameResult::Draw;
+                game.status = GameStatus::Finished;
+                msg!("XFChess: STALEMATE — draw");
+            }
+        }
     }
 
     game.fen = next_fen.clone();

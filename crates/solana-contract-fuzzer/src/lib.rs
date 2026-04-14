@@ -11,7 +11,6 @@ pub mod invariants;
 pub mod funding;
 
 use anyhow::Result;
-use solana_sdk::signature::Keypair;
 use std::path::PathBuf;
 
 /// Fuzzer configuration

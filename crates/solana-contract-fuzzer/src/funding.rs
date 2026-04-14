@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use ed25519_dalek::{PublicKey, SecretKey, Keypair as DalekKeypair};
 use solana_client::rpc_client::RpcClient;
+#[allow(deprecated)]
 use solana_sdk::{
     signature::{Keypair, Signer},
     system_instruction,
@@ -52,6 +53,7 @@ impl FundingManager {
             rpc,
         })
     }
+
 
     /// Check and fund all test accounts
     pub async fn fund_all_accounts(&self) -> Result<()> {
@@ -140,7 +142,7 @@ fn load_keypair_from_file(path: &Path) -> Result<Keypair> {
     let bytes: Vec<u8> = serde_json::from_str(&contents)
         .context("Invalid keypair JSON format")?;
 
-    Keypair::from_bytes(&bytes)
+    Keypair::try_from(bytes.as_slice())
         .context("Invalid keypair bytes")
 }
 
@@ -162,7 +164,7 @@ fn derive_test_accounts(master: &Keypair, count: usize) -> Vec<Keypair> {
         let dalek_kp = DalekKeypair { secret, public };
         
         // Convert to solana-sdk Keypair
-        let solana_kp = Keypair::from_bytes(&dalek_kp.to_bytes())
+        let solana_kp = Keypair::try_from(dalek_kp.to_bytes().as_slice())
             .expect("Valid conversion");
         
         accounts.push(solana_kp);

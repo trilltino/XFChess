@@ -1,3 +1,5 @@
+//! Instruction to withdraw wagers from expired/abandoned games.
+
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;

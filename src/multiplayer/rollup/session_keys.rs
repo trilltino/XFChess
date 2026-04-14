@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Session Key Management for Solana and MagicBlock ER
 use bevy::prelude::*;
 use solana_sdk::{

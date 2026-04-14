@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Error handling utilities for state systems
 //!
 //! Provides wrappers and utilities for handling errors gracefully in state systems,

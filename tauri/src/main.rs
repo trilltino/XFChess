@@ -4,7 +4,6 @@
 use std::process::Command;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -12,8 +11,8 @@ use tokio::sync::oneshot;
 use tauri::Manager;
 use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
 use sqlx::SqlitePool;
-use tracing_subscriber::EnvFilter;
 use dotenvy;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -36,85 +35,53 @@ fn http_port() -> u16 {
         .unwrap_or(7454)
 }
 
-/// Global flag: has the browser tab already been opened?
-static BROWSER_OPENED: AtomicBool = AtomicBool::new(false);
-
-/// Wallet popup dimensions.
-const WALLET_WIDTH: u32 = 360;
-const WALLET_HEIGHT: u32 = 520;
-
-/// Open the wallet page in a compact browser popup — but only once.
-/// The React page polls `/pending` for new signing requests, so
-/// subsequent transactions are handled without opening extra tabs.
-///
-/// Tries Chrome/Edge `--app` mode first (clean popup, no address bar).
-/// Falls back to the system default browser if neither is found.
-fn open_browser_once() {
-    if BROWSER_OPENED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let url = format!("http://localhost:{}", http_port());
-    let size_arg = format!("--window-size={},{}", WALLET_WIDTH, WALLET_HEIGHT);
-
-    // Common Chrome / Edge paths on Windows
-    let candidates: &[&str] = &[
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-    ];
-
-    for path in candidates {
-        if std::path::Path::new(path).exists() {
-            let app_url = format!("--app={}", url);
-            if Command::new(path)
-                .args([&app_url, &size_arg, "--window-position=100,100"])
-                .spawn()
-                .is_ok()
-            {
-                println!("[WALLET] Opened popup via {}", path);
-                return;
-            }
-        }
-    }
-
-    // Fallback: system default browser (full tab)
-    println!("[WALLET] No Chrome/Edge found, falling back to default browser");
-    let _ = open::that(url);
+/// Open the onboarding page in Chrome so the user can sign a pending TX.
+/// The Tauri window is kept hidden — it loads index.html with a broken base
+/// path since wallet-ui is built with base="/onboard/". Chrome is the correct
+/// host for the wallet UI.
+fn show_main_window(_app: &tauri::AppHandle) {
+    let port = http_port();
+    let url = format!("http://localhost:{}/onboard", port);
+    let _ = open::that(&url);
 }
 
 // ---------------------------------------------------------------------------
 // HTTP signing bridge (axum)
 // ---------------------------------------------------------------------------
 
-async fn http_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
+async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: WalletPubkey) {
     use axum::{
-        body::Body,
         extract::State,
-        http::{header, Method, StatusCode},
-        response::{IntoResponse, Response},
+        http::{Method, StatusCode},
+        response::IntoResponse,
         routing::{get, post},
         Json, Router,
     };
     use tower_http::cors::{Any, CorsLayer};
 
     #[derive(Clone)]
-    struct AppState {
+    struct LocalAppState {
+        app: tauri::AppHandle,
         pending: PendingTx,
         wallet_pubkey: WalletPubkey,
     }
 
     // GET /pending — React polls this; returns {"tx": "<base64>"} or {"tx": null}
     async fn get_pending(
-        State(state): State<AppState>,
+        State(state): State<LocalAppState>,
     ) -> impl IntoResponse {
         let lock = state.pending.lock().unwrap();
         let tx_b64 = lock.as_ref().map(|(bytes, _)| B64.encode(bytes));
+        // If we have a TX, ensure window is shown
+        if tx_b64.is_some() {
+            show_main_window(&state.app);
+        }
         Json(serde_json::json!({ "tx": tx_b64 }))
     }
 
     // POST /resolved — React posts {"signed": "<base64>"} after Phantom signs
     async fn post_resolved(
-        State(state): State<AppState>,
+        State(state): State<LocalAppState>,
         Json(body): Json<serde_json::Value>,
     ) -> impl IntoResponse {
         let signed_b64 = body["signed"].as_str().unwrap_or("").to_string();
@@ -134,7 +101,7 @@ async fn http_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
 
     // POST /wallet — React posts {"pubkey": "<base58>"} on wallet connect
     async fn post_wallet(
-        State(state): State<AppState>,
+        State(state): State<LocalAppState>,
         Json(body): Json<serde_json::Value>,
     ) -> impl IntoResponse {
         if let Some(pk) = body["pubkey"].as_str() {
@@ -146,24 +113,117 @@ async fn http_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
     }
 
     // GET /status — health-check / wallet info for the React page
-    async fn get_status(State(state): State<AppState>) -> impl IntoResponse {
+    async fn get_status(State(state): State<LocalAppState>) -> impl IntoResponse {
         let pubkey = state.wallet_pubkey.0.lock().unwrap().clone();
         Json(serde_json::json!({ "connected": pubkey.is_some(), "pubkey": pubkey }))
     }
 
-    // Serve the built React SPA (index.html + assets) from wallet-ui/dist
-    async fn serve_index() -> impl IntoResponse {
-        let dist = dist_path();
-        let html_path = dist.join("index.html");
-        match tokio::fs::read_to_string(&html_path).await {
-            Ok(content) => Response::builder()
-                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                .body(Body::from(content))
-                .unwrap(),
-            Err(_) => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from("Wallet UI not built. Run: cd tauri/wallet-ui && npm run build"))
-                .unwrap(),
+    // GET /api/consent — load consent record from disk
+    async fn api_get_consent() -> impl IntoResponse {
+        let path = consent_path();
+        match std::fs::read_to_string(&path).ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        {
+            Some(v) => Json(v).into_response(),
+            None    => Json(serde_json::Value::Null).into_response(),
+        }
+    }
+
+    // POST /api/consent — save consent record to disk
+    async fn api_post_consent(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+        let version = body["version"].as_u64().unwrap_or(1) as u8;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+        let record = serde_json::json!({ "version": version, "accepted_at": ts });
+        let path = consent_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, record.to_string());
+        StatusCode::OK
+    }
+
+    // POST /api/auth/login — proxy to :8090
+    async fn api_login(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+        let client = reqwest::Client::new();
+        match client.post("http://localhost:8090/api/auth/login").json(&body).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+                }
+            }
+            Ok(resp) => {
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_REQUEST);
+                let text = resp.text().await.unwrap_or_default();
+                (status, text).into_response()
+            }
+            Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        }
+    }
+
+    // POST /api/auth/register — proxy to :8090
+    async fn api_register(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+        let client = reqwest::Client::new();
+        // Register
+        match client.post("http://localhost:8090/api/auth/register").json(&body).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                // Auto-login after register
+                let login_body = serde_json::json!({
+                    "email": body["email"], "password": body["password"]
+                });
+                match client.post("http://localhost:8090/api/auth/login").json(&login_body).send().await {
+                    Ok(lr) if lr.status().is_success() => {
+                        match lr.json::<serde_json::Value>().await {
+                            Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+                            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+                        }
+                    }
+                    Ok(lr) => {
+                        let text = lr.text().await.unwrap_or_default();
+                        (StatusCode::BAD_REQUEST, text).into_response()
+                    }
+                    Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+                }
+            }
+            Ok(resp) => {
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_REQUEST);
+                let text = resp.text().await.unwrap_or_default();
+                (status, text).into_response()
+            }
+            Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        }
+    }
+
+    // POST /api/game/launch — spawn Bevy game, store pubkey, hide window
+    async fn api_launch_game(
+        State(state): State<LocalAppState>,
+        Json(body): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        let pubkey_opt = body["pubkey"].as_str().map(|s| s.to_string());
+        let is_hot = body["hot"].as_bool().unwrap_or(false);
+        let username_opt = body["username"].as_str().map(|s| s.to_string());
+        let ai_diff = body["ai_difficulty"].as_u64().map(|v| v as u8);
+        let ai_side = body["ai_side"].as_str().map(|s| s.to_string());
+
+        if let Some(ref pk) = pubkey_opt {
+            let mut lock = state.wallet_pubkey.0.lock().unwrap();
+            *lock = Some(pk.clone());
+        }
+        match spawn_bevy_game(true, pubkey_opt, is_hot, username_opt, ai_diff, ai_side) {
+            Ok(mut child) => {
+                println!("[HTTP] Bevy game launched (PID {})", child.id());
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                    println!("[TAURI] Game exited — shutting down");
+                    std::process::exit(0);
+                });
+                if let Some(w) = state.app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+                StatusCode::OK.into_response()
+            }
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
         }
     }
 
@@ -172,20 +232,32 @@ async fn http_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
         .allow_methods([Method::GET, Method::POST])
         .allow_headers(Any);
 
-    let state = AppState {
+    let state = LocalAppState {
+        app,
         pending: pending.clone(),
         wallet_pubkey: wallet_pubkey.clone(),
     };
 
     let app = Router::new()
-        .route("/", get(serve_index))
+        // Wallet onboarding SPA — served at /onboard (ServeDir with SPA index fallback)
+        .nest_service(
+            "/onboard",
+            tower_http::services::ServeDir::new(dist_path())
+                .fallback(tower_http::services::ServeFile::new(dist_path().join("index.html"))),
+        )
+        // API routes
         .route("/pending", get(get_pending))
         .route("/resolved", post(post_resolved))
         .route("/wallet", post(post_wallet))
         .route("/status", get(get_status))
-        .nest_service(
-            "/assets",
-            tower_http::services::ServeDir::new(dist_path().join("assets")),
+        .route("/api/consent", get(api_get_consent).post(api_post_consent))
+        .route("/api/auth/login", post(api_login))
+        .route("/api/auth/register", post(api_register))
+        .route("/api/game/launch", post(api_launch_game))
+        // Web-solana marketing site — serves everything else at /
+        .fallback_service(
+            tower_http::services::ServeDir::new(site_path())
+                .fallback(tower_http::services::ServeFile::new(site_path().join("index.html"))),
         )
         .layer(cors)
         .with_state(state);
@@ -201,16 +273,7 @@ async fn http_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
 // TCP signing bridge (Bevy ↔ Tauri)
 // ---------------------------------------------------------------------------
 
-/// TCP signing server — listens on 127.0.0.1:7443-7452.
-///
-/// Protocol:
-///   Client → Server : b"PKEY"                        → pubkey query
-///   Server → Client : 4-byte LE len + pubkey bytes
-///
-///   Client → Server : 4-byte LE len + raw tx bytes   → signing request
-///   Server → Client : 4-byte LE len + signed bytes   (success)
-///                  or 0xFFFF_FFFF                    (error / timeout)
-async fn tcp_signing_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
+async fn tcp_signing_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: WalletPubkey) {
     let listener = {
         let base = http_port();
         let tcp_start = base.saturating_sub(11);
@@ -240,6 +303,7 @@ async fn tcp_signing_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
 
         let pending = pending.clone();
         let wallet_pubkey = wallet_pubkey.clone();
+        let app = app.clone();
 
         tauri::async_runtime::spawn(async move {
             let (mut reader, mut writer) = stream.into_split();
@@ -250,9 +314,9 @@ async fn tcp_signing_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
                 return;
             }
 
-            // OPEN command — open the wallet page in Chrome (once).
+            // OPEN command — open the wallet page
             if &len_buf == b"OPEN" {
-                open_browser_once();
+                show_main_window(&app);
                 return;
             }
 
@@ -291,8 +355,8 @@ async fn tcp_signing_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
                 *lock = Some((tx_bytes, tx));
             }
 
-            println!("[SIGN-SRV] Pending signing request — wallet page will pick it up");
-            open_browser_once();
+            println!("[SIGN-SRV] Pending signing request — showing Tauri popup");
+            show_main_window(&app);
 
             // Wait for the React page to POST the signed bytes (60 s timeout).
             let result = tokio::time::timeout(
@@ -323,15 +387,9 @@ async fn tcp_signing_server(pending: PendingTx, wallet_pubkey: WalletPubkey) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn bs58_to_bytes(s: &str) -> Option<Vec<u8>> {
-    let alphabet = bs58::Alphabet::DEFAULT;
-    bs58::decode(s).with_alphabet(alphabet).into_vec().ok()
-}
 
-/// Path to the built React SPA.
+/// Path to the built wallet-ui SPA.
 fn dist_path() -> PathBuf {
-    // Relative to the Tauri binary: look for wallet-ui/dist next to it, or
-    // fall back to the source tree location used during development.
     let self_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -345,7 +403,29 @@ fn dist_path() -> PathBuf {
     PathBuf::from("tauri/wallet-ui/dist")
 }
 
-fn spawn_bevy_game(wallet_mode: bool) -> Result<std::process::Child, String> {
+/// Path to the built web-solana site.
+fn site_path() -> PathBuf {
+    let self_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+
+    if let Some(ref dir) = self_dir {
+        let candidate = dir.join("web-solana").join("dist");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    PathBuf::from("web-solana/dist")
+}
+
+fn spawn_bevy_game(
+    wallet_mode: bool, 
+    hot_wallet_pubkey: Option<String>, 
+    is_hot: bool, 
+    username: Option<String>,
+    ai_difficulty: Option<u8>,
+    ai_side: Option<String>,
+) -> Result<std::process::Child, String> {
     let exe_name = if cfg!(windows) { "xfchess.exe" } else { "xfchess" };
 
     let self_dir = std::env::current_exe()
@@ -369,11 +449,61 @@ fn spawn_bevy_game(wallet_mode: bool) -> Result<std::process::Child, String> {
     if wallet_mode {
         cmd.env("XFCHESS_WALLET_MODE", "tauri");
     }
+    if let Some(ref pk) = hot_wallet_pubkey {
+        cmd.env("XFCHESS_WALLET_PUBKEY", pk);
+        if is_hot {
+            cmd.env("XFCHESS_HOT_WALLET", pk);
+        }
+    }
+    if let Some(ref u) = username {
+        cmd.env("XFCHESS_USERNAME", u);
+    }
+    if let Some(d) = ai_difficulty {
+        cmd.env("XFCHESS_AI_DIFFICULTY", d.to_string());
+    }
+    if let Some(ref s) = ai_side {
+        cmd.env("XFCHESS_AI_SIDE", s);
+    }
+    // Set working directory to project root so the game can find assets
+    if let Some(parent) = game_path.parent() {
+        let is_target = parent.ends_with("target") 
+                     || parent.ends_with("target\\debug") 
+                     || parent.ends_with("target\\release")
+                     || parent.ends_with("target/debug")
+                     || parent.ends_with("target/release");
+        
+        if is_target {
+            // If in target/debug or target/release, climb up to reach the root
+            let mut root = parent.to_path_buf();
+            while root.ends_with("debug") || root.ends_with("release") || root.ends_with("target") {
+                if let Some(p) = root.parent() {
+                    root = p.to_path_buf();
+                } else {
+                    break;
+                }
+            }
+            println!("[TAURI] Setting game CWD to project root: {:?}", root);
+            // Bevy 0.18 uses CARGO_MANIFEST_DIR / BEVY_ASSET_ROOT to locate assets
+            // when not launched via `cargo run`. Set both to the project root.
+            cmd.env("CARGO_MANIFEST_DIR", &root);
+            cmd.env("BEVY_ASSET_ROOT", &root);
+            cmd.current_dir(&root);
+        } else {
+            println!("[TAURI] Setting game CWD to binary parent: {:?}", parent);
+            cmd.env("CARGO_MANIFEST_DIR", parent);
+            cmd.env("BEVY_ASSET_ROOT", parent);
+            cmd.current_dir(parent);
+        }
+    }
+    // Inherit stdout/stderr so game logs appear in Tauri console
+    cmd.stdout(std::process::Stdio::inherit());
+    cmd.stderr(std::process::Stdio::inherit());
+    println!("[TAURI] Launching game from: {:?}", game_path);
     cmd.spawn().map_err(|e| format!("Failed to launch game: {}", e))
 }
 
 // ---------------------------------------------------------------------------
-// Tauri commands (kept for API compatibility with any existing IPC calls)
+// Tauri commands
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -391,6 +521,133 @@ async fn resolve_signed_tx(_signed_b64: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Proxy login/register to the embedded auth server.
+#[tauri::command]
+async fn login_user(email: String, password: String) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("http://localhost:8090/api/auth/login")
+        .json(&serde_json::json!({ "email": email, "password": password }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+    } else {
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+        Err(format!("HTTP {}: {}", status, text))
+    }
+}
+
+/// Proxy register to the embedded auth server.
+#[tauri::command]
+async fn register_user(
+    username: String,
+    email: String,
+    password: String,
+) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::new();
+    // Register
+    let reg = client
+        .post("http://localhost:8090/api/auth/register")
+        .json(&serde_json::json!({ "username": username, "email": email, "password": password }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !reg.status().is_success() {
+        let text = reg.text().await.unwrap_or_default();
+        return Err(text);
+    }
+    // Auto-login after registration
+    let login = client
+        .post("http://localhost:8090/api/auth/login")
+        .json(&serde_json::json!({ "email": email, "password": password }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    login.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+}
+
+/// Save GDPR consent timestamp.
+#[tauri::command]
+fn save_consent(version: u8) -> Result<(), String> {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let record = serde_json::json!({ "version": version, "accepted_at": ts });
+    let path = consent_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, record.to_string()).map_err(|e| e.to_string())
+}
+
+/// Load existing consent record (returns null if none).
+#[tauri::command]
+fn load_consent() -> serde_json::Value {
+    let path = consent_path();
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// Launch the Bevy game and open browser for wallet connection (Tauri window stays hidden)
+#[tauri::command]
+async fn launch_game(
+    app: tauri::AppHandle,
+    wallet_pubkey_state: tauri::State<'_, WalletPubkey>,
+    pubkey: Option<String>,
+) -> Result<(), String> {
+    // Store wallet pubkey if provided
+    if let Some(ref pk) = pubkey {
+        let mut lock = wallet_pubkey_state.0.lock().unwrap();
+        *lock = Some(pk.clone());
+    }
+
+    // Spawn Bevy game
+    match spawn_bevy_game(true, pubkey, false, None, None, None) {
+        Ok(mut child) => {
+            let pid = child.id();
+            println!("[TAURI] Bevy game launched (PID {})", pid);
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                println!("[TAURI] Game exited — shutting down");
+                std::process::exit(0);
+            });
+        }
+        Err(e) => return Err(format!("Failed to launch game: {}", e)),
+    }
+
+    // Hide the Tauri window after game launches
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+
+    Ok(())
+}
+
+/// Explicitly hide the window (called from React after signing)
+#[tauri::command]
+fn hide_main_window_cmd(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn consent_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("xfchess")
+        .join("consent.json")
+}
+
 // ---------------------------------------------------------------------------
 // Embedded Signing Server (VPS)
 // ---------------------------------------------------------------------------
@@ -401,7 +658,6 @@ async fn start_embedded_signing_server() {
     let config = SigningConfig::from_env();
     let port = config.port;
     
-    // SQLite pool for session persistence
     let pool = match SqlitePool::connect("sqlite://sessions.db?mode=rwc").await {
         Ok(p) => p,
         Err(e) => {
@@ -410,7 +666,15 @@ async fn start_embedded_signing_server() {
         }
     };
     
-    let state = SigningAppState::new(config, pool.clone());
+    let vault_pool = match SqlitePool::connect("sqlite://vault.db?mode=rwc").await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[SIGN-SRV] Failed to connect to vault DB: {}", e);
+            return;
+        }
+    };
+    
+    let state = SigningAppState::new(config, pool.clone(), vault_pool);
     if let Err(e) = state.store.init().await {
         eprintln!("[SIGN-SRV] Failed to init session store: {}", e);
         return;
@@ -446,45 +710,77 @@ fn main() {
     let pubkey_for_setup = wallet_pubkey.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
+        .manage(wallet_pubkey.clone())
         .invoke_handler(tauri::generate_handler![
             get_wallet_status,
             wallet_connect,
             resolve_signed_tx,
+            login_user,
+            register_user,
+            save_consent,
+            load_consent,
+            launch_game,
+            hide_main_window_cmd,
         ])
         .setup(move |app| {
+            let handle = app.handle().clone();
+
+            // Handle deep-link protocol events (xfchess://launch)
+            let handle_clone = handle.clone();
+            let wallet_clone = pubkey_for_setup.clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    println!("[DEEP-LINK] Received URL: {}", url);
+                    if url.starts_with("xfchess://launch") {
+                        println!("[DEEP-LINK] Launching game from protocol...");
+                        // Launch game without showing Tauri window
+                        let pk = wallet_clone.0.lock().unwrap().clone();
+                        match spawn_bevy_game(true, pk, false, None, None, None) {
+                            Ok(mut child) => {
+                                let pid = child.id();
+                                println!("[TAURI] Bevy game launched (PID {}) from deep-link", pid);
+                                std::thread::spawn(move || {
+                                    let _ = child.wait();
+                                    println!("[TAURI] Game exited");
+                                });
+                            }
+                            Err(e) => {
+                                eprintln!("[DEEP-LINK] Failed to launch game: {}", e);
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Hide the Tauri window immediately — we use Chrome for onboarding.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.hide();
+            }
+
             // Start HTTP wallet server.
             let p = pending_for_setup.clone();
             let w = pubkey_for_setup.clone();
-            tauri::async_runtime::spawn(http_server(p, w));
+            let h1 = handle.clone();
+            tauri::async_runtime::spawn(http_server(h1, p, w));
 
             // Start TCP signing bridge.
             let p2 = pending_for_setup.clone();
             let w2 = pubkey_for_setup.clone();
-            tauri::async_runtime::spawn(tcp_signing_server(p2, w2));
+            let h2 = handle.clone();
+            tauri::async_runtime::spawn(tcp_signing_server(h2, p2, w2));
 
             // Start embedded VPS signing server.
             tauri::async_runtime::spawn(start_embedded_signing_server());
 
-            // Launch the Bevy game and exit when it closes.
-            let wallet_mode = std::env::var("XFCHESS_SOLANA").unwrap_or_default() == "1";
-            match spawn_bevy_game(wallet_mode) {
-                Ok(mut child) => {
-                    let pid = child.id();
-                    println!("[TAURI] Bevy game launched (PID {})", pid);
-                    std::thread::spawn(move || {
-                        let _ = child.wait();
-                        println!("[TAURI] Game exited — shutting down");
-                        std::process::exit(0);
-                    });
-                }
-                Err(e) => eprintln!("[TAURI] Failed to launch game: {}", e),
-            }
-
-            // Hide the Tauri webview — wallet lives in the browser where
-            // Chrome extensions (Phantom / Solflare) are available.
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.hide();
-            }
+            // Open Chrome to the onboarding UI after a brief delay for server start.
+            let port = http_port();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(800));
+                let url = format!("http://localhost:{}/onboard", port);
+                println!("[TAURI] Opening onboarding in browser: {}", url);
+                let _ = open::that(&url);
+            });
 
             Ok(())
         })

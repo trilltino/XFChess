@@ -1,3 +1,5 @@
+//! Data models for in-game dispute metadata and evidence.
+
 use anchor_lang::prelude::*;
 
 #[account]

@@ -1,3 +1,8 @@
+#![allow(dead_code)]
+//! Ephemeral Rollup Manager
+//!
+//! Manages the state of an ephemeral rollup for fast move execution
+//! during gameplay. Batches moves and submits to the MagicBlock ER.
 use bevy::prelude::*; // Events are in prelude
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;

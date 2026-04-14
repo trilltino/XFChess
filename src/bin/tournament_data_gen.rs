@@ -1,3 +1,4 @@
+#![cfg(feature = "solana")]
 //! Tournament Test - Real On-Chain Tournament Execution
 //! 
 //! Executes a complete tournament on Solana devnet with real transactions
@@ -9,16 +10,16 @@ use serde::{Serialize, Deserialize};
 use chrono;
 
 use solana_client::rpc_client::RpcClient;
-use solana_client::rpc_config::RpcSendTransactionConfig;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     signature::{Keypair, Signer},
     transaction::Transaction,
     pubkey::Pubkey,
     instruction::{AccountMeta, Instruction},
-    system_program,
-    system_instruction,
 };
+
+#[allow(deprecated)]
+use solana_sdk::system_instruction;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TournamentStep {
@@ -38,12 +39,11 @@ struct SessionNote {
 // Import tournament instructions
 use xfchess::solana::instructions::{
     initialize_tournament_ix, register_player_ix, start_tournament_ix, 
-    record_match_result_ix, advance_final_ix, TOURNAMENT_SEED, PROGRAM_ID
+    record_match_result_ix, advance_final_ix, PROGRAM_ID
 };
-use xfchess::solana::GameType;
+use xfchess::solana::instructions::GameType;
 
 const DEVNET_RPC: &str = "https://api.devnet.solana.com";
-const TOURNAMENT_ID: u64 = 1743360001; // Use timestamp for uniqueness
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -288,51 +288,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 // ── Helper Functions ─────────────────────────────────────────────────────
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-struct Player {
-    name: String,
-    pubkey: Pubkey,
-    elo: u32,
-}
-
 #[derive(Debug, Clone)]
 struct PlayerWithKeypair {
     name: String,
     keypair: std::sync::Arc<Keypair>,
     elo: u32,
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-struct GameResult {
-    winner: String,
-    winner_index: usize, // Index into players array
-    game_id: u64,
-}
-
-#[allow(dead_code)]
-fn load_players() -> Result<Vec<Player>, Box<dyn std::error::Error>> {
-    let players_data = vec![
-        ("Magnus", "keys/magnus.json", 2800),
-        ("Fabiano", "keys/fabiano.json", 2750),
-        ("Anish", "keys/anish.json", 2700),
-        ("Vidit", "keys/vidit.json", 2650),
-    ];
-
-    let mut players = Vec::new();
-    for (name, keyfile, elo) in players_data {
-        let keypair = load_keypair(keyfile)?;
-        let pubkey = keypair.pubkey();
-        players.push(Player {
-            name: name.to_string(),
-            pubkey,
-            elo,
-        });
-        println!("👤 {}: {} (ELO: {})", name, pubkey, elo);
-    }
-
-    Ok(players)
 }
 
 fn load_players_with_keypairs() -> Result<Vec<PlayerWithKeypair>, Box<dyn std::error::Error>> {
@@ -491,7 +451,7 @@ async fn play_real_game(
     for (i, mv) in moves.iter().enumerate() {
         let player = if i % 2 == 0 { player1 } else { player2 };
         match record_move_on_chain(rpc, program_id, &player.keypair, game_id, mv).await {
-            Ok(sig) => {
+            Ok(_sig) => {
                 if i == 0 {
                     notes.push(SessionNote {
                         step: round.to_string(),
@@ -594,11 +554,10 @@ async fn record_move_on_chain(
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Convert move notation to instruction format
     let move_str = parse_move(mv)?;
-    let move_data = String::new(); // Simplified move data
     let signature = None; // Optional signature for devnet
     let nonce = 0; // Local nonce
     
-    let ix = xfchess::solana::record_move_ix(
+    let ix = xfchess::solana::instructions::record_move_ix(
         *program_id, 
         player.pubkey(), // session_key
         player.pubkey(), // wallet_pubkey (for test purposes)
@@ -625,9 +584,8 @@ async fn finalize_game_on_chain(
     let white_pubkey = player.pubkey();
     let black_pubkey = player.pubkey(); // Placeholder
     
-    let ix = xfchess::solana::finalize_game_ix(
+    let ix = xfchess::solana::instructions::finalize_game_ix(
         *program_id, 
-        player.pubkey(), 
         game_id,
         winner,
         white_pubkey,
@@ -680,39 +638,17 @@ fn parse_move(mv: &str) -> Result<String, Box<dyn std::error::Error>> {
     Ok(mv.to_string())
 }
 
-#[allow(dead_code)]
-fn compute_discriminator(instruction_name: &str) -> [u8; 8] {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(format!("global:{}", instruction_name).as_bytes());
-    let hash = hasher.finalize();
-    let mut disc = [0u8; 8];
-    disc.copy_from_slice(&hash[..8]);
-    disc
-}
-
 fn load_keypair(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> {
     let data = std::fs::read(path)?;
     
     // Try JSON format first (array of numbers)
     if path.ends_with(".json") {
         let bytes: Vec<u8> = serde_json::from_slice(&data)?;
-        return Ok(Keypair::from_bytes(&bytes)?);
+        Ok(Keypair::try_from(bytes.as_slice())?)
+    } else {
+        // Try binary format
+        Ok(Keypair::try_from(data.as_slice())?)
     }
-    
-    // Raw bytes format (32-byte secret key)
-    if data.len() == 32 {
-        // For raw secret keys, we need to expand to 64 bytes (keypair format)
-        let mut expanded = Vec::with_capacity(64);
-        expanded.extend_from_slice(&data);
-        // The public key will be derived from the secret key
-        expanded.extend_from_slice(&[0u8; 32]);
-        return Ok(Keypair::from_bytes(&expanded)?);
-    }
-    
-    // Try as JSON anyway in case extension is wrong
-    let bytes: Vec<u8> = serde_json::from_slice(&data)?;
-    Ok(Keypair::from_bytes(&bytes)?)
 }
 
 async fn generate_tournament_data(

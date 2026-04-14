@@ -1,3 +1,4 @@
+#![cfg(feature = "solana")]
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 

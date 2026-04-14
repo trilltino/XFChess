@@ -23,6 +23,8 @@ pub async fn spawn_node(
     port: Option<u16>,
     secret_key_override: Option<iroh::SecretKey>,
     discovery: DiscoveryConfig,
+    db: Option<sqlx::SqlitePool>,
+    app_router: Option<axum::Router>,
 ) -> anyhow::Result<(Arc<BraidIrohState>, iroh_gossip::api::GossipReceiver)> {
     let secret_key = if let Some(sk) = secret_key_override {
         sk
@@ -47,6 +49,8 @@ pub async fn spawn_node(
         discovery,
         secret_key: Some(secret_key),
         proxy_config,
+        app_router,
+        db,
     })
     .await?;
 

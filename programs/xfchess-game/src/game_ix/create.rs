@@ -1,10 +1,28 @@
+//! Instruction to create a new active wagered game context.
+
 use crate::constants::*;
 use crate::state::*;
 use crate::errors::*;
 use anchor_lang::prelude::*;
 
+/// Get country fee based on country code and match type.
+/// Returns 0 for Free games, otherwise returns the country-specific fee.
+fn get_country_fee(country: &str, match_type: MatchType) -> u64 {
+    if match_type == MatchType::Free {
+        return 0;
+    }
+    
+    match country {
+        "GB" => UK_FEE_LAMPORTS,
+        "BR" => BRAZIL_FEE_LAMPORTS,
+        "CA" => CANADA_FEE_LAMPORTS,
+        "DE" => GERMANY_FEE_LAMPORTS,
+        _ => 0, // Default to 0 for unsupported countries
+    }
+}
+
 #[derive(Accounts)]
-#[instruction(game_id: u64, wager_amount: u64, game_type: GameType)]
+#[instruction(game_id: u64, wager_amount: u64, game_type: GameType, match_type: MatchType, country: String, time_per_move: u16)]
 pub struct CreateGame<'info> {
     #[account(
         init, 
@@ -35,6 +53,9 @@ pub fn handler(
     game_id: u64,
     wager_amount: u64,
     game_type: GameType,
+    match_type: MatchType,
+    country: String,
+    time_per_move: u16,
 ) -> Result<()> {
     let game = &mut ctx.accounts.game;
     game.game_id = game_id;
@@ -56,6 +77,9 @@ pub fn handler(
     game.wager_amount = wager_amount;
     game.wager_token = None;
     game.game_type = game_type;
+    game.match_type = match_type;
+    game.country_fee = get_country_fee(&country, match_type);
+    game.time_per_move = time_per_move;
     game.bump = ctx.bumps.game;
 
     require!(wager_amount <= MAX_WAGER_AMOUNT, GameErrorCode::WagerTooHigh);

@@ -7,6 +7,7 @@
 //! - **SquareMaterials**: Resource holding material handles for square colors
 //! - **ReturnMaterials**: Utility for restoring original square colors after hover effects
 //!
+#![allow(dead_code)]
 //! # Chess Board Coloring
 //!
 //! Traditional chess boards alternate between light and dark squares. The `is_white()`
@@ -53,12 +54,6 @@ impl Square {
     /// Light squares: a1, c1, e1, g1 (files 0, 2, 4, 6 on rank 0)
     pub fn is_white(&self) -> bool {
         (self.x + self.y + 1).is_multiple_of(2)
-    }
-
-    /// Convert to world position (XZ plane)
-    /// Returns (world_x, world_z) where world_x = file, world_z = rank
-    pub fn to_world(&self) -> (f32, f32) {
-        (self.x as f32, self.y as f32)
     }
 
     /// Create from chess notation (file 0-7, rank 0-7)

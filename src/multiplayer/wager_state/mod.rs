@@ -8,4 +8,3 @@ pub mod ui;
 pub mod plugin;
 
 pub use plugin::WagerPlugin;
-pub use state::WagerState;

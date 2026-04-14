@@ -9,6 +9,6 @@ pub mod system_sets;
 pub mod systems;
 pub mod types;
 pub mod view_mode;
+pub mod view_mode_systems;
 
-pub use board_coords::BoardPos;
 pub use plugin::GamePlugin;

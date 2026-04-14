@@ -4,8 +4,9 @@
 
 use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
+#[allow(deprecated)]
 use solana_sdk::{instruction::{AccountMeta, Instruction}, pubkey::Pubkey, system_program};
-use xfchess_game::state::{GameType, GameResult};
+use xfchess_game::state::GameType;
 
 /// A fuzz instruction to execute
 #[derive(Debug, Clone)]
@@ -240,7 +241,6 @@ pub fn build_create_game_ix(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     proptest! {
         #[test]

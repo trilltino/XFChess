@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use bevy::prelude::*;
 use crate::GameConfig;
 
@@ -16,6 +17,12 @@ pub struct WagerState {
     pub game_pda: Option<String>,
     /// Whether wager info is loaded
     pub is_loaded: bool,
+    /// Country fee in SOL (based on player's country)
+    pub country_fee: Option<f64>,
+    /// ELO fee in SOL (for ranked games)
+    pub elo_fee: Option<f64>,
+    /// Match type (Free, Ranked, Wager, Tournament)
+    pub match_type: Option<String>,
 }
 
 impl Default for WagerState {
@@ -27,6 +34,9 @@ impl Default for WagerState {
             player_color: None,
             game_pda: None,
             is_loaded: false,
+            country_fee: None,
+            elo_fee: None,
+            match_type: None,
         }
     }
 }
@@ -43,6 +53,9 @@ impl WagerState {
             player_color: config.player_color.map(|c| format!("{:?}", c)),
             game_pda: config.game_pda.clone(),
             is_loaded: config.wager_amount.is_some(),
+            country_fee: None, // Will be fetched from on-chain game account
+            elo_fee: None,    // Will be fetched from on-chain game account
+            match_type: None, // Will be fetched from on-chain game account
         }
     }
 

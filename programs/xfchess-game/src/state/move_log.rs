@@ -1,3 +1,5 @@
+//! Account struct designed to track the chronological sequence of FENs/moves.
+
 use anchor_lang::prelude::*;
 
 #[account]

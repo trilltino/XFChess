@@ -1,3 +1,5 @@
+//! Account structure mapping unique usernames back to player profiles.
+
 use anchor_lang::prelude::*;
 
 /// UsernameRecord PDA ensures username uniqueness across all players

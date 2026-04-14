@@ -2,25 +2,46 @@
 //!
 //! Assembles all Bevy Egui plugin logic for the application.
 
-pub mod auth;
-pub mod game_ui;
-// pub mod inspector;
-pub mod multiplayer_menu;
-pub mod profile_creation;
-pub mod promotion_ui;
-#[cfg(feature = "solana")]
-pub mod solana_panel;
+pub mod account;
+pub mod game;
+pub mod menus;
 pub mod styles;
 pub mod system_params;
 
+pub use account::auth;
+#[cfg(feature = "solana")]
+pub use account::profile_creation;
+#[cfg(feature = "solana")]
+pub use account::solana_panel;
+
+pub use game::game_2d;
+pub use game::game_ui;
+pub use game::promotion_ui;
+
+pub use menus::compliance_modal;
+pub use menus::multiplayer_menu;
+pub use menus::popup;
+pub use menus::stats;
+// pub use menus::inspector;
+
 use auth::AuthUiPlugin;
 use bevy::prelude::*;
+#[cfg(feature = "solana")]
+use crate::core::states::GameState;
 
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(AuthUiPlugin);
-        // Additional UI-wide registrations can go here
+        app.add_plugins(compliance_modal::CompliancePlugin);
+        app.add_plugins(popup::PopupPlugin);
+        app.add_plugins(stats::StatsPlugin);
+
+        #[cfg(feature = "solana")]
+        app.add_systems(
+            OnEnter(GameState::MainMenu),
+            solana_panel::show_hot_wallet_faucet_popup,
+        );
     }
 }

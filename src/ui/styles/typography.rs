@@ -5,6 +5,37 @@
 use super::colors::UiColors;
 use bevy_egui::egui;
 
+/// Helper functions for creating styled text
+#[allow(dead_code)]
+pub struct TextStyle;
+
+impl TextStyle {
+    /// Create a heading with the XFChess style
+    #[allow(dead_code)]
+    pub fn heading(text: impl Into<String>, size: f32) -> egui::RichText {
+        egui::RichText::new(text)
+            .size(size)
+            .color(UiColors::TEXT_PRIMARY)
+            .strong()
+    }
+
+    /// Create body text
+    #[allow(dead_code)]
+    pub fn body(text: impl Into<String>) -> egui::RichText {
+        egui::RichText::new(text)
+            .size(TextSize::BODY)
+            .color(UiColors::TEXT_SECONDARY)
+    }
+
+    /// Create caption text (small, less prominent)
+    #[allow(dead_code)]
+    pub fn caption(text: impl Into<String>) -> egui::RichText {
+        egui::RichText::new(text)
+            .size(TextSize::CAPTION)
+            .color(UiColors::TEXT_TERTIARY)
+    }
+}
+
 /// Text size presets
 pub struct TextSize;
 
@@ -19,6 +50,7 @@ impl TextSize {
     pub const MD: f32 = 24.0;
 
     /// Small heading (card titles)
+    #[allow(dead_code)]
     pub const SM: f32 = 18.0;
 
     /// Body text
@@ -28,71 +60,3 @@ impl TextSize {
     pub const CAPTION: f32 = 12.0;
 }
 
-/// Helper functions for creating styled text
-#[allow(dead_code)] // Reserved for future UI styling
-pub struct TextStyle;
-
-impl TextStyle {
-    /// Create a heading with the XFChess style
-    #[allow(dead_code)] // Reserved for future UI styling
-    pub fn heading(text: impl Into<String>, size: f32) -> egui::RichText {
-        egui::RichText::new(text)
-            .size(size)
-            .color(UiColors::TEXT_PRIMARY)
-            .strong()
-    }
-
-    /// Create body text
-    pub fn body(text: impl Into<String>) -> egui::RichText {
-        egui::RichText::new(text)
-            .size(TextSize::BODY)
-            .color(UiColors::TEXT_SECONDARY)
-    }
-
-    /// Create caption text (small, less prominent)
-    pub fn caption(text: impl Into<String>) -> egui::RichText {
-        egui::RichText::new(text)
-            .size(TextSize::CAPTION)
-            .color(UiColors::TEXT_TERTIARY)
-    }
-
-    /// Create accent text (gold color)
-    #[allow(dead_code)] // Reserved for future UI styling
-    pub fn accent(text: impl Into<String>) -> egui::RichText {
-        egui::RichText::new(text)
-            .size(TextSize::BODY)
-            .color(UiColors::ACCENT_GOLD)
-            .strong()
-    }
-
-    /// Create success text (green)
-    #[allow(dead_code)] // Reserved for future UI styling
-    pub fn success(text: impl Into<String>) -> egui::RichText {
-        egui::RichText::new(text)
-            .size(TextSize::BODY)
-            .color(UiColors::SUCCESS)
-    }
-
-    /// Create warning text (orange)
-    #[allow(dead_code)] // Reserved for future UI styling
-    pub fn warning(text: impl Into<String>) -> egui::RichText {
-        egui::RichText::new(text)
-            .size(TextSize::BODY)
-            .color(UiColors::WARNING)
-    }
-
-    /// Create error text (red)
-    #[allow(dead_code)] // Reserved for future UI styling
-    pub fn error(text: impl Into<String>) -> egui::RichText {
-        egui::RichText::new(text)
-            .size(TextSize::BODY)
-            .color(UiColors::DANGER)
-    }
-
-    /// Create button text
-    pub fn button(text: impl Into<String>, size: f32) -> egui::RichText {
-        egui::RichText::new(text)
-            .size(size)
-            .color(UiColors::TEXT_PRIMARY)
-    }
-}

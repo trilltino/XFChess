@@ -1,3 +1,5 @@
+//! Instruction to correctly close or resolve games after ER undelegation.
+
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]

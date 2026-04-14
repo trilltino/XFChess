@@ -1,3 +1,6 @@
+//! Instruction for safely halting a tournament and refunding entry fees.
+//! Uses remaining_accounts for variable player count (up to 128).
+
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -20,24 +23,12 @@ pub struct CancelTournament<'info> {
         bump
     )]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// CHECK: Slot-0 player wallet for refund (pass any writable wallet if slot empty).
-    #[account(mut)]
-    pub player0_wallet: UncheckedAccount<'info>,
-    /// CHECK: Slot-1 player wallet for refund.
-    #[account(mut)]
-    pub player1_wallet: UncheckedAccount<'info>,
-    /// CHECK: Slot-2 player wallet for refund.
-    #[account(mut)]
-    pub player2_wallet: UncheckedAccount<'info>,
-    /// CHECK: Slot-3 player wallet for refund.
-    #[account(mut)]
-    pub player3_wallet: UncheckedAccount<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<CancelTournament>, tournament_id: u64) -> Result<()> {
+pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTournament<'info>>, tournament_id: u64) -> Result<()> {
     require!(
         ctx.accounts.tournament.status == TournamentStatus::Registration
             || ctx.accounts.tournament.status == TournamentStatus::Active,
@@ -53,24 +44,29 @@ pub fn handler(ctx: Context<CancelTournament>, tournament_id: u64) -> Result<()>
         let escrow_seeds: &[&[&[u8]]] =
             &[&[TOURNAMENT_ESCROW_SEED, &tournament_id_bytes, &[bump]]];
 
-        let wallets: [&UncheckedAccount; 4] = [
-            &ctx.accounts.player0_wallet,
-            &ctx.accounts.player1_wallet,
-            &ctx.accounts.player2_wallet,
-            &ctx.accounts.player3_wallet,
-        ];
+        // Use remaining_accounts for player wallets
+        require!(
+            ctx.remaining_accounts.len() >= registered,
+            GameErrorCode::NotInGame
+        );
 
         for i in 0..registered {
+            let player_key = ctx.accounts.tournament.players[i];
+            let player_wallet = &ctx.remaining_accounts[i];
             require!(
-                wallets[i].key() == ctx.accounts.tournament.players[i],
+                player_wallet.key() == player_key,
                 GameErrorCode::NotInGame
+            );
+            require!(
+                player_wallet.is_writable,
+                GameErrorCode::UnauthorizedAccess
             );
             anchor_lang::system_program::transfer(
                 CpiContext::new_with_signer(
                     ctx.accounts.system_program.to_account_info(),
                     anchor_lang::system_program::Transfer {
                         from: ctx.accounts.escrow_pda.to_account_info(),
-                        to: wallets[i].to_account_info(),
+                        to: player_wallet.to_account_info(),
                     },
                     escrow_seeds,
                 ),

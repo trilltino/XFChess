@@ -7,9 +7,9 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use super::{
-    CapturedPieces, CurrentGamePhase, CurrentTurn, GameOverState, GameTimer, MoveHistory, Players,
-    Selection, TurnStateContext,
+    CapturedPieces, CurrentGamePhase, CurrentTurn, GameOverState,
 };
+use crate::game::resources::player::selection::Selection;
 use crate::engine::board_state::ChessEngine;
 
 /// System parameter grouping game state resources
@@ -24,9 +24,9 @@ use crate::engine::board_state::ChessEngine;
 /// - [`GameOverState`] - Game end conditions
 /// - [`CapturedPieces`] - Material tracking
 #[derive(SystemParam)]
-#[allow(dead_code)] // Public API - reserved for future system implementations
 pub struct GameStateParams<'w> {
     /// Current turn information
+    #[allow(dead_code)]
     pub current_turn: Res<'w, CurrentTurn>,
     /// Current game phase
     pub game_phase: Res<'w, CurrentGamePhase>,
@@ -34,154 +34,12 @@ pub struct GameStateParams<'w> {
     pub game_over: Res<'w, GameOverState>,
     /// Captured pieces tracking
     pub captured: Res<'w, CapturedPieces>,
-}
-
-/// System parameter grouping game history and timing resources
-///
-/// Provides access to move history and game timer resources.
-///
-/// # Resources Included
-///
-/// - [`MoveHistory`] - Complete move record
-/// - [`GameTimer`] - Time control
-///
-/// # Example
-///
-/// ```rust,ignore
-/// fn display_game_info(history: GameHistoryParams) {
-///     println!("Moves: {}", history.move_history.len());
-///     println!("White time: {:.1}s", history.game_timer.white_time_left);
-/// }
-/// ```
-/// System parameter grouping game history and timing resources
-///
-/// Reserved for future use - provides convenient access to history and timer resources.
-#[derive(SystemParam)]
-#[allow(dead_code)] // Public API - reserved for future system implementations
-pub struct GameHistoryParams<'w> {
-    /// Move history
-    pub move_history: Res<'w, MoveHistory>,
-    /// Game timer
-    pub game_timer: Res<'w, GameTimer>,
-}
-
-/// System parameter grouping player interaction resources
-///
-/// Provides access to selection and board state resources.
-///
-/// # Resources Included
-///
-/// - [`Selection`] - Currently selected piece
-/// - [`FastBoardState`] - Bitboard representation
-///
-/// # Example
-///
-/// ```rust,ignore
-/// fn highlight_selection(interaction: PlayerInteractionParams) {
-///     if let Some((x, y)) = interaction.selection.selected_position {
-///         // Highlight selected square
-///     }
-/// }
-/// ```
-/// System parameter grouping player interaction resources
-///
-/// Reserved for future use - provides convenient access to selection and board state.
-#[derive(SystemParam)]
-#[allow(dead_code)] // Public API - reserved for future system implementations
-pub struct PlayerInteractionParams<'w> {
-    /// Current selection
-    pub selection: Res<'w, Selection>,
-}
-
-/// System parameter grouping turn management resources
-///
-/// Provides access to turn and turn state resources.
-///
-/// # Resources Included
-///
-/// - [`CurrentTurn`] - Current turn
-/// - [`TurnStateContext`] - Fine-grained turn phase
-///
-/// # Example
-///
-/// ```rust,ignore
-/// fn process_turn(turn: TurnParams) {
-///     if turn.turn_context.phase.accepts_input() {
-///         // Process player input
-///     }
-/// }
-/// ```
-/// System parameter grouping turn management resources
-///
-/// Reserved for future use - provides convenient access to turn resources.
-#[derive(SystemParam)]
-#[allow(dead_code)] // Public API - reserved for future system implementations
-pub struct TurnParams<'w> {
-    /// Current turn
-    pub current_turn: Res<'w, CurrentTurn>,
-    /// Turn state context
-    pub turn_context: Res<'w, TurnStateContext>,
-}
-
-/// System parameter grouping engine and player resources
-///
-/// Provides access to chess engine and player information.
-///
-/// # Resources Included
-///
-/// - [`ChessEngine`] - Chess engine state
-/// - [`Players`] - Player information
-///
-/// # Example
-///
-/// ```rust,ignore
-/// fn validate_move(engine_params: EngineParams, from: (u8, u8), to: (u8, u8)) -> bool {
-///     let color = engine_params.players.current(engine_params.current_turn.color).color;
-///     // Use engine to validate move
-/// }
-/// ```
-/// System parameter grouping engine and player resources
-///
-/// Reserved for future use - provides convenient access to engine and player resources.
-#[derive(SystemParam)]
-#[allow(dead_code)] // Public API - reserved for future system implementations
-pub struct EngineParams<'w> {
-    /// Chess engine
-    pub engine: Res<'w, ChessEngine>,
-    /// Players
-    pub players: Res<'w, Players>,
-    /// Current turn (needed for engine operations)
-    pub current_turn: Res<'w, CurrentTurn>,
-}
-
-/// System parameter grouping all game resources
-///
-/// Provides access to all game resources in a single parameter.
-/// Use this when you need access to multiple resource groups.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// fn comprehensive_system(all: AllGameParams) {
-///     // Access all resources via all.game_state, all.history, etc.
-/// }
-/// ```
-/// System parameter grouping all game resources
-///
-/// Reserved for future use - provides convenient access to all game resources.
-#[derive(SystemParam)]
-#[allow(dead_code)] // Public API - reserved for future system implementations
-pub struct AllGameParams<'w> {
-    /// Game state resources
-    pub game_state: GameStateParams<'w>,
-    /// History and timing
-    pub history: GameHistoryParams<'w>,
-    /// Player interaction
-    pub interaction: PlayerInteractionParams<'w>,
-    /// Turn management
-    pub turn: TurnParams<'w>,
-    /// Engine and players
-    pub engine: EngineParams<'w>,
+    /// Piece selection state
+    #[allow(dead_code)]
+    pub selection: ResMut<'w, Selection>,
+    /// Chess engine for move validation
+    #[allow(dead_code)]
+    pub engine: ResMut<'w, ChessEngine>,
 }
 
 /// System parameter grouping AI-related resources
@@ -205,16 +63,15 @@ pub struct AllGameParams<'w> {
 ///     }
 /// }
 /// ```
-/// System parameter grouping AI-related resources
-///
-/// Reserved for future use - provides convenient access to AI resources.
 #[derive(SystemParam)]
-#[allow(dead_code)] // Public API - reserved for future system implementations
 pub struct AIParams<'w> {
     /// AI configuration
+    #[allow(dead_code)]
     pub ai_config: Res<'w, crate::game::ai::ChessAIResource>,
     /// Pending AI move computation
+    #[allow(dead_code)]
     pub pending_ai: Option<Res<'w, crate::game::ai::PendingAIMove>>,
     /// AI statistics
+    #[allow(dead_code)]
     pub ai_stats: Res<'w, crate::game::ai::AIStatistics>,
 }

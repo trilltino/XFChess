@@ -1,3 +1,14 @@
+//! Solana instruction builders and RPC helpers for the XFChess program.
+//!
+//! This module provides functions to build Solana instructions for:
+//! - Recording chess moves on the Execution Rollup
+//! - Undelegating games (committing ER state back to devnet)
+//! - Finalizing games (setting winner, paying out escrow)
+//! - Verifying player profiles (KYC)
+//!
+//! Also provides RPC client helpers for signing and submitting transactions
+//! to both devnet and the MagicBlock Execution Rollup.
+
 use anyhow::{anyhow, Result};
 use tracing::warn;
 use sha2::{Digest, Sha256};
@@ -9,33 +20,44 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    system_instruction,
     transaction::{Transaction, VersionedTransaction},
 };
+#[allow(deprecated)]
+use solana_sdk::system_instruction;
 
+/// PDA seed for game accounts
 pub const GAME_SEED: &[u8] = b"game";
+/// PDA seed for move log accounts
 pub const MOVE_LOG_SEED: &[u8] = b"move_log";
+/// PDA seed for session delegation accounts
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
+/// PDA seed for player profile accounts
 pub const PROFILE_SEED: &[u8] = b"profile";
+/// PDA seed for wager escrow accounts
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 
-/// MagicBlock magic context account (ER-only).
+/// MagicBlock magic context account (ER-only)
 const MAGIC_CONTEXT_PUBKEY: &str = "MagicContext1111111111111111111111111111111";
-/// MagicBlock magic program (ER-only).
+/// MagicBlock magic program (ER-only)
 const MAGIC_PROGRAM_PUBKEY: &str = "Magic11111111111111111111111111111111111111";
 
+/// Computes the Anchor discriminator for a given instruction name.
 fn anchor_discriminator(name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
-    hasher.update(format!("global:{name}"));
+    hasher.update(format!("global:{}", name));
     hasher.finalize()[..8].try_into().unwrap()
 }
 
+/// Borsh-encodes a string (length prefix + bytes).
 fn borsh_string(s: &str) -> Vec<u8> {
     let mut v = (s.len() as u32).to_le_bytes().to_vec();
     v.extend_from_slice(s.as_bytes());
     v
 }
 
+/// Builds a `record_move` instruction for the Execution Rollup.
+///
+/// Records a chess move on the ER with optional signature for replay protection.
 pub fn record_move_ix(
     program_id: &Pubkey,
     session_pubkey: &Pubkey,
@@ -85,9 +107,9 @@ pub fn record_move_ix(
     }
 }
 
-/// Build an `undelegate_game` instruction (sent to the ER endpoint).
-/// Commits the ER state for game + move_log back to devnet and releases the accounts.
-/// The VPS session key is the payer/signer — no wallet popup needed after our auth-check removal.
+/// Builds an `undelegate_game` instruction for the ER.
+///
+/// Commits the ER state (game + move_log) back to devnet and releases the accounts.
 pub fn undelegate_game_ix(program_id: &Pubkey, session_pubkey: &Pubkey, game_id: u64) -> Instruction {
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let move_log_pda = Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], program_id).0;
@@ -110,12 +132,10 @@ pub fn undelegate_game_ix(program_id: &Pubkey, session_pubkey: &Pubkey, game_id:
     }
 }
 
-/// Build a `finalize_game` instruction (sent to devnet, after undelegation).
-/// Sets game.status = Finished, pays out the wager escrow, and updates ELO.
-/// `winner` = Some("white") | Some("black") | None (draw).
+/// Builds a `finalize_game` instruction for devnet.
 ///
-/// The on-chain `EndGame` accounts struct has no explicit Signer — the session key
-/// is only the fee-payer in the outer Transaction, not listed in the instruction accounts.
+/// Sets game.status = Finished, pays out the wager escrow, and updates ELO.
+/// Winner: Some("white") | Some("black") | None (draw).
 pub fn finalize_game_ix(
     program_id: &Pubkey,
     game_id: u64,
@@ -153,7 +173,30 @@ pub fn finalize_game_ix(
     }
 }
 
-/// Fund `dest` with `lamports` from `payer`, submit to `rpc_url`.
+/// Builds a `verify_profile` instruction for devnet.
+///
+/// Marks a player as KYC-verified on-chain.
+pub fn verify_profile_ix(
+    program_id: &Pubkey,
+    admin: &Pubkey,
+    player: &Pubkey,
+) -> Instruction {
+    let player_profile_pda = Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
+
+    let data = anchor_discriminator("verify_profile").to_vec();
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(player_profile_pda, false),
+            AccountMeta::new(*admin, true), // The KYC authority fee-payer
+            AccountMeta::new_readonly(*player, false),
+        ],
+        data,
+    }
+}
+
+/// Funds `dest` with `lamports` from `payer`, submit to `rpc_url`.
 pub fn fund_account(
     rpc: &RpcClient,
     payer: &Keypair,
@@ -166,7 +209,7 @@ pub fn fund_account(
     Ok(rpc.send_and_confirm_transaction(&tx)?)
 }
 
-/// Sign `ix` with `signer` (fee-payer = signer) and submit to `rpc_url`.
+/// Signs `ix` with `signer` (fee-payer = signer) and submits to `rpc_url`.
 pub fn sign_and_submit(rpc: &RpcClient, signer: &Keypair, instructions: &[Instruction]) -> Result<Signature> {
     let blockhash = rpc.get_latest_blockhash()?;
     let msg = Message::new(instructions, Some(&signer.pubkey()));
@@ -178,12 +221,11 @@ pub fn sign_and_submit(rpc: &RpcClient, signer: &Keypair, instructions: &[Instru
     .map_err(|e| anyhow!(e))
 }
 
-/// Sign and submit to the MagicBlock ER with `skip_preflight = true`.
+/// Signs and submits to the MagicBlock ER with `skip_preflight = true`.
 ///
 /// The ER's preflight simulator may reject transactions with -32003
 /// ("Attempt to load a program that does not exist") because the XFChess
-/// program is not in its preflight cache.  The actual ER processing pipeline
-/// lazily loads programs from devnet, so skipping preflight lets the TX land.
+/// program is not in its preflight cache. Skipping preflight lets the TX land.
 /// After sending, we poll for confirmation (ER confirms in sub-second to ~5 s).
 pub fn sign_and_submit_er(rpc: &RpcClient, signer: &Keypair, instructions: &[Instruction]) -> Result<Signature> {
     use solana_client::rpc_config::RpcSendTransactionConfig;
@@ -219,10 +261,10 @@ pub fn sign_and_submit_er(rpc: &RpcClient, signer: &Keypair, instructions: &[Ins
     }
 }
 
-/// Submit an already-signed serialised transaction. Used for wallet-signed setup TXs.
-/// Accepts both legacy `Transaction` and `VersionedTransaction` (v0).
-/// Uses `confirmed` commitment — much faster than `finalized` (default), reducing
-/// the risk of blockhash expiration on devnet before confirmation.
+/// Submits an already-signed serialized transaction.
+///
+/// Used for wallet-signed setup TXs. Accepts both legacy `Transaction`
+/// and `VersionedTransaction` (v0). Uses `confirmed` commitment.
 pub fn submit_signed_tx(rpc: &RpcClient, tx_bytes: &[u8]) -> Result<Signature> {
     let tx: VersionedTransaction = bincode::deserialize(tx_bytes).map_err(|e| anyhow!(e))?;
     rpc.send_and_confirm_transaction_with_spinner_and_commitment(
@@ -232,6 +274,7 @@ pub fn submit_signed_tx(rpc: &RpcClient, tx_bytes: &[u8]) -> Result<Signature> {
     .map_err(|e| anyhow!(e))
 }
 
+/// Creates an RPC client with confirmed commitment.
 pub fn make_rpc(url: &str) -> RpcClient {
     RpcClient::new_with_commitment(url.to_string(), CommitmentConfig::confirmed())
 }

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Camera control system for RTS-style board observation
 //!
 //! Implements Total War-style camera controls with smooth WASD movement
@@ -769,16 +770,19 @@ pub fn setup_game_camera(
     connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
     ai_config: Res<crate::game::ai::ChessAIResource>,
 ) {
-    // Only configure for standard view (TempleOS handles its own camera/view)
+    // Only configure for standard views (TempleOS handles its own camera/view)
     if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
         return;
     }
 
+    let is_2d = *view_mode == crate::game::view_mode::ViewMode::Standard2D;
+
     if let Some(entity) = persistent_camera.entity {
         if let Ok((mut transform, mut camera)) = query.get_mut(entity) {
             // Position for gameplay: Standard Chess Perspective
-            // High angle, centered behind each player's pieces
-            let initial_height = 12.0;
+            // Raised camera angle (55-65° elevation) for better board readability
+            // Higher elevation reduces back-rank compression while keeping silhouettes visible
+            let initial_height = 16.0;
             let distance_behind = 8.0; // Distance behind the board edge
 
             // Determine if the human player is Black:
@@ -795,21 +799,36 @@ pub fn setup_game_camera(
                     .unwrap_or(false),
             };
 
-            // Camera positioned along Z-axis to view board from player's side
-            // White view: behind rank 1 (negative Z), looking toward center
-            // Black view: behind rank 8 (positive Z), looking toward center
-            // Board center is at (3.5, 0, 3.5)
+            let board_center = Vec3::new(3.5, 0.0, 3.5);
 
+            // Position camera along the Z-axis for standard chess board orientation
+            // White view: camera on -Z side looking toward +Z (rank 0 at bottom, rank 7 at top)
+            // Black view: camera on +Z side looking toward -Z (rank 7 at bottom, rank 0 at top)
+            // This ensures h1 (file 7, rank 0) is at bottom-right for both players
             let camera_pos = if is_black_view {
-                // Black player: camera behind rank 8 (Z=7), looking toward board
                 Vec3::new(3.5, initial_height, 7.0 + distance_behind)
             } else {
-                // White player: camera behind rank 1 (Z=0), looking toward board
                 Vec3::new(3.5, initial_height, -distance_behind)
             };
 
-            let board_center = Vec3::new(3.5, 0.0, 3.5);
-            *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+            if is_2d {
+                // Top-down 2D View
+                // Position directly above center, looking straight down
+                let height = 12.0;
+                let translation = Vec3::new(3.5, height, 3.5);
+                
+                let up_vec = if is_black_view {
+                    Vec3::new(-1.0, 0.0, 0.0)
+                } else {
+                    Vec3::new(1.0, 0.0, 0.0)
+                };
+                
+                *transform = Transform::from_translation(translation).looking_at(board_center, up_vec);
+            } else {
+                // Standard 3D Perspective
+                // Camera looks toward board center with correct orientation
+                *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+            }
 
             // Ensure order is correct (0 is standard for 3D)
             camera.order = 0;
@@ -818,18 +837,12 @@ pub fn setup_game_camera(
             // Check if controller already exists to preserve zoom/state if re-running?
             // Usually setup runs once on Enter.
             commands.entity(entity).insert(CameraController {
-                current_zoom: initial_height,
-                target_zoom: initial_height,
-                min_zoom: 3.0,
-                max_zoom: 30.0,
+                current_zoom: transform.translation.y,
+                target_zoom: transform.translation.y,
+                min_zoom: if is_2d { 5.0 } else { 3.0 },
+                max_zoom: if is_2d { 20.0 } else { 30.0 },
                 // Let the system calculate pitch/yaw from the Transform we just set
                 initialized: false,
-                // Initialize yaw correctly for controls (facing toward board center)
-                yaw: if is_black_view {
-                    std::f32::consts::PI // Black looks toward negative Z
-                } else {
-                    0.0 // White looks toward positive Z
-                },
                 ..Default::default()
             });
 
@@ -892,26 +905,57 @@ pub fn camera_reset_system(
 
         for (mut transform, mut controller) in query.iter_mut() {
             // Standard Perspective defaults
-            // Positioned behind player's pieces along Z-axis
-            let initial_height = 12.0;
+            // Position camera along X-axis for proper chess board orientation
+            let initial_height = 16.0;
             let distance_behind = 8.0;
+            let board_center = Vec3::new(3.5, 0.0, 3.5);
+            let default_zoom = 16.0;
+            
             let default_pos = if is_black_view {
-                // Black player: camera behind rank 8, looking toward board
+                // Black view: camera on +Z side looking toward -Z
                 Vec3::new(3.5, initial_height, 7.0 + distance_behind)
             } else {
-                // White player: camera behind rank 1, looking toward board
+                // White view: camera on -Z side looking toward +Z
                 Vec3::new(3.5, initial_height, -distance_behind)
             };
-            let board_center = Vec3::new(3.5, 0.0, 3.5);
-            let default_zoom = 12.0;
 
             *transform = Transform::from_translation(default_pos).looking_at(board_center, Vec3::Y);
 
             controller.current_zoom = default_zoom;
             controller.target_zoom = default_zoom;
-            controller.yaw = if is_black_view { std::f32::consts::PI } else { 0.0 };
+            // Yaw is calculated from transform automatically when initialized=false
+            controller.initialized = false;
 
-            info!("[CAMERA] Reset to {} Perspective", if is_black_view { "Black" } else { "White" });
+            info!("[CAMERA] Reset to {} Perspective with correct board orientation", if is_black_view { "Black" } else { "White" });
         }
+    }
+}
+
+/// System to handle 'V' key for toggling view mode during gameplay
+pub fn view_mode_toggle_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut view_preferences: ResMut<crate::game::view_mode::PlayerViewPreferences>,
+    mut view_mode: ResMut<crate::game::view_mode::ViewMode>,
+    // We need to trigger camera re-setup
+    commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    query: Query<(&mut Transform, &mut Camera)>,
+    connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    ai_config: Res<crate::game::ai::ChessAIResource>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyV) {
+        view_preferences.toggle_view();
+        *view_mode = view_preferences.local_view;
+        info!("[VIEW] Toggled view mode to {:?}", *view_mode);
+        
+        // Re-run camera setup logic for the new mode
+        setup_game_camera(
+            commands,
+            persistent_camera,
+            view_mode.into(),
+            query,
+            connection_state,
+            ai_config,
+        );
     }
 }

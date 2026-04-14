@@ -67,29 +67,12 @@ pub struct Players {
 }
 
 impl Players {
-    /// Get player by their piece color
-    #[allow(dead_code)] // Public API - useful for UI and game logic
-    pub fn by_color(&self, color: PieceColor) -> &Player {
-        match color {
+    /// Get the current player based on turn color
+    pub fn current(&self, current_color: PieceColor) -> &Player {
+        match current_color {
             PieceColor::White => &self.player_1,
             PieceColor::Black => &self.player_2,
         }
-    }
-
-    /// Get player by ID (1 or 2)
-    #[allow(dead_code)] // Public API - useful for UI and game logic
-    pub fn by_id(&self, id: u8) -> Option<&Player> {
-        match id {
-            1 => Some(&self.player_1),
-            2 => Some(&self.player_2),
-            _ => None,
-        }
-    }
-
-    /// Get the current player based on turn color
-    #[allow(dead_code)] // Public API - useful for UI and game logic
-    pub fn current(&self, current_color: PieceColor) -> &Player {
-        self.by_color(current_color)
     }
 }
 
@@ -104,27 +87,5 @@ mod tests {
         assert_eq!(player.name, "Player 1");
         assert_eq!(player.color, PieceColor::White);
         assert!(player.is_human);
-    }
-
-    #[test]
-    fn test_players_by_color() {
-        let players = Players {
-            player_1: Player::new(1, "White".to_string(), PieceColor::White, true),
-            player_2: Player::new(2, "Black".to_string(), PieceColor::Black, true),
-        };
-
-        assert_eq!(players.by_color(PieceColor::White).id, 1);
-        assert_eq!(players.by_color(PieceColor::Black).id, 2);
-    }
-
-    #[test]
-    fn test_players_current() {
-        let players = Players {
-            player_1: Player::new(1, "White".to_string(), PieceColor::White, true),
-            player_2: Player::new(2, "Black".to_string(), PieceColor::Black, true),
-        };
-
-        assert_eq!(players.current(PieceColor::White).id, 1);
-        assert_eq!(players.current(PieceColor::Black).id, 2);
     }
 }

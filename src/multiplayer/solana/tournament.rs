@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot;
 
-use crate::multiplayer::rollup::vps_client::{MatchAssignmentResp, TournamentSummary};
+use crate::multiplayer::vps_client::TournamentSummary;
 
 // ── Join status ────────────────────────────────────────────────────────────────
 
@@ -31,8 +31,6 @@ pub struct TournamentClientState {
     pub my_slot: Option<usize>,
     /// Cached list of available tournaments from VPS.
     pub available_tournaments: Vec<TournamentSummary>,
-    /// Current match assignment (set once bracket is active).
-    pub my_match: Option<MatchAssignmentResp>,
     /// Status text shown in lobby / waiting screens.
     pub status_message: String,
     /// Polling timer: seconds since last my-match poll.
@@ -49,10 +47,9 @@ impl Default for TournamentClientState {
             active_tournament_id: None,
             my_slot: None,
             available_tournaments: Vec::new(),
-            my_match: None,
             status_message: String::new(),
             poll_timer: 0.0,
-            join_status: TournamentJoinStatus::Idle,
+            join_status: TournamentJoinStatus::default(),
             tx_rx: None,
         }
     }
@@ -65,13 +62,6 @@ impl TournamentClientState {
 
     pub fn is_registered(&self) -> bool {
         matches!(self.join_status, TournamentJoinStatus::Registered(_))
-    }
-
-    pub fn has_match_assigned(&self) -> bool {
-        self.my_match
-            .as_ref()
-            .map(|m| m.found && m.opponent_pubkey.is_some())
-            .unwrap_or(false)
     }
 }
 
@@ -111,7 +101,7 @@ pub fn spawn_register_tournament(
     let program_id: Pubkey = crate::solana::instructions::PROGRAM_ID
         .parse()
         .unwrap_or_default();
-    let rpc_url = crate::multiplayer::solana::integration::DEVNET_RPC_URL.to_string();
+    let rpc_url = crate::multiplayer::solana::integration::state::DEVNET_RPC_URL.to_string();
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
@@ -128,7 +118,7 @@ async fn async_register_tournament(
     program_id: Pubkey,
     tournament_id: u64,
     wallet_pubkey: Pubkey,
-    elo: u32,
+    _elo: u32,
 ) -> Result<usize, String> {
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
     use crate::solana::instructions::{init_profile_ix, register_player_ix, PROFILE_SEED};
@@ -157,13 +147,12 @@ async fn async_register_tournament(
     sign_and_send_via_tauri(&rpc_url, wallet_pubkey, &ixs, &[])
         .map_err(|e| format!("wallet sign: {e}"))?;
 
-    let slot = crate::multiplayer::rollup::vps_client::join_tournament(
+    let slot = crate::multiplayer::vps_client::join_tournament(
         tournament_id,
         &wallet_pubkey.to_string(),
-        elo,
     )?;
 
-    Ok(slot)
+    Ok(slot as usize)
 }
 
 // ── Bevy system ───────────────────────────────────────────────────────────────
@@ -182,7 +171,7 @@ fn poll_tournament_tasks(
                 tournament.status_message =
                     format!("Registered in slot {}. Waiting for bracket…", slot + 1);
                 tournament.tx_rx = None;
-                menu_state.set(crate::core::states::MenuState::TournamentLobby);
+                menu_state.set(crate::core::states::MenuState::Tournaments);
                 info!("[TOURNAMENT] Registration confirmed — slot {}", slot);
             }
             Ok(Err(e)) => {

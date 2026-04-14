@@ -58,12 +58,23 @@ pub struct RejectInviteEvent {
     pub game_id: u64,
 }
 
-/// Resource to persist peer node ID input across frames (for UI)
-#[derive(Resource, Default)]
+/// Resource to persist peer node ID and lobby name input across frames (for UI)
+#[derive(Resource)]
 pub struct P2PUIState {
     pub peer_input: String,
+    pub lobby_name: String,
     /// Error message to display if connection fails
     pub error_message: Option<String>,
+}
+
+impl Default for P2PUIState {
+    fn default() -> Self {
+        Self {
+            peer_input: String::new(),
+            lobby_name: "Guest Player".to_string(),
+            error_message: None,
+        }
+    }
 }
 
 impl P2PUIState {
@@ -408,8 +419,6 @@ fn handle_network_events(
                                     // so transition to InGame directly here.
                                     game_started.write(GameStartedEvent {
                                         game_id: *game_id,
-                                        white_player,
-                                        black_player,
                                     });
                                     next_state.set(GameState::InGame);
                                 }
@@ -436,8 +445,6 @@ fn handle_network_events(
 
                             game_started.write(GameStartedEvent {
                                 game_id: *game_id,
-                                white_player: white_player.clone(),
-                                black_player: black_player.clone(),
                             });
 
                             next_state.set(GameState::InGame);

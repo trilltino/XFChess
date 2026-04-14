@@ -10,6 +10,7 @@
 //! - Server → Client : `4-byte LE length` + `signed VersionedTransaction bytes`
 //!                      OR `0xFFFF_FFFF` on rejection / error
 
+use bevy::prelude::info;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     instruction::Instruction,
@@ -117,6 +118,12 @@ pub fn sign_and_send_via_tauri(
     let signed_bytes = send_to_tauri_blocking(&tx_bytes)?;
 
     submit_signed_to_rpc(rpc_url, &signed_bytes)
+}
+
+/// Sign an arbitrary message (e.g. for TEE authentication) via the Tauri signing bridge.
+pub fn sign_message_via_tauri(message: &str) -> Result<Vec<u8>, String> {
+    info!("[TAURI-SIGN] Requesting message signature: '{}'", message);
+    send_to_tauri_blocking(message.as_bytes())
 }
 
 /// Send raw transaction bytes to the Tauri signing server and block until the

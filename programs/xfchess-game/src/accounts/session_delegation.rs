@@ -1,3 +1,5 @@
+//! Definitions for delegating a user's session internally.
+
 use anchor_lang::prelude::*;
 use crate::state::{Game, SessionDelegation};
 

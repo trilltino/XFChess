@@ -46,6 +46,14 @@ pub struct PiecesSpawned {
     pub spawned: bool,
 }
 
+/// Component marking a 3D visual element of a piece
+#[derive(Component)]
+pub struct Piece3DVisual;
+
+/// Component marking a 2D visual element of a piece
+#[derive(Component)]
+pub struct Piece2DVisual;
+
 /// Data-driven piece setup - idiomatic Bevy approach
 ///
 /// Uses const arrays to define starting positions, then iterates to spawn pieces.
@@ -57,8 +65,9 @@ pub fn create_pieces(
     asset_server: Res<AssetServer>,
     piece_meshes: Res<PieceMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    view_mode: Res<crate::game::view_mode::ViewMode>,
+    _view_mode: Res<crate::game::view_mode::ViewMode>,
     mut pieces_spawned: ResMut<PiecesSpawned>,
+    sprite_handles: Option<Res<PieceSpriteHandles>>,
 ) {
     // Skip if already spawned
     if pieces_spawned.spawned {
@@ -116,6 +125,7 @@ pub fn create_pieces(
             piece_type,
             (file as u8, 0), // (file, rank) -> world (X, Z)
             visual_offset,
+            &sprite_handles,
         );
     }
 
@@ -132,8 +142,9 @@ pub fn create_pieces(
             piece_material,
             PieceColor::White,
             PieceType::Pawn,
-            (file, 1), // (file, rank) -> world (X, Z)
+            (file as u8, 1), // (file, rank) -> world (X, Z)
             visual_offset,
+            &sprite_handles,
         );
     }
 
@@ -152,6 +163,7 @@ pub fn create_pieces(
             piece_type,
             (file as u8, 7), // (file, rank) -> world (X, Z)
             visual_offset,
+            &sprite_handles,
         );
     }
 
@@ -168,8 +180,9 @@ pub fn create_pieces(
             piece_material,
             PieceColor::Black,
             PieceType::Pawn,
-            (file, 6), // (file, rank) -> world (X, Z)
+            (file as u8, 6), // (file, rank) -> world (X, Z)
             visual_offset,
+            &sprite_handles,
         );
     }
 
@@ -196,6 +209,41 @@ pub struct PieceMeshes {
     pub black_bishop: Handle<Mesh>,
     pub black_knight: Handle<Mesh>,
     pub black_pawn: Handle<Mesh>,
+}
+
+#[derive(Resource)]
+pub struct PieceSpriteHandles {
+    pub white_king: Handle<Image>,
+    pub white_queen: Handle<Image>,
+    pub white_rook: Handle<Image>,
+    pub white_bishop: Handle<Image>,
+    pub white_knight: Handle<Image>,
+    pub white_pawn: Handle<Image>,
+    pub black_king: Handle<Image>,
+    pub black_queen: Handle<Image>,
+    pub black_rook: Handle<Image>,
+    pub black_bishop: Handle<Image>,
+    pub black_knight: Handle<Image>,
+    pub black_pawn: Handle<Image>,
+}
+
+impl PieceSpriteHandles {
+    pub fn get(&self, piece_type: PieceType, color: PieceColor) -> Handle<Image> {
+        match (piece_type, color) {
+            (PieceType::King, PieceColor::White) => self.white_king.clone(),
+            (PieceType::Queen, PieceColor::White) => self.white_queen.clone(),
+            (PieceType::Rook, PieceColor::White) => self.white_rook.clone(),
+            (PieceType::Bishop, PieceColor::White) => self.white_bishop.clone(),
+            (PieceType::Knight, PieceColor::White) => self.white_knight.clone(),
+            (PieceType::Pawn, PieceColor::White) => self.white_pawn.clone(),
+            (PieceType::King, PieceColor::Black) => self.black_king.clone(),
+            (PieceType::Queen, PieceColor::Black) => self.black_queen.clone(),
+            (PieceType::Rook, PieceColor::Black) => self.black_rook.clone(),
+            (PieceType::Bishop, PieceColor::Black) => self.black_bishop.clone(),
+            (PieceType::Knight, PieceColor::Black) => self.black_knight.clone(),
+            (PieceType::Pawn, PieceColor::Black) => self.black_pawn.clone(),
+        }
+    }
 }
 
 impl PieceMeshes {
@@ -248,7 +296,25 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
     };
     
     commands.insert_resource(meshes);
-    info!("[PIECES] Mesh handles created - waiting for assets to load");
+
+    info!("[PIECES] Loading 2D piece sprites from assets/pieces/2d/");
+    let sprites = PieceSpriteHandles {
+        white_bishop: asset_server.load("pieces/2d/wb.png"),
+        white_king:   asset_server.load("pieces/2d/wk.png"),
+        white_knight: asset_server.load("pieces/2d/wn.png"),
+        white_pawn:   asset_server.load("pieces/2d/wp.png"),
+        white_queen:  asset_server.load("pieces/2d/wq.png"),
+        white_rook:   asset_server.load("pieces/2d/wr.png"),
+        black_bishop: asset_server.load("pieces/2d/bb.png"),
+        black_king:   asset_server.load("pieces/2d/bk.png"),
+        black_knight: asset_server.load("pieces/2d/bn.png"),
+        black_pawn:   asset_server.load("pieces/2d/bp.png"),
+        black_queen:  asset_server.load("pieces/2d/bq.png"),
+        black_rook:   asset_server.load("pieces/2d/br.png"),
+    };
+    commands.insert_resource(sprites);
+
+    info!("[PIECES] Mesh and Sprite handles created - waiting for assets to load");
 }
 
 /// Per-piece-type offsets to center meshes on squares.
@@ -273,12 +339,6 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
 /// These offsets bring each piece to the center of its square (local X=0.5, Z=0.5).
 /// Y=0.0 keeps the piece at the parent's Y position (PIECE_ON_BOARD_Y = 0.05).
 /// The parent entity is positioned at the square corner, so we add 0.5 to center it.
-pub const KING_OFFSET: Vec3 = Vec3::new(0.0, 0.0, 1.83);
-pub const QUEEN_OFFSET: Vec3 = Vec3::new(0.0, 0.0, 0.92);
-pub const BISHOP_OFFSET: Vec3 = Vec3::new(0.0, 0.0, 0.0);
-pub const KNIGHT_OFFSET: Vec3 = Vec3::new(0.0, 0.0, -0.92);
-pub const ROOK_OFFSET: Vec3 = Vec3::new(0.0, 0.0, -1.82);
-pub const PAWN_OFFSET: Vec3 = Vec3::new(0.0, 0.0, -2.63);
 
 /// Unified piece spawning function - dispatches to specific spawner based on type
 ///
@@ -294,6 +354,7 @@ pub fn spawn_piece_at(
     piece_type: PieceType,
     position: (u8, u8),
     _visual_offset: Vec3, // Kept for API compatibility - reference assets are already centered
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
     let (file, rank) = position;
     // World position: X = file, Y = board surface, Z = rank
@@ -306,23 +367,47 @@ pub fn spawn_piece_at(
     // Handle is Clone (not Copy), need .clone() from shared ref
     match piece_type {
         PieceType::King => spawn_king(
-            commands, material, color, world_pos, meshes, offset, file, rank,
+            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
         ),
         PieceType::Queen => spawn_queen(
-            commands, material, color, world_pos, meshes, offset, file, rank,
+            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
         ),
         PieceType::Rook => spawn_rook(
-            commands, material, color, world_pos, meshes, offset, file, rank,
+            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
         ),
         PieceType::Bishop => spawn_bishop(
-            commands, material, color, world_pos, meshes, offset, file, rank,
+            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
         ),
         PieceType::Knight => spawn_knight(
-            commands, material, color, world_pos, meshes, offset, file, rank,
+            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
         ),
         PieceType::Pawn => spawn_pawn(
-            commands, material, color, world_pos, meshes, offset, file, rank,
+            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
         ),
+    }
+
+    // After spawning the piece wrapper, we also need to attach the 2D visual
+    // This is handled in each spawn_X function via with_children
+}
+
+fn append_2d_visual(
+    parent: &mut ChildSpawnerCommands,
+    color: PieceColor,
+    piece_type: PieceType,
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
+) {
+    if let Some(handles) = sprite_handles {
+        let sprite = handles.get(piece_type, color);
+        parent.spawn((
+            Sprite::from_image(sprite),
+            // Position 2D sprite slightly above board surface (Y=0.1)
+            // Rotate to face camera (X=-90deg)
+            Transform::from_xyz(0.0, 0.1, 0.0)
+                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+                .with_scale(Vec3::splat(0.002)), // Scale appropriate for 1.0x1.0 square
+            Piece2DVisual,
+            Visibility::Hidden, // Hidden by default (start in 3D)
+        ));
     }
 }
 
@@ -380,8 +465,9 @@ macro_rules! spawn_piece_visual {
             Mesh3d($mesh),
             MeshMaterial3d($material),
             piece_mesh_transform($offset),
+            Piece3DVisual,
             // Pickable required for child meshes to generate pointer events
-            // Events bubble up to parent entity where observers are registered
+            // MeshPicking enables the actual mesh raycasting in Bevy 0.18
             bevy::picking::Pickable::default(),
         ));
     };
@@ -397,6 +483,7 @@ pub fn spawn_king(
     _visual_offset: Vec3,
     file: u8,
     rank: u8,
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
     use crate::core::{DespawnOnExit, GameState};
 
@@ -422,6 +509,8 @@ pub fn spawn_king(
         .observe(on_piece_unhover)
         .with_children(|parent| {
             spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
+            // Also append 2D visual
+            append_2d_visual(parent, piece_color, PieceType::King, sprite_handles);
         });
 }
 
@@ -434,6 +523,7 @@ pub fn spawn_knight(
     _visual_offset: Vec3,
     file: u8,
     rank: u8,
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
     use crate::core::GameState;
 
@@ -459,6 +549,8 @@ pub fn spawn_knight(
         .observe(on_piece_unhover)
         .with_children(|parent| {
             spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
+            // Also append 2D visual
+            append_2d_visual(parent, piece_color, PieceType::Knight, sprite_handles);
         });
 }
 
@@ -471,6 +563,7 @@ pub fn spawn_queen(
     _visual_offset: Vec3,
     file: u8,
     rank: u8,
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
     use crate::core::GameState;
 
@@ -496,6 +589,8 @@ pub fn spawn_queen(
         .observe(on_piece_unhover)
         .with_children(|parent| {
             spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
+            // Also append 2D visual
+            append_2d_visual(parent, piece_color, PieceType::Queen, sprite_handles);
         });
 }
 
@@ -508,6 +603,7 @@ pub fn spawn_bishop(
     _visual_offset: Vec3,
     file: u8,
     rank: u8,
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
     use crate::core::GameState;
 
@@ -533,6 +629,8 @@ pub fn spawn_bishop(
         .observe(on_piece_unhover)
         .with_children(|parent| {
             spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
+            // Also append 2D visual
+            append_2d_visual(parent, piece_color, PieceType::Bishop, sprite_handles);
         });
 }
 
@@ -545,6 +643,7 @@ pub fn spawn_rook(
     _visual_offset: Vec3,
     file: u8,
     rank: u8,
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
     use crate::core::GameState;
 
@@ -570,6 +669,8 @@ pub fn spawn_rook(
         .observe(on_piece_unhover)
         .with_children(|parent| {
             spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
+            // Also append 2D visual
+            append_2d_visual(parent, piece_color, PieceType::Rook, sprite_handles);
         });
 }
 
@@ -582,6 +683,7 @@ pub fn spawn_pawn(
     _visual_offset: Vec3,
     file: u8,
     rank: u8,
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
     use crate::core::GameState;
 
@@ -607,6 +709,8 @@ pub fn spawn_pawn(
         .observe(on_piece_unhover)
         .with_children(|parent| {
             spawn_piece_visual!(parent, mesh, material, Vec3::ZERO);
+            // Also append 2D visual
+            append_2d_visual(parent, piece_color, PieceType::Pawn, sprite_handles);
         });
 }
 
@@ -623,38 +727,6 @@ pub fn spawn_pawn(
 /// - Row 3: Rooks
 /// - Row 4: Queens
 ///
-/// Within each row, pieces are placed horizontally based on count.
-pub fn calculate_capture_position(
-    captured_piece_color: PieceColor,
-    piece_type: PieceType,
-    count_of_same_type: usize,
-) -> Vec3 {
-    // Determine which side (left for white captures, right for black captures)
-    let x = match captured_piece_color {
-        PieceColor::White => -1.5, // Left side (white captured pieces = black pieces taken)
-        PieceColor::Black => 8.5,  // Right side (black captured pieces = white pieces taken)
-    };
-
-    // Determine row based on piece type
-    let z = match piece_type {
-        PieceType::Pawn => 0.0,
-        PieceType::Knight => 1.0,
-        PieceType::Bishop => 2.0,
-        PieceType::Rook => 3.0,
-        PieceType::Queen => 4.0,
-        PieceType::King => 5.0, // Shouldn't happen, but just in case
-    };
-
-    // Position within row (spread horizontally)
-    let x_offset = (count_of_same_type as f32) * 0.3;
-    let final_x = if captured_piece_color == PieceColor::White {
-        x - x_offset
-    } else {
-        x + x_offset
-    };
-
-    Vec3::new(final_x, 0.0, z)
-}
 
 pub struct PiecePlugin;
 impl Plugin for PiecePlugin {
@@ -666,6 +738,31 @@ impl Plugin for PiecePlugin {
         app.add_systems(Update, create_pieces.run_if(in_state(GameState::InGame)));
         // Reset spawn flag when leaving InGame so pieces can be respawned next game
         app.add_systems(OnExit(GameState::InGame), reset_pieces_spawned);
+        
+        // Add 2D/3D visibility toggle system
+        app.add_systems(Update, view_mode_rendering_toggle_system.run_if(in_state(GameState::InGame)));
+    }
+}
+
+pub fn view_mode_rendering_toggle_system(
+    view_mode: Res<crate::game::view_mode::ViewMode>,
+    mut piece_3d_query: Query<&mut Visibility, (With<Piece3DVisual>, Without<Piece2DVisual>)>,
+    mut piece_2d_query: Query<&mut Visibility, (With<Piece2DVisual>, Without<Piece3DVisual>)>,
+) {
+    let mode = *view_mode;
+    
+    let (show_3d, show_2d) = match mode {
+        crate::game::view_mode::ViewMode::Standard3D => (true, false),
+        crate::game::view_mode::ViewMode::Standard2D => (false, true),
+        crate::game::view_mode::ViewMode::TempleOS => (true, false), // TempleOS still uses standard 3D pieces
+    };
+
+    for mut vis in piece_3d_query.iter_mut() {
+        *vis = if show_3d { Visibility::Visible } else { Visibility::Hidden };
+    }
+    
+    for mut vis in piece_2d_query.iter_mut() {
+        *vis = if show_2d { Visibility::Visible } else { Visibility::Hidden };
     }
 }
 

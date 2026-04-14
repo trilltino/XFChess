@@ -1,3 +1,5 @@
+//! Instruction for delegating games to MagicBlock Ephemeral Rollups.
+
 pub use self::inner::*;
 
 mod inner {
@@ -5,7 +7,6 @@ mod inner {
     use crate::state::Game;
     use crate::state::move_log::MoveLog;
     use anchor_lang::prelude::*;
-    use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
     use ephemeral_rollups_sdk::cpi::{delegate_account, DelegateAccounts, DelegateConfig};
     use ephemeral_rollups_sdk::ephem::deprecated::v0::commit_and_undelegate_accounts;
 

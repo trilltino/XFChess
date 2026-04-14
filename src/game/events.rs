@@ -27,8 +27,6 @@ pub struct RemoteMoveApplied {
 #[derive(Event, Message, Debug, Clone)]
 pub struct GameStartedEvent {
     pub game_id: u64,
-    pub white_player: String,
-    pub black_player: String,
 }
 
 #[derive(Event, Message, Debug, Clone)]
@@ -38,10 +36,6 @@ pub struct GameEndedEvent {
     pub reason: String,
 }
 
-#[derive(Message, Debug, Clone)]
-pub struct PlayerJoinedEvent {
-    pub player_id: String,
-}
 
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
 pub struct NetworkMoveEvent {

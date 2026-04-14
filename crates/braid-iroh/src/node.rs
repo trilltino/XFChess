@@ -33,6 +33,12 @@ pub struct BraidGameConfig {
 
     /// Optional configuration for the TCP proxy bridge.
     pub proxy_config: Option<ProxyConfig>,
+
+    /// External router to mount alongside P2P Braid routes.
+    pub app_router: Option<axum::Router>,
+
+    /// Core application state persistence block.
+    pub db: Option<sqlx::SqlitePool>,
 }
 
 /// Configuration for the TCP proxy bridge.
@@ -50,6 +56,8 @@ impl Default for BraidGameConfig {
             discovery: DiscoveryConfig::Mock(MockDiscoveryMap::new()),
             secret_key: None,
             proxy_config: None,
+            app_router: None,
+            db: None,
         }
     }
 }
@@ -110,10 +118,14 @@ impl BraidIrohNode {
         let app_state = BraidAppState {
             subscriptions: subscription_mgr.clone(),
             resources: resources.clone(),
+            db: config.db,
         };
 
+        // Initialize SQLite payload history if active
+        app_state.init_db().await;
+
         // 4. Mount the Braid protocol handler on the iroh router
-        let braid_handler = protocol::build_protocol_handler(app_state);
+        let braid_handler = protocol::build_protocol_handler(app_state, config.app_router);
 
         let router = Router::builder(endpoint.clone())
             .accept(BRAID_H3_ALPN.to_vec(), braid_handler)

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Profile check system - Detects if wallet needs profile creation
 //!
 //! When a wallet connects, checks if the player has a profile with username.
@@ -6,10 +7,8 @@
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 
-use crate::core::states::MenuState;
 use crate::multiplayer::solana::integration::state::{ProfileStatus, SolanaIntegrationState, DEVNET_RPC_URL};
 use crate::multiplayer::TokioRuntime;
-use crate::solana::instructions::PROFILE_SEED;
 use anchor_lang::AccountDeserialize;
 use xfchess_game::state::PlayerProfile;
 
@@ -42,7 +41,6 @@ pub fn check_profile_on_connect(
     info!("[PROFILE] Spawning async profile check for wallet: {}", wallet_pubkey);
 
     let rpc_url = DEVNET_RPC_URL.to_string();
-    let program_id = solana_state.program_id;
     let profile_pda = solana_state.get_profile_pda(&wallet_pubkey);
 
     let handle = tokio_runtime.0.spawn(async move {
@@ -85,9 +83,8 @@ pub fn check_profile_on_connect(
 /// System to handle the results of the async profile check
 pub fn handle_profile_check_tasks(
     mut solana_state: ResMut<SolanaIntegrationState>,
-    mut menu_state: ResMut<NextState<MenuState>>,
 ) {
-    if let Some(mut task) = solana_state.pending_profile_check.take() {
+    if let Some(task) = solana_state.pending_profile_check.take() {
         if task.is_finished() {
             // Task is done, get the result
             let result = futures_lite::future::block_on(async {
@@ -128,8 +125,7 @@ pub fn handle_profile_check_tasks(
 
 /// System to auto-initialize profile when entering ProfileCreation without one
 pub fn auto_init_profile(
-    mut solana_state: ResMut<SolanaIntegrationState>,
-    mut menu_state: ResMut<NextState<MenuState>>,
+    solana_state: ResMut<SolanaIntegrationState>,
 ) {
     // Only if we have a wallet and no profile
     if solana_state.wallet_pubkey.is_none() {

@@ -5,13 +5,12 @@ use crate::engine::board_state::ChessEngine;
 use crate::game::events::MoveMadeEvent;
 use crate::multiplayer::network::protocol::NetworkMessage;
 use crate::multiplayer::{BraidGameSync, BraidNetworkState, NetworkEvent};
-use braid_core::Patch;
 
 // Board state sync module
 pub mod board_state;
 
 use board_state::{
-    broadcast_state_system, init_board_state_sync, receive_state_system, BoardStateSync,
+    broadcast_state_system, init_board_state_sync, receive_state_system,
 };
 
 /// Plugin for game state synchronization
@@ -129,13 +128,6 @@ fn update_board_state_from_network(_engine: ResMut<ChessEngine>, _braid_sync: Re
     // since the document field no longer exists in BraidGameSync
     // This function might need to be updated based on how the sync works now
     // For now, leaving it as a placeholder
-}
-
-/// Creates a patch representing a move
-fn create_move_patch(move_data: &NetworkMove) -> Patch {
-    // In a real implementation, this would create an actual patch
-    // for the Braid CRDT system
-    Patch::bytes("", serde_json::to_vec(move_data).unwrap_or_default())
 }
 
 /// Represents a move transmitted over the network

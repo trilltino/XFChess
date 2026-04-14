@@ -7,7 +7,7 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
-    signature::{Keypair, Signer},
+    signature::Signer,
     transaction::Transaction,
 };
 use std::sync::Arc;
@@ -128,17 +128,17 @@ impl DevnetRunner {
         }
     }
 
-    async fn join_game(&self, game_id: u64, player_idx: usize) -> Result<ExecutionResult> {
+    async fn join_game(&self, _game_id: u64, _player_idx: usize) -> Result<ExecutionResult> {
         // TODO: Implement
         Ok(ExecutionResult::Skipped)
     }
 
     async fn record_move(
         &self,
-        game_id: u64,
-        move_str: &str,
-        fen: &str,
-        player_idx: usize,
+        _game_id: u64,
+        _move_str: &str,
+        _fen: &str,
+        _player_idx: usize,
     ) -> Result<ExecutionResult> {
         // TODO: Implement
         Ok(ExecutionResult::Skipped)
@@ -146,9 +146,9 @@ impl DevnetRunner {
 
     async fn finalize_game(
         &self,
-        game_id: u64,
-        result: u8,
-        player_idx: usize,
+        _game_id: u64,
+        _result: u8,
+        _player_idx: usize,
     ) -> Result<ExecutionResult> {
         // TODO: Implement
         Ok(ExecutionResult::Skipped)

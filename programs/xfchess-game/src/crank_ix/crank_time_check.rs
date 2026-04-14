@@ -1,0 +1,97 @@
+//! Automatic time check crank instruction.
+//! 
+//! This instruction is called automatically by the MagicBlock scheduler
+//! to check if a player has exceeded their time limit.
+//! 
+//! Must be sent to the Ephemeral Rollup.
+
+use anchor_lang::prelude::*;
+use crate::state::{Game, GameStatus, GameResult};
+
+/// Automatic time check called by the scheduled crank.
+/// 
+/// This instruction:
+/// 1. Checks if the game is active
+/// 2. Calculates if the current player has exceeded their time limit
+/// 3. Automatically sets the game result if timeout occurred
+pub fn crank_time_check(ctx: Context<CrankTimeCheck>) -> Result<()> {
+    let game = &mut ctx.accounts.game;
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
+    
+    // Only check active games
+    if game.status != GameStatus::Active {
+        msg!("Game {} is not active (status: {:?})", game.game_id, game.status);
+        return Ok(());
+    }
+    
+    // Skip if no time control set
+    if game.time_per_move == 0 {
+        msg!("Game {} has no time control", game.game_id);
+        return Ok(());
+    }
+    
+    // Calculate time elapsed since last move
+    let time_elapsed = (now - game.updated_at) as u64;
+    let time_limit = game.time_per_move as u64;
+    
+    // Check if time has expired
+    if time_elapsed > time_limit {
+        // Determine which player timed out based on whose turn it is
+        // turn: 1, 3, 5... = white to move
+        // turn: 2, 4, 6... = black to move
+        let white_to_move = game.turn % 2 == 1;
+        
+        let timed_out_player = if white_to_move {
+            game.white
+        } else {
+            game.black
+        };
+        
+        let winner = if white_to_move {
+            game.black
+        } else {
+            game.white
+        };
+        
+        // Set game as finished with timeout result
+        game.status = GameStatus::Finished;
+        game.result = GameResult::Winner(winner);
+        game.updated_at = now;
+        
+        msg!(
+            "Time control violation: Game {} - Player {} timed out after {}s (limit: {}s). Winner: {}",
+            game.game_id,
+            timed_out_player,
+            time_elapsed,
+            time_limit,
+            winner
+        );
+    } else {
+        msg!(
+            "Time check passed: Game {} - {}s elapsed (limit: {}s)",
+            game.game_id,
+            time_elapsed,
+            time_limit
+        );
+    }
+    
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct CrankTimeCheck<'info> {
+    /// The game account to check
+    #[account(
+        mut,
+        seeds = [b"game", game.game_id.to_le_bytes().as_ref()],
+        bump = game.bump,
+    )]
+    pub game: Account<'info, Game>,
+    
+    /// CHECK: White player (for reference)
+    pub white: AccountInfo<'info>,
+    
+    /// CHECK: Black player (for reference)  
+    pub black: AccountInfo<'info>,
+}

@@ -1,3 +1,5 @@
+//! Instruction for setting or updating a username associated with a profile.
+
 use crate::constants::*;
 use crate::state::*;
 use anchor_lang::prelude::*;

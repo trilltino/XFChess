@@ -102,7 +102,6 @@ impl MoveHistory {
     /// `true` if game just started, `false` if at least one move has been made
     ///
     /// For usage examples, see `tests/resources/history_tests.rs`
-    #[allow(dead_code)] // Public API - useful for UI and game logic
     pub fn is_empty(&self) -> bool {
         self.moves.is_empty()
     }
@@ -129,19 +128,9 @@ impl MoveHistory {
     /// - `None` - Index out of bounds
     ///
     /// For usage examples, see `tests/resources/history_tests.rs`
-    #[allow(dead_code)] // Public API - useful for UI and game analysis
+    #[allow(dead_code)]
     pub fn get_move(&self, index: usize) -> Option<&MoveRecord> {
         self.moves.get(index)
-    }
-
-    /// Iterate over all moves in chronological order
-    ///
-    /// Useful for generating PGN notation or analyzing the full game.
-    ///
-    /// For usage examples, see `tests/resources/history_tests.rs`
-    #[allow(dead_code)] // Public API - useful for UI and game analysis
-    pub fn iter(&self) -> std::slice::Iter<'_, MoveRecord> {
-        self.moves.iter()
     }
 }
 

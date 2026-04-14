@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use bevy::prelude::*; // Events are in prelude
 use futures_lite::StreamExt;
 use iroh::{EndpointId, SecretKey};
@@ -9,11 +10,13 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tokio;
 
-use crate::engine::board_state::ChessEngine;
-use crate::game::events::{GameEndedEvent, GameStartedEvent, MoveMadeEvent};
+#[cfg(feature = "solana")]
+use crate::game::events::MoveMadeEvent;
+use crate::game::events::{GameEndedEvent, GameStartedEvent};
 #[cfg(feature = "solana")]
 use crate::game::resources::history::game_over::GameOverState;
-use crate::rendering::pieces::PieceType;
+#[cfg(feature = "solana")]
+use crate::rendering::PieceType;
 use braid_core::{Patch, Update, Version};
 use braid_iroh::{BraidGameConfig, BraidIrohNode, DiscoveryConfig};
 
@@ -23,24 +26,24 @@ pub mod solana;
 #[cfg(feature = "solana")]
 pub mod rollup;
 pub mod ui;
+pub mod vps_client;
 #[cfg(feature = "solana")]
 pub mod wager_state;
 
 pub use network::*;
 #[cfg(feature = "solana")]
-pub use solana::*;
-#[cfg(feature = "solana")]
 pub use rollup::*;
-pub use ui::*;
-#[cfg(feature = "solana")]
-pub use wager_state::*;
 
+/// Multiplayer Module
+///
+/// Provides P2P networking, VPS relay, and Solana integration for multiplayer chess.
 pub struct MultiplayerPlugin;
 
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
         // Register sub-plugins
-        app.add_plugins(network::p2p::P2PConnectionPlugin);
+        app.add_plugins(network::p2p::P2PConnectionPlugin)
+            .add_plugins(network::p2p_vps::P2PVpsPlugin);
 
         #[cfg(feature = "solana")]
         app.add_plugins((
@@ -231,6 +234,8 @@ fn initialize_braid_network(
             secret_key: Some(secret_key),
             discovery: DiscoveryConfig::Real, // Revert to Real discovery
             proxy_config: None,
+            app_router: Default::default(),
+            db: Default::default(),
         };
 
         let node = match BraidIrohNode::spawn(config).await {
@@ -795,7 +800,7 @@ fn handle_pending_finalize(
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
             use solana_client::rpc_client::RpcClient;
-            use crate::multiplayer::solana::integration::DEVNET_RPC_URL;
+            use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
             use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
             use crate::solana::instructions::finalize_game_ix;
 
@@ -822,7 +827,7 @@ fn handle_pending_finalize(
             let white_pubkey = solana_sdk::pubkey::Pubkey::from(<[u8; 32]>::try_from(&data[16..48]).unwrap());
             let black_pubkey = solana_sdk::pubkey::Pubkey::from(<[u8; 32]>::try_from(&data[48..80]).unwrap());
 
-            let ix = match finalize_game_ix(program_id, wallet_pubkey, game_id, result_code, white_pubkey, black_pubkey) {
+            let ix = match finalize_game_ix(program_id, game_id, result_code, white_pubkey, black_pubkey) {
                 Ok(ix) => ix,
                 Err(e) => {
                     error!("[FINALIZE] Failed to build finalize_game_ix: {}", e);

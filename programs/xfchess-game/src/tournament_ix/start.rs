@@ -1,3 +1,6 @@
+//! Instruction to lock registration and seed players for bracket generation.
+//! Match accounts are created separately via initialize_match instructions.
+
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -13,119 +16,70 @@ pub struct StartTournament<'info> {
         constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
     pub tournament: Account<'info, Tournament>,
-    #[account(
-        init,
-        payer = authority,
-        space = 8 + TournamentMatch::INIT_SPACE,
-        seeds = [TOURNAMENT_MATCH_SEED, &tournament_id.to_le_bytes(), &[0u8]],
-        bump
-    )]
-    pub semi_final_1: Account<'info, TournamentMatch>,
-    #[account(
-        init,
-        payer = authority,
-        space = 8 + TournamentMatch::INIT_SPACE,
-        seeds = [TOURNAMENT_MATCH_SEED, &tournament_id.to_le_bytes(), &[1u8]],
-        bump
-    )]
-    pub semi_final_2: Account<'info, TournamentMatch>,
-    #[account(
-        init,
-        payer = authority,
-        space = 8 + TournamentMatch::INIT_SPACE,
-        seeds = [TOURNAMENT_MATCH_SEED, &tournament_id.to_le_bytes(), &[2u8]],
-        bump
-    )]
-    pub final_match: Account<'info, TournamentMatch>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
+/// Sorts players by ELO descending and records seed order.
+/// Backend uses this to generate matches via separate initialize_match calls.
 pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> {
+    let tournament = &mut ctx.accounts.tournament;
+
     require!(
-        ctx.accounts.tournament.status == TournamentStatus::Registration,
+        tournament.status == TournamentStatus::Registration,
         GameErrorCode::TournamentNotInRegistration
     );
     require!(
-        ctx.accounts.tournament.registered_count == 4,
+        tournament.registered_count == tournament.max_players,
         GameErrorCode::TournamentFull
     );
 
-    // Seed players by ELO descending: highest vs lowest, second vs third
-    let players = ctx.accounts.tournament.players;
-    let elos = ctx.accounts.tournament.player_elos;
-    let mut indexed: [(usize, u32); 4] = [(0, elos[0]), (1, elos[1]), (2, elos[2]), (3, elos[3])];
+    let player_count = tournament.registered_count as usize;
+
+    // Sort players by ELO descending
+    let mut indexed: Vec<(usize, u32)> = tournament
+        .player_elos
+        .iter()
+        .enumerate()
+        .map(|(i, &elo)| (i, elo))
+        .collect();
     indexed.sort_by(|a, b| b.1.cmp(&a.1));
 
-    // SF1: seed[0] (white) vs seed[3] (black)
-    let sf1_white = players[indexed[0].0];
-    let sf1_black = players[indexed[3].0];
-    // SF2: seed[1] (white) vs seed[2] (black)
-    let sf2_white = players[indexed[1].0];
-    let sf2_black = players[indexed[2].0];
+    // Reorder players and elos by seed (highest ELO first)
+    let mut seeded_players: Vec<Pubkey> = Vec::with_capacity(player_count);
+    let mut seeded_elos: Vec<u32> = Vec::with_capacity(player_count);
+    for (original_idx, elo) in indexed {
+        seeded_players.push(tournament.players[original_idx]);
+        seeded_elos.push(elo);
+    }
 
-    let sf1_key = ctx.accounts.semi_final_1.key();
-    let sf2_key = ctx.accounts.semi_final_2.key();
-    let final_key = ctx.accounts.final_match.key();
-    let now = Clock::get()?.unix_timestamp;
-    let sf1_bump = ctx.bumps.semi_final_1;
-    let sf2_bump = ctx.bumps.semi_final_2;
-    let fin_bump = ctx.bumps.final_match;
-
-    ctx.accounts.semi_final_1.tournament_id = tournament_id;
-    ctx.accounts.semi_final_1.match_index = 0;
-    ctx.accounts.semi_final_1.round = 0;
-    ctx.accounts.semi_final_1.player_white = Some(sf1_white);
-    ctx.accounts.semi_final_1.player_black = Some(sf1_black);
-    ctx.accounts.semi_final_1.winner = None;
-    ctx.accounts.semi_final_1.game_pda = None;
-    ctx.accounts.semi_final_1.game_id = None;
-    ctx.accounts.semi_final_1.status = MatchStatus::Pending;
-    ctx.accounts.semi_final_1.started_at = None;
-    ctx.accounts.semi_final_1.completed_at = None;
-    ctx.accounts.semi_final_1.bump = sf1_bump;
-
-    ctx.accounts.semi_final_2.tournament_id = tournament_id;
-    ctx.accounts.semi_final_2.match_index = 1;
-    ctx.accounts.semi_final_2.round = 0;
-    ctx.accounts.semi_final_2.player_white = Some(sf2_white);
-    ctx.accounts.semi_final_2.player_black = Some(sf2_black);
-    ctx.accounts.semi_final_2.winner = None;
-    ctx.accounts.semi_final_2.game_pda = None;
-    ctx.accounts.semi_final_2.game_id = None;
-    ctx.accounts.semi_final_2.status = MatchStatus::Pending;
-    ctx.accounts.semi_final_2.started_at = None;
-    ctx.accounts.semi_final_2.completed_at = None;
-    ctx.accounts.semi_final_2.bump = sf2_bump;
-
-    ctx.accounts.final_match.tournament_id = tournament_id;
-    ctx.accounts.final_match.match_index = 2;
-    ctx.accounts.final_match.round = 1;
-    ctx.accounts.final_match.player_white = None;
-    ctx.accounts.final_match.player_black = None;
-    ctx.accounts.final_match.winner = None;
-    ctx.accounts.final_match.game_pda = None;
-    ctx.accounts.final_match.game_id = None;
-    ctx.accounts.final_match.status = MatchStatus::Pending;
-    ctx.accounts.final_match.started_at = None;
-    ctx.accounts.final_match.completed_at = None;
-    ctx.accounts.final_match.bump = fin_bump;
-
-    ctx.accounts.tournament.semi_final_1 = sf1_key;
-    ctx.accounts.tournament.semi_final_2 = sf2_key;
-    ctx.accounts.tournament.final_match = final_key;
-    ctx.accounts.tournament.status = TournamentStatus::Active;
-    ctx.accounts.tournament.current_round = 0;
-    ctx.accounts.tournament.started_at = Some(now);
+    tournament.players = seeded_players;
+    tournament.player_elos = seeded_elos;
+    tournament.status = TournamentStatus::Active;
+    tournament.current_round = 0;
+    tournament.started_at = Some(Clock::get()?.unix_timestamp);
 
     msg!(
-        "Tournament {} started. SF1: {} vs {} | SF2: {} vs {}",
+        "Tournament {} started with {} players. Players seeded by ELO.",
         tournament_id,
-        sf1_white,
-        sf1_black,
-        sf2_white,
-        sf2_black,
+        player_count
     );
+
+    // Log bracket matchups for first round
+    let round1_matches = player_count / 2;
+    for i in 0..round1_matches {
+        let white_idx = i;
+        let black_idx = player_count - 1 - i;
+        msg!(
+            "R1 Match {}: Seed {} ({}) vs Seed {} ({})",
+            i,
+            white_idx + 1,
+            tournament.players[white_idx],
+            black_idx + 1,
+            tournament.players[black_idx]
+        );
+    }
+
     Ok(())
 }

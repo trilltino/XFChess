@@ -72,7 +72,7 @@ pub fn update_game_phase(
     );
 
     // Sync ECS → Engine before checking game state
-    engine.sync_ecs_to_engine(&pieces_query, &current_turn);
+    engine.sync_ecs_to_engine(&pieces_query);
 
     // Use shakmaty to determine game state
     let _sm_color = match current_turn.color {

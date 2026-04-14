@@ -7,10 +7,10 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot;
 
-use crate::multiplayer::solana::integration::DEVNET_RPC_URL;
+use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
 use crate::solana::instructions::{
     authorize_session_key_ix, create_game_ix, join_game_ix, GameType, GAME_SEED,
-    PROGRAM_ID as SOLANA_PROGRAM_ID, WAGER_ESCROW_SEED,
+    PROGRAM_ID as SOLANA_PROGRAM_ID,
 };
 
 /// Which tab the lobby is showing.
@@ -232,7 +232,7 @@ async fn async_create_game(
     wager_lamports: u64,
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::tauri_signer::sign_via_tauri_only;
-    use crate::multiplayer::rollup::vps_client;
+    use crate::multiplayer::vps_client;
     use std::time::{Duration, Instant};
 
     let game_id: u64 = rand::random();
@@ -367,7 +367,7 @@ async fn async_join_game(
     game_id: u64,
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::tauri_signer::sign_via_tauri_only;
-    use crate::multiplayer::rollup::vps_client;
+    use crate::multiplayer::vps_client;
 
     // 1. Ask VPS for a session keypair for this game.
     let session_pubkey_str = vps_client::create_session(game_id, &wallet_pubkey.to_string())
@@ -484,7 +484,7 @@ fn sync_from_solana_state(
     mut lobby: ResMut<SolanaLobbyState>,
 ) {
     lobby.cached_balance = solana.balance;
-    lobby.cached_rpc_url = crate::multiplayer::solana::integration::DEVNET_RPC_URL.to_string();
+    lobby.cached_rpc_url = DEVNET_RPC_URL.to_string();
 
     if lobby.cached_keypair_bytes.is_none() {
         if let Some(ref pubkey) = solana.wallet_pubkey {

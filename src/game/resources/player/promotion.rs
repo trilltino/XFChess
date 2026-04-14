@@ -52,7 +52,6 @@ impl PendingPromotion {
 pub struct PromotionSelected {
     pub entity: Entity,
     pub position: (u8, u8),
-    pub color: PieceColor,
     pub promoted_to: PieceType,
 }
 

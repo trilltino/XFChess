@@ -2,11 +2,9 @@ pub mod assets;
 pub mod cli;
 pub mod core;
 pub mod engine;
-pub mod opera_game_metadata;
 pub mod game;
 pub mod input;
 pub mod multiplayer;
-pub mod persistent_camera;
 pub mod presentation;
 pub mod rendering;
 pub mod singleplayer;
@@ -16,7 +14,7 @@ pub mod states;
 pub mod ui;
 
 pub use cli::PlayerColor;
-pub use persistent_camera::PersistentEguiCamera;
+pub use core::persistent_camera::PersistentEguiCamera;
 
 use bevy::prelude::*;
 
@@ -34,6 +32,8 @@ pub struct GameConfig {
     pub wager_amount: Option<f64>,
     pub debug: bool,
     pub log_file: String,
+    pub ai_difficulty: Option<u8>,
+    pub ai_side: Option<PlayerColor>,
 }
 
 impl Default for GameConfig {
@@ -50,6 +50,8 @@ impl Default for GameConfig {
             wager_amount: None,
             debug: false,
             log_file: "rollup_debug.log".to_string(),
+            ai_difficulty: None,
+            ai_side: None,
         }
     }
 }

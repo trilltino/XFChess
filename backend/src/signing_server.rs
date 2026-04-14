@@ -1,6 +1,9 @@
-use backend::signing::{AppState, SigningConfig, build_router};
+use backend::signing::{AppState, SigningConfig};
+use backend::signing::storage::tournament::TournamentStore;
+use backend::signing::storage::SessionStore;
+use backend::infrastructure::{initialize_pools, run_migrations, build_app_router, spawn_background_tasks};
 use tracing_subscriber::EnvFilter;
-use sqlx::SqlitePool;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,22 +15,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SigningConfig::from_env();
     let port = config.port;
 
-    // SQLite pool for session persistence
-    let pool = SqlitePool::connect("sqlite://sessions.db?mode=rwc").await?;
-    tracing::info!("[signing-server] SQLite pool connected");
+    // ── Initialize database pools ────────────────────────────────────────
+    let pools = initialize_pools("sqlite://sessions.db?mode=rwc", "sqlite://vault.db?mode=rwc").await?;
+    info!("[signing-server] Database pools initialized");
 
-    let state = AppState::new(config, pool.clone());
-    state.store.init().await?;
-    tracing::info!("[signing-server] Sessions table initialized");
+    // ── Run database migrations ───────────────────────────────────────────
+    run_migrations(&pools).await?;
+    info!("[signing-server] Database migrations completed");
 
-    let app = build_router(state);
+    // ── Initialize application state ─────────────────────────────────────
+    let session_store = SessionStore::new(pools.session_pool.clone());
+    session_store.init().await?;
+    info!("[signing-server] Session store initialized");
 
-    let addr = format!("0.0.0.0:{port}");
-    tracing::info!("[signing-server] Listening on http://{addr}");
+    let state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone());
+    let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+    info!("[signing-server] Tournament store initialized");
 
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .expect("bind port");
-    axum::serve(listener, app).await.expect("server error");
+    // ── Build application router ───────────────────────────────────────────
+    let app = build_app_router(state.clone(), tournament_store);
+    info!("[signing-server] Application router built");
+
+    // ── Bind and serve via Iroh P2P ───────────────────────────────────────
+    info!("[signing-server] Spawning Braid-Iroh Node on port {port}");
+
+    let (_braid_state, _rx) = braid_iroh::spawn_node(
+        "xfchess-vps",
+        Some(port),
+        None,
+        braid_iroh::DiscoveryConfig::Real,
+        Some(pools.session_pool.clone()),
+        Some(app),
+    ).await.expect("failed to spawn braid-iroh node");
+
+    // ── Spawn background tasks ───────────────────────────────────────────────
+    spawn_background_tasks(state, config);
+    info!("[signing-server] Background tasks spawned");
+
+    // ── Wait for shutdown signal ───────────────────────────────────────────
+    tokio::signal::ctrl_c().await.expect("failed to wait for sigint");
+    info!("[signing-server] Shutting down");
+
     Ok(())
 }

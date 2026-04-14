@@ -1,11 +1,17 @@
-use bevy::prelude::*;
+use super::state::{BalanceRefreshTimer, SolanaIntegrationState, DEVNET_RPC_URL};
+use bevy::prelude::{debug, error, info, warn, Local, Res, ResMut, Time};
+use bevy::ecs::message::MessageReader;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
-
+use solana_sdk::signature::Keypair;
+use solana_sdk::signer::Signer;
 use crate::game::events::GameStartedEvent;
 use crate::multiplayer::{BraidNetworkState, NetworkMessage};
-
-use super::state::{BalanceRefreshTimer, SolanaIntegrationState, DEVNET_RPC_URL};
+use crate::multiplayer::solana::session_key_manager::SessionKeyManager;
+use std::sync::Arc;
+use directories::ProjectDirs;
+use std::path::PathBuf;
+use std::fs;
 
 pub fn initialize_solana_integration(
     mut solana_state: ResMut<SolanaIntegrationState>,
@@ -23,17 +29,73 @@ pub fn initialize_solana_integration(
         match receiver.try_recv() {
             Ok(Some(pubkey_str)) => {
                 *rx = None;
-                match pubkey_str.parse::<Pubkey>() {
-                    Ok(pubkey) => {
-                        info!("[WALLET] Phantom wallet connected. Pubkey: {}", pubkey);
+                
+                // 1. Handle sentinel/non-pubkey strings first to avoid Base58 parsing noise
+                let trimmed = pubkey_str.trim();
+                if trimmed.is_empty() || trimmed == "undefined" || trimmed == "null" {
+                    debug!("[WALLET] Transit state: {}", trimmed);
+                    *retry_secs = 2.0;
+                } else if trimmed == "hot-wallet-dummy" {
+                    info!("[WALLET] Defaulting to local hot wallet as requested by Tauri.");
+                    if let Some(keypair) = load_or_create_hot_wallet() {
+                        let pubkey = keypair.pubkey();
+                        info!("[WALLET] Hot wallet initialized. Pubkey: {}", pubkey);
                         solana_state.wallet_pubkey = Some(pubkey);
-                        solana_state.rpc_client =
-                            Some(RpcClient::new(DEVNET_RPC_URL.to_string()));
+                        solana_state.rpc_client = Some(RpcClient::new(DEVNET_RPC_URL.to_string()));
                         if let Some(ref mut w) = solana_wallet {
                             w.pubkey = Some(pubkey);
+                            w.keypair = Some(Arc::new(keypair));
                         }
                     }
-                    Err(e) => warn!("[WALLET] Invalid pubkey from Tauri: {}", e),
+                } else {
+                    // 2. Attempt to parse as real Solana Pubkey
+                    match trimmed.parse::<Pubkey>() {
+                        Ok(pubkey) => {
+                            info!("[WALLET] Phantom wallet connected. Pubkey: {}", pubkey);
+                            solana_state.wallet_pubkey = Some(pubkey);
+                            solana_state.rpc_client =
+                                Some(RpcClient::new(DEVNET_RPC_URL.to_string()));
+                            if let Some(ref mut w) = solana_wallet {
+                                w.pubkey = Some(pubkey);
+                            }
+
+                            // Try to load existing session key
+                            match SessionKeyManager::load_session(&pubkey) {
+                                Ok(session_manager) => {
+                                    info!("[SESSION] Loaded existing session key: {}", session_manager.pubkey());
+                                    solana_state.session_keypair = Some(solana_sdk::signature::Keypair::try_from(session_manager.signer().to_bytes().as_slice()).unwrap());
+                                }
+                                Err(e) => {
+                                    info!("[SESSION] No valid session key found ({}), will create new one", e);
+                                    // Create new session key
+                                    let session_manager = SessionKeyManager::new(&pubkey);
+                                    let session_pubkey = session_manager.pubkey();
+                                    solana_state.session_keypair = Some(solana_sdk::signature::Keypair::try_from(session_manager.signer().to_bytes().as_slice()).unwrap());
+                                    
+                                    // Save session data (24 hour default)
+                                    if let Err(e) = session_manager.save_session(&pubkey, 24) {
+                                        warn!("[SESSION] Failed to save session key: {}", e);
+                                    }
+                                    
+                                    info!("[SESSION] Created new session key: {}", session_pubkey);
+                                    
+                                    // Authorize session key on-chain (async)
+                                    let _rpc_client = RpcClient::new(DEVNET_RPC_URL.to_string());
+                                    let _session_pubkey_clone = session_pubkey;
+                                    let _pubkey_clone = pubkey;
+                                    tokio_runtime.0.spawn(async move {
+                                        // Note: We can't sign without the wallet keypair here
+                                        // In production, this would be done via Tauri wallet popup
+                                        info!("[SESSION] Session key authorization requires wallet signature (deferred to first transaction)");
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("[WALLET] Invalid pubkey from Tauri: {} (Raw: '{}')", e, trimmed);
+                            *retry_secs = 2.0;
+                        }
+                    }
                 }
             }
             Ok(None) => {
@@ -42,7 +104,7 @@ pub fn initialize_solana_integration(
             }
             Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 *rx = None;
-                *retry_secs = 1.0;
+                *retry_secs = 3.0; // Wait longer on host failure
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {} 
         }
@@ -54,7 +116,7 @@ pub fn initialize_solana_integration(
         return;
     }
 
-    let (tx, receiver) = crossbeam_channel::bounded(1);
+    let (tx, receiver) = crossbeam_channel::bounded::<Option<String>>(1);
     *rx = Some(receiver);
     tokio_runtime.0.spawn(async move {
         let _ = tx.send(query_wallet_pubkey_from_tauri().await);
@@ -107,7 +169,7 @@ pub fn update_wallet_balance(
     else {
         return;
     };
-    match rpc_client.get_balance(pubkey) {
+    match rpc_client.get_balance(*pubkey) {
         Ok(lamports) => solana_state.balance = lamports as f64 / 1_000_000_000.0,
         Err(e) => warn!("[SOLANA] Balance fetch failed: {}", e),
     }
@@ -155,7 +217,7 @@ pub fn monitor_network_handshakes(
 }
 
 pub fn handle_pending_solana_tasks(mut solana_state: ResMut<SolanaIntegrationState>) {
-    if let Some(mut task) = solana_state.pending_task.take() {
+    if let Some(task) = solana_state.pending_task.take() {
         if task.is_finished() {
             let result = futures_lite::future::block_on(async {
                 match task.await {
@@ -205,7 +267,7 @@ pub fn authorize_session_key_on_game_start(
 
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
-                use crate::multiplayer::rollup::vps_client;
+                use crate::multiplayer::vps_client;
 
                 let mut active = false;
                 for _ in 0..60 {
@@ -243,4 +305,58 @@ pub fn authorize_session_key_on_game_start(
             })
             .detach();
     }
+}
+
+/// Resolves the storage path for the local hot wallet
+fn get_hot_wallet_path() -> Option<PathBuf> {
+    ProjectDirs::from("com", "trilltino", "XFChess").map(|proj_dirs| {
+        let config_dir = proj_dirs.config_dir();
+        config_dir.join("hot_wallet.json")
+    })
+}
+
+/// Loads an existing hot wallet or generates a new one
+fn load_or_create_hot_wallet() -> Option<Keypair> {
+    let path = get_hot_wallet_path()?;
+
+    if path.exists() {
+        match fs::read_to_string(&path) {
+            Ok(contents) => {
+                // Try to parse as JSON byte array (standard solana-keygen format)
+                match serde_json::from_str::<Vec<u8>>(&contents) {
+                    Ok(bytes) => match Keypair::try_from(bytes.as_slice()) {
+                        Ok(kp) => return Some(kp),
+                        Err(e) => error!("[WALLET] Failed to parse keypair from bytes: {}", e),
+                    },
+                    Err(_) => {
+                        // Try to parse as raw Base58 string
+                        // from_base58_string returns Keypair directly, not Result
+                        let kp = Keypair::from_base58_string(contents.trim());
+                        return Some(kp);
+                    }
+                }
+            }
+            Err(e) => error!("[WALLET] Failed to read hot wallet file: {}", e),
+        }
+    }
+
+    // Generate new keypair if loading failed or file didn't exist
+    info!("[WALLET] Generating new local hot wallet...");
+    let new_kp = Keypair::new();
+    
+    // Save to disk
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let bytes = new_kp.to_bytes().to_vec();
+    if let Ok(json) = serde_json::to_string(&bytes) {
+        if let Err(e) = fs::write(&path, json) {
+            error!("[WALLET] Failed to save hot wallet: {}", e);
+        } else {
+            info!("[WALLET] Saved new hot wallet to {:?}", path);
+        }
+    }
+
+    Some(new_kp)
 }

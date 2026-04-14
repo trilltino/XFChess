@@ -156,6 +156,7 @@ fn settings_ui(
 
                     ui.checkbox(&mut settings.show_hints, "Show move hints");
                     ui.checkbox(&mut settings.highlight_last_move, "Highlight last move");
+                    ui.checkbox(&mut settings.use_vps_relay, "Use VPS relay for P2P (reliable NAT traversal)");
 
                     Layout::item_space(ui);
 

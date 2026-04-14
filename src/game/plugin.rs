@@ -27,6 +27,7 @@ use super::sync::GameSyncPlugin;
 use super::system_sets::GameSystems;
 use super::systems::picking_debug::PickingDebugPlugin;
 use super::systems::*;
+use super::view_mode_systems::*;
 use crate::core::{debug_current_gamestate, GameState};
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{
@@ -37,12 +38,9 @@ use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use crate::ui::game_ui::game_status_ui;
 use crate::ui::promotion_ui::promotion_ui_system;
 use bevy::input::common_conditions::{input_toggle_active, input_just_pressed};
+use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
-
-fn test_event_system(mut reader: MessageReader<crate::game::events::MoveMadeEvent>) {
-    for _ in reader.read() {}
-}
 
 /// Game plugin for XFChess
 ///
@@ -67,6 +65,7 @@ impl Plugin for GamePlugin {
             .init_resource::<Players>()
             .init_resource::<super::systems::camera::CameraRotationState>()
             .init_resource::<super::view_mode::ViewMode>()
+            .init_resource::<super::view_mode::PlayerViewPreferences>()
             .init_resource::<PendingPromotion>()
             .init_resource::<GameSounds>();
 
@@ -192,7 +191,7 @@ impl Plugin for GamePlugin {
                         *view_mode != super::view_mode::ViewMode::TempleOS
                     },
                 ),
-                // Capture fade removed — captured pieces now despawn immediately
+                animate_capture_fade.in_set(GameSystems::Visual),
             ),
         );
 
@@ -202,16 +201,37 @@ impl Plugin for GamePlugin {
             (game_status_ui, promotion_ui_system).run_if(in_state(GameState::InGame)),
         );
 
+        // Conditional 2D rendering system
+        app.add_systems(
+            EguiPrimaryContextPass,
+            crate::ui::game_2d::render_2d_board
+                .run_if(in_state(GameState::InGame))
+                .run_if(view_mode_is_2d),
+        );
+
+        // Conditional 3D visibility system
+        app.add_systems(
+            Update,
+            toggle_3d_visibility
+                .run_if(in_state(GameState::InGame)),
+        );
+
         // Debug system - toggle with F12 key
         app.add_systems(
             Update,
-            debug_current_gamestate.run_if(input_toggle_active(true, KeyCode::F12)),
+            debug_current_gamestate.run_if(input_toggle_active(false, KeyCode::F12)),
         );
 
         // Fullscreen toggle - F11 key
         app.add_systems(
             Update,
             toggle_fullscreen.run_if(input_just_pressed(KeyCode::F11)),
+        );
+
+        // ESC key to exit to main menu (forfeit/leave game)
+        app.add_systems(
+            Update,
+            handle_escape_key.run_if(in_state(GameState::InGame)),
         );
 
         // Global visual setup

@@ -26,8 +26,6 @@ pub struct AIMove {
     pub score: i32,
     pub depth: u8,
     pub thinking_time: f32,
-    /// FEN after the move (used to update ChessEngine.fen)
-    pub fen_after: String,
 }
 
 /// Resource to track AI statistics
@@ -92,7 +90,6 @@ pub struct AiPollParams<'w, 's> {
     pub captured_pieces: ResMut<'w, CapturedPieces>,
     pub ai_stats: ResMut<'w, AIStatistics>,
     pub pending_turn: ResMut<'w, crate::game::resources::PendingTurnAdvance>,
-    pub ai_config: Res<'w, ChessAIResource>,
     pub engine: ResMut<'w, ChessEngine>,
     pub sounds: Option<Res<'w, crate::game::resources::GameSounds>>,
 }
@@ -119,7 +116,7 @@ fn spawn_ai_task_system(
     // Sync ECS → engine FEN so Stockfish sees the latest position
     params
         .engine
-        .sync_ecs_to_engine(&params.pieces_query, &params.current_turn);
+        .sync_ecs_to_engine(&params.pieces_query);
 
     let fen = params.engine.current_fen().to_string();
     let depth = params.ai_config.difficulty.stockfish_depth();
@@ -166,19 +163,44 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
     AsyncComputeTaskPool::get().spawn(async move {
         let start_time = Instant::now();
         
-        // Try to find stockfish executable in common locations
-        let stockfish_paths = [
-            "assets/bin/stockfish.exe",
-            "assets/bin/stockfish",
-            "stockfish.exe",
-            "stockfish",
-            "references/Stockfish/stockfish.exe",
-            "references/Stockfish/stockfish",
-        ];
+        // Try to find stockfish executable
+        let exe_path = std::env::current_exe().ok();
+        let exe_dir = exe_path.as_ref().and_then(|p| p.parent());
         
-        let stockfish_path = stockfish_paths.iter()
-            .find(|p| std::path::Path::new(p).exists())
-            .ok_or_else(|| "Stockfish executable not found. Please install Stockfish or place stockfish.exe in the project root.".to_string())?;
+        let mut stockfish_path = None;
+
+        // 1. Check next to the executable (Standard for local dev and some bundles)
+        if let Some(dir) = exe_dir {
+            let candidate = dir.join("stockfish.exe");
+            if candidate.exists() {
+                stockfish_path = Some(candidate.to_string_lossy().into_owned());
+            }
+        }
+
+        // 2. Check in standard Tauri resource directory (Windows)
+        if stockfish_path.is_none() {
+            if let Some(dir) = exe_dir {
+                let candidate = dir.join("resources").join("stockfish.exe");
+                if candidate.exists() {
+                    stockfish_path = Some(candidate.to_string_lossy().into_owned());
+                }
+            }
+        }
+
+        // 3. Fallback to common dev locations
+        if stockfish_path.is_none() {
+             let stockfish_paths = [
+                "stockfish.exe",
+                "assets/bin/stockfish.exe",
+                "references/Stockfish/stockfish.exe",
+            ];
+            stockfish_path = stockfish_paths.iter()
+                .find(|p| std::path::Path::new(p).exists())
+                .map(|p| p.to_string());
+        }
+        
+        let stockfish_path = stockfish_path
+            .ok_or_else(|| "Stockfish executable not found. Ensure stockfish.exe is in the application folder.".to_string())?;
         
         info!("[AI] Starting Stockfish process at: {}", stockfish_path);
         
@@ -274,7 +296,7 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
         if best_move.len() >= 4 {
             let from_str = &best_move[0..2];
             let to_str = &best_move[2..4];
-            let promotion_char = best_move.chars().nth(4);
+            let _promotion_char = best_move.chars().nth(4);
             
             let from_coords = ChessEngine::uci_to_coords(from_str)
                 .ok_or_else(|| format!("Invalid from square: {}", from_str))?;
@@ -288,7 +310,6 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
                 score,
                 depth: search_depth,
                 thinking_time,
-                fen_after: String::new(), // Will be computed after move
             });
         }
         
@@ -306,7 +327,7 @@ fn should_skip_ai_spawn(
     players: &crate::game::resources::player::Players,
 ) -> bool {
     if pending_task.is_some() {
-        debug!("[AI] Skipping spawn: pending task already exists");
+        trace!("[AI] Skipping spawn: pending task already exists");
         return true;
     }
     
@@ -314,29 +335,29 @@ fn should_skip_ai_spawn(
             .as_ref()
             .map(|r| r.is_pending())
             .unwrap_or(false) {
-        debug!("[AI] Skipping spawn: turn advance pending");
+        trace!("[AI] Skipping spawn: turn advance pending");
         return true;
     }
 
     if let crate::game::ai::resource::GameMode::Multiplayer = ai_config.mode {
-        debug!("[AI] Skipping spawn: game mode is Multiplayer");
+        trace!("[AI] Skipping spawn: game mode is Multiplayer");
         return true;
     }
 
-    if game_phase.0 != GamePhase::Playing {
-        debug!("[AI] Skipping spawn: game phase is {:?}, not Playing", game_phase.0);
+    if !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check) {
+        trace!("[AI] Skipping spawn: game phase is {:?}, not Playing/Check", game_phase.0);
         return true;
     }
 
     let current_player = players.current(current_turn.color);
     if current_player.is_human {
-        info!("[AI] Skipping spawn: current player ({:?}) is human", current_turn.color);
+        trace!("[AI] Skipping spawn: current player ({:?}) is human", current_turn.color);
         return true;
     }
 
     let ai_color = ai_config.mode.ai_color();
     if current_turn.color != ai_color {
-        info!("[AI] Skipping spawn: turn color ({:?}) != AI color ({:?})", current_turn.color, ai_color);
+        trace!("[AI] Skipping spawn: turn color ({:?}) != AI color ({:?})", current_turn.color, ai_color);
         return true;
     }
 
@@ -432,6 +453,26 @@ fn poll_ai_task_system(
             };
 
             let mut p0 = params.pieces_queries.p0();
+
+            // Validate move is legal before executing
+            let legal_moves = params.engine.legal_moves();
+            let from_uci = ChessEngine::coords_to_uci(from_coords.0, from_coords.1);
+            let to_uci = ChessEngine::coords_to_uci(to_coords.0, to_coords.1);
+            let move_uci = format!("{}{}", from_uci, to_uci);
+            
+            let is_legal = legal_moves.iter().any(|mv| {
+                let mv_uci = format!("{}{}", mv.from().map(|s| s.to_string()).unwrap_or_default(), 
+                                           mv.to().to_string());
+                mv_uci == move_uci
+            });
+            
+            if !is_legal {
+                warn!(
+                    "[AI] Stockfish suggested illegal move {} - not in legal moves list (engine check: {}, legal moves count: {})",
+                    move_uci, params.engine.is_check(), legal_moves.len()
+                );
+                return;
+            }
 
             if let Some((entity, piece, is_first_move, capture_target)) =
                 find_move_entities(&p0, from_coords, to_coords)

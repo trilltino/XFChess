@@ -27,6 +27,69 @@ pub struct BraidAppState {
     pub subscriptions: Arc<SubscriptionManager>,
     /// In-memory resource store: URL → List of Updates (History).
     pub resources: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<Update>>>>,
+    /// Optional SQLite pool for durable resource persistence.
+    /// When `Some`, every PUT is also written to the `braid_resources` table.
+    pub db: Option<sqlx::SqlitePool>,
+}
+
+impl BraidAppState {
+    /// Ensure the `braid_resources` table exists and warm-load existing
+    /// resources into the in-memory map. Call this once on startup.
+    pub async fn init_db(&self) {
+        let pool = match &self.db {
+            Some(p) => p,
+            None => return,
+        };
+
+        sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS braid_resources (
+                url        TEXT    NOT NULL,
+                version    TEXT    NOT NULL,
+                body       TEXT,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (url, version)
+            )"#,
+        )
+        .execute(pool)
+        .await
+        .ok();
+
+        // Warm-load into memory (latest version per URL)
+        let rows: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT url, version, body FROM braid_resources ORDER BY updated_at ASC")
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
+
+        let mut resources = self.resources.write().await;
+        for (url, version_str, body) in rows {
+            let update = Update::snapshot(
+                Version::String(version_str),
+                Bytes::from(body.unwrap_or_default().into_bytes()),
+            );
+            resources.entry(url).or_insert_with(Vec::new).push(update);
+        }
+        tracing::info!("[braid] warm-loaded {} resource URL(s) from SQLite", resources.len());
+    }
+
+    /// Persist a single update to SQLite (soft-fail — never breaks the P2P layer).
+    async fn persist_update(&self, url: &str, version_str: &str, body: &str) {
+        let pool = match &self.db {
+            Some(p) => p,
+            None => return,
+        };
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "INSERT OR REPLACE INTO braid_resources (url, version, body, updated_at) VALUES (?, ?, ?, ?)"
+        )
+        .bind(url)
+        .bind(version_str)
+        .bind(body)
+        .bind(now)
+        .execute(pool)
+        .await
+        .ok();
+    }
 }
 
 /// Build the Axum router with Braid-HTTP routes, then wrap it in
@@ -35,13 +98,18 @@ pub struct BraidAppState {
 /// Routes:
 /// - `GET /:resource`  → returns the latest snapshot
 /// - `PUT /:resource`  → accepts a new update, broadcasts via gossip
-pub fn build_protocol_handler(state: BraidAppState) -> IrohAxum {
-    let router = Router::new()
+pub fn build_protocol_handler(state: BraidAppState, external_router: Option<Router>) -> IrohAxum {
+    let local_router = Router::new()
         .route("/{resource}", get(handle_get))
         .route("/{resource}", put(handle_put))
         .with_state(state);
 
-    IrohAxum::new(router)
+    let final_router = match external_router {
+        Some(ext) => local_router.merge(ext),
+        None => local_router,
+    };
+
+    IrohAxum::new(final_router)
 }
 
 use http::HeaderMap;
@@ -185,15 +253,22 @@ async fn handle_put(
         .and_then(|v| v.to_str().ok())
         .map(|v| Version::String(v.to_string()))
         .unwrap_or_else(|| Version::String(uuid::Uuid::new_v4().to_string()));
+    let version_str = match &version {
+        Version::String(s) => s.clone(),
+        _ => uuid::Uuid::new_v4().to_string(),
+    };
     let update = Update::snapshot(version, Bytes::from(body.clone().into_bytes()));
 
-    // Store locally
     // Store locally (append to history)
     let mut resources = state.resources.write().await;
     resources
         .entry(url.clone())
         .or_insert_with(Vec::new)
         .push(update.clone());
+    drop(resources);
+
+    // Persist to SQLite for durability (soft-fail — never kills P2P)
+    state.persist_update(&url, &version_str, &body).await;
 
     // Broadcast to gossip subscribers
     if let Err(e) = state.subscriptions.broadcast(&url, &update).await {

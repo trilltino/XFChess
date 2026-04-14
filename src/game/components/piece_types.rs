@@ -98,23 +98,4 @@ impl Piece {
             y: rank,
         }
     }
-
-    /// Get the file (0-7, a-h).
-    #[inline]
-    pub fn file(&self) -> u8 {
-        self.x
-    }
-
-    /// Get the rank (0-7, 1-8).
-    #[inline]
-    pub fn rank(&self) -> u8 {
-        self.y
-    }
-
-    /// Convert to world position (XZ plane).
-    ///
-    /// Returns `(world_x, world_z)` where `world_x = file`, `world_z = rank`.
-    pub fn to_world(&self) -> (f32, f32) {
-        (self.x as f32, self.y as f32)
-    }
 }

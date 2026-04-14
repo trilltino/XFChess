@@ -102,7 +102,7 @@ impl InvariantChecker {
         Ok(violations)
     }
 
-    fn fetch_game_state(&self, game_id: u64, _rpc: &RpcClient) -> Option<GameState> {
+    fn fetch_game_state(&self, _game_id: u64, _rpc: &RpcClient) -> Option<GameState> {
         // TODO: Actually fetch from chain using game PDA
         // For now return None to skip checks
         None

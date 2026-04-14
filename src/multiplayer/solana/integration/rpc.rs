@@ -1,12 +1,14 @@
+#![allow(dead_code)]
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    system_program,
     transaction::Transaction,
 };
+#[allow(deprecated)]
+use solana_sdk::system_program;
 
 use crate::solana::instructions::{GAME_SEED, MOVE_LOG_SEED, WAGER_ESCROW_SEED};
 
@@ -18,7 +20,7 @@ pub async fn initiate_game_on_chain(
 ) -> Result<u64, String> {
     use rand::Rng;
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let game_id: u64 = rng.random();
 
     let game_pda =

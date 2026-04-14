@@ -5,40 +5,10 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::info;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MoveRequest {
-    pub fen: String,
-    pub player_side: String, // "white" or "black"
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MoveResponse {
-    pub best_move: String,
-    pub evaluation: i32,
-    pub depth: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HealthResponse {
-    pub status: String,
-    pub version: String,
-}
-
-// Simple AI service - placeholder for Stockfish integration
-fn get_best_move(fen: &str, _player_side: &str) -> MoveResponse {
-    // This would integrate with Stockfish in a real implementation
-    // For now, return a placeholder response
-    MoveResponse {
-        best_move: "e2e4".to_string(), // Placeholder move
-        evaluation: 0,
-        depth: 15,
-    }
-}
+use xfchess_ai_service::ai::{MoveRequest, MoveResponse, HealthResponse, get_best_move};
 
 async fn health() -> ResponseJson<HealthResponse> {
     ResponseJson(HealthResponse {
@@ -68,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/move", post(get_move))
-        .route("/", get(|| async { ResponseJson(HealthResponse { status: "XFChess AI Service", version: "0.1.0".to_string() }) }));
+        .route("/", get(|| async { ResponseJson(HealthResponse { status: "XFChess AI Service".to_string(), version: "0.1.0".to_string() }) }));
 
     // Bind to port
     let listener = TcpListener::bind("0.0.0.0:8080").await?;

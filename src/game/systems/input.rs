@@ -73,16 +73,20 @@ pub struct InputSystemParams<'w, 's> {
 }
 
 /// Returns true if the current turn belongs to a human player.
-fn is_human_turn(params: &InputSystemParams) -> bool {
-    params.players.current(params.current_turn.color).is_human
+pub fn is_human_turn(params: &InputSystemParams) -> bool {
+    let current = params.players.current(params.current_turn.color);
+    let result = current.is_human;
+    info!("[INPUT] is_human_turn: current_color={:?}, is_human={}, player={:?}", params.current_turn.color, result, current);
+    result
 }
 
 /// Returns true if the human player is allowed to move pieces of the given color.
 /// In PvP (vs AI) mode, the human chose a specific color and can only move that color's pieces.
 /// In network games, only the local player's color can be moved.
-fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bool {
+pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bool {
     // First check if it's a human turn at all
     if !is_human_turn(params) {
+        warn!("[INPUT] can_move_color: not human turn");
         return false;
     }
 
@@ -134,7 +138,7 @@ fn is_primary(button: PointerButton) -> bool {
 }
 
 /// Helper to clear ECS selection markers
-fn reset_selected_markers(
+pub fn reset_selected_markers(
     commands: &mut Commands,
     selected_pieces: &Query<Entity, With<SelectedPiece>>,
 ) {
@@ -144,7 +148,7 @@ fn reset_selected_markers(
 }
 
 /// Helper to clear all selection state
-fn clear_selection_state(
+pub fn clear_selection_state(
     commands: &mut Commands,
     selection: &mut Selection,
     selected_pieces: &Query<Entity, With<SelectedPiece>>,
@@ -160,7 +164,7 @@ fn clear_selection_state(
 ///
 /// Validates ownership (current turn) and updates selection state.
 /// Also calculates legal moves for the selected piece.
-fn try_select_piece(
+pub fn try_select_piece(
     params: &mut InputSystemParams,
     entity: Entity,
     piece: Piece,
@@ -193,7 +197,7 @@ fn try_select_piece(
     );
     params
         .engine
-        .sync_ecs_to_engine_with_transform(&params.pieces.p1(), &params.current_turn);
+        .sync_ecs_to_engine_with_transform(&params.pieces.p1());
 
     let legal_moves = params
         .engine
@@ -223,7 +227,7 @@ fn try_select_piece(
 ///
 /// Validates move legality, handles multiplayer communication,
 /// and executes the move via `execute_move`.
-fn try_move_sequence(
+pub fn try_move_sequence(
     params: &mut InputSystemParams,
     target_pos: (u8, u8),
     capture_info: Option<CapturedTarget>,
@@ -465,6 +469,8 @@ pub fn on_piece_drag_end(
         let file = world_pos.x.round() as i32;
         let rank = world_pos.z.round() as i32;
 
+        debug!("[3D_DRAG] World pos: {:?}, Calculated: file={}, rank={}", world_pos, file, rank);
+
         // Find square at this board position
         square_query
             .iter()
@@ -557,16 +563,6 @@ pub fn on_square_click(
     try_move_sequence(&mut params, target_pos, capture_info, "square_click_move");
 }
 
-/// Observer system: Handle hover on a piece
-pub fn on_piece_hover(_: On<Pointer<DragStart>>) {
-    // Could add hover visual feedback here
-}
-
-/// Observer system: Handle unhover on a piece
-pub fn on_piece_unhover(_: On<Pointer<DragStart>>) {
-    // Could remove hover visual feedback here
-}
-
 /// System: Toggle fullscreen mode when F11 is pressed
 pub fn toggle_fullscreen(
     mut window_query: Query<&mut Window>,
@@ -581,5 +577,16 @@ pub fn toggle_fullscreen(
             }
             _ => bevy::window::WindowMode::Windowed,
         };
+    }
+}
+
+/// System: Handle ESC key to exit to main menu (forfeit/leave game)
+pub fn handle_escape_key(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        info!("[INPUT] ESC pressed - returning to main menu");
+        next_state.set(crate::core::GameState::MainMenu);
     }
 }

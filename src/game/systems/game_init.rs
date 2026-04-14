@@ -32,7 +32,6 @@ use crate::game::components::GamePhase;
 use crate::game::components::HasMoved;
 use crate::game::resources::*;
 use crate::rendering::pieces::{Piece, PieceColor};
-use bevy::audio::AudioPlayer;
 use bevy::prelude::*;
 
 /// System that resets all game resources when entering InGame state
@@ -123,123 +122,6 @@ pub fn reset_game_resources(
     info!("[GAME_INIT] Chess engine reset to starting position");
 
     info!("[GAME_INIT] All game resources reset successfully - ready for new game");
-}
-
-/// System that plays TempleOS sound when entering InGame state in TempleOS mode
-///
-/// Checks if ViewMode is TempleOS and plays the temple_os.mp3 sound.
-/// This system should run after initialize_game_sounds to ensure the sound is loaded.
-/// Verifies the audio asset is loaded before attempting to play it.
-///
-/// NOTE: This only runs once on state entry. For continuous checking, use `check_and_play_templeos_sound`.
-pub fn play_templeos_sound(
-    view_mode: Res<crate::game::view_mode::ViewMode>,
-    game_sounds: Option<Res<GameSounds>>,
-    asset_server: Res<AssetServer>,
-    mut commands: Commands,
-) {
-    if *view_mode != crate::game::view_mode::ViewMode::TempleOS {
-        return;
-    }
-
-    info!("[GAME_INIT] Attempting to play TempleOS sound on state entry");
-
-    if let Some(sounds) = game_sounds {
-        // Check if the audio asset is loaded before playing
-        let load_state = asset_server.load_state(&sounds.temple_os);
-        info!("[GAME_INIT] TempleOS audio load state: {:?}", load_state);
-        match load_state {
-            bevy::asset::LoadState::Loaded => {
-                info!("[GAME_INIT] TempleOS audio loaded - spawning AudioPlayer");
-                commands.spawn(AudioPlayer::new(sounds.temple_os.clone()));
-                info!("[GAME_INIT] TempleOS audio playback started");
-            }
-            bevy::asset::LoadState::Failed(err) => {
-                error!(
-                    "[GAME_INIT] TempleOS audio file failed to load: {:?} - skipping playback",
-                    err
-                );
-            }
-            bevy::asset::LoadState::NotLoaded => {
-                warn!("[GAME_INIT] TempleOS audio not yet loaded - will be handled by continuous check system");
-            }
-            bevy::asset::LoadState::Loading => {
-                info!("[GAME_INIT] TempleOS audio still loading - will be handled by continuous check system");
-            }
-        }
-    } else {
-        warn!("[GAME_INIT] GameSounds resource not available - cannot play TempleOS sound");
-    }
-}
-
-/// Resource to track if TempleOS sound has been played
-///
-/// Prevents multiple plays of the same sound when the asset loads.
-#[derive(Resource, Default)]
-pub struct TempleOSSoundPlayed {
-    pub played: bool,
-}
-
-/// Continuous system that checks and plays TempleOS sound when asset is loaded
-///
-/// This system runs every frame in Update schedule and checks if the TempleOS
-/// audio asset has finished loading. Once loaded, it plays the sound once.
-///
-/// This handles the case where the asset is still loading when entering InGame state.
-pub fn check_and_play_templeos_sound(
-    view_mode: Res<crate::game::view_mode::ViewMode>,
-    game_sounds: Option<Res<GameSounds>>,
-    asset_server: Res<AssetServer>,
-    mut commands: Commands,
-    sound_played: Option<ResMut<TempleOSSoundPlayed>>,
-) {
-    // Only check in TempleOS mode
-    if *view_mode != crate::game::view_mode::ViewMode::TempleOS {
-        return;
-    }
-
-    // Initialize resource if it doesn't exist
-    if sound_played.is_none() {
-        commands.init_resource::<TempleOSSoundPlayed>();
-        return;
-    }
-
-    // Check if we've already played the sound
-    let already_played = sound_played.as_ref().map(|p| p.played).unwrap_or(false);
-    if already_played {
-        return; // Already played, don't play again
-    }
-
-    // Check if sound is loaded and play it
-    if let Some(sounds) = game_sounds {
-        let load_state = asset_server.load_state(&sounds.temple_os);
-        match load_state {
-            bevy::asset::LoadState::Loaded => {
-                info!("[AUDIO] TempleOS audio loaded - playing now");
-                commands.spawn(AudioPlayer::new(sounds.temple_os.clone()));
-                // Mark as played
-                if let Some(mut played) = sound_played {
-                    played.played = true;
-                }
-                info!("[AUDIO] TempleOS audio playback started");
-            }
-            bevy::asset::LoadState::Failed(err) => {
-                error!("[AUDIO] TempleOS audio failed to load: {:?}", err);
-                // Mark as played to prevent repeated error logs
-                if let Some(mut played) = sound_played {
-                    played.played = true;
-                }
-            }
-            bevy::asset::LoadState::NotLoaded => {
-                debug!("[AUDIO] TempleOS audio not yet loaded");
-            }
-            bevy::asset::LoadState::Loading => {
-                debug!("[AUDIO] TempleOS audio still loading...");
-            }
-        }
-    } else {
-        debug!("[AUDIO] GameSounds resource not yet available");
-    }
 }
 
 /// System that initializes players based on game mode
@@ -428,7 +310,6 @@ pub fn start_timer_when_ready(
 pub fn initialize_engine_from_ecs(
     mut engine: ResMut<ChessEngine>,
     pieces_query: Query<(Entity, &Piece, &HasMoved)>,
-    current_turn: Res<CurrentTurn>,
     view_mode: Res<crate::game::view_mode::ViewMode>,
 ) {
     info!("[GAME_INIT] Initializing chess engine from ECS board state");
@@ -441,7 +322,7 @@ pub fn initialize_engine_from_ecs(
     }
 
     // Sync ECS board state to engine
-    engine.sync_ecs_to_engine(&pieces_query, &current_turn);
+    engine.sync_ecs_to_engine(&pieces_query);
 
     let piece_count = pieces_query.iter().count();
     info!("[GAME_INIT] Engine initialized with {} pieces", piece_count);

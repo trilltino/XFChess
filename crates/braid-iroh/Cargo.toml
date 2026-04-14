@@ -48,5 +48,9 @@ parking_lot = "0.12"
 clap = { version = "4.5", features = ["derive"] }
 rand.workspace = true
 
+# ── Database (for durable resource persistence) ─────────────────────────────────
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "sqlite"] }
+chrono = { version = "0.4", features = ["serde"] }
+
 [dev-dependencies]
 rand = "0.10"

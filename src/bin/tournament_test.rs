@@ -1,3 +1,7 @@
+#![cfg(feature = "solana")]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
 //! tournament_test — Full 4-player tournament simulation
 //! 
 //! Simulates a complete single-elimination tournament on Solana devnet,
@@ -39,7 +43,7 @@ struct Args {
 #[derive(Debug)]
 struct Player {
     name: String,
-    country: String,
+    _country: String,
     elo: u32,
     keypair: Keypair,
     pubkey: Pubkey,
@@ -157,28 +161,28 @@ async fn create_players() -> Result<Vec<Player>, Box<dyn std::error::Error>> {
     let players = vec![
         Player {
             name: "Magnus".to_string(),
-            country: "Norway".to_string(),
+            _country: "Norway".to_string(),
             elo: 2800,
             keypair: Keypair::new(),
             pubkey: Pubkey::new_unique(),
         },
         Player {
             name: "Fabiano".to_string(),
-            country: "Italy".to_string(),
+            _country: "Italy".to_string(),
             elo: 2750,
             keypair: Keypair::new(),
             pubkey: Pubkey::new_unique(),
         },
         Player {
             name: "Anish".to_string(),
-            country: "Netherlands".to_string(),
+            _country: "Netherlands".to_string(),
             elo: 2700,
             keypair: Keypair::new(),
             pubkey: Pubkey::new_unique(),
         },
         Player {
             name: "Vidit".to_string(),
-            country: "Austria".to_string(),
+            _country: "Austria".to_string(),
             elo: 2650,
             keypair: Keypair::new(),
             pubkey: Pubkey::new_unique(),
@@ -336,5 +340,5 @@ async fn generate_html_report(result: &TournamentResult) -> Result<(), Box<dyn s
 
 fn read_keypair_file(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> {
     let data = std::fs::read(path)?;
-    Ok(Keypair::from_bytes(&data)?)
+    Ok(Keypair::try_from(data.as_slice())?)
 }

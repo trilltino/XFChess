@@ -4,6 +4,9 @@ version = "0.30.0"
 description = "Chess and chess variant rules and operations (vendored host-std)"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [features]
 default = ["std", "uci"]
 alloc = ["serde?/alloc"]

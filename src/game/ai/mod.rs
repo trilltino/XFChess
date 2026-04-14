@@ -24,5 +24,5 @@ pub mod resource;
 pub mod systems;
 
 // Re-export for convenience
-pub use resource::{AIDifficulty, ChessAIResource, GameMode};
+pub use resource::{ChessAIResource, GameMode};
 pub use systems::{AIPlugin, AIStatistics, PendingAIMove};

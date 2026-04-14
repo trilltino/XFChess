@@ -1,3 +1,8 @@
+#![cfg(feature = "solana")]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(deprecated)]
 //! Tournament Test - Real 4-Player Tournament Simulation
 //! 
 //! Creates a complete tournament on Solana devnet with real games,

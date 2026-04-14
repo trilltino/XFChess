@@ -1,3 +1,5 @@
+#![cfg(feature = "solana")]
+#![allow(dead_code)]
 use borsh::BorshDeserialize;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;

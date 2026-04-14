@@ -12,11 +12,11 @@
 //!
 //! AI difficulty is controlled by search time, which directly affects search depth:
 //!
-//! | Difficulty | Time/Move | Typical Depth | Strength       |
-//! |------------|-----------|---------------|----------------|
-//! | Easy       | 0.5s      | 3-4 ply       | Beginner (800) |
-//! | Medium     | 1.5s      | 5-6 ply       | Club (1400)    |
-//! | Hard       | 3.0s      | 7-8 ply       | Strong (1800+) |
+//! | Difficulty | Time/Move | Typical Depth | Strength          |
+//! |------------|-----------|---------------|-------------------|
+//! | Level 1    | 0.05s     | 1 ply         | Beginner (400)    |
+//! | Level 4    | 0.6s      | 6 ply         | Club (1300)       |
+//! | Level 8    | 3.0s      | 24 ply        | Master (2500+)    |
 //!
 //! Depth increases with search time thanks to iterative deepening in the engine.
 //!
@@ -28,7 +28,7 @@
 //! fn start_vs_ai_game(mut commands: Commands) {
 //!     commands.insert_resource(ChessAIResource {
 //!         mode: GameMode::VsAI { ai_color: PieceColor::Black },
-//!         difficulty: AIDifficulty::Medium,
+//!         difficulty: AIDifficulty::Level4,
 //!     });
 //! }
 //! ```
@@ -53,7 +53,7 @@ use bevy::prelude::*;
 /// # Fields
 ///
 /// - `mode`: Current game mode (VsHuman or VsAI with color specification)
-/// - `difficulty`: AI strength level (Easy/Medium/Hard)
+/// - `difficulty`: AI strength level (Level 1-8)
 ///
 /// # Examples
 ///
@@ -62,15 +62,14 @@ use bevy::prelude::*;
 /// ```rust,ignore
 /// commands.insert_resource(ChessAIResource {
 ///     mode: GameMode::VsAI { ai_color: PieceColor::Black },
-///     difficulty: AIDifficulty::Medium,
+///     difficulty: AIDifficulty::Level4,
 /// });
 /// ```
 ///
 /// ## Changing difficulty mid-game (for testing)
 ///
 /// ```rust,ignore
-/// fn change_difficulty(mut ai_config: ResMut<ChessAIResource>) {
-///     ai_config.difficulty = AIDifficulty::Hard;
+///     ai_config.difficulty = AIDifficulty::Level8;
 ///     info!("AI now using {}", ai_config.difficulty.description());
 /// }
 /// ```
@@ -93,7 +92,7 @@ pub struct ChessAIResource {
 }
 
 impl Default for ChessAIResource {
-    /// Creates a default AI configuration (AI plays Black, medium difficulty)
+    /// Creates a default AI configuration (AI plays Black, Level 4 difficulty)
     ///
     /// Default mode has AI playing Black (standard setup).
     fn default() -> Self {
@@ -101,7 +100,7 @@ impl Default for ChessAIResource {
             mode: GameMode::VsAI {
                 ai_color: PieceColor::Black,
             },
-            difficulty: AIDifficulty::Medium,
+            difficulty: AIDifficulty::Level4,
         }
     }
 }
@@ -181,94 +180,100 @@ impl GameMode {
 /// AI difficulty levels corresponding to search time and depth
 ///
 /// Difficulty determines how long the AI thinks per move, which directly
-/// affects search depth thanks to iterative deepening. The engine searches
-/// progressively deeper until time runs out.
-///
-/// # Strength vs Performance Trade-off
-///
-/// - **Easy**: Fast responses, suitable for beginners or low-end hardware
-/// - **Medium**: Balanced strength and response time
-/// - **Hard**: Strong play, but may cause frame drops on slow hardware
-///
-/// # Implementation
-///
-/// The engine uses:
-/// - **Iterative Deepening**: Searches depth 1, then 2, then 3, etc. until time runs out
-/// - **Alpha-Beta Pruning**: Skips branches that can't improve the best move
-/// - **Transposition Tables**: Caches positions to avoid re-searching
-///
-/// More time → more depth → stronger play
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// let difficulty = AIDifficulty::Medium;
-/// println!("AI will think for {} seconds", difficulty.seconds_per_move());
-/// println!("Difficulty: {}", difficulty.description());
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
+/// affects search depth thanks to iterative deepening.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Default)]
 pub enum AIDifficulty {
-    /// Easy - 0.5 seconds per move, depth ~3-4 ply
-    ///
-    /// Beginner level (~800 ELO estimate). Makes obvious mistakes,
-    /// doesn't see tactical threats beyond 2-3 moves ahead.
-    ///
-    /// Good for:
-    /// - New chess players
-    /// - Testing/debugging
-    /// - Low-end hardware
-    Easy,
-
-    /// Medium - 1.5 seconds per move, depth ~5-6 ply
-    ///
-    /// Club player level (~1400 ELO estimate). Sees most tactical
-    /// combinations, plays solid positional chess.
-    ///
-    /// Good for:
-    /// - Intermediate players
-    /// - Casual games
-    /// - Default difficulty
-    Medium,
-
-    /// Hard - 3.0 seconds per move, depth ~7-8 ply
-    ///
-    /// Strong player level (~1800+ ELO estimate). Finds complex
-    /// tactics, plays excellent endgames, rarely makes mistakes.
-    ///
-    /// Good for:
-    /// - Advanced players
-    /// - Serious practice
-    /// - High-end hardware
-    Hard,
+    /// Level 1 - ~400 ELO (Complete Beginner)
+    Level1,
+    /// Level 2 - ~700 ELO (Casual Player)
+    Level2,
+    /// Level 3 - ~1000 ELO (Amateur)
+    Level3,
+    /// Level 4 - ~1300 ELO (Club Player)
+    #[default]
+    Level4,
+    /// Level 5 - ~1600 ELO (Intermediate)
+    Level5,
+    /// Level 6 - ~1900 ELO (Advanced)
+    Level6,
+    /// Level 7 - ~2200 ELO (Expert)
+    Level7,
+    /// Level 8 - ~2500+ ELO (Master)
+    Level8,
 }
 
 impl AIDifficulty {
+    /// Convert an integer 1-8 to AIDifficulty
+    pub fn from_u8(val: u8) -> Self {
+        match val {
+            1 => Self::Level1,
+            2 => Self::Level2,
+            3 => Self::Level3,
+            4 => Self::Level4,
+            5 => Self::Level5,
+            6 => Self::Level6,
+            7 => Self::Level7,
+            8 => Self::Level8,
+            _ => Self::Level4,
+        }
+    }
+
+    /// Convert AIDifficulty to an integer 1-8
+    pub fn to_u8(self) -> u8 {
+        match self {
+            Self::Level1 => 1,
+            Self::Level2 => 2,
+            Self::Level3 => 3,
+            Self::Level4 => 4,
+            Self::Level5 => 5,
+            Self::Level6 => 6,
+            Self::Level7 => 7,
+            Self::Level8 => 8,
+        }
+    }
+
     /// Stockfish search depth for this difficulty.
     pub fn stockfish_depth(self) -> Option<u8> {
         match self {
-            AIDifficulty::Easy => Some(5),
-            AIDifficulty::Medium => Some(12),
-            AIDifficulty::Hard => Some(20),
+            Self::Level1 => Some(1),
+            Self::Level2 => Some(2),
+            Self::Level3 => Some(4),
+            Self::Level4 => Some(6),
+            Self::Level5 => Some(10),
+            Self::Level6 => Some(14),
+            Self::Level7 => Some(18),
+            Self::Level8 => Some(24),
         }
     }
 
-    /// Maximum search time in milliseconds (or None for depth-only).
+    /// Maximum search time in milliseconds.
     pub fn stockfish_movetime_ms(self) -> Option<u64> {
         match self {
-            AIDifficulty::Easy => Some(500),
-            AIDifficulty::Medium => Some(1_500),
-            AIDifficulty::Hard => Some(3_000),
+            Self::Level1 => Some(50),
+            Self::Level2 => Some(150),
+            Self::Level3 => Some(300),
+            Self::Level4 => Some(600),
+            Self::Level5 => Some(1000),
+            Self::Level6 => Some(1500),
+            Self::Level7 => Some(2000),
+            Self::Level8 => Some(3000),
         }
     }
 
-    /// Legacy: get the time allocation for this difficulty level (kept for compat).
-    pub fn seconds_per_move(self) -> f32 {
+    /// Friendly description for UI with ELO equivalent
+    pub fn description(self) -> &'static str {
         match self {
-            AIDifficulty::Easy => 0.5,
-            AIDifficulty::Medium => 1.5,
-            AIDifficulty::Hard => 3.0,
+            Self::Level1 => "Beginner (400 ELO)",
+            Self::Level2 => "Casual (700 ELO)",
+            Self::Level3 => "Amateur (1000 ELO)",
+            Self::Level4 => "Club (1300 ELO)",
+            Self::Level5 => "Intermediate (1600 ELO)",
+            Self::Level6 => "Advanced (1900 ELO)",
+            Self::Level7 => "Expert (2200 ELO)",
+            Self::Level8 => "Master (2500+ ELO)",
         }
     }
+
 }
 
 #[cfg(test)]
@@ -285,7 +290,7 @@ mod tests {
                 ai_color: PieceColor::Black
             }
         ));
-        assert_eq!(ai_config.difficulty, AIDifficulty::Medium);
+        assert_eq!(ai_config.difficulty, AIDifficulty::Level4);
     }
 
     #[test]
@@ -312,23 +317,23 @@ mod tests {
     #[test]
     fn test_ai_difficulty_time_allocation() {
         //! Verifies difficulty time allocations are correct
-        assert_eq!(AIDifficulty::Easy.seconds_per_move(), 0.5);
-        assert_eq!(AIDifficulty::Medium.seconds_per_move(), 1.5);
-        assert_eq!(AIDifficulty::Hard.seconds_per_move(), 3.0);
+        assert_eq!(AIDifficulty::Level1.seconds_per_move(), 0.05);
+        assert_eq!(AIDifficulty::Level4.seconds_per_move(), 0.6);
+        assert_eq!(AIDifficulty::Level8.seconds_per_move(), 3.0);
     }
 
     #[test]
     fn test_ai_difficulty_equality() {
         //! Tests AI difficulty comparisons
-        assert_eq!(AIDifficulty::Easy, AIDifficulty::Easy);
-        assert_eq!(AIDifficulty::Medium, AIDifficulty::Medium);
-        assert_ne!(AIDifficulty::Easy, AIDifficulty::Hard);
+        assert_eq!(AIDifficulty::Level1, AIDifficulty::Level1);
+        assert_eq!(AIDifficulty::Level4, AIDifficulty::Level4);
+        assert_ne!(AIDifficulty::Level1, AIDifficulty::Level8);
     }
 
     #[test]
     fn test_ai_difficulty_clone() {
         //! Verifies AI difficulty can be cloned
-        let original = AIDifficulty::Hard;
+        let original = AIDifficulty::Level8;
         let cloned = original.clone();
         assert_eq!(original, cloned);
     }
@@ -352,7 +357,7 @@ mod tests {
         ai_config.mode = GameMode::VsAI {
             ai_color: PieceColor::Black,
         };
-        ai_config.difficulty = AIDifficulty::Hard;
+        ai_config.difficulty = AIDifficulty::Level8;
 
         if let GameMode::VsAI { ai_color } = ai_config.mode {
             assert_eq!(ai_color, PieceColor::Black);
@@ -360,17 +365,17 @@ mod tests {
             panic!("Expected VsAI mode");
         }
 
-        assert_eq!(ai_config.difficulty, AIDifficulty::Hard);
+        assert_eq!(ai_config.difficulty, AIDifficulty::Level8);
     }
 
     #[test]
     fn test_time_increases_with_difficulty() {
         //! Verifies harder difficulties get more thinking time
-        let easy_time = AIDifficulty::Easy.seconds_per_move();
-        let medium_time = AIDifficulty::Medium.seconds_per_move();
-        let hard_time = AIDifficulty::Hard.seconds_per_move();
+        let low_time = AIDifficulty::Level1.seconds_per_move();
+        let med_time = AIDifficulty::Level4.seconds_per_move();
+        let high_time = AIDifficulty::Level8.seconds_per_move();
 
-        assert!(easy_time < medium_time);
-        assert!(medium_time < hard_time);
+        assert!(low_time < med_time);
+        assert!(med_time < high_time);
     }
 }

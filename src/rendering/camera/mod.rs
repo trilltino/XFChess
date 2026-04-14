@@ -13,6 +13,10 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, camera_templeos::templeos_camera_movement_system);
+        use crate::game::systems::camera::view_mode_toggle_input_system;
+        app.add_systems(Update, (
+            camera_templeos::templeos_camera_movement_system,
+            view_mode_toggle_input_system,
+        ));
     }
 }

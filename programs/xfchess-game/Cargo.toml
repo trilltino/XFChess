@@ -19,8 +19,16 @@ anchor-spl = "0.32.1"
 # solana-program version pulled in by anchor-lang
 chess-logic-on-chain = { workspace = true, features = ["alloc"], optional = true }
 ephemeral-rollups-sdk = { path = "../../references/ephemeral-rollups-sdk/rust/sdk", features = ["anchor"] }
+glicko2 = { version = "0.3", default-features = false }
+
+# Crank dependencies (MagicBlock scheduled tasks)
+magicblock-magic-program-api = { version = "0.3.1", default-features = false }
+bincode = "^1.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 solana-sdk = "2.1.0"
 solana-program-test = "2.1.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "allow" }

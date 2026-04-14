@@ -17,9 +17,14 @@ path = "src/main.rs"
 name = "signing-server"
 path = "src/signing_server.rs"
 
+[[bin]]
+name = "vps_admin"
+path = "src/bin/vps_admin.rs"
+
 [dependencies]
 axum = "0.8.8"
 tokio = { version = "1.49.0", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 serde = { workspace = true, features = ["derive"] }
@@ -59,6 +64,13 @@ braid_uri = { path = "../crates/braid_uri" }
 # Solana dependencies
 solana-sdk = { workspace = true }
 solana-client = { workspace = true }
+aes-gcm = "0.10.3"
+hex = "0.4.3"
+reqwest.workspace = true
+regex = "1.11"
+
+# PDF generation for welcome emails
+printpdf = "0.7"
 
 [dev-dependencies]
 serde_json = "1.0"

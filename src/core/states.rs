@@ -52,7 +52,7 @@ where
     T: States + Copy;
 
 /// Sub-state for menu navigation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, SubStates)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, SubStates, Reflect)]
 #[source(GameState = GameState::MainMenu)]
 pub enum MenuState {
     /// Main menu screen (default)
@@ -76,6 +76,9 @@ pub enum MenuState {
 
     /// Piece viewer screen
     PieceViewer,
+    
+    /// Tournament browser
+    Tournaments,
 }
 
 impl Default for MenuState {

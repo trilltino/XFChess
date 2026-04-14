@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Main menu plugin with polished UI
 //!
 //! Displays the primary game menu with options to:
@@ -13,10 +14,8 @@ use crate::assets::{
     check_asset_loading, handle_asset_loading_errors, handle_untyped_asset_loading_errors,
     start_asset_loading,
 };
-use crate::core::{DespawnOnExit, GameMode as CoreGameMode, GameState};
+use crate::core::{GameMode as CoreGameMode, GameState};
 use crate::game::ai::GameMode;
-#[cfg(feature = "solana")]
-use crate::multiplayer::solana::addon::{CompetitiveMatchState, SolanaGameSync, SolanaWallet};
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::lobby::{
     spawn_create_game, spawn_join_game, spawn_lookup_game, spawn_poll_opponent_joined,
@@ -24,34 +23,9 @@ use crate::multiplayer::solana::lobby::{
 };
 use crate::ui::styles::*;
 use crate::ui::system_params::MainMenuUIContext;
-use bevy::color::LinearRgba;
-use bevy::core_pipeline::tonemapping::Tonemapping;
-#[cfg(not(target_arch = "wasm32"))]
-use bevy::light::{FogVolume, VolumetricFog};
-use bevy::math::ops;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiPrimaryContextPass};
-use rand::Rng;
 
-/// Resource tracking intro fog animation state
-#[derive(Resource)]
-pub struct IntroFogState {
-    pub timer: Timer,
-    pub initial_absorption: f32,
-}
-
-impl Default for IntroFogState {
-    fn default() -> Self {
-        Self {
-            timer: Timer::from_seconds(3.0, TimerMode::Once),
-            initial_absorption: 10.0, // Very dense black fog
-        }
-    }
-}
-
-/// Fallback component for web builds (simulates fog with transparent mesh)
-#[derive(Component)]
-struct FogFallback;
 
 /// Plugin for main menu state
 pub struct MainMenuPlugin;
@@ -59,8 +33,9 @@ pub struct MainMenuPlugin;
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
         use super::main_menu_showcase::{
-            animate_showcase_captures, animate_showcase_pieces, run_showcase_game,
-            spawn_showcase_board, spawn_showcase_pieces, ShowcaseGameState,
+            animate_showcase_captures, animate_showcase_idle_float, animate_showcase_pieces,
+            restart_showcase_when_complete, run_showcase_game, spawn_showcase_board,
+            spawn_showcase_pieces, ShowcaseGameState,
         };
 
         // Common systems for all platforms
@@ -68,19 +43,18 @@ impl Plugin for MainMenuPlugin {
             OnEnter(GameState::MainMenu),
             (
                 setup_menu_camera,
-                spawn_star_spheres,
                 spawn_showcase_board,
                 spawn_showcase_pieces,
                 start_asset_loading,
             ),
         )
-        .init_resource::<MenuExpanded>()
-        .init_resource::<PlayerColorChoice>()
+            .init_resource::<PlayerColorChoice>()
         .init_resource::<ShowcaseGameState>()
         .init_resource::<crate::assets::GameAssets>()
         .init_resource::<crate::assets::LoadingProgress>()
         .init_resource::<crate::assets::AssetLoadingTimer>()
         .init_resource::<CompetitiveMenuState>()
+        .init_resource::<crate::states::tournament_menu::TournamentLobbyState>()
         .add_systems(
             EguiPrimaryContextPass,
             main_menu_ui_wrapper.run_if(in_state(GameState::MainMenu)),
@@ -91,30 +65,16 @@ impl Plugin for MainMenuPlugin {
                 check_asset_loading,
                 handle_asset_loading_errors,
                 handle_untyped_asset_loading_errors,
-                animate_menu_camera,
                 ensure_menu_camera_setup,
-                handle_space_to_play,
-                spawn_shooting_stars,
-                emit_trail_particles,
-                animate_shooting_stars,
-                animate_particles,
                 run_showcase_game,
                 animate_showcase_pieces,
                 animate_showcase_captures,
+                animate_showcase_idle_float,
+                restart_showcase_when_complete,
             )
                 .run_if(in_state(GameState::MainMenu))
                 .run_if(not(in_state(crate::core::MenuState::PieceViewer))),
         );
-
-        // Fog systems (Native: VolumetricFog, Web: Mesh Fallback)
-        app.init_resource::<IntroFogState>()
-            .add_systems(OnEnter(GameState::MainMenu), spawn_fog_volume)
-            .add_systems(
-                Update,
-                animate_intro_fog
-                    .run_if(in_state(GameState::MainMenu))
-                    .run_if(not(in_state(crate::core::MenuState::PieceViewer))),
-            );
     }
 }
 
@@ -134,669 +94,102 @@ fn main_menu_ui_wrapper(mut ctx: MainMenuUIContext) {
 #[derive(Component)]
 struct MenuCamera;
 
-/// Resource to track menu expansion state
-#[derive(Resource, Default)]
-pub struct MenuExpanded {
-    pub expanded: bool,
-}
-
 /// Resource to track the player's chosen color when playing vs AI
 #[derive(Resource)]
 pub struct PlayerColorChoice {
     pub play_as_white: bool,
+    pub selected: bool,
 }
 
 impl Default for PlayerColorChoice {
     fn default() -> Self {
-        Self { play_as_white: true }
+        Self { play_as_white: true, selected: true }
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct CompetitiveMenuState {
-    pub wager_sol: f32,
-    pub game_id_input: String,
 }
 
-impl Default for CompetitiveMenuState {
-    fn default() -> Self {
-        Self {
-            wager_sol: 0.1,
-            game_id_input: String::new(),
-        }
-    }
-}
 
-/// Component for shooting star head
-#[derive(Component)]
-struct ShootingStar {
-    velocity: Vec3,
-    lifetime: Timer,
-}
 
-/// Component for individual trail particles
-#[derive(Component)]
-struct TrailParticle {
-    lifetime: Timer,
-    initial_scale: Vec3,
-}
 
-/// Component to emit particles
-#[derive(Component)]
-struct ParticleEmitter {
-    rate_per_second: f32,
-    accumulator: f32,
-}
 
-/// System to spawn shooting stars periodically
-fn spawn_shooting_stars(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    _time: Res<Time>,
-) {
-    let mut rng = rand::rng();
-
-    // Low chance to spawn per frame, adjusted for delta time
-    if rng.random_bool(0.01) {
-        let spawn_distance = 400.0;
-
-        // Random start position high up and far away
-        let start_pos = Vec3::new(
-            rng.random_range(-spawn_distance..spawn_distance),
-            rng.random_range(100.0..300.0), // High up
-            rng.random_range(-spawn_distance..spawn_distance),
-        );
-
-        // Calculate velocity (moving downwards and across)
-        let end_pos = Vec3::new(
-            rng.random_range(-100.0..100.0),
-            rng.random_range(-50.0..50.0),
-            rng.random_range(-100.0..100.0),
-        );
-
-        // Fast speed for the head
-        let velocity = (end_pos - start_pos).normalize() * rng.random_range(200.0..350.0);
-
-        // Head mesh (small glowing sphere)
-        let mesh = meshes.add(Sphere::new(0.5)); // Smaller head
-        let material = materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            emissive: LinearRgba::new(5.0, 5.0, 10.0, 1.0), // Bright bluish-white
-            unlit: true,
-            ..default()
-        });
-
-        commands.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(start_pos),
-            ShootingStar {
-                velocity,
-                lifetime: Timer::from_seconds(2.5, TimerMode::Once),
-            },
-            ParticleEmitter {
-                rate_per_second: 60.0, // High emission rate for smooth trail
-                accumulator: 0.0,
-            },
-            DespawnOnExit(GameState::MainMenu),
-            Name::new("Shooting Star Head"),
-        ));
-    }
-}
-
-/// System to emit trail particles from moving shooting stars
-fn emit_trail_particles(
-    mut commands: Commands,
-    mut query: Query<(&Transform, &mut ParticleEmitter), With<ShootingStar>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    time: Res<Time>,
-) {
-    let mut rng = rand::rng();
-
-    // Shared material for particles (optimization: could be cached resource)
-    let particle_material = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        emissive: LinearRgba::new(2.0, 2.0, 8.0, 1.0), // Slightly dimmer blue trail
-        unlit: true,
-        ..default()
-    });
-    let particle_mesh = meshes.add(Sphere::new(0.3));
-
-    for (transform, mut emitter) in query.iter_mut() {
-        emitter.accumulator += emitter.rate_per_second * time.delta_secs();
-
-        while emitter.accumulator >= 1.0 {
-            emitter.accumulator -= 1.0;
-
-            // Spawn particle at current position with slight randomization
-            let jitter = Vec3::new(
-                rng.random_range(-0.5..0.5),
-                rng.random_range(-0.5..0.5),
-                rng.random_range(-0.5..0.5),
-            );
-
-            let scale = Vec3::splat(rng.random_range(0.8..1.2));
-
-            commands.spawn((
-                Mesh3d(particle_mesh.clone()),
-                MeshMaterial3d(particle_material.clone()),
-                Transform {
-                    translation: transform.translation + jitter,
-                    scale,
-                    rotation: Quat::IDENTITY,
-                },
-                TrailParticle {
-                    lifetime: Timer::from_seconds(0.8, TimerMode::Once), // Short trail life
-                    initial_scale: scale,
-                },
-                DespawnOnExit(GameState::MainMenu),
-                Name::new("Trail Particle"),
-            ));
-        }
-    }
-}
-
-/// Animate shooting star head movement
-fn animate_shooting_stars(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut query: Query<(Entity, &mut Transform, &mut ShootingStar)>,
-) {
-    for (entity, mut transform, mut star) in query.iter_mut() {
-        star.lifetime.tick(time.delta());
-
-        if star.lifetime.is_finished() {
-            commands.entity(entity).despawn();
-            continue;
-        }
-
-        // Move head
-        transform.translation += star.velocity * time.delta_secs();
-    }
-}
-
-/// Animate trail particles (fade out and shrink)
-fn animate_particles(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut query: Query<(Entity, &mut Transform, &mut TrailParticle)>,
-) {
-    for (entity, mut transform, mut particle) in query.iter_mut() {
-        particle.lifetime.tick(time.delta());
-
-        if particle.lifetime.is_finished() {
-            commands.entity(entity).despawn();
-            continue;
-        }
-
-        // Shrink over lifetime
-        let fraction = particle.lifetime.fraction(); // 0.0 (start) to 1.0 (end)
-                                                     // Bevy Timer fraction goes 0.0 -> 1.0.
-                                                     // We want scale 1.0 -> 0.0
-        let scale_mult = 1.0 - fraction;
-
-        transform.scale = particle.initial_scale * scale_mult;
-    }
-}
-
-/// System to handle spacebar input for toggling menu
-fn handle_space_to_play(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut menu_expanded: ResMut<MenuExpanded>,
-) {
-    if keyboard.just_pressed(KeyCode::Space) {
-        menu_expanded.expanded = !menu_expanded.expanded;
-        info!(
-            "[MAIN_MENU] Space pressed - menu expanded: {}",
-            menu_expanded.expanded
-        );
-    }
-}
-
-/// Setup camera for main menu with pyramid scene in background
-/// Uses the persistent Egui camera and updates its transform
-/// Handles case where camera might not exist yet (if OnEnter runs before PreStartup)
+/// Setup camera for main menu - simplified for egui-only launcher
 fn setup_menu_camera(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut camera_query: Query<
         &mut Transform,
-        (With<bevy_egui::PrimaryEguiContext>, Without<MenuCamera>),
+        (With<Camera3d>, Without<MenuCamera>),
     >,
 ) {
-    debug!("[MAIN_MENU] Setting up menu camera with pyramid scene");
-    debug!(
-        "[MAIN_MENU] DEBUG: Persistent camera entity: {:?}",
-        persistent_camera.entity
-    );
+    debug!("[MAIN_MENU] Setting up menu camera for egui launcher");
 
     // Update persistent camera transform for menu view
     // Handle gracefully if camera doesn't exist yet (OnEnter runs before PreStartup for default state)
     if let Some(camera_entity) = persistent_camera.entity {
-        debug!(
-            "[MAIN_MENU] DEBUG: Attempting to query camera entity {:?}",
-            camera_entity
-        );
         match camera_query.get_mut(camera_entity) {
             Ok(mut transform) => {
-                debug!("[MAIN_MENU] DEBUG: Successfully queried camera transform");
-                // Closer camera angle looking down at pyramid to hide floating edge
-                *transform = Transform::from_xyz(5.0, 8.0, 5.0)
-                    .looking_at(Vec3::new(0.0, -2.0, 0.0), Vec3::Y);
-                debug!("[MAIN_MENU] Updated persistent camera transform for menu");
+                info!("[MAIN_MENU] Setting up menu camera entity: {:?}", camera_entity);
+                // Simple default transform for egui-only menu
+                *transform = Transform::from_xyz(0.0, 0.0, 1.0);
+                debug!("[MAIN_MENU] Updated persistent camera transform for egui menu");
 
-                // Add menu marker and volumetric fog to persistent camera
-                debug!("[MAIN_MENU] DEBUG: Adding components to camera entity");
-
-                #[cfg(not(target_arch = "wasm32"))]
-                commands.entity(camera_entity).insert((
-                    MenuCamera,
-                    Tonemapping::TonyMcMapface,
-                    VolumetricFog {
-                        ambient_intensity: 0.0,
-                        ..default()
-                    },
-                ));
-
-                #[cfg(target_arch = "wasm32")]
-                commands
-                    .entity(camera_entity)
-                    .insert((MenuCamera, Tonemapping::TonyMcMapface));
-
-                debug!("[MAIN_MENU] DEBUG: Components added successfully");
+                // Add menu marker to persistent camera
+                commands.entity(camera_entity).insert(MenuCamera);
+                debug!("[MAIN_MENU] Menu camera setup complete");
             }
             Err(e) => {
                 error!(
                     "[MAIN_MENU] ERROR: Persistent camera entity {:?} exists but query failed: {:?}",
                     camera_entity, e
                 );
-                error!("[MAIN_MENU] ERROR: Camera may not be ready yet. Will retry in Update.");
-                error!("[MAIN_MENU] ERROR: Query filter: With<PrimaryEguiContext>, Without<MenuCamera>");
             }
         }
     } else {
-        debug!("[MAIN_MENU] WARNING: Persistent camera not yet created (OnEnter runs before PreStartup). Will be set up in PreStartup.");
-        debug!("[MAIN_MENU] WARNING: This is expected behavior for the default state.");
-    }
-
-    // === PYRAMID SCENE ===
-
-    // Stone material for pyramid blocks - sandstone color
-    let stone = materials.add(StandardMaterial {
-        base_color: Srgba::hex("C4A35A") // Sandstone/golden color
-            .expect("hardcoded hex color 'C4A35A' is valid")
-            .into(),
-        perceptual_roughness: 0.9, // Mostly matte
-        metallic: 0.0,
-        reflectance: 0.3, // Some reflectance to catch light
-        ..default()
-    });
-
-    // Pyramid steps (20 layers to reduce draw calls)
-    for i in 0..20 {
-        let half_size = i as f32 / 2.0 + 3.0;
-        let y = -i as f32 / 2.0;
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(2.0 * half_size, 0.5, 2.0 * half_size))),
-            MeshMaterial3d(stone.clone()),
-            Transform::from_xyz(0.0, y + 0.25, 0.0),
-            DespawnOnExit(GameState::MainMenu),
-            Name::new(format!("Pyramid Layer {}", i)),
-        ));
-    }
-
-    // Skybox/Background - Pure black (user requested complete black, no bluish hue)
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(2.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.0, 0.0, 0.0), // Pure black RGB(0, 0, 0)
-            emissive: LinearRgba::BLACK,            // Ensure no emission
-            unlit: true,
-            cull_mode: None,
-            ..default()
-        })),
-        Transform::from_scale(Vec3::splat(1_000_000.0)),
-        DespawnOnExit(GameState::MainMenu),
-        Name::new("Skybox"),
-    ));
-
-    // Directional light for soft shadows
-    commands.spawn((
-        DirectionalLight {
-            // Increased illuminance significantly for reflections
-            illuminance: 15_000.0,
-            shadows_enabled: true,
-            color: Color::srgb(1.0, 1.0, 1.0), // Pure white
-            ..default()
-        },
-        Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ,
-            -std::f32::consts::FRAC_PI_4,
-            std::f32::consts::FRAC_PI_4,
-            0.0,
-        )),
-        DespawnOnExit(GameState::MainMenu),
-        Name::new("Directional Light"),
-    ));
-
-    // Overhead light to illuminate the pyramid (VERY BRIGHT)
-    commands.spawn((
-        PointLight {
-            intensity: 2_000_000.0, // Very bright to illuminate dark pyramid
-            range: 100.0,
-            shadows_enabled: false,
-            color: Color::srgb(1.0, 1.0, 1.0), // Pure white
-            ..default()
-        },
-        Transform::from_xyz(0.0, 8.0, 0.0), // Closer to pyramid
-        DespawnOnExit(GameState::MainMenu),
-        Name::new("Pyramid Overhead Light"),
-    ));
-
-    // Visible Glowing Orb at the light source
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(0.5))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            emissive: LinearRgba::new(5.0, 5.0, 5.0, 1.0), // Very bright emission
-            unlit: true,
-            ..default()
-        })),
-        Transform::from_xyz(0.0, 15.0, 0.0),
-        DespawnOnExit(GameState::MainMenu),
-        Name::new("Pyramid Overhead Orb"),
-    ));
-
-    // Fill Light to ensure pyramid sides are visible
-    commands.spawn((
-        PointLight {
-            intensity: 200_000.0, // 4x brighter
-            range: 150.0,
-            shadows_enabled: false,
-            color: Color::srgb(1.0, 1.0, 1.0), // Pure White
-            ..default()
-        },
-        Transform::from_xyz(20.0, 10.0, 20.0),
-        DespawnOnExit(GameState::MainMenu),
-        Name::new("Pyramid Fill Light"),
-    ));
-
-    // Additional Fill Light from opposite side
-    commands.spawn((
-        PointLight {
-            intensity: 200_000.0,
-            range: 150.0,
-            shadows_enabled: false,
-            color: Color::srgb(1.0, 1.0, 1.0),
-            ..default()
-        },
-        Transform::from_xyz(-20.0, 10.0, -20.0),
-        DespawnOnExit(GameState::MainMenu),
-        Name::new("Pyramid Fill Light 2"),
-    ));
-
-    debug!("[MAIN_MENU] Pyramid scene and camera setup complete");
-}
-
-/// Spawn the fog volume entity for intro reveal effect
-fn spawn_fog_volume(
-    mut commands: Commands,
-    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))] meshes: ResMut<Assets<Mesh>>,
-    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))] materials: ResMut<
-        Assets<StandardMaterial>,
-    >,
-) {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        // Native: Spawn a large fog volume covering the scene
-        commands.spawn((
-            FogVolume {
-                absorption: 2.0, // High initial absorption for black fog
-                ..default()
-            },
-            Transform::from_scale(Vec3::splat(100.0)),
-            DespawnOnExit(GameState::MainMenu),
-            Name::new("Intro Fog Volume"),
-        ));
-        debug!("[MAIN_MENU] Spawned intro fog volume (Volumetric)");
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Web: Spawn a giant black sphere that fades out
-        // Note: We use a sphere so it covers the camera from all angles
-        let material = materials.add(StandardMaterial {
-            base_color: Color::BLACK,
-            alpha_mode: AlphaMode::Blend,
-            unlit: true, // Black unlit = pure darkness
-            ..default()
-        });
-
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(1.0))),
-            MeshMaterial3d(material),
-            Transform::from_scale(Vec3::splat(100.0)), // Giant sphere containing camera
-            FogFallback,
-            DespawnOnExit(GameState::MainMenu),
-            Name::new("Intro Fog Fallback"),
-        ));
-        debug!("[MAIN_MENU] Spawned intro fog fallback (Mesh)");
+        debug!("[MAIN_MENU] WARNING: Persistent camera not yet created (OnEnter runs before PreStartup).");
     }
 }
 
-/// Animate the intro fog fading away to reveal the scene
-fn animate_intro_fog(
-    time: Res<Time>,
-    mut fog_state: ResMut<IntroFogState>,
-    #[cfg(not(target_arch = "wasm32"))] mut fog_query: Query<&mut FogVolume>,
-    #[cfg(target_arch = "wasm32")] mut fallback_query: Query<(
-        &MeshMaterial3d<StandardMaterial>,
-        &FogFallback,
-    )>,
-    #[cfg(target_arch = "wasm32")] mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    if fog_state.timer.is_finished() {
-        return;
-    }
 
-    fog_state.timer.tick(time.delta());
-    let progress = fog_state.timer.fraction();
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        // Lerp absorption from initial value to near-zero
-        let target_absorption = fog_state.initial_absorption * (1.0 - progress);
-        for mut fog in fog_query.iter_mut() {
-            fog.absorption = target_absorption;
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Lerp alpha from 1.0 (black) to 0.0 (transparent)
-        // 1.0 - progress because progress goes 0->1
-        let start_alpha = 1.0;
-        let target_alpha = start_alpha * (1.0 - progress);
-
-        for (mat_handle, _) in fallback_query.iter() {
-            if let Some(mat) = materials.get_mut(&mat_handle.0) {
-                mat.base_color.set_alpha(target_alpha);
-            }
-        }
-    }
-}
-
-/// Spawn randomly positioned star spheres with bright white lights
-/// Creates a starfield effect "as far as the eye can see" in the black foggy space
-/// Spawn randomly positioned star spheres with bright white lights
-/// Creates a starfield effect "as far as the eye can see" in the black foggy space
-fn spawn_star_spheres(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let mut rng = rand::rng();
-    // Increased to 2500 stars for deep space density
-    let num_stars = 2500;
-
-    // White emissive material for stars
-    let star_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 1.0, 1.0),           // Pure white
-        emissive: LinearRgba::new(10.0, 10.0, 10.0, 1.0), // VERY Bright white glow (boosted for fog)
-        unlit: true,                                      // Always visible regardless of lighting
-        ..default()
-    });
-
-    // Material for fake volumetric glow on Web
-    #[cfg(target_arch = "wasm32")]
-    let glow_material = materials.add(StandardMaterial {
-        base_color: Color::hsla(0.0, 0.0, 1.0, 0.1), // White with low alpha
-        alpha_mode: AlphaMode::Add,                  // Additive blending for glow
-        unlit: true,
-        ..default()
-    });
-    #[cfg(target_arch = "wasm32")]
-    let glow_mesh = meshes.add(Sphere::new(1.0));
-
-    // Spawn stars across a vast area
-    for i in 0..num_stars {
-        // Random positions with a huge "safe zone" for deep space feel
-        // Rejection sampling to keep stars extremely far away
-        let (x, y, z) = loop {
-            let x = rng.random_range(-4000.0..4000.0);
-            let y = rng.random_range(-2000.0..2000.0); // Flatter galaxy-like spread
-            let z = rng.random_range(-4000.0..4000.0);
-
-            // Keep stars at least 800 units away from center
-            if Vec3::new(x, y, z).length() > 800.0 {
-                break (x, y, z);
-            }
-        };
-
-        // Very large stars to be visible at this extreme distance
-        let radius = rng.random_range(3.0..6.0);
-
-        let mut star_cmds = commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(radius))),
-            MeshMaterial3d(star_material.clone()),
-            Transform::from_xyz(x, y, z),
-            DespawnOnExit(GameState::MainMenu),
-            Name::new(format!("Star {}", i)),
-        ));
-
-        // Add "Hero" effects to 5% of stars (closest or largest ones)
-        if i % 20 == 0 {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                // Native: Real PointLight for volumetric fog interaction
-                // Note: Range must be large to be seen in thick fog
-                star_cmds.with_children(|parent| {
-                    parent.spawn(PointLight {
-                        intensity: 1_000_000.0, // High intensity due to distance and fog
-                        range: 500.0,
-                        radius: radius * 2.0, // Soft shadow radius
-                        color: Color::WHITE,
-                        shadows_enabled: false, // Too expensive for many stars
-                        ..default()
-                    });
-                });
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            {
-                // Web: Fake volumetric glow (large transparent additive sphere)
-                star_cmds.with_children(|parent| {
-                    parent.spawn((
-                        Mesh3d(glow_mesh.clone()),
-                        MeshMaterial3d(glow_material.clone()),
-                        Transform::from_scale(Vec3::splat(15.0)), // Giant glow radius relative to star
-                    ));
-                });
-            }
-        }
-    }
-
-    debug!("[MAIN_MENU] Spawned {} star spheres", num_stars);
-}
 
 /// Ensure menu camera is set up if it wasn't ready during OnEnter
 /// This handles the case where OnEnter runs before PreStartup (for default state)
 fn ensure_menu_camera_setup(
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut camera_query: Query<
-        (&mut Transform, Option<&mut Tonemapping>),
-        (With<bevy_egui::PrimaryEguiContext>, Without<MenuCamera>),
+        &mut Transform,
+        (With<Camera3d>, Without<MenuCamera>),
     >,
     mut commands: Commands,
     menu_camera_query: Query<Entity, With<MenuCamera>>,
 ) {
     // Only set up if camera exists and menu camera marker is not present
     if menu_camera_query.is_empty() {
-        debug!("[MAIN_MENU] DEBUG: MenuCamera marker not found, attempting late setup");
         if let Some(camera_entity) = persistent_camera.entity {
-            debug!(
-                "[MAIN_MENU] DEBUG: Persistent camera entity: {:?}",
-                camera_entity
-            );
             match camera_query.get_mut(camera_entity) {
-                Ok((mut transform, _)) => {
-                    // Closer camera angle looking down at pyramid to hide floating edge
-                    *transform = Transform::from_xyz(5.0, 8.0, 5.0)
-                        .looking_at(Vec3::new(0.0, -2.0, 0.0), Vec3::Y);
-                    debug!("[MAIN_MENU] Late setup: Updated persistent camera transform for menu");
+                Ok(mut transform) => {
+                    info!("[MAIN_MENU] Initializing menu camera (late setup)");
+                    // Simple default transform for egui-only menu
+                    *transform = Transform::from_xyz(0.0, 0.0, 1.0);
+                    debug!("[MAIN_MENU] Late setup: Updated persistent camera transform for egui menu");
 
-                    #[cfg(not(target_arch = "wasm32"))]
-                    commands.entity(camera_entity).insert((
-                        MenuCamera,
-                        Tonemapping::TonyMcMapface,
-                        VolumetricFog {
-                            ambient_intensity: 0.0,
-                            ..default()
-                        },
-                    ));
-
-                    #[cfg(target_arch = "wasm32")]
-                    commands
-                        .entity(camera_entity)
-                        .insert((MenuCamera, Tonemapping::TonyMcMapface));
-
-                    debug!("[MAIN_MENU] DEBUG: Late camera setup completed successfully");
+                    // Add menu marker to persistent camera
+                    commands.entity(camera_entity).insert(MenuCamera);
+                    debug!("[MAIN_MENU] Late camera setup completed successfully");
                 }
                 Err(e) => {
                     error!(
                         "[MAIN_MENU] ERROR: Late setup failed to query camera: {:?}",
                         e
                     );
-                    error!("[MAIN_MENU] ERROR: Camera entity: {:?}", camera_entity);
                 }
             }
-        } else {
-            debug!("[MAIN_MENU] WARNING: Late setup attempted but persistent camera entity is None");
         }
     }
 }
 
-/// Animate the camera orbiting around the pyramid
-fn animate_menu_camera(mut camera_query: Query<&mut Transform, With<MenuCamera>>, time: Res<Time>) {
-    let Ok(mut transform) = camera_query.single_mut() else {
-        return;
-    };
-
-    let elapsed = time.elapsed_secs();
-
-    // Orbit camera around pyramid with smooth zoom
-    let orbit_scale = 8.0 + ops::sin(elapsed / 10.0) * 7.0;
-    *transform = Transform::from_xyz(
-        ops::cos(elapsed / 5.0) * orbit_scale,
-        12.0 - orbit_scale / 2.0,
-        ops::sin(elapsed / 5.0) * orbit_scale,
-    )
-    .looking_at(Vec3::ZERO, Vec3::Y);
-}
 
 /// Main menu UI system
 fn main_menu_ui(ctx: &mut MainMenuUIContext) -> Result<(), bevy::ecs::query::QuerySingleError> {
@@ -825,101 +218,722 @@ fn main_menu_ui(ctx: &mut MainMenuUIContext) -> Result<(), bevy::ecs::query::Que
     // on ctx.contexts across the closures that also need &mut ctx.
     let egui_ctx = ctx.contexts.ctx_mut()?.clone();
 
-    // Audio Mute Toggle Button (Top-Right Corner)
-    egui::Area::new("audio_toggle_area".into())
-        .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-20.0, 20.0))
-        .show(&egui_ctx, |ui| {
-            let icon = if ctx.settings.muted { "🔇" } else { "🔊" };
-            if ui
-                .add(
-                    egui::Button::new(egui::RichText::new(icon).size(24.0))
-                        .frame(false)
-                        .fill(egui::Color32::TRANSPARENT),
-                )
-                .clicked()
-            {
-                ctx.settings.muted = !ctx.settings.muted;
-                info!("[MAIN_MENU] Audio mute toggled: {}", ctx.settings.muted);
-            }
-        });
 
-    // Bottom panel for "PRESS SPACE TO PLAY" flashing text (centered at bottom)
-    if !ctx.menu_expanded.expanded {
-        egui::TopBottomPanel::bottom("press_space_panel")
-            .frame(egui::Frame {
-                fill: egui::Color32::TRANSPARENT,
-                inner_margin: egui::Margin::symmetric(0, 20),
-                ..Default::default()
-            })
-            .show_separator_line(false)
-            .show(&egui_ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    // Flashing "PRESS SPACE TO PLAY" text
-                    let time = ui.input(|i| i.time);
-                    let alpha = ((time * 2.0).sin() * 0.5 + 0.5) as f32; // Oscillates between 0.0 and 1.0
-                    let color =
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, (alpha * 255.0) as u8);
+
+
+
+    // Always show website-style menu (no expansion needed)
+    render_website_menu(&egui_ctx, ctx);
+    
+    Ok(())
+}
+
+/// Render website-style main menu with navbar and sections
+fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
+    // Show loading screen if assets aren't loaded yet
+    if !ctx_menu.loading_progress.complete {
+        render_loading_screen_website(ctx, ctx_menu);
+        return;
+    }
+    
+    let screen_rect = ctx.content_rect();
+    
+    // === BLACK GRADIENT BACKGROUND ===
+    egui::CentralPanel::default()
+        .frame(egui::Frame {
+            fill: egui::Color32::from_rgb(0, 0, 0), // Pure black
+            ..Default::default()
+        })
+        .show(ctx, |ui| {
+            ui.add_space(0.0); // Just fill the background
+        });
+    
+    // === NAVBAR ===
+    render_navbar(ctx, ctx_menu);
+    
+    // === DEVNET NOTICE ===
+    egui::Area::new("devnet_notice".into())
+        .anchor(egui::Align2::CENTER_TOP, egui::Vec2::new(0.0, 68.0))
+        .show(ctx, |ui| {
+            ui.label(egui::RichText::new("⚠️ RUNNING ON SOLANA DEVNET")
+                .color(egui::Color32::from_rgb(234, 179, 8)) // Warning yellow
+                .size(11.0)
+                .strong());
+        });
+    
+    // === MAIN CONTENT AREA ===
+    let content_top = 80.0; // Space below navbar
+    let content_height = screen_rect.height() - content_top - 20.0;
+    
+    egui::Area::new("main_content".into())
+        .anchor(egui::Align2::LEFT_TOP, egui::Vec2::new(20.0, content_top))
+        .show(ctx, |ui| {
+            ui.set_width(screen_rect.width() - 40.0);
+            ui.set_height(content_height);
+            
+            // Two column layout
+            let available_w = screen_rect.width() - 40.0;
+            let col_spacing = 40.0;
+            let inner_w = available_w - col_spacing;
+            
+            ui.horizontal(|ui| {
+                // === LEFT COLUMN: TOURNAMENTS & MODES ===
+                ui.vertical(|ui| {
+                    ui.set_width(inner_w * 0.30);
+                    render_tournaments_section(ui, ctx_menu);
+                });
+                
+                ui.add_space(col_spacing);
+                
+                // === RIGHT COLUMN: QUICK PAIRING & LOBBY ===
+                ui.vertical(|ui| {
+                    let mid_w = inner_w * 0.70;
+                    ui.set_width(mid_w);
+                    ui.horizontal(|ui| {
+                        // Quick Pairing
+                        ui.vertical(|ui| {
+                            ui.set_width((mid_w - col_spacing) * 0.45);
+                            render_quick_pairing_section(ui, ctx_menu);
+                        });
+                        
+                        ui.add_space(col_spacing);
+                        
+                        // Lobby
+                        ui.vertical(|ui| {
+                            ui.set_width((mid_w - col_spacing) * 0.55);
+                            render_lobby_section(ui, ctx_menu);
+                        });
+                    });
+                });
+            });
+        });
+}
+
+/// Render website-style navbar
+fn render_navbar(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
+    
+    egui::TopBottomPanel::top("navbar")
+        .frame(egui::Frame {
+            fill: egui::Color32::from_rgba_unmultiplied(20, 20, 20, 240), // Dark with transparency
+            inner_margin: egui::Margin::symmetric(20, 15),
+            ..Default::default()
+        })
+        .show_separator_line(true)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // === LEFT SIDE: PLAY | WATCH | COMMUNITY | SOURCE CODE ===
+                ui.horizontal(|ui| {
+                    if nav_link(ui, "Play") {
+                        // Handle Play navigation - scroll to main content
+                        info!("[MENU] Play clicked - navigating to main game options");
+                        // TODO: Implement smooth scroll to main content
+                    }
+                    ui.add_space(30.0);
+                    if nav_link(ui, "Watch") {
+                        // Handle Watch navigation - placeholder for spectating feature
+                        info!("[MENU] Watch clicked - opening spectating placeholder");
+                        // TODO: Implement spectating interface
+                    }
+                    ui.add_space(30.0);
+                    if nav_link(ui, "Community") {
+                        // Handle Community navigation - placeholder for community features
+                        info!("[MENU] Community clicked - opening community placeholder");
+                        // TODO: Implement community features (forums, chat, etc.)
+                    }
+                    ui.add_space(30.0);
+                    if nav_link(ui, "Source Code") {
+                        // Open GitHub repository
+                        info!("[MENU] Source Code clicked - opening GitHub");
+                        if let Err(e) = webbrowser::open("https://github.com/trilltino/XFChess") {
+                            warn!("[MENU] Failed to open GitHub repository: {}", e);
+                        }
+                    }
+                });
+                
+                // === RIGHT SIDE: SIGN IN | REGISTER (conditional) ===
+                #[cfg(feature = "solana")]
+                let should_show_auth = {
+                    use crate::multiplayer::solana::integration::state::ProfileStatus;
+                    let has_profile = ctx_menu.solana_state.as_ref()
+                        .map(|s| s.profile_status == ProfileStatus::HasProfileWithUsername)
+                        .unwrap_or(false);
+                    let is_hot_wallet = ctx_menu.wallet.as_ref()
+                        .map(|w| w.keypair.is_some())
+                        .unwrap_or(false);
+                    
+                    !has_profile || is_hot_wallet
+                };
+                #[cfg(not(feature = "solana"))]
+                let should_show_auth = true;
+
+                if should_show_auth {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if nav_button(ui, "Register").clicked() {
+                            // Open website register
+                            info!("[MENU] Register clicked - opening website");
+                            if let Err(e) = webbrowser::open("http://localhost:7454/auth/register") {
+                                warn!("[MENU] Failed to open register page: {}", e);
+                            }
+                        }
+                        ui.add_space(15.0);
+                        if nav_button(ui, "Sign In")
+                            .on_hover_text("Sign in with email/password and pair your Solana wallet")
+                            .clicked()
+                        {
+                            // Open website sign in
+                            info!("[MENU] Sign In clicked - opening website");
+                            if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
+                                warn!("[MENU] Failed to open sign in page: {}", e);
+                            }
+                        }
+                    });
+                }
+            });
+        });
+}
+
+/// Render left tournaments section
+fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
+    ui.heading(
+        egui::RichText::new("PLAY")
+            .size(18.0)
+            .color(egui::Color32::WHITE)
+            .strong(),
+    );
+    ui.add_space(15.0);
+
+    // Create a lobby button
+    // Create a Lobby options
+    #[cfg(feature = "solana")]
+    let wallet_connected = ctx_menu.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
+    #[cfg(not(feature = "solana"))]
+    let wallet_connected = false;
+
+    ui.horizontal(|ui| {
+        // Free button
+        let free_btn = ui.add(egui::Button::new(
+            egui::RichText::new(if wallet_connected { "Free" } else { "Free 🔒" }).strong()
+        )).on_hover_text(if wallet_connected { "Host a free game" } else { "Connect wallet to play" });
+
+        if free_btn.clicked() {
+            if wallet_connected {
+                ctx_menu.menu_state.set(crate::core::MenuState::BraidLobby);
+            } else {
+                let _ = webbrowser::open("http://localhost:7454/auth/login");
+            }
+        }
+
+        ui.add_space(5.0);
+        
+        // Wager buttons
+        let stakes = [("£2", 0.05), ("£5", 0.12), ("£10", 0.25)];
+        for (label, amount) in stakes {
+            let btn_text = if wallet_connected { label.to_string() } else { format!("{} 🔒", label) };
+            let btn = ui.add(egui::Button::new(
+                egui::RichText::new(btn_text).strong().color(egui::Color32::from_rgb(200, 255, 200))
+            )).on_hover_text(if wallet_connected { format!("Host {} wager game", label) } else { "Connect wallet to wager".to_string() });
+
+            if btn.clicked() {
+                if wallet_connected {
+                    host_wager_lobby(ctx_menu, amount);
+                } else {
+                    let _ = webbrowser::open("http://localhost:7454/auth/login");
+                }
+            }
+            ui.add_space(5.0);
+        }
+    });
+
+    ui.add_space(8.0);
+    
+    // MoonPay moved to React app - users can top up after connecting wallet
+    
+    // Original Create a Lobby button as a header/default
+    #[cfg(feature = "solana")]
+    let wallet_connected = ctx_menu.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
+    #[cfg(not(feature = "solana"))]
+    let wallet_connected = false;
+
+    let lobby_btn_color = if wallet_connected {
+        egui::Color32::from_rgba_unmultiplied(60, 60, 60, 150)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(40, 40, 40, 80)
+    };
+    let lobby_btn_text = if wallet_connected {
+        egui::RichText::new("Create a Lobby").size(14.0).color(egui::Color32::WHITE).strong()
+    } else {
+        egui::RichText::new("Create a Lobby  🔒").size(14.0).color(egui::Color32::from_rgb(120, 120, 120)).strong()
+    };
+
+    let lobby_btn_resp = ui.add_sized(
+        [ui.available_width(), 30.0],
+        egui::Button::new(lobby_btn_text).fill(lobby_btn_color),
+    ).on_hover_text(if wallet_connected { "Create a free lobby" } else { "Connect your wallet to create a lobby" });
+
+    if lobby_btn_resp.clicked() {
+        if wallet_connected {
+            ctx_menu.menu_state.set(crate::core::MenuState::BraidLobby);
+        } else {
+            info!("[MENU] Lobby creation blocked — wallet not connected. Opening sign-in.");
+            if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
+                warn!("[MENU] Failed to open sign-in page: {}", e);
+            }
+        }
+    }
+
+    ui.add_space(8.0);
+
+    // Play the Computer Section
+    ui.group(|ui| {
+        ui.set_width(ui.available_width());
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("V S   S T O C K F I S H")
+                        .size(14.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        egui::RichText::new("PRESS SPACE TO PLAY")
-                            .size(20.0)
-                            .color(color)
-                            .strong(),
+                        egui::RichText::new(ctx_menu.ai_config.difficulty.description())
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(150, 150, 150)),
                     );
                 });
             });
+            
+            ui.add_space(8.0);
+            
+            // Difficulty Slider (Level 1-8)
+            let mut diff_val = ctx_menu.ai_config.difficulty.to_u8();
+            let slider = ui.add(
+                egui::Slider::new(&mut diff_val, 1..=8)
+                    .show_value(false)
+                    .trailing_fill(true)
+            );
+            
+            if slider.changed() {
+                ctx_menu.ai_config.difficulty = crate::game::ai::resource::AIDifficulty::from_u8(diff_val);
+            }
+            
+            ui.add_space(10.0);
+            
+            if ui.add_sized(
+                [ui.available_width(), 32.0],
+                egui::Button::new(
+                    egui::RichText::new("START GAME")
+                        .size(12.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                )
+                .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200)),
+            ).clicked() {
+                info!("[MENU] Play the Computer clicked at level {}", diff_val);
+                ctx_menu.ai_config.mode = GameMode::VsAI { 
+                    ai_color: crate::rendering::pieces::PieceColor::Black 
+                };
+                *ctx_menu.core_mode = CoreGameMode::SinglePlayer;
+                ctx_menu.next_state.set(GameState::InGame);
+            }
+        });
+    });
+
+    ui.add_space(30.0);
+    ui.separator();
+    ui.add_space(30.0);
+
+    ui.heading(
+        egui::RichText::new("OPEN TOURNAMENTS")
+            .size(18.0)
+            .color(egui::Color32::WHITE)
+            .strong(),
+    );
+    ui.add_space(15.0);
+    
+    // Dynamic tournament processing from VPS
+    let mut tournaments_found = false;
+    if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
+        for listing in &vps_state.cached_games {
+            if listing.game_type == "tournament" {
+                tournaments_found = true;
+                ui.group(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(&listing.display_name)
+                                .size(14.0)
+                                .color(egui::Color32::from_rgb(200, 200, 200))
+                                .strong(),
+                        );
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("Ranked") // Display ranked status 
+                                    .size(12.0)
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{} SOL", listing.stake_amount))
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(255, 215, 0)), // Gold color
+                                );
+                            });
+                        });
+                    });
+                });
+                ui.add_space(10.0);
+            }
+        }
     }
 
-    // Only show menu content if expanded - left side panel
-    if ctx.menu_expanded.expanded {
-        egui::SidePanel::left("main_menu_panel")
-            .resizable(false)
-            .frame(egui::Frame {
-                fill: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 150),
-                inner_margin: egui::Margin::same(20),
-                ..Default::default()
-            })
-            .show(&egui_ctx, |ui| {
-                // Show loading screen if assets aren't loaded yet
-                if !ctx.loading_progress.complete {
-                    render_loading_screen(ui, ctx);
-                    return;
-                }
+    if !tournaments_found {
+        ui.vertical_centered(|ui| {
+            ui.add_space(20.0);
+            ui.label(
+                egui::RichText::new("No active tournaments found.")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(100, 100, 100))
+                    .italics(),
+            );
+        });
+    }
+}
 
-                // "PRESS SPACE TO HIDE" hint at top
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+/// Render middle quick pairing section
+fn render_quick_pairing_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
+    ui.heading(
+        egui::RichText::new("WAGER MATCHMAKING")
+            .size(18.0)
+            .color(egui::Color32::WHITE)
+            .strong(),
+    );
+    ui.add_space(15.0);
+    
+    // Wager options mapped to Sol prices
+    let wagers = vec![
+        ("£2 Wager", 0.05_f64),
+        ("£5 Wager", 0.12_f64),
+        ("£10 Wager", 0.25_f64),
+    ];
+    
+    for (name, stake) in wagers {
+        ui.vertical(|ui| {
+            let btn_resp = ui.add_sized(
+                [ui.available_width(), 40.0],
+                egui::Button::new(
+                    egui::RichText::new(name)
+                        .size(14.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                )
+                .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 200)),
+            );
+            
+            if btn_resp.clicked() {
+                #[cfg(not(feature = "solana"))]
+                {
+                    error!("[MENU] Wager unavailable - Solana feature explicitly disabled.");
+                }
+                
+                #[cfg(feature = "solana")]
+                {
+                    let wallet_connected = ctx_menu.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
+                    
+                    if !wallet_connected {
+                        if let Some(solana_competitive) = ctx_menu.competitive.as_mut() {
+                            solana_competitive.last_error = Some("Please connect your Devnet wallet first!".to_string());
+                        }
+                    } else if let Some(vps_state) = ctx_menu.p2p_vps_state.as_mut() {
+                        // Attempt to find a matching game in the cached games that fits the wager target.
+                        if let Some(target_game) = vps_state.cached_games.iter().find(|g| (g.stake_amount - stake).abs() < 0.001) {
+                            info!("[VPS] Match found! Joining target game: {}", target_game.game_id);
+                            if let Some(node_id) = &ctx_menu.network_state.node_id {
+                                let my_node_id = bs58::encode(node_id.as_bytes()).into_string();
+                                let game_id = target_game.game_id.clone();
+                                let tx = vps_state.response_tx.clone();
+                                
+                                let stake_amount = target_game.stake_amount;
+                                bevy::tasks::IoTaskPool::get().spawn(async move {
+                                    match crate::multiplayer::vps_client::p2p_join_game(game_id.clone(), &my_node_id) {
+                                        Ok(host_node_id) => {
+                                            let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::JoinResult { 
+                                                game_id, 
+                                                host_node_id,
+                                                stake_amount,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::Error(format!("Join failed: {}", e)));
+                                        }
+                                    }
+                                }).detach();
+                            }
+                        } else {
+                            if let Some(solana_competitive) = ctx_menu.competitive.as_mut() {
+                                solana_competitive.last_error = Some("No wager match found on network.".to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            
+            #[cfg(feature = "solana")]
+            {
+                if let Some(solana_competitive) = ctx_menu.competitive.as_ref() {
+                    // Only show the transient warning when hovering near the newly clicked item
+                    if solana_competitive.last_error.is_some() && btn_resp.hovered() {
                         ui.label(
-                            egui::RichText::new("PRESS SPACE TO HIDE")
+                            egui::RichText::new(solana_competitive.last_error.as_ref().unwrap())
+                                .color(UiColors::DANGER)
+                                .size(11.0)
+                        );
+                    }
+                }
+            }
+        });
+        ui.add_space(8.0);
+    }
+}
+
+/// Render middle lobby section
+fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
+    ui.heading(
+        egui::RichText::new("LOBBY")
+            .size(18.0)
+            .color(egui::Color32::WHITE)
+            .strong(),
+    );
+    ui.add_space(15.0);
+
+    // Header for active games
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Active Games")
+                .size(16.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
+        
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button("🔄 Refresh").clicked() {
+                if let Some(vps_state) = ctx_menu.p2p_vps_state.as_mut() {
+                    vps_state.last_poll = None; // Force immediate poll in the next tick
+                }
+            }
+        });
+    });
+    
+    ui.add_space(10.0);
+
+    // Get real games from VPS state
+    let mut games_found = false;
+    if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
+        for listing in &vps_state.cached_games {
+            games_found = true;
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(&listing.display_name)
                                 .size(14.0)
+                                .color(egui::Color32::from_rgb(200, 200, 255))
+                                .strong(),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("{} min | {} SOL", listing.time_control_minutes, listing.stake_amount))
+                                .size(11.0)
                                 .color(egui::Color32::from_rgb(150, 150, 150)),
                         );
                     });
-                });
+                    
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        #[cfg(feature = "solana")]
+                        let wallet_ok = ctx_menu.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
+                        #[cfg(not(feature = "solana"))]
+                        let wallet_ok = false;
 
-                // Main Content Area
-                ui.vertical_centered(|ui| match current_substate {
-                    crate::core::MenuState::Main => {
-                        ui_main(ui, ctx);
-                    }
-                    crate::core::MenuState::ModeSelect => {
-                        ui_mode_select(ui, ctx);
-                    }
-                    crate::core::MenuState::BraidLobby => {
-                        ui_braid_lobby(ui, ctx);
-                    }
-                    #[cfg(feature = "solana")]
-                    crate::core::MenuState::SolanaLobby => {
-                        ui_solana_lobby(ui, ctx);
-                    }
-                    crate::core::MenuState::About => {
-                        ui_about(ui, ctx);
-                    }
-                    _ => {}
+                        let join_resp = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new(if wallet_ok { "JOIN" } else { "JOIN 🔒" })
+                                    .strong()
+                                    .color(if wallet_ok { egui::Color32::WHITE } else { egui::Color32::from_rgb(120, 120, 120) })
+                            )
+                        ).on_hover_text(if wallet_ok { "Join this game" } else { "Connect wallet to join" });
+
+                        if join_resp.clicked() {
+                            if !wallet_ok {
+                                info!("[LOBBY] Join blocked — wallet not connected. Opening sign-in.");
+                                if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
+                                    warn!("[MENU] Failed to open sign-in page: {}", e);
+                                }
+                            } else {
+                                info!("[LOBBY] Joining game: {}", listing.game_id);
+                                if let Some(node_id) = &ctx_menu.network_state.node_id {
+                                    let my_node_id = bs58::encode(node_id.as_bytes()).into_string();
+                                    let game_id = listing.game_id.clone();
+                                    let tx = vps_state.response_tx.clone();
+                                    let stake_amount = listing.stake_amount;
+                                    bevy::tasks::IoTaskPool::get().spawn(async move {
+                                        match crate::multiplayer::vps_client::p2p_join_game(game_id.clone(), &my_node_id) {
+                                            Ok(host_node_id) => {
+                                                let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::JoinResult { 
+                                                    game_id, 
+                                                    host_node_id,
+                                                    stake_amount,
+                                                });
+                                            }
+                                            Err(e) => {
+                                                let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::Error(format!("Join failed: {}", e)));
+                                            }
+                                        }
+                                    }).detach();
+                                }
+                            }
+                        }
+                    });
                 });
             });
+            ui.add_space(5.0);
+        }
     }
 
-    Ok(())
+    if !games_found {
+        ui.vertical_centered(|ui| {
+            ui.add_space(20.0);
+            ui.label(
+                egui::RichText::new("No public games available")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(100, 100, 100))
+                    .italics(),
+            );
+            ui.label(
+                egui::RichText::new("Host a lobby to start a new one")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(80, 80, 80)),
+            );
+        });
+    }
+}
+
+
+/// Helper to transition to Solana Lobby for hosting a specific wager
+fn host_wager_lobby(ctx: &mut MainMenuUIContext, sol_amount: f32) {
+    #[cfg(feature = "solana")]
+    {
+        let wallet_connected = ctx.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
+        if wallet_connected {
+            ctx.menu_state.set(crate::core::MenuState::SolanaLobby);
+            if let Some(lobby) = ctx.solana_lobby.as_mut() {
+                lobby.wager_sol = sol_amount;
+                lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
+                lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
+            }
+        } else {
+            info!("[MENU] Wager hosting blocked — wallet not connected. Opening sign-in.");
+            if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
+                warn!("[MENU] Failed to open sign-in page: {}", e);
+            }
+        }
+    }
+}
+
+/// Navbar link helper
+fn nav_link(ui: &mut egui::Ui, text: &str) -> bool {
+    let response = ui.label(
+        egui::RichText::new(text)
+            .size(14.0)
+            .color(egui::Color32::from_rgb(200, 200, 200)),
+    );
+    
+    if response.hovered() {
+        ui.painter().rect(
+            response.rect,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+            egui::Stroke::NONE,
+            egui::epaint::StrokeKind::Middle,
+        );
+    }
+    
+    response.clicked()
+}
+
+/// Navbar button helper
+fn nav_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let response = ui.add(
+        egui::Button::new(
+            egui::RichText::new(text)
+                .size(14.0)
+                .color(egui::Color32::WHITE),
+        )
+        .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100))),
+    );
+    
+    if response.hovered() {
+        ui.painter().rect(
+            response.rect,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 150)),
+            egui::epaint::StrokeKind::Middle,
+        );
+    }
+    
+    response
+}
+
+/// Loading screen for website menu
+fn render_loading_screen_website(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
+    let screen_rect = ctx.input(|i| i.content_rect());
+    
+    egui::CentralPanel::default()
+        .frame(egui::Frame {
+            fill: egui::Color32::from_rgb(0, 0, 0),
+            ..Default::default()
+        })
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(screen_rect.height() * 0.4);
+                
+                if ctx_menu.loading_progress.failed {
+                    ui.heading(
+                        egui::RichText::new("Asset Loading Failed")
+                            .size(24.0)
+                            .color(egui::Color32::from_rgb(220, 50, 50)),
+                    );
+                    
+                    if let Some(ref error_msg) = ctx_menu.loading_progress.error_message {
+                        ui.label(
+                            egui::RichText::new(error_msg)
+                                .size(14.0)
+                                .color(egui::Color32::from_rgb(220, 150, 150)),
+                        );
+                    }
+                    
+                    if ui.button("Continue Anyway").clicked() {
+                        ctx_menu.loading_progress.complete = true;
+                        ctx_menu.game_assets.loaded = true;
+                    }
+                } else {
+                    ui.heading(
+                        egui::RichText::new("Loading...")
+                            .size(24.0)
+                            .color(egui::Color32::WHITE),
+                    );
+                    
+                    let progress_bar = egui::ProgressBar::new(ctx_menu.loading_progress.progress)
+                        .desired_width(300.0)
+                        .show_percentage()
+                        .animate(true);
+                    
+                    ui.add(progress_bar);
+                }
+            });
+        });
 }
 
 fn render_loading_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
@@ -996,82 +1010,100 @@ fn render_loading_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
 // === SUB-MENUS ===
 
+/// Helper to create a styled bezel button with border and hover effect
+fn bezel_button(ui: &mut egui::Ui, text: &str, color: egui::Color32) -> bool {
+    let frame = egui::Frame {
+        fill: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100),
+        stroke: egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)),
+        inner_margin: egui::Margin::symmetric(12, 8),
+        ..Default::default()
+    };
+
+    let response = frame
+        .show(ui, |ui| {
+            // Use horizontal layout instead of vertical_centered
+            ui.horizontal_centered(|ui| {
+                ui.label(
+                    egui::RichText::new(text)
+                        .size(16.0)
+                        .color(color)
+                        .strong(),
+                );
+            })
+        })
+        .response;
+
+    // Add click interaction to the frame's response area
+    let interact_response = ui.interact(response.rect, response.id, egui::Sense::click());
+
+    // Hover effect
+    if interact_response.hovered() {
+        ui.painter().rect(
+            response.rect,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+            egui::Stroke::new(2.0, color),
+            egui::epaint::StrokeKind::Middle,
+        );
+    }
+
+    interact_response.clicked()
+}
+
+/// Compact bezel button for horizontal layouts (smaller padding)
+fn bezel_button_compact(ui: &mut egui::Ui, text: &str, color: egui::Color32) -> bool {
+    let frame = egui::Frame {
+        fill: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100),
+        stroke: egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)),
+        inner_margin: egui::Margin::symmetric(8, 4),
+        ..Default::default()
+    };
+
+    let response = frame
+        .show(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.label(
+                    egui::RichText::new(text)
+                        .size(14.0)
+                        .color(color)
+                        .strong(),
+                );
+            })
+        })
+        .response;
+
+    let interact_response = ui.interact(response.rect, response.id, egui::Sense::click());
+
+    if interact_response.hovered() {
+        ui.painter().rect(
+            response.rect,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+            egui::Stroke::new(2.0, color),
+            egui::epaint::StrokeKind::Middle,
+        );
+    }
+
+    interact_response.clicked()
+}
+
+
 fn ui_main(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ui.vertical_centered(|ui| {
         Layout::section_space(ui);
 
-        // Plain text menu items - no boxes
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("PLAY")
-                        .size(28.0)
-                        .color(egui::Color32::WHITE)
-                        .strong(),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
+        // Styled bezel buttons
+        if bezel_button(ui, "PLAY", egui::Color32::WHITE) {
             ctx.menu_state.set(crate::core::MenuState::ModeSelect);
         }
 
         Layout::item_space(ui);
 
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("PIECE VIEWER")
-                        .size(22.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
-            ctx.menu_state.set(crate::core::MenuState::PieceViewer);
-            ctx.menu_expanded.expanded = false;
-        }
-
-        Layout::small_space(ui);
-
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("ABOUT")
-                        .size(22.0)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
-            ctx.menu_state.set(crate::core::MenuState::About);
-        }
-
-        Layout::item_space(ui);
-
-        if ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new("EXIT")
-                        .size(18.0)
-                        .color(egui::Color32::from_rgb(200, 100, 100)),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
+        if bezel_button(ui, "EXIT", egui::Color32::from_rgb(200, 100, 100)) {
             std::process::exit(0);
         }
     });
 
-    Layout::small_space(ui);
-    ui.label(
-        egui::RichText::new("v0.1.0 - Bevy 0.17.3")
-            .size(12.0)
-            .color(egui::Color32::from_rgb(100, 100, 100)),
-    );
 }
 
 fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
@@ -1113,11 +1145,10 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         );
         Layout::small_space(ui);
 
-        if ui.button("♟ VS Local Friend (PvP)").clicked() {
+        if bezel_button(ui, "♟ VS Local Friend (PvP)", egui::Color32::WHITE) {
             ctx.ai_config.mode = GameMode::Multiplayer;
             *ctx.core_mode = CoreGameMode::MultiplayerLocal;
             ctx.next_state.set(GameState::InGame);
-            ctx.menu_expanded.expanded = false;
             info!("[MAIN_MENU] Starting Local PvP game");
         }
 
@@ -1142,47 +1173,67 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         };
 
         ui.horizontal(|ui| {
-            ui.label("VS Stockfish:");
-            for (label, difficulty) in [
-                ("Easy", crate::game::ai::resource::AIDifficulty::Easy),
-                ("Medium", crate::game::ai::resource::AIDifficulty::Medium),
-                ("Hard", crate::game::ai::resource::AIDifficulty::Hard),
-            ] {
-                if ui.button(label).clicked() {
-                    ctx.ai_config.mode = GameMode::VsAI { ai_color };
-                    ctx.ai_config.difficulty = difficulty;
-                    *ctx.core_mode = CoreGameMode::SinglePlayer;
-                    ctx.next_state.set(GameState::InGame);
-                    ctx.menu_expanded.expanded = false;
-                    info!("[MAIN_MENU] Starting VS Stockfish ({:?}) - AI plays {:?}", difficulty, ai_color);
-                }
+            ui.label("Difficulty:");
+            ui.add_space(8.0);
+            
+            let mut current_idx = ctx.ai_config.difficulty.to_u8();
+            if ui.add(egui::Slider::new(&mut current_idx, 1..=8).show_value(true)).changed() {
+                ctx.ai_config.difficulty = crate::game::ai::resource::AIDifficulty::from_u8(current_idx);
             }
         });
+
+        ui.label(
+            egui::RichText::new(ctx.ai_config.difficulty.description())
+                .size(15.0)
+                .color(egui::Color32::from_rgb(100, 200, 255))
+                .strong()
+        );
+
+        Layout::small_space(ui);
+
+        if bezel_button(ui, "🚀 PLAY VS COMPUTER", egui::Color32::from_rgb(100, 200, 255)) {
+            ctx.ai_config.mode = GameMode::VsAI { ai_color };
+            *ctx.core_mode = CoreGameMode::SinglePlayer;
+            ctx.next_state.set(GameState::InGame);
+            info!("[MAIN_MENU] Starting VS Computer ({})", ctx.ai_config.difficulty.description());
+        }
 
         Layout::item_space(ui);
         ui.separator();
         Layout::item_space(ui);
 
+        // --- SOLANA P2P ---
         #[cfg(feature = "solana")]
-        {
-            // --- SOLANA P2P ---
-            ui.label(
-                egui::RichText::new("SOLANA P2P")
-                    .size(20.0)
-                    .color(egui::Color32::from_rgb(255, 150, 100))
-                    .strong(),
-            );
-            Layout::small_space(ui);
+        ui.label(
+            egui::RichText::new("SOLANA P2P")
+                .size(20.0)
+                .color(egui::Color32::from_rgb(255, 150, 100))
+                .strong(),
+        );
+        #[cfg(feature = "solana")]
+        Layout::small_space(ui);
 
-            if ui.button("Solana Lobby").clicked() {
-                ctx.menu_state.set(crate::core::MenuState::SolanaLobby);
-                info!("[MAIN_MENU] Entering Solana Lobby");
-            }
-
-            Layout::item_space(ui);
-            ui.separator();
-            Layout::item_space(ui);
+        #[cfg(feature = "solana")]
+        if bezel_button(ui, "🏆 Tournaments", egui::Color32::from_rgb(255, 150, 100)) {
+            ctx.menu_state.set(crate::core::MenuState::Tournaments);
+            info!("[MAIN_MENU] Entering Tournament Browser");
         }
+
+        #[cfg(feature = "solana")]
+        Layout::small_space(ui);
+
+        #[cfg(feature = "solana")]
+        if bezel_button(ui, "Solana Lobby", egui::Color32::from_rgb(255, 150, 100)) {
+            ctx.menu_state.set(crate::core::MenuState::SolanaLobby);
+            info!("[MAIN_MENU] Entering Solana Lobby");
+        }
+
+        #[cfg(feature = "solana")]
+        Layout::item_space(ui);
+        #[cfg(feature = "solana")]
+        ui.separator();
+        #[cfg(feature = "solana")]
+        Layout::item_space(ui);
 
         // --- P2P CHESS (IROH/BRAID) ---
         ui.label(
@@ -1190,6 +1241,24 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 .size(20.0)
                 .color(egui::Color32::from_rgb(100, 200, 255))
                 .strong(),
+        );
+        Layout::small_space(ui);
+
+        // VPS Mode Indicator
+        let vps_status = if ctx.settings.use_vps_relay {
+            "VPS Mode: ON"
+        } else {
+            "VPS Mode: OFF"
+        };
+        let vps_color = if ctx.settings.use_vps_relay {
+            egui::Color32::from_rgb(100, 255, 150)
+        } else {
+            egui::Color32::from_rgb(150, 150, 150)
+        };
+        ui.label(
+            egui::RichText::new(vps_status)
+                .size(12.0)
+                .color(vps_color),
         );
         Layout::small_space(ui);
 
@@ -1205,8 +1274,8 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
             format!("{:.16}...", node_id_str) // Show first 16 chars
         } else {
-            "Initializing...".to_string()
-        };
+                "Initializing...".to_string()
+            };
 
         ui.label(
             egui::RichText::new(&node_id_display)
@@ -1215,7 +1284,7 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 .monospace(),
         );
 
-        if ui.button("📋 Copy Full Node ID").clicked() {
+        if bezel_button(ui, "📋 Copy Full Node ID", egui::Color32::from_rgb(100, 200, 255)) {
             if let Some(node_id) = &ctx.network_state.node_id {
                 let full_node_id = bs58::encode(node_id.as_bytes()).into_string();
                 ui.output_mut(|o| {
@@ -1268,9 +1337,9 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                                 "Opponent: {}...",
                                 &peer_id[..peer_id.len().min(16)]
                             ))
-                            .size(11.0)
-                            .color(egui::Color32::from_rgb(150, 200, 255))
-                            .monospace(),
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(150, 200, 255))
+                                .monospace(),
                         );
                     }
                 } else {
@@ -1292,18 +1361,69 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             _ => {}
         }
 
-        if ui.button("Start Hosting").clicked() {
+        ui.label(
+            egui::RichText::new("Lobby Name:")
+                .size(14.0)
+                .color(egui::Color32::from_rgb(150, 150, 150)),
+        );
+        ui.text_edit_singleline(&mut ctx.p2p_ui.lobby_name);
+        Layout::small_space(ui);
+
+        if bezel_button(ui, "Start Hosting", egui::Color32::from_rgb(100, 255, 150)) {
             // Set AI mode to multiplayer
             ctx.ai_config.mode = GameMode::Multiplayer;
-            // Emit host game event
-            ctx.host_game_events
-                .write(crate::multiplayer::HostGameEvent);
+            // Check if VPS relay is enabled
+            if ctx.settings.use_vps_relay {
+                if let Some(node_id) = &ctx.network_state.node_id {
+                    let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
+                    let game_id = format!("p2p_{}", rand::random::<u64>());
+                    let display_name = if ctx.p2p_ui.lobby_name.trim().is_empty() {
+                        "Guest Player".to_string()
+                    } else {
+                        ctx.p2p_ui.lobby_name.trim().to_string()
+                    };
+
+                    match crate::multiplayer::vps_client::p2p_announce_game(
+                        game_id.clone(),
+                        &node_id_str,
+                        &display_name,
+                        0.0,
+                        "P2P",
+                        10,
+                    ) {
+                        Ok(()) => {
+                            info!("[MAIN_MENU] Hosted game '{}' (ID: {}) via VPS", display_name, game_id);
+                            ctx.p2p_ui.clear_error();
+                            // Enable VPS relay mode
+                            if let Some(ref mut vps_state) = ctx.p2p_vps_state {
+                                crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, true);
+                            }
+                        }
+                        Err(e) => {
+                            ctx.p2p_ui.set_error(format!("VPS announce failed: {}", e));
+                            return;
+                        }
+                    }
+                }
+            } else {
+                // Direct P2P - disable VPS relay
+                if let Some(ref mut vps_state) = ctx.p2p_vps_state {
+                    crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, false);
+                }
+                // Emit host game event
+                ctx.host_game_events.write(crate::multiplayer::HostGameEvent);
+            }
             *ctx.core_mode = CoreGameMode::BraidMultiplayer;
+            ctx.p2p_state.status = crate::multiplayer::P2PConnectionStatus::Hosting;
             info!("[MAIN_MENU] Hosting P2P game");
         }
 
         ui.label(
-            egui::RichText::new("Wait for a peer to connect using your Node ID")
+            egui::RichText::new(if ctx.settings.use_vps_relay {
+                "Game will be listed on VPS relay"
+            } else {
+                "Wait for a peer to connect using your Node ID"
+            })
                 .size(12.0)
                 .color(egui::Color32::from_rgb(150, 150, 150)),
         );
@@ -1320,11 +1440,19 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         );
         Layout::small_space(ui);
 
-        ui.label(
-            egui::RichText::new("Enter Peer Node ID:")
-                .size(14.0)
-                .color(egui::Color32::from_rgb(150, 150, 150)),
-        );
+        if ctx.settings.use_vps_relay {
+            ui.label(
+                egui::RichText::new("Enter Peer Node ID (or use VPS lobby)")
+                    .size(14.0)
+                    .color(egui::Color32::from_rgb(150, 150, 150)),
+            );
+        } else {
+            ui.label(
+                egui::RichText::new("Enter Peer Node ID")
+                    .size(14.0)
+                    .color(egui::Color32::from_rgb(150, 150, 150)),
+            );
+        }
 
         // Text input for peer node ID (persisted across frames)
         let response = ui.text_edit_singleline(&mut ctx.p2p_ui.peer_input);
@@ -1363,15 +1491,45 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             );
         } else {
             let btn_label = if is_error { "🔗 Retry Connect" } else { "Connect to Peer" };
-            if ui.button(btn_label).clicked() {
+            if bezel_button(ui, btn_label, egui::Color32::from_rgb(255, 200, 100)) {
                 match ctx.p2p_ui.validate_node_id() {
                     Ok(()) => {
                         ctx.p2p_ui.clear_error();
                         ctx.ai_config.mode = GameMode::Multiplayer;
-                        ctx.connect_events
-                            .write(crate::multiplayer::ConnectToPeerEvent {
+                        // Check if VPS relay is enabled
+                        if ctx.settings.use_vps_relay {
+                            if let Some(node_id) = &ctx.network_state.node_id {
+                                let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
+                                match crate::multiplayer::vps_client::p2p_join_game(
+                                    ctx.p2p_ui.peer_input.trim().to_string(),
+                                    &node_id_str,
+                                ) {
+                                    Ok(Some(_host_node_id)) => {
+                                        info!("[MAIN_MENU] Joined game via VPS");
+                                        // Enable VPS relay mode
+                                        if let Some(ref mut vps_state) = ctx.p2p_vps_state {
+                                            crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, true);
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        ctx.p2p_ui.set_error("Game not found or rejected".to_string());
+                                        return;
+                                    }
+                                    Err(e) => {
+                                        ctx.p2p_ui.set_error(format!("VPS join failed: {}", e));
+                                        return;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Direct P2P - disable VPS relay
+                            if let Some(ref mut vps_state) = ctx.p2p_vps_state {
+                                crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, false);
+                            }
+                            ctx.connect_events.write(crate::multiplayer::ConnectToPeerEvent {
                                 peer_node_id: ctx.p2p_ui.peer_input.trim().to_string(),
                             });
+                        }
                         *ctx.core_mode = CoreGameMode::BraidMultiplayer;
                         info!(
                             "[MAIN_MENU] Joining P2P game with peer: {}",
@@ -1426,7 +1584,7 @@ fn ui_braid_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             ctx.braid_config.active = true;
             *ctx.core_mode = CoreGameMode::BraidMultiplayer;
             ctx.next_state.set(GameState::InGame);
-            ctx.menu_expanded.expanded = false;
+
         }
 
         Layout::item_space(ui);
@@ -1537,7 +1695,7 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             Layout::item_space(ui);
 
             match lobby.mode {
-                LobbyMode::Create => render_create_tab(ui, lobby),
+                LobbyMode::Create => render_create_tab(ui, lobby, &mut ctx.compliance),
                 LobbyMode::Join => render_join_tab(ui, lobby),
             }
         }
@@ -1715,6 +1873,7 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 fn render_create_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
+    compliance: &mut crate::ui::compliance_modal::ComplianceState,
 ) {
     let balance = lobby.cached_balance;
     let max_wager = ((balance - 0.002) as f32).max(0.0);
@@ -1744,18 +1903,33 @@ fn render_create_tab(
         && (lobby.wager_sol as f64) <= balance - 0.002
         && !matches!(lobby.status, LobbyStatus::Pending);
 
-    if ui.add_enabled(can_create, egui::Button::new("🎮 Create Game")).clicked() {
-        if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            spawn_create_game(
-                lobby.cached_rpc_url.clone(),
-                wallet_pubkey,
-                lobby.wager_lamports(),
-                tx,
-            );
-            lobby.tx_rx = Some(rx);
-            lobby.status = LobbyStatus::Pending;
-            info!("[SOLANA_LOBBY] Creating game with wager {} SOL", lobby.wager_sol);
+    let is_devnet = lobby.cached_rpc_url.contains("devnet");
+    
+    if ui.add_sized([ui.available_width(), 40.0], egui::Button::new(
+        egui::RichText::new("🎮 Create Game")
+            .size(16.0)
+            .strong()
+    ).fill(if can_create { egui::Color32::from_rgb(40, 100, 40) } else { egui::Color32::from_rgb(40, 40, 40) }))
+    .clicked() && can_create {
+        // Enforce CARF Compliance ONLY if not on devnet
+        if !is_devnet && compliance.status != crate::ui::compliance_modal::SubmissionStatus::Success {
+            compliance.show = true;
+            if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
+                compliance.pubkey = Some(wallet_pubkey.to_string());
+            }
+        } else {
+            if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                spawn_create_game(
+                    lobby.cached_rpc_url.clone(),
+                    wallet_pubkey,
+                    lobby.wager_lamports(),
+                    tx,
+                );
+                lobby.tx_rx = Some(rx);
+                lobby.status = LobbyStatus::Pending;
+                info!("[SOLANA_LOBBY] Creating game with wager {} SOL", lobby.wager_sol);
+            }
         }
     }
 
@@ -1776,14 +1950,27 @@ fn render_join_tab(
 
     let game_id_valid = lobby.game_id_input.trim().parse::<u64>().is_ok();
     let looking_up = matches!(lobby.status, LobbyStatus::Pending);
+    let already_fetched = matches!(lobby.status, LobbyStatus::Fetched { .. });
 
-    if ui.add_enabled(game_id_valid && !looking_up, egui::Button::new("🔍 Look Up")).clicked() {
+    // Auto-lookup if pre-filled but not yet looked up
+    if game_id_valid && !looking_up && !already_fetched && !lobby.game_id_input.is_empty() {
         if let Ok(game_id) = lobby.game_id_input.trim().parse::<u64>() {
             let (tx, rx) = tokio::sync::oneshot::channel();
             spawn_lookup_game(lobby.cached_rpc_url.clone(), game_id, tx);
             lobby.lookup_rx = Some(rx);
             lobby.status = LobbyStatus::Pending;
-            info!("[SOLANA_LOBBY] Looking up game {}", game_id);
+            info!("[SOLANA_LOBBY] Automatic lookup for game {}", game_id);
+        }
+    }
+
+    if ui.add_sized([ui.available_width(), 30.0], egui::Button::new("🔍 Manual Look Up"))
+        .clicked() && game_id_valid && !looking_up {
+        if let Ok(game_id) = lobby.game_id_input.trim().parse::<u64>() {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            spawn_lookup_game(lobby.cached_rpc_url.clone(), game_id, tx);
+            lobby.lookup_rx = Some(rx);
+            lobby.status = LobbyStatus::Pending;
+            info!("[SOLANA_LOBBY] Manual lookup for game {}", game_id);
         }
     }
 
@@ -1833,30 +2020,3 @@ fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubk
 }
 
 
-fn ui_about(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
-    Layout::small_space(ui);
-    if ui.button("⬅ Back").clicked() {
-        ctx.menu_state.set(crate::core::MenuState::Main);
-    }
-    Layout::section_space(ui);
-
-    ui.vertical_centered(|ui| {
-        ui.heading(TextStyle::heading("About XFChess", TextSize::MD));
-        Layout::item_space(ui);
-
-        ui.label(
-            egui::RichText::new("An experimental chess engine built with Bevy 0.18")
-                .color(egui::Color32::LIGHT_GRAY),
-        );
-        Layout::small_space(ui);
-
-        ui.label("Created by XF Team");
-        ui.label("Version 0.1.0");
-
-        Layout::item_space(ui);
-        ui.label(egui::RichText::new("Features:").strong());
-        ui.label("- 3D Graphics & Animations");
-        ui.label("- Minimax AI Agent");
-        ui.label("- TempleOS Tribute Mode");
-    });
-}

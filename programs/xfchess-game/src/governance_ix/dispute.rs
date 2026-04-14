@@ -1,3 +1,5 @@
+//! Instruction for opening a game dispute (e.g., cheating suspected).
+
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;

@@ -1,3 +1,5 @@
+//! Gameplay instructions handling chess moves during an active match.
+
 pub mod commit_batch;
 pub mod record;
 

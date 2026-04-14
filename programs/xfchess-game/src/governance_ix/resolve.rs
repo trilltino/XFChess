@@ -1,3 +1,5 @@
+//! Instruction for admins to resolve an open dispute and allocate the prize pool.
+
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;

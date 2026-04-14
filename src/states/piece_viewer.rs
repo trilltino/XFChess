@@ -9,7 +9,6 @@ use crate::ui::styles::*;
 use bevy::color::Color;
 
 use bevy::input::mouse::{AccumulatedMouseMotion, MouseWheel};
-use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 
@@ -51,47 +50,6 @@ impl Plugin for PieceViewerPlugin {
 pub struct SelectedPieceInfo {
     pub piece_type: Option<PieceType>,
     pub piece_color: Option<PieceColor>,
-}
-
-/// Observer function to open piece viewer when a piece is right-clicked
-///
-/// This can be attached to pieces in the menu or game to open the viewer.
-/// Uses right-click (Secondary button) to distinguish from game piece selection (left-click).
-pub fn on_piece_viewer_click(
-    click: On<Pointer<Click>>,
-    piece_query: Query<&Piece>,
-    mut selected_piece: ResMut<SelectedPieceInfo>,
-    mut menu_state: ResMut<NextState<MenuState>>,
-    game_state: Res<State<crate::core::GameState>>,
-) {
-    // Only open viewer on right-click (Secondary button)
-    // Left-click (Primary) is used for game piece selection
-    if click.event.button != PointerButton::Secondary {
-        return;
-    }
-
-    // Get piece info
-    if let Ok(piece) = piece_query.get(click.entity) {
-        selected_piece.piece_type = Some(piece.piece_type);
-        selected_piece.piece_color = Some(piece.color);
-
-        // Transition to viewer based on current game state
-        match *game_state.get() {
-            crate::core::GameState::MainMenu => {
-                // In menu: set MenuState to PieceViewer (substate)
-                menu_state.set(MenuState::PieceViewer);
-                info!(
-                    "[PIECE_VIEWER] Opening viewer for {:?} {:?}",
-                    piece.color, piece.piece_type
-                );
-            }
-            _ => {
-                // In game: could pause and show viewer, but for now viewer is menu-only
-                // This allows right-clicking pieces without opening viewer during gameplay
-                info!("[PIECE_VIEWER] Right-clicked piece in game state (viewer available from menu via 'Piece Viewer' button)");
-            }
-        }
-    }
 }
 
 /// Marker component for viewer camera

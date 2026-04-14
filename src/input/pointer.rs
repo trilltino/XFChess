@@ -6,7 +6,7 @@ use crate::rendering::pieces::Piece;
 use crate::rendering::utils::Square;
 use bevy::picking::events::{Out, Over, Pointer};
 use bevy::prelude::*;
-use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
+use bevy::window::{CursorIcon, SystemCursorIcon};
 
 /// Resource tracking the current cursor position within the game window
 #[derive(Resource, Debug, Reflect)]
@@ -80,30 +80,6 @@ impl Default for HoverMaterials {
 pub struct OriginalMaterials {
     /// Map of entity -> original material handle
     pub materials: std::collections::HashMap<Entity, Handle<StandardMaterial>>,
-}
-
-/// System that tracks cursor position in real-time
-pub fn cursor_tracking_system(
-    q_windows: Query<&Window, With<PrimaryWindow>>,
-    time: Res<Time>,
-    mut cursor_state: ResMut<CursorState>,
-) {
-    cursor_state.last_update += time.delta_secs();
-    if let Ok(window) = q_windows.single() {
-        cursor_state.position = window.cursor_position();
-        if cursor_state.last_update >= 1.0 {
-            if let Some(position) = cursor_state.position {
-                trace!(
-                    "[POINTER] Cursor position: ({:.1}, {:.1})",
-                    position.x,
-                    position.y
-                );
-            }
-            cursor_state.last_update = 0.0;
-        }
-    } else {
-        cursor_state.position = None;
-    }
 }
 
 /// Observer function for piece hover events (Pointer<Over>)
@@ -303,33 +279,4 @@ pub fn on_square_unhover(
 
     cursor_style.active_hovers.remove(&entity);
     cursor_style.update();
-}
-
-/// System that manages cursor icon changes based on hover state
-pub fn cursor_style_system(
-    cursor_style: Res<CursorStyle>,
-    mut commands: Commands,
-    mut q_window: Query<(Entity, Option<&mut CursorIcon>), With<PrimaryWindow>>,
-) {
-    if let Some((entity, maybe_icon)) = q_window.iter_mut().next() {
-        if let Some(mut icon) = maybe_icon {
-            if *icon != cursor_style.current {
-                *icon = cursor_style.current.clone();
-            }
-        } else {
-            commands.entity(entity).insert(cursor_style.current.clone());
-        }
-    }
-}
-
-/// Debug system that logs pointer interactions (rate-limited)
-#[derive(Resource, Debug)]
-pub struct PointerDebugTimer {
-    pub time: f32,
-}
-
-impl Default for PointerDebugTimer {
-    fn default() -> Self {
-        Self { time: 0.0 }
-    }
 }
