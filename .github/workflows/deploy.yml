@@ -26,13 +26,13 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: web-react/package-lock.json
+          cache-dependency-path: web-solana/package-lock.json
 
       - name: Install dependencies
-        run: cd web-react && npm ci
+        run: cd web-solana && npm ci
 
       - name: Build
-        run: cd web-react && npm run build
+        run: cd web-solana && npm run build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -40,7 +40,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./web-react/dist
+          path: ./web-solana/dist
 
   deploy:
     environment:
