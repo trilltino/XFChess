@@ -51,18 +51,19 @@ pub const MAX_WAGER_AMOUNT: u64 = 10 * 1_000_000_000; // 10 SOL in lamports
 // ---------------------------------------------------------------------------
 // Regional treasury fees (in lamports)
 // ---------------------------------------------------------------------------
+// Backend handles local currency conversion, contract uses lamports for on-chain validation
 
-/// UK: 50p GBP per wager/tournament game
+/// UK: 50p GBP per wager/tournament game (backend converts to lamports)
 pub const UK_FEE_LAMPORTS: u64 = 50_000_000; // 0.05 SOL (~50p GBP)
 
-/// Brazil: 10p BRL per wager/tournament game
-pub const BRAZIL_FEE_LAMPORTS: u64 = 10_000_000; // 0.01 SOL (~10p BRL)
+/// Brazil: 20p BRL per wager/tournament game (backend converts to lamports)
+pub const BRAZIL_FEE_LAMPORTS: u64 = 10_000_000; // 0.01 SOL (~20p BRL)
 
-/// Canada: 50p CAD per wager/tournament game
-pub const CANADA_FEE_LAMPORTS: u64 = 50_000_000; // 0.05 SOL (~50p CAD)
+/// Canada: 40 cents CAD per wager/tournament game (backend converts to lamports)
+pub const CANADA_FEE_LAMPORTS: u64 = 40_000_000; // 0.04 SOL (~40c CAD)
 
-/// Germany: 30 EUR per wager/tournament game
-pub const GERMANY_FEE_LAMPORTS: u64 = 30_000_000; // 0.03 SOL (~30 EUR)
+/// Germany: 30 cents EUR per wager/tournament game (backend converts to lamports)
+pub const GERMANY_FEE_LAMPORTS: u64 = 30_000_000; // 0.03 SOL (~30c EUR)
 
 /// ELO update fee per player
 pub const ELO_FEE_LAMPORTS: u64 = 5_000; // 0.000005 SOL per ELO update

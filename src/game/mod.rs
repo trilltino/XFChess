@@ -6,6 +6,7 @@ pub mod plugin;
 pub mod resources;
 pub mod sync;
 pub mod system_sets;
+pub mod camera_modes;
 pub mod systems;
 pub mod types;
 pub mod view_mode;

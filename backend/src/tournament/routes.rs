@@ -179,7 +179,9 @@ pub async fn join_tournament(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let player = body.get("player").and_then(|v| v.as_str()).ok_or(StatusCode::BAD_REQUEST)?;
-    let elo = body.get("elo").and_then(|v| v.as_u64()).unwrap_or(1200) as u32;
+    let elo = body.get("elo")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1200) as u32; // Default ELO of 1200 if not provided
 
     let mut slot = None;
     let ok = store.update(id, |t| {

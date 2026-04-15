@@ -217,10 +217,12 @@ pub async fn send_welcome_email(Json(req): Json<SignUpRequest>) -> Result<Status
         }],
     };
     
-    // Send via SendGrid API
+    // Send via SendGrid API (URL overridable for testing)
+    let sendgrid_url = env::var("SENDGRID_API_URL")
+        .unwrap_or_else(|_| "https://api.sendgrid.com/v3/mail/send".to_string());
     let client = reqwest::Client::new();
     let response = client
-        .post("https://api.sendgrid.com/v3/mail/send")
+        .post(&sendgrid_url)
         .header("Authorization", format!("Bearer {}", sendgrid_api_key))
         .json(&sendgrid_req)
         .send()
@@ -245,4 +247,213 @@ pub async fn send_welcome_email(Json(req): Json<SignUpRequest>) -> Result<Status
 pub fn pdf_mailer_routes() -> Router {
     Router::new()
         .route("/signup", post(send_welcome_email))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sign_up_request_serialization() {
+        let req = SignUpRequest {
+            email: "test@example.com".to_string(),
+            referral: Some("friend".to_string()),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_sign_up_request_without_referral() {
+        let req = SignUpRequest {
+            email: "test@example.com".to_string(),
+            referral: None,
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_sendgrid_request_serialization() {
+        let req = SendGridRequest {
+            personalizations: vec![Personalization {
+                to: vec![EmailAddress {
+                    email: "test@example.com".to_string(),
+                    name: Some("Test User".to_string()),
+                }],
+            }],
+            from: EmailAddress {
+                email: "noreply@xfchess.com".to_string(),
+                name: Some("XFChess".to_string()),
+            },
+            subject: "Test Subject".to_string(),
+            content: vec![Content {
+                content_type: "text/plain".to_string(),
+                value: "Test content".to_string(),
+            }],
+            attachments: vec![Attachment {
+                content: "base64content".to_string(),
+                filename: "test.pdf".to_string(),
+                content_type: "application/pdf".to_string(),
+                disposition: "attachment".to_string(),
+            }],
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_email_address_serialization() {
+        let addr = EmailAddress {
+            email: "test@example.com".to_string(),
+            name: Some("Test User".to_string()),
+        };
+
+        let json = serde_json::to_string(&addr);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_email_address_without_name() {
+        let addr = EmailAddress {
+            email: "test@example.com".to_string(),
+            name: None,
+        };
+
+        let json = serde_json::to_string(&addr);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_content_serialization() {
+        let content = Content {
+            content_type: "text/plain".to_string(),
+            value: "Test content".to_string(),
+        };
+
+        let json = serde_json::to_string(&content);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_attachment_serialization() {
+        let attachment = Attachment {
+            content: "base64content".to_string(),
+            filename: "test.pdf".to_string(),
+            content_type: "application/pdf".to_string(),
+            disposition: "attachment".to_string(),
+        };
+
+        let json = serde_json::to_string(&attachment);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_pdf_mailer_routes_creation() {
+        let router = pdf_mailer_routes();
+        assert!(router.not_found("test").is_some());
+    }
+
+    #[test]
+    fn test_email_format_validation() {
+        // Test valid email formats
+        let valid_emails = vec![
+            "test@example.com",
+            "user.name@domain.co.uk",
+            "user+tag@example.com",
+        ];
+        for email in valid_emails {
+            let req = SignUpRequest {
+                email: email.to_string(),
+                referral: None,
+            };
+            assert!(req.email.contains('@'));
+            assert!(req.email.contains('.'));
+        }
+    }
+
+    #[test]
+    fn test_referral_handling() {
+        // Test with referral
+        let req_with_referral = SignUpRequest {
+            email: "test@example.com".to_string(),
+            referral: Some("friend".to_string()),
+        };
+        assert_eq!(req_with_referral.referral, Some("friend".to_string()));
+
+        // Test without referral
+        let req_without_referral = SignUpRequest {
+            email: "test@example.com".to_string(),
+            referral: None,
+        };
+        assert_eq!(req_without_referral.referral, None);
+    }
+
+    #[test]
+    fn test_pdf_generation_basic() {
+        // Test that PDF generation doesn't panic with valid input
+        let result = generate_welcome_pdf("test@example.com", Some("friend"));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_pdf_generation_without_referral() {
+        // Test PDF generation without referral
+        let result = generate_welcome_pdf("test@example.com", None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_pdf_generation_invalid_email() {
+        // Test PDF generation with edge case email
+        let result = generate_welcome_pdf("@invalid.com", None);
+        // Should still generate PDF even with weird email
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_draw_text_function() {
+        // This test verifies draw_text function exists and has correct signature
+        // Actual PDF rendering tests would require more complex setup
+        let _test_signature = |layer: &PdfLayerReference, font: &IndirectFontRef, text: &str, y: f32, size: f32, x: f32| -> f32 {
+            draw_text(layer, font, text, y, size, x)
+        };
+        let _: fn(&PdfLayerReference, &IndirectFontRef, &str, f32, f32, f32) -> f32 = _test_signature;
+    }
+
+    #[test]
+    fn test_base64_encoding() {
+        // Test that base64 encoding works for PDF bytes
+        let pdf_bytes = vec![1u8, 2, 3, 4, 5];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&pdf_bytes);
+        assert!(!encoded.is_empty());
+    }
+
+    #[test]
+    fn test_attachment_filename() {
+        let attachment = Attachment {
+            content: "base64content".to_string(),
+            filename: "xfchess-welcome-guide.pdf".to_string(),
+            content_type: "application/pdf".to_string(),
+            disposition: "attachment".to_string(),
+        };
+        assert_eq!(attachment.filename, "xfchess-welcome-guide.pdf");
+        assert_eq!(attachment.content_type, "application/pdf");
+        assert_eq!(attachment.disposition, "attachment");
+    }
+
+    #[test]
+    fn test_personalization_structure() {
+        let personalization = Personalization {
+            to: vec![EmailAddress {
+                email: "test@example.com".to_string(),
+                name: Some("Test User".to_string()),
+            }],
+        };
+        assert_eq!(personalization.to.len(), 1);
+        assert_eq!(personalization.to[0].email, "test@example.com");
+    }
 }

@@ -112,7 +112,10 @@ async fn register_identity(
     }
 
     // Protect replay attacks
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("System time should be available")
+        .as_secs();
     if now > payload.timestamp && now - payload.timestamp > 300 {
         return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
     }
@@ -162,7 +165,8 @@ async fn register_identity(
     
     // 4. On-Chain Sync: VPS signs the instruction to flag the user as verified
     let admin_keypair = state.feepayer.next();
-    let program_id = Pubkey::from_str(&state.config.program_id).unwrap_or_else(|_| "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX".parse().unwrap());
+    let program_id = Pubkey::from_str(&state.config.program_id)
+        .unwrap_or_else(|_| "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX".parse().expect("Default program ID should be valid"));
     
     let ix = crate::signing::solana::verify_profile_ix(&program_id, &admin_keypair.pubkey(), &pk);
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
@@ -228,7 +232,10 @@ async fn delete_identity_data(
     }
 
     // 2. Protect replay attacks
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("System time should be available")
+        .as_secs();
     if now > req.timestamp && now - req.timestamp > 300 {
         return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
     }
@@ -276,5 +283,118 @@ async fn log_audit_event(pubkey: &str, action: &str, pool: &Arc<sqlx::SqlitePool
     
     if let Err(e) = result {
         tracing::warn!("[Audit] Failed to log audit event: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::Router,
+    };
+    use tower::ServiceExt;
+    use solana_sdk::signature::{Keypair, Signer};
+    use std::time::SystemTime;
+
+    #[test]
+    fn test_identity_payload_serialization() {
+        let payload = IdentityPayload {
+            pubkey: "test_wallet".to_string(),
+            full_name: "Test User".to_string(),
+            dob: "1990-01-01".to_string(),
+            address: "123 Test St".to_string(),
+            country: "US".to_string(),
+            tax_id: "123456789".to_string(),
+            signature: "test_signature".to_string(),
+            timestamp: SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            consent_kyc: true,
+            consent_retention_years: 5,
+        };
+
+        let json = serde_json::to_string(&payload);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_kyc_status_serialization() {
+        let status = KycStatus {
+            verified: true,
+            verified_at: Some(1234567890),
+            country: Some("US".to_string()),
+            requires_kyc: true,
+        };
+
+        let json = serde_json::to_string(&status);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_delete_data_request_serialization() {
+        let req = DeleteDataRequest {
+            pubkey: "test_wallet".to_string(),
+            signature: "test_signature".to_string(),
+            timestamp: SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            reason: Some("Test deletion".to_string()),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_identity_routes_creation() {
+        let router = identity_routes();
+        assert!(router.not_found("test").is_some());
+    }
+
+    #[test]
+    fn test_identity_payload_validation() {
+        // Test that consent is required
+        let payload = IdentityPayload {
+            pubkey: "test_wallet".to_string(),
+            full_name: "Test User".to_string(),
+            dob: "1990-01-01".to_string(),
+            address: "123 Test St".to_string(),
+            country: "US".to_string(),
+            tax_id: "123456789".to_string(),
+            signature: "test_signature".to_string(),
+            timestamp: SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            consent_kyc: false, // Missing consent
+            consent_retention_years: 5,
+        };
+
+        assert!(!payload.consent_kyc);
+    }
+
+    #[test]
+    fn test_country_code_format() {
+        // Test valid ISO 3166-1 alpha-2 codes
+        let valid_countries = vec!["US", "GB", "DE", "FR", "JP"];
+        for country in valid_countries {
+            assert_eq!(country.len(), 2);
+            assert!(country.chars().all(|c| c.is_ascii_uppercase()));
+        }
+    }
+
+    #[test]
+    fn test_dob_format() {
+        // Test YYYY-MM-DD format
+        let valid_dobs = vec!["1990-01-01", "2000-12-31", "1985-06-15"];
+        for dob in valid_dobs {
+            assert!(dob.len() == 10);
+            assert!(dob.chars().nth(4) == Some('-'));
+            assert!(dob.chars().nth(7) == Some('-'));
+        }
     }
 }

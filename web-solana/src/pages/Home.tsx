@@ -1,6 +1,9 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Globe, GitBranch } from 'lucide-react';
+import { Globe } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
+import chessboardSpace from '../assets/chessboard-space.png';
+import chessWageringUI from '../assets/chess-wagering-ui.png';
+import highFidelityChess from '../assets/high-fidelity-chess.png';
 
 export function Home() {
     const { connected } = useWallet();
@@ -22,7 +25,7 @@ export function Home() {
             }}>
                 <div className="section-overlay"></div>
                 <div className="section-content">
-                    <h1 className="feature-title">XFChess Play <span className="accent">Anywhere.</span></h1>
+                    <h1 className="feature-title">Play Anywhere.</h1>
 
                     <p className="feature-desc">
                         Master the ancient game of strategy on the blockchain. Challenge players worldwide, 
@@ -47,10 +50,10 @@ export function Home() {
                 <div className="section-overlay" style={{ background: 'linear-gradient(to left, rgba(8, 26, 20, 0.95), rgba(8, 26, 20, 0.2))' }}></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '40px' }}>
                     <div style={{ flex: '1', padding: '20px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.1)', backdropFilter: 'blur(10px)' }}>
-                        <img src="/chessboard-space.png" alt="Chessboard in space" style={{ display: 'block', maxWidth: '600px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
+                        <img src={chessboardSpace} alt="Chessboard in space" style={{ display: 'block', maxWidth: '600px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
                     </div>
                     <div style={{ flex: '1', textAlign: 'right' }}>
-                        <h2 className="feature-title">Strategic <span className="accent">Chess.</span></h2>
+                        <h2 className="feature-title">Strategic Gameplay.</h2>
 
                         <p className="feature-desc">
                             Experience the timeless game of chess with modern blockchain technology. 
@@ -61,11 +64,6 @@ export function Home() {
                             in ranked matches, climb the global leaderboards, and earn recognition 
                             as a true chess master in the decentralized arena.
                         </p>
-                        <div className="home-hero-actions right">
-                            <Link to="/how-to-play" className="btn btn-secondary" style={{ width: 'auto', padding: '0 32px' }}>
-                                Learn the Rules
-                            </Link>
-                        </div>
                     </div>
                 </div>
             </section>
@@ -76,8 +74,11 @@ export function Home() {
             }}>
                 <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '40px' }}>
-                    <div style={{ flex: '1' }}>
-                        <h2 className="feature-title">Chess <span className="accent">Wagering.</span></h2>
+                    <div style={{ flex: '1', padding: '20px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.1)', backdropFilter: 'blur(10px)' }}>
+                        <img src={chessWageringUI} alt="Chess wagering interface" style={{ display: 'block', maxWidth: '600px', width: '100%', height: 'auto', objectFit: 'contain', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
+                    </div>
+                    <div style={{ flex: '1', textAlign: 'right' }}>
+                        <h2 className="feature-title">Competitive Wagering.</h2>
 
                         <p className="feature-desc">
                             Challenge opponents in head-to-head matches with clear stakes.
@@ -88,7 +89,7 @@ export function Home() {
                             fair play and instant payouts to the victor.
                         </p>
                         
-                        <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+                        <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
                             {[
                                 { label: '$2' },
                                 { label: '$5' },
@@ -113,8 +114,26 @@ export function Home() {
                             ))}
                         </div>
                     </div>
+                </div>
+            </section>
+
+            {/* SECTION: HIGH FIDELITY */}
+            <section className="fullscreen-section" style={{
+                backgroundImage: `url('/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_tech_engineering_1775215698765.png')`
+            }}>
+                <div className="section-overlay"></div>
+                <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '40px' }}>
+                    <div style={{ flex: '1' }}>
+                        <h2 className="feature-title">High-Fidelity Gaming.</h2>
+
+                        <p className="feature-desc">
+                            Experience the most rigorous skill-based wagering platform on Solana. We've combined 
+                            WebGPU 3D graphics with a Rust-powered escrow engine to eliminate fraud and ensure 
+                            instant payouts. Stake. Checkmate. Settle.
+                        </p>
+                    </div>
                     <div style={{ flex: '1', padding: '20px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.1)', backdropFilter: 'blur(10px)' }}>
-                        <img src="/chess-wagering-ui.png" alt="Chess wagering interface" style={{ display: 'block', maxWidth: '600px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
+                        <img src={highFidelityChess} alt="High-fidelity chess gameplay" style={{ display: 'block', maxWidth: '600px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
                     </div>
                 </div>
             </section>
@@ -159,7 +178,7 @@ export function Home() {
             <section className="section">
                 <div style={{ textAlign: 'center', marginBottom: '80px' }}>
                     <Globe color="var(--primary)" size={48} style={{ margin: '0 auto 24px' }} />
-                    <h2 className="home-section-title centered">Global Chess Arena.</h2>
+                    <h2 className="home-section-title centered">Global Arena.</h2>
                     <p style={{ color: 'var(--text-dim)', fontSize: '1.2rem', maxWidth: '600px', margin: '0 auto' }}>
                         Compete in real-time matches against chess enthusiasts worldwide. Join ranked tournaments, 
                         climb the leaderboards, and prove your strategic mastery in the ultimate blockchain chess ecosystem.
@@ -167,21 +186,6 @@ export function Home() {
                 </div>
 
                 <div className="divider"></div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '40px' }}>
-                    <div style={{ maxWidth: '500px' }}>
-                        <div className="section-label">DEVELOPER ECOSYSTEM</div>
-                        <h3 style={{ fontSize: '1.8rem', marginBottom: '16px' }}>Build Your Chess World</h3>
-                        <p style={{ color: 'var(--text-dim)' }}>
-                            Leverage our open-source chess engine and blockchain infrastructure to create 
-                            custom game modes, tournament systems, and innovative chess experiences. 
-                            Deploy your own chess applications on the XFChess protocol.
-                        </p>
-                    </div>
-                    <button className="btn btn-secondary" style={{ width: 'auto', padding: '0 40px' }}>
-                        <GitBranch size={20} style={{ marginRight: '10px' }} /> Developer Portal
-                    </button>
-                </div>
             </section>
 
         </main>

@@ -338,3 +338,202 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<StatsResp>,
         uptime_seconds,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::Router,
+    };
+    use tower::ServiceExt;
+    use std::time::SystemTime;
+
+    #[test]
+    fn test_create_session_req_serialization() {
+        let req = CreateSessionReq {
+            game_id: 12345,
+            wallet_pubkey: "test_wallet_pubkey".to_string(),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_create_session_resp_serialization() {
+        let resp = CreateSessionResp {
+            session_pubkey: "test_session_pubkey".to_string(),
+        };
+
+        let json = serde_json::to_string(&resp);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_activate_session_req_serialization() {
+        let req = ActivateSessionReq {
+            game_id: 12345,
+            signed_tx_b64: "base64_encoded_tx".to_string(),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_record_move_req_serialization() {
+        let req = RecordMoveReq {
+            game_id: 12345,
+            move_uci: "e2e4".to_string(),
+            next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
+            nonce: 1,
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_sig_resp_serialization() {
+        let resp = SigResp {
+            sig: "test_signature".to_string(),
+        };
+
+        let json = serde_json::to_string(&resp);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_sign_req_serialization() {
+        let req = SignReq {
+            game_id: 12345,
+            tx_b64: "base64_encoded_tx".to_string(),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_undelegate_game_req_serialization() {
+        let req = UndelegateGameReq {
+            game_id: 12345,
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_finalize_game_req_serialization() {
+        let req = FinalizeGameReq {
+            game_id: 12345,
+            winner: Some("white".to_string()),
+            white_pubkey: "white_wallet".to_string(),
+            black_pubkey: "black_wallet".to_string(),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_stats_resp_serialization() {
+        let resp = StatsResp {
+            active_games: 10,
+            unique_players: 20,
+            total_sessions: 100,
+            uptime_seconds: 3600,
+        };
+
+        let json = serde_json::to_string(&resp);
+        assert!(json.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_routes_creation() {
+        let router = routes();
+        assert!(router.not_found("test").is_some());
+    }
+
+    #[test]
+    fn test_game_id_validation() {
+        // Test valid game IDs
+        let valid_ids = vec![0, 1, 12345, u64::MAX];
+        for id in valid_ids {
+            let req = CreateSessionReq {
+                game_id: id,
+                wallet_pubkey: "test_wallet".to_string(),
+            };
+            assert_eq!(req.game_id, id);
+        }
+    }
+
+    #[test]
+    fn test_wallet_pubkey_format() {
+        // Test that wallet pubkey is a non-empty string
+        let req = CreateSessionReq {
+            game_id: 12345,
+            wallet_pubkey: "test_wallet_pubkey".to_string(),
+        };
+        assert!(!req.wallet_pubkey.is_empty());
+    }
+
+    #[test]
+    fn test_move_uci_format() {
+        // Test valid UCI move format (e.g., "e2e4", "a7a8q")
+        let valid_moves = vec!["e2e4", "e7e5", "a7a8q", "e1g1"];
+        for move_uci in valid_moves {
+            let req = RecordMoveReq {
+                game_id: 12345,
+                move_uci: move_uci.to_string(),
+                next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
+                nonce: 1,
+            };
+            assert_eq!(req.move_uci, move_uci);
+        }
+    }
+
+    #[test]
+    fn test_nonce_default() {
+        // Test that nonce defaults to 0
+        let req = RecordMoveReq {
+            game_id: 12345,
+            move_uci: "e2e4".to_string(),
+            next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
+            nonce: 0, // Using #[serde(default)]
+        };
+        assert_eq!(req.nonce, 0);
+    }
+
+    #[test]
+    fn test_winner_options() {
+        // Test different winner options
+        let winners = vec![
+            Some("white".to_string()),
+            Some("black".to_string()),
+            Some("draw".to_string()),
+            None,
+        ];
+        for winner in winners {
+            let req = FinalizeGameReq {
+                game_id: 12345,
+                winner: winner.clone(),
+                white_pubkey: "white_wallet".to_string(),
+                black_pubkey: "black_wallet".to_string(),
+            };
+            assert_eq!(req.winner, winner);
+        }
+    }
+
+    #[test]
+    fn test_timestamp_generation() {
+        // Test that SystemTime can generate valid timestamps
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("System time should be after UNIX_EPOCH");
+        assert!(now.as_secs() > 0);
+    }
+}

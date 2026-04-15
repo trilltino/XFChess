@@ -141,7 +141,7 @@ pub fn profile_creation_ui_system(
                         ("Other", "Other"),
                     ];
                     
-                    egui::ComboBox::from_id_source("country_selector")
+                    egui::ComboBox::from_id_salt("country_selector")
                         .selected_text(if state.country_code.is_empty() {
                             "Select country..."
                         } else {

@@ -107,6 +107,7 @@ impl SessionKeyManager {
         let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
             .map_err(|e| format!("Failed to create cipher: {}", e))?;
         
+        #[allow(deprecated)]
         let nonce = Nonce::from_slice(b"xfchess sess"); // 12 bytes for AES-256-GCM
         let encrypted = cipher.encrypt(nonce, json.as_bytes())
             .map_err(|e| format!("Failed to encrypt: {}", e))?;
@@ -157,6 +158,7 @@ impl SessionKeyManager {
         let cipher = Aes256Gcm::new_from_slice(&encryption_key)
             .map_err(|e| format!("Failed to create cipher: {}", e))?;
         
+        #[allow(deprecated)]
         let nonce = Nonce::from_slice(b"xfchess sess"); // 12 bytes for AES-256-GCM
         let decrypted = cipher.decrypt(nonce, encrypted.as_ref())
             .map_err(|e| format!("Failed to decrypt: {}", e))?;

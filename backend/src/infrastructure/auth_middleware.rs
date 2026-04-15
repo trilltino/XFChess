@@ -24,20 +24,24 @@ pub async fn require_api_key(
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Get expected API key from environment
-    let expected_key = env::var("ADMIN_API_KEY").unwrap_or_default();
-    
-    // If no API key is configured, reject all requests (fail secure)
-    if expected_key.is_empty() {
-        tracing::warn!("[auth] ADMIN_API_KEY not configured, rejecting request");
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
+    // Get expected API key from environment with explicit error handling
+    let expected_key = match env::var("ADMIN_API_KEY") {
+        Ok(key) => key,
+        Err(env::VarError::NotPresent) => {
+            tracing::warn!("[auth] ADMIN_API_KEY not configured, rejecting request");
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        Err(env::VarError::NotUnicode(_)) => {
+            tracing::error!("[auth] ADMIN_API_KEY contains invalid UTF-8, rejecting request");
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    };
     
     // Extract X-API-Key header
     let provided_key = request
         .headers()
         .get("X-API-Key")
-        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.to_str().ok())  
         .map(|s| s.to_string())
         .unwrap_or_default();
     
@@ -68,12 +72,142 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt;
 
     #[test]
     fn test_constant_time_eq() {
+        // Basic equality
         assert!(constant_time_eq("secret123", "secret123"));
+        assert!(constant_time_eq("", ""));
+        assert!(constant_time_eq("a", "a"));
+        
+        // Inequality
         assert!(!constant_time_eq("secret123", "secret124"));
         assert!(!constant_time_eq("secret", "secret123"));
         assert!(!constant_time_eq("", "secret"));
+        assert!(!constant_time_eq("secret", ""));
+        
+        // Different lengths
+        assert!(!constant_time_eq("short", "longer"));
+        assert!(!constant_time_eq("a", "ab"));
+        
+        // Same length, different content
+        assert!(!constant_time_eq("abc", "def"));
+        assert!(!constant_time_eq("123", "456"));
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_missing_env_var() {
+        // Remove env var if it exists
+        std::env::remove_var("ADMIN_API_KEY");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_valid() {
+        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("X-API-Key", "test-secret-key")
+                    .body(Body::empty())
+                    .expect("Failed to build test request"),
+            )
+            .await
+            .expect("Failed to execute test request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_invalid() {
+        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("X-API-Key", "wrong-key")
+                    .body(Body::empty())
+                    .expect("Failed to build test request"),
+            )
+            .await
+            .expect("Failed to execute test request");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_missing_header() {
+        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_empty_header() {
+        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("X-API-Key", "")
+                    .body(Body::empty())
+                    .expect("Failed to build test request"),
+            )
+            .await
+            .expect("Failed to execute test request");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

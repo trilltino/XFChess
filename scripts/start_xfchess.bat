@@ -3,7 +3,7 @@ setlocal
 
 echo.
 echo  ============================================================
-echo   XFChess  ^|  Full Build + Launch (Debug)
+echo   XFChess  ^|  Full Build + Launch (RELEASE MODE)
 echo  ============================================================
 echo.
 
@@ -59,7 +59,7 @@ echo [4/6] Checking for target builds...
 if exist "%ROOT%\target\release\xfchess.exe" (
     echo  Using existing xfchess.exe from target/release
 ) else (
-    echo  Building xfchess...
+    echo  Building xfchess in RELEASE mode...
     cargo build --bin xfchess --features solana --release --quiet
     if %ERRORLEVEL% neq 0 (
         echo  ERROR: Game build failed.
@@ -71,7 +71,7 @@ if exist "%ROOT%\target\release\xfchess.exe" (
 if exist "%ROOT%\target\release\xfchess-tauri.exe" (
     echo  Using existing xfchess-tauri.exe from target/release
 ) else (
-    echo  Building xfchess-tauri...
+    echo  Building xfchess-tauri in RELEASE mode...
     cargo build -p xfchess-tauri --release --quiet
     if %ERRORLEVEL% neq 0 (
         echo  ERROR: Tauri build failed.
@@ -86,7 +86,7 @@ echo [5/7] Building backend HTTP server...
 if exist "%ROOT%\backend\target\release\signing-server-http.exe" (
     echo  Using existing signing-server-http.exe from backend/target/release
 ) else (
-    echo  Building signing-server-http...
+    echo  Building signing-server-http in RELEASE mode...
     pushd backend
     cargo build --bin signing-server-http --release --quiet
     if %ERRORLEVEL% neq 0 (
@@ -103,7 +103,7 @@ echo [6/7] Building VPS Admin...
 if exist "%ROOT%\backend\target\release\vps_admin.exe" (
     echo  Using existing vps_admin.exe from backend/target/release
 ) else (
-    echo  Building vps_admin...
+    echo  Building vps_admin in RELEASE mode...
     pushd backend
     cargo build --bin vps_admin --release --quiet
     if %ERRORLEVEL% neq 0 (
@@ -113,6 +113,12 @@ if exist "%ROOT%\backend\target\release\vps_admin.exe" (
     )
     popd
 )
+
+REM --- Backend URL is now compiled into binary via build.rs ---
+echo.
+echo [Config] Backend URL is compiled into binary (backend_url.txt).
+echo  Edit backend_url.txt and rebuild to change.
+echo.
 
 REM --- Generate API Key if not set ---
 echo.
@@ -131,14 +137,13 @@ if not defined ADMIN_API_KEY (
     echo  Using existing API key.
 )
 
-REM --- Start Backend Server ---
+REM --- Start Local Backend ---
 echo.
 echo  ============================================================
 echo   Build complete! Starting Backend Server...
 echo  ============================================================
 echo.
 echo [6/7] Starting Backend HTTP Server (port 8090)...
-set SIGNING_SERVICE_URL=http://localhost:8090
 start "XFChess Backend" /D "%ROOT%\backend" cmd /c "set ADMIN_API_KEY=%ADMIN_API_KEY% && set SIGNING_SERVICE_URL=http://localhost:8090 && target\release\signing-server-http.exe"
 echo  Backend server starting on port 8090...
 timeout /t 3 /nobreak >nul

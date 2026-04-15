@@ -4,12 +4,28 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>web-solana</title>
-    <script type="module" crossorigin src="/assets/index-BUbstm2B.js"></script>
+    <title>XFChess — On-Chain Chess on Solana</title>
+    <meta name="description" content="Play competitive chess with real SOL prizes. Decentralized tournaments on Solana." />
+    <!-- GitHub Pages SPA redirect handler -->
+    <script>
+      (function() {
+        var redirect = sessionStorage.redirect;
+        delete sessionStorage.redirect;
+        if (redirect && redirect !== location.href) {
+          history.replaceState(null, null, redirect);
+        }
+        var p = window.location.search.slice(1);
+        if (p.indexOf('p=') === 0) {
+          var decoded = decodeURIComponent(p.slice(2).replace(/&q=/, '?'));
+          history.replaceState(null, null, '/' + decoded);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-CsXZEUvb.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/chunk-CFjPhJqf.js">
     <link rel="modulepreload" crossorigin href="/assets/lit-DvAwKlSm.js">
     <link rel="modulepreload" crossorigin href="/assets/exports-BzlfmRjx.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-BB14Zx-X.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-Brb_nBjQ.css">
   </head>
   <body>
     <div id="root"></div>

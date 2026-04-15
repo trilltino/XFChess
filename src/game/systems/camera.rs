@@ -34,6 +34,7 @@
 //! - `reference/bevy/examples/3d/3d_scene.rs` - Camera transform manipulation
 //! - Total War series camera controls - RTS standard
 
+use crate::game::camera_modes::{CameraViewMode, CinematicSequence, TransitionType, CameraControlsDisabled};
 use crate::game::resources::Selection;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
@@ -447,9 +448,41 @@ impl CameraRotationState {
 
 /// System that detects turn changes and initiates camera rotation
 ///
-/// Camera stays fixed in AI mode since only one player is human.
-pub fn camera_rotate_on_turn_detection_system() {
-    // Camera stays fixed - always playing vs AI
+/// In local PvP mode, rotates camera 180° so each player sees the board from their side.
+/// In AI or online multiplayer mode, camera stays fixed on the human player's perspective.
+pub fn camera_rotate_on_turn_detection_system(
+    current_turn: Res<crate::game::resources::CurrentTurn>,
+    ai_config: Res<crate::game::ai::ChessAIResource>,
+    mut rotation_state: ResMut<CameraRotationState>,
+) {
+    use crate::game::ai::resource::GameMode;
+    use crate::rendering::pieces::PieceColor;
+
+    // Only auto-rotate in local PvP (both players human, no AI, no network)
+    let is_local_pvp = matches!(ai_config.mode, GameMode::Multiplayer);
+    if !is_local_pvp {
+        return;
+    }
+
+    // Detect turn change
+    let turn_color = match current_turn.color {
+        PieceColor::White => Some(crate::rendering::pieces::PieceColor::White),
+        PieceColor::Black => Some(crate::rendering::pieces::PieceColor::Black),
+    };
+
+    if turn_color == rotation_state.last_turn_color {
+        return; // No change
+    }
+
+    rotation_state.last_turn_color = turn_color;
+
+    // White's turn: camera at 0° (Z=-8 side), Black's turn: camera at 180° (Z=+15 side)
+    rotation_state.target_yaw = match current_turn.color {
+        PieceColor::White => 0.0,
+        PieceColor::Black => PI,
+    };
+    rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED;
+    rotation_state.is_rotating = true;
 }
 
 /// System that smoothly rotates camera around board center when turn switches
@@ -768,6 +801,7 @@ pub fn setup_game_camera(
     view_mode: Res<crate::game::view_mode::ViewMode>,
     mut query: Query<(&mut Transform, &mut Camera)>,
     connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
     ai_config: Res<crate::game::ai::ChessAIResource>,
 ) {
     // Only configure for standard views (TempleOS handles its own camera/view)
@@ -792,11 +826,20 @@ pub fn setup_game_camera(
                 crate::game::ai::resource::GameMode::VsAI { ai_color } => {
                     *ai_color == crate::rendering::pieces::PieceColor::White
                 }
-                _ => connection_state
-                    .as_ref()
-                    .and_then(|s| s.player_color)
-                    .map(|c| c == shakmaty::Color::Black)
-                    .unwrap_or(false),
+                _ => {
+                    let p2p_color = connection_state
+                        .as_ref()
+                        .and_then(|s| s.player_color)
+                        .map(|c| c == shakmaty::Color::Black);
+                    let braid_color = network_state.as_ref().and_then(|ns| {
+                        ns.active_session.as_ref().and_then(|session| {
+                            session.game_state.as_ref().map(|gs| {
+                                gs.my_color == crate::multiplayer::PlayerColor::Black
+                            })
+                        })
+                    });
+                    p2p_color.or(braid_color).unwrap_or(false)
+                }
             };
 
             let board_center = Vec3::new(3.5, 0.0, 3.5);
@@ -941,6 +984,7 @@ pub fn view_mode_toggle_input_system(
     persistent_camera: Res<crate::PersistentEguiCamera>,
     query: Query<(&mut Transform, &mut Camera)>,
     connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
     ai_config: Res<crate::game::ai::ChessAIResource>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyV) {
@@ -955,7 +999,301 @@ pub fn view_mode_toggle_input_system(
             view_mode.into(),
             query,
             connection_state,
+            network_state,
             ai_config,
         );
     }
+}
+
+/// System to cycle through camera view modes with 'R' key
+pub fn camera_mode_cycle_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut camera_view_mode: ResMut<CameraViewMode>,
+    mut cinematic_sequence: ResMut<CinematicSequence>,
+    mut commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    mut query: Query<(&mut Transform, &mut CameraController), With<Camera3d>>,
+    connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
+    ai_config: Res<crate::game::ai::ChessAIResource>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyR) {
+        let next_mode = camera_view_mode.next();
+        *camera_view_mode = next_mode;
+        info!("[CAMERA_MODE] Switched to {:?}", next_mode);
+
+        // Reset cinematic sequence when entering or leaving cinematic mode
+        if next_mode == CameraViewMode::Cinematic {
+            cinematic_sequence.reset();
+        }
+
+        // Apply camera position for the new mode
+        if let Some(camera_entity) = persistent_camera.entity {
+            if let Ok((mut transform, mut controller)) = query.get_mut(camera_entity) {
+                let board_center = Vec3::new(3.5, 0.0, 3.5);
+
+                match next_mode {
+                    CameraViewMode::TopDownWhite => {
+                        // 90° overhead, white at bottom
+                        let height = 12.0;
+                        let translation = Vec3::new(3.5, height, 3.5);
+                        let up_vec = Vec3::new(1.0, 0.0, 0.0);
+                        *transform = Transform::from_translation(translation).looking_at(board_center, up_vec);
+                        controller.target_zoom = height;
+                        controller.current_zoom = height;
+                        commands.entity(camera_entity).remove::<CameraControlsDisabled>();
+                    }
+                    CameraViewMode::TopDownBlack => {
+                        // 90° overhead, black at bottom
+                        let height = 12.0;
+                        let translation = Vec3::new(3.5, height, 3.5);
+                        let up_vec = Vec3::new(-1.0, 0.0, 0.0);
+                        *transform = Transform::from_translation(translation).looking_at(board_center, up_vec);
+                        controller.target_zoom = height;
+                        controller.current_zoom = height;
+                        commands.entity(camera_entity).remove::<CameraControlsDisabled>();
+                    }
+                    CameraViewMode::Fixed => {
+                        // Static angled view at center
+                        let height = 14.0;
+                        let distance = 6.0;
+                        
+                        // Determine player color for orientation
+                        let is_black_view = match &ai_config.mode {
+                            crate::game::ai::resource::GameMode::VsAI { ai_color } => {
+                                *ai_color == crate::rendering::pieces::PieceColor::White
+                            }
+                            _ => {
+                                let p2p_color = connection_state
+                                    .as_ref()
+                                    .and_then(|s| s.player_color)
+                                    .map(|c| c == shakmaty::Color::Black);
+                                let braid_color = network_state.as_ref().and_then(|ns| {
+                                    ns.active_session.as_ref().and_then(|session| {
+                                        session.game_state.as_ref().map(|gs| {
+                                            gs.my_color == crate::multiplayer::PlayerColor::Black
+                                        })
+                                    })
+                                });
+                                p2p_color.or(braid_color).unwrap_or(false)
+                            }
+                        };
+
+                        let camera_pos = if is_black_view {
+                            Vec3::new(3.5, height, 7.0 + distance)
+                        } else {
+                            Vec3::new(3.5, height, -distance)
+                        };
+
+                        *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+                        controller.target_zoom = height;
+                        controller.current_zoom = height;
+                        commands.entity(camera_entity).insert(CameraControlsDisabled);
+                    }
+                    CameraViewMode::Default => {
+                        // Standard 3D perspective - same as game setup
+                        let initial_height = 16.0;
+                        let distance_behind = 8.0;
+                        
+                        let is_black_view = match &ai_config.mode {
+                            crate::game::ai::resource::GameMode::VsAI { ai_color } => {
+                                *ai_color == crate::rendering::pieces::PieceColor::White
+                            }
+                            _ => {
+                                let p2p_color = connection_state
+                                    .as_ref()
+                                    .and_then(|s| s.player_color)
+                                    .map(|c| c == shakmaty::Color::Black);
+                                let braid_color = network_state.as_ref().and_then(|ns| {
+                                    ns.active_session.as_ref().and_then(|session| {
+                                        session.game_state.as_ref().map(|gs| {
+                                            gs.my_color == crate::multiplayer::PlayerColor::Black
+                                        })
+                                    })
+                                });
+                                p2p_color.or(braid_color).unwrap_or(false)
+                            }
+                        };
+
+                        let camera_pos = if is_black_view {
+                            Vec3::new(3.5, initial_height, 7.0 + distance_behind)
+                        } else {
+                            Vec3::new(3.5, initial_height, -distance_behind)
+                        };
+
+                        *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+                        controller.target_zoom = initial_height;
+                        controller.current_zoom = initial_height;
+                        controller.initialized = false;
+                        commands.entity(camera_entity).remove::<CameraControlsDisabled>();
+                    }
+                    CameraViewMode::Cinematic => {
+                        // Cinematic mode - controls disabled, sequence takes over
+                        commands.entity(camera_entity).insert(CameraControlsDisabled);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Component marker for cinematic fade overlay
+#[derive(Component)]
+pub struct CinematicFadeOverlayComponent;
+
+/// System to update cinematic camera with elaborate movements
+pub fn cinematic_camera_system(
+    time: Res<Time>,
+    mut sequence: ResMut<CinematicSequence>,
+    camera_view_mode: Res<CameraViewMode>,
+    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera3d>>,
+    mut commands: Commands,
+    fade_query: Query<Entity, With<CinematicFadeOverlayComponent>>,
+    mut color_query: Query<&mut BackgroundColor>,
+) {
+    if *camera_view_mode != CameraViewMode::Cinematic {
+        // Remove any existing fade overlay when not in cinematic mode
+        for entity in fade_query.iter() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    let dt = time.delta_secs();
+    let num_frames = sequence.keyframes.len();
+    let current_frame_idx = sequence.current_frame % num_frames;
+    let next_frame_idx = (sequence.current_frame + 1) % num_frames;
+
+    // Copy frame data to avoid borrow issues
+    let current_frame = sequence.keyframes[current_frame_idx].clone();
+    let next_frame = sequence.keyframes[next_frame_idx].clone();
+    let should_fade = sequence.should_fade_at_transition();
+
+    // Handle fading - spawn fade overlay if needed
+    if sequence.is_fading {
+        sequence.fade_time += dt;
+        let fade_t = (sequence.fade_time / sequence.fade_duration).clamp(0.0, 1.0);
+
+        // Ensure fade overlay exists
+        if fade_query.is_empty() {
+            commands.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                ZIndex(1000), // High z-index to cover everything
+                CinematicFadeOverlayComponent,
+                Name::new("Cinematic Fade Overlay"),
+            ));
+        }
+
+        if sequence.fade_out {
+            // Fading out (to black)
+            sequence.fade_progress = fade_t;
+            if fade_t >= 1.0 {
+                // Finished fade out, start fade in
+                sequence.fade_out = false;
+                sequence.fade_time = 0.0;
+                sequence.current_frame = next_frame_idx;
+            }
+        } else {
+            // Fading in (from black)
+            sequence.fade_progress = 1.0 - fade_t;
+            if fade_t >= 1.0 {
+                // Finished fade in
+                sequence.is_fading = false;
+                sequence.fade_progress = 0.0;
+                sequence.fade_time = 0.0;
+            }
+        }
+
+        // Update fade overlay color
+        for entity in fade_query.iter() {
+            if let Ok(mut bg) = color_query.get_mut(entity) {
+                *bg = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, sequence.fade_progress));
+            }
+        }
+        return;
+    } else {
+        // Remove fade overlay when not fading
+        for entity in fade_query.iter() {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    // Check if we need to start a fade at this transition
+    sequence.elapsed_in_frame += dt;
+    if sequence.elapsed_in_frame >= current_frame.duration_secs && should_fade {
+        sequence.is_fading = true;
+        sequence.fade_out = true;
+        sequence.fade_time = 0.0;
+        sequence.fade_progress = 0.0;
+        return;
+    }
+
+    // Normal interpolation
+    let t = (sequence.elapsed_in_frame / current_frame.duration_secs).min(1.0);
+    let smooth_t = t * t * (3.0 - 2.0 * t); // Smooth step interpolation
+
+    for (mut transform, mut controller) in camera_query.iter_mut() {
+        // Calculate position based on transition type
+        let new_position = match current_frame.transition_type {
+            TransitionType::Linear => {
+                current_frame.position.lerp(next_frame.position, smooth_t)
+            }
+            TransitionType::EaseInOut => {
+                // Cubic ease in-out
+                let ease_t = if t < 0.5 {
+                    4.0 * t * t * t
+                } else {
+                    1.0 - ((-2.0 * t + 2.0).powi(3) / 2.0)
+                };
+                current_frame.position.lerp(next_frame.position, ease_t)
+            }
+            TransitionType::Elliptical { center, axis_x, axis_z, start_angle, end_angle } => {
+                // Interpolate angle
+                let angle = start_angle + (end_angle - start_angle) * smooth_t;
+                
+                // Calculate position on ellipse
+                let x = center.x + axis_x * angle.cos();
+                let z = center.z + axis_z * angle.sin();
+                
+                // Interpolate height separately
+                let y = current_frame.position.lerp(next_frame.position, smooth_t).y;
+                
+                Vec3::new(x, y, z)
+            }
+        };
+
+        // Calculate look_at (can also be interpolated for smooth transitions)
+        let new_look_at = current_frame.look_at.lerp(next_frame.look_at, smooth_t);
+
+        // Interpolate zoom/height
+        let target_zoom = current_frame.target_zoom.lerp(next_frame.target_zoom, smooth_t);
+
+        // Apply transform
+        *transform = Transform::from_translation(new_position).looking_at(new_look_at, Vec3::Y);
+        controller.target_zoom = target_zoom;
+        controller.current_zoom = target_zoom;
+
+        // Advance to next frame when complete
+        if sequence.elapsed_in_frame >= current_frame.duration_secs && !sequence.is_fading {
+            sequence.elapsed_in_frame = 0.0;
+            sequence.current_frame = next_frame_idx;
+            info!("[CINEMATIC] Advanced to keyframe {}", sequence.current_frame);
+        }
+    }
+}
+
+/// Run condition to check if camera controls are enabled
+pub fn camera_controls_enabled(
+    camera_view_mode: Res<CameraViewMode>,
+    query: Query<(), (With<Camera3d>, With<CameraControlsDisabled>)>,
+) -> bool {
+    !camera_view_mode.is_fixed() && query.is_empty()
 }

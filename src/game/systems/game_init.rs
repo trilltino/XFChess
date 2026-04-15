@@ -270,12 +270,15 @@ pub fn initialize_players(
 /// frame pieces are spawned (avoids 1-frame edge cases).
 pub fn start_timer_when_ready(
     mut game_timer: ResMut<GameTimer>,
-    pieces_query: Query<(), With<crate::rendering::pieces::Piece>>,
+    mut engine: ResMut<ChessEngine>,
+    pieces_query: Query<(Entity, &Piece, &HasMoved)>,
     game_phase: Res<crate::game::resources::CurrentGamePhase>,
     mut ready_frames: Local<u32>,
+    mut engine_inited: Local<bool>,
 ) {
     if game_timer.is_running {
         *ready_frames = 0; // reset for next game
+        *engine_inited = false; // reset for next game
         return;
     }
 
@@ -285,6 +288,18 @@ pub fn start_timer_when_ready(
 
     if pieces_query.iter().count() >= 32 {
         *ready_frames += 1;
+
+        // Initialise engine once on the first frame pieces are present
+        if !*engine_inited {
+            engine.sync_ecs_to_engine(&pieces_query);
+            *engine_inited = true;
+            info!(
+                "[GAME_INIT] Engine initialised with {} pieces | FEN: {}",
+                pieces_query.iter().count(),
+                engine.current_fen()
+            );
+        }
+
         if *ready_frames >= 5 {
             game_timer.is_running = true;
             *ready_frames = 0;
@@ -307,6 +322,7 @@ pub fn start_timer_when_ready(
 /// before syncing to the engine.
 ///
 /// For usage examples, see `tests/systems_tests.rs`
+#[allow(dead_code)]
 pub fn initialize_engine_from_ecs(
     mut engine: ResMut<ChessEngine>,
     pieces_query: Query<(Entity, &Piece, &HasMoved)>,

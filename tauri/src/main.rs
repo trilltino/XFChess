@@ -732,7 +732,7 @@ fn main() {
             app.deep_link().on_open_url(move |event| {
                 for url in event.urls() {
                     println!("[DEEP-LINK] Received URL: {}", url);
-                    if url.starts_with("xfchess://launch") {
+                    if url.as_str().starts_with("xfchess://launch") {
                         println!("[DEEP-LINK] Launching game from protocol...");
                         // Launch game without showing Tauri window
                         let pk = wallet_clone.0.lock().unwrap().clone();

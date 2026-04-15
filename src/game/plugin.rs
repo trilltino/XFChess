@@ -67,7 +67,10 @@ impl Plugin for GamePlugin {
             .init_resource::<super::view_mode::ViewMode>()
             .init_resource::<super::view_mode::PlayerViewPreferences>()
             .init_resource::<PendingPromotion>()
-            .init_resource::<GameSounds>();
+            .init_resource::<GameSounds>()
+            .init_resource::<super::camera_modes::CameraViewMode>()
+            .init_resource::<super::camera_modes::CinematicSequence>()
+            .init_resource::<super::camera_modes::CinematicFadeOverlay>();
 
         // Register types for reflection (needed for inspector)
         app.register_type::<CurrentTurn>()
@@ -92,6 +95,7 @@ impl Plugin for GamePlugin {
             .register_type::<Player>()
             .register_type::<Players>()
             .register_type::<super::view_mode::ViewMode>()
+            .register_type::<super::camera_modes::CameraViewMode>()
             .add_message::<PromotionSelected>()
             .add_message::<crate::game::events::MoveMadeEvent>()
             .add_message::<crate::game::events::NetworkMoveEvent>()
@@ -128,11 +132,21 @@ impl Plugin for GamePlugin {
             Update,
             (
                 // Input set: Handle user input (camera only in TempleOS)
-                camera_movement_system.in_set(GameSystems::Input),
+                camera_movement_system
+                    .in_set(GameSystems::Input)
+                    .run_if(super::systems::camera::camera_controls_enabled),
                 camera_reset_system.in_set(GameSystems::Input),
-                camera_zoom_input_system.in_set(GameSystems::Input),
-                camera_zoom_system.in_set(GameSystems::Input),
-                camera_rotation_system.in_set(GameSystems::Input),
+                camera_zoom_input_system
+                    .in_set(GameSystems::Input)
+                    .run_if(super::systems::camera::camera_controls_enabled),
+                camera_zoom_system
+                    .in_set(GameSystems::Input)
+                    .run_if(super::systems::camera::camera_controls_enabled),
+                camera_rotation_system
+                    .in_set(GameSystems::Input)
+                    .run_if(super::systems::camera::camera_controls_enabled),
+                camera_mode_cycle_system.in_set(GameSystems::Input),
+                cinematic_camera_system.in_set(GameSystems::Input),
                 camera_rotate_on_turn_detection_system
                     .in_set(GameSystems::Input)
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
@@ -251,7 +265,6 @@ impl Plugin for GamePlugin {
                 initialize_players,
                 setup_game_scene,
                 setup_game_camera,
-                initialize_engine_from_ecs.after(crate::rendering::pieces::create_pieces),
             ),
         );
 

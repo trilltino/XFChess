@@ -92,6 +92,7 @@ impl GameStatistics {
         }
     }
 
+    #[allow(dead_code)]
     pub fn average_moves(&self) -> f32 {
         if self.games_played > 0 {
             self.total_moves as f32 / self.games_played as f32
@@ -100,6 +101,7 @@ impl GameStatistics {
         }
     }
 
+    #[allow(dead_code)]
     pub fn win_rate_white(&self) -> f32 {
         if self.games_played > 0 {
             self.white_wins as f32 / self.games_played as f32 * 100.0
@@ -108,6 +110,7 @@ impl GameStatistics {
         }
     }
 
+    #[allow(dead_code)]
     pub fn win_rate_black(&self) -> f32 {
         if self.games_played > 0 {
             self.black_wins as f32 / self.games_played as f32 * 100.0

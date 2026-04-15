@@ -34,35 +34,35 @@ impl CountryValidationRules {
                 requires_full_name: true,
                 requires_dob: true,
                 requires_address: true,
-                tax_id_pattern: Some(Regex::new(r"^[A-Z]{2}\d{6}[A-Z]$").unwrap()),
+                tax_id_pattern: Some(Regex::new(r"^[A-Z]{2}\d{6}[A-Z]$").expect("Invalid UK tax ID regex pattern")),
                 tax_id_field_name: "National Insurance Number (NI)",
             },
             "BR" => CountryValidationRules {
                 requires_full_name: true,
                 requires_dob: true,
                 requires_address: true,
-                tax_id_pattern: Some(Regex::new(r"^\d{11}$").unwrap()),
+                tax_id_pattern: Some(Regex::new(r"^\d{11}$").expect("Invalid Brazil tax ID regex pattern")),
                 tax_id_field_name: "CPF (Cadastro de Pessoas Físicas)",
             },
             "CA" => CountryValidationRules {
                 requires_full_name: true,
                 requires_dob: true,
                 requires_address: true,
-                tax_id_pattern: Some(Regex::new(r"^\d{9}$").unwrap()),
+                tax_id_pattern: Some(Regex::new(r"^\d{9}$").expect("Invalid Canada tax ID regex pattern")),
                 tax_id_field_name: "Social Insurance Number (SIN)",
             },
             "DE" => CountryValidationRules {
                 requires_full_name: true,
                 requires_dob: true,
                 requires_address: true,
-                tax_id_pattern: Some(Regex::new(r"^\d{11}$").unwrap()),
+                tax_id_pattern: Some(Regex::new(r"^\d{11}$").expect("Invalid Germany tax ID regex pattern")),
                 tax_id_field_name: "Tax ID (Steueridentifikationsnummer)",
             },
             "US" => CountryValidationRules {
                 requires_full_name: false,
                 requires_dob: false,
                 requires_address: false,
-                tax_id_pattern: Some(Regex::new(r"^\d{9}$").unwrap()),
+                tax_id_pattern: Some(Regex::new(r"^\d{9}$").expect("Invalid US tax ID regex pattern")),
                 tax_id_field_name: "Social Security Number (SSN) - Optional",
             },
             _ => CountryValidationRules {
@@ -195,7 +195,8 @@ impl IdentityVault {
         }
         let (nonce_bytes, ciphertext) = blob.split_at(12);
         let cipher = Aes256Gcm::new(&self.encryption_key.into());
-        let nonce_arr: [u8; 12] = nonce_bytes.try_into().unwrap();
+        let nonce_arr: [u8; 12] = nonce_bytes.try_into()
+            .expect("Nonce must be exactly 12 bytes");
         let nonce = Nonce::from(nonce_arr);
         
         let plaintext = cipher.decrypt(&nonce, ciphertext)

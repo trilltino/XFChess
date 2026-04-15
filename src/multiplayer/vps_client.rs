@@ -8,7 +8,10 @@ use bevy::prelude::info;
 const VPS_DEFAULT_URL: &str = "https://unrejuvenated-philologically-trudi.ngrok-free.dev";
 
 fn vps_base() -> String {
-    std::env::var("SIGNING_SERVICE_URL").unwrap_or_else(|_| VPS_DEFAULT_URL.to_string())
+    // Priority: runtime env var > compile-time BACKEND_URL > default
+    std::env::var("SIGNING_SERVICE_URL")
+        .or_else(|_| std::env::var("BACKEND_URL"))
+        .unwrap_or_else(|_| VPS_DEFAULT_URL.to_string())
 }
 
 fn client() -> reqwest::blocking::Client {

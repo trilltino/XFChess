@@ -7,6 +7,7 @@ use axum::{middleware, Router};
 use crate::signing::{AppState, build_router};
 use crate::signing::storage::tournament::TournamentStore;
 use crate::signing::routes::tournament as tournament_routes;
+use crate::signing::routes::matchmaking::matchmaking_routes;
 use crate::signing::routes::pdf_mailer::pdf_mailer_routes;
 use crate::infrastructure::auth_middleware::require_api_key;
 
@@ -36,11 +37,17 @@ pub fn build_app_router(
                 .layer(middleware::from_fn(require_api_key))
         );
 
+    // Build matchmaking router — uses the single shared matchmaking state
+    let matchmaking_router = Router::new()
+        .nest("/matchmaking", matchmaking_routes(signing_state.matchmaking.clone()));
+    // Note: matchmaking_routes provides its own state internally via with_state()
+
     // Build pdf mailer router (no auth required for signup)
     let pdf_router = pdf_mailer_routes();
 
     // Merge all routers
     signing_router
         .merge(tournament_router)
+        .merge(matchmaking_router)
         .merge(pdf_router)
 }

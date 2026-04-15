@@ -8,6 +8,7 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
+use crate::core::GameState;
 
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,12 @@ impl GamePopupQueue {
 // ---------------------------------------------------------------------------
 // Systems
 // ---------------------------------------------------------------------------
+
+/// Clear all popups when leaving the InGame state (prevents popup windows from
+/// blocking menu UI after ESC is pressed).
+fn clear_popups_on_exit(mut queue: ResMut<GamePopupQueue>) {
+    queue.entries.clear();
+}
 
 /// Tick lifetimes and remove expired / dismissed popups.
 fn tick_popups(mut queue: ResMut<GamePopupQueue>, time: Res<Time>) {
@@ -253,7 +260,11 @@ pub struct PopupPlugin;
 impl Plugin for PopupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamePopupQueue>()
-            .add_systems(Update, tick_popups)
-            .add_systems(EguiPrimaryContextPass, render_popups);
+            .add_systems(Update, tick_popups.run_if(in_state(GameState::InGame)))
+            .add_systems(
+                EguiPrimaryContextPass,
+                render_popups.run_if(in_state(GameState::InGame)),
+            )
+            .add_systems(OnExit(GameState::InGame), clear_popups_on_exit);
     }
 }

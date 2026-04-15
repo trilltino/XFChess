@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { WalletReadyState } from '@solana/wallet-adapter-base';
 import { Loader2, Shield, ShieldCheck, Trophy, Zap, ChevronRight, RefreshCw, Cpu, X } from 'lucide-react';
 import { getAnchorProgram, fetchPlayerProfile, createPlayerProfile } from '../lib/anchor_client';
 import { useNavigate } from 'react-router-dom';
@@ -52,7 +53,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 // ─── Flow steps ─────────────────────────────────────────────────────────────
-type FlowStep = 'credentials' | 'connect_wallet' | 'profile';
+type FlowStep = 'identity' | 'credentials' | 'wallet_login' | 'connect_wallet' | 'profile';
 
 interface AuthResult { token: string; username: string }
 
@@ -145,6 +146,118 @@ function ErrBox({ msg }: { msg: string }) {
         }}>⚠ {msg}</div>
     );
 }
+
+// ─── Identity picker ────────────────────────────────────────────────────────
+function IdentityStep({
+    onWallet, onEmail, onGuest,
+}: {
+    onWallet: () => void;
+    onEmail: (mode: 'login' | 'register') => void;
+    onGuest: () => void;
+}) {
+    return (
+        <div style={{ ...card, maxWidth: 440 }}>
+            <div style={{ textAlign: 'center', marginBottom: 32 }}>
+                <div style={{ fontSize: 36, marginBottom: 6 }}>♛</div>
+                <h2 style={{ fontSize: 22, fontWeight: 900, margin: '0 0 4px', letterSpacing: '-0.03em' }}>
+                    <span style={{ color: '#ad5c2f' }}>XF</span>Chess
+                </h2>
+                <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '8px 0 0' }}>
+                    How do you want to play?
+                </p>
+                <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, margin: '2px 0 0', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                    Choose your identity path
+                </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <button
+                    style={identityBtn}
+                    onClick={onWallet}
+                    onMouseEnter={e => applyHover(e, true)}
+                    onMouseLeave={e => applyHover(e, false)}
+                >
+                    <div style={identityIcon}><Shield size={20} color="#ad5c2f" /></div>
+                    <div style={{ flex: 1, textAlign: 'left' as const }}>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}>Login with Wallet</div>
+                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>Instant sign-in for existing users</div>
+                    </div>
+                    <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.25)' }} />
+                </button>
+
+                <button
+                    style={identityBtn}
+                    onClick={() => onEmail('register')}
+                    onMouseEnter={e => applyHover(e, true)}
+                    onMouseLeave={e => applyHover(e, false)}
+                >
+                    <div style={identityIcon}><Zap size={20} color="#ad5c2f" /></div>
+                    <div style={{ flex: 1, textAlign: 'left' as const }}>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}>Create Account</div>
+                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>Use Email + Password</div>
+                    </div>
+                    <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.25)' }} />
+                </button>
+
+                <button
+                    style={identityBtn}
+                    onClick={onGuest}
+                    onMouseEnter={e => applyHover(e, true)}
+                    onMouseLeave={e => applyHover(e, false)}
+                >
+                    <div style={identityIcon}><Cpu size={20} color="#ad5c2f" /></div>
+                    <div style={{ flex: 1, textAlign: 'left' as const }}>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}>Guest Mode (Hot Wallet)</div>
+                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>No setup — play instantly</div>
+                    </div>
+                    <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.25)' }} />
+                </button>
+            </div>
+
+            <p style={{ textAlign: 'center', marginTop: 24, fontSize: 11, color: 'rgba(255,255,255,0.18)' }}>
+                Already have an account?{' '}
+                <button
+                    onClick={() => onEmail('login')}
+                    style={{ background: 'none', border: 'none', color: '#ad5c2f', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}
+                >
+                    Sign in
+                </button>
+            </p>
+        </div>
+    );
+}
+
+function applyHover(e: React.MouseEvent<HTMLButtonElement>, on: boolean) {
+    const el = e.currentTarget as HTMLButtonElement;
+    el.style.borderColor = on ? '#ad5c2f' : 'rgba(255,255,255,0.08)';
+    el.style.background = on ? 'rgba(173,92,47,0.08)' : 'rgba(255,255,255,0.025)';
+}
+
+const identityBtn: React.CSSProperties = {
+    width: '100%',
+    padding: '16px 18px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(255,255,255,0.025)',
+    color: '#fff',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    transition: 'all 0.18s',
+};
+
+const identityIcon: React.CSSProperties = {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    background: 'rgba(173,92,47,0.12)',
+    border: '1px solid rgba(173,92,47,0.25)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+};
 
 // ─── Step 1: Email + Password ────────────────────────────────────────────────
 function CredentialsStep({
@@ -295,34 +408,60 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
             {err && <ErrBox msg={err} />}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {displayed.length === 0 && (
-                    <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>
-                        No supported wallets detected. Install Phantom or Solflare from the Chrome Web Store.
-                    </p>
-                )}
-                {displayed.map(w => (
-                    <button
-                        key={w.adapter.name}
-                        style={walletBtn}
-                        disabled={connecting}
-                        onClick={() => handleSelect(w.adapter.name)}
-                        onMouseEnter={e => {
-                            (e.currentTarget as HTMLButtonElement).style.borderColor = '#ad5c2f';
-                            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(173,92,47,0.12)';
-                        }}
-                        onMouseLeave={e => {
-                            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.1)';
-                            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
-                        }}
-                    >
-                        <img src={w.adapter.icon} alt={w.adapter.name} width={28} height={28} style={{ borderRadius: 6 }} />
-                        <span style={{ flex: 1 }}>Sign with {w.adapter.name}</span>
-                        {connecting
-                            ? <Loader2 size={16} style={{ animation: 'spin 0.7s linear infinite' }} />
-                            : <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.3)' }} />
-                        }
-                    </button>
-                ))}
+                {displayed.map(w => {
+                    const notInstalled =
+                        w.readyState === WalletReadyState.NotDetected ||
+                        w.readyState === WalletReadyState.Unsupported;
+                    if (notInstalled) {
+                        return (
+                            <a
+                                key={w.adapter.name}
+                                href={w.adapter.url}
+                                target='_blank'
+                                rel='noreferrer'
+                                style={{
+                                    ...walletBtn, textDecoration: 'none', opacity: 0.75,
+                                    border: '1px dashed rgba(255,255,255,0.15)',
+                                }}
+                                onMouseEnter={e => {
+                                    (e.currentTarget as HTMLAnchorElement).style.borderColor = '#ad5c2f';
+                                    (e.currentTarget as HTMLAnchorElement).style.opacity = '1';
+                                }}
+                                onMouseLeave={e => {
+                                    (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(255,255,255,0.15)';
+                                    (e.currentTarget as HTMLAnchorElement).style.opacity = '0.75';
+                                }}
+                            >
+                                <img src={w.adapter.icon} alt={w.adapter.name} width={28} height={28} style={{ borderRadius: 6, opacity: 0.6 }} />
+                                <span style={{ flex: 1, color: 'rgba(255,255,255,0.45)' }}>{w.adapter.name} — not installed</span>
+                                <span style={{ fontSize: 11, color: '#ad5c2f', fontWeight: 700 }}>Install →</span>
+                            </a>
+                        );
+                    }
+                    return (
+                        <button
+                            key={w.adapter.name}
+                            style={walletBtn}
+                            disabled={connecting}
+                            onClick={() => handleSelect(w.adapter.name)}
+                            onMouseEnter={e => {
+                                (e.currentTarget as HTMLButtonElement).style.borderColor = '#ad5c2f';
+                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(173,92,47,0.12)';
+                            }}
+                            onMouseLeave={e => {
+                                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.1)';
+                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
+                            }}
+                        >
+                            <img src={w.adapter.icon} alt={w.adapter.name} width={28} height={28} style={{ borderRadius: 6 }} />
+                            <span style={{ flex: 1 }}>Sign with {w.adapter.name}</span>
+                            {connecting
+                                ? <Loader2 size={16} style={{ animation: 'spin 0.7s linear infinite' }} />
+                                : <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.3)' }} />
+                            }
+                        </button>
+                    );
+                })}
 
                 {connected && publicKey && !localStorage.getItem('xfchess_use_hot') && (
                     <button
@@ -411,11 +550,7 @@ function WagerTable({ profile }: { profile: any }) {
                     <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                         Wager Activity
                     </span>
-                    <span style={{
-                        fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 20,
-                        background: 'rgba(234,179,8,0.12)', color: '#eab308',
-                        border: '1px solid rgba(234,179,8,0.3)', letterSpacing: '0.06em',
-                    }}>\u26a0 DEVNET</span>
+
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {priceLoading && <Loader2 size={12} style={{ color: '#ad5c2f', animation: 'spin 0.8s linear infinite' }} />}
@@ -833,9 +968,10 @@ function ProfileStep() {
     );
 }
 
-// ─── Root: orchestrates the three steps ─────────────────────────────────────
-export function SignIn({ defaultMode = 'login' }: { defaultMode?: 'login' | 'register' }) {
-    const [step, setStep] = useState<FlowStep>('credentials');
+// ─── Root: orchestrates the steps ───────────────────────────────────────────
+export function SignIn(_: { defaultMode?: 'login' | 'register' } = {}) {
+    const [step, setStep] = useState<FlowStep>('identity');
+    const [credMode, setCredMode] = useState<'login' | 'register'>('login');
     const [authUser, setAuthUser] = useState<AuthResult | null>(null);
     const { connected } = useWallet();
 
@@ -862,10 +998,26 @@ export function SignIn({ defaultMode = 'login' }: { defaultMode?: 'login' | 'reg
         setStep('profile');
     }, []);
 
+    const handleGuest = () => {
+        localStorage.setItem('xfchess_use_hot', 'true');
+        localStorage.setItem('xfchess_username', 'Guest');
+        setStep('profile');
+    };
+
     return (
         <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingBottom: 40 }}>
+            {step === 'identity' && (
+                <IdentityStep
+                    onWallet={() => setStep('wallet_login')}
+                    onEmail={(mode) => { setCredMode(mode); setStep('credentials'); }}
+                    onGuest={handleGuest}
+                />
+            )}
+            {step === 'wallet_login' && (
+                <ConnectWalletStep username="" onConnected={handleConnected} />
+            )}
             {step === 'credentials' && (
-                <CredentialsStep mode={defaultMode} onAuth={handleAuth} />
+                <CredentialsStep mode={credMode} onAuth={handleAuth} />
             )}
             {step === 'connect_wallet' && (
                 <ConnectWalletStep username={authUser?.username ?? 'Player'} onConnected={handleConnected} />

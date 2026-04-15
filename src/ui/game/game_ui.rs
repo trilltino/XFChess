@@ -464,6 +464,7 @@ fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
 }
 
 /// Render a sleek "CHECK" indicator at the top of the screen
+#[allow(dead_code)]
 fn render_check_banner(ctx: &egui::Context) {
     egui::Window::new("check_banner")
         .title_bar(false)

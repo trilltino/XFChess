@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 import bs58 from "bs58";
 
 // ---------------------------------------------------------------------------
@@ -65,13 +65,6 @@ const RED_BORDER = PRIMARY_BORDER;
 
 const CONSENT_VERSION = 1;
 
-const SPLASH_MSGS = [
-  "Initialising board…",
-  "Loading piece models…",
-  "Connecting to Solana…",
-  "Syncing game state…",
-  "Ready!",
-];
 
 // ---------------------------------------------------------------------------
 // Keyframes
@@ -530,13 +523,18 @@ function WalletStep({
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<"phantom" | "solflare" | null>(null);
 
+  const WALLET_META = {
+    phantom: { label: "Phantom", icon: "👻", installUrl: "https://phantom.app/", provider: () => (window as any).phantom?.solana },
+    solflare: { label: "Solflare", icon: "☀️", installUrl: "https://solflare.com/", provider: () => (window as any).solflare },
+  };
+
   const handleConnect = async (walletName: "phantom" | "solflare") => {
     setError(null);
     setConnecting(walletName);
     try {
-      const provider = walletName === "phantom" ? (window as any).phantom?.solana : (window as any).solflare;
+      const provider = WALLET_META[walletName].provider();
       if (!provider) {
-        throw new Error(`${walletName === "phantom" ? "Phantom" : "Solflare"} extension not detected.`);
+        throw new Error(`${WALLET_META[walletName].label} extension not detected.`);
       }
 
       const resp = await provider.connect();
@@ -593,20 +591,41 @@ function WalletStep({
       {error && <ErrorMsg msg={error} />}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {["phantom", "solflare"].map((w: any) => (
-          <button
-            key={w}
-            style={walletBtnStyle}
-            disabled={connecting !== null}
-            onClick={() => handleConnect(w)}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
-          >
-            <span style={{ fontSize: 20 }}>{w === "phantom" ? "👻" : "☀️"}</span>
-            <span style={{ flex: 1 }}>{w === "phantom" ? "Phantom" : "Solflare"}</span>
-            {connecting === w && <div style={{ width: 16, height: 16, border: `2px solid ${PRIMARY_BORDER}`, borderTop: `2px solid ${PRIMARY}`, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
-          </button>
-        ))}
+        {(["phantom", "solflare"] as const).map((w) => {
+          const meta = WALLET_META[w];
+          const isInstalled = !!meta.provider();
+          if (!isInstalled) {
+            return (
+              <a
+                key={w}
+                href={meta.installUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{ ...walletBtnStyle, textDecoration: "none", opacity: 0.75, border: `1px dashed ${BORDER}` }}
+                onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLAnchorElement).style.opacity = "1"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = BORDER; (e.currentTarget as HTMLAnchorElement).style.opacity = "0.75"; }}
+              >
+                <span style={{ fontSize: 20 }}>{meta.icon}</span>
+                <span style={{ flex: 1, color: TEXT_DIM }}>{meta.label} — not installed</span>
+                <span style={{ fontSize: 11, color: PRIMARY, fontWeight: 700 }}>Install →</span>
+              </a>
+            );
+          }
+          return (
+            <button
+              key={w}
+              style={walletBtnStyle}
+              disabled={connecting !== null}
+              onClick={() => handleConnect(w)}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
+            >
+              <span style={{ fontSize: 20 }}>{meta.icon}</span>
+              <span style={{ flex: 1 }}>{meta.label}</span>
+              {connecting === w && <div style={{ width: 16, height: 16, border: `2px solid ${PRIMARY_BORDER}`, borderTop: `2px solid ${PRIMARY}`, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
+            </button>
+          );
+        })}
       </div>
 
       <button onClick={onBack} style={{ width: "100%", marginTop: 20, background: "none", border: "none", color: TEXT_MUTED, fontSize: 12, textDecoration: "underline" }}>
@@ -620,28 +639,6 @@ function WalletStep({
 // Step 3 — Entering Splash
 // ---------------------------------------------------------------------------
 function SplashStep({ username, onComplete }: { username: string; onComplete: () => void }) {
-  const [msgIdx, setMsgIdx] = useState(0);
-  const [done, setDone] = useState(false);
-  const calledRef = useRef(false);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setMsgIdx(i => {
-        const next = i + 1;
-        if (next >= SPLASH_MSGS.length) { clearInterval(interval); setDone(true); return i; }
-        return next;
-      });
-    }, 600);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    if (done && !calledRef.current) {
-      calledRef.current = true;
-      setTimeout(onComplete, 500);
-    }
-  }, [done, onComplete]);
-
   return (
     <div style={{ textAlign: "center" as const, position: "relative" as const, zIndex: 1, animation: "fadeUp 0.5s ease" }}>
       <div style={{
@@ -658,26 +655,22 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
         }}>XFChess</div>
       </div>
 
-      <p style={{ fontSize: 14, color: TEXT_DIM, marginBottom: 4 }}>
+      <p style={{ fontSize: 14, color: TEXT_DIM, marginBottom: 24 }}>
         Welcome, <span style={{ color: TEXT, fontWeight: 600 }}>{username}</span>
       </p>
 
-      <div style={{
-        width: 280, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.08)",
-        margin: "24px auto", overflow: "hidden",
-      }}>
-        <div style={{
-          height: "100%", borderRadius: 2, background: `linear-gradient(90deg, ${PRIMARY}, ${ACCENT})`,
-          animation: `progress ${(SPLASH_MSGS.length * 0.6) + 0.5}s linear forwards`,
-        }} />
-      </div>
-
-      <p key={msgIdx} style={{
-        fontSize: 13, color: TEXT_MUTED, letterSpacing: "0.04em", minHeight: 20,
-        animation: "fadeUp 0.3s ease",
-      }}>
-        {SPLASH_MSGS[msgIdx]}
-      </p>
+      <button
+        onClick={onComplete}
+        style={{
+          padding: "14px 32px", borderRadius: 10, border: "none",
+          background: `linear-gradient(135deg, ${PRIMARY}, #8c4a26)`,
+          color: "#fff", fontSize: 15, fontWeight: 700, letterSpacing: "0.02em",
+          cursor: "pointer", boxShadow: `0 4px 20px rgba(173,92,47,0.35)`,
+          transition: "all 0.2s",
+        }}
+      >
+        View Profile Hub →
+      </button>
     </div>
   );
 }

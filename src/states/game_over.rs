@@ -1,95 +1,95 @@
 //! Game over screen plugin
 //!
 //! Displayed when a game concludes (checkmate, stalemate, or resignation).
-//! Shows game results, statistics, and options for next actions.
+//! Shows a small translucent popup with game results and cinematic camera in background.
+//! For Solana wager games, displays detailed fee breakdown from smart contract.
 
-use crate::core::{GameState, GameStatistics};
+use crate::core::GameState;
+use crate::game::camera_modes::{CameraViewMode, CinematicSequence};
 use crate::game::resources::{GameOverState, MoveHistory};
-use crate::ui::styles::*;
+use crate::ui::menus::game_over_popup::GameOverPopupPlugin;
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 
-/// Plugin for game over screen
+/// Plugin for game over screen with cinematic camera and popup UI
 pub struct GameOverPlugin;
 
 impl Plugin for GameOverPlugin {
     fn build(&self, app: &mut App) {
+        // Add the popup plugin
+        app.add_plugins(GameOverPopupPlugin);
+
+        // Setup camera and record stats when entering GameOver
         app.add_systems(
             OnEnter(GameState::GameOver),
-            (setup_game_over_camera, record_game_stats),
-        )
-        .add_systems(
-            EguiPrimaryContextPass,
-            game_over_ui_wrapper.run_if(in_state(GameState::GameOver)),
+            (setup_cinematic_camera, record_game_stats),
+        );
+
+        // Reset camera when leaving GameOver
+        app.add_systems(
+            OnExit(GameState::GameOver),
+            reset_camera_on_exit,
         );
     }
 }
 
-/// Wrapper for game_over_ui that handles Result
-fn game_over_ui_wrapper(
-    contexts: EguiContexts,
-    next_state: ResMut<NextState<GameState>>,
-    game_over: Res<GameOverState>,
-    stats: Res<GameStatistics>,
-) {
-    let _ = game_over_ui(contexts, next_state, game_over, stats);
-}
-
-/// Marker component for game over camera
+/// Marker component for tracking that cinematic mode was auto-started
 #[derive(Component)]
-struct GameOverCamera;
+pub struct AutoCinematicMarker;
 
-/// Setup camera for game over screen
-/// Uses the persistent Egui camera and updates its transform
-/// Handles case where camera might not exist yet
-fn setup_game_over_camera(
+/// Setup cinematic camera for game over screen
+/// Automatically switches to cinematic mode for dramatic effect
+fn setup_cinematic_camera(
+    mut camera_view_mode: ResMut<CameraViewMode>,
+    mut cinematic_sequence: ResMut<CinematicSequence>,
     persistent_camera: Res<crate::PersistentEguiCamera>,
-    mut camera_query: Query<
-        &mut Transform,
-        (With<bevy_egui::PrimaryEguiContext>, Without<GameOverCamera>),
-    >,
     mut commands: Commands,
 ) {
-    info!(
-        "[GAME_OVER] DEBUG: Persistent camera entity: {:?}",
-        persistent_camera.entity
-    );
+    info!("[GAME_OVER] Auto-switching to cinematic camera mode");
 
-    // Update persistent camera transform for game over view
+    // Switch to cinematic camera mode
+    *camera_view_mode = CameraViewMode::Cinematic;
+
+    // Reset and start the cinematic sequence
+    cinematic_sequence.reset();
+
+    // Mark the camera as auto-started so we can reset it later
     if let Some(camera_entity) = persistent_camera.entity {
-        info!(
-            "[GAME_OVER] DEBUG: Attempting to query camera entity {:?}",
-            camera_entity
-        );
-        match camera_query.get_mut(camera_entity) {
-            Ok(mut transform) => {
-                info!("[GAME_OVER] DEBUG: Successfully queried camera transform");
-                *transform = Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y);
-                info!("[GAME_OVER] Updated persistent camera transform for game over");
-
-                // Add game over marker to persistent camera
-                info!("[GAME_OVER] DEBUG: Adding GameOverCamera component");
-                commands.entity(camera_entity).insert(GameOverCamera);
-                info!("[GAME_OVER] DEBUG: GameOverCamera component added successfully");
-            }
-            Err(e) => {
-                error!("[GAME_OVER] ERROR: Persistent camera entity {:?} exists but query failed: {:?}", camera_entity, e);
-                error!("[GAME_OVER] ERROR: Query filter: With<PrimaryEguiContext>, Without<GameOverCamera>");
-            }
-        }
-    } else {
-        error!("[GAME_OVER] ERROR: Persistent camera not yet created. Entity: None");
-        error!("[GAME_OVER] ERROR: This should not happen for GameOver state (not default state)");
+        commands.entity(camera_entity).insert(AutoCinematicMarker);
     }
 
-    info!("[GAME_OVER] Camera setup complete");
+    info!("[GAME_OVER] Cinematic camera activated");
+}
+
+/// Reset camera to default mode when leaving game over state
+fn reset_camera_on_exit(
+    mut camera_view_mode: ResMut<CameraViewMode>,
+    mut commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    marked_cameras: Query<Entity, With<AutoCinematicMarker>>,
+) {
+    info!("[GAME_OVER] Resetting camera to default mode");
+
+    // Reset camera view mode to Default
+    *camera_view_mode = CameraViewMode::Default;
+
+    // Remove the auto-cinematic marker from camera
+    for entity in marked_cameras.iter() {
+        commands.entity(entity).remove::<AutoCinematicMarker>();
+    }
+
+    // Also try to remove from persistent camera if it exists
+    if let Some(camera_entity) = persistent_camera.entity {
+        commands.entity(camera_entity).remove::<AutoCinematicMarker>();
+    }
+
+    info!("[GAME_OVER] Camera reset complete");
 }
 
 /// Record game statistics when entering game over state
 fn record_game_stats(
     game_over: Res<GameOverState>,
     move_history: Res<MoveHistory>,
-    mut stats: ResMut<GameStatistics>,
+    mut stats: ResMut<crate::core::GameStatistics>,
 ) {
     let winner = game_over.winner();
     let moves = move_history.len() as u32;
@@ -101,77 +101,3 @@ fn record_game_stats(
     );
 }
 
-/// Game over UI
-fn game_over_ui(
-    mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<GameState>>,
-    game_over: Res<GameOverState>,
-    stats: Res<GameStatistics>,
-) -> Result<(), bevy::ecs::query::QuerySingleError> {
-    let ctx = contexts.ctx_mut()?;
-
-    egui::CentralPanel::default()
-        .frame(egui::Frame {
-            fill: UiColors::BG_DARK,
-            ..Default::default()
-        })
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                Layout::section_space(ui);
-
-                // Game result
-                ui.heading(TextStyle::heading("Game Over", TextSize::XL));
-
-                Layout::item_space(ui);
-
-                // Result message
-                let result_text = game_over.message();
-                ui.label(TextStyle::heading(result_text, TextSize::LG));
-
-                Layout::section_space(ui);
-
-                // Game statistics
-                StyledPanel::card().show(ui, |ui| {
-                    ui.heading(TextStyle::heading("Your Statistics", TextSize::MD));
-                    Layout::item_space(ui);
-
-                    ui.label(TextStyle::body(format!(
-                        "Games Played: {}",
-                        stats.games_played
-                    )));
-                    ui.label(TextStyle::body(format!(
-                        "White Wins: {} ({:.1}%)",
-                        stats.white_wins,
-                        stats.win_rate_white()
-                    )));
-                    ui.label(TextStyle::body(format!(
-                        "Black Wins: {} ({:.1}%)",
-                        stats.black_wins,
-                        stats.win_rate_black()
-                    )));
-                    ui.label(TextStyle::body(format!("Draws: {}", stats.draws)));
-                    ui.label(TextStyle::body(format!(
-                        "Average Moves: {:.1}",
-                        stats.average_moves()
-                    )));
-                });
-
-                Layout::section_space(ui);
-
-                // Action buttons
-                if StyledButton::primary(ui, "New Game").clicked() {
-                    info!("[GAME_OVER] Starting new game");
-                    next_state.set(GameState::InGame);
-                }
-
-                Layout::item_space(ui);
-
-                if StyledButton::secondary(ui, "Main Menu").clicked() {
-                    info!("[GAME_OVER] Returning to main menu");
-                    next_state.set(GameState::MainMenu);
-                }
-            });
-        });
-
-    Ok(())
-}

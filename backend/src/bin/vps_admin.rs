@@ -22,7 +22,13 @@ use serde::{Deserialize, Serialize};
 const VPS_DEFAULT_URL: &str = "https://unrejuvenated-philologically-trudi.ngrok-free.app";
 
 fn vps_base() -> String {
-    env::var("SIGNING_SERVICE_URL").unwrap_or_else(|_| VPS_DEFAULT_URL.to_string())
+    match env::var("SIGNING_SERVICE_URL") {
+        Ok(url) => url,
+        Err(e) => {
+            eprintln!("SIGNING_SERVICE_URL error: {:?}, using default: {}", e, VPS_DEFAULT_URL);
+            VPS_DEFAULT_URL.to_string()
+        }
+    }
 }
 
 fn get_api_key() -> String {
@@ -31,17 +37,24 @@ fn get_api_key() -> String {
 
 fn client() -> reqwest::blocking::Client {
     let api_key = get_api_key();
+    
+    let mut h = reqwest::header::HeaderMap::new();
+    h.insert("ngrok-skip-browser-warning", reqwest::header::HeaderValue::from_static("true"));
+    h.insert("Content-Type", reqwest::header::HeaderValue::from_static("application/json"));
+    
+    match reqwest::header::HeaderValue::from_str(&api_key) {
+        Ok(val) => h.insert("X-API-Key", val),
+        Err(e) => {
+            eprintln!("Invalid API key format: {:?}. API key must be valid HTTP header value.", e);
+            panic!("Cannot create client with invalid API key");
+        }
+    };
+    
     reqwest::blocking::Client::builder()
-        .default_headers({
-            let mut h = reqwest::header::HeaderMap::new();
-            h.insert("ngrok-skip-browser-warning", reqwest::header::HeaderValue::from_static("true"));
-            h.insert("Content-Type", reqwest::header::HeaderValue::from_static("application/json"));
-            h.insert("X-API-Key", reqwest::header::HeaderValue::from_str(&api_key).unwrap());
-            h
-        })
+        .default_headers(h)
         .timeout(std::time::Duration::from_secs(120))
         .build()
-        .unwrap_or_default()
+        .expect("Failed to build HTTP client - check system configuration")
 }
 
 // ── API Types ────────────────────────────────────────────────────────────────

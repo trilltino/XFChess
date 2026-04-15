@@ -252,6 +252,7 @@ async fn main() {
 // Embedded VPS Signing Server
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 async fn start_embedded_signing_server() {
     dotenvy::dotenv().ok();
     

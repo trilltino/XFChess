@@ -10,7 +10,7 @@ use solana_sdk::{
     transaction::Transaction,
     instruction::Instruction,
 };
-use solana_program::system_program;
+use solana_sdk::system_program;
 use anyhow::Result;
 
 /// Program ID for XFChess

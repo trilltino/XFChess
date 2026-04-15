@@ -1,21 +1,16 @@
-name: Deploy to GitHub Pages
+name: Deploy to VPS
 
 on:
   push:
-    branches: [ main, tino, master ]
+    branches: [ main, master ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: "deploy"
+  cancel-in-progress: true
 
 jobs:
-  build:
+  deploy-frontend:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,22 +28,59 @@ jobs:
 
       - name: Build
         run: cd web-solana && npm run build
+        env:
+          # Points to the same domain — nginx routes /api/* to the backend
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload frontend to VPS
+        uses: appleboy/scp-action@v0.1.7
         with:
-          path: ./web-solana/dist
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "web-solana/dist/*"
+          target: "/var/www/xfchess"
+          strip_components: 2
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  deploy-backend:
     runs-on: ubuntu-latest
-    needs: build
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-x86-64-linux-gnu libssl-dev pkg-config musl-tools
+
+      - name: Build backend (Linux)
+        run: |
+          cd backend
+          cargo build --release --bin signing-server-http
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: x86_64-linux-gnu-gcc
+
+      - name: Upload binary to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "backend/target/release/signing-server-http"
+          target: "/opt/xfchess"
+          strip_components: 3
+
+      - name: Restart backend service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            chmod +x /opt/xfchess/signing-server-http
+            systemctl restart xfchess

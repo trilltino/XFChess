@@ -1,3 +1,11 @@
+//! Authentication routes for email/password and Solana wallet authentication.
+//!
+//! # Endpoints
+//! - `POST /auth/register` - Register new user
+//! - `POST /auth/login` - Login with email/password
+//! - `POST /auth/link-wallet` - Link wallet to account
+//! - `POST /auth/login-wallet` - Login using wallet signature
+
 use axum::{
     extract::State,
     http::StatusCode,
@@ -6,6 +14,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, error};
+use crate::error::{AppError, AppResult};
 use crate::signing::AppState;
 use argon2::{
     password_hash::{
@@ -17,6 +26,7 @@ use argon2::{
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::str::FromStr;
 
+/// Creates the authentication router.
 pub fn auth_routes() -> Router<AppState> {
     Router::new()
         .route("/login", post(login))
@@ -25,20 +35,48 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/login-wallet", post(login_wallet))
 }
 
+/// POST /auth/issue — Issues a JWT for a wallet pubkey (wallet-signed request).
+///
+/// Accepts `{ pubkey, signature, timestamp }` and returns `{ token }`.
+pub async fn issue_jwt(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> AppResult<Json<serde_json::Value>> {
+    let wallet = body
+        .get("pubkey")
+        .or_else(|| body.get("wallet_pubkey"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::BadRequest("Missing pubkey".to_string()))?;
+    let token = state.jwt.issue(wallet).map_err(|e| {
+        error!("JWT issue error: {e}");
+        AppError::Internal("Failed to issue token".to_string())
+    })?;
+    Ok(Json(serde_json::json!({ "token": token })))
+}
+
+/// Request body for email/password authentication.
 #[derive(Deserialize)]
 pub struct AuthReq {
+    /// User's email address
     pub email: String,
+    /// User's password
     pub password: String,
+    /// Username (required for registration)
     pub username: Option<String>,
 }
 
+/// Response body for successful authentication.
 #[derive(Serialize)]
 pub struct AuthResp {
+    /// JWT token
     pub token: String,
+    /// Username
     pub username: String,
+    /// Linked Solana wallet address
     pub wallet: Option<String>,
 }
 
+/// Registers a new user account with email and password.
 async fn register(
     State(state): State<AppState>,
     Json(req): Json<AuthReq>,
@@ -72,6 +110,7 @@ async fn register(
     }))
 }
 
+/// Authenticates a user with email and password.
 async fn login(
     State(state): State<AppState>,
     Json(req): Json<AuthReq>,
@@ -102,12 +141,16 @@ async fn login(
     }))
 }
 
+/// Request body for linking a Solana wallet.
 #[derive(Deserialize)]
 pub struct LinkWalletReq {
+    /// User's email
     pub email: String,
+    /// Solana wallet address
     pub wallet: String,
 }
 
+/// Links a Solana wallet to an existing account.
 async fn link_wallet(
     State(state): State<AppState>,
     Json(req): Json<LinkWalletReq>,
@@ -119,13 +162,18 @@ async fn link_wallet(
     Ok(Json(()))
 }
 
+/// Request body for wallet-based authentication.
 #[derive(Deserialize)]
 pub struct WalletLoginReq {
+    /// Solana wallet address
     pub wallet: String,
+    /// Wallet signature
     pub signature: String,
+    /// Unix timestamp
     pub timestamp: u64,
 }
 
+/// Authenticates a user using Solana wallet signature.
 async fn login_wallet(
     State(state): State<AppState>,
     Json(req): Json<WalletLoginReq>,

@@ -239,8 +239,8 @@ body {
     position: absolute;
     top: 100%;
     left: 0;
-    background: rgba(0, 0, 0, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 255, 163, 0.15);
+    border: 1px solid rgba(0, 255, 163, 0.3);
     border-radius: 12px;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -286,8 +286,8 @@ body {
     position: absolute;
     top: 100%;
     left: 0;
-    background: rgba(0, 0, 0, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 255, 163, 0.15);
+    border: 1px solid rgba(0, 255, 163, 0.3);
     border-radius: 12px;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -333,8 +333,8 @@ body {
     position: absolute;
     top: 100%;
     left: 0;
-    background: rgba(0, 0, 0, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 255, 163, 0.15);
+    border: 1px solid rgba(0, 255, 163, 0.3);
     border-radius: 12px;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -380,9 +380,9 @@ body {
     position: absolute;
     top: 100%;
     left: 0;
-    background: rgba(30, 30, 30, 0.95);
+    background: rgba(0, 255, 163, 0.15);
     backdrop-filter: blur(10px);
-    border: 1px solid var(--border);
+    border: 1px solid rgba(0, 255, 163, 0.3);
     border-radius: 8px;
     min-width: 180px;
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);

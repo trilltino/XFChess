@@ -7,19 +7,10 @@
 //! - `tournament`: Tournament bracket management
 
 pub mod auth;
+pub mod game;
 pub mod identity;
-pub mod main;
 pub mod matchmaking;
+pub mod session;
 pub mod tournament;
 pub mod pdf_mailer;
 
-use axum::Router;
-
-use crate::signing::AppState;
-
-/// Creates the main API routes router.
-///
-/// Combines all route modules into the main application router.
-pub fn create_routes() -> Router<AppState> {
-    main::routes()
-}

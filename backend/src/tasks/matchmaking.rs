@@ -18,7 +18,7 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
     loop {
         interval.tick().await;
         
-        let mut queue = state.queue.lock().unwrap();
+        let mut queue = state.queue.lock().expect("Matchmaking queue mutex should not be poisoned");
         if queue.len() < 2 { continue; }
         
         // Sort by ELO
@@ -52,7 +52,7 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
         
         // Save results to match map
         if !new_matches.is_empty() {
-            let mut matches = state.matches.lock().unwrap();
+            let mut matches = state.matches.lock().expect("Matchmaking matches mutex should not be poisoned");
             for (p1, p2, game_id) in new_matches {
                 info!("[Matchmaking] Paired {} vs {}", p1.pubkey, p2.pubkey);
                 matches.insert(p1.pubkey.clone(), MatchResult {

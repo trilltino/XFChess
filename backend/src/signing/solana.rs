@@ -35,6 +35,8 @@ pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
 pub const PROFILE_SEED: &[u8] = b"profile";
 /// PDA seed for wager escrow accounts
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
+/// PDA seed for platform fee vault
+pub const PLATFORM_FEE_VAULT_SEED: &[u8] = b"platform_fee_vault";
 
 /// MagicBlock magic context account (ER-only)
 const MAGIC_CONTEXT_PUBKEY: &str = "MagicContext1111111111111111111111111111111";
@@ -45,7 +47,7 @@ const MAGIC_PROGRAM_PUBKEY: &str = "Magic11111111111111111111111111111111111111"
 fn anchor_discriminator(name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
     hasher.update(format!("global:{}", name));
-    hasher.finalize()[..8].try_into().unwrap()
+    hasher.finalize()[..8].try_into().expect("SHA256 hash should be at least 8 bytes")
 }
 
 /// Borsh-encodes a string (length prefix + bytes).
@@ -277,4 +279,34 @@ pub fn submit_signed_tx(rpc: &RpcClient, tx_bytes: &[u8]) -> Result<Signature> {
 /// Creates an RPC client with confirmed commitment.
 pub fn make_rpc(url: &str) -> RpcClient {
     RpcClient::new_with_commitment(url.to_string(), CommitmentConfig::confirmed())
+}
+
+/// Builds a `claim_fees` instruction for the platform fee vault.
+///
+/// Transfers accumulated fees from the PlatformFeeVault to the host wallet.
+/// This instruction is permissionless - anyone can trigger it.
+///
+/// # Arguments
+/// * `program_id` - The XFChess program ID
+/// * `caller` - The account triggering the claim (fee-payer)
+/// * `host_wallet` - The wallet that receives the claimed fees (must match vault.host_wallet)
+pub fn claim_fees_ix(
+    program_id: &Pubkey,
+    caller: &Pubkey,
+    host_wallet: &Pubkey,
+) -> Instruction {
+    let fee_vault_pda = Pubkey::find_program_address(&[PLATFORM_FEE_VAULT_SEED], program_id).0;
+
+    let data = anchor_discriminator("claim_fees").to_vec();
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(*caller, true),
+            AccountMeta::new(fee_vault_pda, false),
+            AccountMeta::new(*host_wallet, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+        data,
+    }
 }

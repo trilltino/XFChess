@@ -41,6 +41,7 @@ pub struct TextSize;
 
 impl TextSize {
     /// Extra large heading (main menu title)
+    #[allow(dead_code)]
     pub const XL: f32 = 48.0;
 
     /// Large heading (section titles)

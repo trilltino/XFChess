@@ -64,6 +64,9 @@ pub enum MenuState {
     /// Braid Multiplayer Lobby
     BraidLobby,
 
+    /// Lobby type selection (Regular vs Solana Wager)
+    LobbySelection,
+
     /// Solana Multiplayer Lobby
     #[cfg(feature = "solana")]
     SolanaLobby,

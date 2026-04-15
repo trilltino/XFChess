@@ -3,8 +3,6 @@
 //! Fetches and displays global player/game counts from the VPS backend.
 
 use bevy::prelude::*;
-use bevy_egui::egui;
-use bevy_egui::EguiContexts;
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 
@@ -46,8 +44,7 @@ impl Plugin for StatsPlugin {
             sender: tx,
         })
         .init_resource::<PlatformStats>()
-        .add_systems(Update, fetch_stats_system)
-        .add_systems(Update, render_stats_tooltip);
+        .add_systems(Update, fetch_stats_system);
     }
 }
 
@@ -77,6 +74,7 @@ fn fetch_stats_system(
     stats.last_updated = now;
 
     let vps_url = std::env::var("SIGNING_SERVICE_URL")
+        .or_else(|_| std::env::var("BACKEND_URL"))
         .unwrap_or_else(|_| "http://localhost:3000".to_string());
     let tx = channel.sender.clone();
 
@@ -98,25 +96,3 @@ fn fetch_stats_system(
     });
 }
 
-/// Render stats as a small window in the corner
-fn render_stats_tooltip(
-    stats: Res<PlatformStats>,
-    mut contexts: EguiContexts,
-) {
-    let Ok(ctx) = contexts.ctx_mut() else { return };
-
-    if stats.active_games == 0 && stats.unique_players == 0 {
-        return;
-    }
-
-    egui::Window::new("Platform")
-        .collapsible(true)
-        .resizable(false)
-        .default_pos(egui::pos2(10.0, 10.0))
-        .default_size(egui::vec2(160.0, 70.0))
-        .show(&ctx, |ui| {
-            ui.style_mut().spacing.item_spacing = egui::vec2(4.0, 4.0);
-            ui.label(format!("Active Games: {}", stats.active_games));
-            ui.label(format!("Players: {}", stats.unique_players));
-        });
-}

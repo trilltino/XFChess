@@ -12,6 +12,8 @@
 use axum::{
     extract::{Json, State},
     http::StatusCode,
+    routing::{get, post},
+    Router,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -88,7 +90,7 @@ pub fn create_relay_state() -> P2PRelayState {
 }
 
 fn cleanup_stale_games(state: &P2PRelayState) {
-    let mut games = state.write().unwrap();
+    let mut games = state.write().expect("P2P relay mutex should not be poisoned");
     let now = Utc::now();
     let stale_threshold = chrono::Duration::minutes(5);
     
@@ -158,6 +160,19 @@ pub struct PollMessagesRequest {
 pub struct PollMessagesResponse {
     pub messages: Vec<String>,
     pub next_index: usize,
+}
+
+// ── Router ──────────────────────────────────────────────────────────────────
+
+pub fn p2p_routes() -> Router<AppState> {
+    Router::new()
+        .route("/p2p/announce", post(announce_game))
+        .route("/p2p/games", get(list_games))
+        .route("/p2p/join", post(join_game))
+        .route("/p2p/accept", post(accept_join))
+        .route("/p2p/leave", post(leave_game))
+        .route("/p2p/message", post(send_message))
+        .route("/p2p/poll", post(poll_messages))
 }
 
 // ── Route Handlers ─────────────────────────────────────────────────────────

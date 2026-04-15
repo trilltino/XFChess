@@ -78,7 +78,7 @@ impl EloCache {
     pub async fn get_elo(&self, pubkey: &str) -> Result<CachedElo, String> {
         // Check cache first
         {
-            let cache = self.cache.lock().unwrap();
+            let cache = self.cache.lock().expect("ELO cache mutex should not be poisoned");
             if let Some(cached) = cache.get(pubkey) {
                 if cached.cached_at.elapsed() < self.ttl {
                     return Ok(cached.clone());
@@ -132,7 +132,7 @@ impl EloCache {
 
         // Update cache
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self.cache.lock().expect("ELO cache mutex should not be poisoned");
             cache.insert(pubkey.to_string(), cached.clone());
         }
 
@@ -167,14 +167,14 @@ impl EloCache {
     /// # Arguments
     /// * `pubkey` - Player's wallet public key
     pub fn invalidate(&self, pubkey: &str) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().expect("ELO cache mutex should not be poisoned");
         cache.remove(pubkey);
         info!("[EloCache] Invalidated cache for {}", pubkey);
     }
 
     /// Clears all cached entries.
     pub fn clear(&self) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().expect("ELO cache mutex should not be poisoned");
         cache.clear();
         info!("[EloCache] Cleared all cache entries");
     }
@@ -185,7 +185,7 @@ impl EloCache {
             return Err("Offset out of bounds".to_string());
         }
         let bytes: [u8; 8] = data[offset..offset+8].try_into()
-            .map_err(|_| "Failed to read bytes".to_string())?;
+            .map_err(|_| "Failed to read bytes: slice length mismatch".to_string())?;
         Ok(f64::from_le_bytes(bytes))
     }
 
@@ -197,7 +197,7 @@ impl EloCache {
         
         // Read length prefix (u32 in Anchor)
         let len_bytes: [u8; 4] = data[offset..offset+4].try_into()
-            .map_err(|_| "Failed to read length".to_string())?;
+            .map_err(|_| "Failed to read length: slice length mismatch".to_string())?;
         let len = u32::from_le_bytes(len_bytes) as usize;
         
         if len == 0 {

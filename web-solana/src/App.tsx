@@ -8,7 +8,6 @@ import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { SolanaMobileWalletAdapter, createDefaultAddressSelector, createDefaultAuthorizationResultCache, createDefaultWalletNotFoundHandler } from '@solana-mobile/wallet-adapter-mobile';
 import { clusterApiUrl } from '@solana/web3.js';
 import { Home } from './pages/Home';
-import { HowToPlay } from './pages/HowToPlay';
 import { Media } from './pages/Media';
 import { Blog } from './pages/Blog';
 import { ProfileViewer } from './pages/ProfileViewer';
@@ -20,6 +19,7 @@ import AntiCheatPage from './pages/AntiCheat';
 import KycPage from './pages/Kyc';
 import { SignIn } from './pages/SignIn';
 import { SignUp } from './pages/SignUp';
+import NewsRelease from './pages/NewsRelease';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { Footer } from './components/Footer';
@@ -95,9 +95,10 @@ function AppContent() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [username, setUsername] = useState<string | null>(null);
     const [isLegalOpen, setIsLegalOpen] = useState(false);
+    const [isCommunityOpen, setIsCommunityOpen] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
     const lastScrollY = useRef(0);
-    const closeDropdowns = () => { setIsLegalOpen(false); };
+    const closeDropdowns = () => { setIsLegalOpen(false); setIsCommunityOpen(false); };
 
     // Scroll detection for navbar fade
     useEffect(() => {
@@ -173,6 +174,17 @@ function AppContent() {
                     <Link to="/profile" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Profile</Link>
                     <Link to="/auth/register" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Sign Up</Link>
                     <div className="nav-legal-dropdown">
+                        <button className="nav-link dropdown-toggle" onClick={() => setIsCommunityOpen(v => !v)}>
+                            Community <ChevronDown size={14} className={`dropdown-icon ${isCommunityOpen ? 'open' : ''}`} />
+                        </button>
+                        {isCommunityOpen && (
+                            <div className="nav-legal-dropdown-menu">
+                                <Link to="/blog" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Blog</Link>
+                                <Link to="/media" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Media</Link>
+                            </div>
+                        )}
+                    </div>
+                    <div className="nav-legal-dropdown">
                         <button className="nav-link dropdown-toggle" onClick={() => setIsLegalOpen(v => !v)}>
                             Legal <ChevronDown size={14} className={`dropdown-icon ${isLegalOpen ? 'open' : ''}`} />
                         </button>
@@ -208,9 +220,8 @@ function AppContent() {
                 <AnimatePresence mode="wait">
                     <Routes location={location} key={location.pathname}>
                         <Route path="/" element={<Home />} />
-                        <Route path="/how-to-play" element={<HowToPlay />} />
-                        <Route path="/media" element={<Media />} />
                         <Route path="/blog" element={<Blog />} />
+                        <Route path="/media" element={<Media />} />
                         <Route path="/profile" element={<ProfileViewer />} />
                         <Route path="/verify" element={<VerifyProfile />} />
                         <Route path="/download" element={<DownloadPage />} />
@@ -218,7 +229,7 @@ function AppContent() {
                         <Route path="/legal" element={<LegalPage />} />
                         <Route path="/anti-cheat" element={<AntiCheatPage />} />
                         <Route path="/kyc" element={<KycPage />} />
-                        <Route path="/news/release" element={<div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><h1>News Release Page - Coming Soon</h1></div>} />
+                        <Route path="/news/release" element={<NewsRelease />} />
                         <Route path="/auth/login" element={<SignIn defaultMode="login" />} />
                         <Route path="/auth/register" element={<SignUp />} />
                     </Routes>

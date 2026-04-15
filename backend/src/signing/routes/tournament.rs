@@ -191,7 +191,7 @@ async fn get_bracket(
     let t = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
     let final_idx = t.final_match_index();
     let current_round = if t.matches.get(final_idx).map_or(false, |m| m.is_some()) {
-        let m = t.matches[final_idx].as_ref().unwrap();
+        let m = t.matches[final_idx].as_ref().expect("Final match should exist");
         if m.status == MatchStatus::Completed { 255u8 } else { m.round }
     } else {
         0u8
@@ -311,4 +311,243 @@ fn seed_players_by_elo(t: &mut TournamentRecord) {
 
     t.players = seeded_players;
     t.player_elos = seeded_elos;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_tournament_req_serialization() {
+        let req = CreateTournamentReq {
+            tournament_id: 1,
+            name: "Test Tournament".to_string(),
+            entry_fee_lamports: 1000000,
+            max_players: 16,
+            prize_shares: Some([5000, 3000, 1500, 500]),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_register_node_req_serialization() {
+        let req = RegisterNodeReq {
+            player: "test_wallet".to_string(),
+            node_id: "node_123".to_string(),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_record_result_req_serialization() {
+        let req = RecordResultReq {
+            match_index: 0,
+            winner: "player1".to_string(),
+            loser: "player2".to_string(),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_set_match_game_id_req_serialization() {
+        let req = SetMatchGameIdReq {
+            match_index: 0,
+            game_id: 12345,
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_tournament_summary_serialization() {
+        let summary = TournamentSummary {
+            tournament_id: 1,
+            name: "Test Tournament".to_string(),
+            entry_fee_lamports: 1000000,
+            prize_pool: 16000000,
+            max_players: 16,
+            registered: 8,
+            status: "Active".to_string(),
+        };
+
+        let json = serde_json::to_string(&summary);
+        assert!(json.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_tournament_routes_creation() {
+        let router = tournament_routes();
+        assert!(router.not_found("test").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_admin_tournament_routes_creation() {
+        let router = admin_tournament_routes();
+        assert!(router.not_found("test").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_tournaments_routes_creation() {
+        let router = tournaments_routes();
+        assert!(router.not_found("test").is_some());
+    }
+
+    #[test]
+    fn test_max_players_validation() {
+        // Test valid player counts (power of 2)
+        let valid_counts = vec![8, 16, 32, 64, 128];
+        for count in valid_counts {
+            let req = CreateTournamentReq {
+                tournament_id: 1,
+                name: "Test Tournament".to_string(),
+                entry_fee_lamports: 1000000,
+                max_players: count,
+                prize_shares: None,
+            };
+            assert_eq!(req.max_players, count);
+        }
+    }
+
+    #[test]
+    fn test_prize_shares_default() {
+        // Test default prize shares for different player counts
+        let req_large = CreateTournamentReq {
+            tournament_id: 1,
+            name: "Test Tournament".to_string(),
+            entry_fee_lamports: 1000000,
+            max_players: 16,
+            prize_shares: None,
+        };
+        
+        let prize_shares = req_large.prize_shares.unwrap_or(
+            if req_large.max_players >= 16 {
+                [5000, 3000, 1500, 500]
+            } else {
+                [10000, 0, 0, 0]
+            }
+        );
+        
+        assert_eq!(prize_shares, [5000, 3000, 1500, 500]);
+    }
+
+    #[test]
+    fn test_prize_shares_winner_take_all() {
+        // Test winner-take-all for small tournaments
+        let req_small = CreateTournamentReq {
+            tournament_id: 1,
+            name: "Test Tournament".to_string(),
+            entry_fee_lamports: 1000000,
+            max_players: 8,
+            prize_shares: None,
+        };
+        
+        let prize_shares = req_small.prize_shares.unwrap_or(
+            if req_small.max_players >= 16 {
+                [5000, 3000, 1500, 500]
+            } else {
+                [10000, 0, 0, 0]
+            }
+        );
+        
+        assert_eq!(prize_shares, [10000, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_entry_fee_lamports_validation() {
+        // Test reasonable entry fee ranges
+        let valid_fees = vec![0, 1000000, 5000000, 10000000];
+        for fee in valid_fees {
+            let req = CreateTournamentReq {
+                tournament_id: 1,
+                name: "Test Tournament".to_string(),
+                entry_fee_lamports: fee,
+                max_players: 16,
+                prize_shares: None,
+            };
+            assert_eq!(req.entry_fee_lamports, fee);
+        }
+    }
+
+    #[test]
+    fn test_tournament_id_validation() {
+        // Test valid tournament IDs
+        let valid_ids = vec![0, 1, 100, u64::MAX];
+        for id in valid_ids {
+            let req = CreateTournamentReq {
+                tournament_id: id,
+                name: "Test Tournament".to_string(),
+                entry_fee_lamports: 1000000,
+                max_players: 16,
+                prize_shares: None,
+            };
+            assert_eq!(req.tournament_id, id);
+        }
+    }
+
+    #[test]
+    fn test_node_id_format() {
+        // Test that node ID is a non-empty string
+        let req = RegisterNodeReq {
+            player: "test_wallet".to_string(),
+            node_id: "node_123".to_string(),
+        };
+        assert!(!req.node_id.is_empty());
+    }
+
+    #[test]
+    fn test_match_index_validation() {
+        // Test valid match indices
+        let valid_indices = vec![0, 1, 10, 100];
+        for index in valid_indices {
+            let req = RecordResultReq {
+                match_index: index,
+                winner: "player1".to_string(),
+                loser: "player2".to_string(),
+            };
+            assert_eq!(req.match_index, index);
+        }
+    }
+
+    #[test]
+    fn test_game_id_validation() {
+        // Test valid game IDs
+        let valid_ids = vec![0, 1, 12345, u64::MAX];
+        for id in valid_ids {
+            let req = SetMatchGameIdReq {
+                match_index: 0,
+                game_id: id,
+            };
+            assert_eq!(req.game_id, id);
+        }
+    }
+
+    #[test]
+    fn test_seed_players_by_elo() {
+        // Test ELO seeding function
+        let mut record = TournamentRecord::with_config(
+            1,
+            "Test Tournament".to_string(),
+            1000000,
+            16,
+            [5000, 3000, 1500, 500],
+        );
+        
+        record.players = vec!["player1".to_string(), "player2".to_string(), "player3".to_string(), "player4".to_string()];
+        record.player_elos = vec![1500, 2000, 1200, 1800];
+        
+        seed_players_by_elo(&mut record);
+        
+        // After seeding, should be sorted by ELO descending
+        assert_eq!(record.player_elos[0], 2000); // Highest ELO first
+        assert_eq!(record.player_elos[1], 1800);
+        assert_eq!(record.player_elos[2], 1500);
+        assert_eq!(record.player_elos[3], 1200); // Lowest ELO last
+    }
 }

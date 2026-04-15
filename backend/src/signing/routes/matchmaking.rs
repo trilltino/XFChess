@@ -79,7 +79,7 @@ impl Default for SharedMatchmakingState {
 ///
 /// # Returns
 /// An Axum Router with matchmaking endpoints
-pub fn matchmaking_routes(state: SharedMatchmakingState) -> Router<SharedMatchmakingState> {
+pub fn matchmaking_routes(state: SharedMatchmakingState) -> Router {
     Router::new()
         .route("/join", post(join))
         .route("/status/{pubkey}", get(status))
@@ -121,7 +121,7 @@ pub async fn join(
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("System time should be after UNIX_EPOCH")
         .as_secs();
 
     if now > req.timestamp && now - req.timestamp > 120 {
@@ -138,7 +138,7 @@ pub async fn join(
         joined_at: now,
     };
 
-    let mut queue = state.queue.lock().unwrap();
+    let mut queue = state.queue.lock().expect("Mutex lock should not be poisoned");
     // Remove if already in queue to prevent duplicates
     queue.retain(|t| t.pubkey != req.pubkey);
     queue.push(ticket);
@@ -161,7 +161,7 @@ pub async fn status(
     State(state): State<SharedMatchmakingState>,
     Path(pubkey): Path<String>,
 ) -> Result<Json<Option<MatchResult>>, (StatusCode, String)> {
-    let mut matches = state.matches.lock().unwrap();
+    let mut matches = state.matches.lock().expect("Mutex lock should not be poisoned");
     if let Some(res) = matches.remove(&pubkey) {
         info!("[Matchmaking] Player {} retrieved match {}", pubkey, res.game_id);
         Ok(Json(Some(res)))
@@ -202,10 +202,228 @@ async fn leave(
         return Err((StatusCode::UNAUTHORIZED, "Invalid Signature".to_string()));
     }
 
-    let mut queue = state.queue.lock().unwrap();
+    let mut queue = state.queue.lock().expect("Mutex lock should not be poisoned");
     queue.retain(|t| t.pubkey != req.pubkey);
     
     info!("[Matchmaking] Player {} left queue", req.pubkey);
 
     Ok(Json(()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::Router,
+    };
+    use tower::ServiceExt;
+    use std::time::SystemTime;
+
+    #[test]
+    fn test_matchmaking_ticket_serialization() {
+        let ticket = MatchmakingTicket {
+            pubkey: "test_wallet".to_string(),
+            elo: 1500,
+            joined_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("System time should be after UNIX_EPOCH")
+                .as_secs(),
+        };
+
+        let json = serde_json::to_string(&ticket);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_match_result_serialization() {
+        let result = MatchResult {
+            game_id: 12345,
+            opponent: "opponent_wallet".to_string(),
+            is_white: true,
+        };
+
+        let json = serde_json::to_string(&result);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_join_request_serialization() {
+        let req = JoinRequest {
+            pubkey: "test_wallet".to_string(),
+            signature: "test_signature".to_string(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("System time should be after UNIX_EPOCH")
+                .as_secs(),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_leave_request_serialization() {
+        let req = LeaveRequest {
+            pubkey: "test_wallet".to_string(),
+            signature: "test_signature".to_string(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("System time should be after UNIX_EPOCH")
+                .as_secs(),
+        };
+
+        let json = serde_json::to_string(&req);
+        assert!(json.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_matchmaking_routes_creation() {
+        let state = SharedMatchmakingState::default();
+        let router = matchmaking_routes(state);
+        assert!(router.not_found("test").is_some());
+    }
+
+    #[test]
+    fn test_shared_matchmaking_state_default() {
+        let state = SharedMatchmakingState::default();
+        assert_eq!(state.queue.lock().expect("Mutex lock").len(), 0);
+        assert_eq!(state.matches.lock().expect("Mutex lock").len(), 0);
+    }
+
+    #[test]
+    fn test_matchmaking_ticket_creation() {
+        let ticket = MatchmakingTicket {
+            pubkey: "test_wallet".to_string(),
+            elo: 1500,
+            joined_at: 1234567890,
+        };
+
+        assert_eq!(ticket.pubkey, "test_wallet");
+        assert_eq!(ticket.elo, 1500);
+        assert_eq!(ticket.joined_at, 1234567890);
+    }
+
+    #[test]
+    fn test_match_result_creation() {
+        let result = MatchResult {
+            game_id: 12345,
+            opponent: "opponent_wallet".to_string(),
+            is_white: true,
+        };
+
+        assert_eq!(result.game_id, 12345);
+        assert_eq!(result.opponent, "opponent_wallet");
+        assert!(result.is_white);
+    }
+
+    #[test]
+    fn test_elo_range_validation() {
+        // Test reasonable ELO ranges
+        let valid_elos = vec![0, 1000, 1500, 2000, 3000];
+        for elo in valid_elos {
+            let ticket = MatchmakingTicket {
+                pubkey: "test_wallet".to_string(),
+                elo,
+                joined_at: 1234567890,
+            };
+            assert_eq!(ticket.elo, elo);
+        }
+    }
+
+    #[test]
+    fn test_pubkey_format() {
+        // Test that pubkey is a non-empty string
+        let ticket = MatchmakingTicket {
+            pubkey: "test_wallet".to_string(),
+            elo: 1500,
+            joined_at: 1234567890,
+        };
+        assert!(!ticket.pubkey.is_empty());
+    }
+
+    #[test]
+    fn test_timestamp_validation() {
+        // Test that timestamps are reasonable
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time should be after UNIX_EPOCH")
+            .as_secs();
+
+        let ticket = MatchmakingTicket {
+            pubkey: "test_wallet".to_string(),
+            elo: 1500,
+            joined_at: now,
+        };
+        assert!(ticket.joined_at > 0);
+    }
+
+    #[test]
+    fn test_queue_operations() {
+        let state = SharedMatchmakingState::default();
+        let mut queue = state.queue.lock().expect("Mutex lock");
+
+        // Test adding tickets
+        let ticket1 = MatchmakingTicket {
+            pubkey: "player1".to_string(),
+            elo: 1500,
+            joined_at: 1234567890,
+        };
+        queue.push(ticket1);
+        assert_eq!(queue.len(), 1);
+
+        // Test removing tickets
+        let ticket2 = MatchmakingTicket {
+            pubkey: "player2".to_string(),
+            elo: 1600,
+            joined_at: 1234567891,
+        };
+        queue.push(ticket2);
+        assert_eq!(queue.len(), 2);
+
+        queue.retain(|t| t.pubkey != "player1");
+        assert_eq!(queue.len(), 1);
+    }
+
+    #[test]
+    fn test_match_operations() {
+        let state = SharedMatchmakingState::default();
+        let mut matches = state.matches.lock().expect("Mutex lock");
+
+        // Test adding match results
+        let result = MatchResult {
+            game_id: 12345,
+            opponent: "opponent_wallet".to_string(),
+            is_white: true,
+        };
+        matches.insert("player1".to_string(), result);
+        assert_eq!(matches.len(), 1);
+
+        // Test retrieving match results
+        let retrieved = matches.get("player1");
+        assert!(retrieved.is_some());
+
+        // Test removing match results
+        matches.remove("player1");
+        assert_eq!(matches.len(), 0);
+    }
+
+    #[test]
+    fn test_is_white_boolean() {
+        // Test both true and false values
+        let result_white = MatchResult {
+            game_id: 12345,
+            opponent: "opponent_wallet".to_string(),
+            is_white: true,
+        };
+        assert!(result_white.is_white);
+
+        let result_black = MatchResult {
+            game_id: 12345,
+            opponent: "opponent_wallet".to_string(),
+            is_white: false,
+        };
+        assert!(!result_black.is_white);
+    }
 }

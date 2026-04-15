@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Circle, ArrowRight, Check } from 'lucide-react';
+import { ArrowRight, Check } from 'lucide-react';
 
 export function SignUp() {
   const [formData, setFormData] = useState({
@@ -76,19 +76,9 @@ export function SignUp() {
         transition={{ duration: 0.5 }}
         className="signup-header"
       >
-        <div className="signup-logo">
-          <Circle size={24} style={{ color: 'var(--primary)' }} />
-          <span>XFCHESS</span>
-        </div>
-        
         <h1>
-          Join the <span className="gradient-text">Tournament</span>
+          Join the Tournament
         </h1>
-        
-        <p className="signup-subtitle">
-          XFChess is coming soon — on-chain chess tournaments with real prizes.
-          Get early access to competitive play and exclusive events.
-        </p>
       </motion.div>
 
       <motion.form
@@ -184,7 +174,6 @@ export function SignUp() {
           font-size: 36px;
           font-weight: 800;
           margin-bottom: 16px;
-          color: #fff;
         }
 
         .gradient-text {
@@ -224,8 +213,8 @@ export function SignUp() {
         .signup-form {
           width: 100%;
           max-width: 400px;
-          background: rgba(255, 255, 255, 0.02);
-          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(173, 92, 47, 0.1);
+          border: 1px solid rgba(173, 92, 47, 0.3);
           border-radius: 16px;
           padding: 32px;
         }
@@ -239,20 +228,20 @@ export function SignUp() {
           font-size: 11px;
           font-weight: 600;
           letter-spacing: 0.1em;
-          color: #666;
+          color: #fff;
           margin-bottom: 8px;
         }
 
         .form-group .optional {
-          color: #444;
+          color: rgba(255, 255, 255, 0.5);
           font-weight: 400;
         }
 
         .form-group input {
           width: 100%;
           padding: 14px 16px;
-          background: rgba(255, 255, 255, 0.05);
-          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(173, 92, 47, 0.4);
           border-radius: 10px;
           color: #fff;
           font-size: 15px;
@@ -262,22 +251,22 @@ export function SignUp() {
         .form-group input:focus {
           outline: none;
           border-color: #00ffa3;
-          background: rgba(255, 255, 255, 0.08);
+          background: rgba(0, 0, 0, 0.5);
         }
 
         .form-group input::placeholder {
-          color: #555;
+          color: rgba(255, 255, 255, 0.4);
         }
 
         .signup-btn {
           width: 100%;
           padding: 16px;
-          background: linear-gradient(135deg, #00ffa3 0%, #00d4aa 100%);
-          color: #000;
+          background: rgba(173, 92, 47, 0.8);
+          color: #fff;
           font-size: 14px;
           font-weight: 700;
           letter-spacing: 0.05em;
-          border: none;
+          border: 1px solid rgba(173, 92, 47, 0.5);
           border-radius: 10px;
           cursor: pointer;
           display: flex;
@@ -288,7 +277,8 @@ export function SignUp() {
 
         .signup-btn:hover:not(:disabled) {
           transform: translateY(-2px);
-          box-shadow: 0 8px 24px rgba(0, 255, 163, 0.3);
+          background: rgba(173, 92, 47, 1);
+          box-shadow: 0 8px 24px rgba(173, 92, 47, 0.4);
         }
 
         .signup-btn:disabled {
@@ -304,12 +294,12 @@ export function SignUp() {
         .signup-success h2 {
           font-size: 28px;
           font-weight: 700;
-          color: #fff;
+          color: #00ffa3;
           margin-bottom: 16px;
         }
 
         .signup-success p {
-          color: #888;
+          color: rgba(255, 255, 255, 0.7);
           margin-bottom: 32px;
           line-height: 1.6;
         }

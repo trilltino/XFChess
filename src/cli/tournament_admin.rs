@@ -1,4 +1,4 @@
-//! admin_tournament — CLI for tournament lifecycle management.
+    //! admin_tournament — CLI for tournament lifecycle management.
 //!
 //! Uses the admin keypair directly (no Phantom popup).
 //! Calls on-chain instructions AND the local signing-server VPS.

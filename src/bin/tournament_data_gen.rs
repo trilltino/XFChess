@@ -36,6 +36,13 @@ struct SessionNote {
     text: String,
 }
 
+#[derive(Debug, Clone)]
+struct MatchResult {
+    winner: String,
+    winner_index: usize,
+    game_id: u64,
+}
+
 // Import tournament instructions
 use xfchess::solana::instructions::{
     initialize_tournament_ix, register_player_ix, start_tournament_ix, 
@@ -68,11 +75,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load 4 player keypairs
     let players = load_players_with_keypairs()?;
-    let _player_pubkeys: Vec<Player> = players.iter().map(|p| Player {
-        name: p.name.clone(),
-        pubkey: p.keypair.pubkey(),
-        elo: p.elo,
-    }).collect();
     
     // Fund all players from deployer wallet (not airdrops)
     println!("\n💸 Funding players from deployer wallet...");
@@ -416,7 +418,7 @@ async fn play_real_game(
     moves: &[&str],
     lifecycle: &mut Vec<TournamentStep>,
     notes: &mut Vec<SessionNote>,
-) -> Result<GameResult, Box<dyn std::error::Error>> {
+) -> Result<MatchResult, Box<dyn std::error::Error>> {
     println!("  🎮 Playing {} - {} vs {}", round, player1.name, player2.name);
 
     let game_id = std::time::SystemTime::now()
@@ -484,7 +486,7 @@ async fn play_real_game(
     // Determine winner (simplified - first player wins)
     let winner_name = player1.name.clone();
 
-    Ok(GameResult {
+    Ok(MatchResult {
         winner: winner_name,
         winner_index: player1_index,
         game_id,

@@ -57,7 +57,10 @@ impl Plugin for MainMenuPlugin {
         .init_resource::<crate::states::tournament_menu::TournamentLobbyState>()
         .add_systems(
             EguiPrimaryContextPass,
-            main_menu_ui_wrapper.run_if(in_state(GameState::MainMenu)),
+            (
+                main_menu_ui_wrapper,
+                render_lobby_selection_popup.run_if(in_state(crate::core::MenuState::LobbySelection)),
+            ).run_if(in_state(GameState::MainMenu)),
         )
         .add_systems(
             Update,
@@ -251,15 +254,7 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     // === NAVBAR ===
     render_navbar(ctx, ctx_menu);
     
-    // === DEVNET NOTICE ===
-    egui::Area::new("devnet_notice".into())
-        .anchor(egui::Align2::CENTER_TOP, egui::Vec2::new(0.0, 68.0))
-        .show(ctx, |ui| {
-            ui.label(egui::RichText::new("⚠️ RUNNING ON SOLANA DEVNET")
-                .color(egui::Color32::from_rgb(234, 179, 8)) // Warning yellow
-                .size(11.0)
-                .strong());
-        });
+
     
     // === MAIN CONTENT AREA ===
     let content_top = 80.0; // Space below navbar
@@ -310,7 +305,7 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
 }
 
 /// Render website-style navbar
-fn render_navbar(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
+fn render_navbar(ctx: &egui::Context, _ctx_menu: &mut MainMenuUIContext) {
     
     egui::TopBottomPanel::top("navbar")
         .frame(egui::Frame {
@@ -350,44 +345,6 @@ fn render_navbar(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
                     }
                 });
                 
-                // === RIGHT SIDE: SIGN IN | REGISTER (conditional) ===
-                #[cfg(feature = "solana")]
-                let should_show_auth = {
-                    use crate::multiplayer::solana::integration::state::ProfileStatus;
-                    let has_profile = ctx_menu.solana_state.as_ref()
-                        .map(|s| s.profile_status == ProfileStatus::HasProfileWithUsername)
-                        .unwrap_or(false);
-                    let is_hot_wallet = ctx_menu.wallet.as_ref()
-                        .map(|w| w.keypair.is_some())
-                        .unwrap_or(false);
-                    
-                    !has_profile || is_hot_wallet
-                };
-                #[cfg(not(feature = "solana"))]
-                let should_show_auth = true;
-
-                if should_show_auth {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if nav_button(ui, "Register").clicked() {
-                            // Open website register
-                            info!("[MENU] Register clicked - opening website");
-                            if let Err(e) = webbrowser::open("http://localhost:7454/auth/register") {
-                                warn!("[MENU] Failed to open register page: {}", e);
-                            }
-                        }
-                        ui.add_space(15.0);
-                        if nav_button(ui, "Sign In")
-                            .on_hover_text("Sign in with email/password and pair your Solana wallet")
-                            .clicked()
-                        {
-                            // Open website sign in
-                            info!("[MENU] Sign In clicked - opening website");
-                            if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
-                                warn!("[MENU] Failed to open sign in page: {}", e);
-                            }
-                        }
-                    });
-                }
             });
         });
 }
@@ -471,14 +428,7 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     ).on_hover_text(if wallet_connected { "Create a free lobby" } else { "Connect your wallet to create a lobby" });
 
     if lobby_btn_resp.clicked() {
-        if wallet_connected {
-            ctx_menu.menu_state.set(crate::core::MenuState::BraidLobby);
-        } else {
-            info!("[MENU] Lobby creation blocked — wallet not connected. Opening sign-in.");
-            if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
-                warn!("[MENU] Failed to open sign-in page: {}", e);
-            }
-        }
+        ctx_menu.menu_state.set(crate::core::MenuState::LobbySelection);
     }
 
     ui.add_space(8.0);
@@ -2018,5 +1968,86 @@ fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubk
     let arr: [u8; 32] = bytes.as_deref()?.try_into().ok()?;
     Some(solana_sdk::pubkey::Pubkey::from(arr))
 }
+
+/// System to render a popup asking if the user wants to create a regular P2P lobby or a Solana wager lobby.
+pub fn render_lobby_selection_popup(
+    mut contexts: bevy_egui::EguiContexts,
+    mut menu_state: ResMut<NextState<crate::core::MenuState>>,
+    solana_state: Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+) {
+    let Some(ctx) = contexts.ctx_mut().ok() else { return };
+    
+    egui::Window::new("Create Multiplayer Lobby")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .default_width(320.0)
+        .frame(
+            egui::Frame::default()
+                .fill(egui::Color32::from_rgb(15, 15, 20))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(230, 57, 70)))
+                .corner_radius(12.0)
+                .inner_margin(24.0),
+        )
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Choose Lobby Type")
+                    .size(20.0)
+                    .color(egui::Color32::from_rgb(230, 57, 70))
+                    .strong());
+                
+                ui.add_space(12.0);
+                ui.label(egui::RichText::new("Select how you want to play against others.")
+                    .color(egui::Color32::GRAY)
+                    .size(13.0));
+                
+                ui.add_space(32.0);
+
+                // Regular P2P Button
+                let reg_btn = ui.add_sized(
+                    [240.0, 48.0],
+                    egui::Button::new(egui::RichText::new("Regular P2P (Free)").size(16.0).strong())
+                        .fill(egui::Color32::from_rgb(40, 40, 50))
+                ).on_hover_text("Standard match without on-chain wagering");
+
+                if reg_btn.clicked() {
+                    menu_state.set(crate::core::MenuState::BraidLobby);
+                }
+                
+                ui.add_space(16.0);
+                
+                // Solana Wager P2P Button
+                let sol_btn = ui.add_sized(
+                    [240.0, 48.0],
+                    egui::Button::new(egui::RichText::new("Solana Wager P2P").size(16.0).strong())
+                        .fill(egui::Color32::from_rgb(230, 57, 70))
+                ).on_hover_text("Play for SOL on-chain via Solana Devnet");
+
+                if sol_btn.clicked() {
+                    if solana_state.wallet_pubkey.is_none() {
+                        info!("[MENU] Solana wager blocked — wallet not connected. Opening sign-in.");
+                        if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
+                            warn!("[MENU] Failed to open sign-in page: {}", e);
+                        }
+                    } else if solana_state.profile_status != crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername {
+                        info!("[MENU] Profile missing or incomplete. Redirecting to Profile Creation.");
+                        menu_state.set(crate::core::MenuState::ProfileCreation);
+                    } else {
+                        menu_state.set(crate::core::MenuState::SolanaLobby);
+                    }
+                }
+                
+                ui.add_space(32.0);
+                
+                if ui.button(egui::RichText::new("Cancel").color(egui::Color32::GRAY)).clicked() {
+                    menu_state.set(crate::core::MenuState::Main);
+                }
+                
+                ui.add_space(8.0);
+            });
+        });
+}
+
 
 

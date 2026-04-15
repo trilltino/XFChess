@@ -346,7 +346,10 @@ impl TournamentStore {
 
     /// Lists all tournaments.
     pub async fn list(&self) -> Vec<TournamentRecord> {
-        let rows = sqlx::query("SELECT data FROM tournaments").fetch_all(&self.pool).await.unwrap();
+        let rows = sqlx::query("SELECT data FROM tournaments")
+            .fetch_all(&self.pool)
+            .await
+            .expect("Failed to fetch tournaments from database");
         rows.into_iter()
             .filter_map(|r| serde_json::from_str::<TournamentRecord>(&r.get::<String, _>(0)).ok())
             .collect()
