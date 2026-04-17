@@ -1,0 +1,13 @@
+[package]
+name = "braid-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+bytes = "1.0"
+
+[features]
+client = []
+server = []
