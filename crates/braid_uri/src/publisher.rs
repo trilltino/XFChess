@@ -118,7 +118,7 @@ impl ChessPublisher {
         // We override the version and parents via the BraidRequest builder
         let request = BraidRequest::new()
             .with_method("PUT")
-            .with_body(body_json)
+            .with_body(body_json.into_bytes())
             .with_content_type("application/json")
             .with_version(new_version.clone())
             .with_parent(self.current_version.clone())
@@ -126,7 +126,7 @@ impl ChessPublisher {
 
         let response = self
             .client
-            .fetch(&url, request)
+            .fetch(&url, &request)
             .await
             .map_err(|e| BraidUriError::Http(e.to_string()))?;
 

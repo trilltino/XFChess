@@ -1,6 +1,9 @@
 use backend::signing::{AppState, SigningConfig};
 use backend::signing::storage::tournament::TournamentStore;
 use backend::infrastructure::{initialize_pools, run_migrations, build_app_router, spawn_background_tasks};
+
+// TournamentTrigger imported via signing module
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 use tracing::info;
 use axum::http::Method;
@@ -30,12 +33,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     session_store.init().await?;
     info!("[signing-server] Session store initialized");
 
-    let state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone());
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
     info!("[signing-server] Tournament store initialized");
 
+    let mut state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone(), Arc::new(tournament_store.clone()));
+
+    // ── Spawn background tasks (must be before building router to get trigger sender) ───────────────────────────────────────────────
+    let tournament_trigger = spawn_background_tasks(state.clone(), config);
+    state.tournament_trigger = Some(tournament_trigger);
+    info!("[signing-server] Background tasks spawned with tournament scheduler");
+
     // ── Build application router ───────────────────────────────────────────
-    let app = build_app_router(state.clone(), tournament_store);
+    let app = build_app_router(state.clone());
     
     // Add CORS layer
     let app = app.layer(
@@ -50,10 +59,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Bind and serve via HTTP ───────────────────────────────────────────
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     info!("[signing-server] HTTP server listening on port {}", port);
-
-    // ── Spawn background tasks ───────────────────────────────────────────────
-    spawn_background_tasks(state, config);
-    info!("[signing-server] Background tasks spawned");
 
     // ── Serve HTTP ───────────────────────────────────────────────────────
     axum::serve(listener, app).await?;

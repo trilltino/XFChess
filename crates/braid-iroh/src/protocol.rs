@@ -15,10 +15,54 @@ use braid_core::{Update, Version};
 use bytes::Bytes;
 use http::StatusCode;
 use iroh_h3_axum::IrohAxum;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::subscription::SubscriptionManager;
+
+/// Swiss tournament gossip messages
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SwissMessage {
+    /// New round pairings available
+    RoundStarted {
+        tournament_id: u64,
+        round: u8,
+        pairings: Vec<SwissPairing>,
+    },
+    /// Match result recorded
+    ResultRecorded {
+        tournament_id: u64,
+        round: u8,
+        board: u16,
+        result: MatchResult,
+    },
+    /// Standings updated
+    StandingsUpdated {
+        tournament_id: u64,
+        standings: Vec<SwissStandingsEntry>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwissPairing {
+    pub white: String,
+    pub black: String,
+    pub board: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MatchResult {
+    Win { winner: String },
+    Draw,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwissStandingsEntry {
+    pub player_id: String,
+    pub score: f64,
+    pub rank: u16,
+}
 
 /// Shared state accessible from Axum route handlers.
 #[derive(Clone)]
@@ -33,6 +77,33 @@ pub struct BraidAppState {
 }
 
 impl BraidAppState {
+    /// Broadcast a Swiss tournament message via gossip
+    pub async fn broadcast_swiss_message(&self, tournament_id: u64, message: SwissMessage) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!("/swiss/{}", tournament_id);
+        let body = serde_json::to_string(&message)?;
+        let version = Version::String(uuid::Uuid::new_v4().to_string());
+        let update = Update::snapshot(version, Bytes::from(body.into_bytes()));
+
+        // Store locally
+        let mut resources = self.resources.write().await;
+        resources
+            .entry(url.clone())
+            .or_insert_with(Vec::new)
+            .push(update.clone());
+        drop(resources);
+
+        // Broadcast to gossip subscribers
+        self.subscriptions.broadcast(&url, &update).await?;
+        tracing::info!("[braid] Broadcast Swiss message for tournament {}", tournament_id);
+        Ok(())
+    }
+
+    /// Subscribe to Swiss tournament updates
+    pub async fn subscribe_swiss(&self, tournament_id: u64) -> Result<iroh_gossip::api::GossipReceiver, Box<dyn std::error::Error>> {
+        let url = format!("/swiss/{}", tournament_id);
+        let (_sender, receiver) = self.subscriptions.subscribe(&url, vec![]).await?;
+        Ok(receiver)
+    }
     /// Ensure the `braid_resources` table exists and warm-load existing
     /// resources into the in-memory map. Call this once on startup.
     pub async fn init_db(&self) {

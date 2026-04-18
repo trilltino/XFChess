@@ -27,6 +27,14 @@ pub struct SigningConfig {
     pub identity_salt: String,
     /// Comma-separated base58 fee-payer private keys for transaction fees
     pub fee_payer_keys: Vec<String>,
+    /// Base58 encoded VPS authority private key
+    pub vps_authority_key: Option<String>,
+    /// Base58 encoded KYC authority private key
+    pub kyc_authority_key: Option<String>,
+    /// Host treasury pubkey - receives entry fees directly
+    pub host_treasury_pubkey: String,
+    /// USDC mint address (devnet or mainnet)
+    pub usdc_mint_pubkey: String,
 }
 
 impl SigningConfig {
@@ -41,6 +49,10 @@ impl SigningConfig {
     /// - `IDENTITY_ENCRYPTION_KEY` - 64-char hex for AES-256
     /// - `IDENTITY_SALT` - 64-char hex for blind index
     /// - `FEE_PAYER_KEYS` - Comma-separated base58 keys or file paths
+    /// - `VPS_AUTHORITY_KEY` - Base58 VPS authority key
+    /// - `KYC_AUTHORITY_KEY` - Base58 KYC authority key
+    /// - `HOST_TREASURY_PUBKEY` - Host treasury pubkey for entry fees
+    /// - `USDC_MINT` - USDC mint address (devnet or mainnet)
     ///
     /// # Returns
     /// A fully configured `SigningConfig` struct
@@ -68,6 +80,12 @@ impl SigningConfig {
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
                 .collect(),
+            vps_authority_key: env::var("VPS_AUTHORITY_KEY").ok(),
+            kyc_authority_key: env::var("KYC_AUTHORITY_KEY").ok(),
+            host_treasury_pubkey: env::var("HOST_TREASURY_PUBKEY")
+                .unwrap_or_else(|_| "11111111111111111111111111111111".to_string()),
+            usdc_mint_pubkey: env::var("USDC_MINT")
+                .unwrap_or_else(|_| "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".to_string()),
         }
     }
 }

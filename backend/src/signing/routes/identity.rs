@@ -164,7 +164,7 @@ async fn register_identity(
     }
     
     // 4. On-Chain Sync: VPS signs the instruction to flag the user as verified
-    let admin_keypair = state.feepayer.next();
+    let admin_keypair = &state.kyc_authority;
     let program_id = Pubkey::from_str(&state.config.program_id)
         .unwrap_or_else(|_| "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX".parse().expect("Default program ID should be valid"));
     

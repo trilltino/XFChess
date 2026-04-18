@@ -6,3 +6,4 @@
 
 pub mod matchmaking;
 pub mod fee_claimer;
+pub mod tournament_scheduler;

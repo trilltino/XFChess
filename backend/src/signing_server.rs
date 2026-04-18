@@ -1,7 +1,8 @@
 use backend::signing::{AppState, SigningConfig};
 use backend::signing::storage::tournament::TournamentStore;
 use backend::signing::storage::SessionStore;
-use backend::infrastructure::{initialize_pools, run_migrations, build_app_router, spawn_background_tasks};
+use backend::infrastructure::{initialize_pools, run_migrations, spawn_background_tasks};
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 use tracing::info;
 
@@ -28,12 +29,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     session_store.init().await?;
     info!("[signing-server] Session store initialized");
 
-    let state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone());
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
     info!("[signing-server] Tournament store initialized");
 
+    let mut state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone(), Arc::new(tournament_store.clone()));
+
     // ── Build application router ───────────────────────────────────────────
-    let app = build_app_router(state.clone(), tournament_store);
+    let app = backend::signing::build_router(state.clone());
     info!("[signing-server] Application router built");
 
     // ── Bind and serve via Iroh P2P ───────────────────────────────────────
@@ -49,8 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await.expect("failed to spawn braid-iroh node");
 
     // ── Spawn background tasks ───────────────────────────────────────────────
-    spawn_background_tasks(state, config);
-    info!("[signing-server] Background tasks spawned");
+    let tournament_trigger = spawn_background_tasks(state.clone(), config);
+    state.tournament_trigger = Some(tournament_trigger);
+    info!("[signing-server] Background tasks spawned with tournament scheduler");
 
     // ── Wait for shutdown signal ───────────────────────────────────────────
     tokio::signal::ctrl_c().await.expect("failed to wait for sigint");

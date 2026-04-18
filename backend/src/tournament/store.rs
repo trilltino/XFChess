@@ -3,6 +3,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// ── Tournament Format ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TournamentType {
+    SingleElimination,
+    Swiss { rounds: u8 },
+}
+
 // ── Domain types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -20,55 +28,141 @@ pub enum MatchStatus {
     Completed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ResultSource {
+    OnChain,
+    Oracle,
+    Forfeit,
+    DrawAgreed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TournamentMatch {
-    pub match_index: u8,       // 0 = SF1, 1 = SF2, 2 = Final
-    pub round: u8,
+    pub match_index: u16,
+    pub round: u16,
     pub player_white: Option<String>,
     pub player_black: Option<String>,
     pub winner: Option<String>,
     pub game_id: Option<u64>,
     pub status: MatchStatus,
+    pub result_source: Option<ResultSource>,
+}
+
+// Swiss-specific state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwissState {
+    pub current_round: u8,
+    pub total_rounds: u8,
+    pub player_scores: HashMap<String, f64>,
+    pub player_byes: HashMap<String, u8>,
+    pub pairings_history: Vec<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TournamentRecord {
     pub tournament_id: u64,
     pub name: String,
+    pub tournament_type: TournamentType,
+    pub max_players: u16,
+    pub min_players: u16,
     pub entry_fee_lamports: u64,
     pub prize_pool: u64,
+    pub prize_mint: Option<String>,
     pub status: TournamentStatus,
-    pub players: Vec<String>,       // pubkeys in registration order
+    pub players: Vec<String>,
     pub player_elos: Vec<u32>,
-    pub node_ids: HashMap<String, String>, // pubkey → iroh node_id
-    pub matches: [Option<TournamentMatch>; 3], // SF1, SF2, Final
+    pub node_ids: HashMap<String, String>,
+    pub matches: Vec<TournamentMatch>,
+    pub swiss_state: Option<SwissState>,
     pub winner: Option<String>,
-    pub created_at: i64,
+    pub scheduled_at: Option<i64>,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
+    pub created_at: i64,
+    pub elo_min: u32,
+    pub elo_max: u32,
 }
 
 impl TournamentRecord {
-    pub fn new(tournament_id: u64, name: String, entry_fee_lamports: u64) -> Self {
+    pub fn new(
+        tournament_id: u64,
+        name: String,
+        entry_fee_lamports: u64,
+        tournament_type: TournamentType,
+        max_players: u16,
+    ) -> Self {
         Self {
             tournament_id,
             name,
+            tournament_type,
+            max_players,
+            min_players: max_players.min(8),
             entry_fee_lamports,
             prize_pool: 0,
+            prize_mint: None,
             status: TournamentStatus::Registration,
             players: Vec::new(),
             player_elos: Vec::new(),
             node_ids: HashMap::new(),
-            matches: [None, None, None],
+            matches: Vec::new(),
+            swiss_state: None,
             winner: None,
+            scheduled_at: None,
             created_at: chrono::Utc::now().timestamp(),
             started_at: None,
             completed_at: None,
+            elo_min: 0,
+            elo_max: 9999,
+        }
+    }
+
+    pub fn with_config(
+        tournament_id: u64,
+        name: String,
+        entry_fee_lamports: u64,
+        max_players: u16,
+        prize_shares: [u16; 4],
+        format: TournamentType,
+        elo_min: Option<u32>,
+        elo_max: Option<u32>,
+        min_players: Option<u16>,
+        scheduled_at: Option<i64>,
+        _kyc_required: bool,
+    ) -> Self {
+        Self {
+            tournament_id,
+            name,
+            tournament_type: format,
+            max_players,
+            min_players: min_players.unwrap_or(8),
+            entry_fee_lamports,
+            prize_pool: 0,
+            prize_mint: None,
+            status: TournamentStatus::Registration,
+            players: Vec::new(),
+            player_elos: Vec::new(),
+            node_ids: HashMap::new(),
+            matches: Vec::new(),
+            swiss_state: None,
+            winner: None,
+            scheduled_at,
+            created_at: chrono::Utc::now().timestamp(),
+            started_at: None,
+            completed_at: None,
+            elo_min: elo_min.unwrap_or(0),
+            elo_max: elo_max.unwrap_or(9999),
         }
     }
 
     pub fn is_full(&self) -> bool {
-        self.players.len() >= 4
+        self.players.len() >= self.max_players as usize
+    }
+
+    pub fn final_match_index(&self) -> usize {
+        match self.tournament_type {
+            TournamentType::SingleElimination => self.max_players.saturating_sub(1) as usize,
+            TournamentType::Swiss { rounds } => rounds as usize,
+        }
     }
 
     /// Returns the match assigned to the given player pubkey, if any.
@@ -103,7 +197,7 @@ impl TournamentRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchAssignment {
-    pub match_index: u8,
+    pub match_index: u16,
     pub game_id: Option<u64>,
     pub opponent_pubkey: String,
     pub opponent_node_id: Option<String>,

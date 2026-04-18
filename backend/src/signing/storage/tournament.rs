@@ -8,6 +8,23 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sqlx::{SqlitePool, Row};
 
+/// Tournament format - single elimination or Swiss
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TournamentFormat {
+    SingleElimination,
+    Swiss { rounds: u8 },
+}
+
+/// Swiss-specific storage data
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SwissStorageData {
+    pub current_round: u8,
+    pub total_rounds: u8,
+    pub rounds: Vec<swiss_pairing::SwissRound>,
+    pub results: Vec<(u8, u16, swiss_pairing::MatchResult)>,
+    pub standings: Vec<swiss_pairing::StandingsEntry>,
+}
+
 /// Tournament lifecycle status.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TournamentStatus {
@@ -32,6 +49,19 @@ pub enum MatchStatus {
     Completed,
 }
 
+/// Source of match result determination.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ResultSource {
+    /// Result recorded on-chain via Solana
+    OnChain,
+    /// Result submitted by backend oracle
+    Oracle,
+    /// Player forfeit (no-show)
+    Forfeit,
+    /// Players agreed to draw
+    DrawAgreed,
+}
+
 /// Individual tournament match data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TournamentMatch {
@@ -49,6 +79,8 @@ pub struct TournamentMatch {
     pub game_id: Option<u64>,
     /// Current match status
     pub status: MatchStatus,
+    /// Source of result determination
+    pub result_source: Option<ResultSource>,
     /// Next match index for the winner (None for final)
     pub next_match_for_winner: Option<u16>,
     /// Slot in next match (0 = white, 1 = black)
@@ -66,10 +98,12 @@ pub struct TournamentRecord {
     pub entry_fee_lamports: u64,
     /// Total prize pool (sum of entry fees)
     pub prize_pool: u64,
-    /// Maximum players (8, 16, 32, 64, 128)
+    /// Maximum players (8, 16, 32, 64, 128, 256)
     pub max_players: u16,
     /// Current tournament status
     pub status: TournamentStatus,
+    /// Tournament format
+    pub format: TournamentFormat,
     /// Registered player wallet pubkeys
     pub players: Vec<String>,
     /// Player ELO ratings (parallel to players vec)
@@ -88,19 +122,44 @@ pub struct TournamentRecord {
     pub fourth_place: Option<String>,
     /// Prize distribution [1st%, 2nd%, 3rd%, 4th%] in basis points (10000 = 100%)
     pub prize_shares: [u16; 4],
+    /// Swiss-specific data (None for single-elimination)
+    pub swiss_data: Option<SwissStorageData>,
+    /// Minimum ELO rating for players (optional)
+    pub elo_min: Option<u32>,
+    /// Maximum ELO rating for players (optional)
+    pub elo_max: Option<u32>,
+    /// Minimum players required to start tournament (optional)
+    pub min_players: Option<u16>,
     /// Unix timestamp when tournament was created
     pub created_at: i64,
+    /// Unix timestamp when tournament is scheduled to open for play (None = open immediately)
+    pub scheduled_at: Option<i64>,
     /// Unix timestamp when tournament started
     pub started_at: Option<i64>,
     /// Unix timestamp when tournament completed
     pub completed_at: Option<i64>,
+    /// Whether all entrants must have completed CACF KYC before joining
+    #[serde(default)]
+    pub kyc_required: bool,
 }
 
 impl TournamentRecord {
     /// Creates a new tournament record.
-    /// Default: 8 players, winner-take-all (10000 bps = 100%)
+    /// Default: 8 players, winner-take-all (10000 bps = 100%), single elimination
     pub fn new(tournament_id: u64, name: String, entry_fee_lamports: u64) -> Self {
-        Self::with_config(tournament_id, name, entry_fee_lamports, 8, [10000, 0, 0, 0])
+        Self::with_config(
+            tournament_id,
+            name,
+            entry_fee_lamports,
+            8,
+            [10000, 0, 0, 0],
+            TournamentFormat::SingleElimination,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
     }
 
     /// Creates a tournament with custom configuration.
@@ -110,6 +169,12 @@ impl TournamentRecord {
         entry_fee_lamports: u64,
         max_players: u16,
         prize_shares: [u16; 4],
+        format: TournamentFormat,
+        elo_min: Option<u32>,
+        elo_max: Option<u32>,
+        min_players: Option<u16>,
+        scheduled_at: Option<i64>,
+        kyc_required: bool,
     ) -> Self {
         let total_matches = (max_players - 1) as usize;
         Self {
@@ -119,6 +184,7 @@ impl TournamentRecord {
             prize_pool: 0,
             max_players,
             status: TournamentStatus::Registration,
+            format,
             players: Vec::with_capacity(max_players as usize),
             player_elos: Vec::with_capacity(max_players as usize),
             node_ids: HashMap::new(),
@@ -128,9 +194,15 @@ impl TournamentRecord {
             third_place: None,
             fourth_place: None,
             prize_shares,
+            swiss_data: None,
+            elo_min,
+            elo_max,
+            min_players,
             created_at: chrono::Utc::now().timestamp(),
+            scheduled_at,
             started_at: None,
             completed_at: None,
+            kyc_required,
         }
     }
 
@@ -225,6 +297,7 @@ impl TournamentRecord {
                 winner: None,
                 game_id: None,
                 status: MatchStatus::Pending,
+                result_source: None,
                 next_match_for_winner: next_match,
                 next_match_slot: next_slot,
             });
@@ -254,6 +327,7 @@ impl TournamentRecord {
                     winner: None,
                     game_id: None,
                     status: MatchStatus::Pending,
+                    result_source: None,
                     next_match_for_winner: next_match,
                     next_match_slot: next_slot,
                 });
@@ -412,5 +486,101 @@ impl TournamentStore {
                 t.completed_at = Some(chrono::Utc::now().timestamp());
             }
         }).await
+    }
+
+    /// Update tournament status
+    pub async fn update_status(&self, id: u64, status: TournamentStatus) -> bool {
+        self.update(id, |t| {
+            t.status = status;
+        }).await
+    }
+
+    /// Seed players by ELO rating (highest to lowest)
+    pub async fn seed_players_by_elo(&self, id: u64) -> bool {
+        self.update(id, |t| {
+            let mut indexed: Vec<(usize, u32)> = t.player_elos.iter().copied().enumerate().collect();
+            indexed.sort_by(|a, b| b.1.cmp(&a.1)); // descending ELO
+            
+            // Reorder players and elos by sorted index
+            let mut sorted_players = Vec::new();
+            let mut sorted_elos = Vec::new();
+            for (idx, _) in indexed {
+                sorted_players.push(t.players[idx].clone());
+                sorted_elos.push(t.player_elos[idx]);
+            }
+            t.players = sorted_players;
+            t.player_elos = sorted_elos;
+        }).await
+    }
+
+    /// Generate bracket for single-elimination tournaments
+    pub async fn generate_bracket(&self, id: u64) -> bool {
+        self.update(id, |t| {
+            if t.format != TournamentFormat::SingleElimination {
+                return;
+            }
+            
+            let num_players = t.players.len();
+            let num_matches = num_players.saturating_sub(1);
+            t.matches = vec![None; num_matches];
+            
+            // Generate first round pairings (highest vs lowest seeding)
+            let mut match_idx = 0;
+            for i in 0..num_players/2 {
+                let white_idx = i;
+                let black_idx = num_players - 1 - i;
+                
+                t.matches[match_idx] = Some(TournamentMatch {
+                    match_index: match_idx as u16,
+                    round: 0,
+                    player_white: Some(t.players[white_idx].clone()),
+                    player_black: Some(t.players[black_idx].clone()),
+                    winner: None,
+                    game_id: None,
+                    status: MatchStatus::Pending,
+                    result_source: None,
+                    next_match_for_winner: Some((num_players/2 + match_idx/2) as u16),
+                    next_match_slot: if match_idx % 2 == 0 { 0 } else { 1 },
+                });
+                match_idx += 1;
+            }
+        }).await
+    }
+
+    /// Start the tournament (generate bracket and set status)
+    pub async fn start_tournament(&self, id: u64) -> Result<(), String> {
+        let tournament = self.get(id).await.ok_or("Tournament not found")?;
+        
+        // Seed players first
+        if !self.seed_players_by_elo(id).await {
+            return Err("Failed to seed players".to_string());
+        }
+        
+        match tournament.format {
+            TournamentFormat::SingleElimination => {
+                if !self.generate_bracket(id).await {
+                    return Err("Failed to generate bracket".to_string());
+                }
+            }
+            TournamentFormat::Swiss { rounds } => {
+                // Swiss bracket generation handled by swiss service
+                // Just verify we have enough players
+                if tournament.players.len() < tournament.min_players.unwrap_or(8) as usize {
+                    return Err("Not enough players for Swiss tournament".to_string());
+                }
+            }
+        }
+        
+        // Set status to Active
+        if !self.update_status(id, TournamentStatus::Active).await {
+            return Err("Failed to update tournament status".to_string());
+        }
+        
+        // Set start time
+        self.update(id, |t| {
+            t.started_at = Some(chrono::Utc::now().timestamp());
+        }).await;
+        
+        Ok(())
     }
 }

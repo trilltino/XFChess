@@ -293,4 +293,14 @@ impl BraidIrohNode {
         }
         self.subscription_mgr.join_peers(url, peers).await
     }
+
+    /// Create a BraidAppState from the node's internal state
+    /// This allows external services to use the gossip protocol for broadcasting
+    pub fn app_state(&self) -> BraidAppState {
+        BraidAppState {
+            subscriptions: self.subscription_mgr.clone(),
+            resources: self.resources.clone(),
+            db: None, // DB is owned by the node, not exposed here
+        }
+    }
 }
