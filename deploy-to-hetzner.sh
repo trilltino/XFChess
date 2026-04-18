@@ -161,8 +161,9 @@ if [ -d "/tmp/xfchess-build/.git" ]; then
     cd /tmp/xfchess-build
     git remote set-url origin "$AUTH_REPO_URL"
     git fetch origin
-    git checkout $BRANCH
-    git pull --rebase origin $BRANCH
+    # Use refs/heads/ prefix to disambiguate branch from tag with same name
+    git checkout refs/heads/$BRANCH
+    git reset --hard origin/$BRANCH
     # Strip PAT from remote to avoid it sitting on disk
     git remote set-url origin "$REPO_URL"
 else
