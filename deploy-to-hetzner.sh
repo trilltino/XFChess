@@ -184,16 +184,16 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 # Build the backend (standalone workspace — does not require Bevy/Tauri/Solana programs)
 log_info "Compiling signing-server (this may take several minutes)..."
-cargo build --release --bin signing-server 2>&1 | tee /tmp/build.log
+cargo build --manifest-path /tmp/xfchess-build/backend/Cargo.toml --release --bin signing-server 2>&1 | tee /tmp/build.log
 
 # Check if build succeeded
-if [ ! -f "target/release/signing-server" ]; then
+if [ ! -f "/tmp/xfchess-build/backend/target/release/signing-server" ]; then
     log_error "Build failed! Check /tmp/build.log"
     exit 1
 fi
 
 # Copy binary
-cp target/release/signing-server $BACKEND_DIR/
+cp /tmp/xfchess-build/backend/target/release/signing-server $BACKEND_DIR/
 chmod +x $BACKEND_DIR/signing-server
 chown xfchess:xfchess $BACKEND_DIR/signing-server
 log_info "Backend binary installed"
