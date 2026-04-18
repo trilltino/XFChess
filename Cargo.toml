@@ -55,12 +55,13 @@ members = [
     "crates/shared",
     "crates/solana-chess-client",
     "crates/solana-contract-fuzzer",
+    "crates/swiss-pairing",
     "crates/xfchess-ai-service",
     "programs/xfchess-game",
     "references/ephemeral-rollups-sdk/rust/sdk",
     "tauri",
-    "backend",
 ]
+exclude = ["backend"]
 resolver = "2"
 
 [profile.dev]
@@ -224,6 +225,8 @@ anyhow = { workspace = true }
 clap.workspace = true
 egui.workspace = true
 bincode.workspace = true
+zstd.workspace = true
+futures = { workspace = true }
 base64.workspace = true
 aes-gcm.workspace = true
 regex.workspace = true
