@@ -5,6 +5,7 @@
 pub mod account;
 pub mod game;
 pub mod menus;
+pub mod spectator_mode;
 pub mod styles;
 pub mod system_params;
 
@@ -26,6 +27,7 @@ pub use menus::stats;
 
 use auth::AuthUiPlugin;
 use bevy::prelude::*;
+use spectator_mode::SpectatorModePlugin;
 #[cfg(feature = "solana")]
 use crate::core::states::GameState;
 
@@ -37,6 +39,7 @@ impl Plugin for UiPlugin {
         app.add_plugins(compliance_modal::CompliancePlugin);
         app.add_plugins(popup::PopupPlugin);
         app.add_plugins(stats::StatsPlugin);
+        app.add_plugins(SpectatorModePlugin);
 
         #[cfg(feature = "solana")]
         app.add_systems(

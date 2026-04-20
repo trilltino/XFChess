@@ -114,6 +114,24 @@ pub enum GameErrorCode {
     #[msg("Tournament is not active.")]
     TournamentNotActive,     // Instruction requires TournamentStatus::Active
 
+    #[msg("Player ELO is below tournament minimum.")]
+    EloTooLow,               // Player's ELO rating is less than tournament.elo_min
+
+    #[msg("Player ELO is above tournament maximum.")]
+    EloTooHigh,              // Player's ELO rating is greater than tournament.elo_max
+
+    #[msg("Player not found in tournament.")]
+    PlayerNotFound,          // Player is not registered in the tournament
+
+    #[msg("USDC prize pool has not been funded yet.")]
+    UsdcPrizeNotFunded,      // register_player called before operator deposited USDC prize
+
+    #[msg("USDC transfer failed.")]
+    UsdcTransferFailed,      // SPL token transfer failed (insufficient balance or approval)
+
+    #[msg("Insufficient treasury balance for refunds.")]
+    InsufficientTreasuryForRefund, // host_treasury doesn't have enough SOL to refund players on cancel
+
     // ── Timeout / resign ──────────────────────────────────────────────────────
     #[msg("No time limit is set for this game.")]
     NoTimeLimit,             // claim_timeout called on a game with time_per_move == 0
@@ -127,6 +145,15 @@ pub enum GameErrorCode {
     // ── Fee vault ─────────────────────────────────────────────────────────────
     #[msg("Fee vault claim conditions not yet met (threshold or interval).")]
     FeeVaultNotReady,        // claim_fees called before min balance/time conditions are met
+
+    #[msg("Vesting parameters not configured for this tournament.")]
+    NoVestingConfigured,     // Streaming claim attempted on tournament without vesting params
+
+    #[msg("Math overflow in calculation.")]
+    MathOverflow,           // Safe math overflow check failed
+
+    #[msg("Not a tournament winner.")]
+    NotTournamentWinner,    // Caller is not in winner list for prize claim
 }
 
 // Alias so the rest of the codebase can use either name.

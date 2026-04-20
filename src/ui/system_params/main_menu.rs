@@ -67,8 +67,8 @@ pub struct MainMenuUIContext<'w, 's> {
     pub p2p_ui: ResMut<'w, P2PUIState>,
     pub p2p_state: ResMut<'w, P2PConnectionState>,
     pub p2p_vps_state: Option<ResMut<'w, P2PVpsState>>,
-    pub host_game_events: MessageWriter<'w, HostGameEvent>,
-    pub connect_events: MessageWriter<'w, ConnectToPeerEvent>,
+    pub host_game_events: EventWriter<'w, HostGameEvent>,
+    pub connect_events: EventWriter<'w, ConnectToPeerEvent>,
     pub color_choice: ResMut<'w, PlayerColorChoice>,
     #[cfg(feature = "solana")]
     pub wallet: Option<ResMut<'w, SolanaWallet>>,

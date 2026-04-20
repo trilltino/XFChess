@@ -27,6 +27,7 @@ pub struct RecordMove<'info> {
         bump = session_delegation.bump,
         constraint = session_delegation.session_key == player.key() @ GameErrorCode::InvalidSessionKey,
         constraint = session_delegation.enabled @ GameErrorCode::SessionExpiredOrDisabled,
+        constraint = Clock::get()?.unix_timestamp <= session_delegation.expires_at @ GameErrorCode::SessionExpired,
     )]
     pub session_delegation: Account<'info, SessionDelegation>,
 }

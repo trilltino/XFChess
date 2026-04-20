@@ -2,7 +2,7 @@
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
-const PROGRAM_ID: &str = "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX";
+const PROGRAM_ID: &str = "A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W";
 
 fn main() {
     let game_id: u64 = std::env::args()

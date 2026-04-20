@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::board_state::ChessEngine;
 use crate::game::events::MoveMadeEvent;
-use crate::multiplayer::network::protocol::NetworkMessage;
-use crate::multiplayer::{BraidGameSync, BraidNetworkState, NetworkEvent};
+// Temporarily disabled to remove lightyear dependencies
+// use crate::multiplayer::network::protocol::NetworkMessage;
+// use crate::multiplayer::{BraidGameSync, BraidNetworkState, NetworkEvent};
 
 // Board state sync module
 pub mod board_state;
@@ -18,25 +19,28 @@ pub struct GameSyncPlugin;
 
 impl Plugin for GameSyncPlugin {
     fn build(&self, app: &mut App) {
+        // Temporarily disabled multiplayer-dependent systems
         // Initialize board state sync on startup
-        app.add_systems(Startup, init_board_state_sync);
+        // app.add_systems(Startup, init_board_state_sync);
 
-        app.add_systems(
-            Update,
-            (
-                receive_network_moves,
-                broadcast_local_moves,
-                apply_network_patches,
-                update_board_state_from_network,
-                // New board state sync systems
-                broadcast_state_system,
-                receive_state_system,
-            ),
-        );
+        // app.add_systems(
+        //     Update,
+        //     (
+        //         receive_network_moves,
+        //         broadcast_local_moves,
+        //         apply_network_patches,
+        //         update_board_state_from_network,
+        //         // New board state sync systems
+        //         broadcast_state_system,
+        //         receive_state_system,
+        //     ),
+        // );
     }
 }
 
 /// Receives moves from the network and converts them to game events
+// Temporarily disabled to remove lightyear dependencies
+/*
 fn receive_network_moves(
     mut network_events: MessageReader<NetworkEvent>,
     mut network_move_events: MessageWriter<crate::game::events::NetworkMoveEvent>,
@@ -71,8 +75,11 @@ fn receive_network_moves(
         }
     }
 }
+*/
 
 /// Broadcasts local moves to the network
+// Temporarily disabled to remove lightyear dependencies
+/*
 fn broadcast_local_moves(
     mut local_move_events: MessageReader<MoveMadeEvent>,
     network_state: Res<BraidNetworkState>,
@@ -108,8 +115,11 @@ fn broadcast_local_moves(
         }
     }
 }
+*/
 
 /// Applies network patches to the local game state
+// Temporarily disabled to remove lightyear dependencies
+/*
 fn apply_network_patches(
     mut braid_sync: ResMut<BraidGameSync>,
     _network_state: Res<BraidNetworkState>,
@@ -121,14 +131,18 @@ fn apply_network_patches(
         }
     }
 }
+*/
 
 /// Updates the local board state based on network-synced state
-fn update_board_state_from_network(_engine: ResMut<ChessEngine>, _braid_sync: Res<BraidGameSync>) {
+// Temporarily disabled to remove lightyear dependencies
+/*
+fn update_board_state_from_network(_engine: ResMut<ChessEngine>, _braid_sync: ResMut<BraidGameSync>) {
     // In the new architecture, we likely need to update from another source
     // since the document field no longer exists in BraidGameSync
     // This function might need to be updated based on how the sync works now
     // For now, leaving it as a placeholder
 }
+*/
 
 /// Represents a move transmitted over the network
 #[derive(Serialize, Deserialize, Debug, Clone)]

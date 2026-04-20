@@ -3,25 +3,31 @@ setlocal
 
 echo.
 echo  ============================================================
-echo   XFChess  ^|  Full Build + Launch (RELEASE MODE)
+echo   XFChess  ^|  PRODUCTION Launcher
 echo  ============================================================
 echo.
 
 cd /d "%~dp0.."
 set ROOT=%cd%
 
-REM --- Kill any running instances ---
-echo [0/6] Killing any running instances...
-taskkill /IM xfchess.exe        /F >nul 2>&1
-taskkill /IM xfchess-tauri.exe  /F >nul 2>&1
-taskkill /IM signing-server.exe /F >nul 2>&1
+REM --- Step 1: Set Hetzner Backend URL ---
+echo [1/8] Setting backend URLs...
+set HETZNER_IP=178.104.55.19
+echo  Game Backend:       http://%HETZNER_IP%/ (Hetzner)
+echo  Tournament Backend: http://%HETZNER_IP%:8090 (Hetzner)
+
+REM --- Step 2: Kill any running instances ---
+echo.
+echo [2/8] Cleaning up old instances...
+taskkill /IM xfchess.exe             /F >nul 2>&1
+taskkill /IM xfchess-tauri.exe       /F >nul 2>&1
 taskkill /IM signing-server-http.exe /F >nul 2>&1
-taskkill /IM vps_admin.exe /F >nul 2>&1
+taskkill /IM vps_admin.exe           /F >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-REM --- Ensure Stockfish is available ---
+REM --- Step 3: Ensure Stockfish is available ---
 echo.
-echo [1/6] Ensuring Stockfish is available...
+echo [3/8] Ensuring Stockfish is available...
 if not exist "%ROOT%\stockfish.exe" (
     echo  WARNING: stockfish.exe not found! AI will not work.
 ) else (
@@ -29,9 +35,26 @@ if not exist "%ROOT%\stockfish.exe" (
     copy /Y "%ROOT%\stockfish.exe" "%ROOT%\target\release\stockfish.exe" >nul
 )
 
-REM --- Build React onboarding UI ---
+REM --- Check Prerequisites ---
 echo.
-echo [2/6] Building web-solana site (merged into localhost:7454)...
+echo [4/8] Checking prerequisites...
+where npm >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo  ERROR: npm not found. Please install Node.js.
+    pause
+    exit /b 1
+)
+where cargo >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo  ERROR: cargo not found. Please install Rust.
+    pause
+    exit /b 1
+)
+echo  ✓ npm and cargo found
+
+REM --- Step 5: Build web-solana site ---
+echo.
+echo [5/8] Building web-solana site...
 pushd web-solana
 call npm run build >nul 2>&1
 if %ERRORLEVEL% neq 0 (
@@ -41,88 +64,40 @@ if %ERRORLEVEL% neq 0 (
 )
 popd
 
-REM --- Build wallet onboarding UI ---
+REM --- Step 6: Build wallet onboarding UI ---
 echo.
-echo [3/6] Building wallet onboarding UI...
+echo [6/8] Building wallet onboarding UI...
 pushd tauri\wallet-ui
 call npm run build >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo  ERROR: UI build failed.
+    echo  ERROR: Wallet UI build failed.
     pause
     exit /b 1
 )
 popd
 
-REM --- Check if target builds exist ---
+REM --- Step 7: Build xfchess-tauri ---
 echo.
-echo [4/6] Checking for target builds...
-if exist "%ROOT%\target\release\xfchess.exe" (
-    echo  Using existing xfchess.exe from target/release
-) else (
-    echo  Building xfchess in RELEASE mode...
-    cargo build --bin xfchess --features solana --release --quiet
-    if %ERRORLEVEL% neq 0 (
-        echo  ERROR: Game build failed.
-        pause
-        exit /b 1
-    )
+echo [7/8] Building xfchess-tauri in RELEASE mode...
+cargo build -p xfchess-tauri --release --quiet
+if %ERRORLEVEL% neq 0 (
+    echo  ERROR: Tauri build failed.
+    pause
+    exit /b 1
 )
 
-if exist "%ROOT%\target\release\xfchess-tauri.exe" (
-    echo  Using existing xfchess-tauri.exe from target/release
-) else (
-    echo  Building xfchess-tauri in RELEASE mode...
-    cargo build -p xfchess-tauri --release --quiet
-    if %ERRORLEVEL% neq 0 (
-        echo  ERROR: Tauri build failed.
-        pause
-        exit /b 1
-    )
-)
+REM --- Step 8: Backend Configuration ---
+echo.
+echo  [8/8] Using Hetzner backend exclusively (no local servers)
+echo  All auth, tournament, and game services will connect to Hetzner.
+echo.
+echo  Hetzner Services:
+echo   - Game Backend:    http://%HETZNER_IP%:80/
+echo   - Auth/Tournament: http://%HETZNER_IP%:8090/
 
-REM --- Build backend HTTP server ---
+REM --- Step 10: Generate API Key if not set ---
 echo.
-echo [5/7] Building backend HTTP server...
-if exist "%ROOT%\backend\target\release\signing-server-http.exe" (
-    echo  Using existing signing-server-http.exe from backend/target/release
-) else (
-    echo  Building signing-server-http in RELEASE mode...
-    pushd backend
-    cargo build --bin signing-server-http --release --quiet
-    if %ERRORLEVEL% neq 0 (
-        echo  ERROR: Backend HTTP build failed.
-        pause
-        exit /b 1
-    )
-    popd
-)
-
-REM --- Build VPS Admin ---
-echo.
-echo [6/7] Building VPS Admin...
-if exist "%ROOT%\backend\target\release\vps_admin.exe" (
-    echo  Using existing vps_admin.exe from backend/target/release
-) else (
-    echo  Building vps_admin in RELEASE mode...
-    pushd backend
-    cargo build --bin vps_admin --release --quiet
-    if %ERRORLEVEL% neq 0 (
-        echo  ERROR: VPS Admin build failed.
-        pause
-        exit /b 1
-    )
-    popd
-)
-
-REM --- Backend URL is now compiled into binary via build.rs ---
-echo.
-echo [Config] Backend URL is compiled into binary (backend_url.txt).
-echo  Edit backend_url.txt and rebuild to change.
-echo.
-
-REM --- Generate API Key if not set ---
-echo.
-echo [API Key] Checking for ADMIN_API_KEY...
+echo  Checking for ADMIN_API_KEY...
 if not defined ADMIN_API_KEY (
     echo  Generating new API key...
     for /f "tokens=*" %%i in ('powershell -Command "[guid]::NewGuid().ToString()"') do set ADMIN_API_KEY=%%i
@@ -137,43 +112,35 @@ if not defined ADMIN_API_KEY (
     echo  Using existing API key.
 )
 
-REM --- Start Local Backend ---
+REM --- Step 11: Start tournament services ---
 echo.
 echo  ============================================================
-echo   Build complete! Starting Backend Server...
+echo   Build complete! Starting XFChess (Hetzner Mode)...
 echo  ============================================================
 echo.
-echo [6/7] Starting Backend HTTP Server (port 8090)...
-start "XFChess Backend" /D "%ROOT%\backend" cmd /c "set ADMIN_API_KEY=%ADMIN_API_KEY% && set SIGNING_SERVICE_URL=http://localhost:8090 && target\release\signing-server-http.exe"
-echo  Backend server starting on port 8090...
-timeout /t 3 /nobreak >nul
-
+echo  Configuration: ALL services on Hetzner (no local servers)
 echo.
 echo  ============================================================
-echo   Backend Running! Starting VPS Admin Server...
-echo  ============================================================
+echo   Hetzner Endpoints:
 echo.
-
-REM --- Start VPS Admin Server ---
-echo [7/7] Starting VPS Admin Server with API key...
-pushd backend
-start "XFChess VPS Admin" /D "%ROOT%\backend" cmd /c "set ADMIN_API_KEY=%ADMIN_API_KEY% && set SIGNING_SERVICE_URL=http://localhost:8090 && cargo run --bin vps_admin --release"
-popd
-echo  VPS Admin server starting...
-timeout /t 2 /nobreak >nul
-
-echo.
-echo  ============================================================
-echo   All Services Running! Launching XFChess...
-echo   Chrome opens to localhost:7454 (site + onboarding merged).
-echo   Backend: http://localhost:8090
-echo   VPS Admin: Running in separate window
+echo   Game Backend:       http://%HETZNER_IP%/ (port 80)
+echo   Auth API:           http://%HETZNER_IP%:8090/api/auth/*
+echo   Tournament API:     http://%HETZNER_IP%:8090/api/tournament/*
+echo   API Key:            %ADMIN_API_KEY%
 echo  ============================================================
 echo.
 
-REM --- Launch Tauri (serves merged site + opens Chrome to /onboard) ---
-echo [8/8] Starting XFChess...
+REM --- Launch Tauri ---
+echo.
+echo  Launching XFChess...
 "%ROOT%\target\release\xfchess-tauri.exe"
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo  ERROR: XFChess exited with code %ERRORLEVEL%
+    echo  Check the output above for error details.
+    pause
+    exit /b %ERRORLEVEL%
+)
 
 echo.
 echo  XFChess process finished.

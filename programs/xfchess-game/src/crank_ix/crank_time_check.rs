@@ -8,13 +8,17 @@
 use anchor_lang::prelude::*;
 use crate::state::{Game, GameStatus, GameResult};
 
+/// Empty instruction data for crank_time_check (no parameters needed)
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct CrankTimeCheckData {}
+
 /// Automatic time check called by the scheduled crank.
 /// 
 /// This instruction:
 /// 1. Checks if the game is active
 /// 2. Calculates if the current player has exceeded their time limit
 /// 3. Automatically sets the game result if timeout occurred
-pub fn crank_time_check(ctx: Context<CrankTimeCheck>) -> Result<()> {
+pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;

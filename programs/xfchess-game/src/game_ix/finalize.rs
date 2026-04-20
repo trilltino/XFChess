@@ -15,18 +15,17 @@ pub struct EndGame<'info> {
     pub white_profile: Account<'info, PlayerProfile>,
     #[account(mut, seeds = [PROFILE_SEED, game.black.as_ref()], bump)]
     pub black_profile: Account<'info, PlayerProfile>,
-    /// CHECK: Destination for white winnings
-    #[account(mut)]
+    /// CHECK: White player wallet — must match game.white
+    #[account(mut, constraint = white_authority.key() == game.white @ GameErrorCode::UnauthorizedAccess)]
     pub white_authority: UncheckedAccount<'info>,
-    /// CHECK: Destination for black winnings
-    #[account(mut)]
+    /// CHECK: Black player wallet — must match game.black
+    #[account(mut, constraint = black_authority.key() == game.black @ GameErrorCode::UnauthorizedAccess)]
     pub black_authority: UncheckedAccount<'info>,
     /// CHECK: Wager escrow PDA
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// CHECK: Treasury vault for collecting country fees (seeded by country code)
-    /// Note: For now, we'll use a fixed treasury vault. In production, this should be derived per country.
-    #[account(mut)]
+    /// CHECK: Platform treasury vault — seeded PDA prevents redirection to arbitrary wallets.
+    #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub treasury_vault: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -212,21 +211,16 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
         black_profile.last_played = Clock::get()?.unix_timestamp;
 
         // --- Update Annual Wins for Compliance Reporting ---
-        // Based on country and wager amount
-        match white_profile.country.as_str() {
-            "GB" => white_profile.annual_wins_gbp += wager_amount,
-            "BR" => white_profile.annual_wins_brl += wager_amount,
-            "CA" => white_profile.annual_wins_cad += wager_amount,
-            "DE" => white_profile.annual_wins_eur += wager_amount,
-            _ => {}
-        }
-        
-        match black_profile.country.as_str() {
-            "GB" => black_profile.annual_wins_gbp += wager_amount,
-            "BR" => black_profile.annual_wins_brl += wager_amount,
-            "CA" => black_profile.annual_wins_cad += wager_amount,
-            "DE" => black_profile.annual_wins_eur += wager_amount,
-            _ => {}
+        // Only the winner's annual wins are incremented; the loser records nothing.
+        if let GameResult::Winner(w) = result {
+            let winner_profile = if w == game_white { &mut *white_profile } else { &mut *black_profile };
+            match winner_profile.country.as_str() {
+                "GB" => winner_profile.annual_wins_gbp += wager_amount,
+                "BR" => winner_profile.annual_wins_brl += wager_amount,
+                "CA" => winner_profile.annual_wins_cad += wager_amount,
+                "DE" => winner_profile.annual_wins_eur += wager_amount,
+                _ => {}
+            }
         }
 
         white_profile.ranked_games += 1;

@@ -168,7 +168,7 @@ chess-logic-on-chain = { path = "crates/chess-logic-on-chain" }
 xfchess-game = { path = "programs/xfchess-game" }
 
 [features]
-default = []
+default = ["solana"]
 solana = [
     "anchor-lang",
     "solana-sdk",

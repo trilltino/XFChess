@@ -21,3 +21,6 @@ pub use tournament_match::*;
 pub use platform_fee_vault::*;
 pub use player_session::*;
 pub use treasury_vault::*;
+
+// Re-export tournament types for use in instructions
+pub use tournament::TournamentType;

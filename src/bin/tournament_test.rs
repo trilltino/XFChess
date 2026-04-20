@@ -23,7 +23,7 @@ use tokio::time::sleep;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PROGRAM_ID: &str = "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX";
+const PROGRAM_ID: &str = "A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W";
 const DEVNET_RPC: &str = "https://api.devnet.solana.com";
 const TOURNAMENT_ID: u64 = 1;
 const ENTRY_FEE_LAMPORTS: u64 = 1_000_000; // 0.001 SOL

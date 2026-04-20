@@ -287,6 +287,7 @@ impl ChessRpcClient {
     pub fn create_commit_move_batch_ix(
         &self,
         game_id: u64,
+        nonce_start: u64,
         moves: Vec<String>,
         next_fens: Vec<String>,
         white: Pubkey,
@@ -313,6 +314,7 @@ impl ChessRpcClient {
             ],
             data: xfchess_game::instruction::CommitMoveBatch {
                 game_id,
+                nonce_start,
                 moves,
                 next_fens,
             }

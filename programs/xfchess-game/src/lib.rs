@@ -18,7 +18,7 @@ pub mod tournament_ix;
 // can find them via their `use super::*` chain.
 pub use account_ix::{InitProfile, VerifyProfile, SetUsername, WithdrawExpiredWager,
     InitializeFeeVault, CollectFee, ClaimFees, CreateSession, RevokeSession, UpdateElo};
-pub use crank_ix::{ScheduleTimeCheck, CrankTimeCheck, ScheduleTimeCheckArgs, crank_time_check, schedule_time_check_crank};
+pub use crank_ix::{ScheduleTimeCheck, CrankTimeCheck, ScheduleTimeCheckArgs, crank_time_check, schedule_time_check_crank, crank_time_check::CrankTimeCheckData};
 pub use delegation_ix::{
     AuthorizeSessionCtx, DelegateGameCtx, InitializeAfterUndelegation, RevokeSessionCtx,
     UndelegateGameCtx,
@@ -27,8 +27,9 @@ pub use game_ix::{CancelGame, CreateGame, EndGame, JoinGame, ResignGame, ClaimTi
 pub use governance_ix::{DisputeGame, ResolveDispute};
 pub use moves_ix::{CommitMoveBatchCtx, RecordMove};
 pub use tournament_ix::{
-    AdvanceWinner, CancelTournament, ClaimTournamentPrize, InitializeMatch,
-    InitializeTournament, RecordMatchResult, RegisterPlayer, StartTournament,
+    AdvanceWinner, CancelTournament, ClaimTournamentPrize, FundUsdcPrize, InitializeMatch,
+    InitializeTournament, RecordMatchResult, RecordSwissResult, RegisterPlayer, StartTournament,
+    SwissMatchResult,
 };
 
 // Anchor 0.32 #[program] generates `pub use crate::__client_accounts_<snake>::*` at the crate
@@ -116,6 +117,12 @@ pub mod __client_accounts_claim_tournament_prize {
 pub mod __client_accounts_cancel_tournament {
     pub use crate::tournament_ix::cancel::__client_accounts_cancel_tournament::*;
 }
+pub mod __client_accounts_fund_usdc_prize {
+    pub use crate::tournament_ix::fund_prize::__client_accounts_fund_usdc_prize::*;
+}
+pub mod __client_accounts_record_swiss_result {
+    pub use crate::tournament_ix::record_swiss_result::__client_accounts_record_swiss_result::*;
+}
 pub mod __client_accounts_initialize_fee_vault {
     pub use crate::account_ix::fee_vault_ix::__client_accounts_initialize_fee_vault::*;
 }
@@ -144,7 +151,7 @@ pub mod __client_accounts_crank_time_check {
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
 
-declare_id!("FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX");
+declare_id!("A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W");
 
 #[program]
 pub mod xfchess_game {
@@ -259,12 +266,14 @@ pub mod xfchess_game {
     pub fn commit_move_batch(
         ctx: Context<CommitMoveBatchCtx>,
         game_id: u64,
+        nonce_start: u64,
         moves: Vec<String>,
         next_fens: Vec<String>,
     ) -> Result<()> {
         crate::moves_ix::commit_batch::handler_commit_move_batch(
             ctx,
             game_id,
+            nonce_start,
             moves,
             next_fens,
         )
@@ -309,9 +318,28 @@ pub mod xfchess_game {
         name: String,
         entry_fee: u64,
         max_players: u16,
-        prize_shares: [u16; 4],
+        tournament_type: state::TournamentType,
+        elo_min: u32,
+        elo_max: u32,
+        min_players: u16,
+        prize_shares: [u16; 8],
+        host_treasury: Pubkey,
+        usdc_mint: Option<Pubkey>,
     ) -> Result<()> {
-        crate::tournament_ix::initialize::handler(ctx, tournament_id, name, entry_fee, max_players, prize_shares)
+        crate::tournament_ix::initialize::handler(
+            ctx,
+            tournament_id,
+            name,
+            entry_fee,
+            max_players,
+            tournament_type,
+            elo_min,
+            elo_max,
+            min_players,
+            prize_shares,
+            host_treasury,
+            usdc_mint,
+        )
     }
 
     pub fn initialize_match(
@@ -369,6 +397,24 @@ pub mod xfchess_game {
         tournament_id: u64,
     ) -> Result<()> {
         crate::tournament_ix::cancel::handler(ctx, tournament_id)
+    }
+
+    pub fn fund_usdc_prize(
+        ctx: Context<FundUsdcPrize>,
+        tournament_id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::fund_prize::handler(ctx, tournament_id, amount)
+    }
+
+    pub fn record_swiss_result(
+        ctx: Context<RecordSwissResult>,
+        tournament_id: u64,
+        round: u8,
+        board: u16,
+        result: SwissMatchResult,
+    ) -> Result<()> {
+        crate::tournament_ix::record_swiss_result::handler(ctx, tournament_id, round, board, result)
     }
 
     // ── Fee Vault ──────────────────────────────────────────────────────────────
@@ -433,7 +479,7 @@ pub mod xfchess_game {
     }
 
     /// Automatic time check called by the scheduled crank
-    pub fn crank_time_check(ctx: Context<CrankTimeCheck>) -> Result<()> {
-        crate::crank_ix::crank_time_check(ctx)
+    pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData) -> Result<()> {
+        crate::crank_ix::crank_time_check::crank_time_check(ctx, _data)
     }
 }

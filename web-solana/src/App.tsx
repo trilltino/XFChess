@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { ConnectionProvider, WalletProvider, useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
@@ -20,9 +20,16 @@ import KycPage from './pages/Kyc';
 import { SignIn } from './pages/SignIn';
 import { SignUp } from './pages/SignUp';
 import NewsRelease from './pages/NewsRelease';
+import { Tournaments } from './pages/Tournaments';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { Footer } from './components/Footer';
+
+const dropdownVariants = {
+    hidden: { opacity: 0, y: -10 },
+    visible: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -10 }
+};
 
 
 
@@ -174,27 +181,46 @@ function AppContent() {
                     <Link to="/profile" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Profile</Link>
                     <Link to="/auth/register" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Sign Up</Link>
                     <div className="nav-legal-dropdown">
-                        <button className="nav-link dropdown-toggle" onClick={() => setIsCommunityOpen(v => !v)}>
+                        <button className="nav-link dropdown-toggle" onClick={() => { setIsCommunityOpen(v => !v); setIsLegalOpen(false); }}>
                             Community <ChevronDown size={14} className={`dropdown-icon ${isCommunityOpen ? 'open' : ''}`} />
                         </button>
-                        {isCommunityOpen && (
-                            <div className="nav-legal-dropdown-menu">
-                                <Link to="/blog" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Blog</Link>
-                                <Link to="/media" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Media</Link>
-                            </div>
-                        )}
+                        <AnimatePresence>
+                            {isCommunityOpen && (
+                                <motion.div 
+                                    className="nav-legal-dropdown-menu"
+                                    variants={dropdownVariants}
+                                    initial="hidden"
+                                    animate="visible"
+                                    exit="exit"
+                                    transition={{ duration: 0.2 }}
+                                >
+                                    <Link to="/blog" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Blog</Link>
+                                    <Link to="/media" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Media</Link>
+                                    <Link to="/tournaments" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Tournaments</Link>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
                     <div className="nav-legal-dropdown">
-                        <button className="nav-link dropdown-toggle" onClick={() => setIsLegalOpen(v => !v)}>
+                        <button className="nav-link dropdown-toggle" onClick={() => { setIsLegalOpen(v => !v); setIsCommunityOpen(false); }}>
                             Legal <ChevronDown size={14} className={`dropdown-icon ${isLegalOpen ? 'open' : ''}`} />
                         </button>
-                        {isLegalOpen && (
-                            <div className="nav-legal-dropdown-menu">
-                                <Link to="/legal" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>Legal & Compliance</Link>
-                                <Link to="/anti-cheat" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>Anti-Cheat</Link>
-                                <Link to="/kyc" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>KYC</Link>
-                            </div>
-                        )}
+                        <AnimatePresence>
+                            {isLegalOpen && (
+                                <motion.div 
+                                    className="nav-legal-dropdown-menu"
+                                    variants={dropdownVariants}
+                                    initial="hidden"
+                                    animate="visible"
+                                    exit="exit"
+                                    transition={{ duration: 0.2 }}
+                                >
+                                    <Link to="/legal" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>Legal & Compliance</Link>
+                                    <Link to="/anti-cheat" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>Anti-Cheat</Link>
+                                    <Link to="/kyc" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>KYC</Link>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
                     {connected && (
                         <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
@@ -232,6 +258,7 @@ function AppContent() {
                         <Route path="/news/release" element={<NewsRelease />} />
                         <Route path="/auth/login" element={<SignIn defaultMode="login" />} />
                         <Route path="/auth/register" element={<SignUp />} />
+                        <Route path="/tournaments" element={<Tournaments />} />
                     </Routes>
                 </AnimatePresence>
             </div>

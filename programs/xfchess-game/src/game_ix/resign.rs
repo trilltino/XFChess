@@ -16,11 +16,11 @@ pub struct ResignGame<'info> {
     /// The resigning player — must be white or black.
     #[account(mut)]
     pub player: Signer<'info>,
-    /// CHECK: Destination wallet for the winner payout
-    #[account(mut)]
+    /// CHECK: White player wallet — must match game.white
+    #[account(mut, constraint = white_authority.key() == game.white @ GameErrorCode::NotInGame)]
     pub white_authority: UncheckedAccount<'info>,
-    /// CHECK: Destination wallet for the winner payout
-    #[account(mut)]
+    /// CHECK: Black player wallet — must match game.black
+    #[account(mut, constraint = black_authority.key() == game.black @ GameErrorCode::NotInGame)]
     pub black_authority: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }

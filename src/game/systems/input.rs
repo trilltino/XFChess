@@ -69,7 +69,7 @@ pub struct InputSystemParams<'w, 's> {
     pub players: Res<'w, Players>,
     #[cfg(feature = "solana")]
     pub game_sync: Option<Res<'w, SolanaGameSync>>,
-    pub connection_state: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>,
+    // pub connection_state: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
 }
 
 /// Returns true if the current turn belongs to a human player.
@@ -90,6 +90,8 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
         return false;
     }
 
+    // Temporarily disabled to remove lightyear dependencies
+    /*
     // Check if we're in an active network game.
     // Include Connected status: the host enters InGame game-state while still
     // in Connected P2P status (InGame is set only after the GameStart echo arrives).
@@ -111,6 +113,10 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
     }
 
     // Check if we're in PvP (vs AI) mode by seeing if both players are human
+    let both_human = params.players.player_1.is_human && params.players.player_2.is_human;
+    */
+
+    // Default behavior: allow moving any color piece (single-player mode)
     let both_human = params.players.player_1.is_human && params.players.player_2.is_human;
 
     if both_human {

@@ -17,7 +17,7 @@ use crate::game::events::{GameEndedEvent, GameStartedEvent};
 use crate::game::resources::history::game_over::GameOverState;
 #[cfg(feature = "solana")]
 use crate::rendering::PieceType;
-use braid_core::{Patch, Update, Version};
+use braid_core::{Update, Version};
 use braid_iroh::{BraidGameConfig, BraidIrohNode, DiscoveryConfig};
 
 pub mod network;
@@ -25,6 +25,9 @@ pub mod network;
 pub mod solana;
 #[cfg(feature = "solana")]
 pub mod rollup;
+pub mod spectator_feed;
+pub mod tournament;
+pub mod turn_relay;
 pub mod ui;
 pub mod vps_client;
 #[cfg(feature = "solana")]
@@ -43,7 +46,8 @@ impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
         // Register sub-plugins
         app.add_plugins(network::p2p::P2PConnectionPlugin)
-            .add_plugins(network::p2p_vps::P2PVpsPlugin);
+            .add_plugins(network::p2p_vps::P2PVpsPlugin)
+            .add_plugins(spectator_feed::SpectatorPlugin);
 
         #[cfg(feature = "solana")]
         app.add_plugins((
@@ -140,12 +144,27 @@ impl Default for BraidNetworkState {
     }
 }
 
+/// Role of a node in the gossip network
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NodeRole {
+    /// Active game participant
+    Player,
+    /// Read-only observer
+    Spectator,
+    /// TURN relay node
+    Relay,
+    /// Tournament official/oracle
+    Arbiter,
+}
+
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
     pub node_id: String,
     pub wallet_address: String,
     pub game_preferences: GamePreferences,
     pub last_seen: Instant,
+    pub role: NodeRole,
+    pub connected_game: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,11 +213,8 @@ pub struct MultiplayerGameState {
 
 #[derive(Resource)]
 pub struct BraidGameSync {
-    pub pending_patches: Vec<Patch>,
+    pub pending_patches: Vec<Vec<u8>>,
 }
-
-#[derive(Resource, Clone)]
-pub struct TokioRuntime(pub tokio::runtime::Handle);
 
 impl Default for BraidGameSync {
     fn default() -> Self {
@@ -212,7 +228,6 @@ const GAME_TOPIC: &str = "/xfchess-game";
 
 fn initialize_braid_network(
     mut network_state: ResMut<BraidNetworkState>,
-    tokio_runtime: Res<TokioRuntime>,
 ) {
     info!("Initializing Braid/Iroh networking layer");
 
@@ -226,8 +241,7 @@ fn initialize_braid_network(
 
     let event_tx_clone = event_tx.clone();
 
-    let tokio_runtime_inner = tokio_runtime.clone();
-    tokio_runtime.0.spawn(async move {
+    bevy::tasks::IoTaskPool::get().spawn(async move {
         let (secret_key, raw_bytes) = load_or_generate_key();
 
         let config = BraidGameConfig {
@@ -266,7 +280,7 @@ fn initialize_braid_network(
         let node_send = node_arc.clone();
         let node_bootstrap = node_arc.clone();
 
-        tokio_runtime_inner.0.spawn(async move {
+        bevy::tasks::IoTaskPool::get().spawn(async move {
             while let Some(msg) = msg_rx.recv().await {
                 let json = match serde_json::to_vec(&msg) {
                     Ok(b) => b,
@@ -276,14 +290,14 @@ fn initialize_braid_network(
                     }
                 };
                 let version = Version::new(uuid::Uuid::new_v4().to_string());
-                let update = Update::snapshot(version, json);
+                let update = Update::snapshot(version, json.into());
                 if let Err(e) = node_send.put(GAME_TOPIC, update).await {
                     error!("Failed to broadcast message: {}", e);
                 }
             }
         });
 
-        tokio_runtime_inner.0.spawn(async move {
+        bevy::tasks::IoTaskPool::get().spawn(async move {
             while let Some(peer_id) = bootstrap_rx.recv().await {
                 if let Err(e) = node_bootstrap.join_peers(GAME_TOPIC, vec![peer_id]).await {
                     error!("Failed to join peer {}: {}", peer_id, e);
@@ -381,7 +395,7 @@ fn initialize_braid_network(
                 }
             }
         }
-    });
+    }).detach();
 }
 
 fn handle_network_events(

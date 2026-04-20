@@ -4,6 +4,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import chessboardSpace from '../assets/chessboard-space.png';
 import chessWageringUI from '../assets/chess-wagering-ui.png';
 import highFidelityChess from '../assets/high-fidelity-chess.png';
+import xfchessLogo from '../assets/xfchess-logo.png';
 
 export function Home() {
     const { connected } = useWallet();
@@ -25,12 +26,12 @@ export function Home() {
             }}>
                 <div className="section-overlay"></div>
                 <div className="section-content">
-                    <h1 className="feature-title">Play Anywhere.</h1>
+                    <h1 className="feature-title">Play Anywhere</h1>
 
                     <p className="feature-desc">
-                        Master the ancient game of strategy on the blockchain. Challenge players worldwide, 
+                        Master the ancient game of strategy. Challenge players worldwide, 
                         compete in tournaments, and play chess anywhere, anytime.
-                        Experience fair play with transparent on-chain verification and secure wagering.
+                        Experience fair play with transparent verification and secure wagering.
                         Join a global community of chess enthusiasts and climb the competitive leaderboards.
                         Whether you're a grandmaster or a beginner, there's always a match waiting for you.
                     </p>
@@ -53,16 +54,16 @@ export function Home() {
                         <img src={chessboardSpace} alt="Chessboard in space" style={{ display: 'block', maxWidth: '600px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
                     </div>
                     <div style={{ flex: '1', textAlign: 'right' }}>
-                        <h2 className="feature-title">Strategic Gameplay.</h2>
+                        <h2 className="feature-title">Strategic Gameplay</h2>
 
                         <p className="feature-desc">
-                            Experience the timeless game of chess with modern blockchain technology. 
+                            Experience the timeless game of chess with modern technology. 
                             Every move matters, every game tells a story. Master the 64 squares and 
                             prove your tactical prowess against players worldwide.
                             Engage in timeless strategy with cutting-edge innovation where each 
-                            opening, tactic, and endgame is permanently recorded on-chain. Compete 
+                            opening, tactic, and endgame is permanently recorded. Compete 
                             in ranked matches, climb the global leaderboards, and earn recognition 
-                            as a true chess master in the decentralized arena.
+                            as a true chess master.
                         </p>
                     </div>
                 </div>
@@ -78,14 +79,14 @@ export function Home() {
                         <img src={chessWageringUI} alt="Chess wagering interface" style={{ display: 'block', maxWidth: '600px', width: '100%', height: 'auto', objectFit: 'contain', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
                     </div>
                     <div style={{ flex: '1', textAlign: 'right' }}>
-                        <h2 className="feature-title">Competitive Wagering.</h2>
+                        <h2 className="feature-title">Competitive Wagering</h2>
 
                         <p className="feature-desc">
                             Challenge opponents in head-to-head matches with clear stakes.
                             Winner takes all in these strategic PvP encounters where your 
                             chess skills directly translate to real rewards.
-                            Put your money where your mind is - wager SOL on your chess skills 
-                            in secure, transparent matches. Every game is verified on-chain, ensuring 
+                            Put your money where your mind is - wager on your chess skills 
+                            in secure, transparent matches. Every game is verified, ensuring 
                             fair play and instant payouts to the victor.
                         </p>
                         
@@ -124,7 +125,7 @@ export function Home() {
                 <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '40px' }}>
                     <div style={{ flex: '1' }}>
-                        <h2 className="feature-title">High-Fidelity Gaming.</h2>
+                        <h2 className="feature-title">High-Fidelity Gaming</h2>
 
                         <p className="feature-desc">
                             Experience the most rigorous skill-based wagering platform on Solana. We've combined 
@@ -163,11 +164,11 @@ export function Home() {
                         scrollSnapAlign: 'start'
                     }}>
                         <div style={{ height: '160px', background: 'linear-gradient(135deg, #1a3d2e 0%, #0f2a1f 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <span style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--primary)' }}>XFChess</span>
+                            <img src={xfchessLogo} alt="XFChess Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         </div>
                         <div style={{ padding: '20px' }}>
                             <h3 style={{ fontSize: '1.1rem', marginBottom: '8px', color: 'var(--text)' }}>XFChess released!</h3>
-                            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: '12px' }}>1 Mar 2025</p>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: '12px' }}>19 of Apr</p>
                             <Link to="/news/release" style={{ color: 'var(--primary)', fontSize: '0.9rem', fontWeight: 600 }}>read more</Link>
                         </div>
                     </div>
@@ -178,10 +179,10 @@ export function Home() {
             <section className="section">
                 <div style={{ textAlign: 'center', marginBottom: '80px' }}>
                     <Globe color="var(--primary)" size={48} style={{ margin: '0 auto 24px' }} />
-                    <h2 className="home-section-title centered">Global Arena.</h2>
+                    <h2 className="home-section-title centered">Global Arena</h2>
                     <p style={{ color: 'var(--text-dim)', fontSize: '1.2rem', maxWidth: '600px', margin: '0 auto' }}>
                         Compete in real-time matches against chess enthusiasts worldwide. Join ranked tournaments, 
-                        climb the leaderboards, and prove your strategic mastery in the ultimate blockchain chess ecosystem.
+                        climb the leaderboards, and prove your strategic mastery in the ultimate chess ecosystem.
                     </p>
                 </div>
 

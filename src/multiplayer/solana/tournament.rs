@@ -85,6 +85,29 @@ pub struct TournamentMatchAssignedEvent {
     pub your_color: String,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct SwissRoundStartedEvent {
+    pub tournament_id: u64,
+    pub round: u8,
+    pub pairings: Vec<(String, String)>, // (white, black) pairs
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct SwissResultRecordedEvent {
+    pub tournament_id: u64,
+    pub round: u8,
+    pub board: u16,
+    pub white: String,
+    pub black: String,
+    pub result: String, // "win", "loss", "draw"
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct SwissStandingsUpdatedEvent {
+    pub tournament_id: u64,
+    pub standings: Vec<(String, u8, u16)>, // (player, score, buchholz)
+}
+
 // ── On-chain instruction dispatch ─────────────────────────────────────────────
 
 /// Spawn a background task on `IoTaskPool` that:
@@ -147,12 +170,117 @@ async fn async_register_tournament(
     sign_and_send_via_tauri(&rpc_url, wallet_pubkey, &ixs, &[])
         .map_err(|e| format!("wallet sign: {e}"))?;
 
-    let slot = crate::multiplayer::vps_client::join_tournament(
-        tournament_id,
-        &wallet_pubkey.to_string(),
-    )?;
+    // Notify VPS backend of registration
+    let vps_url = std::env::var("VPS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{}/tournament/{}/join", vps_url, tournament_id))
+        .json(&serde_json::json!({
+            "player_pubkey": wallet_pubkey.to_string(),
+        }))
+        .send()
+        .await;
 
-    Ok(slot as usize)
+    if let Err(e) = res {
+        return Err(format!("VPS join failed: {}", e));
+    }
+
+    // Get assigned slot from VPS response
+    let res = res.unwrap();
+    let slot: usize = res.json().await.map_err(|e| format!("VPS response: {}", e))?;
+    Ok(slot)
+}
+
+/// Spawn a background task to subscribe to Swiss tournament updates via Iroh gossip
+pub fn spawn_swiss_subscription(
+    tournament_id: u64,
+    event_sender: bevy::prelude::EventWriter<SwissRoundStartedEvent>,
+    result_sender: bevy::prelude::EventWriter<SwissResultRecordedEvent>,
+    standings_sender: bevy::prelude::EventWriter<SwissStandingsUpdatedEvent>,
+) {
+    bevy::tasks::IoTaskPool::get().spawn(async move {
+        use braid_iroh::BraidIrohNode;
+        use braid_iroh::DiscoveryConfig;
+
+        let vps_url = std::env::var("VPS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+
+        // Get Iroh node ID from VPS
+        let client = reqwest::Client::new();
+        let node_id_res = client
+            .get(format!("{}/iroh/node-id", vps_url))
+            .send()
+            .await;
+
+        let node_id = match node_id_res {
+            Ok(res) => {
+                let text = res.text().await.unwrap_or_default();
+                text.trim().to_string()
+            }
+            Err(e) => {
+                error!("Failed to get Iroh node ID from VPS: {}", e);
+                return;
+            }
+        };
+
+        // Create Iroh node
+        let node = match BraidIrohNode::spawn(
+            "xfchess-swiss-client",
+            None,
+            None,
+            DiscoveryConfig::Real,
+        ).await {
+            Ok((node, _)) => node,
+            Err(e) => {
+                error!("Failed to spawn Iroh node: {}", e);
+                return;
+            }
+        };
+
+        // Subscribe to Swiss tournament topic
+        let topic = format!("/swiss/{}", tournament_id);
+        let mut rx = match node.subscribe(&topic, vec![]).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to subscribe to Swiss topic {}: {}", topic, e);
+                return;
+            }
+        };
+
+        info!("[Swiss] Subscribed to topic {}", topic);
+
+        // Process incoming messages
+        while let Ok(msg) = rx.recv().await {
+            if let Ok(text) = std::str::from_utf8(&msg) {
+                if let Ok(swiss_msg) = serde_json::from_str::<backend::signing::swiss::SwissMessage>(text) {
+                    match swiss_msg {
+                        backend::signing::swiss::SwissMessage::RoundStarted { round, pairings } => {
+                            event_sender.send(SwissRoundStartedEvent {
+                                tournament_id,
+                                round,
+                                pairings: pairings.iter().map(|(w, b)| (w.clone(), b.clone())).collect(),
+                            }).ok();
+                        }
+                        backend::signing::swiss::SwissMessage::ResultRecorded { round, board, white, black, result } => {
+                            result_sender.send(SwissResultRecordedEvent {
+                                tournament_id,
+                                round,
+                                board,
+                                white,
+                                black,
+                                result: result.to_string(),
+                            }).ok();
+                        }
+                        backend::signing::swiss::SwissMessage::StandingsUpdated { standings } => {
+                            standings_sender.send(SwissStandingsUpdatedEvent {
+                                tournament_id,
+                                standings: standings.iter().map(|s| (s.player.clone(), s.score, s.buchholz)).collect(),
+                            }).ok();
+                        }
+                    }
+                }
+            }
+        }
+    }).detach();
 }
 
 // ── Bevy system ───────────────────────────────────────────────────────────────

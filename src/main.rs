@@ -9,6 +9,7 @@ use clap::Parser;
 use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
 use sqlx::SqlitePool;
 use dotenvy;
+use std::sync::Arc;
 
 mod assets;
 mod cli;
@@ -16,7 +17,7 @@ mod core;
 mod engine;
 mod game;
 mod input;
-mod multiplayer;
+// mod multiplayer; // Temporarily disabled to remove lightyear dependencies for UI development
 mod presentation;
 mod rendering;
 mod singleplayer;
@@ -148,8 +149,7 @@ async fn main() {
         });
     }
 
-    app.insert_resource(multiplayer::TokioRuntime(handle))
-        .insert_resource(game_config)
+    app.insert_resource(game_config)
         .init_resource::<PersistentEguiCamera>()
         .add_systems(PreStartup, core::persistent_camera::setup_persistent_egui_camera);
 
@@ -215,7 +215,7 @@ async fn main() {
     ))
     .add_plugins((
         states::main_menu::MainMenuPlugin,
-        states::multiplayer_menu::MultiplayerMenuPlugin,
+        // states::multiplayer_menu::MultiplayerMenuPlugin, // Temporarily disabled with multiplayer module
         states::game_over::GameOverPlugin,
         states::pause::PausePlugin,
         states::piece_viewer::PieceViewerPlugin,
@@ -225,15 +225,16 @@ async fn main() {
     #[cfg(feature = "solana")]
     app.add_plugins((
         solana::SolanaPlugin,
-        multiplayer::rollup::mvp_plugin::EphemeralMvpPlugin,
-        multiplayer::wager_state::WagerPlugin,
+        // multiplayer::rollup::mvp_plugin::EphemeralMvpPlugin, // Temporarily disabled with multiplayer module
+        // multiplayer::wager_state::WagerPlugin, // Temporarily disabled with multiplayer module
     ));
 
-    app.add_plugins(multiplayer::MultiplayerPlugin);
+    // app.add_plugins(multiplayer::MultiplayerPlugin); // Temporarily disabled with multiplayer module
 
     // Add transaction debugger if debug mode enabled
     if cli.debug {
-        println!("🔍 Transaction debugger enabled");
+        println!("🔍 Transaction debugger disabled (multiplayer module disabled)");
+        /*
         let log_file = std::path::PathBuf::from(&cli.log_file);
         app.add_plugins(
             multiplayer::ui::tx_debugger::TransactionDebuggerPlugin {
@@ -242,6 +243,7 @@ async fn main() {
                 game_id: cli.game_id,
             },
         );
+        */
     }
 
     // Run the app
@@ -281,7 +283,8 @@ async fn start_embedded_signing_server() {
         }
     };
     
-    let state = SigningAppState::new(config, pool.clone(), vault_pool.clone());
+    let tournament_store = Arc::new(backend::signing::storage::tournament::TournamentStore::new(pool.clone()).await);
+    let state = SigningAppState::new(config, pool.clone(), vault_pool.clone(), tournament_store);
     if let Err(e) = state.store.init().await {
         eprintln!("[SIGN-SRV] Failed to init session store: {}", e);
         return;

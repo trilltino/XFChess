@@ -67,7 +67,7 @@ impl SigningConfig {
             er_rpc_url: env::var("ER_RPC_URL")
                 .unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into()),
             program_id: env::var("PROGRAM_ID")
-                .unwrap_or_else(|_| "FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX".into()),
+                .unwrap_or_else(|_| "A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W".into()),
             jwt_secret: env::var("JWT_SECRET")
                 .unwrap_or_else(|_| "11111111111111111111111111111111".to_string()),
             identity_encryption_key: env::var("IDENTITY_ENCRYPTION_KEY")

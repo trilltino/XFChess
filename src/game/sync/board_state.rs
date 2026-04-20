@@ -7,14 +7,11 @@ use crate::engine::board_state::ChessEngine;
 use crate::game::components::{PieceColor, PieceType};
 use crate::game::resources::CapturedPieces;
 use bevy::prelude::*;
-use braid_core::core::merge::simpleton::SimpletonMergeType;
 use std::hash::{Hash, Hasher};
 
 /// Resource for synchronizing board state between peers
 #[derive(Resource)]
 pub struct BoardStateSync {
-    /// Simpleton CRDT for automatic conflict resolution
-    pub merge_type: SimpletonMergeType,
     /// Last serialized state we know about
     pub last_known_state: String,
     /// Pending moves that haven't been acknowledged
@@ -46,17 +43,17 @@ pub struct BoardMove {
     pub move_number: u32,
 }
 
-impl BoardStateSync {
-    /// Create a new BoardStateSync
-    pub fn new() -> Self {
+impl Default for BoardStateSync {
+    fn default() -> Self {
         Self {
-            merge_type: SimpletonMergeType::new("default"),
             last_known_state: String::new(),
             pending_moves: Vec::new(),
             sync_status: SyncStatus::Initializing,
         }
     }
+}
 
+impl BoardStateSync {
     /// Serialize the current board state to a string
     pub fn serialize_state(
         &self,
@@ -122,7 +119,6 @@ impl BoardStateSync {
     }
 }
 
-
 /// Calculate a simple hash for state verification
 fn calculate_state_hash(state: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
@@ -179,9 +175,6 @@ pub fn broadcast_state_system(
     if board_sync.sync_status == SyncStatus::PendingLocal {
         let state = board_sync.serialize_state(&engine, &captured_pieces, None);
 
-        // Update simpleton merge type
-        board_sync.merge_type.content = state.clone();
-
         // TODO: Write to braid-blob file or send via braid-iroh
         // For now, just update the state
         board_sync.on_sync_complete(state);
@@ -218,7 +211,7 @@ pub fn receive_state_system(
 
 /// Initialize BoardStateSync on startup
 pub fn init_board_state_sync(mut commands: Commands) {
-    commands.insert_resource(BoardStateSync::new());
+    commands.insert_resource(BoardStateSync::default());
     info!("[BOARD_SYNC] Initialized board state sync");
 }
 

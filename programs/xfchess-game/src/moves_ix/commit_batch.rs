@@ -52,6 +52,7 @@ pub struct CommitMoveBatchCtx<'info> {
 pub fn handler_commit_move_batch(
     ctx: Context<CommitMoveBatchCtx>,
     _game_id: u64,
+    nonce_start: u64,
     moves: Vec<String>,
     next_fens: Vec<String>,
 ) -> Result<()> {
@@ -64,6 +65,10 @@ pub fn handler_commit_move_batch(
     require!(
         game.status == GameStatus::Active,
         XfchessGameError::GameNotActive
+    );
+    require!(
+        nonce_start == move_log.nonce + 1,
+        XfchessGameError::InvalidNonce
     );
     require!(
         moves.len() == next_fens.len(),
@@ -141,6 +146,9 @@ pub fn handler_commit_move_batch(
         }
     }
     game.move_count += moves.len() as u16;
+    move_log.nonce = move_log.nonce
+        .checked_add(moves.len() as u64)
+        .ok_or(XfchessGameError::Overflow)?;
     game.updated_at = clock.unix_timestamp;
 
     Ok(())

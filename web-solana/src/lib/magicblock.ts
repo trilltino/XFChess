@@ -24,7 +24,7 @@ export const EPHEMERAL_ROLLUP_ENDPOINT = 'https://devnet.magicblock.app/';
 export const EPHEMERAL_WS_ENDPOINT = 'wss://devnet.magicblock.app/';
 
 // XFChess Program ID
-export const PROGRAM_ID = new PublicKey('FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX');
+export const PROGRAM_ID = new PublicKey('A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W');
 
 /**
  * Dual connection manager for MagicBlock Ephemeral Rollups

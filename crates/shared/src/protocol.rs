@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use lightyear::prelude::*;
+// use lightyear::prelude::*; // Temporarily disabled for UI development
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -64,6 +64,8 @@ pub struct ProtocolPlugin;
 
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
+        // Temporarily disabled lightyear channel and message registration for UI development
+        /*
         app.add_channel::<Channel1>(ChannelSettings {
             mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
             ..default()
@@ -71,6 +73,7 @@ impl Plugin for ProtocolPlugin {
 
         app.register_message::<LobbyMessage>();
         app.register_message::<GameMessage>();
+        */
     }
 }
 

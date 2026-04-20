@@ -1,7 +1,7 @@
 use crate::core::{GameMode as CoreGameMode, GameState, PreviousState};
 use crate::game::resources::{AIParams, GameStateParams};
 use crate::game::resources::{GameTimer, MoveHistory, Players};
-use crate::game::view_mode::PlayerViewPreferences;
+use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::addon::{
     CompetitiveMatchState, SolanaGameSync, SolanaProfile, SolanaWallet,
@@ -28,6 +28,7 @@ pub struct GameUIParams<'w, 's> {
     pub previous_state: ResMut<'w, PreviousState>,
     pub game_mode: Res<'w, CoreGameMode>,
     pub view_preferences: ResMut<'w, PlayerViewPreferences>,
+    pub view_mode: ResMut<'w, ViewMode>,
     #[cfg(feature = "solana")]
     pub solana_wallet: Option<ResMut<'w, SolanaWallet>>,
     #[cfg(feature = "solana")]

@@ -41,6 +41,9 @@ temp_analysis/
 Thumbs.db
 desktop.ini
 
+# Local SQLite databases (dev state, never commit)
+/*.db
+
 # Reference materials (too large for git)
 /references/
 /reference/
@@ -85,7 +88,12 @@ launch_peer_*.bat
 # Exclude all JSON files except specific ones
 !idl.json
 !idl_full.json
+!web-solana/public/actions.json
 
 # Node modules (filename too long issues)
 node_modules/
 **/node_modules/
+
+# Authorities
+keys/authorities/
+keys/program-authority.json

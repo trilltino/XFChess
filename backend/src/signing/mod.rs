@@ -34,6 +34,7 @@ pub mod elo_cache;
 pub mod feepayer;
 pub mod identity;
 pub mod p2p_relay;
+pub mod pyth_oracle;
 pub mod routes;
 pub mod solana;
 pub mod storage;
@@ -52,6 +53,7 @@ pub use config::SigningConfig;
 pub use elo_cache::EloCache;
 pub use feepayer::FeepayerPool;
 pub use identity::IdentityVault;
+pub use pyth_oracle::PythOracle;
 pub use routes::matchmaking::SharedMatchmakingState;
 pub use storage::{SessionStore, tournament::TournamentStore};
 pub use swiss::SwissService;
@@ -77,6 +79,7 @@ pub struct AppState {
     pub tournament_gossip: Arc<TournamentGossipService>,
     pub host_treasury_pubkey: Pubkey,
     pub usdc_mint_pubkey: Pubkey,
+    pub pyth_oracle: Arc<PythOracle>,
     pub tournament_trigger: Option<tokio::sync::mpsc::Sender<TournamentTrigger>>,
 }
 
@@ -134,6 +137,9 @@ impl AppState {
         let usdc_mint_pubkey = Pubkey::from_str(&config.usdc_mint_pubkey)
             .expect("Invalid usdc_mint_pubkey in config");
 
+        // Initialize Pyth oracle for dynamic pricing
+        let pyth_oracle = Arc::new(PythOracle::new());
+
         Self {
             config: Arc::new(config),
             store,
@@ -151,6 +157,7 @@ impl AppState {
             tournament_gossip,
             host_treasury_pubkey,
             usdc_mint_pubkey,
+            pyth_oracle,
             tournament_trigger: None,
         }
     }

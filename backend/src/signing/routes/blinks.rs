@@ -33,12 +33,12 @@ use crate::signing::{
 /// Creates the Blinks API router.
 pub fn blinks_routes() -> Router<AppState> {
     Router::new()
-        .route("/tournament/:id", get(get_tournament_action))
-        .route("/tournament/:id/register", post(register_transaction))
-        .route("/tournament/:id/check-balance", get(check_balance))
-        .route("/tournament/:id/validate", post(validate_registration_endpoint))
-        .route("/tournament/:id/chain/registration", get(get_registration_chain))
-        .route("/tournament/:id/chain/onboarding", get(get_onboarding_chain))
+        .route("/tournament/{id}", get(get_tournament_action))
+        .route("/tournament/{id}/register", post(register_transaction))
+        .route("/tournament/{id}/check-balance", get(check_balance))
+        .route("/tournament/{id}/validate", post(validate_registration_endpoint))
+        .route("/tournament/{id}/chain/registration", get(get_registration_chain))
+        .route("/tournament/{id}/chain/onboarding", get(get_onboarding_chain))
 }
 
 /// GET /api/actions/tournament/:id

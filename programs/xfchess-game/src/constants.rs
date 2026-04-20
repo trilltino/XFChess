@@ -25,7 +25,11 @@ pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation"; // Derives a p
 
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";       // Derives the TournamentState PDA
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";  // Derives the prize-pool escrow vault for a tournament
+pub const TOURNAMENT_PRIZE_ESCROW_SEED: &[u8] = b"t_prize";  // Derives the prize escrow vault (85% of fees)
+pub const TOURNAMENT_OPS_ESCROW_SEED: &[u8] = b"t_ops";      // Derives the ops escrow vault (10% of fees)
+pub const TOURNAMENT_OPERATOR_ESCROW_SEED: &[u8] = b"t_operator";  // Derives the operator escrow vault (5% of fees)
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";    // Derives an individual match record within a tournament
+pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";  // Derives the SPL token escrow for USDC prize pool
 
 // ---------------------------------------------------------------------------
 // Privileged authority keypairs
@@ -40,9 +44,26 @@ pub mod ai_authority {
 
 /// The KYC/identity verification authority (VPS backend signer).
 /// Called by `verify_profile` to mark a player as CARF-compliant on-chain.
+/// TODO: Replace with a real keypair before mainnet deploy.
 pub mod kyc_authority {
     use anchor_lang::prelude::declare_id;
-    declare_id!("KYCxxZ6UqUeL8XbU7rQfT6YpZ7ZpU7rQfT6YpZ7ZpU7"); // Mock — replace before mainnet
+    declare_id!("EDn2ioRx2iS9kcuVhgh1vfehvMBqMCX3hnFP2hZy1kxb"); // Devnet KYC authority
+}
+
+/// The platform dispute-resolution authority — the only signer allowed to
+/// call `resolve_dispute`. Set to a secure offline keypair before mainnet.
+/// TODO: Replace with a real keypair before mainnet deploy.
+pub mod dispute_authority {
+    use anchor_lang::prelude::declare_id;
+    declare_id!("H9HCrsLG8Y1yRvFKixYnTMGdAoX4JCARUzdWt3zpW83R"); // Devnet dispute authority
+}
+
+/// The VPS/backend operational authority — the only signer allowed to call
+/// privileged instructions such as `update_elo` and `collect_fee`.
+/// Solflare wallet - user's main wallet for signing operations.
+pub mod vps_authority {
+    use anchor_lang::prelude::declare_id;
+    declare_id!("uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"); // Solflare wallet
 }
 
 /// Hard cap on a single wager so no one can lock more than 10 SOL in one game.

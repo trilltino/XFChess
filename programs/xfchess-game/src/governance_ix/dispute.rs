@@ -18,7 +18,12 @@ pub struct DisputeGame<'info> {
         bump
     )]
     pub dispute_record: Account<'info, DisputeRecord>,
-    #[account(mut)]
+    /// Disputing player \u2014 must be white or black in this game.
+    #[account(
+        mut,
+        constraint = player.key() == game.white || player.key() == game.black
+            @ GameErrorCode::NotInGame
+    )]
     pub player: Signer<'info>,
     pub system_program: Program<'info, System>,
 }

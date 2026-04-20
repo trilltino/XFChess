@@ -264,7 +264,79 @@ ufw allow 22/tcp
 ufw --force enable
 log_info "Firewall configured"
 
-# 10. Systemd Service
+# 10. coturn TURN Server (co-located on this VPS)
+log_info "Installing coturn TURN server..."
+apt install -y coturn
+
+TURN_USER="xfchess_turn"
+TURN_PASS="$(openssl rand -base64 32)"
+TURN_SHARED_SECRET="$(openssl rand -hex 32)"
+HETZNER_IP="178.104.55.19"
+
+mkdir -p /etc/coturn/certs
+
+# Self-signed certificate (no domain required when using a raw IP)
+openssl req -x509 -newkey rsa:2048 \
+    -keyout /etc/coturn/certs/turn_server_pkey.pem \
+    -out    /etc/coturn/certs/turn_server_cert.pem \
+    -days 3650 -nodes \
+    -subj "/CN=$HETZNER_IP" 2>/dev/null
+
+cat > /etc/turnserver.conf << EOF
+# XFChess TURN Server — co-located on Hetzner VPS $HETZNER_IP
+listening-port=3478
+tls-listening-port=5349
+listening-ip=0.0.0.0
+relay-ip=0.0.0.0
+external-ip=$HETZNER_IP
+realm=$HETZNER_IP
+use-auth-secret
+static-auth-secret=$TURN_SHARED_SECRET
+user=$TURN_USER:$TURN_PASS
+cert=/etc/coturn/certs/turn_server_cert.pem
+pkey=/etc/coturn/certs/turn_server_pkey.pem
+min-port=10000
+max-port=20000
+no-multicast-peers
+no-loopback-peers
+stale-nonce=600
+total-quota=10000
+user-quota=1000
+max-allocate-lifetime=3600
+log-file=/var/log/turnserver.log
+simple-log
+EOF
+
+chown -R turnserver:turnserver /etc/coturn 2>/dev/null || true
+chmod 600 /etc/coturn/certs/*
+chmod 644 /etc/turnserver.conf
+
+# Open TURN ports in firewall
+ufw allow 3478/tcp
+ufw allow 3478/udp
+ufw allow 5349/tcp
+ufw allow 5349/udp
+ufw allow 10000:20000/udp
+
+systemctl enable coturn
+systemctl restart coturn
+
+# Append TURN vars to the .env (only if not already present)
+if ! grep -q "^TURN_SERVER=" $BACKEND_DIR/.env; then
+    cat >> $BACKEND_DIR/.env << EOF
+
+# TURN Server (coturn, co-located on this VPS)
+TURN_SERVER=turns://$HETZNER_IP:5349?transport=tcp
+TURN_USERNAME=$TURN_USER
+TURN_PASSWORD=$TURN_PASS
+TURN_REALM=$HETZNER_IP
+TURN_SHARED_SECRET=$TURN_SHARED_SECRET
+EOF
+fi
+
+log_info "coturn installed — TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:0:16}..."
+
+# 12. Systemd Service
 cat > /etc/systemd/system/xfchess-backend.service << EOF
 [Unit]
 Description=XFChess Signing Server
@@ -298,7 +370,7 @@ systemctl daemon-reload
 systemctl enable xfchess-backend
 log_info "Systemd service created"
 
-# 11. Backup Script
+# 13. Backup Script
 cat > $APP_DIR/backup.sh << 'EOF'
 #!/bin/bash
 BACKUP_DIR="/opt/xfchess/backups"
@@ -319,7 +391,7 @@ chmod +x $APP_DIR/backup.sh
 echo "0 3 * * * /opt/xfchess/backup.sh" | crontab -
 log_info "Backup script installed"
 
-# 12. Instructions
+# 14. Instructions
 echo ""
 echo "==================================="
 log_info "Deployment Setup Complete!"

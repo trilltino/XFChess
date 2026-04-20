@@ -97,7 +97,7 @@ pub struct AiPollParams<'w, 's> {
 fn spawn_ai_task_system(
     mut commands: Commands,
     mut params: AiSpawnParams,
-    braid_manager: Option<Res<crate::multiplayer::network::braid::BraidNodeManager>>,
+    // braid_manager: Option<Res<crate::multiplayer::network::braid::BraidNodeManager>>, // Temporarily disabled
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     let _start_time = std::time::Instant::now();
@@ -128,18 +128,14 @@ fn spawn_ai_task_system(
         fen, depth, movetime_ms
     );
 
-    // Check if BraidNodeManager has Stockfish sidecar properly initialized
-    let has_stockfish_sidecar = braid_manager
-        .as_ref()
-        .and_then(|bm| bm.sidecar_fen_tx.as_ref())
-        .is_some();
+    // Temporarily disabled to remove lightyear dependencies
+    let has_stockfish_sidecar = false; // Temporarily disabled
 
     if has_stockfish_sidecar {
-        let braid_manager = braid_manager.unwrap();
         // Trigger Stockfish sidecar via channel
-        if let Some(tx) = &braid_manager.sidecar_fen_tx {
-            let _ = tx.send(fen.clone());
-        }
+        // if let Some(tx) = &braid_manager.sidecar_fen_tx {
+        //     let _ = tx.send(fen.clone());
+        // }
 
         // We use a dummy pending move here just to prevent multiple triggers in our singleplayer loops,
         // Braid will resolve the actual move back through `incoming_moves_rx`.
@@ -370,7 +366,7 @@ fn should_skip_ai_spawn(
 fn poll_ai_task_system(
     mut commands: Commands,
     mut params: AiPollParams,
-    braid_manager: Option<Res<crate::multiplayer::network::braid::BraidNodeManager>>,
+    // braid_manager: Option<Res<crate::multiplayer::network::braid::BraidNodeManager>>, // Temporarily disabled
 ) {
     let Some(mut task_resource) = params.task_resource else {
         return;
@@ -379,6 +375,8 @@ fn poll_ai_task_system(
     let mut move_found = None;
     let mut move_from_direct_stockfish = false;
 
+    // Temporarily disabled to remove lightyear dependencies
+    /*
     // Check Braid channel first (if available)
     if let Some(braid_manager) = &braid_manager {
         if let Some(rx) = &braid_manager.incoming_moves_rx {
@@ -388,8 +386,9 @@ fn poll_ai_task_system(
             }
         }
     }
+    */
 
-    // If no move from Braid, check the async task (for direct Stockfish execution)
+    // Otherwise, poll the local AI task
     if move_found.is_none() {
         if let Some(result) = futures_lite::future::block_on(futures_lite::future::poll_once(&mut task_resource.0)) {
             commands.remove_resource::<PendingAIMove>();

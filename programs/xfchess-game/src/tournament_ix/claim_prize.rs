@@ -1,10 +1,11 @@
 //! Instruction allowing winners to claim their tournament prize shares.
-//! Supports top-4 distribution: 1st, 2nd, 3rd, and 4th place.
+//! Supports USDC prize pools (primary) and SOL fallback.
 
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
 #[derive(Accounts)]
 #[instruction(tournament_id: u64)]
@@ -15,7 +16,25 @@ pub struct ClaimTournamentPrize<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// CHECK: Escrow PDA holding prize pool.
+    /// CHECK: USDC prize escrow PDA — the authority of the token account.
+    #[account(
+        seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub usdc_prize_escrow_authority: UncheckedAccount<'info>,
+    /// USDC prize escrow token account (only used if usdc_prize_mint is Some).
+    #[account(
+        mut,
+        associated_token::mint = usdc_mint,
+        associated_token::authority = usdc_prize_escrow_authority,
+    )]
+    pub usdc_prize_escrow: Option<Account<'info, TokenAccount>>,
+    /// Claimant's USDC ATA — receives USDC prize (only used if usdc_prize_mint is Some).
+    #[account(mut)]
+    pub claimant_usdc_ata: Option<Account<'info, TokenAccount>>,
+    /// The USDC mint account (only used if usdc_prize_mint is Some).
+    pub usdc_mint: Option<Account<'info, token::Mint>>,
+    /// CHECK: SOL escrow PDA (legacy, only used for SOL-only tournaments).
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
@@ -26,6 +45,7 @@ pub struct ClaimTournamentPrize<'info> {
     #[account(mut, constraint = claimant_wallet.key() == claimant.key() @ GameErrorCode::UnauthorizedAccess)]
     pub claimant_wallet: UncheckedAccount<'info>,
     pub claimant: Signer<'info>,
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
@@ -53,38 +73,89 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
 
     require!(prize_share_bps > 0, GameErrorCode::NoPrizeToClaim);
 
-    // Calculate prize amount (prize_share in basis points / 10000 * prize_pool)
-    let prize = (tournament.prize_pool as u128)
-        .checked_mul(prize_share_bps as u128)
-        .unwrap()
-        .checked_div(10000)
-        .unwrap() as u64;
+    // USDC prize path
+    if tournament.usdc_prize_mint.is_some() {
+        let usdc_prize_escrow = ctx.accounts.usdc_prize_escrow.as_ref()
+            .ok_or(GameErrorCode::MissingTokenAccounts)?;
+        let claimant_usdc_ata = ctx.accounts.claimant_usdc_ata.as_ref()
+            .ok_or(GameErrorCode::MissingTokenAccounts)?;
 
-    require!(prize > 0, GameErrorCode::NoPrizeToClaim);
+        // Verify claimant owns the USDC ATA
+        require!(
+            claimant_usdc_ata.owner == claimant_key,
+            GameErrorCode::UnauthorizedAccess
+        );
 
-    let tournament_id_bytes = tournament_id.to_le_bytes();
-    let bump = ctx.bumps.escrow_pda;
-    let escrow_seeds: &[&[&[u8]]] = &[&[TOURNAMENT_ESCROW_SEED, &tournament_id_bytes, &[bump]]];
+        // Calculate prize amount from USDC prize pool
+        let prize = (tournament.usdc_prize_pool as u128)
+            .checked_mul(prize_share_bps as u128)
+            .unwrap()
+            .checked_div(10000)
+            .unwrap() as u64;
 
-    anchor_lang::system_program::transfer(
-        CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
-            anchor_lang::system_program::Transfer {
-                from: ctx.accounts.escrow_pda.to_account_info(),
-                to: ctx.accounts.claimant_wallet.to_account_info(),
-            },
-            escrow_seeds,
-        ),
-        prize,
-    )?;
+        require!(prize > 0, GameErrorCode::NoPrizeToClaim);
 
-    msg!(
-        "Tournament {} prize claimed: {} lamports to {} (Place {} - {}%)",
-        tournament_id,
-        prize,
-        claimant_key,
-        place,
-        prize_share_bps as f64 / 100.0
-    );
+        // Transfer USDC from escrow to claimant
+        let tournament_id_bytes = tournament_id.to_le_bytes();
+        let bump = ctx.bumps.usdc_prize_escrow_authority;
+        let escrow_seeds: &[&[&[u8]]] = &[&[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump]]];
+
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: usdc_prize_escrow.to_account_info(),
+                    to: claimant_usdc_ata.to_account_info(),
+                    authority: ctx.accounts.usdc_prize_escrow_authority.to_account_info(),
+                },
+                escrow_seeds,
+            ),
+            prize,
+        )?;
+
+        msg!(
+            "Tournament {} USDC prize claimed: {} USDC to {} (Place {} - {}%)",
+            tournament_id,
+            prize,
+            claimant_key,
+            place,
+            prize_share_bps as f64 / 100.0
+        );
+    } else {
+        // SOL fallback path (legacy)
+        let prize = (tournament.prize_pool as u128)
+            .checked_mul(prize_share_bps as u128)
+            .unwrap()
+            .checked_div(10000)
+            .unwrap() as u64;
+
+        require!(prize > 0, GameErrorCode::NoPrizeToClaim);
+
+        let tournament_id_bytes = tournament_id.to_le_bytes();
+        let bump = ctx.bumps.escrow_pda;
+        let escrow_seeds: &[&[&[u8]]] = &[&[TOURNAMENT_ESCROW_SEED, &tournament_id_bytes, &[bump]]];
+
+        anchor_lang::system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.escrow_pda.to_account_info(),
+                    to: ctx.accounts.claimant_wallet.to_account_info(),
+                },
+                escrow_seeds,
+            ),
+            prize,
+        )?;
+
+        msg!(
+            "Tournament {} SOL prize claimed: {} lamports to {} (Place {} - {}%)",
+            tournament_id,
+            prize,
+            claimant_key,
+            place,
+            prize_share_bps as f64 / 100.0
+        );
+    }
+
     Ok(())
 }

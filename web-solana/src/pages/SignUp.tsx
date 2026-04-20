@@ -92,7 +92,6 @@ export function SignUp() {
           <label>EMAIL</label>
           <input
             type="email"
-            placeholder="you@example.com"
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
             required
@@ -103,7 +102,6 @@ export function SignUp() {
           <label>HOW'D YOU HEAR ABOUT US? <span className="optional">OPTIONAL</span></label>
           <input
             type="text"
-            placeholder="Twitter, Superteam, friend..."
             value={formData.referral}
             onChange={(e) => setFormData({ ...formData, referral: e.target.value })}
           />
@@ -129,10 +127,10 @@ export function SignUp() {
           disabled={isSubmitting}
         >
           {isSubmitting ? (
-            'Joining...'
+            'Registering...'
           ) : (
             <>
-              Join Waitlist <ArrowRight size={16} style={{ marginLeft: '8px' }} />
+              Register <ArrowRight size={16} style={{ marginLeft: '8px' }} />
             </>
           )}
         </button>

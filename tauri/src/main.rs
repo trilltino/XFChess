@@ -1,5 +1,5 @@
-// Prevents additional console window on Windows in release
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Keep console window visible on Windows for debugging
+// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::process::Command;
 use std::path::PathBuf;
@@ -10,9 +10,13 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tauri::Manager;
 use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
+use backend::signing::storage::tournament::TournamentStore;
 use sqlx::SqlitePool;
 use dotenvy;
 use tauri_plugin_deep_link::DeepLinkExt;
+
+#[cfg(windows)]
+use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -35,14 +39,53 @@ fn http_port() -> u16 {
         .unwrap_or(7454)
 }
 
-/// Open the onboarding page in Chrome so the user can sign a pending TX.
-/// The Tauri window is kept hidden — it loads index.html with a broken base
-/// path since wallet-ui is built with base="/onboard/". Chrome is the correct
-/// host for the wallet UI.
-fn show_main_window(_app: &tauri::AppHandle) {
+/// Open the production site in Chrome so the user can start playing.
+fn open_production_site() {
+    match open::that("http://178.104.55.19/auth/login") {
+        Ok(_) => println!("[TAURI] Opened production login page in browser"),
+        Err(e) => eprintln!("[TAURI] Failed to open production site: {}", e),
+    }
+}
+
+/// Open the wallet signing page when a transaction needs signing.
+/// This is called during gameplay when the Bevy game needs a signature.
+fn show_signing_window(_app: &tauri::AppHandle) {
     let port = http_port();
     let url = format!("http://localhost:{}/onboard", port);
     let _ = open::that(&url);
+}
+
+/// Register the xfchess:// protocol in Windows registry on first run.
+/// Uses HKCU (user-level) so no admin/UAC prompt is required.
+#[cfg(windows)]
+fn register_protocol() {
+    use winreg::enums::{KEY_WRITE, REG_SZ};
+    
+    let exe_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "xfchess-tauri.exe".to_string());
+    
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    
+    // Create HKCU\Software\Classes\xfchess
+    if let Ok((key, _)) = hkcu.create_subkey("Software\\Classes\\xfchess") {
+        let _ = key.set_value("", &"URL:XFChess Protocol");
+        let _ = key.set_value("URL Protocol", &"");
+        
+        // Create shell\open\command subkey
+        if let Ok((cmd_key, _)) = key.create_subkey("shell\\open\\command") {
+            let command = format!("\"{}\" \"%1\"", exe_path);
+            let _ = cmd_key.set_value("", &command);
+        }
+    }
+    
+    println!("[TAURI] Registered xfchess:// protocol for: {}", exe_path);
+}
+
+#[cfg(not(windows))]
+fn register_protocol() {
+    // No-op on non-Windows platforms
 }
 
 // ---------------------------------------------------------------------------
@@ -72,9 +115,9 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     ) -> impl IntoResponse {
         let lock = state.pending.lock().unwrap();
         let tx_b64 = lock.as_ref().map(|(bytes, _)| B64.encode(bytes));
-        // If we have a TX, ensure window is shown
+        // If we have a TX, ensure signing window is shown
         if tx_b64.is_some() {
-            show_main_window(&state.app);
+            show_signing_window(&state.app);
         }
         Json(serde_json::json!({ "tx": tx_b64 }))
     }
@@ -143,10 +186,10 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
         StatusCode::OK
     }
 
-    // POST /api/auth/login — proxy to :8090
+    // POST /api/auth/login — proxy to Hetzner :8090
     async fn api_login(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
         let client = reqwest::Client::new();
-        match client.post("http://localhost:8090/api/auth/login").json(&body).send().await {
+        match client.post("http://178.104.55.19:8090/api/auth/login").json(&body).send().await {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(v) => (StatusCode::OK, Json(v)).into_response(),
@@ -166,13 +209,13 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     async fn api_register(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
         let client = reqwest::Client::new();
         // Register
-        match client.post("http://localhost:8090/api/auth/register").json(&body).send().await {
+        match client.post("http://178.104.55.19:8090/api/auth/register").json(&body).send().await {
             Ok(resp) if resp.status().is_success() => {
                 // Auto-login after register
                 let login_body = serde_json::json!({
                     "email": body["email"], "password": body["password"]
                 });
-                match client.post("http://localhost:8090/api/auth/login").json(&login_body).send().await {
+                match client.post("http://178.104.55.19:8090/api/auth/login").json(&login_body).send().await {
                     Ok(lr) if lr.status().is_success() => {
                         match lr.json::<serde_json::Value>().await {
                             Ok(v) => (StatusCode::OK, Json(v)).into_response(),
@@ -314,9 +357,9 @@ async fn tcp_signing_server(app: tauri::AppHandle, pending: PendingTx, wallet_pu
                 return;
             }
 
-            // OPEN command — open the wallet page
+            // OPEN command — open the wallet signing page
             if &len_buf == b"OPEN" {
-                show_main_window(&app);
+                show_signing_window(&app);
                 return;
             }
 
@@ -355,8 +398,8 @@ async fn tcp_signing_server(app: tauri::AppHandle, pending: PendingTx, wallet_pu
                 *lock = Some((tx_bytes, tx));
             }
 
-            println!("[SIGN-SRV] Pending signing request — showing Tauri popup");
-            show_main_window(&app);
+            println!("[SIGN-SRV] Pending signing request — showing signing window");
+            show_signing_window(&app);
 
             // Wait for the React page to POST the signed bytes (60 s timeout).
             let result = tokio::time::timeout(
@@ -526,7 +569,7 @@ async fn resolve_signed_tx(_signed_b64: String) -> Result<(), String> {
 async fn login_user(email: String, password: String) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
     let resp = client
-        .post("http://localhost:8090/api/auth/login")
+        .post("http://178.104.55.19:8090/api/auth/login")
         .json(&serde_json::json!({ "email": email, "password": password }))
         .send()
         .await
@@ -550,7 +593,7 @@ async fn register_user(
     let client = reqwest::Client::new();
     // Register
     let reg = client
-        .post("http://localhost:8090/api/auth/register")
+        .post("http://178.104.55.19:8090/api/auth/register")
         .json(&serde_json::json!({ "username": username, "email": email, "password": password }))
         .send()
         .await
@@ -561,7 +604,7 @@ async fn register_user(
     }
     // Auto-login after registration
     let login = client
-        .post("http://localhost:8090/api/auth/login")
+        .post("http://178.104.55.19:8090/api/auth/login")
         .json(&serde_json::json!({ "email": email, "password": password }))
         .send()
         .await
@@ -674,7 +717,8 @@ async fn start_embedded_signing_server() {
         }
     };
     
-    let state = SigningAppState::new(config, pool.clone(), vault_pool);
+    let tournament_store = Arc::new(TournamentStore::new(pool.clone()).await);
+    let state = SigningAppState::new(config, pool.clone(), vault_pool, tournament_store);
     if let Err(e) = state.store.init().await {
         eprintln!("[SIGN-SRV] Failed to init session store: {}", e);
         return;
@@ -703,6 +747,9 @@ async fn start_embedded_signing_server() {
 // ---------------------------------------------------------------------------
 
 fn main() {
+    // Register xfchess:// protocol on Windows (no admin prompt needed for HKCU)
+    register_protocol();
+    
     let pending: PendingTx = Arc::new(Mutex::new(None));
     let wallet_pubkey = WalletPubkey::default();
 
@@ -726,7 +773,7 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
 
-            // Handle deep-link protocol events (xfchess://launch)
+            // Handle deep-link protocol events (xfchess://launch?pubkey=X&username=Y)
             let handle_clone = handle.clone();
             let wallet_clone = pubkey_for_setup.clone();
             app.deep_link().on_open_url(move |event| {
@@ -734,9 +781,34 @@ fn main() {
                     println!("[DEEP-LINK] Received URL: {}", url);
                     if url.as_str().starts_with("xfchess://launch") {
                         println!("[DEEP-LINK] Launching game from protocol...");
-                        // Launch game without showing Tauri window
-                        let pk = wallet_clone.0.lock().unwrap().clone();
-                        match spawn_bevy_game(true, pk, false, None, None, None) {
+                        
+                        // Parse query parameters from the URL
+                        let url_str = url.as_str();
+                        let query = url_str.split('?').nth(1).unwrap_or("");
+                        let params: std::collections::HashMap<&str, &str> = query
+                            .split('&')
+                            .filter_map(|pair| {
+                                let mut parts = pair.split('=');
+                                let key = parts.next()?;
+                                let value = parts.next().unwrap_or("");
+                                Some((key, value))
+                            })
+                            .collect();
+                        
+                        let pubkey = params.get("pubkey").map(|s| s.to_string())
+                            .or_else(|| wallet_clone.0.lock().unwrap().clone());
+                        let username = params.get("username").map(|s| s.to_string());
+                        let ai_difficulty = params.get("ai_difficulty")
+                            .and_then(|s| s.parse::<u8>().ok());
+                        let ai_side = params.get("ai_side").map(|s| s.to_string());
+                        
+                        // Update wallet pubkey state if provided in URL
+                        if let Some(ref pk) = pubkey {
+                            let mut lock = wallet_clone.0.lock().unwrap();
+                            *lock = Some(pk.clone());
+                        }
+                        
+                        match spawn_bevy_game(true, pubkey, false, username, ai_difficulty, ai_side) {
                             Ok(mut child) => {
                                 let pid = child.id();
                                 println!("[TAURI] Bevy game launched (PID {}) from deep-link", pid);
@@ -753,10 +825,15 @@ fn main() {
                 }
             });
 
-            // Hide the Tauri window immediately — we use Chrome for onboarding.
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.hide();
-            }
+            // Show the Tauri window initially, then hide after Chrome opens successfully
+            // This prevents invisible crashes if Chrome fails to launch
+            let handle_for_chrome = handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2000));
+                if let Some(w) = handle_for_chrome.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            });
 
             // Start HTTP wallet server.
             let p = pending_for_setup.clone();
@@ -770,20 +847,23 @@ fn main() {
             let h2 = handle.clone();
             tauri::async_runtime::spawn(tcp_signing_server(h2, p2, w2));
 
-            // Start embedded VPS signing server.
-            tauri::async_runtime::spawn(start_embedded_signing_server());
+            // NOTE: Local embedded server disabled - using Hetzner backend at 178.104.55.19:8090
+            // tauri::async_runtime::spawn(start_embedded_signing_server());
 
-            // Open Chrome to the onboarding UI after a brief delay for server start.
-            let port = http_port();
+            // Open Chrome to the production site after server starts
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(800));
-                let url = format!("http://localhost:{}/onboard", port);
-                println!("[TAURI] Opening onboarding in browser: {}", url);
-                let _ = open::that(&url);
+                println!("[TAURI] Opening production site: http://178.104.55.19");
+                open_production_site();
             });
 
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error running tauri application");
+        .map_err(|e| {
+            eprintln!("[FATAL] Tauri application error: {}", e);
+            eprintln!("[FATAL] Press any key to exit...");
+            let _ = std::io::Read::read(&mut std::io::stdin(), &mut [0u8]);
+            std::process::exit(1);
+        }).ok();
 }

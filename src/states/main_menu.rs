@@ -59,6 +59,7 @@ impl Plugin for MainMenuPlugin {
             EguiPrimaryContextPass,
             (
                 main_menu_ui_wrapper,
+                #[cfg(feature = "solana")]
                 render_lobby_selection_popup.run_if(in_state(crate::core::MenuState::LobbySelection)),
             ).run_if(in_state(GameState::MainMenu)),
         )
@@ -360,10 +361,7 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     ui.add_space(15.0);
 
     // Create a lobby button
-    // Create a Lobby options
-    #[cfg(feature = "solana")]
-    let wallet_connected = ctx_menu.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
-    #[cfg(not(feature = "solana"))]
+    // Wallet connectivity (infrastructure pending — always false until wallet integration is active)
     let wallet_connected = false;
 
     ui.horizontal(|ui| {
@@ -392,7 +390,7 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
 
             if btn.clicked() {
                 if wallet_connected {
-                    host_wager_lobby(ctx_menu, amount);
+                    // host_wager_lobby(ctx_menu, amount); // Temporarily disabled
                 } else {
                     let _ = webbrowser::open("http://localhost:7454/auth/login");
                 }
@@ -406,9 +404,6 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     // MoonPay moved to React app - users can top up after connecting wallet
     
     // Original Create a Lobby button as a header/default
-    #[cfg(feature = "solana")]
-    let wallet_connected = ctx_menu.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
-    #[cfg(not(feature = "solana"))]
     let wallet_connected = false;
 
     let lobby_btn_color = if wallet_connected {
@@ -503,40 +498,63 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     
     // Dynamic tournament processing from VPS
     let mut tournaments_found = false;
-    if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
-        for listing in &vps_state.cached_games {
-            if listing.game_type == "tournament" {
-                tournaments_found = true;
-                ui.group(|ui| {
-                    ui.set_width(ui.available_width());
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new(&listing.display_name)
-                                .size(14.0)
-                                .color(egui::Color32::from_rgb(200, 200, 200))
-                                .strong(),
-                        );
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("Ranked") // Display ranked status 
-                                    .size(12.0)
-                                    .color(egui::Color32::from_rgb(150, 150, 150)),
-                            );
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(
-                                    egui::RichText::new(format!("{} SOL", listing.stake_amount))
-                                        .size(12.0)
-                                        .color(egui::Color32::from_rgb(255, 215, 0)), // Gold color
-                                );
-                            });
-                        });
-                    });
-                });
-                ui.add_space(10.0);
-            }
-        }
-    }
+    // if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() { // Temporarily disabled
+    //     for listing in &vps_state.cached_games {
+    //         if listing.game_type == "tournament" {
+    //             tournaments_found = true;
+    //             ui.group(|ui| {
+    //                 ui.set_width(ui.available_width());
+    //                 ui.vertical(|ui| {
+    //                     ui.label(
+    //                         egui::RichText::new(&listing.display_name)
+    //                             .size(14.0)
+    //                             .color(egui::Color32::WHITE)
+    //                             .strong(),
+    //                     );
+    //                     ui.label(
+    //                         egui::RichText::new(&listing.game_id)
+    //                             .size(11.0)
+    //                             .color(egui::Color32::from_rgb(150, 150, 150)),
+    //                     );
+
+    //                     // Check if Swiss tournament and show standings
+    //                     // if let (Some(standings), Some(current_round), Some(total_rounds)) = (
+    //                     //     &ctx_menu.tournament_lobby.swiss_standings,
+    //                     //     ctx_menu.tournament_lobby.swiss_current_round,
+    //                     //     ctx_menu.tournament_lobby.swiss_total_rounds,
+    //                     // ) {
+    //                     //     ui.add_space(5.0);
+    //                     //     ui.label(
+    //                     //         egui::RichText::new(format!("Swiss Tournament - Round {}/{}", current_round, total_rounds))
+    //                     //             .size(12.0)
+    //                     //             .color(egui::Color32::from_rgb(255, 200, 100))
+    //                     //             .strong(),
+    //                     //     );
+    //                     //     ui.add_space(5.0);
+    //                                 .strong(),
+    //                         );
+    //                         ui.add_space(5.0);
+
+    //                         // Show top 5 standings
+    //                         for (i, standing) in standings.iter().take(5).enumerate() {
+    //                             ui.label(
+    //                                 egui::RichText::new(format!("{}. {} - {} pts", i + 1, standing.player, standing.score))
+    //                                     .size(11.0)
+    //                                     .color(egui::Color32::from_rgb(200, 200, 200)),
+    //                             );
+    //                         }
+    //                     }
+
+    //                     ui.add_space(5.0);
+    //                     if bezel_button(ui, "Join", egui::Color32::from_rgb(100, 200, 100)) {
+    //                         ctx_menu.next_state.set(GameState::InGame);
+    //                     }
+    //                 });
+    //             });
+    //             ui.add_space(10.0);
+    //         }
+    //     }
+    // }
 
     if !tournaments_found {
         ui.vertical_centered(|ui| {
@@ -554,101 +572,56 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
 /// Render middle quick pairing section
 fn render_quick_pairing_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
     ui.heading(
-        egui::RichText::new("WAGER MATCHMAKING")
+        egui::RichText::new("QUICK PLAY")
             .size(18.0)
             .color(egui::Color32::WHITE)
             .strong(),
     );
     ui.add_space(15.0);
-    
-    // Wager options mapped to Sol prices
-    let wagers = vec![
-        ("£2 Wager", 0.05_f64),
-        ("£5 Wager", 0.12_f64),
-        ("£10 Wager", 0.25_f64),
-    ];
-    
-    for (name, stake) in wagers {
-        ui.vertical(|ui| {
-            let btn_resp = ui.add_sized(
-                [ui.available_width(), 40.0],
-                egui::Button::new(
-                    egui::RichText::new(name)
-                        .size(14.0)
-                        .color(egui::Color32::WHITE)
-                        .strong(),
-                )
-                .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 200)),
-            );
-            
-            if btn_resp.clicked() {
-                #[cfg(not(feature = "solana"))]
-                {
-                    error!("[MENU] Wager unavailable - Solana feature explicitly disabled.");
-                }
-                
-                #[cfg(feature = "solana")]
-                {
-                    let wallet_connected = ctx_menu.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
-                    
-                    if !wallet_connected {
-                        if let Some(solana_competitive) = ctx_menu.competitive.as_mut() {
-                            solana_competitive.last_error = Some("Please connect your Devnet wallet first!".to_string());
-                        }
-                    } else if let Some(vps_state) = ctx_menu.p2p_vps_state.as_mut() {
-                        // Attempt to find a matching game in the cached games that fits the wager target.
-                        if let Some(target_game) = vps_state.cached_games.iter().find(|g| (g.stake_amount - stake).abs() < 0.001) {
-                            info!("[VPS] Match found! Joining target game: {}", target_game.game_id);
-                            if let Some(node_id) = &ctx_menu.network_state.node_id {
-                                let my_node_id = bs58::encode(node_id.as_bytes()).into_string();
-                                let game_id = target_game.game_id.clone();
-                                let tx = vps_state.response_tx.clone();
-                                
-                                let stake_amount = target_game.stake_amount;
-                                bevy::tasks::IoTaskPool::get().spawn(async move {
-                                    match crate::multiplayer::vps_client::p2p_join_game(game_id.clone(), &my_node_id) {
-                                        Ok(host_node_id) => {
-                                            let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::JoinResult { 
-                                                game_id, 
-                                                host_node_id,
-                                                stake_amount,
-                                            });
-                                        }
-                                        Err(e) => {
-                                            let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::Error(format!("Join failed: {}", e)));
-                                        }
-                                    }
-                                }).detach();
-                            }
-                        } else {
-                            if let Some(solana_competitive) = ctx_menu.competitive.as_mut() {
-                                solana_competitive.last_error = Some("No wager match found on network.".to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            
-            #[cfg(feature = "solana")]
-            {
-                if let Some(solana_competitive) = ctx_menu.competitive.as_ref() {
-                    // Only show the transient warning when hovering near the newly clicked item
-                    if solana_competitive.last_error.is_some() && btn_resp.hovered() {
-                        ui.label(
-                            egui::RichText::new(solana_competitive.last_error.as_ref().unwrap())
-                                .color(UiColors::DANGER)
-                                .size(11.0)
-                        );
-                    }
-                }
-            }
-        });
-        ui.add_space(8.0);
+
+    // Local PvP — always functional
+    if ui.add_sized(
+        [ui.available_width(), 40.0],
+        egui::Button::new(
+            egui::RichText::new("♟  Local PvP")
+                .size(14.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        )
+        .fill(egui::Color32::from_rgba_unmultiplied(50, 80, 50, 200)),
+    ).clicked() {
+        info!("[MENU] Starting Local PvP game");
+        ctx_menu.ai_config.mode = GameMode::Multiplayer;
+        *ctx_menu.core_mode = CoreGameMode::SinglePlayer;
+        ctx_menu.next_state.set(GameState::InGame);
+    }
+    ui.add_space(8.0);
+
+    // Online wager tiers (locked until wallet connected)
+    let wagers = [("£2 Wager", 0.05), ("£5 Wager", 0.12), ("£10 Wager", 0.25)];
+    for (name, _stake) in wagers {
+        let btn_text = format!("{} 🔒", name);
+        let resp = ui.add_sized(
+            [ui.available_width(), 36.0],
+            egui::Button::new(
+                egui::RichText::new(btn_text)
+                    .size(13.0)
+                    .color(egui::Color32::from_rgb(120, 120, 120))
+                    .strong(),
+            )
+            .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 150)),
+        ).on_hover_text("Connect wallet to wager");
+
+        if resp.clicked() {
+            info!("[MENU] Wager {} clicked — wallet not connected, opening sign-in", name);
+            let _ = webbrowser::open("http://localhost:7454/auth/login");
+        }
+        ui.add_space(5.0);
     }
 }
 
 /// Render middle lobby section
-fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
+fn render_lobby_section(ui: &mut egui::Ui, _ctx_menu: &mut MainMenuUIContext) {
     ui.heading(
         egui::RichText::new("LOBBY")
             .size(18.0)
@@ -665,111 +638,37 @@ fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
                 .color(egui::Color32::WHITE)
                 .strong(),
         );
-        
+
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("🔄 Refresh").clicked() {
-                if let Some(vps_state) = ctx_menu.p2p_vps_state.as_mut() {
-                    vps_state.last_poll = None; // Force immediate poll in the next tick
-                }
+                info!("[LOBBY] Refresh clicked — polling not yet connected");
             }
         });
     });
-    
+
     ui.add_space(10.0);
 
-    // Get real games from VPS state
-    let mut games_found = false;
-    if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
-        for listing in &vps_state.cached_games {
-            games_found = true;
-            ui.group(|ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new(&listing.display_name)
-                                .size(14.0)
-                                .color(egui::Color32::from_rgb(200, 200, 255))
-                                .strong(),
-                        );
-                        ui.label(
-                            egui::RichText::new(format!("{} min | {} SOL", listing.time_control_minutes, listing.stake_amount))
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(150, 150, 150)),
-                        );
-                    });
-                    
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        #[cfg(feature = "solana")]
-                        let wallet_ok = ctx_menu.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
-                        #[cfg(not(feature = "solana"))]
-                        let wallet_ok = false;
-
-                        let join_resp = ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(if wallet_ok { "JOIN" } else { "JOIN 🔒" })
-                                    .strong()
-                                    .color(if wallet_ok { egui::Color32::WHITE } else { egui::Color32::from_rgb(120, 120, 120) })
-                            )
-                        ).on_hover_text(if wallet_ok { "Join this game" } else { "Connect wallet to join" });
-
-                        if join_resp.clicked() {
-                            if !wallet_ok {
-                                info!("[LOBBY] Join blocked — wallet not connected. Opening sign-in.");
-                                if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
-                                    warn!("[MENU] Failed to open sign-in page: {}", e);
-                                }
-                            } else {
-                                info!("[LOBBY] Joining game: {}", listing.game_id);
-                                if let Some(node_id) = &ctx_menu.network_state.node_id {
-                                    let my_node_id = bs58::encode(node_id.as_bytes()).into_string();
-                                    let game_id = listing.game_id.clone();
-                                    let tx = vps_state.response_tx.clone();
-                                    let stake_amount = listing.stake_amount;
-                                    bevy::tasks::IoTaskPool::get().spawn(async move {
-                                        match crate::multiplayer::vps_client::p2p_join_game(game_id.clone(), &my_node_id) {
-                                            Ok(host_node_id) => {
-                                                let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::JoinResult { 
-                                                    game_id, 
-                                                    host_node_id,
-                                                    stake_amount,
-                                                });
-                                            }
-                                            Err(e) => {
-                                                let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::Error(format!("Join failed: {}", e)));
-                                            }
-                                        }
-                                    }).detach();
-                                }
-                            }
-                        }
-                    });
-                });
-            });
-            ui.add_space(5.0);
-        }
-    }
-
-    if !games_found {
-        ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            ui.label(
-                egui::RichText::new("No public games available")
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(100, 100, 100))
-                    .italics(),
-            );
-            ui.label(
-                egui::RichText::new("Host a lobby to start a new one")
-                    .size(11.0)
-                    .color(egui::Color32::from_rgb(80, 80, 80)),
-            );
-        });
-    }
+    // Placeholder: no active games until VPS/P2P is connected
+    ui.vertical_centered(|ui| {
+        ui.add_space(20.0);
+        ui.label(
+            egui::RichText::new("No public games available")
+                .size(12.0)
+                .color(egui::Color32::from_rgb(100, 100, 100))
+                .italics(),
+        );
+        ui.label(
+            egui::RichText::new("Host a lobby or play locally")
+                .size(11.0)
+                .color(egui::Color32::from_rgb(80, 80, 80)),
+        );
+    });
 }
 
 
 /// Helper to transition to Solana Lobby for hosting a specific wager
+// Temporarily disabled to remove lightyear dependencies
+/*
 fn host_wager_lobby(ctx: &mut MainMenuUIContext, sol_amount: f32) {
     #[cfg(feature = "solana")]
     {
@@ -789,6 +688,7 @@ fn host_wager_lobby(ctx: &mut MainMenuUIContext, sol_amount: f32) {
         }
     }
 }
+*/
 
 /// Navbar link helper
 fn nav_link(ui: &mut egui::Ui, text: &str) -> bool {
@@ -1097,13 +997,15 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         if bezel_button(ui, "♟ VS Local Friend (PvP)", egui::Color32::WHITE) {
             ctx.ai_config.mode = GameMode::Multiplayer;
-            *ctx.core_mode = CoreGameMode::MultiplayerLocal;
+            // *ctx.core_mode = CoreGameMode::MultiplayerLocal; // Temporarily disabled
             ctx.next_state.set(GameState::InGame);
             info!("[MAIN_MENU] Starting Local PvP game");
         }
 
         Layout::small_space(ui);
 
+        // Temporarily disabled to remove lightyear dependencies
+        /*
         ui.horizontal(|ui| {
             ui.label("Play as:");
             if ui.selectable_label(ctx.color_choice.play_as_white, "♔ White").clicked() {
@@ -1113,14 +1015,12 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 ctx.color_choice.play_as_white = false;
             }
         });
+        */
 
         Layout::small_space(ui);
 
-        let ai_color = if ctx.color_choice.play_as_white {
-            crate::rendering::pieces::PieceColor::Black
-        } else {
-            crate::rendering::pieces::PieceColor::White
-        };
+        // Temporarily disabled to remove lightyear dependencies
+        let ai_color = crate::rendering::pieces::PieceColor::Black; // Default to AI as Black
 
         ui.horizontal(|ui| {
             ui.label("Difficulty:");
@@ -1195,16 +1095,13 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         Layout::small_space(ui);
 
         // VPS Mode Indicator
-        let vps_status = if ctx.settings.use_vps_relay {
+        // Temporarily disabled to remove lightyear dependencies
+        let vps_status = if false { // ctx.settings.use_vps_relay
             "VPS Mode: ON"
         } else {
             "VPS Mode: OFF"
         };
-        let vps_color = if ctx.settings.use_vps_relay {
-            egui::Color32::from_rgb(100, 255, 150)
-        } else {
-            egui::Color32::from_rgb(150, 150, 150)
-        };
+        let vps_color = egui::Color32::from_rgb(150, 150, 150); // Default to OFF color
         ui.label(
             egui::RichText::new(vps_status)
                 .size(12.0)
@@ -1220,12 +1117,8 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         );
 
         // Get node ID from network state
-        let node_id_display = if let Some(node_id) = &ctx.network_state.node_id {
-            let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
-            format!("{:.16}...", node_id_str) // Show first 16 chars
-        } else {
-                "Initializing...".to_string()
-            };
+        // Temporarily disabled to remove lightyear dependencies
+        let node_id_display = "Initializing...".to_string();
 
         ui.label(
             egui::RichText::new(&node_id_display)
@@ -1235,18 +1128,42 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         );
 
         if bezel_button(ui, "📋 Copy Full Node ID", egui::Color32::from_rgb(100, 200, 255)) {
-            if let Some(node_id) = &ctx.network_state.node_id {
-                let full_node_id = bs58::encode(node_id.as_bytes()).into_string();
-                ui.output_mut(|o| {
-                    o.commands
-                        .push(egui::OutputCommand::CopyText(full_node_id.clone()))
-                });
-                info!("[MAIN_MENU] Node ID copied to clipboard: {}", full_node_id);
-            }
+            // if let Some(node_id) = &ctx.network_state.node_id { // Temporarily disabled
+            //     let full_node_id = bs58::encode(node_id.as_bytes()).into_string();
+            //     ui.output_mut(|o| {
+            //         o.commands
+            //             .push(egui::OutputCommand::CopyText(full_node_id.clone()))
+            //     });
+            //     info!("[MAIN_MENU] Node ID copied to clipboard: {}", full_node_id);
+            // }
         }
 
         Layout::item_space(ui);
         ui.separator();
+        Layout::item_space(ui);
+    });
+}
+
+// --- P2P LOBBY UI ---
+// Temporarily disabled to remove lightyear dependencies
+/*
+fn ui_p2p_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
+    ui.vertical_centered(|ui| {
+        Layout::section_space(ui);
+
+        if ui.button("⬅ Back").clicked() {
+            ctx.menu_state.set(crate::core::MenuState::ModeSelect);
+        }
+
+        Layout::section_space(ui);
+
+        ui.label(
+            egui::RichText::new("BRAID P2P LOBBY")
+                .size(24.0)
+                .color(egui::Color32::from_rgb(100, 200, 255))
+                .strong(),
+        );
+
         Layout::item_space(ui);
 
         // --- HOST GAME ---
@@ -1258,6 +1175,8 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         Layout::small_space(ui);
 
         // Show connection status if any
+        // Temporarily disabled to remove lightyear dependencies
+        /*
         match ctx.p2p_state.status {
             crate::multiplayer::P2PConnectionStatus::Hosting => {
                 ui.label(
@@ -1310,28 +1229,27 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             }
             _ => {}
         }
+        */
 
         ui.label(
             egui::RichText::new("Lobby Name:")
                 .size(14.0)
                 .color(egui::Color32::from_rgb(150, 150, 150)),
         );
-        ui.text_edit_singleline(&mut ctx.p2p_ui.lobby_name);
+        ui.text_edit_singleline(&mut String::new()); // Temporarily disabled
         Layout::small_space(ui);
 
         if bezel_button(ui, "Start Hosting", egui::Color32::from_rgb(100, 255, 150)) {
             // Set AI mode to multiplayer
             ctx.ai_config.mode = GameMode::Multiplayer;
             // Check if VPS relay is enabled
+            // Temporarily disabled to remove lightyear dependencies
+            /*
             if ctx.settings.use_vps_relay {
-                if let Some(node_id) = &ctx.network_state.node_id {
-                    let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
+                // if let Some(node_id) = &ctx.network_state.node_id { // Temporarily disabled
+                //     let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
                     let game_id = format!("p2p_{}", rand::random::<u64>());
-                    let display_name = if ctx.p2p_ui.lobby_name.trim().is_empty() {
-                        "Guest Player".to_string()
-                    } else {
-                        ctx.p2p_ui.lobby_name.trim().to_string()
-                    };
+                    let display_name = "Guest Player".to_string(); // Temporarily disabled
 
                     match crate::multiplayer::vps_client::p2p_announce_game(
                         game_id.clone(),
@@ -1343,28 +1261,33 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     ) {
                         Ok(()) => {
                             info!("[MAIN_MENU] Hosted game '{}' (ID: {}) via VPS", display_name, game_id);
-                            ctx.p2p_ui.clear_error();
+                            // ctx.p2p_ui // Temporarily disabled.clear_error();
                             // Enable VPS relay mode
-                            if let Some(ref mut vps_state) = ctx.p2p_vps_state {
-                                crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, true);
-                            }
+                            // if let Some(ref mut vps_state) = ctx.p2p_vps_state { // Temporarily disabled
+                            //     crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, true);
+                            // }
                         }
                         Err(e) => {
-                            ctx.p2p_ui.set_error(format!("VPS announce failed: {}", e));
+                            // ctx.p2p_ui // Temporarily disabled.set_error(format!("VPS announce failed: {}", e));
                             return;
                         }
                     }
                 }
-            } else {
+            }
+            */
+            if false { // Temporarily disabled
                 // Direct P2P - disable VPS relay
+                // Temporarily disabled to remove lightyear dependencies
+                /*
                 if let Some(ref mut vps_state) = ctx.p2p_vps_state {
                     crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, false);
                 }
+                */
                 // Emit host game event
-                ctx.host_game_events.write(crate::multiplayer::HostGameEvent);
+                // ctx.host_game_events.write(crate::multiplayer::HostGameEvent); // Temporarily disabled
             }
             *ctx.core_mode = CoreGameMode::BraidMultiplayer;
-            ctx.p2p_state.status = crate::multiplayer::P2PConnectionStatus::Hosting;
+            // ctx.p2p_state.status = crate::multiplayer::P2PConnectionStatus::Hosting; // Temporarily disabled
             info!("[MAIN_MENU] Hosting P2P game");
         }
 
@@ -1405,15 +1328,15 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         }
 
         // Text input for peer node ID (persisted across frames)
-        let response = ui.text_edit_singleline(&mut ctx.p2p_ui.peer_input);
+        let response = ui.text_edit_singleline(&mut String::new()); // Temporarily disabled
 
         // Clear error when user starts typing
         if response.changed() {
-            ctx.p2p_ui.clear_error();
+            // ctx.p2p_ui // Temporarily disabled.clear_error();
         }
 
         // Display error message if present
-        if let Some(ref error) = ctx.p2p_ui.error_message {
+        if false { // Temporarily disabled
             Layout::small_space(ui);
             ui.label(
                 egui::RichText::new(format!("⚠ {}", error))
@@ -1424,14 +1347,9 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::small_space(ui);
 
-        let is_connecting = matches!(
-            ctx.p2p_state.status,
-            crate::multiplayer::P2PConnectionStatus::Connecting
-        );
-        let is_error = matches!(
-            ctx.p2p_state.status,
-            crate::multiplayer::P2PConnectionStatus::Error(_)
-        );
+        // Temporarily disabled to remove lightyear dependencies
+        let is_connecting = false;
+        let is_error = false;
 
         if is_connecting {
             ui.label(
@@ -1442,55 +1360,62 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         } else {
             let btn_label = if is_error { "🔗 Retry Connect" } else { "Connect to Peer" };
             if bezel_button(ui, btn_label, egui::Color32::from_rgb(255, 200, 100)) {
-                match ctx.p2p_ui.validate_node_id() {
+                match Ok::<(), String>(()) { // Temporarily disabled
                     Ok(()) => {
-                        ctx.p2p_ui.clear_error();
+                        // ctx.p2p_ui // Temporarily disabled.clear_error();
                         ctx.ai_config.mode = GameMode::Multiplayer;
                         // Check if VPS relay is enabled
+                        // Temporarily disabled to remove lightyear dependencies
+                        /*
                         if ctx.settings.use_vps_relay {
-                            if let Some(node_id) = &ctx.network_state.node_id {
-                                let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
+                            // if let Some(node_id) = &ctx.network_state.node_id { // Temporarily disabled
+                                // let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
                                 match crate::multiplayer::vps_client::p2p_join_game(
-                                    ctx.p2p_ui.peer_input.trim().to_string(),
-                                    &node_id_str,
+                                    String::new(), // Temporarily disabled
+                                    // &node_id_str,
                                 ) {
                                     Ok(Some(_host_node_id)) => {
                                         info!("[MAIN_MENU] Joined game via VPS");
                                         // Enable VPS relay mode
-                                        if let Some(ref mut vps_state) = ctx.p2p_vps_state {
-                                            crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, true);
-                                        }
+                                        // if let Some(ref mut vps_state) = ctx.p2p_vps_state { // Temporarily disabled
+                                        //     crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, true);
+                                        // }
                                     }
                                     Ok(None) => {
-                                        ctx.p2p_ui.set_error("Game not found or rejected".to_string());
+                                        // ctx.p2p_ui // Temporarily disabled.set_error("Game not found or rejected".to_string());
                                         return;
                                     }
                                     Err(e) => {
-                                        ctx.p2p_ui.set_error(format!("VPS join failed: {}", e));
+                                        // ctx.p2p_ui // Temporarily disabled.set_error(format!("VPS join failed: {}", e));
                                         return;
                                     }
                                 }
                             }
-                        } else {
+                        }
+                        */
+                        if false { // Temporarily disabled
+                            // Temporarily disabled to remove lightyear dependencies
+                            /*
                             // Direct P2P - disable VPS relay
-                            if let Some(ref mut vps_state) = ctx.p2p_vps_state {
+                            // if let Some(ref mut vps_state) = ctx.p2p_vps_state { // Temporarily disabled
                                 crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, false);
                             }
                             ctx.connect_events.write(crate::multiplayer::ConnectToPeerEvent {
-                                peer_node_id: ctx.p2p_ui.peer_input.trim().to_string(),
+                                peer_node_id: String::new(), // Temporarily disabled
                             });
-                        }
-                        *ctx.core_mode = CoreGameMode::BraidMultiplayer;
+                            */
+                        } // end if false
+                        // *ctx.core_mode = CoreGameMode::BraidMultiplayer; // Temporarily disabled
                         info!(
                             "[MAIN_MENU] Joining P2P game with peer: {}",
-                            ctx.p2p_ui.peer_input
+                            "" // // ctx.p2p_ui // Temporarily disabled.peer_input
                         );
                     }
                     Err(error_msg) => {
-                        ctx.p2p_ui.set_error(error_msg);
+                        // // ctx.p2p_ui // Temporarily disabled.set_error(error_msg); // Temporarily disabled
                         warn!(
                             "[MAIN_MENU] Invalid Node ID entered: {}",
-                            ctx.p2p_ui.peer_input
+                            "" // // ctx.p2p_ui // Temporarily disabled.peer_input
                         );
                     }
                 }
@@ -1498,7 +1423,10 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         }
     });
 }
+*/
 
+// Temporarily disabled to remove lightyear dependencies
+/*
 fn ui_braid_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ui.vertical_centered(|ui| {
         Layout::section_space(ui);
@@ -1518,6 +1446,8 @@ fn ui_braid_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::item_space(ui);
 
+        // Temporarily disabled to remove lightyear dependencies
+        /*
         ui.group(|ui| {
             ui.label("Base URL:");
             ui.text_edit_singleline(&mut ctx.braid_config.base_url);
@@ -1536,6 +1466,7 @@ fn ui_braid_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             ctx.next_state.set(GameState::InGame);
 
         }
+        */
 
         Layout::item_space(ui);
         ui.label(
@@ -1547,6 +1478,7 @@ fn ui_braid_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         );
     });
 }
+*/
 
 #[cfg(feature = "solana")]
 fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
@@ -1590,12 +1522,14 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         }
 
         // Node ID display
+        // Temporarily disabled to remove lightyear dependencies
+        /*
         if let Some(node_id) = &ctx.network_state.node_id {
-            let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
-            let short_id = if node_id_str.len() > 16 {
-                format!("{:.16}...", node_id_str)
+            let full = bs58::encode(node_id.as_bytes()).into_string();
+            let short_id = if full.len() > 16 {
+                format!("{:.16}...", full)
             } else {
-                node_id_str.clone()
+                full.clone()
             };
             ui.label(
                 egui::RichText::new(format!("Node ID: {}", short_id))
@@ -1606,9 +1540,9 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             if ui.small_button("📋 Copy Node ID").clicked() {
                 ui.output_mut(|o| {
                     o.commands
-                        .push(egui::OutputCommand::CopyText(node_id_str.clone()));
+                        .push(egui::OutputCommand::CopyText(full.clone()));
                 });
-                info!("[SOLANA_LOBBY] Node ID copied: {}", node_id_str);
+                info!("[SOLANA_LOBBY] Node ID copied: {}", full);
             }
         } else {
             ui.label(
@@ -1617,6 +1551,7 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     .color(egui::Color32::from_rgb(150, 150, 150)),
             );
         }
+        */
 
         Layout::item_space(ui);
 
@@ -1692,6 +1627,8 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                         .size(12.0)
                         .color(egui::Color32::LIGHT_GRAY),
                 );
+                // Temporarily disabled to remove lightyear dependencies
+                /*
                 if let Some(node_id) = &ctx.network_state.node_id {
                     let full = bs58::encode(node_id.as_bytes()).into_string();
                     let short = format!("{:.16}...", full);
@@ -1709,6 +1646,7 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                         info!("[SOLANA_LOBBY] Node ID copied while waiting: {}", full);
                     }
                 }
+                */
                 Layout::small_space(ui);
                 if ui.small_button("✖ Cancel").clicked() {
                     lobby.status = LobbyStatus::Idle;
@@ -1733,8 +1671,8 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 Layout::small_space(ui);
                 if ui.button("🎮 Host Game").clicked() {
                     ctx.ai_config.mode = GameMode::Multiplayer;
-                    ctx.host_game_events
-                        .write(crate::multiplayer::HostGameEvent);
+                    // ctx.host_game_events // Temporarily disabled
+                    //     .write(crate::multiplayer::HostGameEvent);
                     *ctx.core_mode = CoreGameMode::BraidMultiplayer;
                     if let Some(ref mut sync) = ctx.solana_sync {
                         sync.game_id = Some(game_id);
@@ -1763,11 +1701,11 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                         .color(egui::Color32::LIGHT_GRAY),
                 );
 
-                let response = ui.text_edit_singleline(&mut ctx.p2p_ui.peer_input);
+                let response = ui.text_edit_singleline(&mut String::new()); // Temporarily disabled
                 if response.changed() {
-                    ctx.p2p_ui.clear_error();
+                    // ctx.p2p_ui // Temporarily disabled.clear_error();
                 }
-                if let Some(ref err) = ctx.p2p_ui.error_message.clone() {
+                if let Some(ref err) = None::<String> { // Temporarily disabled
                     ui.label(
                         egui::RichText::new(format!("⚠ {}", err))
                             .size(11.0)
@@ -1776,16 +1714,16 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 }
                 Layout::small_space(ui);
                 if ui.button("🔗 Connect to Host").clicked() {
-                    match ctx.p2p_ui.validate_node_id() {
+                    match Ok::<(), String>(()) { // Temporarily disabled
                         Ok(()) => {
-                            ctx.p2p_ui.clear_error();
+                            // ctx.p2p_ui // Temporarily disabled.clear_error();
                             ctx.ai_config.mode = GameMode::Multiplayer;
-                            let peer = ctx.p2p_ui.peer_input.trim().to_string();
-                            ctx.connect_events
-                                .write(crate::multiplayer::ConnectToPeerEvent {
-                                    peer_node_id: peer.clone(),
-                                });
-                            *ctx.core_mode = CoreGameMode::BraidMultiplayer;
+                            let peer = String::new(); // Temporarily disabled
+                            // ctx.connect_events // Temporarily disabled
+                            //     .write(crate::multiplayer::ConnectToPeerEvent {
+                            //         peer_node_id: peer.clone(),
+                            //     });
+                            // *ctx.core_mode = CoreGameMode::BraidMultiplayer; // Temporarily disabled
                             if let Some(ref mut sync) = ctx.solana_sync {
                                 sync.game_id = Some(game_id);
                                 sync.wager_amount = wager_lamports;
@@ -1801,7 +1739,7 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                             );
                         }
                         Err(e) => {
-                            ctx.p2p_ui.set_error(e);
+                            // ctx.p2p_ui // Temporarily disabled.set_error(e);
                         }
                     }
                 }
@@ -1820,6 +1758,8 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 }
 
 #[cfg(feature = "solana")]
+// Temporarily disabled to remove lightyear dependencies
+/*
 fn render_create_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
@@ -1887,8 +1827,11 @@ fn render_create_tab(
         ui.colored_label(egui::Color32::RED, "Insufficient balance (need ≥ 0.003 SOL)");
     }
 }
+*/
 
 #[cfg(feature = "solana")]
+// Temporarily disabled to remove lightyear dependencies
+/*
 fn render_join_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
@@ -1962,6 +1905,7 @@ fn render_join_tab(
         }
     }
 }
+*/
 
 #[cfg(feature = "solana")]
 fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubkey::Pubkey> {
@@ -1969,6 +1913,9 @@ fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubk
     Some(solana_sdk::pubkey::Pubkey::from(arr))
 }
 
+// Temporarily disabled to remove lightyear dependencies
+/*
+#[cfg(feature = "solana")]
 /// System to render a popup asking if the user wants to create a regular P2P lobby or a Solana wager lobby.
 pub fn render_lobby_selection_popup(
     mut contexts: bevy_egui::EguiContexts,
@@ -2048,6 +1995,7 @@ pub fn render_lobby_selection_popup(
             });
         });
 }
+*/
 
 
 

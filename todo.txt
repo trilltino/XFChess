@@ -1,4 +1,0 @@
-- Create Welcome packets for new players on canva 
-- Full web flow for signing up 
-  Viewing Profiles
-  Inputing CACF data

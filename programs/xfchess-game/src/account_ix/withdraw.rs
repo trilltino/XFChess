@@ -78,8 +78,20 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
             )?;
         } else {
             let pot = game.wager_amount;
-            **ctx.accounts.escrow_pda.try_borrow_mut_lamports()? -= pot;
-            **ctx.accounts.player.try_borrow_mut_lamports()? += pot;
+            let game_id_bytes = _game_id.to_le_bytes();
+            let escrow_bump = ctx.bumps.escrow_pda;
+            let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[escrow_bump]]];
+            anchor_lang::system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.escrow_pda.to_account_info(),
+                        to: ctx.accounts.player.to_account_info(),
+                    },
+                    escrow_seeds,
+                ),
+                pot,
+            )?;
         }
     }
 

@@ -2,7 +2,7 @@ import { AnchorProvider, Program, type Idl, web3 } from '@coral-xyz/anchor';
 import { Connection, PublicKey } from '@solana/web3.js';
 import idl from './xfchess_game.json';
 
-export const PROGRAM_ID = new PublicKey('FVPp29xDtMrh3CrTJNnxDcbGRnMMKuUv2ntqkBRc1uDX');
+export const PROGRAM_ID = new PublicKey('A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W');
 
 export function getAnchorProgram(connection: Connection, wallet: any) {
   const provider = new AnchorProvider(connection, wallet as any, {
@@ -51,4 +51,23 @@ export async function createPlayerProfile(program: Program, walletPubkey: Public
       systemProgram: web3.SystemProgram.programId,
     })
     .rpc();
+}
+
+export async function fetchProfileByUsername(program: Program, username: string) {
+  try {
+    const [usernameRecord] = PublicKey.findProgramAddressSync(
+      [Buffer.from("username"), Buffer.from(username)],
+      program.programId
+    );
+    
+    // Fetch the username record to get the wallet pubkey
+    const record = await (program.account as any).usernameRecord.fetch(usernameRecord);
+    const walletPubkey = new PublicKey(record.owner);
+    
+    // Now fetch the profile using the wallet pubkey
+    return await fetchPlayerProfile(program, walletPubkey);
+  } catch (err: any) {
+    console.error("Profile not found by username:", err);
+    return null;
+  }
 }

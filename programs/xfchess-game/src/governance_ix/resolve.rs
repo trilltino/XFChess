@@ -12,14 +12,18 @@ pub struct ResolveDispute<'info> {
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [b"dispute", &game_id.to_le_bytes()], bump)]
     pub dispute_record: Account<'info, DisputeRecord>,
-    /// CHECK: Escrow PDA validated by seeds in constraint
+    /// CHECK: Escrow PDA validated by seeds
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// CHECK: Admin authority to resolve disputes
+    /// Dispute-resolution authority — only the platform key may resolve.
+    #[account(address = crate::constants::dispute_authority::ID @ GameErrorCode::UnauthorizedDisputeResolution)]
     pub authority: Signer<'info>,
-    /// CHECK: Winner destination for payout
-    #[account(mut)]
-    pub winner_destination: UncheckedAccount<'info>,
+    /// CHECK: White player destination — must match game.white
+    #[account(mut, constraint = white_authority.key() == game.white @ GameErrorCode::NotInGame)]
+    pub white_authority: UncheckedAccount<'info>,
+    /// CHECK: Black player destination — must match game.black
+    #[account(mut, constraint = black_authority.key() == game.black @ GameErrorCode::NotInGame)]
+    pub black_authority: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -46,23 +50,30 @@ pub fn handler(
     dispute.resolved_by = Some(ctx.accounts.authority.key());
     dispute.resolved_at = Some(Clock::get()?.unix_timestamp);
 
+    let wager_amount = game.wager_amount;
+    let game_id_bytes = _game_id.to_le_bytes();
+    let bump = ctx.bumps.escrow_pda;
+    let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[bump]]];
+
     if let Some(w) = winner {
         game.result = GameResult::Winner(w);
         game.status = GameStatus::Finished;
 
-        let wager_amount = game.wager_amount;
         if wager_amount > 0 {
-            let pot = wager_amount * 2;
-            let game_id_bytes = _game_id.to_le_bytes();
-            let bump = ctx.bumps.escrow_pda;
-            let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[bump]]];
-
+            let pot = wager_amount
+                .checked_mul(2)
+                .ok_or(GameErrorCode::Overflow)?;
+            let dest = if w == game.white {
+                ctx.accounts.white_authority.to_account_info()
+            } else {
+                ctx.accounts.black_authority.to_account_info()
+            };
             anchor_lang::system_program::transfer(
                 CpiContext::new_with_signer(
                     ctx.accounts.system_program.to_account_info(),
                     anchor_lang::system_program::Transfer {
                         from: ctx.accounts.escrow_pda.to_account_info(),
-                        to: ctx.accounts.winner_destination.to_account_info(),
+                        to: dest,
                     },
                     escrow_seeds,
                 ),
@@ -70,10 +81,34 @@ pub fn handler(
             )?;
         }
     } else {
-        // Draw or Cancelled resolution
-        game.status = GameStatus::Cancelled;
-        // In case of a draw/dismissed, we may need two destinations for split. 
-        // For simplicity, let's assume we handle a winner or draw as split.
+        // Draw — split the pot evenly between both players.
+        game.result = GameResult::Draw;
+        game.status = GameStatus::Finished;
+
+        if wager_amount > 0 {
+            anchor_lang::system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.escrow_pda.to_account_info(),
+                        to: ctx.accounts.white_authority.to_account_info(),
+                    },
+                    escrow_seeds,
+                ),
+                wager_amount,
+            )?;
+            anchor_lang::system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.escrow_pda.to_account_info(),
+                        to: ctx.accounts.black_authority.to_account_info(),
+                    },
+                    escrow_seeds,
+                ),
+                wager_amount,
+            )?;
+        }
     }
 
     Ok(())

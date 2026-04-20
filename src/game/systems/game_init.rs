@@ -136,10 +136,13 @@ pub fn initialize_players(
     mut players: ResMut<Players>,
     ai_config: Res<ChessAIResource>,
     core_mode: Res<crate::core::states::GameMode>,
-    connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
-    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
+    // Temporarily disabled to remove lightyear dependencies
+    // connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    // network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
 ) {
     // Determine if we're in a multiplayer game and what color the local player is
+    // Temporarily disabled to remove lightyear dependencies
+    /*
     // Check P2PConnectionState first (uses shakmaty::Color)
     let p2p_color = connection_state.as_ref().and_then(|s| {
         if s.status == crate::multiplayer::network::p2p::P2PConnectionStatus::InGame {
@@ -157,8 +160,8 @@ pub fn initialize_players(
         ns.active_session.as_ref().and_then(|session| {
             if session.started {
                 session.game_state.as_ref().map(|gs| match gs.my_color {
-                    crate::multiplayer::PlayerColor::White => PieceColor::White,
-                    crate::multiplayer::PlayerColor::Black => PieceColor::Black,
+                    crate::PlayerColor::White => PieceColor::White,
+                    crate::PlayerColor::Black => PieceColor::Black,
                 })
             } else {
                 None
@@ -167,6 +170,8 @@ pub fn initialize_players(
     });
 
     let multiplayer_color = p2p_color.or(network_color);
+    */
+    let multiplayer_color: Option<PieceColor> = None; // Temporarily disabled
 
     // If core_mode is MultiplayerLocal, set both players as human without network dependency
     if let crate::core::states::GameMode::MultiplayerLocal = *core_mode {
@@ -177,77 +182,37 @@ pub fn initialize_players(
         info!("[GAME_INIT] Local PvP players initialized (both human)");
     } else if let Some(my_color) = multiplayer_color {
         // Multiplayer mode: Both players are human
-        let _opponent_color = match my_color {
-            PieceColor::White => PieceColor::Black,
-            PieceColor::Black => PieceColor::White,
-        };
-
-        let is_host = connection_state
-            .as_ref()
-            .map(|s| s.is_host)
-            .unwrap_or(my_color == PieceColor::White);
-
-        let my_name = if is_host { "Player 1 (Host)" } else { "Player 2 (Joiner)" };
-        let opponent_name = if is_host { "Player 2 (Joiner)" } else { "Player 1 (Host)" };
-
         *players = Players {
-            player_1: Player::new(
-                1,
-                if my_color == PieceColor::White { my_name } else { opponent_name }.to_string(),
-                PieceColor::White,
-                true, // Both players are human in multiplayer
-            ),
-            player_2: Player::new(
-                2,
-                if my_color == PieceColor::Black { my_name } else { opponent_name }.to_string(),
-                PieceColor::Black,
-                true, // Both players are human in multiplayer
-            ),
+            player_1: Player::new(1, "Host".to_string(), PieceColor::White, true),
+            player_2: Player::new(2, "Joiner".to_string(), PieceColor::Black, true),
         };
-
-        info!(
-            "[GAME_INIT] Multiplayer players initialized: {} (White) vs {} (Black)",
-            if my_color == PieceColor::White { my_name } else { opponent_name },
-            if my_color == PieceColor::Black { my_name } else { opponent_name }
-        );
+        info!("[GAME_INIT] Multiplayer players initialized (both human)");
     } else {
-        // AI mode: One human, one AI
-        info!(
-            "[GAME_INIT] Initializing players for AI mode: {:?}",
-            ai_config.mode
-        );
-
+        // VsAI mode: One human, one AI
         let ai_color = ai_config.mode.ai_color();
         let human_color = match ai_color {
             PieceColor::White => PieceColor::Black,
             PieceColor::Black => PieceColor::White,
         };
 
+        // Temporarily disabled to remove lightyear dependencies
+        /*
+        // Determine if the human is the host in multiplayer mode
+        let is_host = connection_state
+            .as_ref()
+            .and_then(|s| s.player_color)
+            .map(|c| c == shakmaty::Color::White)
+            .unwrap_or(true);
+        */
+        let is_host = true; // Temporarily disabled
+
         *players = Players {
-            player_1: Player::new(
-                1,
-                if human_color == PieceColor::White {
-                    "Player 1".to_string()
-                } else {
-                    "AI".to_string()
-                },
-                PieceColor::White,
-                human_color == PieceColor::White,
-            ),
-            player_2: Player::new(
-                2,
-                if ai_color == PieceColor::Black {
-                    "AI".to_string()
-                } else {
-                    "Player 1".to_string()
-                },
-                PieceColor::Black,
-                ai_color != PieceColor::Black,
-            ),
+            player_1: Player::new(1, "Player 1".to_string(), human_color, true),
+            player_2: Player::new(2, "AI".to_string(), ai_color, false),
         };
 
         info!(
-            "[GAME_INIT] Players initialized: Human ({:?}) vs AI ({:?})",
+            "[GAME_INIT] VsAI players initialized: Human ({:?}) vs AI ({:?})",
             human_color, ai_color
         );
     }

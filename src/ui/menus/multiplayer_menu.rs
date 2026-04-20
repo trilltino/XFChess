@@ -3,13 +3,13 @@ use bevy_egui::{egui, EguiContexts};
 use serde::{Deserialize, Serialize};
 
 use crate::core::GameState;
-use crate::multiplayer::BraidNetworkState;
+// use crate::multiplayer::BraidNetworkState; // Temporarily disabled
 
 /// System parameter to handle multiplayer menu interactions
 #[derive(SystemParam)]
 pub struct MultiplayerMenu<'w> {
     game_states: ResMut<'w, NextState<GameState>>,
-    braid_network: ResMut<'w, BraidNetworkState>,
+    // braid_network: ResMut<'w, BraidNetworkState>, // Temporarily disabled
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +56,8 @@ pub fn multiplayer_menu_system(
         .show(ctx, |ui| {
             ui.heading("Multiplayer Options");
 
+            // Temporarily disabled to remove lightyear dependencies
+            /*
             // Display current node ID if available
             if let Some(node_id) = &multiplayer_menu.braid_network.node_id {
                 let node_id_str = bs58::encode(node_id).into_string();
@@ -64,6 +66,7 @@ pub fn multiplayer_menu_system(
                     &node_id_str[..16.min(node_id_str.len())]
                 ));
             }
+            */
 
             // Radio buttons for different multiplayer modes
             ui.horizontal(|ui| {
@@ -103,6 +106,8 @@ pub fn multiplayer_menu_system(
                         initiate_gossip_matchmaking(&mut multiplayer_menu, &mut menu_state);
                     }
 
+                    // Temporarily disabled to remove lightyear dependencies
+                    /*
                     // Show discovered peers
                     if !multiplayer_menu.braid_network.discovered_peers.is_empty() {
                         ui.separator();
@@ -111,6 +116,7 @@ pub fn multiplayer_menu_system(
                             ui.label(format!("- {}: {}", &peer.node_id[..8], peer.wallet_address));
                         }
                     }
+                    */
                 }
                 MultiplayerMode::BraidUriInput => {
                     ui.separator();

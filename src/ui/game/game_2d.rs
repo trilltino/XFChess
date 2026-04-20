@@ -92,8 +92,9 @@ pub fn render_2d_board(
             if response.drag_started() {
                 let mouse_pos = response.interact_pointer_pos().unwrap_or(board_rect.center());
                 let local_pos = mouse_pos - board_rect.min;
-                let file = (local_pos.x / square_size) as u8;
+                let raw_file = (local_pos.x / square_size) as u8;
                 let rank = 7 - (local_pos.y / square_size) as u8;
+                let file = 7 - raw_file;
                 
                 if file < 8 && rank < 8 {
                     let pieces = input_params.pieces.p1();
@@ -115,7 +116,7 @@ pub fn render_2d_board(
             for rank in 0..8 {
                 for file in 0..8 {
                     let square_rect = egui::Rect::from_min_size(
-                        board_rect.min + egui::Vec2::new(file as f32 * square_size, (7 - rank) as f32 * square_size),
+                        board_rect.min + egui::Vec2::new((7 - file) as f32 * square_size, (7 - rank) as f32 * square_size),
                         egui::Vec2::new(square_size, square_size),
                     );
 
@@ -181,7 +182,7 @@ pub fn render_2d_board(
                     continue; // Draw dragging piece last (on top)
                 } else {
                     egui::Rect::from_min_size(
-                        board_rect.min + egui::Vec2::new(piece.x as f32 * square_size, (7 - piece.y) as f32 * square_size),
+                        board_rect.min + egui::Vec2::new((7 - piece.x) as f32 * square_size, (7 - piece.y) as f32 * square_size),
                         egui::Vec2::new(square_size, square_size),
                     )
                 };
@@ -213,8 +214,9 @@ pub fn render_2d_board(
                 let mouse_pos = response.interact_pointer_pos().unwrap_or(board_rect.center());
                 let local_pos = mouse_pos - board_rect.min;
                 
-                let file = (local_pos.x / square_size) as u8;
+                let raw_file = (local_pos.x / square_size) as u8;
                 let rank = 7 - (local_pos.y / square_size) as u8;
+                let file = 7 - raw_file;
 
                 if file < 8 && rank < 8 {
                     handle_2d_click(file as u8, rank as u8, &mut input_params);
@@ -222,8 +224,9 @@ pub fn render_2d_board(
             } else if response.drag_stopped() {
                 let mouse_pos = ui.ctx().pointer_latest_pos().unwrap_or(board_rect.center());
                 let local_pos = mouse_pos - board_rect.min;
-                let file = (local_pos.x / square_size) as u8;
+                let raw_file = (local_pos.x / square_size) as u8;
                 let rank = 7 - (local_pos.y / square_size) as u8;
+                let file = 7 - raw_file;
 
                 debug!("[2D_DRAG] Mouse: {:?}, Local: {:?}, Calculated: file={}, rank={}", 
                     mouse_pos, local_pos, file, rank);

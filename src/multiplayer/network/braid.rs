@@ -62,7 +62,6 @@ impl BraidNodeManager {
     pub fn initialize_braid_session(
         &mut self,
         braid_url: &str,
-        tokio_runtime: &crate::multiplayer::TokioRuntime,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Extract game ID from URL
         let parts: Vec<&str> = braid_url.split('/').collect();
@@ -84,7 +83,7 @@ impl BraidNodeManager {
         // Spawn background task for the Braid session
         let url = base_url.clone();
         let id = game_id.clone();
-        tokio_runtime.0.spawn(async move {
+        bevy::tasks::IoTaskPool::get().spawn(async move {
             info!("[Braid Session] Starting Braid session for game {}...", id);
 
             // Setup Subscriber

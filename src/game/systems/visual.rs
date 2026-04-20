@@ -1,5 +1,6 @@
 use crate::game::components::{FadingCapture, PieceMoveAnimation};
 use crate::game::resources::{CurrentTurn, GameTimer, PendingTurnAdvance, Selection};
+use crate::rendering::board::board::BoardSquare3DVisual;
 use crate::rendering::pieces::{Piece, PIECE_ON_BOARD_Y};
 use crate::rendering::utils::{ReturnMaterials, Square, SquareMaterials};
 use bevy::prelude::*;
@@ -28,7 +29,8 @@ pub fn highlight_possible_moves(
     selection: Res<Selection>,
     square_materials: Res<SquareMaterials>,
     return_materials: Res<ReturnMaterials>,
-    mut squares_query: Query<(Entity, &Square, &mut MeshMaterial3d<StandardMaterial>)>,
+    squares_query: Query<(&Square, &Children)>,
+    mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>, With<BoardSquare3DVisual>>,
     mut commands: Commands,
     border_query: Query<Entity, With<SelectedBorder>>,
 ) {
@@ -37,7 +39,7 @@ pub fn highlight_possible_moves(
         commands.entity(entity).despawn();
     }
 
-    for (_, square, mut material) in squares_query.iter_mut() {
+    for (square, children) in squares_query.iter() {
         let pos = (square.x, square.y);
 
         // Check if this is the selected square
@@ -56,12 +58,17 @@ pub fn highlight_possible_moves(
                 Name::new("Selected Border"),
                 crate::core::DespawnOnExit(crate::core::GameState::InGame),
             ));
-        } else if is_valid_move {
-            // Use soft transparent red for valid moves
-            material.0 = square_materials.hover_matl.clone();
-        } else {
-            // Restore original color
-            material.0 = return_materials.get_original_material(square, &square_materials);
+        }
+
+        // Update the 3D visual child's material
+        for child in children.iter() {
+            if let Ok(mut material) = material_query.get_mut(child) {
+                if is_valid_move {
+                    material.0 = square_materials.hover_matl.clone();
+                } else if !is_selected {
+                    material.0 = return_materials.get_original_material(square, &square_materials);
+                }
+            }
         }
     }
 }
@@ -181,6 +188,7 @@ pub fn setup_global_scene(
             ..default()
         })),
         Transform::from_scale(Vec3::splat(1_000_000.0)),
+        bevy::picking::Pickable::IGNORE,
         Name::new("Global Background"),
     ));
 

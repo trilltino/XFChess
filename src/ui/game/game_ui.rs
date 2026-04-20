@@ -155,6 +155,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     .stroke(egui::Stroke::new(1.0, UiColors::BORDER)),
                 ).clicked() {
                     params.view_preferences.toggle_view();
+                    *params.view_mode = params.view_preferences.local_view;
                     info!("[UI] View mode toggled to {:?}", params.view_preferences.local_view);
                 }
                 

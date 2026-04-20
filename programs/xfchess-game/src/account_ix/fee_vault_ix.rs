@@ -38,7 +38,8 @@ pub fn handler_initialize_fee_vault(
 
 #[derive(Accounts)]
 pub struct CollectFee<'info> {
-    #[account(mut)]
+    /// VPS backend authority — the only signer allowed to deposit into the fee vault.
+    #[account(mut, address = crate::constants::vps_authority::ID @ GameErrorCode::UnauthorizedAccess)]
     pub payer: Signer<'info>,
     #[account(
         mut,
@@ -86,17 +87,28 @@ pub struct ClaimFees<'info> {
 
 pub fn handler_claim_fees(ctx: Context<ClaimFees>) -> Result<u64> {
     let now = Clock::get()?.unix_timestamp;
-    let vault = &mut ctx.accounts.fee_vault;
 
-    require!(vault.should_claim(now), GameErrorCode::NoPrizeToClaim);
-    require!(vault.total_accumulated > 0, GameErrorCode::NoPrizeToClaim);
+    // Read state and validate before any mutable borrow.
+    require!(ctx.accounts.fee_vault.should_claim(now), GameErrorCode::NoPrizeToClaim);
+    require!(ctx.accounts.fee_vault.total_accumulated > 0, GameErrorCode::NoPrizeToClaim);
 
-    let amount = vault.total_accumulated;
+    let amount = ctx.accounts.fee_vault.total_accumulated;
 
-    // Transfer out of vault PDA
-    **vault.to_account_info().try_borrow_mut_lamports()? -= amount;
+    // Capture AccountInfo values before the mutable data borrow below.
+    let vault_info = ctx.accounts.fee_vault.to_account_info();
+    let rent_min = Rent::get()?.minimum_balance(vault_info.data_len());
+    require!(
+        vault_info.lamports().saturating_sub(amount) >= rent_min,
+        GameErrorCode::Overflow
+    );
+
+    // Direct lamport manipulation is correct here — fee_vault is program-owned
+    // so the system program cannot CPI-transfer on its behalf.
+    **vault_info.try_borrow_mut_lamports()? -= amount;
     **ctx.accounts.host_wallet.try_borrow_mut_lamports()? += amount;
 
+    // Re-borrow for data mutation after lamport manipulation is complete.
+    let vault = &mut ctx.accounts.fee_vault;
     vault.total_claimed = vault.total_claimed.checked_add(amount).ok_or(GameErrorCode::Overflow)?;
     vault.total_accumulated = 0;
     vault.last_claim_at = now;
@@ -168,7 +180,8 @@ pub fn handler_revoke_session(ctx: Context<RevokeSession>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct UpdateElo<'info> {
-    /// Only the program authority (VPS) can update ELO
+    /// VPS backend authority — only this key may update ELO standings.
+    #[account(address = crate::constants::vps_authority::ID @ GameErrorCode::UnauthorizedAccess)]
     pub authority: Signer<'info>,
     #[account(mut)]
     pub profile: Account<'info, crate::state::PlayerProfile>,
