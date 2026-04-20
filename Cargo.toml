@@ -60,8 +60,8 @@ members = [
     "programs/xfchess-game",
     "references/ephemeral-rollups-sdk/rust/sdk",
     "tauri",
+    "backend",
 ]
-exclude = ["backend"]
 resolver = "2"
 
 [profile.dev]
