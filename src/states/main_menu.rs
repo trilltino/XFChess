@@ -361,7 +361,13 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     ui.add_space(15.0);
 
     // Create a lobby button
-    // Wallet connectivity (infrastructure pending — always false until wallet integration is active)
+    // Read wallet state from SolanaIntegrationState resource
+    #[cfg(feature = "solana")]
+    let wallet_connected = ctx_menu.solana_state
+        .as_ref()
+        .and_then(|s| s.wallet_pubkey.as_ref())
+        .is_some();
+    #[cfg(not(feature = "solana"))]
     let wallet_connected = false;
 
     ui.horizontal(|ui| {
@@ -404,7 +410,7 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     // MoonPay moved to React app - users can top up after connecting wallet
     
     // Original Create a Lobby button as a header/default
-    let wallet_connected = false;
+    // (reuse same wallet_connected computed above)
 
     let lobby_btn_color = if wallet_connected {
         egui::Color32::from_rgba_unmultiplied(60, 60, 60, 150)
@@ -1758,8 +1764,6 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 }
 
 #[cfg(feature = "solana")]
-// Temporarily disabled to remove lightyear dependencies
-/*
 fn render_create_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
@@ -1827,11 +1831,8 @@ fn render_create_tab(
         ui.colored_label(egui::Color32::RED, "Insufficient balance (need ≥ 0.003 SOL)");
     }
 }
-*/
 
 #[cfg(feature = "solana")]
-// Temporarily disabled to remove lightyear dependencies
-/*
 fn render_join_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
@@ -1905,7 +1906,6 @@ fn render_join_tab(
         }
     }
 }
-*/
 
 #[cfg(feature = "solana")]
 fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubkey::Pubkey> {
@@ -1913,8 +1913,6 @@ fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubk
     Some(solana_sdk::pubkey::Pubkey::from(arr))
 }
 
-// Temporarily disabled to remove lightyear dependencies
-/*
 #[cfg(feature = "solana")]
 /// System to render a popup asking if the user wants to create a regular P2P lobby or a Solana wager lobby.
 pub fn render_lobby_selection_popup(
@@ -1995,7 +1993,6 @@ pub fn render_lobby_selection_popup(
             });
         });
 }
-*/
 
 
 

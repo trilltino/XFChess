@@ -160,7 +160,11 @@ async fn can_connect_direct() -> bool {
                 Ok(addr) => {
                     // Check if it's a public IP
                     let ip = addr.ip();
-                    !ip.is_loopback() && !ip.is_private()
+                    let is_private = match ip {
+                        std::net::IpAddr::V4(ipv4) => ipv4.is_private(),
+                        std::net::IpAddr::V6(_) => false, // Simplified since IpAddr::is_global is nightly
+                    };
+                    !ip.is_loopback() && !is_private
                 }
                 Err(_) => false,
             }

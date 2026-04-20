@@ -77,7 +77,7 @@ pub fn routes() -> Router<AppState> {
         .route("/auth/issue", post(issue_jwt))
         .route("/session/create", post(create_session))
         .route("/session/activate", post(activate_session))
-        .route("/session/status/:game_id", get(session_status))
+        .route("/session/status/{game_id}", get(session_status))
         .route("/session/sign", post(sign_tx))
         .route("/move/record", post(record_move))
         .route("/game/undelegate", post(undelegate_game))

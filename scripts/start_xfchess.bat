@@ -133,6 +133,8 @@ echo.
 REM --- Launch Tauri ---
 echo.
 echo  Launching XFChess...
+set SIGNING_SERVICE_URL=http://178.104.55.19:8090
+set BACKEND_URL=http://178.104.55.19
 "%ROOT%\target\release\xfchess-tauri.exe"
 if %ERRORLEVEL% neq 0 (
     echo.

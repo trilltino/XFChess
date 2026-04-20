@@ -79,7 +79,6 @@ pub struct MainMenuUIContext<'w, 's> {
     #[cfg(feature = "solana")]
     pub solana_lobby: Option<ResMut<'w, SolanaLobbyState>>,
     #[cfg(feature = "solana")]
-    #[allow(dead_code)]
     pub solana_state: Option<Res<'w, SolanaIntegrationState>>,
     #[allow(dead_code)]
     pub tournament_lobby: ResMut<'w, crate::states::tournament_menu::TournamentLobbyState>,
