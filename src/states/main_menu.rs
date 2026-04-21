@@ -743,30 +743,6 @@ fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
 }
 
 
-/// Helper to transition to Solana Lobby for hosting a specific wager
-// Temporarily disabled to remove lightyear dependencies
-/*
-fn host_wager_lobby(ctx: &mut MainMenuUIContext, sol_amount: f32) {
-    #[cfg(feature = "solana")]
-    {
-        let wallet_connected = ctx.wallet.as_ref().map(|w| w.is_connected()).unwrap_or(false);
-        if wallet_connected {
-            ctx.menu_state.set(crate::core::MenuState::SolanaLobby);
-            if let Some(lobby) = ctx.solana_lobby.as_mut() {
-                lobby.wager_sol = sol_amount;
-                lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
-                lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
-            }
-        } else {
-            info!("[MENU] Wager hosting blocked — wallet not connected. Opening sign-in.");
-            if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
-                warn!("[MENU] Failed to open sign-in page: {}", e);
-            }
-        }
-    }
-}
-*/
-
 /// Navbar link helper
 fn nav_link(ui: &mut egui::Ui, text: &str) -> bool {
     let response = ui.label(
@@ -1074,30 +1050,13 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         if bezel_button(ui, "♟ VS Local Friend (PvP)", egui::Color32::WHITE) {
             ctx.ai_config.mode = GameMode::Multiplayer;
-            // *ctx.core_mode = CoreGameMode::MultiplayerLocal; // Temporarily disabled
             ctx.next_state.set(GameState::InGame);
             info!("[MAIN_MENU] Starting Local PvP game");
         }
 
         Layout::small_space(ui);
 
-        // Temporarily disabled to remove lightyear dependencies
-        /*
-        ui.horizontal(|ui| {
-            ui.label("Play as:");
-            if ui.selectable_label(ctx.color_choice.play_as_white, "♔ White").clicked() {
-                ctx.color_choice.play_as_white = true;
-            }
-            if ui.selectable_label(!ctx.color_choice.play_as_white, "♚ Black").clicked() {
-                ctx.color_choice.play_as_white = false;
-            }
-        });
-        */
-
-        Layout::small_space(ui);
-
-        // Temporarily disabled to remove lightyear dependencies
-        let ai_color = crate::rendering::pieces::PieceColor::Black; // Default to AI as Black
+        let ai_color = crate::rendering::pieces::PieceColor::Black;
 
         ui.horizontal(|ui| {
             ui.label("Difficulty:");
@@ -1172,8 +1131,7 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         Layout::small_space(ui);
 
         // VPS Mode Indicator
-        // Temporarily disabled to remove lightyear dependencies
-        let vps_status = if false { // ctx.settings.use_vps_relay
+        let vps_status = if false {
             "VPS Mode: ON"
         } else {
             "VPS Mode: OFF"
@@ -1193,27 +1151,14 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 .color(egui::Color32::from_rgb(150, 150, 150)),
         );
 
-        // Get node ID from network state
-        // Temporarily disabled to remove lightyear dependencies
         let node_id_display = "Initializing...".to_string();
 
         ui.label(
-            egui::RichText::new(&node_id_display)
+            egui::RichText::new(node_id_display)
                 .size(16.0)
                 .color(egui::Color32::from_rgb(100, 200, 255))
                 .monospace(),
         );
-
-        if bezel_button(ui, "📋 Copy Full Node ID", egui::Color32::from_rgb(100, 200, 255)) {
-            // if let Some(node_id) = &ctx.network_state.node_id { // Temporarily disabled
-            //     let full_node_id = bs58::encode(node_id.as_bytes()).into_string();
-            //     ui.output_mut(|o| {
-            //         o.commands
-            //             .push(egui::OutputCommand::CopyText(full_node_id.clone()))
-            //     });
-            //     info!("[MAIN_MENU] Node ID copied to clipboard: {}", full_node_id);
-            // }
-        }
 
         Layout::item_space(ui);
         ui.separator();
@@ -1222,340 +1167,10 @@ fn ui_mode_select(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 }
 
 // --- P2P LOBBY UI ---
-// Temporarily disabled to remove lightyear dependencies
-/*
-fn ui_p2p_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
-    ui.vertical_centered(|ui| {
-        Layout::section_space(ui);
+// Disabled - lightyear dependencies removed
 
-        if ui.button("⬅ Back").clicked() {
-            ctx.menu_state.set(crate::core::MenuState::ModeSelect);
-        }
-
-        Layout::section_space(ui);
-
-        ui.label(
-            egui::RichText::new("BRAID P2P LOBBY")
-                .size(24.0)
-                .color(egui::Color32::from_rgb(100, 200, 255))
-                .strong(),
-        );
-
-        Layout::item_space(ui);
-
-        // --- HOST GAME ---
-        ui.label(
-            egui::RichText::new("HOST GAME")
-                .size(16.0)
-                .color(egui::Color32::from_rgb(100, 255, 150)),
-        );
-        Layout::small_space(ui);
-
-        // Show connection status if any
-        // Temporarily disabled to remove lightyear dependencies
-        /*
-        match ctx.p2p_state.status {
-            crate::multiplayer::P2PConnectionStatus::Hosting => {
-                ui.label(
-                    egui::RichText::new("⏳ Waiting for peer to connect...")
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(100, 255, 150)),
-                );
-            }
-            crate::multiplayer::P2PConnectionStatus::Connecting => {
-                ui.label(
-                    egui::RichText::new("⏳ Sending invite to host...")
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(255, 200, 100)),
-                );
-            }
-            crate::multiplayer::P2PConnectionStatus::Connected => {
-                if ctx.p2p_state.is_host {
-                    ui.label(
-                        egui::RichText::new("✅ Peer joined! Starting game...")
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(100, 255, 100))
-                            .strong(),
-                    );
-                    if let Some(ref peer_id) = ctx.p2p_state.peer_node_id {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Opponent: {}...",
-                                &peer_id[..peer_id.len().min(16)]
-                            ))
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(150, 200, 255))
-                                .monospace(),
-                        );
-                    }
-                } else {
-                    ui.label(
-                        egui::RichText::new("✅ Host accepted! Game starting...")
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(100, 255, 100))
-                            .strong(),
-                    );
-                }
-            }
-            crate::multiplayer::P2PConnectionStatus::Error(ref msg) => {
-                ui.label(
-                    egui::RichText::new(format!("❌ {}", msg))
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(255, 80, 80)),
-                );
-            }
-            _ => {}
-        }
-        */
-
-        ui.label(
-            egui::RichText::new("Lobby Name:")
-                .size(14.0)
-                .color(egui::Color32::from_rgb(150, 150, 150)),
-        );
-        ui.text_edit_singleline(&mut String::new()); // Temporarily disabled
-        Layout::small_space(ui);
-
-        if bezel_button(ui, "Start Hosting", egui::Color32::from_rgb(100, 255, 150)) {
-            // Set AI mode to multiplayer
-            ctx.ai_config.mode = GameMode::Multiplayer;
-            // Check if VPS relay is enabled
-            // Temporarily disabled to remove lightyear dependencies
-            /*
-            if ctx.settings.use_vps_relay {
-                // if let Some(node_id) = &ctx.network_state.node_id { // Temporarily disabled
-                //     let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
-                    let game_id = format!("p2p_{}", rand::random::<u64>());
-                    let display_name = "Guest Player".to_string(); // Temporarily disabled
-
-                    match crate::multiplayer::vps_client::p2p_announce_game(
-                        game_id.clone(),
-                        &node_id_str,
-                        &display_name,
-                        0.0,
-                        "P2P",
-                        10,
-                    ) {
-                        Ok(()) => {
-                            info!("[MAIN_MENU] Hosted game '{}' (ID: {}) via VPS", display_name, game_id);
-                            // ctx.p2p_ui // Temporarily disabled.clear_error();
-                            // Enable VPS relay mode
-                            // if let Some(ref mut vps_state) = ctx.p2p_vps_state { // Temporarily disabled
-                            //     crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, true);
-                            // }
-                        }
-                        Err(e) => {
-                            // ctx.p2p_ui // Temporarily disabled.set_error(format!("VPS announce failed: {}", e));
-                            return;
-                        }
-                    }
-                }
-            }
-            */
-            if false { // Temporarily disabled
-                // Direct P2P - disable VPS relay
-                // Temporarily disabled to remove lightyear dependencies
-                /*
-                if let Some(ref mut vps_state) = ctx.p2p_vps_state {
-                    crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, false);
-                }
-                */
-                // Emit host game event
-                // ctx.host_game_events.write(crate::multiplayer::HostGameEvent); // Temporarily disabled
-            }
-            *ctx.core_mode = CoreGameMode::BraidMultiplayer;
-            // ctx.p2p_state.status = crate::multiplayer::P2PConnectionStatus::Hosting; // Temporarily disabled
-            info!("[MAIN_MENU] Hosting P2P game");
-        }
-
-        ui.label(
-            egui::RichText::new(if ctx.settings.use_vps_relay {
-                "Game will be listed on VPS relay"
-            } else {
-                "Wait for a peer to connect using your Node ID"
-            })
-                .size(12.0)
-                .color(egui::Color32::from_rgb(150, 150, 150)),
-        );
-
-        Layout::item_space(ui);
-        ui.separator();
-        Layout::item_space(ui);
-
-        // --- JOIN GAME ---
-        ui.label(
-            egui::RichText::new("JOIN GAME")
-                .size(16.0)
-                .color(egui::Color32::from_rgb(255, 200, 100)),
-        );
-        Layout::small_space(ui);
-
-        if ctx.settings.use_vps_relay {
-            ui.label(
-                egui::RichText::new("Enter Peer Node ID (or use VPS lobby)")
-                    .size(14.0)
-                    .color(egui::Color32::from_rgb(150, 150, 150)),
-            );
-        } else {
-            ui.label(
-                egui::RichText::new("Enter Peer Node ID")
-                    .size(14.0)
-                    .color(egui::Color32::from_rgb(150, 150, 150)),
-            );
-        }
-
-        // Text input for peer node ID (persisted across frames)
-        let response = ui.text_edit_singleline(&mut String::new()); // Temporarily disabled
-
-        // Clear error when user starts typing
-        if response.changed() {
-            // ctx.p2p_ui // Temporarily disabled.clear_error();
-        }
-
-        // Display error message if present
-        if false { // Temporarily disabled
-            Layout::small_space(ui);
-            ui.label(
-                egui::RichText::new(format!("⚠ {}", error))
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(255, 80, 80)),
-            );
-        }
-
-        Layout::small_space(ui);
-
-        // Temporarily disabled to remove lightyear dependencies
-        let is_connecting = false;
-        let is_error = false;
-
-        if is_connecting {
-            ui.label(
-                egui::RichText::new("⏳ Connecting... (up to 12s)")
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(255, 200, 100)),
-            );
-        } else {
-            let btn_label = if is_error { "🔗 Retry Connect" } else { "Connect to Peer" };
-            if bezel_button(ui, btn_label, egui::Color32::from_rgb(255, 200, 100)) {
-                match Ok::<(), String>(()) { // Temporarily disabled
-                    Ok(()) => {
-                        // ctx.p2p_ui // Temporarily disabled.clear_error();
-                        ctx.ai_config.mode = GameMode::Multiplayer;
-                        // Check if VPS relay is enabled
-                        // Temporarily disabled to remove lightyear dependencies
-                        /*
-                        if ctx.settings.use_vps_relay {
-                            // if let Some(node_id) = &ctx.network_state.node_id { // Temporarily disabled
-                                // let node_id_str = bs58::encode(node_id.as_bytes()).into_string();
-                                match crate::multiplayer::vps_client::p2p_join_game(
-                                    String::new(), // Temporarily disabled
-                                    // &node_id_str,
-                                ) {
-                                    Ok(Some(_host_node_id)) => {
-                                        info!("[MAIN_MENU] Joined game via VPS");
-                                        // Enable VPS relay mode
-                                        // if let Some(ref mut vps_state) = ctx.p2p_vps_state { // Temporarily disabled
-                                        //     crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, true);
-                                        // }
-                                    }
-                                    Ok(None) => {
-                                        // ctx.p2p_ui // Temporarily disabled.set_error("Game not found or rejected".to_string());
-                                        return;
-                                    }
-                                    Err(e) => {
-                                        // ctx.p2p_ui // Temporarily disabled.set_error(format!("VPS join failed: {}", e));
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        */
-                        if false { // Temporarily disabled
-                            // Temporarily disabled to remove lightyear dependencies
-                            /*
-                            // Direct P2P - disable VPS relay
-                            // if let Some(ref mut vps_state) = ctx.p2p_vps_state { // Temporarily disabled
-                                crate::multiplayer::network::p2p_vps::set_vps_relay_mode(vps_state, false);
-                            }
-                            ctx.connect_events.write(crate::multiplayer::ConnectToPeerEvent {
-                                peer_node_id: String::new(), // Temporarily disabled
-                            });
-                            */
-                        } // end if false
-                        // *ctx.core_mode = CoreGameMode::BraidMultiplayer; // Temporarily disabled
-                        info!(
-                            "[MAIN_MENU] Joining P2P game with peer: {}",
-                            "" // // ctx.p2p_ui // Temporarily disabled.peer_input
-                        );
-                    }
-                    Err(error_msg) => {
-                        // // ctx.p2p_ui // Temporarily disabled.set_error(error_msg); // Temporarily disabled
-                        warn!(
-                            "[MAIN_MENU] Invalid Node ID entered: {}",
-                            "" // // ctx.p2p_ui // Temporarily disabled.peer_input
-                        );
-                    }
-                }
-            }
-        }
-    });
-}
-*/
-
-// Temporarily disabled to remove lightyear dependencies
-/*
-fn ui_braid_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
-    ui.vertical_centered(|ui| {
-        Layout::section_space(ui);
-
-        if ui.button("⬅ Back").clicked() {
-            ctx.menu_state.set(crate::core::MenuState::ModeSelect);
-        }
-
-        Layout::section_space(ui);
-
-        ui.label(
-            egui::RichText::new("BRAID P2P LOBBY")
-                .size(24.0)
-                .color(egui::Color32::from_rgb(180, 120, 255))
-                .strong(),
-        );
-
-        Layout::item_space(ui);
-
-        // Temporarily disabled to remove lightyear dependencies
-        /*
-        ui.group(|ui| {
-            ui.label("Base URL:");
-            ui.text_edit_singleline(&mut ctx.braid_config.base_url);
-
-            Layout::small_space(ui);
-
-            ui.label("Game ID:");
-            ui.text_edit_singleline(&mut ctx.braid_config.game_id);
-        });
-
-        Layout::item_space(ui);
-
-        if ui.button("CONNECT & PLAY").clicked() {
-            ctx.braid_config.active = true;
-            *ctx.core_mode = CoreGameMode::BraidMultiplayer;
-            ctx.next_state.set(GameState::InGame);
-
-        }
-        */
-
-        Layout::item_space(ui);
-        ui.label(
-            egui::RichText::new(
-                "Braid protocol uses decentralized HTTP for real-time state synchronization.",
-            )
-            .size(10.0)
-            .color(egui::Color32::from_rgb(150, 150, 150)),
-        );
-    });
-}
-*/
+// --- BRAID LOBBY UI ---
+// Disabled - lightyear dependencies removed
 
 #[cfg(feature = "solana")]
 fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
@@ -1598,37 +1213,7 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             }
         }
 
-        // Node ID display
-        // Temporarily disabled to remove lightyear dependencies
-        /*
-        if let Some(node_id) = &ctx.network_state.node_id {
-            let full = bs58::encode(node_id.as_bytes()).into_string();
-            let short_id = if full.len() > 16 {
-                format!("{:.16}...", full)
-            } else {
-                full.clone()
-            };
-            ui.label(
-                egui::RichText::new(format!("Node ID: {}", short_id))
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(100, 200, 255))
-                    .monospace(),
-            );
-            if ui.small_button("📋 Copy Node ID").clicked() {
-                ui.output_mut(|o| {
-                    o.commands
-                        .push(egui::OutputCommand::CopyText(full.clone()));
-                });
-                info!("[SOLANA_LOBBY] Node ID copied: {}", full);
-            }
-        } else {
-            ui.label(
-                egui::RichText::new("Node ID: Initializing...")
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(150, 150, 150)),
-            );
-        }
-        */
+        // Node ID display disabled - lightyear dependencies removed
 
         Layout::item_space(ui);
 
@@ -1748,8 +1333,6 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 Layout::small_space(ui);
                 if ui.button("🎮 Host Game").clicked() {
                     ctx.ai_config.mode = GameMode::Multiplayer;
-                    // ctx.host_game_events // Temporarily disabled
-                    //     .write(crate::multiplayer::HostGameEvent);
                     *ctx.core_mode = CoreGameMode::BraidMultiplayer;
                     if let Some(ref mut sync) = ctx.solana_sync {
                         sync.game_id = Some(game_id);
@@ -1778,47 +1361,21 @@ fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                         .color(egui::Color32::LIGHT_GRAY),
                 );
 
-                let response = ui.text_edit_singleline(&mut String::new()); // Temporarily disabled
-                if response.changed() {
-                    // ctx.p2p_ui // Temporarily disabled.clear_error();
-                }
-                if let Some(ref err) = None::<String> { // Temporarily disabled
-                    ui.label(
-                        egui::RichText::new(format!("⚠ {}", err))
-                            .size(11.0)
-                            .color(egui::Color32::from_rgb(255, 80, 80)),
-                    );
-                }
+                let response = ui.text_edit_singleline(&mut String::new());
+                if response.changed() {}
                 Layout::small_space(ui);
                 if ui.button("🔗 Connect to Host").clicked() {
-                    match Ok::<(), String>(()) { // Temporarily disabled
-                        Ok(()) => {
-                            // ctx.p2p_ui // Temporarily disabled.clear_error();
-                            ctx.ai_config.mode = GameMode::Multiplayer;
-                            let peer = String::new(); // Temporarily disabled
-                            // ctx.connect_events // Temporarily disabled
-                            //     .write(crate::multiplayer::ConnectToPeerEvent {
-                            //         peer_node_id: peer.clone(),
-                            //     });
-                            // *ctx.core_mode = CoreGameMode::BraidMultiplayer; // Temporarily disabled
-                            if let Some(ref mut sync) = ctx.solana_sync {
-                                sync.game_id = Some(game_id);
-                                sync.wager_amount = wager_lamports;
-                            }
-                            if let Some(ref mut comp) = ctx.competitive {
-                                comp.game_id = Some(game_id);
-                                comp.wager_lamports = wager_lamports;
-                                comp.active = true;
-                            }
-                            info!(
-                                "[SOLANA_LOBBY] Connecting to host {} for game #{}",
-                                peer, game_id
-                            );
-                        }
-                        Err(e) => {
-                            // ctx.p2p_ui // Temporarily disabled.set_error(e);
-                        }
+                    ctx.ai_config.mode = GameMode::Multiplayer;
+                    if let Some(ref mut sync) = ctx.solana_sync {
+                        sync.game_id = Some(game_id);
+                        sync.wager_amount = wager_lamports;
                     }
+                    if let Some(ref mut comp) = ctx.competitive {
+                        comp.game_id = Some(game_id);
+                        comp.wager_lamports = wager_lamports;
+                        comp.active = true;
+                    }
+                    info!("[SOLANA_LOBBY] Connecting to host for game #{}", game_id);
                 }
             }
 

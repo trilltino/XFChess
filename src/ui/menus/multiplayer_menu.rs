@@ -56,18 +56,6 @@ pub fn multiplayer_menu_system(
         .show(ctx, |ui| {
             ui.heading("Multiplayer Options");
 
-            // Temporarily disabled to remove lightyear dependencies
-            /*
-            // Display current node ID if available
-            if let Some(node_id) = &multiplayer_menu.braid_network.node_id {
-                let node_id_str = bs58::encode(node_id).into_string();
-                ui.label(format!(
-                    "Your Node ID: {}",
-                    &node_id_str[..16.min(node_id_str.len())]
-                ));
-            }
-            */
-
             // Radio buttons for different multiplayer modes
             ui.horizontal(|ui| {
                 ui.selectable_value(
@@ -105,18 +93,6 @@ pub fn multiplayer_menu_system(
                         // This would initiate gossip-based matchmaking
                         initiate_gossip_matchmaking(&mut multiplayer_menu, &mut menu_state);
                     }
-
-                    // Temporarily disabled to remove lightyear dependencies
-                    /*
-                    // Show discovered peers
-                    if !multiplayer_menu.braid_network.discovered_peers.is_empty() {
-                        ui.separator();
-                        ui.label("Discovered Peers:");
-                        for peer in &multiplayer_menu.braid_network.discovered_peers {
-                            ui.label(format!("- {}: {}", &peer.node_id[..8], peer.wallet_address));
-                        }
-                    }
-                    */
                 }
                 MultiplayerMode::BraidUriInput => {
                     ui.separator();

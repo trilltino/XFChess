@@ -128,30 +128,14 @@ fn spawn_ai_task_system(
         fen, depth, movetime_ms
     );
 
-    // Temporarily disabled to remove lightyear dependencies
-    let has_stockfish_sidecar = false; // Temporarily disabled
-
-    if has_stockfish_sidecar {
-        // Trigger Stockfish sidecar via channel
-        // if let Some(tx) = &braid_manager.sidecar_fen_tx {
-        //     let _ = tx.send(fen.clone());
-        // }
-
-        // We use a dummy pending move here just to prevent multiple triggers in our singleplayer loops,
-        // Braid will resolve the actual move back through `incoming_moves_rx`.
-        let task_pool = futures_lite::future::pending();
-        let task = AsyncComputeTaskPool::get().spawn(task_pool);
-        commands.insert_resource(PendingAIMove(task));
-    } else {
-        // No BraidNodeManager or sidecar not initialized - spawn Stockfish directly
-        info!("[AI] BraidNodeManager unavailable or sidecar not initialized, spawning Stockfish process directly");
-        
-        let depth = depth.unwrap_or(12);
-        let movetime = movetime_ms.unwrap_or(1500);
-        
-        let task = spawn_stockfish_task(fen, depth, movetime);
-        commands.insert_resource(PendingAIMove(task));
-    }
+    // Stockfish sidecar disabled - spawn Stockfish directly
+    info!("[AI] Spawning Stockfish process directly");
+    
+    let depth = depth.unwrap_or(12);
+    let movetime = movetime_ms.unwrap_or(1500);
+    
+    let task = spawn_stockfish_task(fen, depth, movetime);
+    commands.insert_resource(PendingAIMove(task));
 }
 
 /// Spawn a task that runs Stockfish process and returns the best move
@@ -375,20 +359,7 @@ fn poll_ai_task_system(
     let mut move_found = None;
     let mut move_from_direct_stockfish = false;
 
-    // Temporarily disabled to remove lightyear dependencies
-    /*
-    // Check Braid channel first (if available)
-    if let Some(braid_manager) = &braid_manager {
-        if let Some(rx) = &braid_manager.incoming_moves_rx {
-            if let Ok(alg_move) = rx.try_recv() {
-                move_found = Some(alg_move);
-                commands.remove_resource::<PendingAIMove>();
-            }
-        }
-    }
-    */
-
-    // Otherwise, poll the local AI task
+    // Poll the local AI task
     if move_found.is_none() {
         if let Some(result) = futures_lite::future::block_on(futures_lite::future::poll_once(&mut task_resource.0)) {
             commands.remove_resource::<PendingAIMove>();

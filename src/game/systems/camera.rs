@@ -820,30 +820,7 @@ pub fn setup_game_camera(
             let distance_behind = 8.0; // Distance behind the board edge
 
             // Determine if the human player is Black:
-            // 1. In AI mode: human plays the opposite color of ai_color
-            // 2. In multiplayer: joiner is Black, host is White
-            // Temporarily disabled to remove lightyear dependencies
-            /*
-            let is_black_view = match &ai_config.mode {
-                crate::game::ai::resource::GameMode::VsAI { ai_color } => {
-                    *ai_color == crate::rendering::pieces::PieceColor::White
-                }
-                _ => {
-                    let p2p_color = connection_state
-                        .as_ref()
-                        .and_then(|s| s.player_color)
-                        .map(|c| c == shakmaty::Color::Black);
-                    let braid_color = network_state.as_ref().and_then(|ns| {
-                        ns.active_session.as_ref().and_then(|session| {
-                            session.game_state.as_ref().map(|gs| {
-                                gs.my_color == crate::PlayerColor::Black
-                            })
-                        })
-                    });
-                    p2p_color.or(braid_color).unwrap_or(false)
-                }
-            };
-            */
+            // In AI mode: human plays the opposite color of ai_color
             let is_black_view = match &ai_config.mode {
                 crate::game::ai::resource::GameMode::VsAI { ai_color } => {
                     *ai_color == crate::rendering::pieces::PieceColor::White
@@ -929,35 +906,10 @@ pub fn reset_game_camera(
 pub fn camera_reset_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&mut Transform, &mut CameraController)>,
-    // connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
-    // network_state: Option<Res<crate::multiplayer::BraidNetworkState>>, // Temporarily disabled
 ) {
     if keyboard.just_pressed(KeyCode::KeyN) {
-        // Temporarily disabled to remove lightyear dependencies
-        /*
-        // Determine player color from either P2PConnectionState or BraidNetworkState
-        let player_color = connection_state
-            .as_ref()
-            .and_then(|s| s.player_color)
-            .or_else(|| {
-                network_state.as_ref().and_then(|ns| {
-                    ns.active_session.as_ref().map(|session| {
-                        match session.game_state.as_ref() {
-                            Some(game_state) => match game_state.my_color {
-                                crate::PlayerColor::White => shakmaty::Color::White,
-                                crate::PlayerColor::Black => shakmaty::Color::Black,
-                            },
-                            None => shakmaty::Color::White,
-                        }
-                    })
-                })
-            });
-        */
-        let player_color = None; // Temporarily disabled
-
-        let is_black_view = player_color
-            .map(|c: shakmaty::Color| c == shakmaty::Color::Black)
-            .unwrap_or(false);
+        // Player color detection disabled - defaults to white view
+        let is_black_view = false;
 
         for (mut transform, mut controller) in query.iter_mut() {
             // Standard Perspective defaults
@@ -1070,15 +1022,6 @@ pub fn camera_mode_cycle_system(
                         let distance = 6.0;
                         
                         // Determine player color for orientation
-                        // Temporarily disabled to remove lightyear dependencies
-                        /*
-                        let is_black_view = match &ai_config.mode {
-                            crate::game::ai::resource::GameMode::VsAI { ai_color } => {
-                                *ai_color == crate::rendering::pieces::PieceColor::White
-                            }
-                            _ => false, // Default to white view for single-player
-                        };
-                        */
                         let is_black_view = match &ai_config.mode {
                             crate::game::ai::resource::GameMode::VsAI { ai_color } => {
                                 *ai_color == crate::rendering::pieces::PieceColor::White

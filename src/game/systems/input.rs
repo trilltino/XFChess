@@ -95,33 +95,6 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
         warn!("[INPUT] can_move_color: not human turn");
         return false;
     }
-
-    // Temporarily disabled to remove lightyear dependencies
-    /*
-    // Check if we're in an active network game.
-    // Include Connected status: the host enters InGame game-state while still
-    // in Connected P2P status (InGame is set only after the GameStart echo arrives).
-    if let Some(conn) = params.connection_state.as_ref() {
-        let is_active = matches!(
-            conn.status,
-            crate::multiplayer::network::p2p::P2PConnectionStatus::Connected
-                | crate::multiplayer::network::p2p::P2PConnectionStatus::InGame
-        );
-        if is_active {
-            if let Some(my_color) = conn.player_color {
-                let my_piece_color = match my_color {
-                    shakmaty::Color::White => PieceColor::White,
-                    shakmaty::Color::Black => PieceColor::Black,
-                };
-                return piece_color == my_piece_color;
-            }
-        }
-    }
-
-    // Check if we're in PvP (vs AI) mode by seeing if both players are human
-    let both_human = params.players.player_1.is_human && params.players.player_2.is_human;
-    */
-
     // Default behavior: allow moving any color piece (single-player mode)
     let both_human = params.players.player_1.is_human && params.players.player_2.is_human;
 

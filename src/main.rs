@@ -1,39 +1,10 @@
-use bevy::{
-    asset::AssetMetaCheck,
-    audio::{AudioPlugin, Volume},
-    log::LogPlugin,
-    prelude::*,
-};
-use bevy_egui::EguiPlugin;
+/// XFChess main entry point for decentralized chess on Solana
 use clap::Parser;
-use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
-use sqlx::SqlitePool;
-use dotenvy;
-use std::sync::Arc;
-
-mod assets;
-mod cli;
-mod core;
-mod engine;
-mod game;
-mod input;
-// mod multiplayer; // Temporarily disabled to remove lightyear dependencies for UI development
-mod presentation;
-mod rendering;
-mod singleplayer;
-#[cfg(feature = "solana")]
-mod solana;
-mod states;
-mod ui;
-
-pub use cli::{Cli, PlayerColor as CliPlayerColor};
-pub use core::persistent_camera::PersistentEguiCamera;
-pub use xfchess::{GameConfig, PlayerColor};
+use xfchess::{Cli, PlayerColor as CliPlayerColor, GameConfig, PlayerColor, build_app};
 
 #[tokio::main]
 async fn main() {
-    // Start embedded VPS signing server in background (unless running under Tauri/Mobile)
-    // DISABLED: Using external HTTP-only backend to avoid braid-iroh route conflict
+    // Check wallet mode (Tauri vs standalone)
     let wallet_mode = std::env::var("XFCHESS_WALLET_MODE").unwrap_or_default() == "tauri";
     if !wallet_mode {
         println!("🚀 XFChess running in standalone mode — using external HTTP backend at http://localhost:8090");
@@ -53,15 +24,15 @@ async fn main() {
         }
     }
 
-    // Check for CLI-only commands before launching game client
+    // Handle CLI-only commands before launching game client
     if let Some(cmd) = &cli.command {
         match cmd {
-            cli::Commands::Tournament { action } => {
+            Cli::Commands::Tournament { action } => {
                 let rpc = cli.rpc_url.clone();
-                let vps = "http://127.0.0.1:8090".to_string(); // Or from env
-                let keypair = "keys/fee-payer.json"; // Default
+                let vps = "http://127.0.0.1:8090".to_string();
+                let keypair = "keys/fee-payer.json";
                 #[cfg(feature = "solana")]
-                cli::tournament_admin::run(action, &rpc, &vps, keypair);
+                xfchess::cli::tournament_admin::run(action, &rpc, &vps, keypair);
                 #[cfg(not(feature = "solana"))]
                 eprintln!("Tournament admin tools require the 'solana' feature to be enabled during compilation!");
                 return;
@@ -76,7 +47,7 @@ async fn main() {
     println!("╚════════════════════════════════════════════════════════╝");
     println!();
 
-    // Build game config from CLI + Env
+    // Build game config from CLI + environment variables
     let mut game_config = GameConfig {
         game_id: cli.game_id,
         player_color: cli.player_color.map(|c| match c {
@@ -98,15 +69,15 @@ async fn main() {
         }),
     };
 
-    // If AI side is specified but player color isn't, we are playing VS AI
+    // Auto-assign player color if AI side is specified
     if game_config.player_color.is_none() && game_config.ai_side.is_some() {
-        // Player plays the opposite of AI
         game_config.player_color = Some(match game_config.ai_side.unwrap() {
             PlayerColor::White => PlayerColor::Black,
             PlayerColor::Black => PlayerColor::White,
         });
     }
 
+    // Print game configuration if joining a game
     if game_config.game_id.is_some() {
         println!("🎮 Game ID: {}", game_config.game_id.unwrap());
         println!("🎨 Player: {:?}", game_config.player_color);
@@ -126,127 +97,8 @@ async fn main() {
         println!();
     }
 
-    let handle = tokio::runtime::Handle::current();
-    let mut app = App::new();
-    
-    // Configure AI if requested
-    if let Some(diff_val) = game_config.ai_difficulty {
-        use crate::game::ai::resource::{ChessAIResource, GameMode, AIDifficulty};
-        use crate::rendering::pieces::PieceColor;
-        
-        let difficulty = AIDifficulty::from_u8(diff_val);
-        let ai_color = match game_config.ai_side.unwrap_or(PlayerColor::Black) {
-            PlayerColor::White => PieceColor::White,
-            PlayerColor::Black => PieceColor::Black,
-        };
-        
-        info!("[AI] Initialising VS Computer Match: {} (Side: {:?})", 
-            difficulty.description(), ai_color);
-            
-        app.insert_resource(ChessAIResource {
-            mode: GameMode::VsAI { ai_color },
-            difficulty,
-        });
-    }
-
-    app.insert_resource(game_config)
-        .init_resource::<PersistentEguiCamera>()
-        .add_systems(PreStartup, core::persistent_camera::setup_persistent_egui_camera);
-
-    // Add core plugins
-    app.add_plugins(
-        DefaultPlugins
-            .set(AssetPlugin {
-                // Wasm builds will check for meta files (that don't exist) if this isn't set
-                meta_check: AssetMetaCheck::Never,
-                // Use the project root assets folder so the game works regardless of
-                // which directory the executable is launched from.
-                #[cfg(not(target_arch = "wasm32"))]
-                file_path: {
-                    let cwd_assets = std::path::PathBuf::from("assets");
-                    if cwd_assets.exists() && cwd_assets.is_dir() {
-                        "assets".to_string()
-                    } else {
-                        // Fallback to absolute path from manifest (dev-only)
-                        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                            .join("assets")
-                            .to_string_lossy()
-                            .into_owned()
-                    }
-                },
-                ..default()
-            })
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "XFChess".to_string(),
-                    fit_canvas_to_parent: true,
-                    prevent_default_event_handling: false,
-                    ..default()
-                }),
-                ..default()
-            })
-            // Using volume from default to reduce popping sounds
-            .set(AudioPlugin {
-                global_volume: GlobalVolume {
-                    volume: Volume::Linear(0.3),
-                },
-                ..default()
-            })
-            // Disable console logging in release mode to reduce WASM size
-            .set(LogPlugin {
-                filter: if cfg!(debug_assertions) {
-                    "info,wgpu_core=warn,wgpu_hal=warn,xfchess=info,bevy_gltf=error,bevy_image=error".to_string()
-                } else {
-                    "error".to_string()
-                },
-                ..default()
-            }),
-    )
-    .add_plugins(EguiPlugin::default());
-
-    // Add custom plugins - split into groups due to Bevy tuple size limits
-    app.add_plugins((
-        core::CorePlugin,
-        game::GamePlugin,
-        rendering::RenderingPlugin,
-        ui::UiPlugin,
-        input::InputPlugin,
-        presentation::PresentationPlugin,
-    ))
-    .add_plugins((
-        states::main_menu::MainMenuPlugin,
-        // states::multiplayer_menu::MultiplayerMenuPlugin, // Temporarily disabled with multiplayer module
-        states::game_over::GameOverPlugin,
-        states::pause::PausePlugin,
-        states::piece_viewer::PieceViewerPlugin,
-    ))
-    .add_plugins(singleplayer::SingleplayerPlugin);
-
-    #[cfg(feature = "solana")]
-    app.add_plugins((
-        solana::SolanaPlugin,
-        // multiplayer::rollup::mvp_plugin::EphemeralMvpPlugin, // Temporarily disabled with multiplayer module
-        // multiplayer::wager_state::WagerPlugin, // Temporarily disabled with multiplayer module
-    ));
-
-    // app.add_plugins(multiplayer::MultiplayerPlugin); // Temporarily disabled with multiplayer module
-
-    // Add transaction debugger if debug mode enabled
-    if cli.debug {
-        println!("🔍 Transaction debugger disabled (multiplayer module disabled)");
-        /*
-        let log_file = std::path::PathBuf::from(&cli.log_file);
-        app.add_plugins(
-            multiplayer::ui::tx_debugger::TransactionDebuggerPlugin {
-                log_file: Some(log_file),
-                pretty_print: !cli.no_pretty_print,
-                game_id: cli.game_id,
-            },
-        );
-        */
-    }
-
-    // Run the app
+    // Build and run the Bevy application
+    let app = build_app(game_config);
     app.run();
 }
 

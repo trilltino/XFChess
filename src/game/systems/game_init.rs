@@ -136,42 +136,9 @@ pub fn initialize_players(
     mut players: ResMut<Players>,
     ai_config: Res<ChessAIResource>,
     core_mode: Res<crate::core::states::GameMode>,
-    // Temporarily disabled to remove lightyear dependencies
-    // connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
-    // network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
 ) {
-    // Determine if we're in a multiplayer game and what color the local player is
-    // Temporarily disabled to remove lightyear dependencies
-    /*
-    // Check P2PConnectionState first (uses shakmaty::Color)
-    let p2p_color = connection_state.as_ref().and_then(|s| {
-        if s.status == crate::multiplayer::network::p2p::P2PConnectionStatus::InGame {
-            s.player_color.map(|c| match c {
-                shakmaty::Color::White => PieceColor::White,
-                shakmaty::Color::Black => PieceColor::Black,
-            })
-        } else {
-            None
-        }
-    });
-
-    // Check BraidNetworkState as fallback (uses PlayerColor)
-    let network_color = network_state.as_ref().and_then(|ns| {
-        ns.active_session.as_ref().and_then(|session| {
-            if session.started {
-                session.game_state.as_ref().map(|gs| match gs.my_color {
-                    crate::PlayerColor::White => PieceColor::White,
-                    crate::PlayerColor::Black => PieceColor::Black,
-                })
-            } else {
-                None
-            }
-        })
-    });
-
-    let multiplayer_color = p2p_color.or(network_color);
-    */
-    let multiplayer_color: Option<PieceColor> = None; // Temporarily disabled
+    // Multiplayer color detection disabled - will be re-enabled when multiplayer is refactored
+    let multiplayer_color: Option<PieceColor> = None;
 
     // If core_mode is MultiplayerLocal, set both players as human without network dependency
     if let crate::core::states::GameMode::MultiplayerLocal = *core_mode {
@@ -195,16 +162,7 @@ pub fn initialize_players(
             PieceColor::Black => PieceColor::White,
         };
 
-        // Temporarily disabled to remove lightyear dependencies
-        /*
-        // Determine if the human is the host in multiplayer mode
-        let is_host = connection_state
-            .as_ref()
-            .and_then(|s| s.player_color)
-            .map(|c| c == shakmaty::Color::White)
-            .unwrap_or(true);
-        */
-        let is_host = true; // Temporarily disabled
+        let is_host = true;
 
         *players = Players {
             player_1: Player::new(1, "Player 1".to_string(), human_color, true),
