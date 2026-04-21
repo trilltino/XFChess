@@ -4,6 +4,7 @@
 use bevy::prelude::*;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot;
+use crate::multiplayer::{Message, MessageWriter};
 
 use crate::multiplayer::vps_client::TournamentSummary;
 
@@ -105,7 +106,7 @@ pub struct SwissResultRecordedEvent {
 #[derive(Message, Debug, Clone)]
 pub struct SwissStandingsUpdatedEvent {
     pub tournament_id: u64,
-    pub standings: Vec<(String, u8, u16)>, // (player, score, buchholz)
+    pub standings: Vec<(String, f64, u16)>, // (player, score, rank)
 }
 
 // ── On-chain instruction dispatch ─────────────────────────────────────────────
@@ -194,9 +195,9 @@ async fn async_register_tournament(
 /// Spawn a background task to subscribe to Swiss tournament updates via Iroh gossip
 pub fn spawn_swiss_subscription(
     tournament_id: u64,
-    event_sender: bevy::prelude::EventWriter<SwissRoundStartedEvent>,
-    result_sender: bevy::prelude::EventWriter<SwissResultRecordedEvent>,
-    standings_sender: bevy::prelude::EventWriter<SwissStandingsUpdatedEvent>,
+    mut event_sender: MessageWriter<SwissRoundStartedEvent>,
+    mut result_sender: MessageWriter<SwissResultRecordedEvent>,
+    mut standings_sender: MessageWriter<SwissStandingsUpdatedEvent>,
 ) {
     bevy::tasks::IoTaskPool::get().spawn(async move {
         use braid_iroh::BraidIrohNode;
@@ -222,14 +223,16 @@ pub fn spawn_swiss_subscription(
             }
         };
 
-        // Create Iroh node
-        let node = match BraidIrohNode::spawn(
-            "xfchess-swiss-client",
-            None,
-            None,
-            DiscoveryConfig::Real,
-        ).await {
-            Ok((node, _)) => node,
+        // Create Iroh node using BraidGameConfig
+        use braid_iroh::BraidGameConfig;
+        let node = match BraidIrohNode::spawn(BraidGameConfig {
+            discovery: DiscoveryConfig::Real,
+            secret_key: None,
+            proxy_config: None,
+            app_router: None,
+            db: None,
+        }).await {
+            Ok(node) => node,
             Err(e) => {
                 error!("Failed to spawn Iroh node: {}", e);
                 return;
@@ -251,16 +254,16 @@ pub fn spawn_swiss_subscription(
         // Process incoming messages
         while let Ok(msg) = rx.recv().await {
             if let Ok(text) = std::str::from_utf8(&msg) {
-                if let Ok(swiss_msg) = serde_json::from_str::<backend::signing::swiss::SwissMessage>(text) {
+                if let Ok(swiss_msg) = serde_json::from_str::<braid_iroh::protocol::SwissMessage>(text) {
                     match swiss_msg {
-                        backend::signing::swiss::SwissMessage::RoundStarted { round, pairings } => {
+                        braid_iroh::protocol::SwissMessage::RoundStarted { round, pairings, .. } => {
                             event_sender.send(SwissRoundStartedEvent {
                                 tournament_id,
                                 round,
                                 pairings: pairings.iter().map(|(w, b)| (w.clone(), b.clone())).collect(),
-                            }).ok();
+                            });
                         }
-                        backend::signing::swiss::SwissMessage::ResultRecorded { round, board, white, black, result } => {
+                        braid_iroh::protocol::SwissMessage::ResultRecorded { round, board, white, black, result, .. } => {
                             result_sender.send(SwissResultRecordedEvent {
                                 tournament_id,
                                 round,
@@ -268,13 +271,13 @@ pub fn spawn_swiss_subscription(
                                 white,
                                 black,
                                 result: result.to_string(),
-                            }).ok();
+                            });
                         }
-                        backend::signing::swiss::SwissMessage::StandingsUpdated { standings } => {
-                            standings_sender.send(SwissStandingsUpdatedEvent {
+                        braid_iroh::protocol::SwissMessage::StandingsUpdated { standings, .. } => {
+                            standings_sender.write(SwissStandingsUpdatedEvent {
                                 tournament_id,
-                                standings: standings.iter().map(|s| (s.player.clone(), s.score, s.buchholz)).collect(),
-                            }).ok();
+                                standings: standings.iter().map(|s| (s.player_id.clone(), s.score, s.rank)).collect(),
+                            });
                         }
                     }
                 }

@@ -84,6 +84,13 @@ pub enum NetworkMessage {
         black_player: String,
         initial_fen: String,
     },
+    GameStateBroadcast {
+        game_id: u64,
+        fen: String,
+        last_move: Option<String>,
+        move_number: u32,
+        is_check: bool,
+    },
 }
 
 impl NetworkMessage {
@@ -103,6 +110,7 @@ impl NetworkMessage {
             NetworkMessage::GameInvite { game_id, .. } => *game_id,
             NetworkMessage::InviteResponse { game_id, .. } => *game_id,
             NetworkMessage::GameStart { game_id, .. } => *game_id,
+            NetworkMessage::GameStateBroadcast { game_id, .. } => *game_id,
         }
     }
 }

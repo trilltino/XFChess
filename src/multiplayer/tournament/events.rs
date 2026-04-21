@@ -4,9 +4,10 @@
 //! are received, allowing UI systems to react to tournament updates.
 
 use bevy::prelude::*;
+use crate::multiplayer::AddMessage;
 
 /// Event emitted when a new round starts
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Event, Debug, Clone)]
 pub struct RoundStarted {
     pub tournament_id: u64,
     pub round: u8,
@@ -15,7 +16,7 @@ pub struct RoundStarted {
 }
 
 /// Event emitted when a match result is recorded
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Event, Debug, Clone)]
 pub struct ResultRecorded {
     pub tournament_id: u64,
     pub round: u8,
@@ -24,7 +25,7 @@ pub struct ResultRecorded {
 }
 
 /// Event emitted when tournament standings are updated
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Event, Debug, Clone)]
 pub struct StandingsUpdated {
     pub tournament_id: u64,
     pub standings: Vec<StandingsEntry>,
@@ -32,7 +33,7 @@ pub struct StandingsUpdated {
 }
 
 /// Event emitted when player joins a tournament
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Event, Debug, Clone)]
 pub struct TournamentJoined {
     pub tournament_id: u64,
     pub player_id: String,
@@ -41,13 +42,13 @@ pub struct TournamentJoined {
 }
 
 /// Event emitted when player leaves a tournament
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Event, Debug, Clone)]
 pub struct TournamentLeft {
     pub tournament_id: u64,
 }
 
 /// Event emitted when tournament is completed
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Event, Debug, Clone)]
 pub struct TournamentCompleted {
     pub tournament_id: u64,
     pub winner: String,
@@ -99,12 +100,12 @@ pub struct TournamentEventsPlugin;
 
 impl Plugin for TournamentEventsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<RoundStarted>()
-            .add_event::<ResultRecorded>()
-            .add_event::<StandingsUpdated>()
-            .add_event::<TournamentJoined>()
-            .add_event::<TournamentLeft>()
-            .add_event::<TournamentCompleted>();
+        app.add_message::<RoundStarted>()
+            .add_message::<ResultRecorded>()
+            .add_message::<StandingsUpdated>()
+            .add_message::<TournamentJoined>()
+            .add_message::<TournamentLeft>()
+            .add_message::<TournamentCompleted>();
     }
 }
 

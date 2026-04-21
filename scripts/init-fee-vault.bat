@@ -1,3 +1,0 @@
-@echo off
-echo Initializing PlatformFeeVault...
-solana program invoke A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W --accounts fee_vault,authority,system_program --data "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C" --instruction initialize_fee_vault

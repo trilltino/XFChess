@@ -11,6 +11,7 @@ pub mod picking_debug;
 pub mod promotion;
 pub mod shared;
 pub mod visual;
+pub mod spectate_sync;
 
 // Re-export all public systems for convenience
 

@@ -67,6 +67,7 @@ pub struct InputSystemParams<'w, 's> {
     pub game_sounds: Option<Res<'w, GameSounds>>,
     pub move_events: MessageWriter<'w, crate::game::events::MoveMadeEvent>,
     pub players: Res<'w, Players>,
+    pub game_mode: Res<'w, crate::core::states::GameMode>,
     #[cfg(feature = "solana")]
     pub game_sync: Option<Res<'w, SolanaGameSync>>,
     // pub connection_state: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
@@ -74,6 +75,11 @@ pub struct InputSystemParams<'w, 's> {
 
 /// Returns true if the current turn belongs to a human player.
 pub fn is_human_turn(params: &InputSystemParams) -> bool {
+    // If we're spectating, it's NEVER a human turn (at least for THIS local instance)
+    if *params.game_mode == crate::core::states::GameMode::Spectator {
+        return false;
+    }
+
     let current = params.players.current(params.current_turn.color);
     let result = current.is_human;
     info!("[INPUT] is_human_turn: current_color={:?}, is_human={}, player={:?}", params.current_turn.color, result, current);

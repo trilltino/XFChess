@@ -16,6 +16,7 @@ check_errors*.txt
 current_errors.txt
 final_check.txt
 test_run.log
+build_errors.txt
 
 # Analysis and plan files
 REFERENCE_ANALYSIS.md
@@ -36,6 +37,28 @@ temp_analysis/
 *.swo
 *~
 .DS_Store
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Binary executables
+*.exe
+stockfish
+stockfish.exe
+
+# Key files (should be in keys/ directory only)
+fee-payer.json
+kyc-authority.json
+vps-authority.json
+program-authority.json
+new-program-id.json
+
+# Wallets directory
+/wallets/
+*.key
 
 # OS
 Thumbs.db

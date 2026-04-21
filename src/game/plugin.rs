@@ -26,6 +26,7 @@ use super::resources::*;
 use super::sync::GameSyncPlugin;
 use super::system_sets::GameSystems;
 use super::systems::picking_debug::PickingDebugPlugin;
+use super::systems::spectate_sync::SpectateSyncPlugin;
 use super::systems::*;
 use super::view_mode_systems::*;
 use crate::core::{debug_current_gamestate, GameState};
@@ -109,6 +110,9 @@ impl Plugin for GamePlugin {
 
         // Add network sync plugin for P2P multiplayer
         app.add_plugins(GameSyncPlugin);
+
+        // Add spectator sync plugin
+        app.add_plugins(SpectateSyncPlugin);
 
         // Configure system sets to run in order: Input → Validation → Execution → Visual
         app.configure_sets(
@@ -269,13 +273,10 @@ impl Plugin for GamePlugin {
         );
 
         app.add_systems(OnExit(GameState::InGame), (reset_game_camera,));
-
-        // This must run after pieces are created, we can schedule it in Update temporarily
-        // or a different state, but let's just use PostStartup or a delayed system?
-        // Wait, PiecePlugin probably spawns pieces on OnEnter(GameState::InGame).
-        // If we add this to OnEnter(GameState::InGame), we should order it after piece spawning.
-        // Piece spawning is in `crate::rendering::pieces::create_pieces`.
-        // Let's just add it to OnEnter(GameState::InGame) for now, Bevy's default ordering might be enough,
-        // or we can use `.after(crate::rendering::pieces::create_pieces)`.
     }
+}
+
+/// Run condition to check if the current game mode is NOT spectator
+pub fn view_mode_is_not_spectator(game_mode: Res<crate::core::states::GameMode>) -> bool {
+    *game_mode != crate::core::states::GameMode::Spectator
 }

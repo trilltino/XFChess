@@ -312,6 +312,30 @@ impl ChessEngine {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+
+    /// Set the engine state from a FEN string.
+    pub fn set_from_fen(&mut self, fen_str: &str) -> Result<(), String> {
+        let fen: Fen = fen_str.parse().map_err(|e| format!("Invalid FEN: {}", e))?;
+        let position: Chess = fen
+            .into_position(CastlingMode::Standard)
+            .map_err(|e| format!("Invalid position from FEN: {}", e))?;
+        
+        // Update all fields
+        self.fen = fen_str.to_string();
+        self.position = position;
+        
+        // Extract auxiliary info if possible, or fallback to defaults
+        let parts: Vec<&str> = fen_str.split_whitespace().collect();
+        if parts.len() >= 6 {
+            self.current_turn = if parts[1] == "w" { PieceColor::White } else { PieceColor::Black };
+            self.castling_rights = parts[2].to_string();
+            self.en_passant = if parts[3] == "-" { None } else { Some(parts[3].to_string()) };
+            self.halfmove_clock = parts[4].parse().unwrap_or(0);
+            self.fullmove_counter = parts[5].parse().unwrap_or(1);
+        }
+        
+        Ok(())
+    }
 }
 
 // ─── Castling rights helper ──────────────────────────────────────────────────

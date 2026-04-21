@@ -9,10 +9,14 @@
 //! - Tournament bracket management
 //! - Identity vault for encrypted KYC data
 //! - Matchmaking queue for player matching
+//! - CACF compliance for regulated jurisdictions
+//! - Solana Blinks for tournament registration
 //!
 //! # Module Organization
 //!
 //! - `auth`: JWT token issuance and verification
+//! - `blinks`: Solana Blinks API for tournament registration
+//! - `cacf`: CACF compliance (UK, Brazil, Germany, Canada)
 //! - `config`: Environment configuration
 //! - `feepayer`: Fee-payer keypair pool for transactions
 //! - `identity`: Identity vault for encrypted KYC data
@@ -20,15 +24,11 @@
 //! - `routes`: HTTP route handlers (organized by feature)
 //! - `solana`: Solana instruction builders and RPC helpers
 //! - `storage`: SQLite-backed data stores
+//! - `swiss`: Swiss pairing tournament system
 
 pub mod auth;
 pub mod blinks;
-pub mod blinks_anti_cheat;
-pub mod blinks_chains;
-pub mod blinks_funding;
-pub mod blinks_onboarding;
-pub mod blinks_pda;
-pub mod cacf_compliance;
+pub mod cacf;
 pub mod config;
 pub mod elo_cache;
 pub mod feepayer;
@@ -184,7 +184,7 @@ impl AppState {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .nest("/api/auth", routes::auth::auth_routes())
-        .nest("/api/actions", routes::blinks::blinks_routes())
+        .nest("/api/actions", blinks::blinks_routes())
         .nest("/api/tournaments", routes::tournament::tournaments_routes())
         .nest("/api/tournament", routes::tournament::tournament_routes())
         .nest("/admin/tournament", routes::tournament::admin_tournament_app_state_routes())

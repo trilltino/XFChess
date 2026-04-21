@@ -39,4 +39,5 @@ pub struct GameUIParams<'w, 's> {
     pub competitive_match: Option<ResMut<'w, CompetitiveMatchState>>,
     #[cfg(feature = "solana")]
     pub recent_txs: Option<Res<'w, RecentTransactions>>,
+    pub spectator_mode: Res<'w, crate::ui::spectator_mode::SpectatorMode>,
 }

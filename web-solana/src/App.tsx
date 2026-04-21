@@ -103,9 +103,10 @@ function AppContent() {
     const [username, setUsername] = useState<string | null>(null);
     const [isLegalOpen, setIsLegalOpen] = useState(false);
     const [isCommunityOpen, setIsCommunityOpen] = useState(false);
+    const [isGameTypesOpen, setIsGameTypesOpen] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
     const lastScrollY = useRef(0);
-    const closeDropdowns = () => { setIsLegalOpen(false); setIsCommunityOpen(false); };
+    const closeDropdowns = () => { setIsLegalOpen(false); setIsCommunityOpen(false); setIsGameTypesOpen(false); };
 
     // Scroll detection for navbar fade
     useEffect(() => {
@@ -181,7 +182,27 @@ function AppContent() {
                     <Link to="/profile" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Profile</Link>
                     <Link to="/auth/register" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Sign Up</Link>
                     <div className="nav-legal-dropdown">
-                        <button className="nav-link dropdown-toggle" onClick={() => { setIsCommunityOpen(v => !v); setIsLegalOpen(false); }}>
+                        <button className="nav-link dropdown-toggle" onClick={() => { setIsGameTypesOpen(v => !v); setIsCommunityOpen(false); setIsLegalOpen(false); }}>
+                            Game types <ChevronDown size={14} className={`dropdown-icon ${isGameTypesOpen ? 'open' : ''}`} />
+                        </button>
+                        <AnimatePresence>
+                            {isGameTypesOpen && (
+                                <motion.div 
+                                    className="nav-legal-dropdown-menu"
+                                    variants={dropdownVariants}
+                                    initial="hidden"
+                                    animate="visible"
+                                    exit="exit"
+                                    transition={{ duration: 0.2 }}
+                                >
+                                    <Link to="/download" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>PvP</Link>
+                                    <Link to="/tournaments" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Tournament</Link>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                    <div className="nav-legal-dropdown">
+                        <button className="nav-link dropdown-toggle" onClick={() => { setIsCommunityOpen(v => !v); setIsLegalOpen(false); setIsGameTypesOpen(false); }}>
                             Community <ChevronDown size={14} className={`dropdown-icon ${isCommunityOpen ? 'open' : ''}`} />
                         </button>
                         <AnimatePresence>
@@ -196,13 +217,12 @@ function AppContent() {
                                 >
                                     <Link to="/blog" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Blog</Link>
                                     <Link to="/media" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Media</Link>
-                                    <Link to="/tournaments" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Tournaments</Link>
                                 </motion.div>
                             )}
                         </AnimatePresence>
                     </div>
                     <div className="nav-legal-dropdown">
-                        <button className="nav-link dropdown-toggle" onClick={() => { setIsLegalOpen(v => !v); setIsCommunityOpen(false); }}>
+                        <button className="nav-link dropdown-toggle" onClick={() => { setIsLegalOpen(v => !v); setIsCommunityOpen(false); setIsGameTypesOpen(false); }}>
                             Legal <ChevronDown size={14} className={`dropdown-icon ${isLegalOpen ? 'open' : ''}`} />
                         </button>
                         <AnimatePresence>

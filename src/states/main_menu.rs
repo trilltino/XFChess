@@ -21,7 +21,7 @@ use crate::multiplayer::solana::lobby::{
     spawn_create_game, spawn_join_game, spawn_lookup_game, spawn_poll_opponent_joined,
     LobbyMode, LobbyStatus,
 };
-use crate::ui::styles::*;
+use crate::ui::styles::{Layout, *};
 use crate::ui::system_params::MainMenuUIContext;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiPrimaryContextPass};
@@ -58,10 +58,12 @@ impl Plugin for MainMenuPlugin {
         .add_systems(
             EguiPrimaryContextPass,
             (
-                main_menu_ui_wrapper,
+                main_menu_ui_wrapper.run_if(in_state(GameState::MainMenu)),
                 #[cfg(feature = "solana")]
-                render_lobby_selection_popup.run_if(in_state(crate::core::MenuState::LobbySelection)),
-            ).run_if(in_state(GameState::MainMenu)),
+                render_lobby_selection_popup
+                    .run_if(in_state(crate::core::MenuState::LobbySelection))
+                    .run_if(in_state(GameState::MainMenu)),
+            ),
         )
         .add_systems(
             Update,
@@ -111,8 +113,19 @@ impl Default for PlayerColorChoice {
     }
 }
 
+/// Filter controlling which lobby listings are shown on the home page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LobbyFilter {
+    #[default]
+    All,
+    Free,
+    Wagered,
+}
+
 #[derive(Resource, Default)]
 pub struct CompetitiveMenuState {
+    /// Which game-type filter is selected in the lobby browser.
+    pub lobby_filter: LobbyFilter,
 }
 
 
@@ -360,76 +373,29 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     );
     ui.add_space(15.0);
 
-    // Create a lobby button
-    // Read wallet state from SolanaIntegrationState resource
-    #[cfg(feature = "solana")]
-    let wallet_connected = ctx_menu.solana_state
-        .as_ref()
-        .and_then(|s| s.wallet_pubkey.as_ref())
-        .is_some();
-    #[cfg(not(feature = "solana"))]
-    let wallet_connected = false;
-
-    ui.horizontal(|ui| {
-        // Free button
-        let free_btn = ui.add(egui::Button::new(
-            egui::RichText::new(if wallet_connected { "Free" } else { "Free 🔒" }).strong()
-        )).on_hover_text(if wallet_connected { "Host a free game" } else { "Connect wallet to play" });
-
-        if free_btn.clicked() {
-            if wallet_connected {
-                ctx_menu.menu_state.set(crate::core::MenuState::BraidLobby);
-            } else {
-                let _ = webbrowser::open("http://localhost:7454/auth/login");
-            }
-        }
-
-        ui.add_space(5.0);
-        
-        // Wager buttons
-        let stakes = [("£2", 0.05), ("£5", 0.12), ("£10", 0.25)];
-        for (label, amount) in stakes {
-            let btn_text = if wallet_connected { label.to_string() } else { format!("{} 🔒", label) };
-            let btn = ui.add(egui::Button::new(
-                egui::RichText::new(btn_text).strong().color(egui::Color32::from_rgb(200, 255, 200))
-            )).on_hover_text(if wallet_connected { format!("Host {} wager game", label) } else { "Connect wallet to wager".to_string() });
-
-            if btn.clicked() {
-                if wallet_connected {
-                    // host_wager_lobby(ctx_menu, amount); // Temporarily disabled
-                } else {
-                    let _ = webbrowser::open("http://localhost:7454/auth/login");
-                }
-            }
-            ui.add_space(5.0);
-        }
-    });
-
-    ui.add_space(8.0);
-    
-    // MoonPay moved to React app - users can top up after connecting wallet
-    
-    // Original Create a Lobby button as a header/default
-    // (reuse same wallet_connected computed above)
-
-    let lobby_btn_color = if wallet_connected {
-        egui::Color32::from_rgba_unmultiplied(60, 60, 60, 150)
-    } else {
-        egui::Color32::from_rgba_unmultiplied(40, 40, 40, 80)
-    };
-    let lobby_btn_text = if wallet_connected {
-        egui::RichText::new("Create a Lobby").size(14.0).color(egui::Color32::WHITE).strong()
-    } else {
-        egui::RichText::new("Create a Lobby  🔒").size(14.0).color(egui::Color32::from_rgb(120, 120, 120)).strong()
-    };
-
+    // "Create a Lobby" goes straight to the unified lobby form.
+    // Wallet is NOT required here — free games work without one.
+    // Wagered games inside that form enforce the wallet requirement.
     let lobby_btn_resp = ui.add_sized(
-        [ui.available_width(), 30.0],
-        egui::Button::new(lobby_btn_text).fill(lobby_btn_color),
-    ).on_hover_text(if wallet_connected { "Create a free lobby" } else { "Connect your wallet to create a lobby" });
+        [ui.available_width(), 36.0],
+        egui::Button::new(
+            egui::RichText::new("+ Create a Lobby")
+                .size(15.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        )
+        .fill(egui::Color32::from_rgba_unmultiplied(55, 55, 55, 200)),
+    );
 
     if lobby_btn_resp.clicked() {
-        ctx_menu.menu_state.set(crate::core::MenuState::LobbySelection);
+        // Reset lobby form to Create mode.
+        #[cfg(feature = "solana")]
+        if let Some(ref mut lobby) = ctx_menu.solana_lobby {
+            lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
+            lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
+            lobby.wager_sol = 0.0; // default to free
+        }
+        ctx_menu.menu_state.set(crate::core::MenuState::SolanaLobby);
     }
 
     ui.add_space(8.0);
@@ -502,65 +468,41 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     );
     ui.add_space(15.0);
     
-    // Dynamic tournament processing from VPS
+    // Dynamic tournament listings from VPS cached data
     let mut tournaments_found = false;
-    // if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() { // Temporarily disabled
-    //     for listing in &vps_state.cached_games {
-    //         if listing.game_type == "tournament" {
-    //             tournaments_found = true;
-    //             ui.group(|ui| {
-    //                 ui.set_width(ui.available_width());
-    //                 ui.vertical(|ui| {
-    //                     ui.label(
-    //                         egui::RichText::new(&listing.display_name)
-    //                             .size(14.0)
-    //                             .color(egui::Color32::WHITE)
-    //                             .strong(),
-    //                     );
-    //                     ui.label(
-    //                         egui::RichText::new(&listing.game_id)
-    //                             .size(11.0)
-    //                             .color(egui::Color32::from_rgb(150, 150, 150)),
-    //                     );
-
-    //                     // Check if Swiss tournament and show standings
-    //                     // if let (Some(standings), Some(current_round), Some(total_rounds)) = (
-    //                     //     &ctx_menu.tournament_lobby.swiss_standings,
-    //                     //     ctx_menu.tournament_lobby.swiss_current_round,
-    //                     //     ctx_menu.tournament_lobby.swiss_total_rounds,
-    //                     // ) {
-    //                     //     ui.add_space(5.0);
-    //                     //     ui.label(
-    //                     //         egui::RichText::new(format!("Swiss Tournament - Round {}/{}", current_round, total_rounds))
-    //                     //             .size(12.0)
-    //                     //             .color(egui::Color32::from_rgb(255, 200, 100))
-    //                     //             .strong(),
-    //                     //     );
-    //                     //     ui.add_space(5.0);
-    //                                 .strong(),
-    //                         );
-    //                         ui.add_space(5.0);
-
-    //                         // Show top 5 standings
-    //                         for (i, standing) in standings.iter().take(5).enumerate() {
-    //                             ui.label(
-    //                                 egui::RichText::new(format!("{}. {} - {} pts", i + 1, standing.player, standing.score))
-    //                                     .size(11.0)
-    //                                     .color(egui::Color32::from_rgb(200, 200, 200)),
-    //                             );
-    //                         }
-    //                     }
-
-    //                     ui.add_space(5.0);
-    //                     if bezel_button(ui, "Join", egui::Color32::from_rgb(100, 200, 100)) {
-    //                         ctx_menu.next_state.set(GameState::InGame);
-    //                     }
-    //                 });
-    //             });
-    //             ui.add_space(10.0);
-    //         }
-    //     }
-    // }
+    if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
+        for listing in &vps_state.cached_games {
+            if listing.game_type == "tournament" {
+                tournaments_found = true;
+                ui.group(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(&listing.display_name)
+                                .size(14.0)
+                                .color(egui::Color32::WHITE)
+                                .strong(),
+                        );
+                        let tag = if listing.stake_amount > 0.0 {
+                            format!("{:.3} SOL wager", listing.stake_amount)
+                        } else {
+                            "Free".to_string()
+                        };
+                        ui.label(
+                            egui::RichText::new(tag)
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(150, 200, 150)),
+                        );
+                        ui.add_space(5.0);
+                        if bezel_button_compact(ui, "Join", egui::Color32::from_rgb(100, 200, 100)) {
+                            ctx_menu.next_state.set(GameState::InGame);
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+            }
+        }
+    }
 
     if !tournaments_found {
         ui.vertical_centered(|ui| {
@@ -626,49 +568,178 @@ fn render_quick_pairing_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUICont
     }
 }
 
-/// Render middle lobby section
-fn render_lobby_section(ui: &mut egui::Ui, _ctx_menu: &mut MainMenuUIContext) {
+/// Render middle lobby section with live VPS listings and type filter.
+fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
     ui.heading(
         egui::RichText::new("LOBBY")
             .size(18.0)
             .color(egui::Color32::WHITE)
             .strong(),
     );
-    ui.add_space(15.0);
+    ui.add_space(10.0);
 
-    // Header for active games
+    // Filter tabs: All | Free | Wagered
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new("Active Games")
-                .size(16.0)
-                .color(egui::Color32::WHITE)
-                .strong(),
-        );
+        let filter = &mut ctx_menu.competitive_menu.lobby_filter;
+        let active_col = egui::Color32::WHITE;
+        let inactive_col = egui::Color32::from_rgb(120, 120, 120);
+
+        for (label, variant) in &[
+            ("All", LobbyFilter::All),
+            ("Free", LobbyFilter::Free),
+            ("Wagered", LobbyFilter::Wagered),
+        ] {
+            let selected = *filter == *variant;
+            let text = egui::RichText::new(*label)
+                .size(12.0)
+                .color(if selected { active_col } else { inactive_col })
+                .strong();
+            if ui.selectable_label(selected, text).clicked() {
+                *filter = *variant;
+            }
+            ui.add_space(8.0);
+        }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("🔄 Refresh").clicked() {
-                info!("[LOBBY] Refresh clicked — polling not yet connected");
+            if ui.small_button("🔄").on_hover_text("Refresh game list").clicked() {
+                // Reset poll timer so the next frame triggers a new fetch
+                if let Some(ref mut vps) = ctx_menu.p2p_vps_state {
+                    vps.last_poll = None;
+                }
+                info!("[LOBBY] Refresh requested");
             }
         });
     });
 
-    ui.add_space(10.0);
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(8.0);
 
-    // Placeholder: no active games until VPS/P2P is connected
-    ui.vertical_centered(|ui| {
-        ui.add_space(20.0);
-        ui.label(
-            egui::RichText::new("No public games available")
-                .size(12.0)
-                .color(egui::Color32::from_rgb(100, 100, 100))
-                .italics(),
-        );
-        ui.label(
-            egui::RichText::new("Host a lobby or play locally")
-                .size(11.0)
-                .color(egui::Color32::from_rgb(80, 80, 80)),
-        );
-    });
+    // Collect matching games from VPS cache
+    let filter = ctx_menu.competitive_menu.lobby_filter;
+    let mut any_game = false;
+
+    if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
+        // Clone listings to avoid holding an immutable borrow of ctx_menu while
+        // we need a mutable borrow of it inside the group closures.
+        let listings: Vec<_> = vps_state
+            .cached_games
+            .iter()
+            .filter(|g| g.game_type != "tournament")
+            .filter(|g| match filter {
+                LobbyFilter::All => true,
+                LobbyFilter::Free => g.stake_amount <= 0.0,
+                LobbyFilter::Wagered => g.stake_amount > 0.0,
+            })
+            .cloned()
+            .collect();
+
+        // Extract the transmitter before the loop
+        let tx_channel = ctx_menu.p2p_vps_state.as_ref().map(|v| v.response_tx.clone());
+
+        for listing in listings {
+            any_game = true;
+            let is_wagered = listing.stake_amount > 0.0;
+            let stake_tag = if is_wagered {
+                format!("{:.3} SOL", listing.stake_amount)
+            } else {
+                "Free".to_string()
+            };
+            let stake_col = if is_wagered {
+                egui::Color32::from_rgb(255, 200, 80)
+            } else {
+                egui::Color32::from_rgb(100, 200, 150)
+            };
+
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(&listing.display_name)
+                                .size(13.0)
+                                .color(egui::Color32::WHITE)
+                                .strong(),
+                        );
+                        ui.label(
+                            egui::RichText::new(&stake_tag)
+                                .size(11.0)
+                                .color(stake_col),
+                        );
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let join_col = if is_wagered {
+                            egui::Color32::from_rgb(255, 160, 60)
+                        } else {
+                            egui::Color32::from_rgb(80, 200, 120)
+                        };
+                        if bezel_button_compact(ui, "Join", join_col) {
+                            info!("[LOBBY] Joining game: {}", listing.game_id);
+                            
+                            if let Some(ref tx) = tx_channel {
+                                let game_id = listing.game_id.clone();
+                                let stake_amount = listing.stake_amount;
+                                let wagered = is_wagered;
+                                let tx = tx.clone();
+                                bevy::tasks::IoTaskPool::get()
+                                    .spawn(async move {
+                                        match crate::multiplayer::vps_client::p2p_join_game(
+                                            game_id.clone(),
+                                            "unknown_node_id",
+                                        ) {
+                                            Ok(Some(host_id)) => {
+                                                let stake = if wagered { stake_amount } else { 0.0 };
+                                                let _ = tx.send(
+                                                    crate::multiplayer::network::p2p_vps::VpsResponse::JoinResult {
+                                                        game_id,
+                                                        host_node_id: Some(host_id),
+                                                        stake_amount: stake,
+                                                    },
+                                                );
+                                            }
+                                            Ok(None) => {
+                                                let _ = tx.send(
+                                                    crate::multiplayer::network::p2p_vps::VpsResponse::Error(
+                                                        "Game rejected or full".to_string(),
+                                                    ),
+                                                );
+                                            }
+                                            Err(_e) => {
+                                                let _ = tx.send(
+                                                    crate::multiplayer::network::p2p_vps::VpsResponse::Error(
+                                                        format!("Join failed: {_e}"),
+                                                    ),
+                                                );
+                                            }
+                                        }
+                                    })
+                                    .detach();
+                            }
+                        }
+                    });
+                });
+            });
+            ui.add_space(6.0);
+        }
+    }
+
+    if !any_game {
+        ui.vertical_centered(|ui| {
+            ui.add_space(20.0);
+            ui.label(
+                egui::RichText::new("No public games available")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(100, 100, 100))
+                    .italics(),
+            );
+            ui.label(
+                egui::RichText::new("Host a lobby or play locally")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(80, 80, 80)),
+            );
+        });
+    }
 }
 
 
@@ -1770,49 +1841,112 @@ fn render_create_tab(
     compliance: &mut crate::ui::compliance_modal::ComplianceState,
 ) {
     let balance = lobby.cached_balance;
-    let max_wager = ((balance - 0.002) as f32).max(0.0);
+    let wallet_connected = lobby.cached_keypair_bytes.is_some();
+    let max_wager = if wallet_connected {
+        ((balance - 0.002) as f32).max(0.0)
+    } else {
+        0.0
+    };
+
+    // If wallet is not connected force wager to 0 (free game only).
+    if !wallet_connected {
+        lobby.wager_sol = 0.0;
+    }
 
     ui.label(egui::RichText::new("Wager amount (SOL)").size(14.0));
 
-    ui.add(
-        egui::Slider::new(&mut lobby.wager_sol, 0.001..=max_wager.max(0.001))
-            .step_by(0.001)
-            .fixed_decimals(3),
-    );
+    if wallet_connected {
+        ui.add(
+            egui::Slider::new(&mut lobby.wager_sol, 0.0..=max_wager.max(0.001))
+                .step_by(0.001)
+                .fixed_decimals(3),
+        );
+        // Clamp after slider interaction
+        lobby.wager_sol = lobby.wager_sol.clamp(0.0, max_wager);
+    } else {
+        // Greyed-out disabled slider at 0
+        let mut zero: f32 = 0.0;
+        ui.add_enabled(
+            false,
+            egui::Slider::new(&mut zero, 0.0..=1.0).fixed_decimals(3),
+        );
+        ui.label(
+            egui::RichText::new("(Connect wallet to add a wager)")
+                .size(11.0)
+                .color(egui::Color32::from_rgb(160, 130, 80))
+                .italics(),
+        );
+    }
 
-    // Clamp after slider interaction
-    lobby.wager_sol = lobby.wager_sol.clamp(0.001, max_wager.max(0.001));
-
+    let label_text = if lobby.wager_sol == 0.0 {
+        "Free casual game — no SOL at stake".to_string()
+    } else {
+        format!("Escrow: {:.4} SOL  |  Pot: {:.4} SOL",
+            lobby.wager_sol, lobby.wager_sol * 2.0)
+    };
     ui.label(
-        egui::RichText::new(format!("Escrow: {:.4} SOL  |  Pot: {:.4} SOL",
-            lobby.wager_sol, lobby.wager_sol * 2.0))
+        egui::RichText::new(label_text)
             .color(egui::Color32::LIGHT_GRAY)
             .size(12.0),
     );
 
     Layout::small_space(ui);
 
-    let can_create = lobby.cached_keypair_bytes.is_some()
-        && lobby.wager_sol >= 0.001
-        && (lobby.wager_sol as f64) <= balance - 0.002
+    let is_free_game = lobby.wager_sol == 0.0;
+    let can_create = !matches!(lobby.status, LobbyStatus::Pending)
+        && (is_free_game
+            || (wallet_connected
+                && lobby.wager_sol > 0.0
+                && (lobby.wager_sol as f64) <= balance - 0.002))
         && !matches!(lobby.status, LobbyStatus::Pending);
 
     let is_devnet = lobby.cached_rpc_url.contains("devnet");
     
     if ui.add_sized([ui.available_width(), 40.0], egui::Button::new(
-        egui::RichText::new("🎮 Create Game")
+        egui::RichText::new(if is_free_game { "🎮 Host Free Game" } else { "🎮 Create Wagered Game" })
             .size(16.0)
             .strong()
     ).fill(if can_create { egui::Color32::from_rgb(40, 100, 40) } else { egui::Color32::from_rgb(40, 40, 40) }))
     .clicked() && can_create {
-        // Enforce CARF Compliance ONLY if not on devnet
-        if !is_devnet && compliance.status != crate::ui::compliance_modal::SubmissionStatus::Success {
-            compliance.show = true;
-            if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
-                compliance.pubkey = Some(wallet_pubkey.to_string());
+        if is_free_game {
+            // Free game: announce to VPS relay with stake 0.0, then go straight into game.
+            // No Solana transaction needed.
+            let game_id = format!("free_{}", rand::random::<u32>());
+            let display_name = lobby
+                .cached_keypair_bytes
+                .as_ref()
+                .map(|b| {
+                    // Show first 6 chars of hex as a display name.
+                    let hex: String = b.iter().take(3).map(|x| format!("{:02x}", x)).collect();
+                    format!("Player {}", &hex)
+                })
+                .unwrap_or_else(|| "Anonymous".to_string());
+
+            match crate::multiplayer::vps_client::p2p_announce_game(
+                game_id.clone(),
+                "unknown_node_id", // node_id not needed for free lobby listing
+                &display_name,
+                0.0,
+                "P2P",
+                10,
+            ) {
+                Ok(()) => {
+                    info!("[LOBBY] Free game announced (id={}). Waiting for opponent via VPS.", game_id);
+                    lobby.status = LobbyStatus::WaitingForOpponent { game_id: 0 };
+                }
+                Err(e) => {
+                    warn!("[LOBBY] VPS announce failed ({}). Starting locally anyway.", e);
+                    lobby.status = LobbyStatus::WaitingForOpponent { game_id: 0 };
+                }
             }
         } else {
-            if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
+            // Wagered game: enforce CARF compliance on mainnet, then spawn Solana TX.
+            if !is_devnet && compliance.status != crate::ui::compliance_modal::SubmissionStatus::Success {
+                compliance.show = true;
+                if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
+                    compliance.pubkey = Some(wallet_pubkey.to_string());
+                }
+            } else if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 spawn_create_game(
                     lobby.cached_rpc_url.clone(),
@@ -1822,12 +1956,12 @@ fn render_create_tab(
                 );
                 lobby.tx_rx = Some(rx);
                 lobby.status = LobbyStatus::Pending;
-                info!("[SOLANA_LOBBY] Creating game with wager {} SOL", lobby.wager_sol);
+                info!("[SOLANA_LOBBY] Creating wagered game ({} SOL)", lobby.wager_sol);
             }
         }
     }
 
-    if !can_create && lobby.cached_keypair_bytes.is_some() && balance < 0.003 {
+    if !can_create && wallet_connected && balance < 0.003 {
         ui.colored_label(egui::Color32::RED, "Insufficient balance (need ≥ 0.003 SOL)");
     }
 }

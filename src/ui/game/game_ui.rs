@@ -84,22 +84,41 @@ pub fn game_status_ui(mut params: GameUIParams) {
             ui.add_space(10.0);
 
             ui.vertical(|ui| {
-                // === PLAYER INFO SECTION ===
+                // Player Info section
+                let is_spectating = *params.game_mode == CoreGameMode::Spectator;
+                
+                if is_spectating {
+                    ui.colored_label(UiColors::ACCENT_GOLD, egui::RichText::new("👁 SPECTATING").size(16.0).strong());
+                    ui.add_space(4.0);
+                }
+
                 ui.separator();
                 ui.add_space(8.0);
                 
-                let is_singleplayer = *params.game_mode == GameMode::SinglePlayer;
-                // Note: using params.game_mode from GameUIParams. 
-                // We check for SinglePlayer to hide SOL/ELO.
-                let (w_elo, w_sol) = if is_singleplayer { ("", "") } else { ("1200 ELO", "0.5 SOL") };
-                let (b_elo, b_sol) = if is_singleplayer { ("", "") } else { ("1180 ELO", "0.5 SOL") };
+                let is_singleplayer = *params.game_mode == CoreGameMode::SinglePlayer;
+                
+                // Get player names (from feed if spectating, else default)
+                let white_name = if is_spectating {
+                    params.spectator_mode.white_player.as_ref().map(|p| p.username.clone()).unwrap_or_else(|| "White Player".to_string())
+                } else {
+                    "White Player".to_string()
+                };
+                
+                let black_name = if is_spectating {
+                    params.spectator_mode.black_player.as_ref().map(|p| p.username.clone()).unwrap_or_else(|| "Black Player".to_string())
+                } else {
+                    "Black Player".to_string()
+                };
+
+                let (w_elo, w_sol) = if is_singleplayer || is_spectating { ("", "") } else { ("1200 ELO", "0.5 SOL") };
+                let (b_elo, b_sol) = if is_singleplayer || is_spectating { ("", "") } else { ("1180 ELO", "0.5 SOL") };
 
                 // White Player Info
-                render_player_info(ui, "White Player", w_elo, w_sol, true);
+                render_player_info(ui, &white_name, w_elo, w_sol, true);
                 ui.add_space(6.0);
                 
                 // Black Player Info
-                render_player_info(ui, "Black Player", b_elo, b_sol, false);
+                render_player_info(ui, &black_name, b_elo, b_sol, false);
                 
                 ui.add_space(12.0);
                 ui.separator();

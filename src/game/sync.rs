@@ -1,18 +1,8 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::board_state::ChessEngine;
-use crate::game::events::MoveMadeEvent;
-// Temporarily disabled to remove lightyear dependencies
-// use crate::multiplayer::network::protocol::NetworkMessage;
-// use crate::multiplayer::{BraidGameSync, BraidNetworkState, NetworkEvent};
-
 // Board state sync module
 pub mod board_state;
-
-use board_state::{
-    broadcast_state_system, init_board_state_sync, receive_state_system,
-};
 
 /// Plugin for game state synchronization
 pub struct GameSyncPlugin;

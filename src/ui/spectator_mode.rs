@@ -48,6 +48,8 @@ impl Plugin for SpectatorModePlugin {
 fn spectator_ui_system(
     mut contexts: EguiContexts,
     mut spectator: ResMut<SpectatorMode>,
+    state: Res<State<crate::core::GameState>>,
+    game_mode: Res<crate::core::states::GameMode>,
 ) {
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,
@@ -56,6 +58,11 @@ fn spectator_ui_system(
 
     // Only show when active
     if !spectator.active {
+        return;
+    }
+
+    // HIDE ASCII window if we are in the "Full" spectator mode (InGame board)
+    if *state.get() == crate::core::GameState::InGame && *game_mode == crate::core::states::GameMode::Spectator {
         return;
     }
 
@@ -238,6 +245,9 @@ fn piece_symbol(c: char) -> String {
 pub fn spectator_menu_ui(
     mut contexts: EguiContexts,
     mut spectator: ResMut<SpectatorMode>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+    mut game_mode: ResMut<crate::core::states::GameMode>,
+    braid_network: Res<crate::multiplayer::BraidNetworkState>,
 ) {
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,
@@ -252,28 +262,56 @@ pub fn spectator_menu_ui(
     egui::Window::new("Spectate Game")
         .collapsible(false)
         .resizable(false)
+        .default_width(320.0)
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Game ID:");
-                ui.text_edit_singleline(&mut spectator.game_id);
-                
-                if ui.button("👁 Watch").clicked() && !spectator.game_id.is_empty() {
-                    spectator.active = true;
-                    spectator.connected = true;
-                    spectator.current_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
-                    
-                    // Set demo players
-                    spectator.white_player = Some(PlayerInfo {
-                        username: "Player1".to_string(),
-                        rating: 1850,
-                        country: "US".to_string(),
-                    });
-                    spectator.black_player = Some(PlayerInfo {
-                        username: "Player2".to_string(),
-                        rating: 1820,
-                        country: "UK".to_string(),
-                    });
+            // Collect unique active games from discovered peers
+            let mut active_games = std::collections::HashSet::new();
+            for peer in &braid_network.discovered_peers {
+                if let Some(game_id) = peer.connected_game {
+                    active_games.insert(game_id);
                 }
-            });
+            }
+
+            if active_games.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    ui.spinner();
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("Looking for active games...").italics().color(egui::Color32::from_rgb(150, 150, 150)));
+                });
+            } else {
+                ui.label(egui::RichText::new(format!("Discovered {} Live Games:", active_games.len())).strong());
+                ui.add_space(5.0);
+                ui.separator();
+                ui.add_space(5.0);
+
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for game_id in active_games {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Game #{}", game_id));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("👁 WATCH").clicked() {
+                                    spectator.game_id = game_id.to_string();
+                                    spectator.active = true;
+                                    spectator.connected = true;
+                                    spectator.current_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
+                                    
+                                    // Transition to Full Spectator Mode
+                                    game_mode.set_if_different(crate::core::states::GameMode::Spectator);
+                                    next_state.set(crate::core::GameState::InGame);
+                                }
+                            });
+                        });
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+                    }
+                });
+            }
+
+            ui.add_space(10.0);
+            if ui.button("Close").clicked() {
+                // Return to main menu (by convention, closing the window)
+            }
         });
 }

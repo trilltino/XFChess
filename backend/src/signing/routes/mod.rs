@@ -7,7 +7,6 @@
 //! - `tournament`: Tournament bracket management
 
 pub mod auth;
-pub mod blinks;
 pub mod identity;
 pub mod matchmaking;
 pub mod tournament;

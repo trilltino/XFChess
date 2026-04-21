@@ -4,11 +4,10 @@
 //! instant updates for pairings, results, and standings.
 
 use bevy::prelude::*;
-use braid_iroh::protocol::{SwissMessage, SwissPairing, SwissStandingsEntry};
+use braid_iroh::protocol::{SwissMessage, SwissPairing};
 use futures::StreamExt;
-use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::info;
 
 use crate::multiplayer::braid_network::BraidNetworkState;
 
@@ -68,7 +67,7 @@ pub struct StandingsEntry {
 }
 
 /// Event emitted when a new round starts
-#[derive(Event)]
+#[derive(Message, Debug, Clone)]
 pub struct RoundStarted {
     pub tournament_id: u64,
     pub round: u8,
@@ -76,7 +75,7 @@ pub struct RoundStarted {
 }
 
 /// Event emitted when a result is recorded
-#[derive(Event)]
+#[derive(Message, Debug, Clone)]
 pub struct ResultRecorded {
     pub tournament_id: u64,
     pub round: u8,
@@ -86,7 +85,7 @@ pub struct ResultRecorded {
 }
 
 /// Event emitted when standings are updated
-#[derive(Event)]
+#[derive(Message, Debug, Clone)]
 pub struct StandingsUpdated {
     pub tournament_id: u64,
     pub standings: Vec<StandingsEntry>,
@@ -143,9 +142,9 @@ impl TournamentClientState {
 /// Process incoming gossip messages and emit Bevy events
 fn process_gossip_messages(
     mut client_state: ResMut<TournamentClientState>,
-    mut round_started_events: EventWriter<RoundStarted>,
-    mut result_recorded_events: EventWriter<ResultRecorded>,
-    mut standings_updated_events: EventWriter<StandingsUpdated>,
+    mut round_started_events: MessageWriter<RoundStarted>,
+    mut result_recorded_events: MessageWriter<ResultRecorded>,
+    mut standings_updated_events: MessageWriter<StandingsUpdated>,
 ) {
     let Some(rx) = client_state.gossip_rx.as_mut() else {
         return;
@@ -267,10 +266,10 @@ fn find_player_pairing(
 }
 
 /// System to initialize tournament client when joining a tournament
-pub fn join_tournament_system(
-    mut commands: Commands,
-    mut client_state: ResMut<TournamentClientState>,
-    braid_state: Res<BraidNetworkState>,
+pub fn handle_discovery_events(
+    mut _commands: Commands,
+    mut _client_state: ResMut<crate::multiplayer::solana::tournament::TournamentClientState>,
+    _braid_state: Res<BraidNetworkState>,
 ) {
     // This would be triggered by a UI action or network response
     // For now, it's a placeholder for the integration point
