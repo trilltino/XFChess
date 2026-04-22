@@ -21,6 +21,11 @@ build_errors.txt
 # Analysis and plan files
 REFERENCE_ANALYSIS.md
 FIX_PLAN.md
+dispute-system-plan.md
+TESTING.md
+
+# Windsurf / AI session note files (hex-suffix .md files)
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].md
 
 # Temporary scripts
 temp_clone_repos.bat
@@ -49,7 +54,11 @@ temp_analysis/
 stockfish
 stockfish.exe
 
-# Key files (should be in keys/ directory only)
+# All keypairs — entire keys/ tree is secret, never committed
+keys/**
+!keys/KEYS_README.md
+
+# Root-level stray keypairs
 fee-payer.json
 kyc-authority.json
 vps-authority.json
@@ -75,6 +84,7 @@ desktop.ini
 /web/dist/
 /web/pkg/
 /web/target/
+web-solana/dist/
 
 # Personal settings (contains user preferences)
 settings.json
@@ -87,6 +97,17 @@ settings.json
 xfchess_identity.key
 xfchess_peer_*.key
 launch_peer_*.bat
+
+# Environment files — NEVER commit real secrets
+**/.env
+**/.env.local
+**/.env.production
+**/.env.staging
+# Allow example/template files (no real values)
+!**/.env.example
+
+# Deploy secrets specifically
+deploy/.env.production
 
 # Sensitive wallet and key files
 *.json
@@ -107,6 +128,12 @@ launch_peer_*.bat
 !tauri/wallet-ui/tsconfig.json
 !tauri/wallet-ui/vite.config.ts
 !tauri/Cargo.toml
+# web-solana JSON config files
+!web-solana/package.json
+!web-solana/package-lock.json
+!web-solana/tsconfig.json
+!web-solana/tsconfig.app.json
+!web-solana/tsconfig.node.json
 
 # Exclude all JSON files except specific ones
 !idl.json
@@ -117,6 +144,9 @@ launch_peer_*.bat
 node_modules/
 **/node_modules/
 
-# Authorities
+# Authorities and keypair files in deploy/
 keys/authorities/
 keys/program-authority.json
+deploy/*.json
+deploy/.env*
+!deploy/.env.example
