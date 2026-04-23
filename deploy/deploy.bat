@@ -63,7 +63,7 @@ echo !behindCount!| findstr /r "^[0-9][0-9]*$" >nul && set "is_numeric=1"
 if defined is_numeric (
     if !behindCount! gtr 0 (
         echo.
-        echo   ABORT: Your branch is !behindCount! commit(s) out of sync with origin/!branch!.
+        echo   ABORT: Your branch is !behindCount! commits out of sync with origin/!branch!.
         echo   Run: git pull  — then deploy again.
         exit /b 1
     )
