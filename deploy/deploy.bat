@@ -3,6 +3,8 @@ REM XFChess full deploy script
 REM Usage: deploy\deploy.bat [Server] [User]
 REM Prerequisites: ssh + scp in PATH (Windows OpenSSH or Git Bash), git in PATH
 
+setlocal enabledelayedexpansion
+
 set "SERVER=178.104.55.19"
 if not "%1"=="" set "SERVER=%1"
 set "USER=root"
@@ -10,34 +12,38 @@ if not "%2"=="" set "USER=%2"
 
 set "SSH=ssh"
 set "SCP=scp"
-set "DEST=%USER%@%SERVER%"
+set "DEST=!USER!@!SERVER!"
 set "ROOT=%~dp0.."
 
 echo.
 echo === Git preflight checks ===
 
-pushd %ROOT%
+pushd "!ROOT!"
 
 REM 1. Repo identity — must be the XFChess repo
+set "remoteUrl="
 for /f "tokens=*" %%i in ('git remote get-url origin 2^>^&1') do set "remoteUrl=%%i"
-if errorlevel 1 (
+if not defined remoteUrl (
     echo ABORT: Could not get git remote URL
     exit /b 1
 )
-echo %remoteUrl% | findstr /C:"XFChess" >nul
+echo !remoteUrl! | findstr /C:"XFChess" >nul
 if errorlevel 1 (
     echo ABORT: This does not look like the XFChess repository.
-    echo        Remote URL: %remoteUrl%
+    echo        Remote URL: !remoteUrl!
     exit /b 1
 )
-echo Repo:   %remoteUrl%
+echo Repo:   !remoteUrl!
 
 REM 2. Show current branch
+set "branch="
 for /f "tokens=*" %%i in ('git rev-parse --abbrev-ref HEAD 2^>^&1') do set "branch=%%i"
-echo Branch: %branch%
+echo Branch: !branch!
 
 REM 3. Dirty working tree — HARD STOP
-for /f "delims=" %%i in ('git status --porcelain 2^>^&1') do (
+set "is_dirty="
+for /f "delims=" %%i in ('git status --porcelain 2^>^&1') do set "is_dirty=1"
+if defined is_dirty (
     echo.
     echo   ABORT: You have uncommitted changes. Commit or stash before deploying.
     git status --porcelain
@@ -47,18 +53,22 @@ echo Tree:   clean
 
 REM 4. Remote sync — HARD STOP
 git fetch --quiet 2>nul
-for /f "tokens=*" %%i in ('git rev-list "HEAD..origin/%branch%" --count 2^>^&1') do set "behind=%%i"
-if not defined behind set "behind=0"
-echo %behind% | findstr /r "^[0-9][0-9]*$" >nul
-if not errorlevel 1 (
-    if %behind% gtr 0 (
+set "behind=0"
+for /f "tokens=*" %%i in ('git rev-list "HEAD..origin/!branch!" --count 2^>^&1') do set "behind=%%i"
+
+REM Validate numeric behind count
+set "is_numeric="
+echo !behind!| findstr /r "^[0-9][0-9]*$" >nul && set "is_numeric=1"
+
+if defined is_numeric (
+    if !behind! gtr 0 (
         echo.
-        echo   ABORT: Your branch is %behind% commit(s) behind origin/%branch%.
+        echo   ABORT: Your branch is !behind! commit(s) behind origin/!branch!.
         echo   Run: git pull  — then deploy again.
         exit /b 1
     )
 )
-echo Sync:   up to date with origin/%branch%
+echo Sync:   up to date with origin/!branch!
 
 REM 5. Show exactly what is going out
 for /f "tokens=*" %%i in ('git rev-parse --short HEAD') do set "commitHash=%%i"
