@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 /// XFChess main entry point for decentralized chess on Solana
 use clap::Parser;
 use std::sync::Arc;

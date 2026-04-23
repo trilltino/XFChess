@@ -1,5 +1,4 @@
-// Keep console window visible on Windows for debugging
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::process::Command;
 use std::path::PathBuf;

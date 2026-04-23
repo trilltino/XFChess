@@ -223,9 +223,8 @@ Upload "$ROOT\web-solana\dist\*" "/opt/xfchess/web/"
 Write-Host "`n=== Configuring nginx ===" -ForegroundColor Green
 Upload "$ROOT\deploy\nginx.conf" "/etc/nginx/sites-available/xfchess"
 Run-Remote "sed -i 's/YOUR_DOMAIN/${Server}/g' /etc/nginx/sites-available/xfchess"
-Run-Remote "sed -i '/ssl_/d; /listen 443/d; /return 301/d' /etc/nginx/sites-available/xfchess"
 Run-Remote "ln -sf /etc/nginx/sites-available/xfchess /etc/nginx/sites-enabled/xfchess"
-Run-Remote "rm -f /etc/nginx/sites-enabled/default"
+Run-Remote "rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/default.conf"
 Run-Remote "nginx -t && systemctl reload nginx"
 
 # ── Step 9: Verify ────────────────────────────────────────────────────────────
