@@ -53,17 +53,17 @@ echo Tree:   clean
 
 REM 4. Remote sync — HARD STOP
 git fetch --quiet 2>nul
-set "behind=0"
-for /f "tokens=*" %%i in ('git rev-list "HEAD..origin/!branch!" --count 2^>^&1') do set "behind=%%i"
+set "behindCount=0"
+for /f "tokens=*" %%i in ('git rev-list "HEAD..origin/!branch!" --count 2^>^&1') do set "behindCount=%%i"
 
-REM Validate numeric behind count
+REM Validate numeric count
 set "is_numeric="
-echo !behind!| findstr /r "^[0-9][0-9]*$" >nul && set "is_numeric=1"
+echo !behindCount!| findstr /r "^[0-9][0-9]*$" >nul && set "is_numeric=1"
 
 if defined is_numeric (
-    if !behind! gtr 0 (
+    if !behindCount! gtr 0 (
         echo.
-        echo   ABORT: Your branch is !behind! commit(s) behind origin/!branch!.
+        echo   ABORT: Your branch is !behindCount! commit(s) out of sync with origin/!branch!.
         echo   Run: git pull  — then deploy again.
         exit /b 1
     )
