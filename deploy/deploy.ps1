@@ -17,6 +17,17 @@ if (-not (Test-Path $SSH_KEY)) {
     Write-Host "Generating SSH key..." -ForegroundColor Yellow
     ssh-keygen -t ed25519 -f $SSH_KEY -N '""' -C xfchess-deploy
     Write-Host "SSH key generated at $SSH_KEY" -ForegroundColor Green
+} else {
+    Write-Host "SSH key already exists at $SSH_KEY. If it has a passphrase, it will be regenerated without one." -ForegroundColor Yellow
+    # Test if the key requires a passphrase
+    $testKey = & ssh-keygen -y -P "" -f $SSH_KEY 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Existing key requires a passphrase. Regenerating without passphrase for automation." -ForegroundColor Yellow
+        Remove-Item $SSH_KEY
+        Remove-Item "$SSH_KEY.pub"
+        ssh-keygen -t ed25519 -f $SSH_KEY -N '""' -C xfchess-deploy
+        Write-Host "SSH key regenerated without passphrase at $SSH_KEY" -ForegroundColor Green
+    }
 }
 
 # Always attempt to copy the key to the server to ensure it's authorized
