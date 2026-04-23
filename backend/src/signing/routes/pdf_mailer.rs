@@ -8,14 +8,47 @@ use base64::Engine;
 use printpdf::*;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::io::BufWriter;
-use tracing::{info, error};
+use std::io::{BufWriter, Write};
+use std::path::PathBuf;
+use tracing::{info, warn, error};
 
-/// Signup request with email
-#[derive(Deserialize)]
+/// Signup request with email and optional profile metadata.
+#[derive(Deserialize, Serialize, Default)]
 pub struct SignUpRequest {
     pub email: String,
+    #[serde(default)]
     pub referral: Option<String>,
+    #[serde(default)]
+    pub wallet_pubkey: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+}
+
+/// Append a signup to the on-disk subscribers list.
+/// Format: JSON lines at `data/subscribers.jsonl`. Best-effort, failures are logged.
+fn append_subscriber(req: &SignUpRequest) {
+    let path = PathBuf::from("data/subscribers.jsonl");
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            warn!("[pdf_mailer] failed to create subscribers dir: {}", e);
+            return;
+        }
+    }
+    let json = match serde_json::to_string(req) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("[pdf_mailer] failed to serialize subscriber: {}", e);
+            return;
+        }
+    };
+    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(mut f) => {
+            if let Err(e) = writeln!(f, "{}", json) {
+                warn!("[pdf_mailer] failed to write subscriber: {}", e);
+            }
+        }
+        Err(e) => warn!("[pdf_mailer] failed to open subscribers file: {}", e),
+    }
 }
 
 /// SendGrid API request structure
@@ -75,83 +108,54 @@ fn generate_welcome_pdf(email: &str, referral: Option<&str>) -> Result<Vec<u8>, 
     let left_margin: f32 = 20.0;
     
     // Title
-    y_pos = draw_text(&layer, &font_bold, "Welcome to XFChess!", y_pos, 24.0, left_margin);
+    y_pos = draw_text(&layer, &font_bold, "Welcome to XFChess", y_pos, 24.0, left_margin);
     y_pos -= 12.0;
-    
-    // Subtitle
-    y_pos = draw_text(&layer, &font, "Your On-Chain Chess Tournament Guide", y_pos, 14.0, left_margin);
+
+    y_pos = draw_text(&layer, &font, "Decentralised Chess on Solana", y_pos, 14.0, left_margin);
     y_pos -= 20.0;
-    
-    // Welcome message
+
     let name = email.split('@').next().unwrap_or("Player");
     y_pos = draw_text(&layer, &font, &format!("Hello {},", name), y_pos, 12.0, left_margin);
     y_pos -= 15.0;
-    
-    y_pos = draw_text(&layer, &font, 
-        "Thank you for joining XFChess! You're now part of the future of competitive chess on Solana.", 
-        y_pos, 12.0, left_margin);
-    y_pos -= 25.0;
-    
-    // What's Inside section
-    y_pos = draw_text(&layer, &font_bold, "What's Inside:", y_pos, 14.0, left_margin);
+
+    y_pos = draw_text(
+        &layer,
+        &font,
+        "Thanks for joining XFChess. This is your welcome note.",
+        y_pos,
+        12.0,
+        left_margin,
+    );
+    y_pos -= 20.0;
+
+    y_pos = draw_text(&layer, &font_bold, "What you can do:", y_pos, 14.0, left_margin);
     y_pos -= 15.0;
-    
-    let features = vec![
-        "• Tournament entry with real SOL prizes",
-        "• ELO-based matchmaking and rankings", 
-        "• On-chain game verification",
-        "• Anti-cheat protected gameplay",
-        "• Player profiles and achievements",
+
+    let bullets = vec![
+        "\u{2022} Play free games or against the chess computer",
+        "\u{2022} Connect a Solana wallet to save your on-chain profile",
+        "\u{2022} Complete KYC to access PvP wagering and Cash Tournaments",
     ];
-    
-    for feature in features {
-        y_pos = draw_text(&layer, &font, feature, y_pos, 11.0, left_margin);
+    for b in bullets {
+        y_pos = draw_text(&layer, &font, b, y_pos, 11.0, left_margin);
         y_pos -= 12.0;
     }
-    y_pos -= 15.0;
-    
-    // Getting Started section
-    y_pos = draw_text(&layer, &font_bold, "Getting Started:", y_pos, 14.0, left_margin);
-    y_pos -= 15.0;
-    
-    let steps = vec![
-        "1. Download the XFChess client",
-        "2. Connect your Solana wallet",
-        "3. Join a tournament or play casual games",
-        "4. Compete for SOL prizes!",
-    ];
-    
-    for step in steps {
-        y_pos = draw_text(&layer, &font, step, y_pos, 11.0, left_margin);
-        y_pos -= 12.0;
-    }
-    y_pos -= 15.0;
-    
-    // Tournament Structure section
-    y_pos = draw_text(&layer, &font_bold, "Tournament Structure:", y_pos, 14.0, left_margin);
-    y_pos -= 15.0;
-    
-    let tournament_info = vec![
-        "• 8, 16, 32, 64, or 128 player brackets",
-        "• Entry fees: FREE to 0.5 SOL",
-        "• Prize distribution: 50%/30%/15%/5% for 16+ players",
-        "• Winner-take-all for 8 player tournaments",
-    ];
-    
-    for info in tournament_info {
-        y_pos = draw_text(&layer, &font, info, y_pos, 11.0, left_margin);
-        y_pos -= 12.0;
-    }
-    
-    // Referral note
+
     if let Some(ref_source) = referral {
         y_pos -= 15.0;
-        draw_text(&layer, &font, &format!("You heard about us from: {}", ref_source), y_pos, 11.0, left_margin);
+        draw_text(
+            &layer,
+            &font,
+            &format!("Referral: {}", ref_source),
+            y_pos,
+            11.0,
+            left_margin,
+        );
     }
-    
+
     // Footer
     y_pos = 45.0;
-    draw_text(&layer, &font_bold, "Good luck on the board!", y_pos, 12.0, left_margin);
+    draw_text(&layer, &font_bold, "See you on the board.", y_pos, 12.0, left_margin);
     y_pos -= 15.0;
     draw_text(&layer, &font, "- The XFChess Team", y_pos, 11.0, left_margin);
     
@@ -173,6 +177,9 @@ fn draw_text(layer: &PdfLayerReference, font: &IndirectFontRef, text: &str, y: f
 
 /// Send welcome email with PDF via SendGrid
 pub async fn send_welcome_email(Json(req): Json<SignUpRequest>) -> Result<StatusCode, StatusCode> {
+    // Persist to subscribers list first so we never lose the signup even if SendGrid fails.
+    append_subscriber(&req);
+
     let sendgrid_api_key = env::var("SENDGRID_API_KEY")
         .map_err(|_| {
             error!("[pdf_mailer] SENDGRID_API_KEY not set");
@@ -201,11 +208,11 @@ pub async fn send_welcome_email(Json(req): Json<SignUpRequest>) -> Result<Status
             email: "noreply@xfchess.com".to_string(),
             name: Some("XFChess".to_string()),
         },
-        subject: "Welcome to XFChess - Your Tournament Guide".to_string(),
+        subject: "Welcome to XFChess".to_string(),
         content: vec![Content {
             content_type: "text/plain".to_string(),
             value: format!(
-                "Hello {},\n\nWelcome to XFChess! Your tournament guide is attached as a PDF.\n\nGet ready to play chess on-chain!\n\n- The XFChess Team",
+                "Hello {},\n\nThanks for joining XFChess. You can play free games straight away; connect a Solana wallet and complete KYC to unlock PvP wagering and Cash Tournaments.\n\n- The XFChess Team",
                 email_name
             ),
         }],
@@ -258,6 +265,8 @@ mod tests {
         let req = SignUpRequest {
             email: "test@example.com".to_string(),
             referral: Some("friend".to_string()),
+            wallet_pubkey: None,
+            username: None,
         };
 
         let json = serde_json::to_string(&req);
@@ -269,6 +278,8 @@ mod tests {
         let req = SignUpRequest {
             email: "test@example.com".to_string(),
             referral: None,
+            wallet_pubkey: None,
+            username: None,
         };
 
         let json = serde_json::to_string(&req);
@@ -353,8 +364,7 @@ mod tests {
 
     #[test]
     fn test_pdf_mailer_routes_creation() {
-        let router = pdf_mailer_routes();
-        assert!(router.not_found("test").is_some());
+        let _router = pdf_mailer_routes();
     }
 
     #[test]

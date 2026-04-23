@@ -25,9 +25,15 @@
 //! - `solana`: Solana instruction builders and RPC helpers
 //! - `storage`: SQLite-backed data stores
 //! - `swiss`: Swiss pairing tournament system
+//! - `relayer`: Relayer routes
+//! - `tee_relayer`: Tee Relayer routes
 
 pub mod auth;
 pub mod blinks;
+pub mod blinks_onboarding;
+pub mod blinks_funding;
+pub mod ws_subscriber;
+pub mod tee_relayer;
 pub mod cacf;
 pub mod config;
 pub mod elo_cache;
@@ -40,6 +46,10 @@ pub mod solana;
 pub mod storage;
 pub mod swiss;
 pub mod tournament_gossip;
+pub mod relayer {
+    //! Re-export relayer routes from the routes module.
+    pub use crate::signing::routes::relayer::*;
+}
 
 use axum::Router;
 use solana_sdk::pubkey::Pubkey;
@@ -56,9 +66,10 @@ pub use identity::IdentityVault;
 pub use pyth_oracle::PythOracle;
 pub use routes::matchmaking::SharedMatchmakingState;
 pub use storage::{SessionStore, tournament::TournamentStore};
-pub use swiss::SwissService;
+pub use swiss::{SwissService, OrchestratorEvent};
 pub use tournament_gossip::TournamentGossipService;
 pub use crate::tasks::tournament_scheduler::TournamentTrigger;
+pub use xfchess_braid_server::ResourceHub;
 
 /// Shared state injected into every route handler.
 #[derive(Clone)]
@@ -81,6 +92,8 @@ pub struct AppState {
     pub usdc_mint_pubkey: Pubkey,
     pub pyth_oracle: Arc<PythOracle>,
     pub tournament_trigger: Option<tokio::sync::mpsc::Sender<TournamentTrigger>>,
+    pub orchestrator_tx: Option<tokio::sync::mpsc::Sender<OrchestratorEvent>>,
+    pub braid_hub: Arc<ResourceHub>,
 }
 
 impl AppState {
@@ -107,23 +120,38 @@ impl AppState {
         ));
 
 
-        // Parse authority keys
-        let vps_authority = Arc::new(config.vps_authority_key.as_ref()
-            .map(|k| Keypair::from_base58_string(k))
+        // Parse authority keys — accepts either a JSON file path or a base58 string
+        let load_keypair = |val: &str| -> Keypair {
+            if std::path::Path::new(val).exists() {
+                let bytes: Vec<u8> = std::fs::read_to_string(val)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default();
+                Keypair::try_from(bytes.as_slice()).unwrap_or_else(|_| Keypair::new())
+            } else {
+                Keypair::from_base58_string(val)
+            }
+        };
+
+        let vps_authority = Arc::new(config.vps_authority_key.as_deref()
+            .map(load_keypair)
             .unwrap_or_else(|| {
                 warn!("[VPS] No vps_authority_key provided, using random fallback");
                 Keypair::new()
             }));
 
-        let kyc_authority = Arc::new(config.kyc_authority_key.as_ref()
-            .map(|k| Keypair::from_base58_string(k))
+        let kyc_authority = Arc::new(config.kyc_authority_key.as_deref()
+            .map(load_keypair)
             .unwrap_or_else(|| {
                 warn!("[VPS] No kyc_authority_key provided, using random fallback");
                 Keypair::new()
             }));
 
-        // Initialize Swiss service
-        let swiss_service = Arc::new(swiss::SwissService::new((*tournament_store).clone()));
+        // Initialize Swiss service and attach Braid hub
+        let braid_hub = Arc::new(ResourceHub::new());
+        let mut _swiss = swiss::SwissService::new((*tournament_store).clone());
+        _swiss.set_braid_hub(Arc::clone(&braid_hub));
+        let swiss_service = Arc::new(_swiss);
 
         // Initialize tournament gossip service (VPS node ID will be set later)
         let tournament_gossip = Arc::new(TournamentGossipService::new(
@@ -159,6 +187,8 @@ impl AppState {
             usdc_mint_pubkey,
             pyth_oracle,
             tournament_trigger: None,
+            orchestrator_tx: None,
+            braid_hub,
         }
     }
 
@@ -181,15 +211,18 @@ impl AppState {
 /// Builds the Axum router with all signing service routes.
 ///
 /// Uses per-feature router functions merged together for clear separation of concerns.
+/// Note: tournament routes are mounted in build_app_router to avoid duplication.
 pub fn build_router(state: AppState) -> Router {
+    let braid_hub = Arc::clone(&state.braid_hub);
+    // Build the API router and consume AppState first.
+    // Then nest the braid router (Router<()>) onto the resulting Router<()>.
     Router::new()
         .nest("/api/auth", routes::auth::auth_routes())
         .nest("/api/actions", blinks::blinks_routes())
-        .nest("/api/tournaments", routes::tournament::tournaments_routes())
-        .nest("/api/tournament", routes::tournament::tournament_routes())
-        .nest("/admin/tournament", routes::tournament::admin_tournament_app_state_routes())
-        .nest("/tournament", routes::tournament::tournament_gossip_routes())
         .merge(p2p_relay::p2p_routes())
         .nest("/identity", routes::identity::identity_routes())
+        .merge(relayer::routes())
+        .merge(tee_relayer::routes())
         .with_state(state)
+        .nest("/braid", xfchess_braid_server::braid_router((*braid_hub).clone()))
 }

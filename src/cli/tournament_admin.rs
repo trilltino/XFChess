@@ -20,7 +20,7 @@ use solana_sdk::{
 use solana_sdk::system_program;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PROGRAM_ID: &str = "A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W";
+const PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
 const TOURNAMENT_SEED: &[u8] = b"tournament";
 const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";

@@ -45,12 +45,14 @@ pub fn handler(
     game.status = GameStatus::Disputed;
     game.updated_at = Clock::get()?.unix_timestamp;
 
+    let now = Clock::get()?.unix_timestamp;
     dispute.game_id = _game_id;
     dispute.challenger = ctx.accounts.player.key();
     dispute.reason = reason;
     dispute.evidence_hash = evidence_hash;
     dispute.status = DisputeStatus::Pending;
-    dispute.created_at = Clock::get()?.unix_timestamp;
+    dispute.created_at = now;
+    dispute.expires_at = now + crate::constants::DISPUTE_TTL_SECS;
     dispute.bump = ctx.bumps.dispute_record;
 
     msg!("Game {} disputed by {}", _game_id, dispute.challenger);

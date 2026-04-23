@@ -6,8 +6,8 @@ use backend::infrastructure::{initialize_pools, run_migrations, build_app_router
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 use tracing::info;
-use axum::http::Method;
-use tower_http::cors::{CorsLayer, Any};
+use axum::http::{HeaderValue, Method};
+use tower_http::cors::CorsLayer;
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -21,7 +21,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = config.port;
 
     // ── Initialize database pools ────────────────────────────────────────
-    let pools = initialize_pools("sqlite://sessions.db?mode=rwc", "sqlite://vault.db?mode=rwc").await?;
+    let session_db = std::env::var("SESSION_DB_URL")
+        .unwrap_or_else(|_| "sqlite://sessions.db?mode=rwc".into());
+    let vault_db = std::env::var("VAULT_DB_URL")
+        .unwrap_or_else(|_| "sqlite://vault.db?mode=rwc".into());
+    let pools = initialize_pools(&session_db, &vault_db).await?;
     info!("[signing-server] Database pools initialized");
 
     // ── Run database migrations ───────────────────────────────────────────
@@ -46,13 +50,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Build application router ───────────────────────────────────────────
     let app = build_app_router(state.clone());
     
-    // Add CORS layer
-    let app = app.layer(
+    // Add CORS layer — restrict to configured origins in production
+    let allowed_origins: Vec<HeaderValue> = std::env::var("ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "http://localhost:5173,http://localhost:3000".into())
+        .split(',')
+        .filter_map(|o| o.trim().parse::<HeaderValue>().ok())
+        .collect();
+    let cors = if allowed_origins.is_empty() {
+        CorsLayer::permissive()
+    } else {
         CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-            .allow_headers(Any)
-    );
+            .allow_origin(allowed_origins)
+            .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+            .allow_headers(tower_http::cors::Any)
+    };
+    let app = app.layer(cors);
     
     info!("[signing-server] Application router built");
 

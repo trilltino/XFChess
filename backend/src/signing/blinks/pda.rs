@@ -80,6 +80,7 @@ pub fn derive_player_profile_pda(wallet_pubkey: &Pubkey, program_id: &Pubkey) ->
 mod tests {
     use super::*;
     use solana_sdk::signature::Keypair;
+    use solana_sdk::signer::Signer;
     use std::str::FromStr;
 
     #[test]

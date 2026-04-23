@@ -2,7 +2,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount};
-use crate::state::{Tournament, TournamentStatus, PayoutType, VestingParams};
+use crate::state::{Tournament, TournamentStatus, PayoutType};
 use crate::errors::GameErrorCode;
 
 #[derive(Accounts)]

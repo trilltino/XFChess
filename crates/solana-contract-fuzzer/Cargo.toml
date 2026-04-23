@@ -8,7 +8,7 @@ authors.workspace = true
 proptest = "1.4"
 anchor-lang = "0.32.1"
 solana-client = { workspace = true }
-solana-sdk = { workspace = true }
+solana-sdk = "=2.1.21"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 anyhow = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

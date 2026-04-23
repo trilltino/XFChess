@@ -132,6 +132,22 @@ impl MoveHistory {
     pub fn get_move(&self, index: usize) -> Option<&MoveRecord> {
         self.moves.get(index)
     }
+
+    /// Iterate over all moves in chronological order
+    ///
+    /// Returns an iterator over references to each MoveRecord.
+    ///
+    /// For usage examples, see `tests/resources/history_tests.rs`
+    pub fn iter(&self) -> std::slice::Iter<'_, MoveRecord> {
+        self.moves.iter()
+    }
+
+    /// Iterate mutably over all moves in chronological order
+    ///
+    /// Returns an iterator over mutable references to each MoveRecord.
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, MoveRecord> {
+        self.moves.iter_mut()
+    }
 }
 
 #[cfg(test)]

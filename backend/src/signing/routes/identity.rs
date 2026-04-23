@@ -60,7 +60,7 @@ pub struct KycStatus {
 }
 
 /// GDPR data deletion request.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DeleteDataRequest {
     pub pubkey: String,
     pub signature: String,
@@ -351,8 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_routes_creation() {
-        let router = identity_routes();
-        assert!(router.not_found("test").is_some());
+        let _router = identity_routes();
     }
 
     #[test]

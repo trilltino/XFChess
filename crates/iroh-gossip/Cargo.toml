@@ -44,7 +44,6 @@ derive_more = { version = "2", features = [
     "try_into",
     "into",
 ] }
-ed25519-dalek = { version = "=2.1", features = ["serde", "rand_core"] }
 hex = "0.4.3"
 indexmap = "2"
 iroh-metrics = { version = "0.38", default-features = false }

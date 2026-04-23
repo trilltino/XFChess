@@ -14,7 +14,7 @@ use solana_sdk::system_program;
 use anyhow::Result;
 
 /// Program ID for XFChess
-pub const PROGRAM_ID: &str = "A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W";
+pub const PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
 
 /// Creates a session key authorization instruction.
 ///

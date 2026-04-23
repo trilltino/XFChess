@@ -8,6 +8,8 @@ use crate::multiplayer::solana::addon::{
 };
 #[cfg(feature = "solana")]
 use crate::multiplayer::rollup::bridge::RecentTransactions;
+#[cfg(feature = "solana")]
+use crate::multiplayer::rollup::manager::EphemeralRollupManager;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
@@ -39,5 +41,7 @@ pub struct GameUIParams<'w, 's> {
     pub competitive_match: Option<ResMut<'w, CompetitiveMatchState>>,
     #[cfg(feature = "solana")]
     pub recent_txs: Option<Res<'w, RecentTransactions>>,
+    #[cfg(feature = "solana")]
+    pub rollup_manager: Option<ResMut<'w, EphemeralRollupManager>>,
     pub spectator_mode: Res<'w, crate::ui::spectator_mode::SpectatorMode>,
 }

@@ -1,5 +1,6 @@
 use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
 use crate::signing::tournament_gossip::TournamentGossipService;
+use xfchess_braid_server::{bridge, ResourceHub};
 use braid_iroh::protocol::{MatchResult as SwissMessageResult, SwissMessage, SwissPairing, SwissStandingsEntry};
 // Note: bytes crate not available, using Vec<u8> instead
 use serde::{Deserialize, Serialize};
@@ -32,12 +33,18 @@ pub struct SwissData {
 pub struct SwissService {
     store: TournamentStore,
     gossip: Option<Arc<TournamentGossipService>>,
+    braid_hub: Option<Arc<ResourceHub>>,
 }
 
 impl SwissService {
     /// Create a new Swiss service
     pub fn new(store: TournamentStore) -> Self {
-        Self { store, gossip: None }
+        Self { store, gossip: None, braid_hub: None }
+    }
+
+    /// Attach the Braid resource hub so live updates stream to subscribers.
+    pub fn set_braid_hub(&mut self, hub: Arc<ResourceHub>) {
+        self.braid_hub = Some(hub);
     }
 
     /// Set the gossip service for broadcasting updates
@@ -103,10 +110,7 @@ impl SwissService {
                     sd.current_round = next_round;
                     sd.rounds.push(round.clone());
                 }
-                if next_round == 1 {
-                    t.status = TournamentStatus::Active;
-                    t.started_at = Some(chrono::Utc::now().timestamp());
-                }
+                // status and started_at are already set by start_tournament().
             })
             .await;
 
@@ -120,6 +124,12 @@ impl SwissService {
 
         // Broadcast round started via gossip
         self.broadcast_round_started(tournament_id, next_round, &round).await;
+
+        // Push pairings to Braid subscribers
+        if let Some(hub) = &self.braid_hub {
+            let pairings_json = serde_json::to_value(&round.pairings).unwrap_or_default();
+            bridge::push_pairings(hub, tournament_id, next_round, pairings_json);
+        }
 
         Ok(round)
     }
@@ -148,7 +158,18 @@ impl SwissService {
             .clone()
             .ok_or(SwissServiceError::NotSwissFormat)?;
 
-        // Store the result
+        // Validate (round, board) before persisting to avoid corrupt state.
+        let round_data = swiss_data
+            .rounds
+            .iter()
+            .find(|r| r.round == round)
+            .ok_or(SwissServiceError::InvalidRound(round))?;
+        let _pairing = round_data
+            .pairings
+            .iter()
+            .find(|p| p.board == board)
+            .ok_or(SwissServiceError::InvalidBoard(board))?;
+
         swiss_data.results.push((round, board, result));
 
         // Rebuild player scores and calculate standings
@@ -190,6 +211,12 @@ impl SwissService {
         // Broadcast result and standings via gossip
         self.broadcast_result_recorded(tournament_id, round, board, &result).await;
         self.broadcast_standings_updated(tournament_id, &standings).await;
+
+        // Push standings to Braid subscribers
+        if let Some(hub) = &self.braid_hub {
+            let standings_json = serde_json::to_value(&standings).unwrap_or_default();
+            bridge::push_standings(hub, tournament_id, standings_json);
+        }
 
         Ok(standings)
     }
@@ -451,8 +478,33 @@ impl SwissService {
             }
         }
 
+        // Rebuild float_status from the most recent completed round so the
+        // pairing engine can avoid floating the same player down twice.
+        if let Some(last_round) = swiss_data.rounds.last() {
+            for float_down_id in &last_round.float_downs {
+                if let Some(player) = players.get_mut(float_down_id) {
+                    player.float_status = swiss_pairing::FloatStatus::Down;
+                }
+            }
+        }
+
         Ok(players.into_values().collect())
     }
+}
+
+// ── Scoring conversion (contract ↔ backend) ────────────────────────────────
+//
+// On-chain uses integer points (2/1/0), pairing engine uses FIDE float (1.0/0.5/0.0).
+// See `SCORING.md` for the full mapping.
+
+/// Convert a backend float score to on-chain integer points.
+pub fn to_contract_points(score: f64) -> u8 {
+    (score * 2.0).round() as u8
+}
+
+/// Convert an on-chain integer score to backend float.
+pub fn from_contract_points(points: u8) -> f64 {
+    points as f64 / 2.0
 }
 
 /// Errors that can occur in Swiss service

@@ -20,6 +20,8 @@ pub struct JoinGame<'info> {
     pub white_profile: Account<'info, PlayerProfile>,
     #[account(mut)]
     pub player: Signer<'info>,
+    #[account(mut)]
+    pub fee_payer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -60,6 +62,7 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     let player = ctx.accounts.player.key();
     let player_country = &ctx.accounts.player_profile.country;
     let white_country = &ctx.accounts.white_profile.country;
+    let fee_payer = ctx.accounts.fee_payer.key();
 
     require!(
         game.game_type == GameType::PvP,
@@ -72,6 +75,10 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     require!(
         game.white != ctx.accounts.player.key(),
         GameErrorCode::CannotPlaySelf
+    );
+    require!(
+        game.fee_payer == fee_payer,
+        GameErrorCode::FeePayerMismatch
     );
 
     // --- Cross-Border Fee Logic ---
@@ -87,6 +94,7 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
 
     game.black = player;
     game.status = GameStatus::Active;
+    game.fees_advanced = game.fees_advanced.checked_add(CREATE_GAME_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
     game.updated_at = Clock::get()?.unix_timestamp;
 
     if game.wager_amount > 0 && game.wager_token.is_none() {
@@ -103,5 +111,24 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     }
 
     msg!("Player joined game. Match started with cross-border fee: {}", final_fee);
+    Ok(())
+}
+
+pub fn join_game(
+    ctx: Context<JoinGame>
+) -> Result<()> {
+    let game = &mut ctx.accounts.game;
+    let joiner = &ctx.accounts.player;
+    let fee_payer = &ctx.accounts.fee_payer;
+
+    require!(game.status == GameStatus::WaitingForOpponent, GameErrorCode::GameNotActive);
+    require!(game.black == Pubkey::default(), GameErrorCode::GameNotActive);
+    require!(game.white != joiner.key(), GameErrorCode::GameNotActive);
+    require!(game.fee_payer == fee_payer.key(), GameErrorCode::FeePayerMismatch);
+
+    game.black = joiner.key();
+    game.status = GameStatus::Active;
+    game.fees_advanced = game.fees_advanced.checked_add(JOIN_GAME_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
+
     Ok(())
 }

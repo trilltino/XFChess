@@ -55,3 +55,90 @@ impl Update {
         self.body.as_ref()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_new_from_string() {
+        let v = Version::new("root");
+        assert_eq!(v, Version::String("root".to_string()));
+    }
+
+    #[test]
+    fn version_display_string() {
+        let v = Version::String("abc".to_string());
+        assert_eq!(format!("{}", v), "abc");
+    }
+
+    #[test]
+    fn version_display_u64() {
+        let v = Version::U64(42);
+        assert_eq!(format!("{}", v), "42");
+    }
+
+    #[test]
+    fn version_iter_returns_once() {
+        let v = Version::U64(1);
+        let collected: Vec<_> = v.iter().collect();
+        assert_eq!(collected.len(), 1);
+        assert_eq!(collected[0], &v);
+    }
+
+    #[test]
+    fn update_snapshot_roundtrip() {
+        let ver = Version::new("v1");
+        let body = bytes::Bytes::from_static(b"hello");
+        let up = Update::snapshot(ver.clone(), body);
+
+        assert_eq!(up.version, ver);
+        assert_eq!(up.parents.len(), 0);
+        assert_eq!(up.body, Some(b"hello".to_vec()));
+        assert_eq!(up.status, 200);
+    }
+
+    #[test]
+    fn update_body_str_valid_utf8() {
+        let up = Update {
+            version: Version::new("v1"),
+            parents: vec![],
+            body: Some(b"chess".to_vec()),
+            status: 200,
+        };
+        assert_eq!(up.body_str(), Some("chess"));
+    }
+
+    #[test]
+    fn update_body_str_invalid_utf8() {
+        let up = Update {
+            version: Version::new("v1"),
+            parents: vec![],
+            body: Some(vec![0x80, 0x81]),
+            status: 200,
+        };
+        assert_eq!(up.body_str(), None);
+    }
+
+    #[test]
+    fn update_patches_returns_body() {
+        let up = Update {
+            version: Version::new("v1"),
+            parents: vec![],
+            body: Some(vec![1, 2, 3]),
+            status: 200,
+        };
+        assert_eq!(up.patches(), Some(&vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn update_patches_none_when_no_body() {
+        let up = Update {
+            version: Version::new("v1"),
+            parents: vec![Version::new("v0")],
+            body: None,
+            status: 204,
+        };
+        assert_eq!(up.patches(), None);
+    }
+}

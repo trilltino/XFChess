@@ -1,4 +1,4 @@
-//! Instruction to close a tournament and auto-distribute prizes to top 8.
+//! Instruction to close a tournament and auto-distribute prizes to top 10.
 //! Only callable after tournament completion.
 
 use crate::constants::*;
@@ -47,6 +47,12 @@ pub struct CloseTournament<'info> {
     /// CHECK: Placeholder for 8th place (not tracked in current state)
     #[account(mut)]
     pub eighth_place: UncheckedAccount<'info>,
+    /// CHECK: Placeholder for 9th place (not tracked in current state)
+    #[account(mut)]
+    pub ninth_place: UncheckedAccount<'info>,
+    /// CHECK: Placeholder for 10th place (not tracked in current state)
+    #[account(mut)]
+    pub tenth_place: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -70,7 +76,7 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
         GameErrorCode::NoPrizeToClaim
     );
 
-    // Distribute prizes to top 8 based on prize_shares
+    // Distribute prizes to top 10 based on prize_shares
     let winners = [
         &ctx.accounts.winner,
         &ctx.accounts.second_place,
@@ -80,6 +86,8 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
         &ctx.accounts.sixth_place,
         &ctx.accounts.seventh_place,
         &ctx.accounts.eighth_place,
+        &ctx.accounts.ninth_place,
+        &ctx.accounts.tenth_place,
     ];
 
     let placements = [
@@ -87,10 +95,12 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
         tournament.second_place,
         tournament.third_place,
         tournament.fourth_place,
-        None, // 5th-8th not tracked in current state
-        None,
-        None,
-        None,
+        tournament.fifth_place,
+        tournament.sixth_place,
+        tournament.seventh_place,
+        tournament.eighth_place,
+        tournament.ninth_place,
+        tournament.tenth_place,
     ];
 
     for (i, (winner_account, placement)) in winners.iter().zip(placements.iter()).enumerate() {
@@ -99,7 +109,7 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
             continue;
         }
 
-        // For 5th-8th place, skip if not set (None)
+        // For 5th-10th place, skip if not set (None)
         if i >= 4 && placement.is_none() {
             continue;
         }
@@ -120,7 +130,7 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
     }
 
     msg!(
-        "Tournament {} closed. {} lamports distributed to top 8",
+        "Tournament {} closed. {} lamports distributed to top 10",
         tournament_id,
         prize_pool
     );

@@ -42,6 +42,11 @@ impl SessionStore {
         Self { pool }
     }
 
+    /// Returns a clone of the underlying pool for use in repositories.
+    pub fn pool(&self) -> SqlitePool {
+        self.pool.clone()
+    }
+
     /// Initializes the sessions table if it doesn't exist.
     pub async fn init(&self) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -57,15 +62,24 @@ impl SessionStore {
         .execute(&self.pool)
         .await?;
 
+        // Wallet-first user table — no password_hash
         sqlx::query(
             r#"
-            CREATE TABLE IF NOT EXISTS users (
-                email         TEXT PRIMARY KEY,
-                password_hash TEXT NOT NULL,
-                username      TEXT NOT NULL,
-                wallet        TEXT
+            CREATE TABLE IF NOT EXISTS users_v2 (
+                wallet      TEXT PRIMARY KEY,
+                username    TEXT NOT NULL,
+                email       TEXT,
+                kyc_status  TEXT NOT NULL DEFAULT 'none',
+                created_at  INTEGER NOT NULL DEFAULT 0,
+                deleted_at  INTEGER
             )
             "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_v2_username ON users_v2 (LOWER(username))"
         )
         .execute(&self.pool)
         .await?;
@@ -73,42 +87,90 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Finds a user by email.
-    pub async fn find_user(&self, email: &str) -> Option<(String, String, String, Option<String>)> {
-        sqlx::query_as("SELECT email, password_hash, username, wallet FROM users WHERE email = ?")
-            .bind(email)
-            .fetch_one(&self.pool)
-            .await
-            .ok()
+    /// Finds a user by wallet pubkey. Returns (wallet, username, email, kyc_status).
+    pub async fn find_user_by_wallet(&self, wallet: &str) -> Option<(String, String, Option<String>, String)> {
+        sqlx::query_as(
+            "SELECT wallet, username, email, kyc_status FROM users_v2 WHERE wallet = ? AND deleted_at IS NULL",
+        )
+        .bind(wallet)
+        .fetch_one(&self.pool)
+        .await
+        .ok()
     }
 
-    /// Finds a user by linked wallet public key.
-    pub async fn find_user_by_wallet(&self, wallet: &str) -> Option<(String, String, String, Option<String>)> {
-        sqlx::query_as("SELECT email, password_hash, username, wallet FROM users WHERE wallet = ?")
+    /// Finds a user by email (for notification / contact lookups).
+    pub async fn find_user_by_email(&self, email: &str) -> Option<(String, String, Option<String>, String)> {
+        sqlx::query_as(
+            "SELECT wallet, username, email, kyc_status FROM users_v2 WHERE email = ? AND deleted_at IS NULL",
+        )
+        .bind(email)
+        .fetch_one(&self.pool)
+        .await
+        .ok()
+    }
+
+    /// Creates a new wallet-first user.
+    pub async fn create_wallet_user(
+        &self,
+        wallet: &str,
+        username: &str,
+        email: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "INSERT INTO users_v2 (wallet, username, email, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(wallet)
+        .bind(username)
+        .bind(email)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Updates the email for a wallet (optional field, notifications only).
+    pub async fn set_email(&self, wallet: &str, email: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users_v2 SET email = ? WHERE wallet = ?")
+            .bind(email)
             .bind(wallet)
-            .fetch_one(&self.pool)
-            .await
-            .ok()
-    }
-
-    /// Creates a new user.
-    pub async fn create_user(&self, email: &str, password_hash: &str, username: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("INSERT INTO users (email, password_hash, username) VALUES (?, ?, ?)")
-            .bind(email)
-            .bind(password_hash)
-            .bind(username)
             .execute(&self.pool)
             .await?;
         Ok(())
     }
 
-    /// Links a wallet to an existing user.
-    pub async fn link_wallet(&self, email: &str, wallet_pubkey: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE users SET wallet = ? WHERE email = ?")
-            .bind(wallet_pubkey)
-            .bind(email)
+    /// Updates kyc_status for a wallet.
+    pub async fn set_kyc_status(&self, wallet: &str, status: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users_v2 SET kyc_status = ? WHERE wallet = ?")
+            .bind(status)
+            .bind(wallet)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    /// Returns true if the given username is already taken (case-insensitive).
+    pub async fn username_taken(&self, username: &str) -> bool {
+        let (count,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM users_v2 WHERE LOWER(username) = LOWER(?) AND deleted_at IS NULL",
+        )
+        .bind(username)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or((0,));
+        count > 0
+    }
+
+    /// GDPR erasure: soft-deletes user and nulls PII fields.
+    pub async fn erase_user(&self, wallet: &str) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "UPDATE users_v2 SET username = '[erased]', email = NULL, deleted_at = ? WHERE wallet = ?",
+        )
+        .bind(now)
+        .bind(wallet)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -211,5 +273,17 @@ impl SessionStore {
             .await
             .unwrap_or((0,));
         count as u64
+    }
+
+    /// Atomically increments the move counter for a game and returns the new value.
+    /// Used to assign sequential move numbers when persisting moves to the DB.
+    pub async fn increment_move_count(&self, game_id: u64) -> i32 {
+        let result: Result<(i64,), _> = sqlx::query_as(
+            "UPDATE sessions SET move_count = move_count + 1 WHERE game_id = ? RETURNING move_count",
+        )
+        .bind(game_id as i64)
+        .fetch_one(&self.pool)
+        .await;
+        result.map(|(n,)| n as i32).unwrap_or(1)
     }
 }

@@ -149,11 +149,10 @@ function ErrBox({ msg }: { msg: string }) {
 
 // ─── Identity picker ────────────────────────────────────────────────────────
 function IdentityStep({
-    onWallet, onEmail, onGuest,
+    onWallet, onEmail,
 }: {
     onWallet: () => void;
     onEmail: (mode: 'login' | 'register') => void;
-    onGuest: () => void;
 }) {
     return (
         <div style={{ ...card, maxWidth: 440 }}>
@@ -162,10 +161,7 @@ function IdentityStep({
                 <h2 style={{ fontSize: 22, fontWeight: 900, margin: '0 0 4px', letterSpacing: '-0.03em' }}>
                     <span style={{ color: '#ad5c2f' }}>XF</span>Chess
                 </h2>
-                <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '8px 0 0' }}>
-                    How do you want to play?
-                </p>
-                <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, margin: '2px 0 0', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '8px 0 0', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                     Choose your identity path
                 </p>
             </div>
@@ -199,30 +195,8 @@ function IdentityStep({
                     <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.25)' }} />
                 </button>
 
-                <button
-                    style={identityBtn}
-                    onClick={onGuest}
-                    onMouseEnter={e => applyHover(e, true)}
-                    onMouseLeave={e => applyHover(e, false)}
-                >
-                    <div style={identityIcon}><Cpu size={20} color="#ad5c2f" /></div>
-                    <div style={{ flex: 1, textAlign: 'left' as const }}>
-                        <div style={{ fontWeight: 800, fontSize: 14 }}>Guest Mode (Hot Wallet)</div>
-                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>No setup — play instantly</div>
-                    </div>
-                    <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.25)' }} />
-                </button>
             </div>
 
-            <p style={{ textAlign: 'center', marginTop: 24, fontSize: 11, color: 'rgba(255,255,255,0.18)' }}>
-                Already have an account?{' '}
-                <button
-                    onClick={() => onEmail('login')}
-                    style={{ background: 'none', border: 'none', color: '#ad5c2f', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}
-                >
-                    Sign in
-                </button>
-            </p>
         </div>
     );
 }
@@ -479,19 +453,6 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
 
                 <div style={{ margin: '12px 0', height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
-                <button
-                    style={{ ...walletBtn, background: 'rgba(173,92,47,0.05)', border: '1px solid rgba(173,92,47,0.2)' }}
-                    onClick={() => {
-                        localStorage.setItem('xfchess_use_hot', 'true');
-                        onConnected();
-                    }}
-                >
-                    <Zap size={28} color="#ad5c2f" />
-                    <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 800, fontSize: 13, color: '#ad5c2f' }}>Local Signer (Hot Wallet)</div>
-                        <div style={{ fontSize: 11, opacity: 0.5 }}>Fast, app-managed identity</div>
-                    </div>
-                </button>
             </div>
 
             <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', textAlign: 'center', marginTop: 20 }}>
@@ -691,15 +652,6 @@ function ProfileStep() {
         <div style={{ ...card, maxWidth: 520 }}>
             <StepDots current={2} />
 
-            {/* Header */}
-            <div style={{ textAlign: 'center', marginBottom: 28 }}>
-                <div style={{ fontSize: 36, marginBottom: 4 }}>♛</div>
-                <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>Your Solana Profile</h2>
-                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 6 }}>
-                    Wallet: <span style={{ fontFamily: 'monospace', color: '#ad5c2f' }}>{short}</span>
-                </p>
-            </div>
-
             {loading && (
                 <div style={{ textAlign: 'center', padding: '40px 0' }}>
                     <Loader2 size={32} style={{ color: '#ad5c2f', animation: 'spin 0.8s linear infinite' }} />
@@ -795,15 +747,15 @@ function ProfileStep() {
                         
                         <div style={{ display: 'flex', gap: '12px' }}>
                             <button
-                                style={{ ...primaryBtn, flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: 'none' }}
+                                style={{ ...primaryBtn, flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: 'none', fontSize: 13 }}
                                 onClick={() => setShowAiSetup(true)}
                             >
                                 <Cpu size={16} />
                                 Play Computer
                             </button>
-                            
+
                             <button
-                                style={{ ...primaryBtn, flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: 'none' }}
+                                style={{ ...primaryBtn, flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: 'none', fontSize: 13 }}
                                 onClick={async () => {
                                     const useHot = localStorage.getItem('xfchess_use_hot') === 'true';
                                     const body = {
@@ -831,10 +783,6 @@ function ProfileStep() {
                         </div>
                     </div>
 
-                    <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', marginTop: '16px' }}>
-                        Note: Matchplay requires the <strong>XFChess Desktop Client</strong>. 
-                        Redirecting to download...
-                    </p>
 
                     {/* AI Configuration Modal */}
                     {showAiSetup && (
@@ -998,19 +946,12 @@ export function SignIn(_: { defaultMode?: 'login' | 'register' } = {}) {
         setStep('profile');
     }, []);
 
-    const handleGuest = () => {
-        localStorage.setItem('xfchess_use_hot', 'true');
-        localStorage.setItem('xfchess_username', 'Guest');
-        setStep('profile');
-    };
-
     return (
         <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingBottom: 40 }}>
             {step === 'identity' && (
                 <IdentityStep
                     onWallet={() => setStep('wallet_login')}
                     onEmail={(mode) => { setCredMode(mode); setStep('credentials'); }}
-                    onGuest={handleGuest}
                 />
             )}
             {step === 'wallet_login' && (

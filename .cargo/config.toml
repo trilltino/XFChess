@@ -1,9 +1,7 @@
 # Windows-specific linker optimizations for Bevy
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
-rustflags = [
-    "-Zshare-generics=y"
-]
+# Note: -Zshare-generics is nightly-only and has been removed for stable compatibility
 
 # Note: rust-lld comes bundled with standard Rust installations
 # It drastically reduces the "waiting for linker" time for Bevy projects.

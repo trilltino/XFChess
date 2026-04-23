@@ -102,8 +102,8 @@ pub fn handler(ctx: Context<InitProfile>, username: String) -> Result<()> {
     // Set initial values
     profile.authority = player.key();
     profile.elo_rating = 120000.0;
-    profile.rd = 35000.0;
-    profile.volatility = 600.0;
+    profile.rd = 0.0;
+    profile.volatility = 0.0;
     profile.created_at = Clock::get()?.unix_timestamp;
     profile.is_verified = false;
     profile.username = username.clone();

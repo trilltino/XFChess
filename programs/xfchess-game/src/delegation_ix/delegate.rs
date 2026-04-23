@@ -3,9 +3,9 @@
 pub use self::inner::*;
 
 mod inner {
-    use crate::constants::MOVE_LOG_SEED;
-    use crate::state::Game;
-    use crate::state::move_log::MoveLog;
+    use crate::constants::{MOVE_LOG_SEED, DELEGATE_COST};
+    use crate::state::{Game, GameStatus, MoveLog};
+    use crate::errors::GameErrorCode;
     use anchor_lang::prelude::*;
     use ephemeral_rollups_sdk::cpi::{delegate_account, DelegateAccounts, DelegateConfig};
     use ephemeral_rollups_sdk::ephem::deprecated::v0::commit_and_undelegate_accounts;
@@ -60,6 +60,14 @@ mod inner {
         };
 
         delegate_account(ml_delegate_accounts, ml_seeds, config)?;
+
+        let game = &mut ctx.accounts.game;
+        let fee_payer = &ctx.accounts.fee_payer;
+
+        require!(game.status == GameStatus::Active, GameErrorCode::GameNotActive);
+        require!(game.fee_payer == fee_payer.key(), GameErrorCode::FeePayerMismatch);
+
+        game.fees_advanced = game.fees_advanced.checked_add(DELEGATE_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
 
         Ok(())
     }
@@ -134,6 +142,9 @@ mod inner {
         pub delegation_program: AccountInfo<'info>,
 
         pub system_program: Program<'info, System>,
+
+        #[account(mut)]
+        pub fee_payer: Signer<'info>,
     }
 
     #[derive(Accounts)]

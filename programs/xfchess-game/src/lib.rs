@@ -1,6 +1,7 @@
 //! Main entry point mapping all Anchor program instructions to their handler functions.
 
 use anchor_lang::prelude::*;
+use ephemeral_rollups_sdk::cpi::undelegate_account;
 
 pub mod account_ix;
 pub mod constants;
@@ -24,12 +25,13 @@ pub use delegation_ix::{
     UndelegateGameCtx,
 };
 pub use game_ix::{CancelGame, CreateGame, EndGame, JoinGame, ResignGame, ClaimTimeout};
-pub use governance_ix::{DisputeGame, ResolveDispute};
+pub use governance_ix::{ClaimStaleDispute, DisputeGame, ResolveDispute};
 pub use moves_ix::{CommitMoveBatchCtx, RecordMove};
 pub use tournament_ix::{
-    AdvanceWinner, CancelTournament, ClaimTournamentPrize, FundUsdcPrize, InitializeMatch,
-    InitializeTournament, RecordMatchResult, RecordSwissResult, RegisterPlayer, StartTournament,
-    SwissMatchResult,
+    AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
+    CancelTournament, ClaimTournamentPrize, FundUsdcPrize, InitializeMatch, InitializeTournament,
+    RecordMatchResult, RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx,
+    SessionCreateGame, SessionJoinGame, StartTournament, SwissMatchResult,
 };
 
 // Anchor 0.32 #[program] generates `pub use crate::__client_accounts_<snake>::*` at the crate
@@ -94,34 +96,46 @@ pub mod __client_accounts_record_move {
     pub use crate::moves_ix::record::__client_accounts_record_move::*;
 }
 pub mod __client_accounts_initialize_tournament {
-    pub use crate::tournament_ix::initialize::__client_accounts_initialize_tournament::*;
+    pub use crate::tournament_ix::lifecycle::initialize::__client_accounts_initialize_tournament::*;
 }
 pub mod __client_accounts_register_player {
-    pub use crate::tournament_ix::register::__client_accounts_register_player::*;
+    pub use crate::tournament_ix::registration::register::__client_accounts_register_player::*;
 }
 pub mod __client_accounts_start_tournament {
-    pub use crate::tournament_ix::start::__client_accounts_start_tournament::*;
+    pub use crate::tournament_ix::lifecycle::start::__client_accounts_start_tournament::*;
 }
 pub mod __client_accounts_record_match_result {
-    pub use crate::tournament_ix::record_result::__client_accounts_record_match_result::*;
+    pub use crate::tournament_ix::matches::record_result::__client_accounts_record_match_result::*;
 }
 pub mod __client_accounts_advance_winner {
-    pub use crate::tournament_ix::record_result::__client_accounts_advance_winner::*;
+    pub use crate::tournament_ix::matches::record_result::__client_accounts_advance_winner::*;
 }
 pub mod __client_accounts_initialize_match {
-    pub use crate::tournament_ix::initialize_match::__client_accounts_initialize_match::*;
+    pub use crate::tournament_ix::matches::initialize_match::__client_accounts_initialize_match::*;
 }
 pub mod __client_accounts_claim_tournament_prize {
-    pub use crate::tournament_ix::claim_prize::__client_accounts_claim_tournament_prize::*;
+    pub use crate::tournament_ix::prizes::claim_prize::__client_accounts_claim_tournament_prize::*;
 }
 pub mod __client_accounts_cancel_tournament {
-    pub use crate::tournament_ix::cancel::__client_accounts_cancel_tournament::*;
+    pub use crate::tournament_ix::lifecycle::cancel::__client_accounts_cancel_tournament::*;
 }
 pub mod __client_accounts_fund_usdc_prize {
-    pub use crate::tournament_ix::fund_prize::__client_accounts_fund_usdc_prize::*;
+    pub use crate::tournament_ix::prizes::fund_prize::__client_accounts_fund_usdc_prize::*;
 }
 pub mod __client_accounts_record_swiss_result {
-    pub use crate::tournament_ix::record_swiss_result::__client_accounts_record_swiss_result::*;
+    pub use crate::tournament_ix::matches::record_swiss_result::__client_accounts_record_swiss_result::*;
+}
+pub mod __client_accounts_authorize_tournament_session_ctx {
+    pub use crate::tournament_ix::session::authorize_tournament_session::__client_accounts_authorize_tournament_session_ctx::*;
+}
+pub mod __client_accounts_revoke_tournament_session_ctx {
+    pub use crate::tournament_ix::session::authorize_tournament_session::__client_accounts_revoke_tournament_session_ctx::*;
+}
+pub mod __client_accounts_session_create_game {
+    pub use crate::tournament_ix::session::session_create_game::__client_accounts_session_create_game::*;
+}
+pub mod __client_accounts_session_join_game {
+    pub use crate::tournament_ix::session::session_join_game::__client_accounts_session_join_game::*;
 }
 pub mod __client_accounts_initialize_fee_vault {
     pub use crate::account_ix::fee_vault_ix::__client_accounts_initialize_fee_vault::*;
@@ -147,28 +161,18 @@ pub mod __client_accounts_schedule_time_check {
 pub mod __client_accounts_crank_time_check {
     pub use crate::crank_ix::crank_time_check::__client_accounts_crank_time_check::*;
 }
+pub mod __client_accounts_claim_stale_dispute {
+    pub use crate::governance_ix::claim_stale_dispute::__client_accounts_claim_stale_dispute::*;
+}
 
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
 
-declare_id!("A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W");
+declare_id!("C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf");
 
 #[program]
 pub mod xfchess_game {
     use super::*;
-    use crate::account_ix::{
-        InitProfile, VerifyProfile, SetUsername, WithdrawExpiredWager,
-        InitializeFeeVault, CollectFee, ClaimFees, CreateSession, RevokeSession, UpdateElo,
-    };
-    use crate::crank_ix::{ScheduleTimeCheck, CrankTimeCheck, ScheduleTimeCheckArgs};
-    use crate::delegation_ix::{
-        AuthorizeSessionCtx, DelegateGameCtx, InitializeAfterUndelegation, RevokeSessionCtx,
-        UndelegateGameCtx,
-    };
-    use crate::game_ix::{CancelGame, CreateGame, EndGame, JoinGame, ResignGame, ClaimTimeout};
-    use crate::governance_ix::{DisputeGame, ResolveDispute};
-    use crate::moves_ix::{CommitMoveBatchCtx, RecordMove};
-    use ephemeral_rollups_sdk::cpi::undelegate_account;
 
     pub fn init_profile(ctx: Context<InitProfile>, username: String) -> Result<()> {
         crate::account_ix::profile::handler(ctx, username)
@@ -191,11 +195,21 @@ pub mod xfchess_game {
         country: String,
         time_per_move: u16,
     ) -> Result<()> {
-        crate::game_ix::create::handler(ctx, game_id, wager_amount, game_type, match_type, country, time_per_move)
+        crate::game_ix::create::handler(
+            ctx,
+            game_id,
+            wager_amount,
+            game_type,
+            match_type,
+            country,
+            time_per_move,
+        )
     }
 
-    pub fn join_game(ctx: Context<JoinGame>, game_id: u64) -> Result<()> {
-        crate::game_ix::join::handler(ctx, game_id)
+    pub fn join_game(
+        ctx: Context<JoinGame>
+    ) -> Result<()> {
+        crate::game_ix::join::join_game(ctx)
     }
 
     pub fn record_move(
@@ -245,6 +259,10 @@ pub mod xfchess_game {
         winner: Option<Pubkey>,
     ) -> Result<()> {
         crate::governance_ix::resolve::handler(ctx, game_id, resolution, winner)
+    }
+
+    pub fn claim_stale_dispute(ctx: Context<ClaimStaleDispute>, game_id: u64) -> Result<()> {
+        crate::governance_ix::claim_stale_dispute::handler(ctx, game_id)
     }
 
     pub fn authorize_session_key(
@@ -322,11 +340,12 @@ pub mod xfchess_game {
         elo_min: u32,
         elo_max: u32,
         min_players: u16,
-        prize_shares: [u16; 8],
+        prize_shares: [u16; 10],
+        winner_takes_all: bool,
         host_treasury: Pubkey,
         usdc_mint: Option<Pubkey>,
     ) -> Result<()> {
-        crate::tournament_ix::initialize::handler(
+        crate::tournament_ix::lifecycle::initialize::handler(
             ctx,
             tournament_id,
             name,
@@ -337,6 +356,7 @@ pub mod xfchess_game {
             elo_max,
             min_players,
             prize_shares,
+            winner_takes_all,
             host_treasury,
             usdc_mint,
         )
@@ -352,18 +372,18 @@ pub mod xfchess_game {
         next_match_for_winner: Option<u16>,
         next_match_slot: u8,
     ) -> Result<()> {
-        crate::tournament_ix::initialize_match::handler(
+        crate::tournament_ix::matches::initialize_match::handler(
             ctx, tournament_id, match_index, round, player_white, player_black,
             next_match_for_winner, next_match_slot
         )
     }
 
     pub fn register_player(ctx: Context<RegisterPlayer>, tournament_id: u64) -> Result<()> {
-        crate::tournament_ix::register::handler(ctx, tournament_id)
+        crate::tournament_ix::registration::register::handler(ctx, tournament_id)
     }
 
     pub fn start_tournament(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> {
-        crate::tournament_ix::start::handler(ctx, tournament_id)
+        crate::tournament_ix::lifecycle::start::handler(ctx, tournament_id)
     }
 
     pub fn record_match_result(
@@ -373,7 +393,7 @@ pub mod xfchess_game {
         winner: Pubkey,
         loser: Pubkey,
     ) -> Result<()> {
-        crate::tournament_ix::record_result::handler(ctx, tournament_id, match_index, winner, loser)
+        crate::tournament_ix::matches::record_result::handler(ctx, tournament_id, match_index, winner, loser)
     }
 
     pub fn advance_winner(
@@ -382,21 +402,21 @@ pub mod xfchess_game {
         source_match_index: u16,
         _target_match_index: u16,
     ) -> Result<()> {
-        crate::tournament_ix::record_result::handler_advance_winner(ctx, tournament_id, source_match_index)
+        crate::tournament_ix::matches::record_result::handler_advance_winner(ctx, tournament_id, source_match_index)
     }
 
     pub fn claim_tournament_prize(
         ctx: Context<ClaimTournamentPrize>,
         tournament_id: u64,
     ) -> Result<()> {
-        crate::tournament_ix::claim_prize::handler(ctx, tournament_id)
+        crate::tournament_ix::prizes::claim_prize::handler(ctx, tournament_id)
     }
 
     pub fn cancel_tournament<'a, 'b, 'c, 'info>(
         ctx: Context<'a, 'b, 'c, 'info, CancelTournament<'info>>,
         tournament_id: u64,
     ) -> Result<()> {
-        crate::tournament_ix::cancel::handler(ctx, tournament_id)
+        crate::tournament_ix::lifecycle::cancel::handler(ctx, tournament_id)
     }
 
     pub fn fund_usdc_prize(
@@ -404,7 +424,7 @@ pub mod xfchess_game {
         tournament_id: u64,
         amount: u64,
     ) -> Result<()> {
-        crate::tournament_ix::fund_prize::handler(ctx, tournament_id, amount)
+        crate::tournament_ix::prizes::fund_prize::handler(ctx, tournament_id, amount)
     }
 
     pub fn record_swiss_result(
@@ -414,7 +434,71 @@ pub mod xfchess_game {
         board: u16,
         result: SwissMatchResult,
     ) -> Result<()> {
-        crate::tournament_ix::record_swiss_result::handler(ctx, tournament_id, round, board, result)
+        crate::tournament_ix::matches::record_swiss_result::handler(ctx, tournament_id, round, board, result)
+    }
+
+    // ── Tournament-scoped session delegation ───────────────────────────────
+
+    /// Authorize a `session_key` to co-sign game and swiss-result ixs for
+    /// `tournament_id` on behalf of the registered player, without a wallet
+    /// popup per match. See [`AuthorizeTournamentSessionArgs`] for caps.
+    pub fn authorize_tournament_session(
+        ctx: Context<AuthorizeTournamentSessionCtx>,
+        tournament_id: u64,
+        args: AuthorizeTournamentSessionArgs,
+    ) -> Result<()> {
+        crate::tournament_ix::session::authorize_tournament_session::handler_authorize_tournament_session(
+            ctx,
+            tournament_id,
+            args,
+        )
+    }
+
+    /// Disable an existing tournament session delegation immediately.
+    pub fn revoke_tournament_session(
+        ctx: Context<RevokeTournamentSessionCtx>,
+        tournament_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::session::authorize_tournament_session::handler_revoke_tournament_session(
+            ctx,
+            tournament_id,
+        )
+    }
+
+    /// Session-signed variant of `create_game` for tournament matches.
+    /// The session key (not the player wallet) co-signs; wager and rent
+    /// are drawn from the delegation PDA vault.
+    pub fn session_create_game(
+        ctx: Context<SessionCreateGame>,
+        tournament_id: u64,
+        game_id: u64,
+        wager_amount: u64,
+        game_type: state::GameType,
+        match_type: state::MatchType,
+        country: String,
+        time_per_move: u16,
+    ) -> Result<()> {
+        crate::tournament_ix::session::session_create_game::handler(
+            ctx,
+            tournament_id,
+            game_id,
+            wager_amount,
+            game_type,
+            match_type,
+            country,
+            time_per_move,
+        )
+    }
+
+    /// Session-signed variant of `join_game` for tournament matches.
+    /// The session key (not the player wallet) co-signs; wager and fees
+    /// are drawn from the delegation PDA vault.
+    pub fn session_join_game(
+        ctx: Context<SessionJoinGame>,
+        tournament_id: u64,
+        game_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::session::session_join_game::handler(ctx, tournament_id, game_id)
     }
 
     // ── Fee Vault ──────────────────────────────────────────────────────────────

@@ -1,26 +1,32 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { ConnectionProvider, WalletProvider, useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletConnectWalletAdapter } from '@solana/wallet-adapter-walletconnect';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { SolanaMobileWalletAdapter, createDefaultAddressSelector, createDefaultAuthorizationResultCache, createDefaultWalletNotFoundHandler } from '@solana-mobile/wallet-adapter-mobile';
 import { clusterApiUrl } from '@solana/web3.js';
-import { Home } from './pages/Home';
-import { Media } from './pages/Media';
-import { Blog } from './pages/Blog';
 import { ProfileViewer } from './pages/ProfileViewer';
+import { Players } from './pages/Players';
 import { VerifyProfile } from './pages/VerifyProfile';
 import DownloadPage from './pages/Download';
+import WSetup from './pages/WSetup';
 import CompliancePage from './pages/Compliance';
 import LegalPage from './pages/Legal';
 import AntiCheatPage from './pages/AntiCheat';
 import KycPage from './pages/Kyc';
 import { SignIn } from './pages/SignIn';
-import { SignUp } from './pages/SignUp';
+import Launch from './pages/Launch';
 import NewsRelease from './pages/NewsRelease';
 import { Tournaments } from './pages/Tournaments';
+import { ChessComputer } from './pages/ChessComputer';
+import { Home } from './pages/Home';
+import { Pvp } from './pages/Pvp';
+import Spectate from './pages/Spectate';
+import TournamentDetail from './pages/TournamentDetail';
+import TournamentStandings from './pages/TournamentStandings';
+import TournamentPlay from './pages/TournamentPlay';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { Footer } from './components/Footer';
@@ -177,13 +183,11 @@ function AppContent() {
                 </div>
                 
                 <div className={`nav-links ${isMenuOpen ? 'active' : ''}`}>
-                    <Link to="/" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Home</Link>
+                    <Link to="/home" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Home</Link>
                     <Link to="/download" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
-                    <Link to="/profile" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Profile</Link>
-                    <Link to="/auth/register" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Sign Up</Link>
                     <div className="nav-legal-dropdown">
                         <button className="nav-link dropdown-toggle" onClick={() => { setIsGameTypesOpen(v => !v); setIsCommunityOpen(false); setIsLegalOpen(false); }}>
-                            Game types <ChevronDown size={14} className={`dropdown-icon ${isGameTypesOpen ? 'open' : ''}`} />
+                            Game Modes <ChevronDown size={14} className={`dropdown-icon ${isGameTypesOpen ? 'open' : ''}`} />
                         </button>
                         <AnimatePresence>
                             {isGameTypesOpen && (
@@ -195,8 +199,9 @@ function AppContent() {
                                     exit="exit"
                                     transition={{ duration: 0.2 }}
                                 >
-                                    <Link to="/download" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>PvP</Link>
+                                    <Link to="/pvp" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>PvP</Link>
                                     <Link to="/tournaments" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Tournament</Link>
+                                    <Link to="/computer" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Chess Computer</Link>
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -215,8 +220,8 @@ function AppContent() {
                                     exit="exit"
                                     transition={{ duration: 0.2 }}
                                 >
-                                    <Link to="/blog" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Blog</Link>
-                                    <Link to="/media" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Media</Link>
+                                    <Link to="/players" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Players</Link>
+                                    <a href="https://t.me/+IBdo42qMPqM4Y2Vk" target="_blank" rel="noopener noreferrer" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Telegram</a>
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -243,14 +248,14 @@ function AppContent() {
                         </AnimatePresence>
                     </div>
                     {connected && (
-                        <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
+                        <Link to="/" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
                             {username || "Set Name"}
                         </Link>
                     )}
 
                     <div className="nav-wallet-wrap">
                         {connected ? (
-                            <button onClick={() => { disconnect(); setIsMenuOpen(false); }} className="btn-secondary" style={{ height: '44px', padding: '0 20px', borderRadius: '4px', fontSize: '0.9rem', fontWeight: 700 }}>
+                            <button onClick={() => { disconnect(); setIsMenuOpen(false); }} className="btn-secondary" style={{ height: '44px', padding: '0 20px', borderRadius: '4px', fontSize: '0.9rem', fontWeight: 700, border: 'none' }}>
                                 Logout
                             </button>
                         ) : (
@@ -265,20 +270,26 @@ function AppContent() {
             <div style={{ flex: 1 }}>
                 <AnimatePresence mode="wait">
                     <Routes location={location} key={location.pathname}>
-                        <Route path="/" element={<Home />} />
-                        <Route path="/blog" element={<Blog />} />
-                        <Route path="/media" element={<Media />} />
-                        <Route path="/profile" element={<ProfileViewer />} />
+                        <Route path="/" element={<Navigate to="/home" replace />} />
+                        <Route path="/home" element={<Home />} />
+                        <Route path="/pvp" element={<Pvp />} />
+                        <Route path="/players" element={<Players />} />
                         <Route path="/verify" element={<VerifyProfile />} />
                         <Route path="/download" element={<DownloadPage />} />
+                        <Route path="/w_setup" element={<WSetup />} />
                         <Route path="/compliance" element={<CompliancePage />} />
                         <Route path="/legal" element={<LegalPage />} />
                         <Route path="/anti-cheat" element={<AntiCheatPage />} />
                         <Route path="/kyc" element={<KycPage />} />
                         <Route path="/news/release" element={<NewsRelease />} />
                         <Route path="/auth/login" element={<SignIn defaultMode="login" />} />
-                        <Route path="/auth/register" element={<SignUp />} />
+                        <Route path="/launch" element={<Launch />} />
                         <Route path="/tournaments" element={<Tournaments />} />
+                        <Route path="/tournament/:id" element={<TournamentDetail />} />
+                        <Route path="/tournament/:id/standings" element={<TournamentStandings />} />
+                        <Route path="/tournament/:id/play" element={<TournamentPlay />} />
+                        <Route path="/spectate/:game_id" element={<Spectate />} />
+                        <Route path="/computer" element={<ChessComputer />} />
                     </Routes>
                 </AnimatePresence>
             </div>

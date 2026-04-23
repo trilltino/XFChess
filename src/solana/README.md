@@ -123,7 +123,7 @@ Loaded from session JSON:
 
 ### Environment Variables
 ```rust
-const PROGRAM_ID: &str = "AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp";
+const PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
 const DEFAULT_RPC: &str = "https://api.devnet.solana.com";
 ```
 
@@ -189,9 +189,6 @@ cargo run -- --session-config test_session.json
 ```
 
 ## Troubleshooting
-
-### "Insufficient funds"
-- Get devnet SOL: https://faucet.solana.com/
 
 ### "Invalid session"
 - Session may have expired

@@ -16,6 +16,7 @@ use crate::assets::{
 };
 use crate::core::{GameMode as CoreGameMode, GameState};
 use crate::game::ai::GameMode;
+use rand;
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::lobby::{
     spawn_create_game, spawn_join_game, spawn_lookup_game, spawn_poll_opponent_joined,
@@ -24,7 +25,8 @@ use crate::multiplayer::solana::lobby::{
 use crate::ui::styles::{Layout, *};
 use crate::ui::system_params::MainMenuUIContext;
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiPrimaryContextPass};
+use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+use std::sync::Arc;
 
 
 /// Plugin for main menu state
@@ -32,24 +34,17 @@ pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
-        use super::main_menu_showcase::{
-            animate_showcase_captures, animate_showcase_idle_float, animate_showcase_pieces,
-            restart_showcase_when_complete, run_showcase_game, spawn_showcase_board,
-            spawn_showcase_pieces, ShowcaseGameState,
-        };
-
         // Common systems for all platforms
         app.add_systems(
             OnEnter(GameState::MainMenu),
             (
                 setup_menu_camera,
-                spawn_showcase_board,
-                spawn_showcase_pieces,
                 start_asset_loading,
+                setup_custom_fonts,
             ),
         )
             .init_resource::<PlayerColorChoice>()
-        .init_resource::<ShowcaseGameState>()
+        .insert_resource(PlayerIdentity::from_env())
         .init_resource::<crate::assets::GameAssets>()
         .init_resource::<crate::assets::LoadingProgress>()
         .init_resource::<crate::assets::AssetLoadingTimer>()
@@ -59,7 +54,6 @@ impl Plugin for MainMenuPlugin {
             EguiPrimaryContextPass,
             (
                 main_menu_ui_wrapper.run_if(in_state(GameState::MainMenu)),
-                #[cfg(feature = "solana")]
                 render_lobby_selection_popup
                     .run_if(in_state(crate::core::MenuState::LobbySelection))
                     .run_if(in_state(GameState::MainMenu)),
@@ -72,11 +66,6 @@ impl Plugin for MainMenuPlugin {
                 handle_asset_loading_errors,
                 handle_untyped_asset_loading_errors,
                 ensure_menu_camera_setup,
-                run_showcase_game,
-                animate_showcase_pieces,
-                animate_showcase_captures,
-                animate_showcase_idle_float,
-                restart_showcase_when_complete,
             )
                 .run_if(in_state(GameState::MainMenu))
                 .run_if(not(in_state(crate::core::MenuState::PieceViewer))),
@@ -126,6 +115,51 @@ pub enum LobbyFilter {
 pub struct CompetitiveMenuState {
     /// Which game-type filter is selected in the lobby browser.
     pub lobby_filter: LobbyFilter,
+    /// Whether the AI setup modal is currently open
+    pub show_ai_setup: bool,
+    /// Selected AI difficulty level (1-8)
+    pub ai_difficulty: u8,
+    /// Selected player side (Black, Random, White)
+    pub ai_side: AISide,
+    /// Whether the spectator popup is currently open
+    pub show_spectator_popup: bool,
+}
+
+/// Player side selection for AI games
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AISide {
+    Black,
+    Random,
+    White,
+}
+
+impl Default for AISide {
+    fn default() -> Self {
+        Self::Random
+    }
+}
+
+/// Logged-in player identity passed to the game by the Tauri wallet UI or
+/// the web profile deep-link (via the `XFCHESS_USERNAME` env var).
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PlayerIdentity {
+    pub username: Option<String>,
+}
+
+impl PlayerIdentity {
+    /// Read the username from the `XFCHESS_USERNAME` env var, if set and non-empty.
+    pub fn from_env() -> Self {
+        let username = std::env::var("XFCHESS_USERNAME")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        Self { username }
+    }
+
+    /// Display label used in the menu UI.
+    pub fn display_name(&self) -> &str {
+        self.username.as_deref().unwrap_or("Guest")
+    }
 }
 
 
@@ -245,6 +279,57 @@ fn main_menu_ui(ctx: &mut MainMenuUIContext) -> Result<(), bevy::ecs::query::Que
     Ok(())
 }
 
+/// Setup custom fonts for the main menu
+///
+/// Tries multiple locations in order:
+/// 1. Project assets/fonts/ (development)
+/// 2. Executable directory (bundled app)
+/// 3. System fallback (if all else fails, uses default egui font)
+fn setup_custom_fonts(mut contexts: EguiContexts) {
+    let ctx_result = contexts.ctx_mut();
+    let Ok(ctx) = ctx_result else {
+        warn!("[MAIN_MENU] Failed to get egui context for font setup");
+        return;
+    };
+
+    let mut fonts = egui::FontDefinitions::default();
+
+    // Try to find OpenSans variable font from project assets
+    let possible_font_paths = [
+        // Project assets (dev mode)
+        "assets/fonts/OpenSans-VariableFont_wdth,wght.ttf".to_string(),
+        // Relative to executable (bundled)
+        "./assets/fonts/OpenSans-VariableFont_wdth,wght.ttf".to_string(),
+    ];
+
+    let mut font_loaded = false;
+
+    for font_path in &possible_font_paths {
+        if let Ok(font_data) = std::fs::read(font_path) {
+            fonts.font_data.insert(
+                "OpenSans".to_owned(),
+                Arc::new(egui::FontData::from_owned(font_data)),
+            );
+
+            // Set OpenSans as the primary font for all text styles
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "OpenSans".to_owned());
+
+            ctx.set_fonts(fonts);
+            info!("[MAIN_MENU] Loaded OpenSans font successfully from {}", font_path);
+            font_loaded = true;
+            break;
+        }
+    }
+
+    if !font_loaded {
+        warn!("[MAIN_MENU] Could not load OpenSans font, using egui default font");
+    }
+}
+
 /// Render website-style main menu with navbar and sections
 fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     // Show loading screen if assets aren't loaded yet
@@ -252,102 +337,159 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
         render_loading_screen_website(ctx, ctx_menu);
         return;
     }
-    
+
     let screen_rect = ctx.content_rect();
-    
-    // === BLACK GRADIENT BACKGROUND ===
-    egui::CentralPanel::default()
-        .frame(egui::Frame {
-            fill: egui::Color32::from_rgb(0, 0, 0), // Pure black
-            ..Default::default()
-        })
-        .show(ctx, |ui| {
-            ui.add_space(0.0); // Just fill the background
-        });
-    
+    debug!("[MAIN_MENU] Screen rect: {:?}", screen_rect);
+
     // === NAVBAR ===
     render_navbar(ctx, ctx_menu);
-    
 
-    
-    // === MAIN CONTENT AREA ===
-    let content_top = 80.0; // Space below navbar
-    let content_height = screen_rect.height() - content_top - 20.0;
-    
-    egui::Area::new("main_content".into())
-        .anchor(egui::Align2::LEFT_TOP, egui::Vec2::new(20.0, content_top))
+
+
+    // === MAIN CONTENT AREA (SCROLLABLE) ===
+    egui::CentralPanel::default()
         .show(ctx, |ui| {
-            ui.set_width(screen_rect.width() - 40.0);
-            ui.set_height(content_height);
-            
-            // Two column layout
-            let available_w = screen_rect.width() - 40.0;
-            let col_spacing = 40.0;
-            let inner_w = available_w - col_spacing;
-            
-            ui.horizontal(|ui| {
-                // === LEFT COLUMN: TOURNAMENTS & MODES ===
-                ui.vertical(|ui| {
-                    ui.set_width(inner_w * 0.30);
-                    render_tournaments_section(ui, ctx_menu);
-                });
-                
-                ui.add_space(col_spacing);
-                
-                // === RIGHT COLUMN: QUICK PAIRING & LOBBY ===
-                ui.vertical(|ui| {
-                    let mid_w = inner_w * 0.70;
-                    ui.set_width(mid_w);
+            ui.add_space(80.0); // Space below navbar
+
+            egui::ScrollArea::vertical()
+                .show(ui, |ui| {
+                    // Two column layout
+                    let available_w = ui.available_width();
+                    let col_spacing = 40.0;
+                    let inner_w = available_w - col_spacing;
+
                     ui.horizontal(|ui| {
-                        // Quick Pairing
+                        // === LEFT COLUMN: PLAY THE COMPUTER ===
                         ui.vertical(|ui| {
-                            ui.set_width((mid_w - col_spacing) * 0.45);
-                            render_quick_pairing_section(ui, ctx_menu);
+                            ui.set_width(inner_w * 0.30);
+                            render_play_computer_section(ui, ctx_menu);
                         });
-                        
+
                         ui.add_space(col_spacing);
-                        
-                        // Lobby
+
+                        // === RIGHT COLUMN: QUICK PLAY & LOBBY (symmetrical) ===
                         ui.vertical(|ui| {
-                            ui.set_width((mid_w - col_spacing) * 0.55);
-                            render_lobby_section(ui, ctx_menu);
+                            let mid_w = inner_w * 0.70;
+                            ui.set_width(mid_w);
+                            // Calculate equal widths for symmetry
+                            let mid_spacing = col_spacing;
+                            let equal_width = (mid_w - mid_spacing) * 0.5;
+                            ui.horizontal(|ui| {
+                                // Quick Play (equal width)
+                                ui.vertical(|ui| {
+                                    ui.set_width(equal_width);
+                                    render_quick_pairing_section(ui, ctx_menu);
+                                });
+
+                                ui.add_space(mid_spacing);
+
+                                // Lobby (equal width)
+                                ui.vertical(|ui| {
+                                    ui.set_width(equal_width);
+                                    render_lobby_section(ui, ctx_menu);
+                                });
+                            });
+                        });
+                    });
+
+                    ui.add_space(30.0);
+
+                    // === NEWS & LEARN ROW (centered with space on sides) ===
+                    let middle_col_spacing = 20.0;
+                    let box_width = (available_w - middle_col_spacing) * 0.35; // 35% each, centered
+                    let side_margin = (available_w - middle_col_spacing - (box_width * 2.0)) * 0.5;
+
+                    ui.horizontal(|ui| {
+                        ui.add_space(side_margin); // Left margin
+
+                        // === NEWS SECTION ===
+                        ui.vertical(|ui| {
+                            ui.set_width(box_width);
+                            render_news_section(ui, box_width);
+                        });
+
+                        ui.add_space(middle_col_spacing);
+
+                        // === LEARN SECTION ===
+                        ui.vertical(|ui| {
+                            ui.set_width(box_width);
+                            render_learn_section(ui, box_width);
+                        });
+
+                        ui.add_space(side_margin); // Right margin
+                    });
+
+                    ui.add_space(30.0);
+
+                    // === BOTTOM BOXES: TOURNAMENTS & UPDATES (larger) ===
+                    let bottom_box_height = 280.0;
+
+                    ui.horizontal(|ui| {
+                        // === TOURNAMENTS BOX ===
+                        ui.vertical(|ui| {
+                            ui.set_width((available_w - col_spacing) * 0.5);
+                            render_tournaments_box(ui, ctx_menu);
+                        });
+
+                        ui.add_space(col_spacing);
+
+                        // === UPDATES BOX ===
+                        ui.vertical(|ui| {
+                            ui.set_width((available_w - col_spacing) * 0.5);
+                            render_updates_box(ui);
                         });
                     });
                 });
-            });
         });
+
+    // === AI SETUP MODAL ===
+    if ctx_menu.competitive_menu.show_ai_setup {
+        render_ai_setup_modal(ctx, &mut ctx_menu.competitive_menu, &mut ctx_menu.ai_config, &mut ctx_menu.core_mode, &mut ctx_menu.next_state);
+    }
+
+    // === SPECTATOR POPUP ===
+    if ctx_menu.competitive_menu.show_spectator_popup {
+        render_spectator_popup(ctx, &mut ctx_menu.competitive_menu);
+    }
 }
 
 /// Render website-style navbar
-fn render_navbar(ctx: &egui::Context, _ctx_menu: &mut MainMenuUIContext) {
-    
+fn render_navbar(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
+
     egui::TopBottomPanel::top("navbar")
         .frame(egui::Frame {
-            fill: egui::Color32::from_rgba_unmultiplied(20, 20, 20, 240), // Dark with transparency
+            fill: egui::Color32::from_rgba_unmultiplied(20, 20, 20, 0), // Fully transparent
             inner_margin: egui::Margin::symmetric(20, 15),
+            outer_margin: egui::Margin::ZERO,
             ..Default::default()
         })
-        .show_separator_line(true)
+        .show_separator_line(false)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // === LEFT SIDE: PLAY | WATCH | COMMUNITY | SOURCE CODE ===
+                // === BRAND LOGO ===
+                ui.label(
+                    egui::RichText::new("XFChess")
+                        .size(24.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+
+                ui.add_space(40.0);
+
+                // === LEFT SIDE: SPECTATOR | COMMUNITY | SOURCE CODE ===
                 ui.horizontal(|ui| {
-                    if nav_link(ui, "Play") {
-                        // Handle Play navigation - scroll to main content
-                        info!("[MENU] Play clicked - navigating to main game options");
-                        // TODO: Implement smooth scroll to main content
-                    }
-                    ui.add_space(30.0);
-                    if nav_link(ui, "Watch") {
-                        // Handle Watch navigation - placeholder for spectating feature
-                        info!("[MENU] Watch clicked - opening spectating placeholder");
-                        // TODO: Implement spectating interface
+                    if nav_link(ui, "Spectator") {
+                        // Show spectator popup
+                        info!("[MENU] Spectator clicked - opening spectator popup");
+                        ctx_menu.competitive_menu.show_spectator_popup = true;
                     }
                     ui.add_space(30.0);
                     if nav_link(ui, "Community") {
-                        // Handle Community navigation - placeholder for community features
-                        info!("[MENU] Community clicked - opening community placeholder");
-                        // TODO: Implement community features (forums, chat, etc.)
+                        // Open Telegram page
+                        info!("[MENU] Community clicked - opening Telegram");
+                        if let Err(e) = webbrowser::open("https://t.me/+IBdo42qMPqM4Y2Vk") {
+                            warn!("[MENU] Failed to open Telegram: {}", e);
+                        }
                     }
                     ui.add_space(30.0);
                     if nav_link(ui, "Source Code") {
@@ -358,19 +500,53 @@ fn render_navbar(ctx: &egui::Context, _ctx_menu: &mut MainMenuUIContext) {
                         }
                     }
                 });
-                
+
+                // === RIGHT SIDE: USERNAME DISPLAY ===
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(ref username) = ctx_menu.player_identity.username {
+                        if !username.is_empty() {
+                            ui.label(
+                                egui::RichText::new(format!("@{}", username))
+                                    .size(16.0)
+                                    .color(egui::Color32::from_rgb(100, 200, 255))
+                                    .strong()
+                            );
+                            ui.add_space(10.0);
+                            ui.label(
+                                egui::RichText::new("Player:")
+                                    .size(14.0)
+                                    .color(egui::Color32::GRAY)
+                            );
+                        } else {
+                            ui.label(
+                                egui::RichText::new("Guest")
+                                    .size(14.0)
+                                    .color(egui::Color32::GRAY)
+                            );
+                        }
+                    } else {
+                        ui.label(
+                            egui::RichText::new("Guest")
+                                .size(14.0)
+                                .color(egui::Color32::GRAY)
+                        );
+                    }
+                });
+
             });
         });
 }
 
-/// Render left tournaments section
-fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
-    ui.heading(
-        egui::RichText::new("PLAY")
-            .size(18.0)
-            .color(egui::Color32::WHITE)
-            .strong(),
-    );
+/// Render play computer section
+fn render_play_computer_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
+    ui.vertical_centered(|ui| {
+        ui.heading(
+            egui::RichText::new("PLAY")
+                .size(18.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
+    });
     ui.add_space(15.0);
 
     // "Create a Lobby" goes straight to the unified lobby form.
@@ -379,12 +555,14 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
     let lobby_btn_resp = ui.add_sized(
         [ui.available_width(), 36.0],
         egui::Button::new(
-            egui::RichText::new("+ Create a Lobby")
+            egui::RichText::new("Create a Lobby")
                 .size(15.0)
                 .color(egui::Color32::WHITE)
                 .strong(),
         )
-        .fill(egui::Color32::from_rgba_unmultiplied(55, 55, 55, 200)),
+        .fill(egui::Color32::from_rgba_unmultiplied(55, 55, 55, 200))
+        .corner_radius(8.0)
+        .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
     );
 
     if lobby_btn_resp.clicked() {
@@ -395,7 +573,8 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
             lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
             lobby.wager_sol = 0.0; // default to free
         }
-        ctx_menu.menu_state.set(crate::core::MenuState::SolanaLobby);
+        // Always show Local vs Solana selection popup
+        ctx_menu.menu_state.set(crate::core::MenuState::LobbySelection);
     }
 
     ui.add_space(8.0);
@@ -406,36 +585,41 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("V S   S T O C K F I S H")
+                    egui::RichText::new("Play the Computer")
                         .size(14.0)
                         .color(egui::Color32::WHITE)
                         .strong(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        egui::RichText::new(ctx_menu.ai_config.difficulty.description())
+                        egui::RichText::new(format!("Level {}", ctx_menu.competitive_menu.ai_difficulty))
                             .size(11.0)
                             .color(egui::Color32::from_rgb(150, 150, 150)),
                     );
                 });
             });
-            
+
             ui.add_space(8.0);
-            
-            // Difficulty Slider (Level 1-8)
-            let mut diff_val = ctx_menu.ai_config.difficulty.to_u8();
-            let slider = ui.add(
-                egui::Slider::new(&mut diff_val, 1..=8)
-                    .show_value(false)
-                    .trailing_fill(true)
-            );
-            
-            if slider.changed() {
-                ctx_menu.ai_config.difficulty = crate::game::ai::resource::AIDifficulty::from_u8(diff_val);
+
+            // Button to open AI setup modal
+            if ui.add_sized(
+                [ui.available_width(), 32.0],
+                egui::Button::new(
+                    egui::RichText::new("Game Setup")
+                        .size(12.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                )
+                .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
+                .corner_radius(8.0)
+                .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
+            ).clicked() {
+                ctx_menu.competitive_menu.show_ai_setup = true;
             }
-            
+
             ui.add_space(10.0);
-            
+
+            // Quick start button
             if ui.add_sized(
                 [ui.available_width(), 32.0],
                 egui::Button::new(
@@ -444,99 +628,160 @@ fn render_tournaments_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContex
                         .color(egui::Color32::WHITE)
                         .strong(),
                 )
-                .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200)),
+                .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
+                .corner_radius(8.0)
+                .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
             ).clicked() {
-                info!("[MENU] Play the Computer clicked at level {}", diff_val);
-                ctx_menu.ai_config.mode = GameMode::VsAI { 
-                    ai_color: crate::rendering::pieces::PieceColor::Black 
+                info!("[MENU] Play the Computer clicked at level {}", ctx_menu.competitive_menu.ai_difficulty);
+                ctx_menu.ai_config.difficulty = crate::game::ai::resource::AIDifficulty::from_u8(ctx_menu.competitive_menu.ai_difficulty);
+                ctx_menu.ai_config.mode = GameMode::VsAI {
+                    ai_color: match ctx_menu.competitive_menu.ai_side {
+                        AISide::Black => crate::rendering::pieces::PieceColor::White,
+                        AISide::Random => {
+                            if rand::random::<bool>() {
+                                crate::rendering::pieces::PieceColor::White
+                            } else {
+                                crate::rendering::pieces::PieceColor::Black
+                            }
+                        }
+                        AISide::White => crate::rendering::pieces::PieceColor::Black,
+                    }
                 };
                 *ctx_menu.core_mode = CoreGameMode::SinglePlayer;
                 ctx_menu.next_state.set(GameState::InGame);
             }
         });
     });
+}
 
-    ui.add_space(30.0);
-    ui.separator();
-    ui.add_space(30.0);
-
-    ui.heading(
-        egui::RichText::new("OPEN TOURNAMENTS")
-            .size(18.0)
-            .color(egui::Color32::WHITE)
-            .strong(),
-    );
-    ui.add_space(15.0);
-    
-    // Dynamic tournament listings from VPS cached data
-    let mut tournaments_found = false;
-    if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
-        for listing in &vps_state.cached_games {
-            if listing.game_type == "tournament" {
-                tournaments_found = true;
-                ui.group(|ui| {
-                    ui.set_width(ui.available_width());
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new(&listing.display_name)
-                                .size(14.0)
-                                .color(egui::Color32::WHITE)
-                                .strong(),
-                        );
-                        let tag = if listing.stake_amount > 0.0 {
-                            format!("{:.3} SOL wager", listing.stake_amount)
-                        } else {
-                            "Free".to_string()
-                        };
-                        ui.label(
-                            egui::RichText::new(tag)
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(150, 200, 150)),
-                        );
-                        ui.add_space(5.0);
-                        if bezel_button_compact(ui, "Join", egui::Color32::from_rgb(100, 200, 100)) {
-                            ctx_menu.next_state.set(GameState::InGame);
-                        }
-                    });
-                });
-                ui.add_space(8.0);
-            }
-        }
-    }
-
-    if !tournaments_found {
+/// Render tournaments box at bottom
+fn render_tournaments_box(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
+    ui.group(|ui| {
+        ui.set_width(ui.available_width());
+        ui.set_height(250.0);
         ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            ui.label(
-                egui::RichText::new("No active tournaments found.")
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(100, 100, 100))
-                    .italics(),
+            ui.heading(
+                egui::RichText::new("TOURNAMENTS")
+                    .size(16.0)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
             );
         });
-    }
+        ui.add_space(10.0);
+        ui.vertical(|ui| {
+
+            // Dynamic tournament listings from VPS cached data
+            let mut tournaments_found = false;
+            if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
+                for listing in &vps_state.cached_games {
+                    if listing.game_type == "tournament" {
+                        tournaments_found = true;
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new(&listing.display_name)
+                                        .size(12.0)
+                                        .color(egui::Color32::WHITE)
+                                        .strong(),
+                                );
+                                let prize = if listing.stake_amount > 0.0 {
+                                    format!("{:.3} SOL", listing.stake_amount)
+                                } else {
+                                    "Free".to_string()
+                                };
+                                ui.label(
+                                    egui::RichText::new(prize)
+                                        .size(10.0)
+                                        .color(egui::Color32::from_rgb(150, 200, 150)),
+                                );
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add_sized(
+                                    [60.0, 24.0],
+                                    egui::Button::new(
+                                        egui::RichText::new("Join")
+                                            .size(11.0)
+                                            .color(egui::Color32::WHITE)
+                                            .strong(),
+                                    )
+                                    .fill(egui::Color32::from_rgb(100, 200, 100))
+                                    .corner_radius(6.0)
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
+                                ).clicked() {
+                                    ctx_menu.next_state.set(GameState::InGame);
+                                }
+                            });
+                        });
+                        ui.add_space(8.0);
+                    }
+                }
+            }
+
+            if !tournaments_found {
+                ui.label(
+                    egui::RichText::new("No active tournaments")
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(120, 120, 120))
+                        .italics(),
+                );
+            }
+        });
+    });
+}
+
+/// Render updates box at bottom
+fn render_updates_box(ui: &mut egui::Ui) {
+    ui.group(|ui| {
+        ui.set_width(ui.available_width());
+        ui.set_height(250.0);
+        ui.vertical_centered(|ui| {
+            ui.heading(
+                egui::RichText::new("UPDATES")
+                    .size(16.0)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
+            );
+        });
+        ui.add_space(10.0);
+        ui.vertical(|ui| {
+
+            ui.vertical_centered(|ui| {
+                ui.add_space(30.0);
+                ui.label(
+                    egui::RichText::new("XFChess Released stay tuned for updates!")
+                        .size(14.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 200))
+                        .italics(),
+                );
+            });
+        });
+    });
 }
 
 /// Render middle quick pairing section
 fn render_quick_pairing_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
-    ui.heading(
-        egui::RichText::new("QUICK PLAY")
-            .size(18.0)
-            .color(egui::Color32::WHITE)
-            .strong(),
-    );
+    ui.vertical_centered(|ui| {
+        ui.heading(
+            egui::RichText::new("QUICK PLAY")
+                .size(18.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
+    });
     ui.add_space(15.0);
 
     // Local PvP — always functional
     if ui.add_sized(
         [ui.available_width(), 40.0],
         egui::Button::new(
-            egui::RichText::new("♟  Local PvP")
+            egui::RichText::new("Local PvP")
                 .size(14.0)
                 .color(egui::Color32::WHITE)
                 .strong(),
         )
-        .fill(egui::Color32::from_rgba_unmultiplied(50, 80, 50, 200)),
+        .fill(egui::Color32::from_rgba_unmultiplied(50, 80, 50, 200))
+        .corner_radius(8.0)
+        .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
     ).clicked() {
         info!("[MENU] Starting Local PvP game");
         ctx_menu.ai_config.mode = GameMode::Multiplayer;
@@ -548,7 +793,7 @@ fn render_quick_pairing_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUICont
     // Online wager tiers (locked until wallet connected)
     let wagers = [("£2 Wager", 0.05), ("£5 Wager", 0.12), ("£10 Wager", 0.25)];
     for (name, _stake) in wagers {
-        let btn_text = format!("{} 🔒", name);
+        let btn_text = format!("{} (Locked)", name);
         let resp = ui.add_sized(
             [ui.available_width(), 36.0],
             egui::Button::new(
@@ -557,7 +802,9 @@ fn render_quick_pairing_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUICont
                     .color(egui::Color32::from_rgb(120, 120, 120))
                     .strong(),
             )
-            .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 150)),
+            .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 150))
+            .corner_radius(8.0)
+            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
         ).on_hover_text("Connect wallet to wager");
 
         if resp.clicked() {
@@ -568,14 +815,110 @@ fn render_quick_pairing_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUICont
     }
 }
 
+/// Render news section with XFChess released button - square shape
+fn render_news_section(ui: &mut egui::Ui, box_width: f32) {
+    ui.vertical_centered(|ui| {
+        ui.heading(
+            egui::RichText::new("NEWS")
+                .size(18.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
+    });
+    ui.add_space(10.0);
+
+    let square_size = box_width; // Fixed square size based on passed width
+
+    ui.group(|ui| {
+        ui.set_width(box_width);
+        ui.set_height(square_size);
+
+        ui.vertical_centered(|ui| {
+            ui.add_space(square_size * 0.15);
+
+            if ui.add_sized(
+                [box_width * 0.8, square_size * 0.35],
+                egui::Button::new(
+                    egui::RichText::new("XFChess released")
+                        .size(14.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                )
+                .fill(egui::Color32::from_rgba_unmultiplied(55, 55, 55, 200))
+                .corner_radius(8.0)
+                .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
+            ).clicked() {
+                info!("[MENU] Blog clicked - opening home page");
+                if let Err(e) = webbrowser::open("/") {
+                    warn!("[MENU] Failed to open home page: {}", e);
+                }
+            }
+
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("Latest updates and features")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(150, 150, 150))
+                    .italics(),
+            );
+        });
+    });
+}
+
+/// Render learn section (formerly featured game) - square shape
+fn render_learn_section(ui: &mut egui::Ui, box_width: f32) {
+    ui.vertical_centered(|ui| {
+        ui.heading(
+            egui::RichText::new("LEARN")
+                .size(18.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
+    });
+    ui.add_space(10.0);
+
+    let square_size = box_width; // Fixed square size based on passed width
+
+    ui.group(|ui| {
+        ui.set_width(box_width);
+        ui.set_height(square_size);
+
+        ui.vertical_centered(|ui| {
+            ui.add_space(square_size * 0.2);
+
+            ui.label(
+                egui::RichText::new("Immortal Zugzwang Game")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new("Sämisch vs Nimzowitsch, 1923")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(150, 150, 150))
+                    .italics(),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new("Study classic games")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(100, 100, 100)),
+            );
+        });
+    });
+}
+
 /// Render middle lobby section with live VPS listings and type filter.
 fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
-    ui.heading(
-        egui::RichText::new("LOBBY")
-            .size(18.0)
-            .color(egui::Color32::WHITE)
-            .strong(),
-    );
+    ui.vertical_centered(|ui| {
+        ui.heading(
+            egui::RichText::new("LOBBY")
+                .size(18.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
+    });
     ui.add_space(10.0);
 
     // Filter tabs: All | Free | Wagered
@@ -601,7 +944,7 @@ fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("🔄").on_hover_text("Refresh game list").clicked() {
+            if ui.small_button("Refresh").on_hover_text("Refresh game list").clicked() {
                 // Reset poll timer so the next frame triggers a new fetch
                 if let Some(ref mut vps) = ctx_menu.p2p_vps_state {
                     vps.last_poll = None;
@@ -666,6 +1009,33 @@ fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
                                 .size(11.0)
                                 .color(stake_col),
                         );
+
+                        // Show username if available
+                        if let Some(ref username) = listing.username {
+                            ui.label(
+                                egui::RichText::new(format!("@{}", username))
+                                    .size(10.0)
+                                    .color(egui::Color32::from_rgb(150, 150, 200)),
+                            );
+                        }
+
+                        // Show ELO if available
+                        if let Some(elo) = listing.elo {
+                            ui.label(
+                                egui::RichText::new(format!("ELO: {}", elo))
+                                    .size(10.0)
+                                    .color(egui::Color32::from_rgb(200, 200, 150)),
+                            );
+                        }
+
+                        // Show region if available
+                        if let Some(ref region) = listing.region {
+                            ui.label(
+                                egui::RichText::new(format!("📍 {}", region))
+                                    .size(10.0)
+                                    .color(egui::Color32::from_rgb(150, 200, 200)),
+                            );
+                        }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -674,7 +1044,18 @@ fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
                         } else {
                             egui::Color32::from_rgb(80, 200, 120)
                         };
-                        if bezel_button_compact(ui, "Join", join_col) {
+                        if ui.add_sized(
+                            [ui.available_width(), 28.0],
+                            egui::Button::new(
+                                egui::RichText::new("Join")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            )
+                            .fill(join_col)
+                            .corner_radius(8.0)
+                            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
+                        ).clicked() {
                             info!("[LOBBY] Joining game: {}", listing.game_id);
                             
                             if let Some(ref tx) = tx_channel {
@@ -743,24 +1124,28 @@ fn render_lobby_section(ui: &mut egui::Ui, ctx_menu: &mut MainMenuUIContext) {
 }
 
 
-/// Navbar link helper
+/// Navbar link helper with button styling
 fn nav_link(ui: &mut egui::Ui, text: &str) -> bool {
-    let response = ui.label(
-        egui::RichText::new(text)
-            .size(14.0)
-            .color(egui::Color32::from_rgb(200, 200, 200)),
+    let response = ui.add(
+        egui::Button::new(
+            egui::RichText::new(text)
+                .size(14.0)
+                .color(egui::Color32::from_rgb(200, 200, 200)),
+        )
+        .fill(egui::Color32::TRANSPARENT)
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 50)))
     );
-    
+
     if response.hovered() {
         ui.painter().rect(
             response.rect,
-            0.0,
+            4.0,
             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
-            egui::Stroke::NONE,
+            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100)),
             egui::epaint::StrokeKind::Middle,
         );
     }
-    
+
     response.clicked()
 }
 
@@ -781,12 +1166,296 @@ fn nav_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
             response.rect,
             0.0,
             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
-            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 150)),
+            egui::Stroke::NONE,
             egui::epaint::StrokeKind::Middle,
         );
     }
-    
+
     response
+}
+
+/// Grey bezel border color for popups
+const BEZEL_GREY: egui::Color32 = egui::Color32::from_rgb(100, 100, 100);
+
+/// Render AI setup modal with strength and side selection
+fn render_ai_setup_modal(
+    ctx: &egui::Context,
+    competitive: &mut CompetitiveMenuState,
+    ai_config: &mut crate::game::ai::resource::ChessAIResource,
+    core_mode: &mut CoreGameMode,
+    next_state: &mut NextState<GameState>,
+) {
+    let accent_color = egui::Color32::from_rgb(173, 92, 47); // #ad5c2f
+
+    egui::Window::new("Game Setup")
+        .collapsible(false)
+        .resizable(false)
+        .fixed_size(egui::Vec2::new(380.0, 400.0))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .frame(egui::Frame {
+            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
+            corner_radius: egui::Rounding::same(4),
+            stroke: egui::Stroke::new(2.0, BEZEL_GREY),
+            inner_margin: egui::Margin::same(16),
+            ..Default::default()
+        })
+        .show(ctx, |ui| {
+            // Close button only (window title already shows "Game Setup")
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        competitive.show_ai_setup = false;
+                    }
+                });
+            });
+
+            ui.add_space(12.0);
+
+            // Strength section
+            ui.label(
+                egui::RichText::new("Strength")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+
+            // Strength grid (1-8) - compact
+            let elos = [0, 400, 700, 1000, 1300, 1600, 1900, 2200, 2500];
+            ui.horizontal(|ui| {
+                for lvl in 1..=8 {
+                    let response = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(format!("{}", lvl))
+                                .size(14.0)
+                                .color(if competitive.ai_difficulty == lvl {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 160)
+                                })
+                        )
+                        .min_size(egui::Vec2::new(32.0, 32.0))
+                        .fill(if competitive.ai_difficulty == lvl {
+                            accent_color
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
+                        })
+                        .corner_radius(4.0)
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            if competitive.ai_difficulty == lvl {
+                                accent_color
+                            } else {
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                            }
+                        ))
+                    );
+
+                    if response.clicked() {
+                        competitive.ai_difficulty = lvl;
+                    }
+                    ui.add_space(4.0);
+                }
+            });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{} ELO", elos[competitive.ai_difficulty as usize]))
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(150, 150, 150)),
+                );
+            });
+
+            ui.add_space(16.0);
+
+            // Side selection (buttons are self-explanatory)
+            ui.add_space(10.0);
+
+            ui.horizontal(|ui| {
+                // Black
+                let black_selected = competitive.ai_side == AISide::Black;
+                if ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("Black")
+                            .size(14.0)
+                    )
+                    .min_size(egui::Vec2::new(70.0, 40.0))
+                    .corner_radius(4.0)
+                    .fill(if black_selected {
+                        accent_color
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
+                    })
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        if black_selected {
+                            accent_color
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                        }
+                    ))
+                ).clicked() {
+                    competitive.ai_side = AISide::Black;
+                }
+
+                ui.add_space(8.0);
+
+                // Random
+                let random_selected = competitive.ai_side == AISide::Random;
+                if ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("Random")
+                            .size(14.0)
+                    )
+                    .min_size(egui::Vec2::new(70.0, 40.0))
+                    .corner_radius(4.0)
+                    .fill(if random_selected {
+                        accent_color
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
+                    })
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        if random_selected {
+                            accent_color
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                        }
+                    ))
+                ).clicked() {
+                    competitive.ai_side = AISide::Random;
+                }
+
+                ui.add_space(8.0);
+
+                // White
+                let white_selected = competitive.ai_side == AISide::White;
+                if ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("White")
+                            .size(14.0)
+                    )
+                    .min_size(egui::Vec2::new(70.0, 40.0))
+                    .corner_radius(4.0)
+                    .fill(if white_selected {
+                        accent_color
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
+                    })
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        if white_selected {
+                            accent_color
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                        }
+                    ))
+                ).clicked() {
+                    competitive.ai_side = AISide::White;
+                }
+            });
+
+            ui.add_space(16.0);
+
+            // Launch button
+            if ui.add_sized(
+                [ui.available_width(), 36.0],
+                egui::Button::new(
+                    egui::RichText::new("Play")
+                        .size(14.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                )
+                .fill(accent_color)
+                .corner_radius(4.0)
+            ).clicked() {
+                info!("[MENU] AI setup modal - Play against computer clicked");
+                ai_config.difficulty = crate::game::ai::resource::AIDifficulty::from_u8(competitive.ai_difficulty);
+                ai_config.mode = GameMode::VsAI {
+                    ai_color: match competitive.ai_side {
+                        AISide::Black => crate::rendering::pieces::PieceColor::White,
+                        AISide::Random => {
+                            if rand::random::<bool>() {
+                                crate::rendering::pieces::PieceColor::White
+                            } else {
+                                crate::rendering::pieces::PieceColor::Black
+                            }
+                        }
+                        AISide::White => crate::rendering::pieces::PieceColor::Black,
+                    }
+                };
+                *core_mode = CoreGameMode::SinglePlayer;
+                next_state.set(GameState::InGame);
+                competitive.show_ai_setup = false;
+            }
+        });
+}
+
+/// Render spectator popup to view all games
+fn render_spectator_popup(ctx: &egui::Context, competitive: &mut CompetitiveMenuState) {
+    let accent_color = egui::Color32::from_rgb(173, 92, 47); // #ad5c2f
+
+    egui::Window::new("Spectator Mode")
+        .collapsible(false)
+        .resizable(false)
+        .fixed_size(egui::Vec2::new(500.0, 320.0))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .title_bar(false)
+        .frame(egui::Frame {
+            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
+            corner_radius: egui::Rounding::same(4),
+            stroke: egui::Stroke::new(2.0, BEZEL_GREY),
+            inner_margin: egui::Margin::same(16),
+            ..Default::default()
+        })
+        .show(ctx, |ui| {
+            // Header with X close button
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Spectator Mode")
+                        .size(18.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        competitive.show_spectator_popup = false;
+                    }
+                });
+            });
+
+            ui.add_space(12.0);
+
+            ui.label(
+                egui::RichText::new("No games available to spectate at the moment.")
+                    .size(14.0)
+                    .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180)),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("Check back later for live games.")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120))
+                    .italics(),
+            );
+
+            ui.add_space(20.0);
+
+            if ui.add_sized(
+                [ui.available_width(), 36.0],
+                egui::Button::new(
+                    egui::RichText::new("Close")
+                        .size(14.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                )
+                .fill(accent_color)
+                .corner_radius(4.0)
+            ).clicked() {
+                competitive.show_spectator_popup = false;
+            }
+        });
 }
 
 /// Loading screen for website menu
@@ -1486,6 +2155,9 @@ fn render_create_tab(
                 0.0,
                 "P2P",
                 10,
+                Some(display_name.clone()), // username from player identity
+                None, // ELO - will be fetched from profile in future
+                None, // Region - will be fetched from profile in future
             ) {
                 Ok(()) => {
                     info!("[LOBBY] Free game announced (id={}). Waiting for opponent via VPS.", game_id);
@@ -1604,12 +2276,12 @@ fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubk
     Some(solana_sdk::pubkey::Pubkey::from(arr))
 }
 
-#[cfg(feature = "solana")]
 /// System to render a popup asking if the user wants to create a regular P2P lobby or a Solana wager lobby.
 pub fn render_lobby_selection_popup(
     mut contexts: bevy_egui::EguiContexts,
     mut menu_state: ResMut<NextState<crate::core::MenuState>>,
-    solana_state: Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    #[cfg(feature = "solana")]
+    solana_state: Option<Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>>,
 ) {
     let Some(ctx) = contexts.ctx_mut().ok() else { return };
     
@@ -1640,10 +2312,10 @@ pub fn render_lobby_selection_popup(
                 
                 ui.add_space(32.0);
 
-                // Regular P2P Button
+                // Local Button
                 let reg_btn = ui.add_sized(
                     [240.0, 48.0],
-                    egui::Button::new(egui::RichText::new("Regular P2P (Free)").size(16.0).strong())
+                    egui::Button::new(egui::RichText::new("Local").size(16.0).strong())
                         .fill(egui::Color32::from_rgb(40, 40, 50))
                 ).on_hover_text("Standard match without on-chain wagering");
 
@@ -1653,25 +2325,41 @@ pub fn render_lobby_selection_popup(
                 
                 ui.add_space(16.0);
                 
-                // Solana Wager P2P Button
-                let sol_btn = ui.add_sized(
-                    [240.0, 48.0],
-                    egui::Button::new(egui::RichText::new("Solana Wager P2P").size(16.0).strong())
-                        .fill(egui::Color32::from_rgb(230, 57, 70))
-                ).on_hover_text("Play for SOL on-chain via Solana Devnet");
+                // Solana Wager P2P Button (only available with solana feature)
+                #[cfg(feature = "solana")]
+                {
+                    let solana_available = solana_state.as_ref().map(|s| s.wallet_pubkey.is_some()).unwrap_or(false);
+                    let sol_btn = ui.add_sized(
+                        [240.0, 48.0],
+                        egui::Button::new(egui::RichText::new("Solana Wager P2P").size(16.0).strong())
+                            .fill(if solana_available { egui::Color32::from_rgb(230, 57, 70) } else { egui::Color32::from_rgb(80, 80, 80) })
+                    ).on_hover_text(if solana_available { "Play for SOL on-chain via Solana Devnet" } else { "Solana not available - feature disabled" });
 
-                if sol_btn.clicked() {
-                    if solana_state.wallet_pubkey.is_none() {
-                        info!("[MENU] Solana wager blocked — wallet not connected. Opening sign-in.");
-                        if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
-                            warn!("[MENU] Failed to open sign-in page: {}", e);
+                    if sol_btn.clicked() && solana_available {
+                        if let Some(state) = solana_state.as_ref() {
+                            if state.wallet_pubkey.is_none() {
+                                info!("[MENU] Solana wager blocked — wallet not connected. Opening sign-in.");
+                                if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
+                                    warn!("[MENU] Failed to open sign-in page: {}", e);
+                                }
+                            } else if state.profile_status != crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername {
+                                info!("[MENU] Profile missing or incomplete. Redirecting to Profile Creation.");
+                                menu_state.set(crate::core::MenuState::ProfileCreation);
+                            } else {
+                                menu_state.set(crate::core::MenuState::SolanaLobby);
+                            }
                         }
-                    } else if solana_state.profile_status != crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername {
-                        info!("[MENU] Profile missing or incomplete. Redirecting to Profile Creation.");
-                        menu_state.set(crate::core::MenuState::ProfileCreation);
-                    } else {
-                        menu_state.set(crate::core::MenuState::SolanaLobby);
                     }
+                }
+                
+                #[cfg(not(feature = "solana"))]
+                {
+                    ui.add_sized(
+                        [240.0, 48.0],
+                        egui::Button::new(egui::RichText::new("Solana Wager P2P (Disabled)").size(16.0).strong())
+                            .fill(egui::Color32::from_rgb(80, 80, 80))
+                    ).on_hover_text("Solana feature not enabled in this build")
+                    .set_enabled(false);
                 }
                 
                 ui.add_space(32.0);

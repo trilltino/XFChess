@@ -40,31 +40,38 @@ pub struct SpectatorModePlugin;
 impl Plugin for SpectatorModePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpectatorMode>()
-            .add_systems(Update, spectator_ui_system);
+            // Must run in EguiPrimaryContextPass — EguiContexts is only valid there.
+            // The run condition avoids touching the egui context every frame when
+            // spectator mode is inactive, which previously blocked the main menu UI.
+            .add_systems(
+                bevy_egui::EguiPrimaryContextPass,
+                spectator_ui_system.run_if(|s: Res<SpectatorMode>| s.active),
+            );
     }
 }
 
 /// Main spectator UI system
+///
+/// Runs only in [`bevy_egui::EguiPrimaryContextPass`] and only when
+/// [`SpectatorMode::active`] is true, so it never touches the egui context
+/// during normal gameplay or menu rendering.
 fn spectator_ui_system(
     mut contexts: EguiContexts,
-    mut spectator: ResMut<SpectatorMode>,
+    spectator: Res<SpectatorMode>,
     state: Res<State<crate::core::GameState>>,
     game_mode: Res<crate::core::states::GameMode>,
 ) {
+    // HIDE ASCII window if we are in the "Full" spectator mode (InGame board)
+    if *state.get() == crate::core::GameState::InGame
+        && *game_mode == crate::core::states::GameMode::Spectator
+    {
+        return;
+    }
+
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,
         Err(_) => return,
     };
-
-    // Only show when active
-    if !spectator.active {
-        return;
-    }
-
-    // HIDE ASCII window if we are in the "Full" spectator mode (InGame board)
-    if *state.get() == crate::core::GameState::InGame && *game_mode == crate::core::states::GameMode::Spectator {
-        return;
-    }
 
     egui::Window::new("👁 Spectator Mode")
         .default_size([800.0, 600.0])
@@ -73,73 +80,57 @@ fn spectator_ui_system(
             // Header with game ID
             ui.horizontal(|ui| {
                 ui.heading(format!("Game: {}", spectator.game_id));
-                
+
                 if spectator.connected {
                     ui.colored_label(egui::Color32::GREEN, "● Live");
                 } else {
                     ui.colored_label(egui::Color32::RED, "○ Disconnected");
                 }
-                
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("❌ Leave").clicked() {
-                        spectator.active = false;
-                        spectator.connected = false;
-                    }
-                });
             });
-            
+
             ui.separator();
-            
+
             // Player info panel
             ui.horizontal(|ui| {
-                // White player
                 ui.vertical(|ui| {
                     ui.heading("White");
                     if let Some(ref white) = spectator.white_player {
-                        ui.label(format!("{}", white.username));
+                        ui.label(&white.username);
                         ui.label(format!("Rating: {}", white.rating));
                     } else {
                         ui.label("Waiting...");
                     }
                 });
-                
+
                 ui.separator();
-                
-                // VS indicator
-                ui.vertical_centered(|ui| {
-                    ui.heading("VS");
-                });
-                
+                ui.vertical_centered(|ui| ui.heading("VS"));
                 ui.separator();
-                
-                // Black player
+
                 ui.vertical(|ui| {
                     ui.heading("Black");
                     if let Some(ref black) = spectator.black_player {
-                        ui.label(format!("{}", black.username));
+                        ui.label(&black.username);
                         ui.label(format!("Rating: {}", black.rating));
                     } else {
                         ui.label("Waiting...");
                     }
                 });
             });
-            
+
             ui.separator();
-            
+
             // Chess board view (placeholder - shows FEN)
             ui.group(|ui| {
                 ui.heading("Board Position");
                 ui.monospace(&spectator.current_fen);
-                
-                // Simple ASCII board visualization
                 if !spectator.current_fen.is_empty() {
                     ui.separator();
                     render_simple_board(ui, &spectator.current_fen);
                 }
             });
-            
+
             ui.separator();
-            
+
             // Move history
             ui.group(|ui| {
                 ui.heading("Move History");
@@ -150,7 +141,7 @@ fn spectator_ui_system(
                             let move_num = i / 2 + 1;
                             let is_white = i % 2 == 0;
                             let prefix = if is_white {
-                                format!("{}.", move_num)
+                                format!("{}", move_num)
                             } else {
                                 String::new()
                             };
@@ -158,7 +149,7 @@ fn spectator_ui_system(
                         }
                     });
             });
-            
+
             // Error display
             if let Some(ref error) = spectator.error {
                 ui.separator();
@@ -241,7 +232,9 @@ fn piece_symbol(c: char) -> String {
     }
 }
 
-/// System to add spectator menu option to main menu
+/// System to add spectator menu option to main menu.
+///
+/// Must be scheduled in [`bevy_egui::EguiPrimaryContextPass`] by the caller.
 pub fn spectator_menu_ui(
     mut contexts: EguiContexts,
     mut spectator: ResMut<SpectatorMode>,
@@ -249,15 +242,15 @@ pub fn spectator_menu_ui(
     mut game_mode: ResMut<crate::core::states::GameMode>,
     braid_network: Res<crate::multiplayer::BraidNetworkState>,
 ) {
+    // Show join dialog only when spectator mode is not yet active
+    if spectator.active {
+        return;
+    }
+
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,
         Err(_) => return,
     };
-    
-    // Show join dialog when not active
-    if spectator.active {
-        return;
-    }
     
     egui::Window::new("Spectate Game")
         .collapsible(false)
@@ -297,7 +290,12 @@ pub fn spectator_menu_ui(
                                     spectator.current_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
                                     
                                     // Transition to Full Spectator Mode
-                                    game_mode.set_if_different(crate::core::states::GameMode::Spectator);
+                                    {
+                                        let next_mode = crate::core::states::GameMode::Spectator;
+                                        if *game_mode != next_mode {
+                                            *game_mode = next_mode;
+                                        }
+                                    }
                                     next_state.set(crate::core::GameState::InGame);
                                 }
                             });

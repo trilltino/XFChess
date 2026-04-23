@@ -14,6 +14,9 @@ pub struct P2PGameAnnouncement {
     pub time_control_minutes: u32,
     pub created_at: DateTime<Utc>,
     pub status: GameStatus,
+    pub username: Option<String>,
+    pub elo: Option<u16>,
+    pub region: Option<String>,
 }
 
 /// Game status in the relay system
@@ -38,6 +41,9 @@ pub struct GameListing {
     pub game_type: String,
     pub time_control_minutes: u32,
     pub status: GameStatus,
+    pub username: Option<String>,
+    pub elo: Option<u16>,
+    pub region: Option<String>,
 }
 
 /// Internal active game state
@@ -61,6 +67,9 @@ pub struct AnnounceGameRequest {
     pub stake_amount: f64,
     pub game_type: String,
     pub time_control_minutes: u32,
+    pub username: Option<String>,
+    pub elo: Option<u16>,
+    pub region: Option<String>,
 }
 
 /// Response to game announcement

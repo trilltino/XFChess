@@ -4,7 +4,6 @@
 //! are received, allowing UI systems to react to tournament updates.
 
 use bevy::prelude::*;
-use crate::multiplayer::AddMessage;
 
 /// Event emitted when a new round starts
 #[derive(Message, Event, Debug, Clone)]

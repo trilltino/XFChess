@@ -31,6 +31,8 @@ pub struct SigningConfig {
     pub vps_authority_key: Option<String>,
     /// Base58 encoded KYC authority private key
     pub kyc_authority_key: Option<String>,
+    /// Admin token for protected endpoints (POST /admin/dispute/resolve, etc.)
+    pub admin_token: Option<String>,
     /// Host treasury pubkey - receives entry fees directly
     pub host_treasury_pubkey: String,
     /// USDC mint address (devnet or mainnet)
@@ -69,9 +71,9 @@ impl SigningConfig {
             program_id: env::var("PROGRAM_ID")
                 .unwrap_or_else(|_| "AhkTK5LVJHvR51gmDXbsJsqq4wg381AH6vTiaFGGJPWm".into()),
             jwt_secret: env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "11111111111111111111111111111111".to_string()),
+                .expect("JWT_SECRET must be set — generate with: openssl rand -hex 32"),
             identity_encryption_key: env::var("IDENTITY_ENCRYPTION_KEY")
-                .unwrap_or_else(|_| "0000000000000000000000000000000000000000000000000000000000000000".to_string()),
+                .expect("IDENTITY_ENCRYPTION_KEY must be set — generate with: openssl rand -hex 32"),
             identity_salt: env::var("IDENTITY_SALT")
                 .unwrap_or_else(|_| "1111111111111111111111111111111111111111111111111111111111111111".to_string()),
             fee_payer_keys: env::var("FEE_PAYER_KEYS")
@@ -82,8 +84,9 @@ impl SigningConfig {
                 .collect(),
             vps_authority_key: env::var("VPS_AUTHORITY_KEY").ok(),
             kyc_authority_key: env::var("KYC_AUTHORITY_KEY").ok(),
+            admin_token: env::var("ADMIN_TOKEN").ok(),
             host_treasury_pubkey: env::var("HOST_TREASURY_PUBKEY")
-                .unwrap_or_else(|_| "11111111111111111111111111111111".to_string()),
+                .unwrap_or_else(|_| "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string()),
             usdc_mint_pubkey: env::var("USDC_MINT")
                 .unwrap_or_else(|_| "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".to_string()),
         }

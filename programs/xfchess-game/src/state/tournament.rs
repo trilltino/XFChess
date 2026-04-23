@@ -17,6 +17,10 @@ pub struct Tournament {
     /// Current number of registered players.
     pub registered_count: u16,
     pub status: TournamentStatus,
+    pub start_time: Option<i64>,
+    pub end_time: Option<i64>,
+    pub fees_advanced: u64, // Accumulator for operational fees paid by relayer
+    pub fee_payer: Pubkey, // Relayer wallet that paid; reimbursed at claim
     pub tournament_type: TournamentType,
     pub current_round: u8,
     /// Total rounds (for Swiss tournaments only).
@@ -38,10 +42,24 @@ pub struct Tournament {
     pub third_place: Option<Pubkey>,
     /// Fourth place (other semifinal loser).
     pub fourth_place: Option<Pubkey>,
-    /// Prize distribution for top 8: [1st%, 2nd%, 3rd%, 4th%, 5th%, 6th%, 7th%, 8th%] in basis points.
-    /// Default for 16+ players: [5000, 3000, 1500, 500, 0, 0, 0, 0] = 50/30/15/5%
-    /// For 8 players: [10000, 0, 0, 0, 0, 0, 0, 0] = winner-take-all
-    pub prize_shares: [u16; 8],
+    /// Fifth place
+    pub fifth_place: Option<Pubkey>,
+    /// Sixth place
+    pub sixth_place: Option<Pubkey>,
+    /// Seventh place
+    pub seventh_place: Option<Pubkey>,
+    /// Eighth place
+    pub eighth_place: Option<Pubkey>,
+    /// Ninth place
+    pub ninth_place: Option<Pubkey>,
+    /// Tenth place
+    pub tenth_place: Option<Pubkey>,
+    /// Prize distribution for top 10: [1st%, 2nd%, 3rd%, 4th%, 5th%, 6th%, 7th%, 8th%, 9th%, 10th%] in basis points.
+    /// 64 and below (top 3): [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0] = 60/30/10%
+    /// 128 players (top 5): [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0] = 50/25/15/5/5%
+    /// 256 players (top 10): [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300] = 40/20/12/8/6/4/3/2/2/3%
+    /// Winner-takes-all: [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    pub prize_shares: [u16; 10],
     /// Registered players (up to 256).
     #[max_len(256)]
     pub players: Vec<Pubkey>,
@@ -116,4 +134,31 @@ pub struct SwissStanding {
     pub buchholz: u16,  // Sum of opponents' scores
     pub sonneborn: u16,  // Sum of defeated opponents' scores + 0.5*draws
     pub color_balance: i8,  // Whites - blacks (should balance to 0)
+}
+
+/// Returns competitive default prize distribution based on tournament size.
+/// If winner_takes_all is true, returns [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0].
+pub fn get_default_prize_shares(max_players: u16, winner_takes_all: bool) -> [u16; 10] {
+    if winner_takes_all {
+        return [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    }
+
+    match max_players {
+        0..=64 => {
+            // Top 3: 60/30/10%
+            [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]
+        }
+        128 => {
+            // Top 5: 50/25/15/5/5% (4th and 5th equal)
+            [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0]
+        }
+        256 => {
+            // Top 10: 40/20/12/8/6/4/3/2/2/3% (top prizes attractive, 7-10 get smaller)
+            [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300]
+        }
+        _ => {
+            // Default to 64 and below distribution
+            [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]
+        }
+    }
 }

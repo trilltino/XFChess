@@ -22,6 +22,8 @@ impl Plugin for SolanaIntegrationPlugin {
         app.add_systems(Update, authorize_session_key_on_game_start);
         app.add_systems(Update, check_profile_on_connect);
         app.add_systems(Update, handle_profile_check_tasks);
+        app.add_systems(Update, fetch_user_status_async);
+        app.add_systems(Update, sync_player_profiles);
         
         // Profile creation UI systems
         app.add_systems(OnEnter(MenuState::ProfileCreation), spawn_profile_creation_ui);

@@ -5,7 +5,6 @@
 use crate::multiplayer::solana::addon::{
     CompetitiveMatchState, SolanaGameSync, SolanaProfile, SolanaWallet,
 };
-use crate::ui::popup::{GamePopup, GamePopupQueue};
 use crate::ui::styles::UiColors;
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -40,13 +39,6 @@ pub fn render_solana_panel(
                         });
                     }
                 });
-                if wallet.keypair.is_some() {
-                    ui.label(
-                        egui::RichText::new("⚠ Hot wallet — fund on devnet faucet")
-                            .size(10.0)
-                            .color(UiColors::WARNING),
-                    );
-                }
                 if ui.small_button("Disconnect").clicked() {
                     wallet.pubkey = None;
                     wallet.keypair = None;
@@ -77,6 +69,41 @@ pub fn render_solana_panel(
 
         ui.add_space(10.0);
 
+        // --- Verification Section ---
+        if wallet.pubkey.is_some() {
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("VERIFICATION").strong());
+                
+                let status = &wallet.user_status;
+                let has_profile = status.as_ref().map(|s| s.has_profile).unwrap_or(false);
+                let has_email = status.as_ref().map(|s| s.has_email).unwrap_or(false);
+                let has_kyc = status.as_ref().map(|s| s.has_kyc).unwrap_or(false);
+                let can_wager = status.as_ref().map(|s| s.can_wager).unwrap_or(false);
+
+                ui.horizontal(|ui| {
+                    ui.label(if has_profile { "✓" } else { "✗" });
+                    ui.label("Profile");
+                });
+                ui.horizontal(|ui| {
+                    ui.label(if has_email { "✓" } else { "✗" });
+                    ui.label("Email");
+                });
+                ui.horizontal(|ui| {
+                    ui.label(if has_kyc { "✓" } else { "✗" });
+                    ui.colored_label(if has_kyc { UiColors::SUCCESS } else { UiColors::DANGER }, "KYC — required for wagered play");
+                });
+
+                ui.add_space(5.0);
+                let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
+                let profile_url = format!("{}/profile", backend_url);
+                if ui.button("Complete at xfchess.gg/profile →").clicked() {
+                    let _ = webbrowser::open(&profile_url);
+                }
+            });
+        }
+
+        ui.add_space(10.0);
+
         // --- Stats Section ---
         ui.group(|ui| {
             ui.label(egui::RichText::new("ON-CHAIN STATS").strong());
@@ -87,8 +114,10 @@ pub fn render_solana_panel(
                 profile.wins, profile.losses, profile.draws
             ));
             ui.add_space(5.0);
+            let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
+            let profile_url = format!("{}/profile", backend_url);
             if ui.button("Manage Profile (Web)").clicked() {
-                let _ = webbrowser::open("http://localhost:5173/profile");
+                let _ = webbrowser::open(&profile_url);
             }
         });
 
@@ -137,32 +166,4 @@ pub fn render_solana_panel(
             ui.colored_label(UiColors::DANGER, err);
         }
     });
-}
-
-/// One-shot system: fires when entering InGame with a hot (browser) wallet.
-/// Reads XFCHESS_HOT_WALLET env var (set by Tauri to the wallet pubkey).
-pub fn show_hot_wallet_faucet_popup(
-    mut queue: ResMut<GamePopupQueue>,
-) {
-    let Ok(pk_str) = std::env::var("XFCHESS_HOT_WALLET") else { return };
-    if pk_str.is_empty() { return; }
-
-    // Prevent duplicate faucet popups in the queue
-    if queue.entries.iter().any(|p| p.title == "Fund Your Hot Wallet") {
-        return;
-    }
-
-    queue.push(
-        GamePopup::warning(
-            "Fund Your Hot Wallet",
-            "This is a fresh hot wallet generated for this session.\n\
-             Send devnet SOL from the faucet to play ranked games.",
-        )
-        .with_copy(pk_str.clone())
-        .with_url(
-            "https://faucet.solana.com/".to_string(),
-            "Open Faucet →",
-        )
-        .persistent(),
-    );
 }

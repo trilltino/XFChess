@@ -48,6 +48,9 @@ pub async fn announce_game(
         time_control_minutes: req.time_control_minutes,
         created_at: chrono::Utc::now(),
         status: GameStatus::Open,
+        username: req.username,
+        elo: req.elo,
+        region: req.region,
     };
 
     let active_game = ActiveGame {
@@ -82,6 +85,9 @@ pub async fn list_games(
             game_type: g.announcement.game_type.clone(),
             time_control_minutes: g.announcement.time_control_minutes,
             status: g.announcement.status.clone(),
+            username: g.announcement.username.clone(),
+            elo: g.announcement.elo,
+            region: g.announcement.region.clone(),
         })
         .collect();
 

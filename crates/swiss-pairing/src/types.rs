@@ -108,6 +108,12 @@ pub struct SwissRound {
     pub pairings: Vec<Pairing>,
     /// Players receiving a bye this round
     pub byes: Vec<String>,
+    /// Players who floated down (could not be paired within their scoregroup)
+    #[serde(default)]
+    pub float_downs: Vec<String>,
+    /// Players who floated up (paired from a lower scoregroup into a higher one)
+    #[serde(default)]
+    pub float_ups: Vec<String>,
 }
 
 /// Match result

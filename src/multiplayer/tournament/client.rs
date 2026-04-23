@@ -9,7 +9,7 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tracing::info;
 
-use crate::multiplayer::braid_network::BraidNetworkState;
+use crate::multiplayer::BraidNetworkState;
 
 /// Plugin for tournament gossip client
 pub struct TournamentClientPlugin;
@@ -17,9 +17,9 @@ pub struct TournamentClientPlugin;
 impl Plugin for TournamentClientPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TournamentClientState>()
-            .add_event::<RoundStarted>()
-            .add_event::<ResultRecorded>()
-            .add_event::<StandingsUpdated>()
+            .add_message::<RoundStarted>()
+            .add_message::<ResultRecorded>()
+            .add_message::<StandingsUpdated>()
             .add_systems(Update, process_gossip_messages);
     }
 }
@@ -146,15 +146,24 @@ fn process_gossip_messages(
     mut result_recorded_events: MessageWriter<ResultRecorded>,
     mut standings_updated_events: MessageWriter<StandingsUpdated>,
 ) {
-    let Some(rx) = client_state.gossip_rx.as_mut() else {
-        return;
-    };
+    // Drain all pending messages first so we release the mutable borrow on
+    // `client_state.gossip_rx` before touching other fields of `client_state`
+    // below. Without this, the borrow checker complains about overlapping
+    // mutable/immutable borrows of `client_state` inside the loop.
+    let mut pending: Vec<SwissMessage> = Vec::new();
+    {
+        let Some(rx) = client_state.gossip_rx.as_mut() else {
+            return;
+        };
+        while let Ok(message) = rx.try_recv() {
+            pending.push(message);
+        }
+    }
 
-    // Process all pending messages without blocking
-    while let Ok(message) = rx.try_recv() {
-        let player_id = client_state.player_id.clone();
-        let tournament_id = client_state.active_tournament;
+    let player_id = client_state.player_id.clone();
+    let _tournament_id = client_state.active_tournament;
 
+    for message in pending {
         match message {
             SwissMessage::RoundStarted {
                 tournament_id: msg_tournament_id,
@@ -172,7 +181,7 @@ fn process_gossip_messages(
 
                 client_state.my_pairing = my_pairing.clone();
 
-                round_started_events.send(RoundStarted {
+                round_started_events.write(RoundStarted {
                     tournament_id: msg_tournament_id,
                     round,
                     my_pairing,
@@ -196,7 +205,7 @@ fn process_gossip_messages(
                     braid_iroh::protocol::MatchResult::Draw => (0.5, 0.5),
                 };
 
-                result_recorded_events.send(ResultRecorded {
+                result_recorded_events.write(ResultRecorded {
                     tournament_id: msg_tournament_id,
                     round,
                     board,
@@ -228,7 +237,7 @@ fn process_gossip_messages(
                 client_state.standings = entries.clone();
                 client_state.my_rank = my_rank;
 
-                standings_updated_events.send(StandingsUpdated {
+                standings_updated_events.write(StandingsUpdated {
                     tournament_id: msg_tournament_id,
                     standings: entries,
                     my_rank,

@@ -183,13 +183,36 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
             .ok_or_else(|| "Stockfish executable not found. Ensure stockfish.exe is in the application folder.".to_string())?;
         
         info!("[AI] Starting Stockfish process at: {}", stockfish_path);
-        
-        let mut child = Command::new(stockfish_path)
+
+        /// Spawn Stockfish UCI engine as a child process.
+        ///
+        /// Stockfish communicates via the Universal Chess Interface (UCI) protocol:
+        /// - stdin:  Send commands to the engine (uci, isready, position, go, quit)
+        /// - stdout: Receive engine responses (uciok, readyok, info, bestmove)
+        /// - stderr: Discarded (engine logs not needed for gameplay)
+        ///
+        /// The UCI protocol is stateful - we first initialize the engine,
+        /// then feed positions and search commands, finally reading the best move.
+        ///
+        /// # Protocol Flow
+        /// 1. "uci" -> wait for "uciok"
+        /// 2. "isready" -> wait for "readyok"
+        /// 3. "position fen <FEN>" -> set board state
+        /// 4. "go movetime <ms>" or "go depth <n>" -> start search
+        /// 5. Parse "info" lines for score/depth updates
+        /// 6. Read "bestmove <move>" -> search complete
+        /// 7. "quit" -> terminate engine
+        ///
+        /// # Stockfish Documentation
+        /// - UCI Protocol: https://backscattering.de/chess/uci/
+        /// - Stockfish GitHub: https://github.com/official-stockfish/Stockfish
+        /// - Stockfish Wiki: https://github.com/official-stockfish/Stockfish/wiki
+        let mut child = Command::new(&stockfish_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("Failed to spawn Stockfish: {}", e))?;
+            .map_err(|e| format!("Failed to spawn Stockfish at '{}': {}", stockfish_path, e))?;
         
         let mut stdin = child.stdin.take().ok_or("Failed to get stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to get stdout")?;

@@ -158,20 +158,18 @@ pub fn log_game_state_system(
     mut timer: ResMut<StateLoggerTimer>,
     time: Res<Time>,
     persistent_camera: Option<Res<crate::PersistentEguiCamera>>,
-    camera_query: Query<Entity, With<bevy_egui::PrimaryEguiContext>>,
+    camera_query: Query<Entity, With<Camera3d>>,
 ) {
     if timer.tick(time.delta()).just_finished() {
         let current_state = state.get();
         let mut state_info = format!("State: {:?}", current_state);
 
-        // Log MenuState if we're in MainMenu
         if *current_state == GameState::MainMenu {
             if let Some(menu_state_res) = menu_state {
                 state_info.push_str(&format!(" | Menu: {:?}", menu_state_res.get()));
             }
         }
 
-        // Log computed states (only if relevant)
         if InMenus::compute(*current_state).is_some() {
             state_info.push_str(" | InMenus");
         }
@@ -181,11 +179,11 @@ pub fn log_game_state_system(
 
         debug!("[STATE] {}", state_info);
 
-        // Only log camera errors, not status
+        // Verify the persistent camera entity is still alive
         if let Some(persistent_camera_res) = persistent_camera {
             if let Some(camera_entity) = persistent_camera_res.entity {
                 if camera_query.get(camera_entity).is_err() {
-                    error!("[STATE] Camera entity {:?} query failed", camera_entity);
+                    error!("[STATE] Persistent camera entity {:?} missing Camera3d", camera_entity);
                 }
             }
         }

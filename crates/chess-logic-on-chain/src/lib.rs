@@ -43,3 +43,26 @@ pub mod validation {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::validation::is_move_legal;
+
+    #[test]
+    fn test_invalid_fen_returns_false() {
+        assert!(!is_move_legal("not-a-fen", "e2e4"));
+    }
+
+    #[test]
+    fn test_invalid_move_format_returns_false() {
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        assert!(!is_move_legal(fen, "zzzz"));
+    }
+
+    #[test]
+    fn test_known_illegal_move_returns_false() {
+        // e2e5 is not a legal pawn move from start
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        assert!(!is_move_legal(fen, "e2e5"));
+    }
+}

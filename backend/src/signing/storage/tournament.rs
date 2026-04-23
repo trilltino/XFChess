@@ -120,8 +120,20 @@ pub struct TournamentRecord {
     pub third_place: Option<String>,
     /// Fourth place
     pub fourth_place: Option<String>,
-    /// Prize distribution [1st%, 2nd%, 3rd%, 4th%] in basis points (10000 = 100%)
-    pub prize_shares: [u16; 4],
+    /// Fifth place
+    pub fifth_place: Option<String>,
+    /// Sixth place
+    pub sixth_place: Option<String>,
+    /// Seventh place
+    pub seventh_place: Option<String>,
+    /// Eighth place
+    pub eighth_place: Option<String>,
+    /// Ninth place
+    pub ninth_place: Option<String>,
+    /// Tenth place
+    pub tenth_place: Option<String>,
+    /// Prize distribution [1st-10th%] in basis points (10000 = 100%)
+    pub prize_shares: [u16; 10],
     /// Swiss-specific data (None for single-elimination)
     pub swiss_data: Option<SwissStorageData>,
     /// Minimum ELO rating for players (optional)
@@ -152,7 +164,7 @@ impl TournamentRecord {
             name,
             entry_fee_lamports,
             8,
-            [10000, 0, 0, 0],
+            [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             TournamentFormat::SingleElimination,
             None,
             None,
@@ -168,7 +180,7 @@ impl TournamentRecord {
         name: String,
         entry_fee_lamports: u64,
         max_players: u16,
-        prize_shares: [u16; 4],
+        prize_shares: [u16; 10],
         format: TournamentFormat,
         elo_min: Option<u32>,
         elo_max: Option<u32>,
@@ -193,6 +205,12 @@ impl TournamentRecord {
             second_place: None,
             third_place: None,
             fourth_place: None,
+            fifth_place: None,
+            sixth_place: None,
+            seventh_place: None,
+            eighth_place: None,
+            ninth_place: None,
+            tenth_place: None,
             prize_shares,
             swiss_data: None,
             elo_min,

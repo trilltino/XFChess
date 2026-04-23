@@ -4,4 +4,5 @@ pub mod lobby;
 pub mod session_authorization;
 pub mod session_key_manager;
 pub mod tournament;
+pub mod tournament_session;
 pub mod tauri_signer;

@@ -85,7 +85,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
 
             ui.vertical(|ui| {
                 // Player Info section
-                let is_spectating = *params.game_mode == CoreGameMode::Spectator;
+                let is_spectating = *params.game_mode == GameMode::Spectator;
                 
                 if is_spectating {
                     ui.colored_label(UiColors::ACCENT_GOLD, egui::RichText::new("👁 SPECTATING").size(16.0).strong());
@@ -95,30 +95,89 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 ui.separator();
                 ui.add_space(8.0);
                 
-                let is_singleplayer = *params.game_mode == CoreGameMode::SinglePlayer;
+                let is_singleplayer = *params.game_mode == GameMode::SinglePlayer;
                 
-                // Get player names (from feed if spectating, else default)
-                let white_name = if is_spectating {
-                    params.spectator_mode.white_player.as_ref().map(|p| p.username.clone()).unwrap_or_else(|| "White Player".to_string())
+                // Get player names and ELO
+                let is_competitive = *params.game_mode == GameMode::MultiplayerCompetitive;
+                let (white_name, white_elo, white_flag, white_sol) = if is_spectating {
+                    let w = params.spectator_mode.white_player.as_ref();
+                    (
+                        format!("{} {}", w.map(|p| country_to_flag(&p.country)).unwrap_or_else(|| "🏳".to_string()), w.map(|p| p.username.clone()).unwrap_or_else(|| "White Player".to_string())),
+                        w.map(|p| format!("{} ELO", p.rating)).unwrap_or_default(),
+                        "".to_string(),
+                        "".to_string()
+                    )
+                } else if is_competitive {
+                    // In competitive, we are either white or black.
+                    // For now, let's assume if we are connected, we have our profile.
+                    if let (Some(profile), Some(comp)) = (params.solana_profile.as_ref(), params.competitive_match.as_ref()) {
+                        // TODO: Determine if we are white or black to show correct opponent info
+                        // For simplicity, we'll show our info and opponent info from CompetitiveMatchState
+                        // We'll use a placeholder logic to decide who is who for now
+                        // Usually white is the creator
+                        // let is_creator = params.rollup_manager.is_creator; // TODO: Fix this when rollup_manager is available
+                        let is_creator = true; // Temporary placeholder
+                        if is_creator {
+                            (
+                                format!("{} {}", country_to_flag(&profile.country), profile.username),
+                                format!("{} ELO", profile.elo),
+                                "".to_string(), // flag already in name
+                                format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
+                            )
+                        } else {
+                            (
+                                format!("{} {}", country_to_flag(&comp.opponent_country), comp.opponent_username),
+                                format!("{} ELO", comp.opponent_elo),
+                                "".to_string(),
+                                format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
+                            )
+                        }
+                    } else {
+                        ("White Player".to_string(), "1200 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
+                    }
                 } else {
-                    "White Player".to_string()
-                };
-                
-                let black_name = if is_spectating {
-                    params.spectator_mode.black_player.as_ref().map(|p| p.username.clone()).unwrap_or_else(|| "Black Player".to_string())
-                } else {
-                    "Black Player".to_string()
+                    ("White Player".to_string(), "".to_string(), "🏳".to_string(), "".to_string())
                 };
 
-                let (w_elo, w_sol) = if is_singleplayer || is_spectating { ("", "") } else { ("1200 ELO", "0.5 SOL") };
-                let (b_elo, b_sol) = if is_singleplayer || is_spectating { ("", "") } else { ("1180 ELO", "0.5 SOL") };
+                let (black_name, black_elo, black_flag, black_sol) = if is_spectating {
+                    let b = params.spectator_mode.black_player.as_ref();
+                    (
+                        format!("{} {}", b.map(|p| country_to_flag(&p.country)).unwrap_or_else(|| "🏳".to_string()), b.map(|p| p.username.clone()).unwrap_or_else(|| "Black Player".to_string())),
+                        b.map(|p| format!("{} ELO", p.rating)).unwrap_or_default(),
+                        "".to_string(),
+                        "".to_string()
+                    )
+                } else if is_competitive {
+                    if let (Some(profile), Some(comp)) = (params.solana_profile.as_ref(), params.competitive_match.as_ref()) {
+                        let is_creator = params.rollup_manager.as_ref().map(|rm| rm.is_creator).unwrap_or(true);
+                        if !is_creator {
+                            (
+                                format!("{} {}", country_to_flag(&profile.country), profile.username),
+                                format!("{} ELO", profile.elo),
+                                "".to_string(),
+                                format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
+                            )
+                        } else {
+                            (
+                                format!("{} {}", country_to_flag(&comp.opponent_country), comp.opponent_username),
+                                format!("{} ELO", comp.opponent_elo),
+                                "".to_string(),
+                                format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
+                            )
+                        }
+                    } else {
+                        ("Black Player".to_string(), "1180 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
+                    }
+                } else {
+                    ("Black Player".to_string(), "".to_string(), "🏳".to_string(), "".to_string())
+                };
 
                 // White Player Info
-                render_player_info(ui, &white_name, w_elo, w_sol, true);
+                render_player_info(ui, &white_name, &white_elo, &white_sol, true);
                 ui.add_space(6.0);
                 
                 // Black Player Info
-                render_player_info(ui, &black_name, b_elo, b_sol, false);
+                render_player_info(ui, &black_name, &black_elo, &black_sol, false);
                 
                 ui.add_space(12.0);
                 ui.separator();
@@ -569,4 +628,19 @@ fn format_time(seconds: f32) -> String {
     let minutes = total_seconds / 60;
     let secs = total_seconds % 60;
     format!("{:02}:{:02}", minutes, secs)
+}
+
+/// Helper to convert ISO country code to emoji flag
+fn country_to_flag(country_code: &str) -> String {
+    if country_code.len() != 2 {
+        return "🏳".to_string();
+    }
+    let mut flag = String::new();
+    for c in country_code.to_uppercase().chars() {
+        let cp = c as u32 + 127397;
+        if let Some(ch) = std::char::from_u32(cp) {
+            flag.push(ch);
+        }
+    }
+    flag
 }

@@ -3,8 +3,7 @@
 
 use bevy::prelude::*;
 use solana_sdk::pubkey::Pubkey;
-use tokio::sync::oneshot;
-use crate::multiplayer::{Message, MessageWriter};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::multiplayer::vps_client::TournamentSummary;
 
@@ -137,6 +136,29 @@ pub fn spawn_register_tournament(
         .detach();
 }
 
+/// Gate helper with structured error messages and profile URL.
+/// Fetches current verification status live and reports exactly which tiers are missing.
+fn require_wager_eligibility_with_url(wallet_pubkey: &str) -> Result<(), String> {
+    use crate::multiplayer::vps_client;
+    let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
+    let status = match vps_client::get_user_status(wallet_pubkey) {
+        Ok(s) => s,
+        Err(e) => return Err(format!("Tournament entry requires verification. Could not check status: {}. Visit {}/profile", e, backend_url)),
+    };
+    if status.can_wager {
+        return Ok(());
+    }
+    let mut missing = Vec::new();
+    if !status.has_profile { missing.push("Profile"); }
+    if !status.has_email   { missing.push("Email"); }
+    if !status.has_kyc     { missing.push("KYC"); }
+    Err(format!(
+        "Wagered play requires: {} (missing). Visit {}/profile to complete.",
+        missing.join(" + "),
+        backend_url,
+    ))
+}
+
 async fn async_register_tournament(
     rpc_url: String,
     program_id: Pubkey,
@@ -145,8 +167,12 @@ async fn async_register_tournament(
     _elo: u32,
 ) -> Result<usize, String> {
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
+    use crate::multiplayer::vps_client;
     use crate::solana::instructions::{init_profile_ix, register_player_ix, PROFILE_SEED};
     use solana_client::rpc_client::RpcClient;
+
+    // Gate: cash tournaments require wallet + email + KYC + can_wager.
+    require_wager_eligibility_with_url(&wallet_pubkey.to_string())?;
 
     // Check whether a PlayerProfile PDA already exists for this wallet.
     // If not, prepend init_profile so it gets created in the same transaction.
@@ -192,12 +218,16 @@ async fn async_register_tournament(
     Ok(slot)
 }
 
-/// Spawn a background task to subscribe to Swiss tournament updates via Iroh gossip
+/// Spawn a background task to subscribe to Swiss tournament updates via Iroh
+/// gossip. Decoded events are forwarded on the provided `tokio::sync::mpsc`
+/// senders, which a Bevy system can drain into the real `MessageWriter`s. We
+/// can't push into a `MessageWriter` directly from a detached async task
+/// because `MessageWriter` is a borrowed `SystemParam` (`!'static`).
 pub fn spawn_swiss_subscription(
     tournament_id: u64,
-    mut event_sender: MessageWriter<SwissRoundStartedEvent>,
-    mut result_sender: MessageWriter<SwissResultRecordedEvent>,
-    mut standings_sender: MessageWriter<SwissStandingsUpdatedEvent>,
+    round_tx: mpsc::UnboundedSender<SwissRoundStartedEvent>,
+    result_tx: mpsc::UnboundedSender<SwissResultRecordedEvent>,
+    standings_tx: mpsc::UnboundedSender<SwissStandingsUpdatedEvent>,
 ) {
     bevy::tasks::IoTaskPool::get().spawn(async move {
         use braid_iroh::BraidIrohNode;
@@ -252,34 +282,46 @@ pub fn spawn_swiss_subscription(
         info!("[Swiss] Subscribed to topic {}", topic);
 
         // Process incoming messages
-        while let Ok(msg) = rx.recv().await {
-            if let Ok(text) = std::str::from_utf8(&msg) {
-                if let Ok(swiss_msg) = serde_json::from_str::<braid_iroh::protocol::SwissMessage>(text) {
-                    match swiss_msg {
-                        braid_iroh::protocol::SwissMessage::RoundStarted { round, pairings, .. } => {
-                            event_sender.send(SwissRoundStartedEvent {
-                                tournament_id,
-                                round,
-                                pairings: pairings.iter().map(|(w, b)| (w.clone(), b.clone())).collect(),
-                            });
-                        }
-                        braid_iroh::protocol::SwissMessage::ResultRecorded { round, board, white, black, result, .. } => {
-                            result_sender.send(SwissResultRecordedEvent {
-                                tournament_id,
-                                round,
-                                board,
-                                white,
-                                black,
-                                result: result.to_string(),
-                            });
-                        }
-                        braid_iroh::protocol::SwissMessage::StandingsUpdated { standings, .. } => {
-                            standings_sender.write(SwissStandingsUpdatedEvent {
-                                tournament_id,
-                                standings: standings.iter().map(|s| (s.player_id.clone(), s.score, s.rank)).collect(),
-                            });
-                        }
-                    }
+        use futures::StreamExt;
+        use iroh_gossip::api::Event as GossipEvent;
+
+        while let Some(Ok(event)) = rx.next().await {
+            let payload = match event {
+                GossipEvent::Received(message) => message.content,
+                _ => continue,
+            };
+            let Ok(text) = std::str::from_utf8(&payload) else { continue };
+            let Ok(swiss_msg) = serde_json::from_str::<braid_iroh::protocol::SwissMessage>(text) else { continue };
+            match swiss_msg {
+                braid_iroh::protocol::SwissMessage::RoundStarted { round, pairings, .. } => {
+                    let _ = round_tx.send(SwissRoundStartedEvent {
+                        tournament_id,
+                        round,
+                        pairings: pairings.iter().map(|p| (p.white.clone(), p.black.clone())).collect(),
+                    });
+                }
+                braid_iroh::protocol::SwissMessage::ResultRecorded { round, board, result, .. } => {
+                    // `SwissMessage::ResultRecorded` carries only the match outcome;
+                    // white/black player identifiers are resolved from the pairing
+                    // stored alongside the round.
+                    let (white, black) = match &result {
+                        braid_iroh::protocol::MatchResult::Win { winner } => (winner.clone(), String::new()),
+                        braid_iroh::protocol::MatchResult::Draw => (String::new(), String::new()),
+                    };
+                    let _ = result_tx.send(SwissResultRecordedEvent {
+                        tournament_id,
+                        round,
+                        board,
+                        white,
+                        black,
+                        result: result.to_string(),
+                    });
+                }
+                braid_iroh::protocol::SwissMessage::StandingsUpdated { standings, .. } => {
+                    let _ = standings_tx.send(SwissStandingsUpdatedEvent {
+                        tournament_id,
+                        standings: standings.iter().map(|s| (s.player_id.clone(), s.score, s.rank)).collect(),
+                    });
                 }
             }
         }

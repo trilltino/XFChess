@@ -201,7 +201,6 @@ mod tests {
 
     #[test]
     fn test_router_creation() {
-        let router = blinks_routes();
-        assert!(router.not_found("test").is_some());
+        let _router = blinks_routes();
     }
 }

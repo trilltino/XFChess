@@ -3,7 +3,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
-use crate::elo::glicko2::calculate_glicko2_update;
+use crate::elo::glicko2::calculate_elo_update;
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -181,46 +181,64 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
             )?;
         }
 
-        // --- Glicko-2 ELO Calculation ---
-        let (sa, _sb) = match result {
+        // --- K=32 ELO Calculation ---
+        let sa = match result {
             GameResult::Winner(w) => {
-                if w == game_white {
-                    (1.0, 0.0)
-                } else {
-                    (0.0, 1.0)
-                }
+                if w == game_white { 1.0 } else { 0.0 }
             }
-            GameResult::Draw => (0.5, 0.5),
-            _ => (0.5, 0.5),
+            GameResult::Draw => 0.5,
+            _ => 0.5,
         };
 
         let w_rating = white_profile.elo_rating;
-        let w_rd = white_profile.rd;
         let b_rating = black_profile.elo_rating;
-        let b_rd = black_profile.rd;
 
-        let (new_w_rating, new_w_rd, new_b_rating, new_b_rd) = 
-            calculate_glicko2_update(w_rating, w_rd, b_rating, b_rd, sa);
+        let (new_w_rating, new_b_rating) = 
+            calculate_elo_update(w_rating, b_rating, sa);
 
         white_profile.elo_rating = new_w_rating;
-        white_profile.rd = new_w_rd;
         black_profile.elo_rating = new_b_rating;
-        black_profile.rd = new_b_rd;
+        
+        // K=32 doesn't use RD/volatility, but we keep them in struct for ABI compatibility.
+        // We set them to 0 or leave them unchanged. The plan says set rd=0.0 at init.
+        // We'll leave them as they are or set to 0.0 if we want to be clean.
+        white_profile.rd = 0.0;
+        black_profile.rd = 0.0;
+        white_profile.volatility = 0.0;
+        black_profile.volatility = 0.0;
 
         white_profile.last_played = Clock::get()?.unix_timestamp;
         black_profile.last_played = Clock::get()?.unix_timestamp;
 
-        // --- Update Annual Wins for Compliance Reporting ---
-        // Only the winner's annual wins are incremented; the loser records nothing.
+        // --- Update Win Streaks and Tournament Wins ---
         if let GameResult::Winner(w) = result {
-            let winner_profile = if w == game_white { &mut *white_profile } else { &mut *black_profile };
-            match winner_profile.country.as_str() {
-                "GB" => winner_profile.annual_wins_gbp += wager_amount,
-                "BR" => winner_profile.annual_wins_brl += wager_amount,
-                "CA" => winner_profile.annual_wins_cad += wager_amount,
-                "DE" => winner_profile.annual_wins_eur += wager_amount,
+            let (winner, loser) = if w == game_white {
+                (&mut *white_profile, &mut *black_profile)
+            } else {
+                (&mut *black_profile, &mut *white_profile)
+            };
+
+            winner.win_streak += 1;
+            if winner.win_streak > winner.best_streak {
+                winner.best_streak = winner.win_streak;
+            }
+            loser.win_streak = 0;
+
+            if match_type == MatchType::Tournament {
+                winner.tournament_wins += 1;
+            }
+
+            // --- Update Annual Wins for Compliance Reporting ---
+            match winner.country.as_str() {
+                "GB" => winner.annual_wins_gbp += wager_amount,
+                "BR" => winner.annual_wins_brl += wager_amount,
+                "CA" => winner.annual_wins_cad += wager_amount,
+                "DE" => winner.annual_wins_eur += wager_amount,
                 _ => {}
             }
+        } else if result == GameResult::Draw {
+            white_profile.win_streak = 0;
+            black_profile.win_streak = 0;
         }
 
         white_profile.ranked_games += 1;

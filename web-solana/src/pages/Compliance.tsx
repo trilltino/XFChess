@@ -154,7 +154,6 @@ const CompliancePage = () => {
                   <p>We do not intend to offer services to players located in the following territories:</p>
 
                   <ul className="restricted-territories">
-                    <li><strong>United States of America</strong> (including all states and territories). Multiple US states treat peer-to-peer wagering on skill games as unlawful under state gambling law, and the federal legal position remains complex. We do not have authorisation to serve US-located players.</li>
                     <li><strong>People's Republic of China</strong></li>
                     <li><strong>The Netherlands</strong> (where online games for money require a Kansspelautoriteit licence)</li>
                     <li><strong>Any jurisdiction</strong> where participation would be unlawful under applicable local law</li>
@@ -318,10 +317,6 @@ const CompliancePage = () => {
             <p>XFChess operates in compliance with local laws and regulations in the following jurisdictions:</p>
 
             <div className="jurisdictions-list">
-              <div className="jurisdiction-item">
-                <h4>United States</h4>
-                <p>Compliant with federal and state gaming regulations. No real-money gaming in restricted jurisdictions.</p>
-              </div>
               <div className="jurisdiction-item">
                 <h4>European Union</h4>
                 <p>Full GDPR compliance and adherence to EU gaming directives and financial regulations.</p>

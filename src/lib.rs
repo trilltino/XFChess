@@ -18,6 +18,10 @@ pub use cli::{Cli, PlayerColor};
 pub use core::persistent_camera::PersistentEguiCamera;
 
 use bevy::prelude::*;
+use bevy::asset::AssetMetaCheck;
+use bevy::audio::{AudioPlugin, Volume};
+use bevy::log::LogPlugin;
+use bevy_egui::EguiPlugin;
 
 /// Game configuration from CLI arguments and environment variables
 #[derive(Resource, Debug, Clone)]
@@ -102,7 +106,10 @@ pub fn build_app(game_config: GameConfig) -> App {
 
     app.insert_resource(game_config.clone())
         .init_resource::<PersistentEguiCamera>()
-        .add_systems(PreStartup, core::persistent_camera::setup_persistent_egui_camera);
+        // Startup (not PreStartup): the primary window must exist before we spawn
+        // a Camera3d so that bevy_egui can attach an egui context to it.
+        .add_systems(Startup, core::persistent_camera::setup_persistent_egui_camera);
+
 
     // Add core plugins
     app.add_plugins(

@@ -17,17 +17,20 @@ pub mod network;
 pub mod solana;
 #[cfg(feature = "solana")]
 pub mod rollup;
-pub mod spectator;
 pub mod tournament;
-pub mod turn_relay;
 pub mod ui;
-pub mod vps_client;
 #[cfg(feature = "solana")]
 pub mod wager_state;
 
+/// Compatibility alias: the VPS HTTP client lives at `network::vps`. Older call
+/// sites import it as `multiplayer::vps_client`.
+pub mod vps_client {
+    pub use super::network::vps::*;
+}
+
 // Re-exports for public API
 pub use error::{MultiplayerError, MultiplayerResult};
-pub use traits::{AddMessage, Message, MessageReader, MessageWriter};
+pub use traits::{Message, MessageReader, MessageWriter};
 pub use types::*;
 pub use network::*;
 #[cfg(feature = "solana")]
@@ -57,7 +60,6 @@ impl Plugin for MultiplayerPlugin {
         app.add_plugins((
             network::p2p::P2PConnectionPlugin,
             network::p2p_vps::P2PVpsPlugin,
-            spectator::SpectatorPlugin,
         ));
 
         #[cfg(feature = "solana")]

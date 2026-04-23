@@ -8,6 +8,9 @@ use crate::signing::{AppState, build_router};
 use crate::signing::routes::tournament as tournament_routes;
 use crate::signing::routes::matchmaking::matchmaking_routes;
 use crate::signing::routes::pdf_mailer::pdf_mailer_routes;
+use crate::signing::routes::kyc::kyc_routes;
+use crate::signing::routes::history::history_routes;
+use crate::signing::routes::dispute::{dispute_routes, admin_dispute_routes};
 use crate::infrastructure::auth_middleware::require_api_key;
 
 /// Builds the complete application router by merging all sub-routers.
@@ -42,9 +45,27 @@ pub fn build_app_router(
     // Build pdf mailer router (no auth required for signup)
     let pdf_router = pdf_mailer_routes();
 
+    // Build KYC / user-status router (needs AppState for vault_pool + store)
+    let kyc_router = kyc_routes().with_state(signing_state.clone());
+
+    // Build game history router
+    let history_router = history_routes().with_state(signing_state.clone());
+
+    // Build dispute router
+    let dispute_router = Router::new()
+        .nest("/dispute", dispute_routes().with_state(signing_state.clone()))
+        .nest("/admin/dispute",
+            admin_dispute_routes()
+                .with_state(signing_state.clone())
+                .layer(middleware::from_fn(require_api_key))
+        );
+
     // Merge all routers
     signing_router
         .merge(tournament_router)
         .merge(matchmaking_router)
         .merge(pdf_router)
+        .merge(kyc_router)
+        .merge(history_router)
+        .merge(dispute_router)
 }

@@ -129,10 +129,7 @@ mod tests {
         // Second registration should pass
         assert!(detector.check_ip_patterns("192.168.1.1", 1).await.is_none());
 
-        // Third registration should pass (at limit)
-        assert!(detector.check_ip_patterns("192.168.1.1", 1).await.is_none());
-
-        // Fourth registration should fail (over limit)
+        // Third registration should fail (rate limit: max 2 per 5 min window)
         assert!(detector.check_ip_patterns("192.168.1.1", 1).await.is_some());
     }
 

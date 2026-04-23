@@ -11,6 +11,9 @@ pub struct Game {
     pub white: Pubkey,       // White player's wallet
     pub black: Pubkey,       // Black player's wallet (default pubkey = no opponent yet)
     pub status: GameStatus,
+    pub last_move_timestamp: i64,
+    pub fees_advanced: u64, // Accumulator for operational fees paid by relayer
+    pub fee_payer: Pubkey, // Relayer wallet that paid; reimbursed at claim
     pub result: GameResult,
     #[max_len(100)]
     pub fen: String,         // Current board position in FEN notation
@@ -23,7 +26,7 @@ pub struct Game {
     pub game_type: GameType,
     pub match_type: MatchType, // Free, Ranked, Wager, or Tournament
     pub country_fee: u64,    // Treasury fee in lamports for this game
-    pub time_per_move: u16,  // Seconds each player has per move; 0 = no time limit
+    pub time_per_move: i64,  // Seconds each player has per move; 0 = no time limit
     pub bump: u8,            // PDA canonical bump stored for use in signed CPI calls
 }
 
@@ -45,13 +48,14 @@ pub struct SessionDelegation {
 /// Lifecycle state of a game.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum GameStatus {
-    WaitingForOpponent, // Created, wager escrowed, waiting for black to join
-    Active,             // Both players present, moves are being recorded
-    Inactive,           // Paused / reserved for future use
-    Disputed,           // A player raised a dispute; moves frozen until resolved
-    Cancelled,          // Creator cancelled before opponent joined (or both agreed)
-    Finished,           // finalize_game was called and result is final
-    Expired,            // No activity for 24h; wager can be reclaimed
+    Pending,
+    WaitingForOpponent,
+    Active,
+    Inactive,
+    Disputed,
+    Finished,
+    Expired,
+    Cancelled,
 }
 
 /// Outcome recorded when a game is finalised.
@@ -72,8 +76,13 @@ pub enum GameType {
 /// Match type determines fee structure and ELO impact.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum MatchType {
-    Free,      // Casual game, no fees, no ELO
-    Ranked,    // Ranked game, ELO + treasury fee
-    Wager,     // Wager game, ELO + treasury fee + wager
-    Tournament, // Tournament game, ELO + treasury fee
+    Free,
+    Ranked,
+    Wager,
+    Casual,
+    Tournament,
+}
+
+impl Game {
+    pub const LEN: usize = 32 + 32 + 8 + 8 + 1 + 1 + 8 + 8 + 32 + 1 + 32;
 }

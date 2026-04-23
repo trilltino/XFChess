@@ -40,11 +40,5 @@ impl Plugin for UiPlugin {
         app.add_plugins(popup::PopupPlugin);
         app.add_plugins(stats::StatsPlugin);
         app.add_plugins(SpectatorModePlugin);
-
-        #[cfg(feature = "solana")]
-        app.add_systems(
-            OnEnter(GameState::MainMenu),
-            solana_panel::show_hot_wallet_faucet_popup,
-        );
     }
 }

@@ -15,6 +15,7 @@ pub struct DisputeRecord {
     #[max_len(200)]
     pub resolution: String,
     pub created_at: i64,
+    pub expires_at: i64,
     pub resolved_at: Option<i64>,
     pub bump: u8,
 }

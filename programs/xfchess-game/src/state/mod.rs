@@ -9,6 +9,7 @@ pub mod tournament;
 pub mod tournament_match;
 pub mod platform_fee_vault;
 pub mod player_session;
+pub mod tournament_session;
 pub mod treasury_vault;
 
 pub use game::*;
@@ -20,6 +21,7 @@ pub use tournament::*;
 pub use tournament_match::*;
 pub use platform_fee_vault::*;
 pub use player_session::*;
+pub use tournament_session::*;
 pub use treasury_vault::*;
 
 // Re-export tournament types for use in instructions

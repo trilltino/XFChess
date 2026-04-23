@@ -1,23 +1,21 @@
 //! Instructions managing multi-player structured tournaments.
 
-pub mod initialize;
-pub mod initialize_match;
-pub mod register;
-pub mod start;
-pub mod record_result;
-pub mod record_swiss_result;
-pub mod claim_prize;
-pub mod claim_streaming;
-pub mod cancel;
-pub mod fund_prize;
+pub mod lifecycle;
+pub mod registration;
+pub mod matches;
+pub mod session;
+pub mod prizes;
 
-pub use initialize::InitializeTournament;
-pub use initialize_match::InitializeMatch;
-pub use register::RegisterPlayer;
-pub use start::StartTournament;
-pub use record_result::{AdvanceWinner, RecordMatchResult};
-pub use record_swiss_result::{RecordSwissResult, SwissMatchResult};
-pub use claim_prize::ClaimTournamentPrize;
-pub use claim_streaming::ClaimStreamingPrize;
-pub use cancel::CancelTournament;
-pub use fund_prize::FundUsdcPrize;
+// Re-export all types from subdirectories for easier access
+pub use lifecycle::{
+    CancelTournament, CloseTournament, InitializeTournament, StartTournament,
+};
+pub use registration::RegisterPlayer;
+pub use matches::{
+    AdvanceWinner, InitializeMatch, RecordMatchResult, RecordSwissResult, SwissMatchResult,
+};
+pub use session::{
+    AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx, RevokeTournamentSessionCtx,
+    SessionCreateGame, SessionJoinGame,
+};
+pub use prizes::{ClaimStreamingPrize, ClaimTournamentPrize, FundUsdcPrize, OperatorWithdraw};

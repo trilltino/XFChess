@@ -8,3 +8,6 @@ publish = false
 braid-core = { path = "../braid-core" }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

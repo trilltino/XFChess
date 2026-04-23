@@ -49,54 +49,7 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> tokio::
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::signing::{AppState, SigningConfig, MatchmakingState};
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
-
-    #[test]
-    fn test_spawn_background_tasks_structure() {
-        // This test verifies the function can be called without panicking
-        // Actual task execution is tested in the respective service modules
-        
-        let state = AppState {
-            matchmaking: Arc::new(RwLock::new(MatchmakingState::default())),
-            // Add other required fields as needed
-        };
-
-        let config = SigningConfig {
-            solana_rpc_url: "https://api.devnet.solana.com".to_string(),
-            program_id: "test_program_id".to_string(),
-            // Add other required fields as needed
-        };
-
-        // Note: This will spawn tasks that will run in the background
-        // In a real test, you'd want to mock the actual services or use a test runtime
-        // For now, we just verify the function signature and structure
-        let _ = (state, config);
-    }
-
-    #[test]
-    fn test_spawn_background_tasks_clones_correctly() {
-        // Verify that the function correctly clones the necessary fields
-        // This is a compile-time test to ensure the types are correct
-        
-        let state = AppState {
-            matchmaking: Arc::new(RwLock::new(MatchmakingState::default())),
-            // Add other required fields as needed
-        };
-
-        let config = SigningConfig {
-            solana_rpc_url: "https://api.devnet.solana.com".to_string(),
-            program_id: "test_program_id".to_string(),
-            // Add other required fields as needed
-        };
-
-        // Verify cloning works
-        let _matchmaking_state = state.matchmaking.clone();
-        let _rpc_url = config.solana_rpc_url.clone();
-        let _program_id_str = config.program_id.clone();
-        
-        let _ = (state, config);
-    }
+    // AppState and SigningConfig construction tests would require
+    // full dependency injection of all 14+ fields. Integration tests
+    // for task spawning belong in tests/ or with mocked state.
 }

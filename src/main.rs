@@ -1,5 +1,8 @@
 /// XFChess main entry point for decentralized chess on Solana
 use clap::Parser;
+use std::sync::Arc;
+use sqlx::SqlitePool;
+use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
 use xfchess::{Cli, PlayerColor as CliPlayerColor, GameConfig, PlayerColor, build_app};
 
 #[tokio::main]
@@ -27,7 +30,7 @@ async fn main() {
     // Handle CLI-only commands before launching game client
     if let Some(cmd) = &cli.command {
         match cmd {
-            Cli::Commands::Tournament { action } => {
+            xfchess::cli::Commands::Tournament { action } => {
                 let rpc = cli.rpc_url.clone();
                 let vps = "http://127.0.0.1:8090".to_string();
                 let keypair = "keys/fee-payer.json";
@@ -98,7 +101,7 @@ async fn main() {
     }
 
     // Build and run the Bevy application
-    let app = build_app(game_config);
+    let mut app = build_app(game_config);
     app.run();
 }
 

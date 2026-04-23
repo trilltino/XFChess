@@ -28,12 +28,17 @@ fn test_reset_game_resources_system() {
     app.insert_resource(selection);
 
     let mut history = MoveHistory::default();
-    // history.add_move(...) - tedious to construct MoveRecord, just use generic if possible or check len
-    // Assuming MoveHistory has public fields or methods to dirty it.
-    // It has `add_move`. I need a MoveRecord.
-    // For simplicity, I'll rely on checking it's empty after reset.
-    // But to verify it *resets*, I should ideally make it non-empty.
-    // I'll skip complex setup for history for now, assuming logic holds.
+    history.add_move(MoveRecord {
+        piece_type: PieceType::Pawn,
+        piece_color: PieceColor::White,
+        from: (4, 1),
+        to: (4, 3),
+        captured: None,
+        is_castling: false,
+        is_en_passant: false,
+        is_check: false,
+        is_checkmate: false,
+    });
     app.insert_resource(history);
 
     app.insert_resource(GameTimer::default()); // Dirtying timer requires pub fields or helper

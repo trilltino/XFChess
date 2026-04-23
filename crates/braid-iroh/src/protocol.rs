@@ -57,6 +57,15 @@ pub enum MatchResult {
     Draw,
 }
 
+impl std::fmt::Display for MatchResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MatchResult::Win { winner } => write!(f, "win:{winner}"),
+            MatchResult::Draw => write!(f, "draw"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwissStandingsEntry {
     pub player_id: String,

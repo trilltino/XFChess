@@ -62,13 +62,13 @@ pub struct MainMenuUIContext<'w, 's> {
     pub core_mode: ResMut<'w, CoreGameMode>,
     #[allow(dead_code)]
     pub competitive_menu: ResMut<'w, CompetitiveMenuState>,
-    pub braid_config: ResMut<'w, BraidP2PConfig>,
-    pub network_state: Res<'w, BraidNetworkState>,
-    pub p2p_ui: ResMut<'w, P2PUIState>,
-    pub p2p_state: ResMut<'w, P2PConnectionState>,
+    pub braid_config: Option<ResMut<'w, BraidP2PConfig>>,
+    pub network_state: Option<Res<'w, BraidNetworkState>>,
+    pub p2p_ui: Option<ResMut<'w, P2PUIState>>,
+    pub p2p_state: Option<ResMut<'w, P2PConnectionState>>,
     pub p2p_vps_state: Option<ResMut<'w, P2PVpsState>>,
-    pub host_game_events: MessageWriter<'w, HostGameEvent>,
-    pub connect_events: MessageWriter<'w, ConnectToPeerEvent>,
+    pub host_game_events: Option<MessageWriter<'w, HostGameEvent>>,
+    pub connect_events: Option<MessageWriter<'w, ConnectToPeerEvent>>,
     pub color_choice: ResMut<'w, PlayerColorChoice>,
     #[cfg(feature = "solana")]
     pub wallet: Option<ResMut<'w, SolanaWallet>>,
@@ -83,4 +83,5 @@ pub struct MainMenuUIContext<'w, 's> {
     #[allow(dead_code)]
     pub tournament_lobby: ResMut<'w, crate::states::tournament_menu::TournamentLobbyState>,
     pub compliance: ResMut<'w, crate::ui::compliance_modal::ComplianceState>,
+    pub player_identity: Res<'w, crate::states::main_menu::PlayerIdentity>,
 }

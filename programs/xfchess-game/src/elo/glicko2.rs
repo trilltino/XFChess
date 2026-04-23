@@ -1,62 +1,49 @@
-//! On-chain Glicko-2 rating calculation for player ELO updates.
+//! On-chain K=32 Elo rating calculation for player profile updates.
+//!
+//! Ratings are stored at ×100 centiscale (1200 Elo → 120000 stored).
+//! K=32 → K_SCALED=3200; standard 400-point divisor → 40000 in centiscale.
 
-/// Calculate Glicko-2 rating update for two players.
+const K_SCALED: f64 = 3200.0;   // K=32 × 100
+const DIVISOR: f64 = 40000.0;   // 400 × 100
+const ELO_FLOOR: f64 = 10000.0; // 100 Elo minimum (× 100)
+
+/// Calculate K=32 Elo update for two players.
 ///
-/// Returns the updated ratings for both players based on the game outcome.
-/// Uses a simplified Glicko-2 calculation optimized for on-chain computation.
+/// Both ratings are in centiscale (×100): 1200 Elo → 120000.0.
+/// `sa` is white's score: 1.0 win, 0.5 draw, 0.0 loss.
 ///
-/// # Arguments
-/// * `winner_rating` - Current rating of the winner
-/// * `winner_rd` - Current rating deviation of the winner
-/// * `loser_rating` - Current rating of the loser
-/// * `loser_rd` - Current rating deviation of the loser
-/// * `winner_outcome` - 1.0 for win, 0.5 for draw, 0.0 for loss
-///
-/// # Returns
-/// A tuple of (new_winner_rating, new_winner_rd, new_loser_rating, new_loser_rd)
-pub fn calculate_glicko2_update(
-    winner_rating: f64,
-    winner_rd: f64,
-    loser_rating: f64,
-    loser_rd: f64,
-    winner_outcome: f64,
-) -> (f64, f64, f64, f64) {
-    // Simplified Glicko-2 calculation for on-chain efficiency
-    // Based on Glicko-2 algorithm but optimized for compute units
-    
-    let loser_outcome = 1.0 - winner_outcome;
-    
-    // Calculate expected scores
-    let expected_winner = calculate_expected_score(winner_rating, loser_rating, winner_rd, loser_rd);
-    let expected_loser = 1.0 - expected_winner;
-    
-    // Calculate new rating deviations
-    let winner_new_rd = calculate_new_rd(winner_rd);
-    let loser_new_rd = calculate_new_rd(loser_rd);
-    
-    // Calculate new ratings using Glicko-2 formula
-    let winner_new_rating = winner_rating + (winner_new_rd.powi(2) * (winner_outcome - expected_winner));
-    let loser_new_rating = loser_rating + (loser_new_rd.powi(2) * (loser_outcome - expected_loser));
-    
-    (winner_new_rating, winner_new_rd, loser_new_rating, loser_new_rd)
+/// Returns `(new_white_rating, new_black_rating)`.
+pub fn calculate_elo_update(white_rating: f64, black_rating: f64, sa: f64) -> (f64, f64) {
+    let ea = 1.0 / (1.0 + 10.0_f64.powf((black_rating - white_rating) / DIVISOR));
+    let sb = 1.0 - sa;
+    let eb = 1.0 - ea;
+    let new_white = (white_rating + K_SCALED * (sa - ea)).max(ELO_FLOOR);
+    let new_black = (black_rating + K_SCALED * (sb - eb)).max(ELO_FLOOR);
+    (new_white, new_black)
 }
 
-/// Calculate expected score using Glicko-2 formula.
-fn calculate_expected_score(rating_a: f64, rating_b: f64, rd_a: f64, _rd_b: f64) -> f64 {
-    let q = 0.005756462; // ln(10) / 400
-    let g = calculate_g(rd_a);
-    let expected = 1.0 / (1.0 + (-g * q * (rating_a - rating_b)).exp());
-    expected
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Calculate the g function for Glicko-2.
-fn calculate_g(rd: f64) -> f64 {
-    1.0 / (1.0 + (3.0 * rd.powi(2) * (std::f64::consts::PI).powi(2)).sqrt())
-}
+    #[test]
+    fn equal_players_win_increases_rating() {
+        let (w, b) = calculate_elo_update(120000.0, 120000.0, 1.0);
+        assert!(w > 120000.0);
+        assert!(b < 120000.0);
+        assert!((w - 121600.0).abs() < 1.0, "expected +1600 centiscale (+16 Elo): got {}", w);
+    }
 
-/// Calculate new rating deviation after a game.
-fn calculate_new_rd(rd: f64) -> f64 {
-    let c: f64 = 50.0; // System constant for volatility
-    let new_rd = ((rd.powi(2) + c.powi(2)).sqrt()).min(350.0);
-    new_rd
+    #[test]
+    fn draw_between_equal_players_unchanged() {
+        let (w, b) = calculate_elo_update(120000.0, 120000.0, 0.5);
+        assert!((w - 120000.0).abs() < 1.0);
+        assert!((b - 120000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn floor_prevents_negative_ratings() {
+        let (_, b) = calculate_elo_update(200000.0, 10000.0, 1.0);
+        assert!(b >= ELO_FLOOR);
+    }
 }

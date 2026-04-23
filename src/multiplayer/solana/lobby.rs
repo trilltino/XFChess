@@ -235,6 +235,11 @@ async fn async_create_game(
     use crate::multiplayer::vps_client;
     use std::time::{Duration, Instant};
 
+    // Gate: only wallets with profile + email + KYC may create a wagered match.
+    if wager_lamports > 0 {
+        require_wager_eligibility_with_url(&wallet_pubkey.to_string())?;
+    }
+
     let game_id: u64 = rand::random();
 
     // 1. Ask VPS to generate session keypair → get session_pubkey.
@@ -343,6 +348,29 @@ async fn async_lookup_game(
     Ok((wager_lamports, game_id))
 }
 
+/// Gate helper with structured error messages and profile URL.
+/// Fetches current status live and reports exactly which tiers are missing.
+fn require_wager_eligibility_with_url(wallet_pubkey: &str) -> Result<(), String> {
+    use crate::multiplayer::vps_client;
+    let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
+    let status = match vps_client::get_user_status(wallet_pubkey) {
+        Ok(s) => s,
+        Err(e) => return Err(format!("Wagered play requires verification. Could not check status: {}. Visit {}/profile", e, backend_url)),
+    };
+    if status.can_wager {
+        return Ok(());
+    }
+    let mut missing = Vec::new();
+    if !status.has_profile { missing.push("Profile"); }
+    if !status.has_email   { missing.push("Email"); }
+    if !status.has_kyc     { missing.push("KYC"); }
+    Err(format!(
+        "Wagered play requires: {} (missing). Visit {}/profile to complete.",
+        missing.join(" + "),
+        backend_url,
+    ))
+}
+
 /// Walk the Borsh-encoded Game account to find the wager_amount offset.
 fn parse_wager_offset(data: &[u8]) -> Result<usize, String> {
     const FIXED_HEADER: usize = 8 + 8 + 32 + 32 + 1 + 1; // disc + game_id + white + black + status + result
@@ -368,6 +396,9 @@ async fn async_join_game(
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::tauri_signer::sign_via_tauri_only;
     use crate::multiplayer::vps_client;
+
+    // Gate: joining any on-chain game requires the wager eligibility checks.
+    require_wager_eligibility_with_url(&wallet_pubkey.to_string())?;
 
     // 1. Ask VPS for a session keypair for this game.
     let session_pubkey_str = vps_client::create_session(game_id, &wallet_pubkey.to_string())

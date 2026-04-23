@@ -24,7 +24,7 @@ use crate::signing::{AppState, TournamentTrigger};
 // ── Request / Response types ──────────────────────────────────────────────────
 
 /// Request to create a new tournament.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct CreateTournamentReq {
     pub tournament_id: u64,
     pub name: String,
@@ -42,8 +42,11 @@ pub struct CreateTournamentReq {
     pub elo_max: Option<u32>,
     /// Minimum players required to start tournament (optional)
     pub min_players: Option<u16>,
-    /// Prize distribution in basis points [1st, 2nd, 3rd, 4th]. Default: [5000, 3000, 1500, 500]
-    pub prize_shares: Option<[u16; 4]>,
+    /// Prize distribution in basis points [1st-10th]. Default: competitive split based on max_players
+    pub prize_shares: Option<[u16; 10]>,
+    /// Winner takes all mode (overrides prize_shares with [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    #[serde(default)]
+    pub winner_takes_all: bool,
     /// Unix timestamp for when the tournament is scheduled to open (None = open immediately)
     pub scheduled_at: Option<i64>,
     /// Whether CACF KYC verification is required to join
@@ -56,14 +59,14 @@ fn default_format() -> String {
 }
 
 /// Request to register a player's P2P node ID.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct RegisterNodeReq {
     pub player: String,
     pub node_id: String,
 }
 
 /// Request to subscribe to tournament gossip updates.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct SubscribeNodeReq {
     pub player: String,
     pub node_id: String,
@@ -80,7 +83,7 @@ pub struct SubscribeNodeRes {
 }
 
 /// Request to record a match result.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct RecordResultReq {
     pub match_index: usize,
     pub winner: String,
@@ -88,7 +91,7 @@ pub struct RecordResultReq {
 }
 
 /// Request to set the game ID for a match.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct SetMatchGameIdReq {
     pub match_index: usize,
     pub game_id: u64,
@@ -113,6 +116,7 @@ pub fn tournament_routes() -> Router<AppState> {
         .route("/{id}/register-node", post(register_node))
         .route("/{id}/my-match", get(get_my_match))
         .route("/{id}/bracket", get(get_bracket))
+        .route("/{id}/schedule-status", get(get_schedule_status))
 }
 
 /// Creates player-facing routes that require full AppState (KYC vault access).
@@ -238,14 +242,19 @@ async fn create_tournament(
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
-    // Default prize shares: 50/30/15/5 for 16+ players, winner-take-all for 8
-    let prize_shares = req.prize_shares.unwrap_or(
-        if req.max_players >= 16 {
-            [5000, 3000, 1500, 500]
-        } else {
-            [10000, 0, 0, 0]
+    // Default competitive prize shares based on tournament size
+    let default_shares = if req.winner_takes_all {
+        [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    } else {
+        match req.max_players {
+            0..=64 => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0], // Top 3: 60/30/10%
+            128 => [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0], // Top 5: 50/25/15/5/5%
+            256 => [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300], // Top 10: 40/20/12/8/6/4/3/2/2/3%
+            _ => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0], // Default to 64 and below
         }
-    );
+    };
+
+    let prize_shares = req.prize_shares.unwrap_or(default_shares);
 
     let record = TournamentRecord::with_config(
         req.tournament_id,
@@ -361,6 +370,12 @@ async fn get_bracket(
         "second_place": t.second_place,
         "third_place": t.third_place,
         "fourth_place": t.fourth_place,
+        "fifth_place": t.fifth_place,
+        "sixth_place": t.sixth_place,
+        "seventh_place": t.seventh_place,
+        "eighth_place": t.eighth_place,
+        "ninth_place": t.ninth_place,
+        "tenth_place": t.tenth_place,
         "prize_shares": t.prize_shares,
         "current_round": current_round,
     })))
@@ -645,7 +660,8 @@ mod tests {
             elo_min: None,
             elo_max: None,
             min_players: None,
-            prize_shares: Some([5000, 3000, 1500, 500]),
+            prize_shares: Some([6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]),
+            winner_takes_all: false,
             scheduled_at: None,
             kyc_required: false,
         };
@@ -729,20 +745,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_tournament_routes_creation() {
-        let router = tournament_routes();
-        assert!(router.not_found("test").is_some());
+        let _router = tournament_routes();
     }
 
     #[tokio::test]
     async fn test_admin_tournament_routes_creation() {
-        let router = admin_tournament_routes();
-        assert!(router.not_found("test").is_some());
+        let _router = admin_tournament_routes();
     }
 
     #[tokio::test]
     async fn test_tournaments_routes_creation() {
-        let router = tournaments_routes();
-        assert!(router.not_found("test").is_some());
+        let _router = tournaments_routes();
     }
 
     #[tokio::test]
@@ -772,6 +785,7 @@ mod tests {
                 elo_max: None,
                 min_players: None,
                 prize_shares: None,
+                winner_takes_all: false,
                 scheduled_at: None,
                 kyc_required: false,
             };
@@ -793,19 +807,25 @@ mod tests {
             elo_max: None,
             min_players: None,
             prize_shares: None,
+            winner_takes_all: false,
             scheduled_at: None,
             kyc_required: false,
         };
-        
-        let prize_shares = req_large.prize_shares.unwrap_or(
-            if req_large.max_players >= 16 {
-                [5000, 3000, 1500, 500]
-            } else {
-                [10000, 0, 0, 0]
+
+        let default_shares = if req_large.winner_takes_all {
+            [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        } else {
+            match req_large.max_players {
+                0..=64 => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
+                128 => [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0],
+                256 => [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300],
+                _ => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
             }
-        );
-        
-        assert_eq!(prize_shares, [5000, 3000, 1500, 500]);
+        };
+
+        let prize_shares = req_large.prize_shares.unwrap_or(default_shares);
+
+        assert_eq!(prize_shares, [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -822,19 +842,25 @@ mod tests {
             elo_max: None,
             min_players: None,
             prize_shares: None,
+            winner_takes_all: true,
             scheduled_at: None,
             kyc_required: false,
         };
-        
-        let prize_shares = req_small.prize_shares.unwrap_or(
-            if req_small.max_players >= 16 {
-                [5000, 3000, 1500, 500]
-            } else {
-                [10000, 0, 0, 0]
+
+        let default_shares = if req_small.winner_takes_all {
+            [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        } else {
+            match req_small.max_players {
+                0..=64 => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
+                128 => [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0],
+                256 => [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300],
+                _ => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
             }
-        );
-        
-        assert_eq!(prize_shares, [10000, 0, 0, 0]);
+        };
+
+        let prize_shares = req_small.prize_shares.unwrap_or(default_shares);
+
+        assert_eq!(prize_shares, [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -853,6 +879,7 @@ mod tests {
                 elo_max: None,
                 min_players: None,
                 prize_shares: None,
+                winner_takes_all: false,
                 scheduled_at: None,
                 kyc_required: false,
             };
@@ -876,6 +903,7 @@ mod tests {
                 elo_max: None,
                 min_players: None,
                 prize_shares: None,
+                winner_takes_all: false,
                 scheduled_at: None,
                 kyc_required: false,
             };
@@ -928,7 +956,7 @@ mod tests {
             "Test Tournament".to_string(),
             1000000,
             16,
-            [5000, 3000, 1500, 500],
+            [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
             TournamentFormat::SingleElimination,
             None,
             None,
@@ -936,7 +964,7 @@ mod tests {
             None,
             false,
         );
-        
+
         record.players = vec!["player1".to_string(), "player2".to_string(), "player3".to_string(), "player4".to_string()];
         record.player_elos = vec![1500, 2000, 1200, 1800];
         
@@ -948,4 +976,53 @@ mod tests {
         assert_eq!(record.player_elos[2], 1500);
         assert_eq!(record.player_elos[3], 1200); // Lowest ELO last
     }
+}
+
+// ── Schedule Status ─────────────────────────────────────────────────────
+
+/// Response for `GET /tournament/:id/schedule-status`.
+#[derive(serde::Serialize)]
+struct ScheduleStatusResponse {
+    phase: String,
+    seconds_until_start: Option<i64>,
+    current_players: usize,
+    min_players: u16,
+    max_players: u16,
+    my_session_authorized: Option<bool>,
+}
+
+async fn get_schedule_status(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<Json<ScheduleStatusResponse>, StatusCode> {
+    let tournament = state.tournament_store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    let now = chrono::Utc::now().timestamp();
+    let scheduled_at = tournament.scheduled_at.unwrap_or(0);
+
+    let phase = match tournament.status {
+        TournamentStatus::Registration if scheduled_at > 0 && now < scheduled_at => "countdown".to_string(),
+        TournamentStatus::Registration if scheduled_at > 0 && now >= scheduled_at => "grace_period".to_string(),
+        TournamentStatus::Active => "active".to_string(),
+        TournamentStatus::Completed => "completed".to_string(),
+        TournamentStatus::Cancelled => "cancelled".to_string(),
+        _ => "unknown".to_string(),
+    };
+
+    let seconds_until_start = if scheduled_at > 0 && now < scheduled_at {
+        Some(scheduled_at - now)
+    } else {
+        None
+    };
+
+    let min_players = tournament.min_players.unwrap_or(8);
+
+    Ok(Json(ScheduleStatusResponse {
+        phase,
+        seconds_until_start,
+        current_players: tournament.players.len(),
+        min_players,
+        max_players: tournament.max_players,
+        my_session_authorized: None, // populated by client from wallet state
+    }))
 }

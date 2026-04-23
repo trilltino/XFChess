@@ -8,6 +8,8 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use std::sync::Arc;
 
+use crate::multiplayer::vps_client::UserStatus;
+
 /// Result type for Solana operations
 #[derive(Debug, Clone)]
 pub enum SolanaResult<T> {
@@ -22,6 +24,8 @@ pub struct SolanaWallet {
     pub keypair: Option<Arc<solana_sdk::signature::Keypair>>,
     pub ranked_active: bool,
     pub tournament_match_id: Option<u64>,
+    /// Cached verification status from VPS backend
+    pub user_status: Option<UserStatus>,
 }
 
 impl SolanaWallet {
@@ -65,6 +69,8 @@ pub struct CompetitiveMatchState {
     pub is_ranked: bool,
     pub elo_rating: u32,
     pub opponent_elo: u32,
+    pub opponent_username: String,
+    pub opponent_country: String,
     pub active: bool,
     pub wager_lamports: u64,
     pub game_id: Option<u64>,
@@ -77,6 +83,7 @@ pub struct CompetitiveMatchState {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SolanaProfile {
     pub username: String,
+    pub country: String,
     pub elo: u32,
     pub total_wagered: u64,
     pub wins: u32,

@@ -47,7 +47,7 @@ pub mod ai_authority {
 /// TODO: Replace with a real keypair before mainnet deploy.
 pub mod kyc_authority {
     use anchor_lang::prelude::declare_id;
-    declare_id!("EDn2ioRx2iS9kcuVhgh1vfehvMBqMCX3hnFP2hZy1kxb"); // Devnet KYC authority
+    declare_id!("uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"); // Devnet consolidated authority
 }
 
 /// The platform dispute-resolution authority — the only signer allowed to
@@ -55,7 +55,7 @@ pub mod kyc_authority {
 /// TODO: Replace with a real keypair before mainnet deploy.
 pub mod dispute_authority {
     use anchor_lang::prelude::declare_id;
-    declare_id!("H9HCrsLG8Y1yRvFKixYnTMGdAoX4JCARUzdWt3zpW83R"); // Devnet dispute authority
+    declare_id!("uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"); // Devnet consolidated authority
 }
 
 /// The VPS/backend operational authority — the only signer allowed to call
@@ -63,11 +63,24 @@ pub mod dispute_authority {
 /// Solflare wallet - user's main wallet for signing operations.
 pub mod vps_authority {
     use anchor_lang::prelude::declare_id;
-    declare_id!("uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"); // Solflare wallet
+    declare_id!("uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"); // Devnet consolidated authority
 }
 
 /// Hard cap on a single wager so no one can lock more than 10 SOL in one game.
 pub const MAX_WAGER_AMOUNT: u64 = 10 * 1_000_000_000; // 10 SOL in lamports
+
+/// Minimum wager amount (0.001 SOL).
+pub const MIN_WAGER_LAMPORTS: u64 = 1_000_000;
+
+/// Lamports advanced by each player to cover on-chain compute costs.
+pub const CREATE_GAME_COST: u64 = 5_000; // lamports
+pub const JOIN_GAME_COST: u64 = 5_000;
+pub const DELEGATE_COST: u64 = 5_000;
+pub const UNDELEGATE_COST: u64 = 5_000;
+pub const COMMIT_ER_COST: u64 = 5_000; // per ER→L1 commit (0 if MagicBlock sponsors)
+pub const RECORD_RESULT_COST: u64 = 5_000;
+pub const CLAIM_PRIZE_COST: u64 = 5_000;
+pub const MARGIN_BPS: u16 = 25; // 0.25% of wager pool, priority-fee spike insurance
 
 // ---------------------------------------------------------------------------
 // Regional treasury fees (in lamports)
@@ -91,3 +104,7 @@ pub const ELO_FEE_LAMPORTS: u64 = 5_000; // 0.000005 SOL per ELO update
 
 /// Treasury vault seed
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
+
+/// Time-to-live for an unresolved dispute (7 days in seconds).
+/// After this window any party may call claim_stale_dispute for an automatic 50/50 split.
+pub const DISPUTE_TTL_SECS: i64 = 604_800;

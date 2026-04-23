@@ -75,3 +75,45 @@ impl JwtIssuer {
 pub fn extract_bearer(header: &str) -> Option<&str> {
     header.strip_prefix("Bearer ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jwt_issue_and_verify_roundtrip() {
+        let issuer = JwtIssuer::new("test_secret_123");
+        let token = issuer.issue("wallet123").expect("issue should succeed");
+        let claims = issuer.verify(&token).expect("verify should succeed");
+        assert_eq!(claims.sub, "wallet123");
+        assert!(claims.exp > Utc::now().timestamp());
+    }
+
+    #[test]
+    fn jwt_verify_fails_with_bad_secret() {
+        let issuer = JwtIssuer::new("correct_secret");
+        let token = issuer.issue("wallet123").unwrap();
+        let bad_issuer = JwtIssuer::new("wrong_secret");
+        assert!(bad_issuer.verify(&token).is_err());
+    }
+
+    #[test]
+    fn extract_bearer_valid() {
+        assert_eq!(extract_bearer("Bearer abc123"), Some("abc123"));
+    }
+
+    #[test]
+    fn extract_bearer_missing_prefix() {
+        assert_eq!(extract_bearer("abc123"), None);
+    }
+
+    #[test]
+    fn extract_bearer_empty() {
+        assert_eq!(extract_bearer(""), None);
+    }
+
+    #[test]
+    fn extract_bearer_wrong_case() {
+        assert_eq!(extract_bearer("bearer abc123"), None);
+    }
+}

@@ -23,6 +23,7 @@ use tracing::{error, info, warn};
 use sha2::{Digest, Sha256};
 
 use crate::signing::{AppState, solana};
+use crate::db::repository::GameRepository;
 
 // ── Request / Response types ─────────────────────────────────────────────────
 
@@ -71,6 +72,14 @@ pub struct SignReq {
     pub tx_b64: String,
 }
 
+/// Response containing player profile details.
+#[derive(Serialize)]
+pub struct PlayerProfileResp {
+    pub elo: u32,
+    pub country: String,
+    pub username: String,
+}
+
 /// Creates the main API routes router.
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -82,6 +91,7 @@ pub fn routes() -> Router<AppState> {
         .route("/move/record", post(record_move))
         .route("/game/undelegate", post(undelegate_game))
         .route("/game/finalize", post(finalize_game))
+        .route("/player/{pubkey}", get(get_player_profile))
         .route("/stats", get(get_stats))
 }
 
@@ -216,6 +226,27 @@ pub async fn record_move(
     })?;
     info!("[VPS] record_move game {} move {} sig {}", req.game_id, req.move_uci, sig);
 
+    // Fire-and-forget DB write (log errors but don't fail the HTTP response)
+    let game_id_str = req.game_id.to_string();
+    let player_wallet = entry.wallet_pubkey.to_string();
+    let pool = state.store.pool();
+    let move_uci = req.move_uci.clone();
+    let next_fen = req.next_fen.clone();
+    tokio::spawn(async move {
+        // Ensure game row exists on first move
+        let repo = GameRepository::new(pool);
+        if let Err(e) = repo.upsert_game(&game_id_str).await {
+            error!("[DB] Failed to upsert game {}: {}", game_id_str, e);
+            return;
+        }
+        // Increment move counter and get the new number
+        let move_number = repo.get_next_move_number(&game_id_str).await.unwrap_or(1) as i32;
+        // Insert the move
+        if let Err(e) = repo.add_move_simple(&game_id_str, move_number, &move_uci, Some(&next_fen), &player_wallet).await {
+            error!("[DB] Failed to insert move for game {}: {}", game_id_str, e);
+        }
+    });
+
     Ok(Json(SigResp { sig: sig.to_string() }))
 }
 
@@ -263,7 +294,54 @@ pub async fn finalize_game(
     })?;
     info!("[VPS] finalize_game game {} winner={:?} sig {}", req.game_id, req.winner, sig);
 
+    // Fire-and-forget DB write (log errors but don't fail the HTTP response)
+    let game_id_str = req.game_id.to_string();
+    let pool = state.store.pool();
+    let white = req.white_pubkey.clone();
+    let black = req.black_pubkey.clone();
+    let winner = req.winner.clone();
+    let sig_str = sig.to_string();
+    tokio::spawn(async move {
+        let repo = GameRepository::new(pool);
+        // Look up usernames from users_v2
+        let white_username = repo.get_username(&white).await.ok();
+        let black_username = repo.get_username(&black).await.ok();
+        // Finalize the game record
+        if let Err(e) = repo.complete_game(
+            &game_id_str,
+            Some(&white),
+            Some(&black),
+            white_username.as_deref(),
+            black_username.as_deref(),
+            winner.as_deref(),
+            None, // final_fen (not provided in request)
+            &sig_str,
+            0.0, // stake_amount (not provided in request)
+        ).await {
+            error!("[DB] Failed to finalize game {}: {}", game_id_str, e);
+        }
+        // Invalidate ELO cache for both players (read-through with TTL, so safe to skip)
+        // TODO: Add EloCache to AppState and call invalidate here
+    });
+
     Ok(Json(SigResp { sig: sig.to_string() }))
+}
+
+/// GET /player/:pubkey - Gets player profile details (ELO, country, username).
+pub async fn get_player_profile(
+    Path(pubkey): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<PlayerProfileResp>, StatusCode> {
+    let elo_data = state.elo_cache.get_elo(&pubkey).await.map_err(|e| {
+        warn!("Failed to fetch profile for {}: {}", pubkey, e);
+        StatusCode::NOT_FOUND
+    })?;
+
+    Ok(Json(PlayerProfileResp {
+        elo: (elo_data.elo_rating / 100.0) as u32,
+        country: elo_data.country,
+        username: elo_data.username,
+    }))
 }
 
 #[derive(Deserialize)]

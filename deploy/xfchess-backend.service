@@ -1,0 +1,20 @@
+[Unit]
+Description=XFChess Backend API
+After=network.target
+
+[Service]
+Type=simple
+User=xfchess
+WorkingDirectory=/opt/xfchess
+ExecStart=/opt/xfchess/signing-server-http
+EnvironmentFile=/opt/xfchess/.env
+Restart=always
+RestartSec=5
+
+# Harden: no privilege escalation, read-only filesystem except data dir
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/xfchess/data
+
+[Install]
+WantedBy=multi-user.target

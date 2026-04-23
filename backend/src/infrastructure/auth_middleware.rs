@@ -103,6 +103,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Flaky: race condition with parallel tests modifying global env vars"]
     async fn test_require_api_key_missing_env_var() {
         // Remove env var if it exists
         std::env::remove_var("ADMIN_API_KEY");

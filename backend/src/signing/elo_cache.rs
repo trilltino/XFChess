@@ -27,6 +27,8 @@ pub struct CachedElo {
     pub rd: f64,
     /// Player's country code (ISO 3166-1 alpha-2)
     pub country: String,
+    /// Player's username
+    pub username: String,
     /// When this cache entry was last updated
     pub cached_at: Instant,
 }
@@ -117,16 +119,24 @@ impl EloCache {
         }
 
         // Deserialize PlayerProfile
-        // Note: This is a simplified deserialization. In production,
-        // you would use the actual PlayerProfile struct from the program.
-        let elo_rating = self.deserialize_f64(&account.data, 40)?; // Offset based on struct
-        let rd = self.deserialize_f64(&account.data, 48)?;
-        let country = self.deserialize_string(&account.data, 56, 2)?;
+        // Offsets based on PlayerProfile struct (disc 8 + authority 32 = 40):
+        // 40: country (4+2)
+        // 46: tax_id (4+50)
+        // 100: wins (4), 104: losses (4), 108: draws (4), 112: games_played (4)
+        // 116: elo_rating (8)
+        // 124: rd (8)
+        // ...
+        // 229: username (4+20)
+        let country = self.deserialize_string(&account.data, 40, 2)?;
+        let elo_rating = self.deserialize_f64(&account.data, 116)?;
+        let rd = self.deserialize_f64(&account.data, 124)?;
+        let username = self.deserialize_string(&account.data, 229, 20)?;
 
         let cached = CachedElo {
             elo_rating,
             rd,
             country: country.clone(),
+            username: username.clone(),
             cached_at: Instant::now(),
         };
 
@@ -136,8 +146,8 @@ impl EloCache {
             cache.insert(pubkey.to_string(), cached.clone());
         }
 
-        info!("[ELO_CACHE] Fetched ELO for {}: {} (RD: {}, country: {})",
-            pubkey, elo_rating, rd, country);
+        info!("[ELO_CACHE] Fetched profile for {}: {} ELO, country: {}, username: {}",
+            pubkey, elo_rating, country, username);
 
         Ok(cached)
     }
@@ -220,7 +230,8 @@ mod tests {
 
     #[test]
     fn test_deserialize_f64() {
-        let cache = EloCache::new("http://localhost".to_string(), Duration::from_secs(60));
+        let program_id = Pubkey::new_from_array([0u8; 32]);
+        let cache = EloCache::new("http://localhost".to_string(), Duration::from_secs(60), program_id);
         let mut data = vec![0u8; 56];
         
         // Write f64 = 1200.5 at offset 40

@@ -19,7 +19,8 @@ const VALID_PLAYER_COUNTS: [u16; 6] = [8, 16, 32, 64, 128, 256];
     elo_min: u32,
     elo_max: u32,
     min_players: u16,
-    prize_shares: [u16; 8],
+    prize_shares: [u16; 10],
+    winner_takes_all: bool,
     host_treasury: Pubkey,
     usdc_mint: Option<Pubkey>
 )]
@@ -68,7 +69,8 @@ pub fn handler(
     elo_min: u32,
     elo_max: u32,
     min_players: u16,
-    prize_shares: [u16; 8],
+    prize_shares: [u16; 10],
+    winner_takes_all: bool,
     host_treasury: Pubkey,
     usdc_mint: Option<Pubkey>,
 ) -> Result<()> {
@@ -90,6 +92,13 @@ pub fn handler(
     if ctx.accounts.usdc_prize_escrow.is_some() {
         require!(usdc_mint.is_some(), GameErrorCode::InvalidGameStatus);
     }
+
+    // Use default prize shares if winner_takes_all, otherwise use provided shares
+    let final_prize_shares = if winner_takes_all {
+        crate::state::tournament::get_default_prize_shares(max_players, true)
+    } else {
+        prize_shares
+    };
 
     let t = &mut ctx.accounts.tournament;
     let total_matches = max_players - 1;
@@ -117,7 +126,13 @@ pub fn handler(
     t.second_place = None;
     t.third_place = None;
     t.fourth_place = None;
-    t.prize_shares = prize_shares;
+    t.fifth_place = None;
+    t.sixth_place = None;
+    t.seventh_place = None;
+    t.eighth_place = None;
+    t.ninth_place = None;
+    t.tenth_place = None;
+    t.prize_shares = final_prize_shares;
     t.players = Vec::with_capacity(max_players as usize);
     t.player_elos = Vec::with_capacity(max_players as usize);
     t.swiss_standings = Vec::with_capacity(max_players as usize);

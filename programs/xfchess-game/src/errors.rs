@@ -65,6 +65,15 @@ pub enum GameErrorCode {
     #[msg("Session spending limit exceeded.")]
     SessionSpendingLimit,    // Wager would exceed the session's configured spending cap
 
+    #[msg("Session not authorized for this operation.")]
+    SessionNotAuthorized,    // Session key mismatch or session disabled
+
+    #[msg("Wager exceeds session per-match cap.")]
+    WagerExceedsSessionCap,  // Wager > session.max_wager
+
+    #[msg("Session spending limit would be exceeded.")]
+    SessionSpendingLimitExceeded, // total_spent + new_cost > spending_limit
+
     // ── Batch moves ───────────────────────────────────────────────────────────
     #[msg("Invalid next FEN provided in batch.")]
     InvalidNextFen,          // A FEN in a commit_move_batch call is malformed
@@ -154,6 +163,16 @@ pub enum GameErrorCode {
 
     #[msg("Not a tournament winner.")]
     NotTournamentWinner,    // Caller is not in winner list for prize claim
+
+    // ── Fee rebate system ─────────────────────────────────────────────────────
+    #[msg("Wager amount is below the minimum required")]
+    StakeTooLow,
+    #[msg("Wager pool is too small to cover fees and margin")]
+    PoolTooSmallForFees,
+    #[msg("Fee payer does not match the initial payer")]
+    FeePayerMismatch,
+    #[msg("Arithmetic overflow occurred")]
+    ArithmeticOverflow,
 }
 
 // Alias so the rest of the codebase can use either name.

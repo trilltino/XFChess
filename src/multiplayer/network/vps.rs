@@ -214,6 +214,26 @@ pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {
         .map_err(|e| format!("vps session_status parse: {e}"))
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct PlayerProfile {
+    pub elo: u32,
+    pub country: String,
+    pub username: String,
+}
+
+/// Fetch player profile details (ELO, country, username) from VPS.
+pub fn fetch_player_profile(pubkey: &str) -> Result<PlayerProfile, String> {
+    let resp = client()
+        .get(format!("{}/player/{}", vps_base(), pubkey))
+        .send()
+        .map_err(|e| format!("vps fetch_player_profile: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("vps fetch_player_profile: HTTP {}", resp.status()));
+    }
+    resp.json::<PlayerProfile>()
+        .map_err(|e| format!("vps fetch_player_profile parse: {e}"))
+}
+
 #[derive(Serialize)]
 struct TeeAuthReq<'a> {
     game_id: u64,
@@ -258,6 +278,60 @@ pub fn tee_authenticate(game_id: u64, wallet_pubkey: &str) -> Result<String, Str
 
     info!("[TEE-AUTH] SUCCESS for game {} (TEE: {})", game_id, TEE_DEVNET_ADDR);
     Ok(resp.sig)
+}
+
+// ── User verification status ────────────────────────────────────────────────
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct UserStatus {
+    pub has_profile: bool,
+    pub has_email: bool,
+    pub has_kyc: bool,
+    pub can_wager: bool,
+}
+
+/// Fetch verification status for a wallet. Returns defaults on network error so
+/// callers can decide whether to block hard or degrade gracefully.
+pub fn get_user_status(wallet_pubkey: &str) -> Result<UserStatus, String> {
+    let resp = client()
+        .get(format!("{}/api/user/status/{}", vps_base(), wallet_pubkey))
+        .send()
+        .map_err(|e| format!("vps get_user_status: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("vps get_user_status: HTTP {}", resp.status()));
+    }
+    resp.json::<UserStatus>()
+        .map_err(|e| format!("vps get_user_status parse: {e}"))
+}
+
+/// Async version of get_user_status — wraps the blocking call in spawn_blocking
+/// so it can be awaited from a tokio task without blocking the async executor.
+pub async fn get_user_status_async(wallet_pubkey: String) -> Result<UserStatus, String> {
+    tokio::task::spawn_blocking(move || get_user_status(&wallet_pubkey))
+        .await
+        .map_err(|e| format!("vps get_user_status_async join: {e}"))?
+}
+
+/// Gate wagered-play entry: returns Ok(()) when the wallet may enter a wagered
+/// match or cash tournament, otherwise a human-readable reason.
+pub fn require_wager_eligibility(wallet_pubkey: &str) -> Result<(), String> {
+    let status = get_user_status(wallet_pubkey)?;
+    if status.can_wager {
+        return Ok(());
+    }
+    let mut missing = Vec::new();
+    if !status.has_profile {
+        missing.push("profile");
+    }
+    if !status.has_email {
+        missing.push("email");
+    }
+    if !status.has_kyc {
+        missing.push("KYC");
+    }
+    Err(format!(
+        "Wagered play blocked. Missing: {}. Complete setup on your Profile page.",
+        missing.join(", ")
+    ))
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -315,6 +389,9 @@ struct P2PAnnounceReq<'a> {
     stake_amount: f64,
     game_type: &'a str,
     time_control_minutes: u32,
+    username: Option<String>,
+    elo: Option<u16>,
+    region: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -338,6 +415,9 @@ pub struct P2PGameListing {
     pub game_type: String,
     pub time_control_minutes: u32,
     pub status: String,
+    pub username: Option<String>,
+    pub elo: Option<u16>,
+    pub region: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -360,6 +440,9 @@ pub fn p2p_announce_game(
     stake_amount: f64,
     game_type: &str,
     time_control_minutes: u32,
+    username: Option<String>,
+    elo: Option<u16>,
+    region: Option<String>,
 ) -> Result<(), String> {
     let resp = client()
         .post(format!("{}/p2p/announce", vps_base()))
@@ -370,6 +453,9 @@ pub fn p2p_announce_game(
             stake_amount,
             game_type,
             time_control_minutes,
+            username,
+            elo,
+            region,
         })
         .send()
         .map_err(|e| format!("vps p2p_announce: {e}"))?;

@@ -1,0 +1,29 @@
+[package]
+name = "xfchess-braid-server"
+version.workspace = true
+edition.workspace = true
+description = "Braid-HTTP 209 subscribe server for XFChess tournament state streaming"
+license.workspace = true
+
+[dependencies]
+axum        = { version = "0.8", features = ["ws", "macros"] }
+tower       = "0.5"
+tower-http  = { version = "0.6", features = ["cors", "trace"] }
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+json-patch  = "2"
+bytes       = { version = "1", features = ["serde"] }
+async-stream = "0.3"
+parking_lot = { version = "0.12" }
+futures     = { workspace = true }
+tracing     = { workspace = true }
+thiserror   = { workspace = true }
+chrono      = { workspace = true }
+uuid        = { workspace = true }
+
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[dev-dependencies]
+tokio       = { workspace = true }
+axum-test   = "20"

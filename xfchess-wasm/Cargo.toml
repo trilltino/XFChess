@@ -1,0 +1,31 @@
+[package]
+name = "xfchess-wasm"
+version.workspace = true
+edition.workspace = true
+description = "Bevy WASM build for in-browser chess spectating and play"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bevy = { workspace = true, default-features = false, features = [
+    "webgl2",
+    "bevy_gltf",
+] }
+wasm-bindgen = "=0.2.114"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlElement",
+    "HtmlCanvasElement", "Response", "ReadableStream",
+    "Headers", "Request", "RequestInit", "RequestMode",
+] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-wasm = "0.2"
+console_error_panic_hook = "0.1"
+
+# Chess logic only — no Solana, no Tauri, no fs
+chess-logic-shared = { workspace = true, features = ["std", "uci"] }

@@ -55,7 +55,6 @@ const KycPage = () => {
                 <li><strong>Brazil:</strong> CPF (Cadastro de Pessoas Físicas) — 11 digits</li>
                 <li><strong>Germany:</strong> Tax ID (Steueridentifikationsnummer) — 11 digits</li>
                 <li><strong>Canada:</strong> Social Insurance Number (SIN) — 9 digits</li>
-                <li><strong>USA:</strong> Social Security Number (SSN) — 9 digits (optional)</li>
               </ul>
               <p>Tax IDs are stored using blind index hashing for privacy, allowing compliance verification without exposing raw identification data.</p>
             </div>

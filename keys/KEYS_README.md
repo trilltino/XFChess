@@ -9,8 +9,7 @@ All `.json` files here are Solana keypairs — never commit them.
 |------|---------------|---------|---------|
 | `program-authority.json` | `C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw` | Program upgrade authority — signs all `anchor deploy` | devnet |
 | `fee-payer.json` | `9dT8q8ZaP3XLDx4ecgk2Yptn4F7YTRwMv33H5AuzpKSG` | Fee payer / project wallet | devnet |
-| `vps-authority.json` | *(copy from VPS: `/opt/xfchess/keys/vps-authority.json`)* | VPS backend signing key | devnet |
-| `kyc-authority.json` | *(copy from VPS: `/opt/xfchess/keys/kyc-authority.json`)* | KYC oracle signer | devnet |
+| `vps-authority.json` | `uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C` | Consolidated authority: VPS signing, KYC, dispute resolution, treasury wallet (receives platform fees) | devnet |
 
 ## Deploy command
 

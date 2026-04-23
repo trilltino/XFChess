@@ -70,6 +70,9 @@ pub struct VpsGameListing {
     pub stake_amount: f64,
     pub game_type: String,
     pub time_control_minutes: u32,
+    pub username: Option<String>,
+    pub elo: Option<u16>,
+    pub region: Option<String>,
 }
 
 /// Plugin for P2P VPS relay
@@ -154,6 +157,9 @@ fn handle_vps_responses(
                         stake_amount: g.stake_amount,
                         game_type: g.game_type,
                         time_control_minutes: g.time_control_minutes,
+                        username: g.username,
+                        elo: g.elo,
+                        region: g.region,
                     })
                     .collect();
                 trace!("[P2P VPS] Updated cached games: {} found", vps_state.cached_games.len());

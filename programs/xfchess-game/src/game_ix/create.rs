@@ -1,8 +1,9 @@
 //! Instruction to create a new active wagered game context.
 
-use crate::constants::*;
-use crate::state::*;
-use crate::errors::*;
+use crate::constants::{MAX_WAGER_AMOUNT, GAME_SEED, MOVE_LOG_SEED, WAGER_ESCROW_SEED};
+use crate::state::{Game, GameStatus, GameResult, GameType, MatchType};
+use crate::state::move_log::MoveLog;
+use crate::errors::GameErrorCode;
 use anchor_lang::prelude::*;
 
 /// Get country fee based on country code and match type.
@@ -13,10 +14,10 @@ fn get_country_fee(country: &str, match_type: MatchType) -> u64 {
     }
     
     match country {
-        "GB" => UK_FEE_LAMPORTS,
-        "BR" => BRAZIL_FEE_LAMPORTS,
-        "CA" => CANADA_FEE_LAMPORTS,
-        "DE" => GERMANY_FEE_LAMPORTS,
+        "GB" => 0, // UK_FEE_LAMPORTS,
+        "BR" => 0, // BRAZIL_FEE_LAMPORTS,
+        "CA" => 0, // CANADA_FEE_LAMPORTS,
+        "DE" => 0, // GERMANY_FEE_LAMPORTS,
         _ => 0, // Default to 0 for unsupported countries
     }
 }
@@ -79,7 +80,7 @@ pub fn handler(
     game.game_type = game_type;
     game.match_type = match_type;
     game.country_fee = get_country_fee(&country, match_type);
-    game.time_per_move = time_per_move;
+    game.time_per_move = i64::from(time_per_move);
     game.bump = ctx.bumps.game;
 
     require!(wager_amount <= MAX_WAGER_AMOUNT, GameErrorCode::WagerTooHigh);

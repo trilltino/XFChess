@@ -41,3 +41,55 @@ pub enum BraidError {
     #[error("Protocol error: {0}")]
     Protocol(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn braid_client_new_ok() {
+        let client = BraidClient::new();
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn braid_error_display_subscription_closed() {
+        let err = BraidError::SubscriptionClosed;
+        assert_eq!(format!("{}", err), "Subscription closed");
+    }
+
+    #[test]
+    fn braid_error_display_network() {
+        let err = BraidError::Network("timeout".to_string());
+        assert_eq!(format!("{}", err), "Network error: timeout");
+    }
+
+    #[test]
+    fn braid_error_display_protocol() {
+        let err = BraidError::Protocol("bad header".to_string());
+        assert_eq!(format!("{}", err), "Protocol error: bad header");
+    }
+
+    #[tokio::test]
+    async fn braid_client_fetch_returns_not_implemented() {
+        let client = BraidClient::new().unwrap();
+        let req = crate::types::BraidRequest::new();
+        let result = client.fetch("http://example.com", &req).await;
+        assert!(matches!(result, Err(BraidError::Network(_))));
+    }
+
+    #[tokio::test]
+    async fn braid_client_subscribe_returns_subscription() {
+        let client = BraidClient::new().unwrap();
+        let req = crate::types::BraidRequest::new();
+        let result = client.subscribe("http://example.com", &req).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn subscription_next_returns_none() {
+        let mut sub = Subscription {};
+        let result = sub.next().await;
+        assert!(result.is_none());
+    }
+}

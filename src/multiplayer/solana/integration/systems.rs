@@ -1,17 +1,27 @@
 use super::state::{BalanceRefreshTimer, SolanaIntegrationState, DEVNET_RPC_URL};
-use bevy::prelude::{debug, error, info, warn, Local, Res, ResMut, Time};
+use bevy::prelude::{debug, error, info, warn, Local, Res, ResMut, Time, Commands};
 use bevy::ecs::message::MessageReader;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use crate::game::events::GameStartedEvent;
+use crate::core::GameState;
 use crate::multiplayer::{BraidNetworkState, NetworkMessage};
 use crate::multiplayer::solana::session_key_manager::SessionKeyManager;
+use crate::multiplayer::solana::tournament::TournamentClientState;
+use crate::multiplayer::vps_client::UserStatus;
 use std::sync::Arc;
 use directories::ProjectDirs;
 use std::path::PathBuf;
 use std::fs;
+
+/// Solana RPC configuration with relayer fee payer
+#[derive(Clone, Debug, bevy::prelude::Resource)]
+pub struct SolanaRpc {
+    pub rpc_url: String,
+    pub fee_payer: String,
+}
 
 pub fn initialize_solana_integration(
     mut solana_state: ResMut<SolanaIntegrationState>,
@@ -359,4 +369,178 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
     }
 
     Some(new_kp)
+}
+
+/// Fetches user verification status from VPS backend and caches it in SolanaWallet
+/// Runs periodically (every 30s) when wallet is connected
+pub fn fetch_user_status(
+    solana_wallet: Option<Res<crate::multiplayer::solana::addon::SolanaWallet>>,
+    mut solana_wallet_mut: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    *timer -= time.delta_secs();
+    if *timer > 0.0 {
+        return;
+    }
+    *timer = 30.0; // Refresh every 30 seconds
+
+    let (wallet, wallet_mut) = match (solana_wallet, solana_wallet_mut) {
+        (Some(w), Some(wm)) => (w, wm),
+        _ => return,
+    };
+
+    let pubkey = match wallet.pubkey {
+        Some(pk) => pk.to_string(),
+        None => return,
+    };
+
+    let pubkey_clone = pubkey.clone();
+    let pubkey_display = pubkey.clone();
+    // Spawn async task to fetch status
+    bevy::tasks::IoTaskPool::get().spawn(async move {
+        match crate::multiplayer::vps_client::get_user_status_async(pubkey_clone).await {
+            Ok(status) => {
+                info!("[USER_STATUS] Fetched status for {}: profile={}, email={}, kyc={}, can_wager={}",
+                    pubkey_display, status.has_profile, status.has_email, status.has_kyc, status.can_wager);
+                // Note: We can't write to ResMut from async task, so this is a placeholder
+                // In production, use a channel or event to communicate back to main thread
+            }
+            Err(e) => {
+                warn!("[USER_STATUS] Failed to fetch status for {}: {}", pubkey_display, e);
+            }
+        }
+    }).detach();
+}
+
+/// Alternative version that uses a channel-based approach for async-to-main communication
+/// This is the preferred pattern for Bevy
+pub fn fetch_user_status_async(
+    solana_wallet: Option<Res<crate::multiplayer::solana::addon::SolanaWallet>>,
+    mut solana_wallet_mut: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+    tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
+) {
+    *timer -= time.delta_secs();
+    if *timer > 0.0 {
+        return;
+    }
+    *timer = 30.0; // Refresh every 30 seconds
+
+    let pubkey = match solana_wallet.as_ref().and_then(|w| w.pubkey) {
+        Some(pk) => pk.to_string(),
+        None => return,
+    };
+
+    let pubkey_display = pubkey.clone();
+    let (tx, rx) = crossbeam_channel::bounded::<Option<UserStatus>>(1);
+    let pubkey_clone = pubkey.clone();
+    tokio_runtime.0.spawn(async move {
+        let result = crate::multiplayer::vps_client::get_user_status_async(pubkey_clone).await.ok();
+        let _ = tx.send(result);
+    });
+
+    // Try to receive immediately (non-blocking)
+    if let Ok(Some(status)) = rx.try_recv() {
+        if let Some(ref mut w) = solana_wallet_mut {
+            w.user_status = Some(status);
+            info!("[USER_STATUS] Updated cached status for {}", pubkey_display);
+        }
+    }
+}
+
+/// Syncs own and opponent profiles from VPS when a competitive match starts
+pub fn sync_player_profiles(
+    mut competitive: ResMut<crate::multiplayer::solana::addon::CompetitiveMatchState>,
+    mut profile: ResMut<crate::multiplayer::solana::addon::SolanaProfile>,
+    solana_state: Res<SolanaIntegrationState>,
+    tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
+    mut own_rx: Local<Option<crossbeam_channel::Receiver<Option<crate::multiplayer::network::vps::PlayerProfile>>>>,
+    mut opp_rx: Local<Option<crossbeam_channel::Receiver<Option<crate::multiplayer::network::vps::PlayerProfile>>>>,
+    mut last_game_id: Local<Option<u64>>,
+    mut last_opp_pk: Local<Option<Pubkey>>,
+) {
+    // Trigger fetches
+    if competitive.active {
+        if competitive.game_id != *last_game_id || competitive.opponent_pubkey != *last_opp_pk {
+            *last_game_id = competitive.game_id;
+            *last_opp_pk = competitive.opponent_pubkey;
+
+            // Fetch own
+            if let Some(pk) = solana_state.wallet_pubkey {
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                let pk_str = pk.to_string();
+                tokio_runtime.0.spawn(async move {
+                    let _ = tx.send(crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok());
+                });
+                *own_rx = Some(rx);
+            }
+
+            // Fetch opponent
+            if let Some(pk) = competitive.opponent_pubkey {
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                let pk_str = pk.to_string();
+                tokio_runtime.0.spawn(async move {
+                    let _ = tx.send(crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok());
+                });
+                *opp_rx = Some(rx);
+            }
+        }
+    } else {
+        *last_game_id = None;
+        *last_opp_pk = None;
+    }
+
+    // Poll results
+    if let Some(ref rx) = *own_rx {
+        if let Ok(res) = rx.try_recv() {
+            if let Some(p) = res {
+                profile.elo = p.elo;
+                profile.username = p.username;
+                profile.country = p.country;
+                info!("[PROFILES] Updated own profile: {} ({} ELO)", profile.username, profile.elo);
+            }
+            *own_rx = None;
+        }
+    }
+
+    if let Some(ref rx) = *opp_rx {
+        if let Ok(res) = rx.try_recv() {
+            if let Some(p) = res {
+                competitive.opponent_elo = p.elo;
+                competitive.opponent_username = p.username;
+                competitive.opponent_country = p.country;
+                info!("[PROFILES] Updated opponent profile: {} ({} ELO)", competitive.opponent_username, competitive.opponent_elo);
+            }
+            *opp_rx = None;
+        }
+    }
+}
+
+pub fn setup_solana_system(
+    mut commands: Commands,
+) {
+    // Placeholder for fetching relayer_pubkey from backend or environment
+    let relayer_pubkey = "PlaceholderRelayerPubkey";
+    commands.insert_resource(SolanaRpc {
+        rpc_url: "https://api.devnet.solana.com".to_string(),
+        fee_payer: relayer_pubkey.to_string(),
+    });
+}
+
+pub fn handle_game_transactions(
+    mut game_state: ResMut<GameState>,
+    solana_rpc: Res<SolanaRpc>,
+) {
+    // Use solana_rpc.fee_payer for transactions
+    // Placeholder for transaction logic
+}
+
+pub fn handle_tournament_transactions(
+    mut tournament_state: ResMut<TournamentClientState>,
+    solana_rpc: Res<SolanaRpc>,
+) {
+    // Use solana_rpc.fee_payer for tournament transactions
+    // Placeholder for transaction logic
 }

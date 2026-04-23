@@ -167,7 +167,7 @@ impl ChessRpcClient {
                 AccountMeta::new(player, true),
                 AccountMeta::new_readonly(system_program_id(), false),
             ],
-            data: xfchess_game::instruction::JoinGame { game_id }.data(),
+            data: xfchess_game::instruction::JoinGame {}.data(),
         }
     }
 

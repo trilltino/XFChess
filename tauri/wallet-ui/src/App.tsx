@@ -264,7 +264,7 @@ function StepDots({ step }: { step: Step }) {
 function EntryStep({
   onChoice
 }: {
-  onChoice: (choice: "wallet" | "email" | "hot") => void;
+  onChoice: (choice: "wallet" | "email") => void;
 }) {
   return (
     <Card>
@@ -272,7 +272,7 @@ function EntryStep({
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
         <LogoMark size={44} />
         <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 16, fontFamily: "'Space Grotesk', sans-serif", color: TEXT }}>
-           How do you want to play?
+           Choose your identity path
         </h2>
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 6 }}>
           Choose your identity path for XFChess
@@ -308,18 +308,6 @@ function EntryStep({
 
         <div style={{ margin: "8px 0", height: 1, background: "rgba(255,255,255,0.05)" }} />
 
-        <button
-          style={{ ...pathBtn, border: "1px dashed rgba(173,92,47,0.3)" }}
-          onClick={() => onChoice("hot")}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(173,92,47,0.3)"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
-        >
-          <div style={{ ...iconCircle, background: "rgba(173,92,47,0.1)" }}>🔥</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: ACCENT }}>Guest Mode (Hot Wallet)</div>
-            <div style={{ fontSize: 12, color: TEXT_MUTED }}>No setup — play instantly</div>
-          </div>
-        </button>
       </div>
     </Card>
   );
@@ -783,7 +771,15 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
 // ---------------------------------------------------------------------------
 // Root orchestrator
 // ---------------------------------------------------------------------------
-function ProfileStep({ onComplete }: { onComplete: (handle: string) => void }) {
+function ProfileStep({
+  onComplete,
+  pubkey,
+  isHotWallet = false,
+}: {
+  onComplete: (handle: string) => void;
+  pubkey?: string | null;
+  isHotWallet?: boolean;
+}) {
   const [handle, setHandle] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -846,19 +842,9 @@ function Onboarding() {
     setStep("entry");
   };
 
-  const onChoice = (choice: "wallet" | "email" | "hot") => {
+  const onChoice = (choice: "wallet" | "email") => {
     setPath(choice);
-    if (choice === "hot") {
-      // 1. Generate a real ephemeral keypair for the Hot Wallet
-      const kp = web3.Keypair.generate();
-      const pubkeyStr = kp.publicKey.toBase58();
-      
-      // 2. Store secret key for TransactionSigner to use (auto-signing)
-      sessionStorage.setItem("xfchess_session_key", JSON.stringify(Array.from(kp.secretKey)));
-      
-      setStep("splash");
-      handleGameLaunch(pubkeyStr, true, "Guest");
-    } else if (choice === "wallet") {
+    if (choice === "wallet") {
       setStep("wallet");
     } else {
       setStep("auth");
@@ -881,7 +867,7 @@ function Onboarding() {
   const handleProfileComplete = (handle: string) => {
     setUsername(handle);
     setStep("splash");
-    handleGameLaunch(pubkey || "dummy", false, handle);
+    handleGameLaunch(pubkey || "dummy", path === "hot", handle);
   };
 
   const handleGameLaunch = async (pk: string, hot: boolean, user: string) => {
@@ -921,7 +907,13 @@ function Onboarding() {
         onBack={() => setStep("entry")}
       />}
       
-      {step === "profile" && <ProfileStep onComplete={handleProfileComplete} />}
+      {step === "profile" && (
+        <ProfileStep
+          onComplete={handleProfileComplete}
+          pubkey={pubkey}
+          isHotWallet={path === "hot"}
+        />
+      )}
       
       {step === "splash"  && <SplashStep username={username} onComplete={() => console.log("Done")} />}
 
