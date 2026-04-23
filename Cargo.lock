@@ -20727,6 +20727,7 @@ dependencies = [
  "ephemeral-rollups-sdk",
  "futures",
  "futures-lite",
+ "image",
  "iroh",
  "iroh-gossip",
  "magic-resolver",

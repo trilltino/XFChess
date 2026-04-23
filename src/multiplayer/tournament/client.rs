@@ -277,7 +277,7 @@ fn find_player_pairing(
 /// System to initialize tournament client when joining a tournament
 pub fn handle_discovery_events(
     mut _commands: Commands,
-    mut _client_state: ResMut<crate::multiplayer::solana::tournament::TournamentClientState>,
+    mut _client_state: ResMut<TournamentClientState>,
     _braid_state: Res<BraidNetworkState>,
 ) {
     // This would be triggered by a UI action or network response

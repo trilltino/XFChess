@@ -9,8 +9,10 @@ use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
 use bevy::ecs::system::{ParamSet, SystemParam};
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
+use std::env;
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// Resource holding the async AI computation task
@@ -26,6 +28,45 @@ pub struct AIMove {
     pub score: i32,
     pub depth: u8,
     pub thinking_time: f32,
+}
+
+fn resolve_stockfish_path() -> Result<PathBuf, String> {
+    if let Ok(path) = env::var("STOCKFISH_PATH") {
+        let override_path = PathBuf::from(path.trim());
+        if override_path.exists() {
+            return Ok(override_path);
+        }
+
+        return Err(format!(
+            "STOCKFISH_PATH is set but the file does not exist: {}",
+            override_path.display()
+        ));
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(current_dir) = env::current_dir() {
+        candidates.push(current_dir.join("stockfish.exe"));
+        candidates.push(current_dir.join("stockfish"));
+        candidates.push(current_dir.join("assets").join("bin").join("stockfish.exe"));
+        candidates.push(current_dir.join("references").join("Stockfish").join("stockfish.exe"));
+    }
+
+    if let Ok(exe_path) = env::current_exe() {
+        for ancestor in exe_path.ancestors() {
+            candidates.push(ancestor.join("stockfish.exe"));
+            candidates.push(ancestor.join("resources").join("stockfish.exe"));
+            candidates.push(ancestor.join("assets").join("bin").join("stockfish.exe"));
+            candidates.push(ancestor.join("references").join("Stockfish").join("stockfish.exe"));
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            "Stockfish executable not found. Set STOCKFISH_PATH or place stockfish.exe next to the app, in the repo root, or under references/Stockfish/.".to_string()
+        })
 }
 
 /// Resource to track AI statistics
@@ -142,47 +183,10 @@ fn spawn_ai_task_system(
 fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result<AIMove, String>> {
     AsyncComputeTaskPool::get().spawn(async move {
         let start_time = Instant::now();
-        
-        // Try to find stockfish executable
-        let exe_path = std::env::current_exe().ok();
-        let exe_dir = exe_path.as_ref().and_then(|p| p.parent());
-        
-        let mut stockfish_path = None;
 
-        // 1. Check next to the executable (Standard for local dev and some bundles)
-        if let Some(dir) = exe_dir {
-            let candidate = dir.join("stockfish.exe");
-            if candidate.exists() {
-                stockfish_path = Some(candidate.to_string_lossy().into_owned());
-            }
-        }
-
-        // 2. Check in standard Tauri resource directory (Windows)
-        if stockfish_path.is_none() {
-            if let Some(dir) = exe_dir {
-                let candidate = dir.join("resources").join("stockfish.exe");
-                if candidate.exists() {
-                    stockfish_path = Some(candidate.to_string_lossy().into_owned());
-                }
-            }
-        }
-
-        // 3. Fallback to common dev locations
-        if stockfish_path.is_none() {
-             let stockfish_paths = [
-                "stockfish.exe",
-                "assets/bin/stockfish.exe",
-                "references/Stockfish/stockfish.exe",
-            ];
-            stockfish_path = stockfish_paths.iter()
-                .find(|p| std::path::Path::new(p).exists())
-                .map(|p| p.to_string());
-        }
+        let stockfish_path = resolve_stockfish_path()?;
         
-        let stockfish_path = stockfish_path
-            .ok_or_else(|| "Stockfish executable not found. Ensure stockfish.exe is in the application folder.".to_string())?;
-        
-        info!("[AI] Starting Stockfish process at: {}", stockfish_path);
+        info!("[AI] Starting Stockfish process at: {}", stockfish_path.display());
 
         /// Spawn Stockfish UCI engine as a child process.
         ///
@@ -212,7 +216,7 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("Failed to spawn Stockfish at '{}': {}", stockfish_path, e))?;
+            .map_err(|e| format!("Failed to spawn Stockfish at '{}': {}", stockfish_path.display(), e))?;
         
         let mut stdin = child.stdin.take().ok_or("Failed to get stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
@@ -220,9 +224,11 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
         
         // Send UCI commands to Stockfish
         writeln!(stdin, "uci").map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
         std::thread::sleep(Duration::from_millis(100));
         
         writeln!(stdin, "isready").map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
         
         // Wait for readyok
         loop {
@@ -238,6 +244,7 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
         
         // Set position and search
         writeln!(stdin, "position fen {}", fen).map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
         
         // Use go command with movetime or depth
         if movetime_ms > 0 {
@@ -245,6 +252,7 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
         } else {
             writeln!(stdin, "go depth {}", depth).map_err(|e| e.to_string())?;
         }
+        stdin.flush().map_err(|e| e.to_string())?;
         
         // Wait for best move
         let mut best_move = String::new();

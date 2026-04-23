@@ -146,8 +146,7 @@ foreach ($src in $keyFiles.Keys) {
     } else {
         Write-Host "WARNING: $src not found — skipping" -ForegroundColor Red
     }
-}
-
+} 
 # ── Step 5: Upload .env if it exists ─────────────────────────────────────────
 Write-Host "`n=== Checking .env ===" -ForegroundColor Green
 $envFile = "$ROOT\deploy\.env.production"
@@ -164,8 +163,7 @@ if (Test-Path $envFile) {
     Write-Host "  ALLOWED_ORIGINS=http://${Server}"
     Write-Host "  SESSION_DB_URL=sqlite:///opt/xfchess/data/sessions.db?mode=rwc"
     Write-Host "  VAULT_DB_URL=sqlite:///opt/xfchess/data/vault.db?mode=rwc"
-}
-
+} 
 # ── Step 6: Upload systemd service ───────────────────────────────────────────
 Write-Host "`n=== Installing systemd service ===" -ForegroundColor Green
 Upload "$ROOT\deploy\xfchess-backend.service" "/etc/systemd/system/xfchess-backend.service"

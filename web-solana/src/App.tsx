@@ -7,7 +7,6 @@ import { WalletConnectWalletAdapter } from '@solana/wallet-adapter-walletconnect
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { SolanaMobileWalletAdapter, createDefaultAddressSelector, createDefaultAuthorizationResultCache, createDefaultWalletNotFoundHandler } from '@solana-mobile/wallet-adapter-mobile';
 import { clusterApiUrl } from '@solana/web3.js';
-import { ProfileViewer } from './pages/ProfileViewer';
 import { Players } from './pages/Players';
 import { VerifyProfile } from './pages/VerifyProfile';
 import DownloadPage from './pages/Download';
@@ -365,4 +364,3 @@ function WalletSelectionModal({ onClose }: { onClose: () => void }) {
         </div>
     );
 }
-

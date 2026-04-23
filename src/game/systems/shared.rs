@@ -95,6 +95,7 @@ pub fn update_piece_state(
     from_pos: (u8, u8),
     target: (u8, u8),
     _was_first_move: bool,
+    is_castling: bool,
     capture: Option<CapturedTarget>,
     promotion: Option<PieceType>,
     commands: &mut Commands,
@@ -118,7 +119,7 @@ pub fn update_piece_state(
         from: from_pos,
         to: target,
         captured: capture.map(|data| data.piece_type),
-        is_castling: false,
+        is_castling,
         is_en_passant: false,
         is_check: false,
         is_checkmate: false,
@@ -138,6 +139,71 @@ pub fn update_piece_state(
     has_moved.moved = true;
     has_moved.move_count += 1;
     true
+}
+
+fn is_castling_move(piece_type: PieceType, from: (u8, u8), to: (u8, u8)) -> bool {
+    piece_type == PieceType::King
+        && from.1 == to.1
+        && from.0.abs_diff(to.0) == 2
+}
+
+fn castling_rook_move(from: (u8, u8), to: (u8, u8)) -> Option<((u8, u8), (u8, u8))> {
+    if from.1 != to.1 || from.0.abs_diff(to.0) != 2 {
+        return None;
+    }
+
+    let rank = from.1;
+    if to.0 > from.0 {
+        Some(((7, rank), (5, rank)))
+    } else {
+        Some(((0, rank), (3, rank)))
+    }
+}
+
+fn apply_castling_rook_move(
+    commands: &mut Commands,
+    pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
+    from: (u8, u8),
+    to: (u8, u8),
+) {
+    let Some((rook_from, rook_to)) = castling_rook_move(from, to) else {
+        return;
+    };
+
+    let Some((rook_entity, rook_piece)) = pieces_query
+        .iter_mut()
+        .find(|(_, piece, has_moved)| {
+            piece.piece_type == PieceType::Rook
+                && piece.x == rook_from.0
+                && piece.y == rook_from.1
+                && !has_moved.moved
+        })
+        .map(|(entity, piece, _)| (entity, *piece))
+    else {
+        warn!(
+            "[SHARED] castling rook not found for move {:?} -> {:?}",
+            from, to
+        );
+        return;
+    };
+
+    if let Ok((_, mut rook_piece_component, mut rook_has_moved)) = pieces_query.get_mut(rook_entity) {
+        rook_piece_component.x = rook_to.0;
+        rook_piece_component.y = rook_to.1;
+        rook_has_moved.moved = true;
+        rook_has_moved.move_count += 1;
+
+        commands.entity(rook_entity).insert(PieceMoveAnimation::new(
+            Vec3::new(rook_from.0 as f32, PIECE_ON_BOARD_Y, rook_from.1 as f32),
+            Vec3::new(rook_to.0 as f32, PIECE_ON_BOARD_Y, rook_to.1 as f32),
+            0.25,
+        ));
+
+        debug!(
+            "[SHARED] castling rook moved from {:?} to {:?} (entity {:?}, piece {:?})",
+            rook_from, rook_to, rook_entity, rook_piece
+        );
+    }
 }
 
 /// Core function to execute a validated move.
@@ -172,12 +238,14 @@ pub fn execute_move(
 
     // 3. Update Piece State
     let from_pos = (ctx.piece.x, ctx.piece.y);
+    let castling = is_castling_move(ctx.piece.piece_type, from_pos, ctx.target);
     if !update_piece_state(
         ctx.origin,
         ctx.entity,
         from_pos,
         ctx.target,
         ctx.was_first_move,
+        castling,
         ctx.capture,
         ctx.promotion,
         commands,
@@ -189,6 +257,11 @@ pub fn execute_move(
 
     // 4. Advance Turn
     pending_turn.request(ctx.piece.color);
+
+    // 4b. Move the rook as part of castling so the windowed board animates both pieces.
+    if castling {
+        apply_castling_rook_move(commands, pieces_query, from_pos, ctx.target);
+    }
 
     // 5. Update Engine State (for P2P sync and FEN export)
     update_engine_state_after_move(

@@ -84,4 +84,7 @@ pub struct MainMenuUIContext<'w, 's> {
     pub tournament_lobby: ResMut<'w, crate::states::tournament_menu::TournamentLobbyState>,
     pub compliance: ResMut<'w, crate::ui::compliance_modal::ComplianceState>,
     pub player_identity: Res<'w, crate::states::main_menu::PlayerIdentity>,
+    pub brand_logo: ResMut<'w, crate::states::main_menu::BrandLogoState>,
+    pub news_banner: ResMut<'w, crate::states::main_menu::NewsBannerState>,
+    pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
 }

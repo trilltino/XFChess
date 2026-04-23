@@ -16,7 +16,7 @@ export function Home() {
                 <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
-                        <h1 className="feature-title">XFChess<br />Competitive Chess Server</h1>
+                        <h1 className="feature-title">Competitive Chess Server</h1>
 
                         <p className="feature-desc">
                             Challenge players worldwide, compete in tournaments, and play chess anywhere, anytime.

@@ -98,6 +98,7 @@ bevy = { version = "0.18.1", default-features = false, features = ["default", "w
 bevy_sprite = "0.18.1"
 bevy_text = "0.18.1"
 bevy_ui = "0.18.1"
+image = { version = "0.25.5", default-features = false, features = ["png"] }
 tokio = { version = "1.49.0", features = ["full"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -175,6 +176,7 @@ bevy.workspace = true
 bevy_sprite = { workspace = true }
 bevy_text = { workspace = true }
 bevy_ui = { workspace = true }
+image = { workspace = true }
 tokio.workspace = true
 futures-lite.workspace = true
 async-trait.workspace = true

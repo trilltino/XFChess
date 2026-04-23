@@ -8,7 +8,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
  */
 export default function TournamentPlay() {
     const { id } = useParams<{ id: string }>();
-    const { publicKey, connected, signTransaction } = useWallet();
+    const { connected, signTransaction } = useWallet();
     const canvasRef = useRef<HTMLDivElement>(null);
     const wasmLoaded = useRef(false);
 

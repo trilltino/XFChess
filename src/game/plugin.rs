@@ -25,7 +25,6 @@ use super::ai::AIPlugin;
 use super::resources::*;
 use super::sync::GameSyncPlugin;
 use super::system_sets::GameSystems;
-use super::systems::picking_debug::PickingDebugPlugin;
 use super::systems::spectate_sync::SpectateSyncPlugin;
 use super::systems::*;
 use super::view_mode_systems::*;
@@ -36,8 +35,6 @@ use crate::game::components::{
 };
 
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
-use crate::ui::game_ui::game_status_ui;
-use crate::ui::promotion_ui::promotion_ui_system;
 use bevy::input::common_conditions::{input_toggle_active, input_just_pressed};
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
@@ -113,6 +110,18 @@ impl Plugin for GamePlugin {
 
         // Add spectator sync plugin
         app.add_plugins(SpectateSyncPlugin);
+
+        // Setup gameplay camera and board scene when entering InGame
+        app.add_systems(
+            OnEnter(GameState::InGame),
+            (
+                reset_game_resources,
+                initialize_players,
+                setup_game_camera,
+                setup_game_scene,
+            )
+                .chain(),
+        );
 
         // Configure system sets to run in order: Input → Validation → Execution → Visual
         app.configure_sets(
@@ -213,12 +222,6 @@ impl Plugin for GamePlugin {
             ),
         );
 
-        // Add UI system separately (egui requires EguiPrimaryContextPass)
-        app.add_systems(
-            EguiPrimaryContextPass,
-            (game_status_ui, promotion_ui_system).run_if(in_state(GameState::InGame)),
-        );
-
         // Conditional 2D rendering system
         app.add_systems(
             EguiPrimaryContextPass,
@@ -257,20 +260,6 @@ impl Plugin for GamePlugin {
 
         // Add mesh picking plugin for 3D picking support (required in Bevy 0.18)
         app.add_plugins(MeshPickingPlugin);
-
-        // Add picking debug plugin
-        app.add_plugins(PickingDebugPlugin);
-
-        // InGame setup systems
-        app.add_systems(
-            OnEnter(GameState::InGame),
-            (
-                reset_game_resources.before(crate::rendering::pieces::create_pieces),
-                initialize_players,
-                setup_game_scene,
-                setup_game_camera,
-            ),
-        );
 
         app.add_systems(OnExit(GameState::InGame), (reset_game_camera,));
     }

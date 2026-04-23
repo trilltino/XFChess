@@ -13,6 +13,7 @@ pub mod singleplayer;
 pub mod solana;
 pub mod states;
 pub mod ui;
+pub mod xf_animate;
 
 pub use cli::{Cli, PlayerColor};
 pub use core::persistent_camera::PersistentEguiCamera;
@@ -106,6 +107,14 @@ pub fn build_app(game_config: GameConfig) -> App {
 
     app.insert_resource(game_config.clone())
         .init_resource::<PersistentEguiCamera>()
+        // Disable bevy_egui's auto-attachment of PrimaryEguiContext. We attach
+        // it manually to the persistent camera in `setup_persistent_egui_camera`
+        // so additional cameras spawned later (e.g. `xf_animate`'s mini
+        // showcase camera) cannot accidentally claim the primary egui context.
+        .insert_resource(bevy_egui::EguiGlobalSettings {
+            auto_create_primary_context: false,
+            ..default()
+        })
         // Startup (not PreStartup): the primary window must exist before we spawn
         // a Camera3d so that bevy_egui can attach an egui context to it.
         .add_systems(Startup, core::persistent_camera::setup_persistent_egui_camera);

@@ -108,31 +108,22 @@ pub fn game_status_ui(mut params: GameUIParams) {
                         "".to_string()
                     )
                 } else if is_competitive {
-                    // In competitive, we are either white or black.
-                    // For now, let's assume if we are connected, we have our profile.
-                    if let (Some(profile), Some(comp)) = (params.solana_profile.as_ref(), params.competitive_match.as_ref()) {
-                        // TODO: Determine if we are white or black to show correct opponent info
-                        // For simplicity, we'll show our info and opponent info from CompetitiveMatchState
-                        // We'll use a placeholder logic to decide who is who for now
-                        // Usually white is the creator
-                        // let is_creator = params.rollup_manager.is_creator; // TODO: Fix this when rollup_manager is available
-                        let is_creator = true; // Temporary placeholder
-                        if is_creator {
+                    #[cfg(feature = "solana")]
+                    {
+                        if let (Some(profile), Some(comp)) = (params.solana_profile.as_ref(), params.competitive_match.as_ref()) {
+                            // CompetitiveMatchState already carries the wager and opponent metadata.
                             (
                                 format!("{} {}", country_to_flag(&profile.country), profile.username),
                                 format!("{} ELO", profile.elo),
-                                "".to_string(), // flag already in name
-                                format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
-                            )
-                        } else {
-                            (
-                                format!("{} {}", country_to_flag(&comp.opponent_country), comp.opponent_username),
-                                format!("{} ELO", comp.opponent_elo),
                                 "".to_string(),
                                 format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
                             )
+                        } else {
+                            ("White Player".to_string(), "1200 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
                         }
-                    } else {
+                    }
+                    #[cfg(not(feature = "solana"))]
+                    {
                         ("White Player".to_string(), "1200 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
                     }
                 } else {
@@ -148,24 +139,21 @@ pub fn game_status_ui(mut params: GameUIParams) {
                         "".to_string()
                     )
                 } else if is_competitive {
-                    if let (Some(profile), Some(comp)) = (params.solana_profile.as_ref(), params.competitive_match.as_ref()) {
-                        let is_creator = params.rollup_manager.as_ref().map(|rm| rm.is_creator).unwrap_or(true);
-                        if !is_creator {
-                            (
-                                format!("{} {}", country_to_flag(&profile.country), profile.username),
-                                format!("{} ELO", profile.elo),
-                                "".to_string(),
-                                format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
-                            )
-                        } else {
+                    #[cfg(feature = "solana")]
+                    {
+                        if let (Some(profile), Some(comp)) = (params.solana_profile.as_ref(), params.competitive_match.as_ref()) {
                             (
                                 format!("{} {}", country_to_flag(&comp.opponent_country), comp.opponent_username),
                                 format!("{} ELO", comp.opponent_elo),
                                 "".to_string(),
                                 format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
                             )
+                        } else {
+                            ("Black Player".to_string(), "1180 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
                         }
-                    } else {
+                    }
+                    #[cfg(not(feature = "solana"))]
+                    {
                         ("Black Player".to_string(), "1180 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
                     }
                 } else {

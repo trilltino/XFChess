@@ -468,10 +468,10 @@ fn spawn_viewer_model(
     // Helper function for knight rotation - knights face across the board
     fn knight_rotation(color: PieceColor) -> Quat {
         match color {
-            // White: Face +Z (toward black's side) - rotate -90° from default
-            PieceColor::White => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
-            // Black: Face -Z (toward white's side) - rotate +90° from default
-            PieceColor::Black => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            // White: Face +Z (toward black's side) - rotate +90° from default
+            PieceColor::White => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            // Black: Face -Z (toward white's side) - rotate -90° from default
+            PieceColor::Black => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
         }
     }
 
