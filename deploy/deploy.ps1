@@ -42,6 +42,23 @@ function Upload($local, $remote) {
     if ($LASTEXITCODE -ne 0) { throw "Upload failed: $local" }
 }
 
+function Resolve-BackendBinaryPath() {
+    $candidates = @(
+        "$ROOT\target\release\signing-server-http.exe",
+        "$ROOT\target\release\signing-server-http",
+        "$ROOT\backend\target\release\signing-server-http.exe",
+        "$ROOT\backend\target\release\signing-server-http"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    throw "Backend binary not found. Checked: $($candidates -join ', ')"
+}
+
 # ════════════════════════════════════════════════════════════════════════════════
 # GIT PREFLIGHT — runs before any build or upload
 # ════════════════════════════════════════════════════════════════════════════════
@@ -153,7 +170,9 @@ Run-Remote "cp /opt/xfchess/signing-server-http /opt/xfchess/signing-server-http
 Write-Host "Binary backup saved as signing-server-http.prev" -ForegroundColor DarkGray
 
 Write-Host "`n=== Uploading backend binary ===" -ForegroundColor Green
-Upload "$ROOT\backend\target\release\signing-server-http" "/opt/xfchess/signing-server-http"
+$backendBinary = Resolve-BackendBinaryPath
+Write-Host "Using backend binary: $backendBinary" -ForegroundColor DarkGray
+Upload $backendBinary "/opt/xfchess/signing-server-http"
 Run-Remote "chmod +x /opt/xfchess/signing-server-http"
 
 # ── Step 5a: Upload keypair files ────────────────────────────────────────────
