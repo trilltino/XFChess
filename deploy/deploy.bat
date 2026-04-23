@@ -37,8 +37,7 @@ for /f "tokens=*" %%i in ('git rev-parse --abbrev-ref HEAD 2^>^&1') do set "bran
 echo Branch: %branch%
 
 REM 3. Dirty working tree — HARD STOP
-git status --porcelain >nul 2>&1
-if not errorlevel 1 (
+for /f "delims=" %%i in ('git status --porcelain 2^>^&1') do (
     echo.
     echo   ABORT: You have uncommitted changes. Commit or stash before deploying.
     git status --porcelain
