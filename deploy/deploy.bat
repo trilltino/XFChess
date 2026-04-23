@@ -48,6 +48,7 @@ echo Tree:   clean
 REM 4. Remote sync — HARD STOP
 git fetch --quiet 2>nul
 for /f "tokens=*" %%i in ('git rev-list "HEAD..origin/%branch%" --count 2^>^&1') do set "behind=%%i"
+if not defined behind set "behind=0"
 echo %behind% | findstr /r "^[0-9][0-9]*$" >nul
 if not errorlevel 1 (
     if %behind% gtr 0 (
