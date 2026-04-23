@@ -119,7 +119,7 @@ if errorlevel 1 exit /b 1
 if errorlevel 1 exit /b 1
 %SSH% %DEST% "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates"
 if errorlevel 1 exit /b 1
-%SSH% %DEST% "command -v cargo >/dev/null 2>&1 || (curl https://sh.rustup.rs -sSf | su - xfchess -c 'sh -s -- -y')"
+%SSH% %DEST% "command -v cargo >/dev/null 2>&1 || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh && chmod +x /tmp/rustup.sh && su - xfchess -c '/tmp/rustup.sh -y')"
 if errorlevel 1 exit /b 1
 
 REM Install nightly cron backup (3am UTC, keeps 14 days)
