@@ -106,7 +106,7 @@ pub async fn user_status(
 pub fn kyc_routes() -> Router<AppState> {
     Router::new()
         .route("/api/kyc/submit", post(submit_kyc))
-        .route("/api/user/status/:pubkey", get(user_status))
+        .route("/api/user/status/{pubkey}", get(user_status))
 }
 
 #[cfg(test)]

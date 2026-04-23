@@ -65,3 +65,9 @@ if ($result) {
 } else {
     Write-Host "Rollback done but API not responding — check: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Yellow
 }
+$healthResult = Invoke-RestMethod -Uri "http://${Server}/health" -ErrorAction SilentlyContinue
+if ($healthResult -eq "OK") {
+    Write-Host "Health endpoint check passed after rollback." -ForegroundColor Green
+} else {
+    Write-Host "Health endpoint check failed after rollback — check: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Yellow
+}

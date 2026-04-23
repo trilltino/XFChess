@@ -15,7 +15,7 @@ use crate::db::repository::GameRepository;
 use crate::signing::AppState;
 
 pub fn history_routes() -> Router<AppState> {
-    Router::new().route("/games/history/:wallet", get(get_game_history))
+    Router::new().route("/games/history/{wallet}", get(get_game_history))
 }
 
 pub async fn get_game_history(

@@ -9,7 +9,7 @@ import { SolanaMobileWalletAdapter, createDefaultAddressSelector, createDefaultA
 import { clusterApiUrl } from '@solana/web3.js';
 import { Players } from './pages/Players';
 import { VerifyProfile } from './pages/VerifyProfile';
-import DownloadPage from './pages/Download';
+import PlayPage from './pages/Play';
 import WSetup from './pages/WSetup';
 import CompliancePage from './pages/Compliance';
 import LegalPage from './pages/Legal';
@@ -26,6 +26,7 @@ import Spectate from './pages/Spectate';
 import TournamentDetail from './pages/TournamentDetail';
 import TournamentStandings from './pages/TournamentStandings';
 import TournamentPlay from './pages/TournamentPlay';
+import { ProfileViewer } from './pages/ProfileViewer';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { Footer } from './components/Footer';
@@ -183,7 +184,7 @@ function AppContent() {
                 
                 <div className={`nav-links ${isMenuOpen ? 'active' : ''}`}>
                     <Link to="/home" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Home</Link>
-                    <Link to="/download" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
+                    <Link to="/play" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
                     <div className="nav-legal-dropdown">
                         <button className="nav-link dropdown-toggle" onClick={() => { setIsGameTypesOpen(v => !v); setIsCommunityOpen(false); setIsLegalOpen(false); }}>
                             Game Modes <ChevronDown size={14} className={`dropdown-icon ${isGameTypesOpen ? 'open' : ''}`} />
@@ -247,7 +248,7 @@ function AppContent() {
                         </AnimatePresence>
                     </div>
                     {connected && (
-                        <Link to="/" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
+                        <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
                             {username || "Set Name"}
                         </Link>
                     )}
@@ -274,13 +275,15 @@ function AppContent() {
                         <Route path="/pvp" element={<Pvp />} />
                         <Route path="/players" element={<Players />} />
                         <Route path="/verify" element={<VerifyProfile />} />
-                        <Route path="/download" element={<DownloadPage />} />
+                        <Route path="/play" element={<PlayPage />} />
                         <Route path="/w_setup" element={<WSetup />} />
                         <Route path="/compliance" element={<CompliancePage />} />
                         <Route path="/legal" element={<LegalPage />} />
                         <Route path="/anti-cheat" element={<AntiCheatPage />} />
+                        <Route path="/profile" element={<ProfileViewer />} />
                         <Route path="/kyc" element={<KycPage />} />
                         <Route path="/news/release" element={<NewsRelease />} />
+                        <Route path="/login" element={<SignIn defaultMode="login" />} />
                         <Route path="/auth/login" element={<SignIn defaultMode="login" />} />
                         <Route path="/launch" element={<Launch />} />
                         <Route path="/tournaments" element={<Tournaments />} />

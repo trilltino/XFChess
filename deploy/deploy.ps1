@@ -42,23 +42,6 @@ function Upload($local, $remote) {
     if ($LASTEXITCODE -ne 0) { throw "Upload failed: $local" }
 }
 
-function Resolve-BackendBinaryPath() {
-    $candidates = @(
-        "$ROOT\target\release\signing-server-http.exe",
-        "$ROOT\target\release\signing-server-http",
-        "$ROOT\backend\target\release\signing-server-http.exe",
-        "$ROOT\backend\target\release\signing-server-http"
-    )
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) {
-            return $candidate
-        }
-    }
-
-    throw "Backend binary not found. Checked: $($candidates -join ', ')"
-}
-
 # ════════════════════════════════════════════════════════════════════════════════
 # GIT PREFLIGHT — runs before any build or upload
 # ════════════════════════════════════════════════════════════════════════════════
@@ -122,35 +105,37 @@ Write-Host ""
 Pop-Location
 # ════════════════════════════════════════════════════════════════════════════════
 
-# ── Step 1: Build backend ─────────────────────────────────────────────────────
-Write-Host "`n=== Building backend ===" -ForegroundColor Green
-Push-Location "$ROOT\backend"
-cargo build --release --bin signing-server-http
-if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
-Pop-Location
-
-# ── Step 2: Build frontend ────────────────────────────────────────────────────
+# ── Step 1: Build frontend ────────────────────────────────────────────────────
 Write-Host "`n=== Building frontend ===" -ForegroundColor Green
 Push-Location "$ROOT\web-solana"
 if (-not (Test-Path ".env.production")) {
-    "VITE_BACKEND_URL=http://${Server}:8090" | Out-File -Encoding utf8 ".env.production"
-    Write-Host "Created .env.production with VITE_BACKEND_URL=http://${Server}:8090" -ForegroundColor Yellow
+    "VITE_BACKEND_URL=http://${Server}" | Out-File -Encoding utf8 ".env.production"
+    Write-Host "Created .env.production with VITE_BACKEND_URL=http://${Server}" -ForegroundColor Yellow
+} else {
+    "VITE_BACKEND_URL=http://${Server}" | Out-File -Encoding utf8 ".env.production"
 }
 npm run build
 if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
 Pop-Location
 
-# ── Step 3: Server setup ──────────────────────────────────────────────────────
+# ── Step 2: Server setup ──────────────────────────────────────────────────────
 Write-Host "`n=== Setting up server ===" -ForegroundColor Green
 Run-Remote "id xfchess 2>/dev/null || adduser xfchess --disabled-password --gecos ''"
-Run-Remote "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups"
+Run-Remote "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups /opt/xfchess/keys /opt/xfchess/src"
 Run-Remote "chown -R xfchess:xfchess /opt/xfchess"
-Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3"
+Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates"
+Run-Remote "command -v cargo >/dev/null 2>&1 || (curl https://sh.rustup.rs -sSf | su - xfchess -c 'sh -s -- -y')"
 
 # Install nightly cron backup (3am UTC, keeps 14 days)
 $cronJob = '0 3 * * * sqlite3 /opt/xfchess/data/sessions.db ".backup ''/opt/xfchess/backups/sessions-$(date +%%Y%%m%%d).db''" ; sqlite3 /opt/xfchess/data/vault.db ".backup ''/opt/xfchess/backups/vault-$(date +%%Y%%m%%d).db''" ; find /opt/xfchess/backups -name ''*.db'' -mtime +14 -delete'
 Run-Remote "(crontab -l 2>/dev/null | grep -v xfchess/backups; echo '$cronJob') | crontab -"
 Write-Host "Nightly backup cron installed (3am UTC, 14-day retention)" -ForegroundColor DarkGray
+
+# ── Step 3: Sync source and build backend on server ───────────────────────────
+Write-Host "`n=== Syncing source and building backend on server ===" -ForegroundColor Green
+Run-Remote "if [ ! -d /opt/xfchess/src/.git ]; then git clone --depth 1 $remoteUrl /opt/xfchess/src; fi"
+Run-Remote "cd /opt/xfchess/src && git fetch --all --tags --prune && git checkout $commitHash && git reset --hard $commitHash"
+Run-Remote "su - xfchess -c 'export PATH=\$HOME/.cargo/bin:\$PATH && cd /opt/xfchess/src/backend && cargo build --release --bin signing-server-http'"
 
 # ── Step 4: Backup databases + binary before touching anything ───────────────
 Write-Host "`n=== Snapshotting databases ===" -ForegroundColor Green
@@ -169,10 +154,8 @@ Write-Host "`n=== Backing up current binary ===" -ForegroundColor Green
 Run-Remote "cp /opt/xfchess/signing-server-http /opt/xfchess/signing-server-http.prev 2>/dev/null || true"
 Write-Host "Binary backup saved as signing-server-http.prev" -ForegroundColor DarkGray
 
-Write-Host "`n=== Uploading backend binary ===" -ForegroundColor Green
-$backendBinary = Resolve-BackendBinaryPath
-Write-Host "Using backend binary: $backendBinary" -ForegroundColor DarkGray
-Upload $backendBinary "/opt/xfchess/signing-server-http"
+Write-Host "`n=== Installing Linux backend binary ===" -ForegroundColor Green
+Run-Remote "cp /opt/xfchess/src/backend/target/release/signing-server-http /opt/xfchess/signing-server-http"
 Run-Remote "chmod +x /opt/xfchess/signing-server-http"
 
 # ── Step 5a: Upload keypair files ────────────────────────────────────────────
@@ -226,6 +209,7 @@ Run-Remote "sed -i 's/YOUR_DOMAIN/${Server}/g' /etc/nginx/sites-available/xfches
 Run-Remote "ln -sf /etc/nginx/sites-available/xfchess /etc/nginx/sites-enabled/xfchess"
 Run-Remote "rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/default.conf"
 Run-Remote "nginx -t && systemctl reload nginx"
+Run-Remote "systemctl restart nginx"
 
 # ── Step 9: Verify ────────────────────────────────────────────────────────────
 Write-Host "`n=== Verifying deployment ===" -ForegroundColor Green
@@ -235,6 +219,13 @@ if ($result) {
     Write-Host "Backend responding: $($result | ConvertTo-Json)" -ForegroundColor Green
 } else {
     Write-Host "Backend check failed - check logs: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
+}
+# Add health endpoint check
+$healthResult = Invoke-RestMethod -Uri "http://${Server}/health" -ErrorAction SilentlyContinue
+if ($healthResult -eq "OK") {
+    Write-Host "Health endpoint check passed." -ForegroundColor Green
+} else {
+    Write-Host "Health endpoint check failed - check logs: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
 }
 
 Write-Host "`n=== Deploy complete ===" -ForegroundColor Green

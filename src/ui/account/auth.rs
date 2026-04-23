@@ -5,6 +5,12 @@ use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use futures_lite::future;
 use serde::Deserialize;
 
+ fn auth_base_url() -> String {
+     std::env::var("SIGNING_SERVICE_URL")
+         .or_else(|_| std::env::var("BACKEND_URL"))
+         .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string())
+ }
+
 // --- Resources ---
 
 #[derive(Resource, Default)]
@@ -292,8 +298,7 @@ fn render_floating_title(ui: &mut egui::Ui, color: egui::Color32) {
 
     // Let's just draw relative to rect.min
     let mut x_offset = 0.0;
-    // Center it manually
-    let actual_width_estimate = title.len() as f32 * (font_size * 0.55); // tighter estimate
+    let actual_width_estimate = title.len() as f32 * (font_size * 0.55);
     let start_x = rect.center().x - (actual_width_estimate / 2.0);
 
     for (i, ch) in title.chars().enumerate() {
@@ -305,7 +310,7 @@ fn render_floating_title(ui: &mut egui::Ui, color: egui::Color32) {
         let text_layout = painter.layout_no_wrap(ch.to_string(), font_id.clone(), color);
         let width = text_layout.size().x;
 
-        painter.galley(pos, text_layout, egui::Color32::BLACK); // optional shadow if we wanted
+        painter.galley(pos, text_layout, egui::Color32::BLACK);
 
         x_offset += width;
     }
@@ -316,6 +321,7 @@ fn perform_auth(auth_state: &mut ResMut<AuthState>, commands: &mut Commands) {
     auth_state.error = None;
 
     let thread_pool = AsyncComputeTaskPool::get();
+    let base_url = auth_base_url();
     let email = auth_state.email.clone();
     let password = auth_state.password.clone();
     let username = auth_state.username.clone();
@@ -326,7 +332,6 @@ fn perform_auth(auth_state: &mut ResMut<AuthState>, commands: &mut Commands) {
         // Run blocking code in a separate thread
         std::thread::spawn(move || {
             let client = reqwest::blocking::Client::new();
-            let base_url = "http://localhost:3000";
             let url = if mode {
                 format!("{}/auth/register", base_url)
             } else {

@@ -38,11 +38,27 @@ fn http_port() -> u16 {
         .unwrap_or(7454)
 }
 
-/// Open the production site in Chrome so the user can start playing.
+/// Get the base URL for the backend (defaults to localhost).
+fn get_backend_url() -> String {
+    std::env::var("SIGNING_SERVICE_URL")
+        .or_else(|_| std::env::var("BACKEND_URL"))
+        .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string())
+}
+
+/// Open the login page in the browser.
 fn open_production_site() {
-    match open::that("http://178.104.55.19/auth/login") {
-        Ok(_) => println!("[TAURI] Opened production login page in browser"),
-        Err(e) => eprintln!("[TAURI] Failed to open production site: {}", e),
+    let backend_url = get_backend_url();
+    let is_local = backend_url.contains("localhost") || backend_url.contains("127.0.0.1");
+    
+    let url = if is_local {
+        format!("http://localhost:{}/auth/login", http_port())
+    } else {
+        format!("{}/auth/login", backend_url.replace(":8090", ""))
+    };
+    
+    match open::that(&url) {
+        Ok(_) => println!("[TAURI] Opened login page in browser: {}", url),
+        Err(e) => eprintln!("[TAURI] Failed to open site: {}", e),
     }
 }
 
@@ -188,7 +204,8 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     // POST /api/auth/login — proxy to Hetzner :8090
     async fn api_login(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
         let client = reqwest::Client::new();
-        match client.post("http://178.104.55.19:8090/api/auth/login").json(&body).send().await {
+        let url = format!("{}/api/auth/login", get_backend_url());
+        match client.post(&url).json(&body).send().await {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(v) => (StatusCode::OK, Json(v)).into_response(),
@@ -207,14 +224,15 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     // POST /api/auth/register — proxy to :8090
     async fn api_register(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
         let client = reqwest::Client::new();
+        let base = get_backend_url();
         // Register
-        match client.post("http://178.104.55.19:8090/api/auth/register").json(&body).send().await {
+        match client.post(format!("{}/api/auth/register", base)).json(&body).send().await {
             Ok(resp) if resp.status().is_success() => {
                 // Auto-login after register
                 let login_body = serde_json::json!({
                     "email": body["email"], "password": body["password"]
                 });
-                match client.post("http://178.104.55.19:8090/api/auth/login").json(&login_body).send().await {
+                match client.post(format!("{}/api/auth/login", base)).json(&login_body).send().await {
                     Ok(lr) if lr.status().is_success() => {
                         match lr.json::<serde_json::Value>().await {
                             Ok(v) => (StatusCode::OK, Json(v)).into_response(),
@@ -252,7 +270,9 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
             let mut lock = state.wallet_pubkey.0.lock().unwrap();
             *lock = Some(pk.clone());
         }
-        match spawn_bevy_game(true, pubkey_opt, is_hot, username_opt, ai_diff, ai_side) {
+        let token_opt = body["token"].as_str().map(|s| s.to_string());
+
+        match spawn_bevy_game(true, pubkey_opt, is_hot, username_opt, ai_diff, ai_side, token_opt) {
             Ok(mut child) => {
                 println!("[HTTP] Bevy game launched (PID {})", child.id());
                 std::thread::spawn(move || {
@@ -467,6 +487,7 @@ fn spawn_bevy_game(
     username: Option<String>,
     ai_difficulty: Option<u8>,
     ai_side: Option<String>,
+    token: Option<String>,
 ) -> Result<std::process::Child, String> {
     let exe_name = if cfg!(windows) { "xfchess.exe" } else { "xfchess" };
 
@@ -474,8 +495,17 @@ fn spawn_bevy_game(
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
 
+    let resource_dir = self_dir.as_ref().map(|dir| {
+        if dir.ends_with("bin") {
+            dir.parent().map(|parent| parent.to_path_buf()).unwrap_or_else(|| dir.clone())
+        } else {
+            dir.clone()
+        }
+    });
+
     let candidate_paths = [
         self_dir.as_ref().map(|d| d.join(exe_name)),
+        resource_dir.as_ref().map(|d| d.join(exe_name)),
         Some(PathBuf::from(format!("target/debug/{}", exe_name))),
         Some(PathBuf::from(format!("target/release/{}", exe_name))),
     ];
@@ -505,6 +535,18 @@ fn spawn_bevy_game(
     }
     if let Some(ref s) = ai_side {
         cmd.env("XFCHESS_AI_SIDE", s);
+    }
+    if let Some(ref t) = token {
+        cmd.env("XFCHESS_AUTH_TOKEN", t);
+    }
+    if let Ok(signing_url) = std::env::var("SIGNING_SERVICE_URL") {
+        cmd.env("SIGNING_SERVICE_URL", signing_url);
+    }
+    if let Ok(backend_url) = std::env::var("BACKEND_URL") {
+        cmd.env("BACKEND_URL", backend_url);
+    }
+    if let Ok(wallet_port) = std::env::var("XFCHESS_WALLET_PORT") {
+        cmd.env("XFCHESS_WALLET_PORT", wallet_port);
     }
     // Set working directory to project root so the game can find assets
     if let Some(parent) = game_path.parent() {
@@ -567,8 +609,9 @@ async fn resolve_signed_tx(_signed_b64: String) -> Result<(), String> {
 #[tauri::command]
 async fn login_user(email: String, password: String) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
+    let url = format!("{}/api/auth/login", get_backend_url());
     let resp = client
-        .post("http://178.104.55.19:8090/api/auth/login")
+        .post(&url)
         .json(&serde_json::json!({ "email": email, "password": password }))
         .send()
         .await
@@ -590,9 +633,10 @@ async fn register_user(
     password: String,
 ) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
+    let base = get_backend_url();
     // Register
     let reg = client
-        .post("http://178.104.55.19:8090/api/auth/register")
+        .post(format!("{}/api/auth/register", base))
         .json(&serde_json::json!({ "username": username, "email": email, "password": password }))
         .send()
         .await
@@ -603,7 +647,7 @@ async fn register_user(
     }
     // Auto-login after registration
     let login = client
-        .post("http://178.104.55.19:8090/api/auth/login")
+        .post(format!("{}/api/auth/login", base))
         .json(&serde_json::json!({ "email": email, "password": password }))
         .send()
         .await
@@ -650,7 +694,7 @@ async fn launch_game(
     }
 
     // Spawn Bevy game
-    match spawn_bevy_game(true, pubkey, false, None, None, None) {
+    match spawn_bevy_game(true, pubkey, false, None, None, None, None) {
         Ok(mut child) => {
             let pid = child.id();
             println!("[TAURI] Bevy game launched (PID {})", pid);
@@ -800,6 +844,7 @@ fn main() {
                         let ai_difficulty = params.get("ai_difficulty")
                             .and_then(|s| s.parse::<u8>().ok());
                         let ai_side = params.get("ai_side").map(|s| s.to_string());
+                        let token = params.get("token").map(|s| s.to_string());
                         
                         // Update wallet pubkey state if provided in URL
                         if let Some(ref pk) = pubkey {
@@ -807,7 +852,7 @@ fn main() {
                             *lock = Some(pk.clone());
                         }
                         
-                        match spawn_bevy_game(true, pubkey, false, username, ai_difficulty, ai_side) {
+                        match spawn_bevy_game(true, pubkey, false, username, ai_difficulty, ai_side, token) {
                             Ok(mut child) => {
                                 let pid = child.id();
                                 println!("[TAURI] Bevy game launched (PID {}) from deep-link", pid);
@@ -852,7 +897,7 @@ fn main() {
             // Open Chrome to the production site after server starts
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(800));
-                println!("[TAURI] Opening production site: http://178.104.55.19");
+                println!("[TAURI] Opening site: {}", get_backend_url());
                 open_production_site();
             });
 

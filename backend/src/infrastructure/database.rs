@@ -73,17 +73,19 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_001 = include_str!("../../migrations/001_initial.sql");
     for statement in migration_001.split(';') {
         let statement = statement.trim();
-        if statement.is_empty() {
+        if statement.is_empty() || statement.starts_with("--") {
             continue;
         }
         if statement.contains("CREATE TABLE IF NOT EXISTS sessions")
             || statement.contains("CREATE TABLE IF NOT EXISTS users")
         {
-            sqlx::query(statement).execute(&pools.session_pool).await?;
+            sqlx::query(statement).execute(&pools.session_pool).await
+                .map_err(|e| { tracing::error!("Migration 001 (session) failed on statement: {}: {}", statement, e); e })?;
         } else if statement.contains("CREATE TABLE IF NOT EXISTS vault_users")
             || statement.contains("CREATE TABLE IF NOT EXISTS audit_log")
         {
-            sqlx::query(statement).execute(&pools.vault_pool).await?;
+            sqlx::query(statement).execute(&pools.vault_pool).await
+                .map_err(|e| { tracing::error!("Migration 001 (vault) failed on statement: {}: {}", statement, e); e })?;
         }
     }
 
@@ -91,7 +93,7 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_002 = include_str!("../../migrations/002_kyc_gdpr.sql");
     for statement in migration_002.split(';') {
         let statement = statement.trim();
-        if statement.is_empty() {
+        if statement.is_empty() || statement.starts_with("--") {
             continue;
         }
         let is_vault = statement.contains("CREATE TABLE IF NOT EXISTS kyc_records")
@@ -99,7 +101,8 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
         let is_session = statement.contains("ALTER TABLE users");
 
         if is_vault {
-            sqlx::query(statement).execute(&pools.vault_pool).await?;
+            sqlx::query(statement).execute(&pools.vault_pool).await
+                .map_err(|e| { tracing::error!("Migration 002 (vault) failed on statement: {}: {}", statement, e); e })?;
         } else if is_session {
             // ALTER TABLE ADD COLUMN fails silently if column exists
             let _ = sqlx::query(statement).execute(&pools.session_pool).await;
@@ -110,7 +113,7 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_003 = include_str!("../../migrations/003_wallet_first_auth.sql");
     for statement in migration_003.split(';') {
         let statement = statement.trim();
-        if statement.is_empty() {
+        if statement.is_empty() || statement.starts_with("--") {
             continue;
         }
         let _ = sqlx::query(statement).execute(&pools.session_pool).await;

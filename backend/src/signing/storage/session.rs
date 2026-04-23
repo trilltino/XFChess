@@ -56,7 +56,7 @@ impl SessionStore {
                 keypair   BLOB    NOT NULL,
                 wallet    TEXT    NOT NULL,
                 active    INTEGER NOT NULL DEFAULT 0
-            )
+            );
             "#,
         )
         .execute(&self.pool)
@@ -72,14 +72,14 @@ impl SessionStore {
                 kyc_status  TEXT NOT NULL DEFAULT 'none',
                 created_at  INTEGER NOT NULL DEFAULT 0,
                 deleted_at  INTEGER
-            )
+            );
             "#,
         )
         .execute(&self.pool)
         .await?;
 
         sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_v2_username ON users_v2 (LOWER(username))"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_v2_username ON users_v2 (LOWER(username));"
         )
         .execute(&self.pool)
         .await?;

@@ -37,7 +37,7 @@ function useSolPrice(): SolPrice & { refresh: () => void } {
 }
 
 // ─── API helpers ────────────────────────────────────────────────────────────
-const API = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8090';
+const API = import.meta.env.VITE_BACKEND_URL || ''; // Relative for proxying via Tauri
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
     const r = await fetch(`${API}${path}`, {
         method: 'POST',
@@ -764,9 +764,9 @@ function ProfileStep() {
                                         username: profile.data.username
                                     };
                                     try {
-                                        await apiPost('/api/game/launch', body);
+                                        await apiPost('/api/game/launch', { ...body, token: localStorage.getItem('xfchess_token') });
                                     } catch (e) {
-                                        navigate('/download');
+                                        navigate('/play');
                                     }
                                 }}
                             >
@@ -862,9 +862,9 @@ function ProfileStep() {
                                             ai_side: finalSide === 'white' ? 'black' : 'white' // AI plays opposite of player
                                         };
                                         try {
-                                            await apiPost('/api/game/launch', body);
+                                            await apiPost('/api/game/launch', { ...body, token: localStorage.getItem('xfchess_token') });
                                         } catch (e) {
-                                            navigate('/download');
+                                            navigate('/play');
                                         }
                                     }}
                                 >

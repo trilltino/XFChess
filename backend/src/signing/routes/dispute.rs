@@ -29,7 +29,7 @@ const FROM_EMAIL: &str = "noreply@xfchess.com";
 pub fn dispute_routes() -> Router<AppState> {
     Router::new()
         .route("/dispute/notify", post(notify_dispute))
-        .route("/dispute/:game_id", get(get_dispute_status))
+        .route("/dispute/{game_id}", get(get_dispute_status))
 }
 
 pub fn admin_dispute_routes() -> Router<AppState> {

@@ -47,7 +47,7 @@ pub fn auth_routes() -> Router<AppState> {
     Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
-        .route("/check-username/:username", get(check_username))
+        .route("/check-username/{username}", get(check_username))
         .route("/delete", post(delete_account))
 }
 

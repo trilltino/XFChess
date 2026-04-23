@@ -193,7 +193,7 @@ function SignupForm({
       <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(173, 92, 47, 0.05)', borderRadius: '8px', border: '1px solid rgba(173, 92, 47, 0.2)', textAlign: 'center' }}>
         <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-dim)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> PvP wagering and Cash Tournaments require a Solana wallet and KYC verification.
-          <Link to="http://localhost:5173/kyc" style={{ color: '#ad5c2f', fontWeight: 600, marginLeft: '8px' }}>Complete KYC</Link> or{' '}
+          <Link to="/kyc" style={{ color: '#ad5c2f', fontWeight: 600, marginLeft: '8px' }}>Complete KYC</Link> or{' '}
           <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ad5c2f', fontWeight: 600 }}>create a wallet on Solflare</a>.
         </p>
       </div>
@@ -392,7 +392,7 @@ export function ProfileViewer() {
               >
                 <UserPlus size={18} /> Create Account
               </button>
-              <Link to="/auth/login" className="launch-btn">
+              <Link to="/login" className="launch-btn">
                 <LogIn size={18} /> Login
               </Link>
             </div>
@@ -494,7 +494,7 @@ export function ProfileViewer() {
 
                   <div style={{ marginTop: 24, textAlign: 'center' }}>
                     <a
-                      href={`xfchess://launch?pubkey=${wallet.publicKey?.toBase58()}&username=${profile.data.username || ''}`}
+                      href={`xfchess://launch?pubkey=${wallet.publicKey?.toBase58()}&username=${profile.data.username || ''}&token=${localStorage.getItem('xfchess_token') || ''}`}
                       className="btn btn-primary"
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '16px 32px', fontSize: '1.1rem' }}
                     >

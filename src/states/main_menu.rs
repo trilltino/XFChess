@@ -29,6 +29,26 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use std::sync::Arc;
 
+ fn sign_in_url() -> String {
+     if std::env::var("XFCHESS_WALLET_MODE").unwrap_or_default() == "tauri" {
+         let port = std::env::var("XFCHESS_WALLET_PORT")
+             .ok()
+             .and_then(|value| value.parse::<u16>().ok())
+             .unwrap_or(7454);
+         return format!("http://localhost:{}/auth/login", port);
+     }
+
+     let backend_url = std::env::var("SIGNING_SERVICE_URL")
+         .or_else(|_| std::env::var("BACKEND_URL"))
+         .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
+
+     if backend_url.contains("127.0.0.1") || backend_url.contains("localhost") {
+         return format!("{}/auth/login", backend_url.trim_end_matches('/'));
+     }
+
+     format!("{}/auth/login", backend_url.replace(":8090", "").trim_end_matches('/'))
+ }
+
 /// Plugin for main menu state
 pub struct MainMenuPlugin;
 
@@ -858,7 +878,7 @@ fn render_quick_pairing_section(ui: &mut egui::Ui) {
 
         if resp.clicked() {
             info!("[MENU] Wager {} clicked — wallet not connected, opening sign-in", name);
-            let _ = webbrowser::open("http://localhost:7454/auth/login");
+            let _ = webbrowser::open(&sign_in_url());
         }
         ui.add_space(5.0);
     }
@@ -2274,7 +2294,7 @@ pub fn render_lobby_selection_popup(
                         if let Some(state) = solana_state.as_ref() {
                             if state.wallet_pubkey.is_none() {
                                 info!("[MENU] Solana wager blocked — wallet not connected. Opening sign-in.");
-                                if let Err(e) = webbrowser::open("http://localhost:7454/auth/login") {
+                                if let Err(e) = webbrowser::open(&sign_in_url()) {
                                     warn!("[MENU] Failed to open sign-in page: {}", e);
                                 }
                             } else if state.profile_status != crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername {

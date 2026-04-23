@@ -75,7 +75,7 @@ fn fetch_stats_system(
 
     let vps_url = std::env::var("SIGNING_SERVICE_URL")
         .or_else(|_| std::env::var("BACKEND_URL"))
-        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+        .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
     let tx = channel.sender.clone();
 
     std::thread::spawn(move || {

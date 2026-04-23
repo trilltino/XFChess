@@ -91,25 +91,12 @@ echo.
 
 popd
 
-REM ── Step 1: Build backend ─────────────────────────────────────────────────────
-echo.
-echo === Building backend ===
-pushd %ROOT%\backend
-cargo build --release --bin signing-server-http
-if errorlevel 1 (
-    echo Backend build failed
-    exit /b 1
-)
-popd
-
-REM ── Step 2: Build frontend ────────────────────────────────────────────────────
+REM ── Step 1: Build frontend ────────────────────────────────────────────────────
 echo.
 echo === Building frontend ===
 pushd %ROOT%\web-solana
-if not exist ".env.production" (
-    echo VITE_BACKEND_URL=http://%SERVER%:8090 > .env.production
-    echo Created .env.production with VITE_BACKEND_URL=http://%SERVER%:8090
-)
+echo VITE_BACKEND_URL=http://%SERVER% > .env.production
+echo Set .env.production to VITE_BACKEND_URL=http://%SERVER%
 call npm run build
 if errorlevel 1 (
     echo Frontend build failed
@@ -117,23 +104,35 @@ if errorlevel 1 (
 )
 popd
 
-REM ── Step 3: Server setup ──────────────────────────────────────────────────────
+REM ── Step 2: Server setup ──────────────────────────────────────────────────────
 echo.
 echo === Setting up server ===
 %SSH% %DEST% "id xfchess 2>/dev/null || adduser xfchess --disabled-password --gecos ''"
 if errorlevel 1 exit /b 1
-%SSH% %DEST% "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups"
+%SSH% %DEST% "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups /opt/xfchess/keys /opt/xfchess/src"
 if errorlevel 1 exit /b 1
 %SSH% %DEST% "chown -R xfchess:xfchess /opt/xfchess"
 if errorlevel 1 exit /b 1
-%SSH% %DEST% "apt-get update -qq && apt-get install -y -qq nginx sqlite3"
+%SSH% %DEST% "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates"
+if errorlevel 1 exit /b 1
+%SSH% %DEST% "command -v cargo >/dev/null 2>&1 || (curl https://sh.rustup.rs -sSf | su - xfchess -c 'sh -s -- -y')"
 if errorlevel 1 exit /b 1
 
 REM Install nightly cron backup (3am UTC, keeps 14 days)
-set "cronJob=0 3 * * * sqlite3 /opt/xfchess/data/sessions.db \".backup '/opt/xfchess/backups/sessions-$(date +%%Y%%m%%d).db'\" ; sqlite3 /opt/xfchess/data/vault.db \".backup '/opt/xfchess/backups/vault-$(date +%%Y%%m%%d).db'\" ; find /opt/xfchess/backups -name '*.db' -mtime +14 -delete"
+set "cronJob=0 3 * * * sqlite3 /opt/xfchess/data/sessions.db ".backup '/opt/xfchess/backups/sessions-$(date +%%Y%%m%%d).db'" ; sqlite3 /opt/xfchess/data/vault.db ".backup '/opt/xfchess/backups/vault-$(date +%%Y%%m%%d).db'" ; find /opt/xfchess/backups -name '*.db' -mtime +14 -delete"
 %SSH% %DEST% "(crontab -l 2>/dev/null | grep -v xfchess/backups; echo '%cronJob%') | crontab -"
 if errorlevel 1 exit /b 1
 echo Nightly backup cron installed (3am UTC, 14-day retention)
+
+REM ── Step 3: Sync source and build backend on server ───────────────────────────
+echo.
+echo === Syncing source and building backend on server ===
+%SSH% %DEST% "if [ ! -d /opt/xfchess/src/.git ]; then git clone --depth 1 !remoteUrl! /opt/xfchess/src; fi"
+if errorlevel 1 exit /b 1
+%SSH% %DEST% "cd /opt/xfchess/src && git fetch --all --tags --prune && git checkout !commitHash! && git reset --hard !commitHash!"
+if errorlevel 1 exit /b 1
+%SSH% %DEST% "su - xfchess -c 'export PATH=\$HOME/.cargo/bin:\$PATH && cd /opt/xfchess/src/backend && cargo build --release --bin signing-server-http'"
+if errorlevel 1 exit /b 1
 
 REM ── Step 4: Backup databases + binary before touching anything ───────────────
 echo.
@@ -141,6 +140,8 @@ echo === Snapshotting databases ===
 for /f "tokens=*" %%i in ('%SSH% %DEST% "date +%%Y%%m%%d-%%H%%M%%S"') do set "ts=%%i"
 %SSH% %DEST% "mkdir -p /opt/xfchess/backups"
 if errorlevel 1 exit /b 1
+%SSH% %DEST% "sqlite3 /opt/xfchess/data/sessions.db ".backup '/opt/xfchess/backups/sessions-%ts%.db'" 2>/dev/null || cp /opt/xfchess/data/sessions.db /opt/xfchess/backups/sessions-%ts%.db 2>/dev/null || true"
+%SSH% %DEST% "sqlite3 /opt/xfchess/data/vault.db ".backup '/opt/xfchess/backups/vault-%ts%.db'" 2>/dev/null || cp /opt/xfchess/data/vault.db /opt/xfchess/backups/vault-%ts%.db 2>/dev/null || true"
 %SSH% %DEST% "sqlite3 /opt/xfchess/data/sessions.db \".backup '/opt/xfchess/backups/sessions-%ts%.db'\" 2>/dev/null || cp /opt/xfchess/data/sessions.db /opt/xfchess/backups/sessions-%ts%.db 2>/dev/null || true"
 %SSH% %DEST% "sqlite3 /opt/xfchess/data/vault.db \".backup '/opt/xfchess/backups/vault-%ts%.db'\" 2>/dev/null || cp /opt/xfchess/data/vault.db /opt/xfchess/backups/vault-%ts%.db 2>/dev/null || true"
 %SSH% %DEST% "ls -t /opt/xfchess/backups/sessions-*.db 2>/dev/null | tail -n +8 | xargs rm -f"
@@ -153,12 +154,9 @@ echo === Backing up current binary ===
 echo Binary backup saved as signing-server-http.prev
 
 echo.
-echo === Uploading backend binary ===
-%SCP% -r "%ROOT%\backend\target\release\signing-server-http" "%DEST%:/opt/xfchess/signing-server-http"
-if errorlevel 1 (
-    echo Upload failed: backend binary
-    exit /b 1
-)
+echo === Installing Linux backend binary ===
+%SSH% %DEST% "cp /opt/xfchess/src/backend/target/release/signing-server-http /opt/xfchess/signing-server-http"
+if errorlevel 1 exit /b 1
 %SSH% %DEST% "chmod +x /opt/xfchess/signing-server-http"
 if errorlevel 1 exit /b 1
 
@@ -246,6 +244,8 @@ if errorlevel 1 exit /b 1
 if errorlevel 1 exit /b 1
 %SSH% %DEST% "nginx -t && systemctl reload nginx"
 if errorlevel 1 exit /b 1
+%SSH% %DEST% "systemctl restart nginx"
+if errorlevel 1 exit /b 1
 
 REM ── Step 9: Verify ────────────────────────────────────────────────────────────
 echo.
@@ -257,7 +257,12 @@ if errorlevel 1 (
 ) else (
     echo Backend responding
 )
-
+curl -s "http://%SERVER%/health" >nul 2>&1
+if errorlevel 1 (
+    echo Health endpoint check failed - check logs: ssh %DEST% journalctl -u xfchess-backend -n 50
+) else (
+    echo Health endpoint check passed
+)
 echo.
 echo === Deploy complete ===
 echo Frontend: http://%SERVER%

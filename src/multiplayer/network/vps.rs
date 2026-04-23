@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use bevy::prelude::info;
 
-const VPS_DEFAULT_URL: &str = "http://178.104.55.19:8090";
+const VPS_DEFAULT_URL: &str = "http://127.0.0.1:8090";
 
 fn vps_base() -> String {
     // Priority: runtime env var > compile-time BACKEND_URL > default

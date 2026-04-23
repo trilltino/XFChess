@@ -60,7 +60,7 @@ pub fn build_app_router(
                 .layer(middleware::from_fn(require_api_key))
         );
 
-    // Merge all routers
+    // Merge all routers and add CORS
     signing_router
         .merge(tournament_router)
         .merge(matchmaking_router)
@@ -68,4 +68,8 @@ pub fn build_app_router(
         .merge(kyc_router)
         .merge(history_router)
         .merge(dispute_router)
+        .layer(
+            tower_http::cors::CorsLayer::permissive()
+        )
+        .layer(tower_http::trace::TraceLayer::new_for_http())
 }

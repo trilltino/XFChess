@@ -19,7 +19,7 @@ const Launch = () => {
           <Link to="/profile" className="launch-btn primary">
             <UserPlus size={18} /> Create Account
           </Link>
-          <Link to="/auth/login" className="launch-btn">
+          <Link to="/login" className="launch-btn">
             <LogIn size={18} /> Login
           </Link>
         </div>

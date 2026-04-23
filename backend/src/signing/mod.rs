@@ -213,16 +213,20 @@ impl AppState {
 /// Uses per-feature router functions merged together for clear separation of concerns.
 /// Note: tournament routes are mounted in build_app_router to avoid duplication.
 pub fn build_router(state: AppState) -> Router {
-    let braid_hub = Arc::clone(&state.braid_hub);
-    // Build the API router and consume AppState first.
-    // Then nest the braid router (Router<()>) onto the resulting Router<()>.
     Router::new()
-        .nest("/api/auth", routes::auth::auth_routes())
+        // Core game session and move routes (These were missing from build_app_router)
+        .merge(crate::signing::routes::main::routes())
+        
+        // Feature-specific nested routes
+        .nest("/api/auth", crate::signing::routes::auth::auth_routes())
         .nest("/api/actions", blinks::blinks_routes())
         .merge(p2p_relay::p2p_routes())
-        .nest("/identity", routes::identity::identity_routes())
+        .nest("/identity", crate::signing::routes::identity::identity_routes())
+        
+        // Relayer infrastructure
         .merge(relayer::routes())
         .merge(tee_relayer::routes())
+        
+        // State injection
         .with_state(state)
-        .nest("/braid", xfchess_braid_server::braid_router((*braid_hub).clone()))
 }

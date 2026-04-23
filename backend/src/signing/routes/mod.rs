@@ -8,6 +8,7 @@
 //! - `history`: Game history queries
 //! - `dispute`: Dispute resolution
 
+pub mod main;
 pub mod auth;
 pub mod identity;
 pub mod matchmaking;

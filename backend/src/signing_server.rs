@@ -35,7 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone(), Arc::new(tournament_store.clone()));
 
     // ── Build application router ───────────────────────────────────────────
-    let app = backend::signing::build_router(state.clone());
+    // Use the comprehensive app router from infrastructure to include all services
+    let app = backend::infrastructure::build_app_router(state.clone());
     info!("[signing-server] Application router built");
 
     // ── Bind and serve via Iroh P2P ───────────────────────────────────────

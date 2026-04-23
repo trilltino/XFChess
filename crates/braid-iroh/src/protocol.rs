@@ -189,6 +189,9 @@ pub fn build_protocol_handler(state: BraidAppState, external_router: Option<Rout
         None => local_router,
     };
 
+    // Apply permissive CORS to the entire final router (P2P + App routes)
+    let final_router = final_router.layer(tower_http::cors::CorsLayer::permissive());
+
     IrohAxum::new(final_router)
 }
 

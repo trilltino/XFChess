@@ -3,7 +3,7 @@
 
 const BACKEND_URL: string =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ||
-  'http://localhost:8090';
+  ''; // Empty string for relative paths (proxied via Tauri in prod)
 
 export interface SignupRequest {
   email: string;
@@ -43,7 +43,7 @@ async function request<T>(
 }
 
 export function submitSignup(body: SignupRequest): Promise<{ ok: boolean }> {
-  return request('/signup', { method: 'POST', body: JSON.stringify(body) });
+  return request('/api/signup', { method: 'POST', body: JSON.stringify(body) });
 }
 
 export interface RegisterRequest {
@@ -61,11 +61,11 @@ export interface AuthResponse {
 }
 
 export function registerWithWallet(body: RegisterRequest): Promise<AuthResponse> {
-  return request('/auth/register', { method: 'POST', body: JSON.stringify(body) });
+  return request('/api/auth/register', { method: 'POST', body: JSON.stringify(body) });
 }
 
 export function checkUsernameAvailable(username: string): Promise<{ taken: boolean }> {
-  return request(`/auth/check-username/${encodeURIComponent(username)}`, { method: 'GET' });
+  return request(`/api/auth/check-username/${encodeURIComponent(username)}`, { method: 'GET' });
 }
 
 export function submitKyc(body: KycSubmission): Promise<{ ok: boolean }> {
@@ -93,7 +93,7 @@ export interface GameHistoryRecord {
 }
 
 export function getGameHistory(wallet: string): Promise<{ games: GameHistoryRecord[] }> {
-  return request(`/games/history/${wallet}`, { method: 'GET' });
+  return request(`/api/games/history/${wallet}`, { method: 'GET' });
 }
 
 export interface NotifyDisputeRequest {
@@ -104,7 +104,7 @@ export interface NotifyDisputeRequest {
 }
 
 export function notifyDispute(body: NotifyDisputeRequest): Promise<{ ok: boolean; case_id: string }> {
-  return request('/dispute/notify', { method: 'POST', body: JSON.stringify(body) });
+  return request('/api/dispute/notify', { method: 'POST', body: JSON.stringify(body) });
 }
 
 export interface DisputeStatus {
@@ -118,5 +118,5 @@ export interface DisputeStatus {
 }
 
 export function getDisputeStatus(gameId: number): Promise<DisputeStatus> {
-  return request(`/dispute/${gameId}`, { method: 'GET' });
+  return request(`/api/dispute/${gameId}`, { method: 'GET' });
 }

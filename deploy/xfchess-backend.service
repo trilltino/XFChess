@@ -15,6 +15,17 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/opt/xfchess/data
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Environment validation
+ExecStartPre=/bin/sh -c 'test -f /opt/xfchess/.env || (echo "/opt/xfchess/.env not found"; exit 1)'
+ExecStartPre=/bin/sh -c 'grep -q JWT_SECRET /opt/xfchess/.env || (echo "JWT_SECRET not set in /opt/xfchess/.env"; exit 1)'
+ExecStartPre=/bin/sh -c 'grep -q IDENTITY_ENCRYPTION_KEY /opt/xfchess/.env || (echo "IDENTITY_ENCRYPTION_KEY not set in /opt/xfchess/.env"; exit 1)'
 
 [Install]
 WantedBy=multi-user.target

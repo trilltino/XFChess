@@ -407,7 +407,7 @@ impl TournamentStore {
                 id       INTEGER PRIMARY KEY,
                 data     TEXT    NOT NULL,
                 updated_at INTEGER NOT NULL DEFAULT 0
-            )"
+            );"
         ).execute(&pool).await.ok();
         tracing::info!("[tournament-store] SQLite table ready");
         Self { pool }
