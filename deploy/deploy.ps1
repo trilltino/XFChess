@@ -121,6 +121,8 @@ Pop-Location
 # ── Step 2: Server setup ──────────────────────────────────────────────────────
 Write-Host "`n=== Setting up server ===" -ForegroundColor Green
 Run-Remote "id xfchess 2>/dev/null || adduser xfchess --disabled-password --gecos ''"
+Run-Remote "mkdir -p /home/xfchess"
+Run-Remote "chown xfchess:xfchess /home/xfchess"
 Run-Remote "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups /opt/xfchess/keys /opt/xfchess/src"
 Run-Remote "chown -R xfchess:xfchess /opt/xfchess"
 Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates"

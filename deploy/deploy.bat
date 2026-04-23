@@ -109,6 +109,10 @@ echo.
 echo === Setting up server ===
 %SSH% %DEST% "id xfchess 2>/dev/null || adduser xfchess --disabled-password --gecos ''"
 if errorlevel 1 exit /b 1
+%SSH% %DEST% "mkdir -p /home/xfchess"
+if errorlevel 1 exit /b 1
+%SSH% %DEST% "chown xfchess:xfchess /home/xfchess"
+if errorlevel 1 exit /b 1
 %SSH% %DEST% "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups /opt/xfchess/keys /opt/xfchess/src"
 if errorlevel 1 exit /b 1
 %SSH% %DEST% "chown -R xfchess:xfchess /opt/xfchess"
