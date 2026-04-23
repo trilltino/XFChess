@@ -72,14 +72,14 @@ echo Sync:   up to date with origin/!branch!
 
 REM 5. Show exactly what is going out
 for /f "tokens=*" %%i in ('git rev-parse --short HEAD') do set "commitHash=%%i"
-for /f "tokens=*" %%i in ('git log -1 --pretty="%%s"') do set "commitMsg=%%i"
-for /f "tokens=*" %%i in ('git log -1 --pretty="%%an"') do set "commitAuthor=%%i"
-for /f "tokens=*" %%i in ('git log -1 --pretty="%%cd" --date=format:"%%Y-%%m-%%d %%H:%%M"') do set "commitDate=%%i"
+for /f "tokens=*" %%i in ('git log -1 --pretty="%%%%s"') do set "commitMsg=%%i"
+for /f "tokens=*" %%i in ('git log -1 --pretty="%%%%an"') do set "commitAuthor=%%i"
+for /f "tokens=*" %%i in ('git log -1 --pretty="%%%%cd" --date=format:"%%%%Y-%%%%m-%%%%d %%%%H:%%%%M"') do set "commitDate=%%i"
 echo.
-echo   Deploying commit: %commitHash%
-echo   Message:  %commitMsg%
-echo   Author:   %commitAuthor%
-echo   Date:     %commitDate%
+echo   Deploying commit: !commitHash!
+echo   Message:  !commitMsg!
+echo   Author:   !commitAuthor!
+echo   Date:     !commitDate!
 echo.
 
 popd
