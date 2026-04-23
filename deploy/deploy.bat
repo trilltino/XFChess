@@ -40,16 +40,23 @@ set "branch="
 for /f "tokens=*" %%i in ('git rev-parse --abbrev-ref HEAD 2^>^&1') do set "branch=%%i"
 echo Branch: !branch!
 
-REM 3. Dirty working tree — HARD STOP
+REM 3. Dirty working tree — auto-commit + push
 set "is_dirty="
 for /f "delims=" %%i in ('git status --porcelain 2^>^&1') do set "is_dirty=1"
 if defined is_dirty (
     echo.
-    echo   ABORT: You have uncommitted changes. Commit or stash before deploying.
-    git status --porcelain
-    exit /b 1
+    echo   Uncommitted changes detected — auto-committing and pushing...
+    git add -A
+    git commit -m "Deploy %date% %time%"
+    git push origin !branch!
+    if errorlevel 1 (
+        echo   ABORT: git push failed.
+        exit /b 1
+    )
+    echo   Committed and pushed to origin/!branch!.
+) else (
+    echo Tree:   clean
 )
-echo Tree:   clean
 
 REM 4. Remote sync — HARD STOP
 git fetch --quiet 2>nul
@@ -72,9 +79,9 @@ echo Sync:   up to date with origin/!branch!
 
 REM 5. Show exactly what is going out
 for /f "tokens=*" %%i in ('git rev-parse --short HEAD') do set "commitHash=%%i"
-for /f "tokens=*" %%i in ('git log -1 --pretty="%%%%s"') do set "commitMsg=%%i"
-for /f "tokens=*" %%i in ('git log -1 --pretty="%%%%an"') do set "commitAuthor=%%i"
-for /f "tokens=*" %%i in ('git log -1 --pretty="%%%%cd" --date=format:"%%%%Y-%%%%m-%%%%d %%%%H:%%%%M"') do set "commitDate=%%i"
+for /f "tokens=*" %%i in ('git log -1 --pretty="%%s"') do set "commitMsg=%%i"
+for /f "tokens=*" %%i in ('git log -1 --pretty="%%an"') do set "commitAuthor=%%i"
+for /f "tokens=*" %%i in ('git log -1 --pretty="%%cd" --date=format:"%%Y-%%m-%%d %%H:%%M"') do set "commitDate=%%i"
 echo.
 echo   Deploying commit: !commitHash!
 echo   Message:  !commitMsg!
