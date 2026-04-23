@@ -7,20 +7,38 @@ param(
     [string]$User   = "root"
 )
 
-$SSH  = "ssh"
-$SCP  = "scp"
+$SSH_KEY = "$env:USERPROFILE\.ssh\id_xfchess"
+$SSH_ARGS = @('-i', $SSH_KEY, '-o', 'StrictHostKeyChecking=accept-new')
 $DEST = "${User}@${Server}"
 $ROOT = Split-Path $PSScriptRoot -Parent
 
+# One-time SSH key setup
+if (-not (Test-Path $SSH_KEY)) {
+    Write-Host "Generating SSH key..." -ForegroundColor Yellow
+    ssh-keygen -t ed25519 -f $SSH_KEY -N '""' -C xfchess-deploy
+}
+
+# Check if key is on server
+$null = & ssh @SSH_ARGS -o ConnectTimeout=5 $DEST "echo key_works" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`nSSH key not on server. Type your password ONE TIME to copy it:" -ForegroundColor Yellow
+    Get-Content "$SSH_KEY.pub" | & ssh -o StrictHostKeyChecking=accept-new $DEST "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Failed to copy key." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "SSH key copied. Future deploys will be passwordless." -ForegroundColor Green
+}
+
 function Run-Remote($cmd) {
     Write-Host ">> $cmd" -ForegroundColor Cyan
-    & $SSH $DEST $cmd
+    & ssh @SSH_ARGS $DEST $cmd
     if ($LASTEXITCODE -ne 0) { throw "Remote command failed: $cmd" }
 }
 
 function Upload($local, $remote) {
     Write-Host ">> scp $local -> $remote" -ForegroundColor Yellow
-    & $SCP -r $local "${DEST}:${remote}"
+    & scp @SSH_ARGS -r $local "${DEST}:${remote}"
     if ($LASTEXITCODE -ne 0) { throw "Upload failed: $local" }
 }
 
@@ -44,15 +62,22 @@ Write-Host "Repo:   $remoteUrl" -ForegroundColor Green
 $branch = git rev-parse --abbrev-ref HEAD 2>&1
 Write-Host "Branch: $branch" -ForegroundColor Green
 
-# 3. Dirty working tree — HARD STOP: uncommitted changes must not be deployed
+# 3. Dirty working tree — auto-commit + push
 $dirty = git status --porcelain 2>&1
 if ($dirty) {
     Write-Host ""
-    Write-Host "  ABORT: You have uncommitted changes. Commit or stash before deploying." -ForegroundColor Red
-    $dirty | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow }
-    exit 1
+    Write-Host "  Uncommitted changes detected - auto-committing and pushing..." -ForegroundColor Yellow
+    git add -A
+    git commit -m "Deploy $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    git push origin $branch
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ABORT: git push failed." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  Committed and pushed to origin/$branch." -ForegroundColor Green
+} else {
+    Write-Host "Tree:   clean" -ForegroundColor Green
 }
-Write-Host "Tree:   clean" -ForegroundColor Green
 
 # 4. Remote sync — HARD STOP: local must not be behind origin (must be latest)
 git fetch --quiet 2>&1 | Out-Null
@@ -60,7 +85,7 @@ $behind = git rev-list "HEAD..origin/$branch" --count 2>&1
 if ($behind -match '^\d+$' -and [int]$behind -gt 0) {
     Write-Host ""
     Write-Host "  ABORT: Your branch is $behind commit(s) behind origin/$branch." -ForegroundColor Red
-    Write-Host "  Run: git pull  — then deploy again." -ForegroundColor Yellow
+    Write-Host "  Run: git pull - then deploy again." -ForegroundColor Yellow
     exit 1
 }
 Write-Host "Sync:   up to date with origin/$branch" -ForegroundColor Green
@@ -106,7 +131,7 @@ Run-Remote "chown -R xfchess:xfchess /opt/xfchess"
 Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3"
 
 # Install nightly cron backup (3am UTC, keeps 14 days)
-$cronJob = "0 3 * * * sqlite3 /opt/xfchess/data/sessions.db "".backup '/opt/xfchess/backups/sessions-\`$(date +\%Y\%m\%d).db'"" ; sqlite3 /opt/xfchess/data/vault.db "".backup '/opt/xfchess/backups/vault-\`$(date +\%Y\%m\%d).db'"" ; find /opt/xfchess/backups -name '*.db' -mtime +14 -delete"
+$cronJob = '0 3 * * * sqlite3 /opt/xfchess/data/sessions.db ".backup ''/opt/xfchess/backups/sessions-$(date +%%Y%%m%%d).db''" ; sqlite3 /opt/xfchess/data/vault.db ".backup ''/opt/xfchess/backups/vault-$(date +%%Y%%m%%d).db''" ; find /opt/xfchess/backups -name ''*.db'' -mtime +14 -delete'
 Run-Remote "(crontab -l 2>/dev/null | grep -v xfchess/backups; echo '$cronJob') | crontab -"
 Write-Host "Nightly backup cron installed (3am UTC, 14-day retention)" -ForegroundColor DarkGray
 
@@ -114,10 +139,10 @@ Write-Host "Nightly backup cron installed (3am UTC, 14-day retention)" -Foregrou
 Write-Host "`n=== Snapshotting databases ===" -ForegroundColor Green
 # Uses SQLite .backup command — safe on a live WAL-mode database (no corruption)
 # Keeps the last 7 snapshots; older ones are pruned automatically
-$ts = & ssh $DEST "date +%Y%m%d-%H%M%S"
+$ts = & ssh @SSH_ARGS $DEST 'date +%Y%m%d-%H%M%S'
 Run-Remote "mkdir -p /opt/xfchess/backups"
-Run-Remote "sqlite3 /opt/xfchess/data/sessions.db "".backup '/opt/xfchess/backups/sessions-${ts}.db'"" 2>/dev/null || cp /opt/xfchess/data/sessions.db /opt/xfchess/backups/sessions-${ts}.db 2>/dev/null || true"
-Run-Remote "sqlite3 /opt/xfchess/data/vault.db "".backup '/opt/xfchess/backups/vault-${ts}.db'"" 2>/dev/null || cp /opt/xfchess/data/vault.db /opt/xfchess/backups/vault-${ts}.db 2>/dev/null || true"
+Run-Remote "sqlite3 /opt/xfchess/data/sessions.db '.backup /opt/xfchess/backups/sessions-${ts}.db' 2>/dev/null || cp /opt/xfchess/data/sessions.db /opt/xfchess/backups/sessions-${ts}.db 2>/dev/null || true"
+Run-Remote "sqlite3 /opt/xfchess/data/vault.db '.backup /opt/xfchess/backups/vault-${ts}.db' 2>/dev/null || cp /opt/xfchess/data/vault.db /opt/xfchess/backups/vault-${ts}.db 2>/dev/null || true"
 # Prune: keep only the 7 most recent backups of each db
 Run-Remote "ls -t /opt/xfchess/backups/sessions-*.db 2>/dev/null | tail -n +8 | xargs rm -f"
 Run-Remote "ls -t /opt/xfchess/backups/vault-*.db    2>/dev/null | tail -n +8 | xargs rm -f"
@@ -144,7 +169,7 @@ foreach ($src in $keyFiles.Keys) {
         Run-Remote "chmod 600 $($keyFiles[$src])"
         Write-Host "Uploaded $([System.IO.Path]::GetFileName($src))" -ForegroundColor Green
     } else {
-        Write-Host "WARNING: $src not found — skipping" -ForegroundColor Red
+        Write-Host "WARNING: $src not found - skipping" -ForegroundColor Red
     }
 } 
 # ── Step 5: Upload .env if it exists ─────────────────────────────────────────
