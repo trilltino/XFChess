@@ -68,6 +68,7 @@ mod inner {
         require!(game.fee_payer == fee_payer.key(), GameErrorCode::FeePayerMismatch);
 
         game.fees_advanced = game.fees_advanced.checked_add(DELEGATE_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
+        game.is_delegated = true;
 
         Ok(())
     }
@@ -86,6 +87,8 @@ mod inner {
             &ctx.accounts.magic_context.to_account_info(),
             &ctx.accounts.magic_program.to_account_info(),
         )?;
+
+        ctx.accounts.game.is_delegated = false;
 
         Ok(())
     }

@@ -134,6 +134,15 @@ pub enum TournamentCommand {
         /// Entry fee in SOL (e.g. 0.05)
         #[arg(long, default_value = "0.05")]
         entry_fee: f64,
+        /// Base time per player in seconds (e.g. 300 = 5 min Blitz)
+        #[arg(long, default_value = "300")]
+        base_time_seconds: u64,
+        /// Fischer increment in seconds per move (e.g. 3)
+        #[arg(long, default_value = "0")]
+        increment_seconds: u16,
+        /// Optional password to make tournament private
+        #[arg(long)]
+        password: Option<String>,
     },
     /// List all active tournaments on the VPS
     List,
@@ -175,6 +184,13 @@ pub enum TournamentCommand {
     Cancel {
         #[arg(long)]
         id: u64,
+    },
+    /// Set or update a tournament password
+    SetPassword {
+        #[arg(long)]
+        id: u64,
+        #[arg(long)]
+        password: String,
     },
 }
 

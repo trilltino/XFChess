@@ -126,6 +126,10 @@ impl GameSession {
         let now = chrono::Utc::now().timestamp_millis();
         (self.expires_at - now) / 1000
     }
+
+    pub fn is_valid(&self) -> bool {
+        self.expires_at >= chrono::Utc::now().timestamp_millis()
+    }
 }
 
 /// Resource to track session state in the game
@@ -182,6 +186,7 @@ fn initialize_session(mut session_state: ResMut<SessionState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solana_sdk::signature::{Keypair, Signer};
 
     #[test]
     fn test_session_json_roundtrip() {

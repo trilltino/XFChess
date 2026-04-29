@@ -13,10 +13,9 @@ use solana_sdk::{
     system_program,
 };
 
-pub use xfchess_game::state::game::GameType;
 
 /// Deployed program ID (must match `declare_id!` in xfchess-game).
-pub const PROGRAM_ID: &str = "AhkTK5LVJHvR51gmDXbsJsqq4wg381AH6vTiaFGGJPWm";
+pub const PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
 
 /// PDA seeds — kept in sync with `programs/xfchess-game/src/constants.rs`.
 pub const GAME_SEED: &[u8] = b"game";
@@ -24,6 +23,7 @@ pub const MOVE_LOG_SEED: &[u8] = b"move_log";
 pub const PROFILE_SEED: &[u8] = b"profile";
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
+pub const USERNAME_SEED: &[u8] = b"username";
 
 /// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
 fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
@@ -64,14 +64,21 @@ fn borsh_option_string(opt: &Option<String>) -> Vec<u8> {
 ///
 /// On-chain signature:
 /// ```ignore
-/// pub fn create_game(ctx, game_id: u64, wager_amount: u64, game_type: GameType)
+/// pub fn create_game(ctx, game_id: u64, wager_amount: u64, match_type: MatchType, country: String, base_time_seconds: u64, increment_seconds: u16)
 /// ```
+///
+/// `match_type` encoding: Free=0, Ranked=1, Wager=2.
+/// `fee_payer` is the VPS session key — must co-sign the transaction.
 pub fn create_game_ix(
     program_id: Pubkey,
-    payer: Pubkey,
+    player: Pubkey,
+    fee_payer: Pubkey,
     game_id: u64,
     wager_amount: u64,
-    game_type: GameType,
+    match_type: u8,
+    country: &str,
+    base_time_seconds: u64,
+    increment_seconds: u16,
 ) -> Result<Instruction> {
     let game_pda = Pubkey::find_program_address(
         &[GAME_SEED, &game_id.to_le_bytes()],
@@ -92,11 +99,14 @@ pub fn create_game_ix(
     let mut data = anchor_discriminator("create_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&wager_amount.to_le_bytes());
-    // GameType is a single-byte Anchor enum: PvP = 0, PvAI = 1
-    data.push(match game_type {
-        GameType::PvP => 0,
-        GameType::PvAI => 1,
-    });
+    // MatchType Anchor enum: Free=0, Ranked=1, Wager=2
+    data.push(match_type);
+    // country: Borsh String (u32 len prefix + utf-8 bytes)
+    data.extend_from_slice(&(country.len() as u32).to_le_bytes());
+    data.extend_from_slice(country.as_bytes());
+    // base_time_seconds: u64 LE, increment_seconds: u16 LE
+    data.extend_from_slice(&base_time_seconds.to_le_bytes());
+    data.extend_from_slice(&increment_seconds.to_le_bytes());
 
     Ok(Instruction {
         program_id,
@@ -104,7 +114,8 @@ pub fn create_game_ix(
             AccountMeta::new(game_pda, false),
             AccountMeta::new(move_log_pda, false),
             AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(payer, true),
+            AccountMeta::new(player, true),
+            AccountMeta::new(fee_payer, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -121,9 +132,14 @@ pub fn create_game_ix(
 /// ```ignore
 /// pub fn join_game(ctx, game_id: u64)
 /// ```
+///
+/// `white_player` is the pubkey stored in `game.white` (read from chain before calling).
+/// `fee_payer` must match `game.fee_payer` (the VPS session key set during create_game).
 pub fn join_game_ix(
     program_id: Pubkey,
     player: Pubkey,
+    white_player: Pubkey,
+    fee_payer: Pubkey,
     game_id: u64,
 ) -> Result<Instruction> {
     let game_pda = Pubkey::find_program_address(
@@ -131,8 +147,18 @@ pub fn join_game_ix(
         &program_id,
     )
     .0;
+    let player_profile_pda = Pubkey::find_program_address(
+        &[PROFILE_SEED, player.as_ref()],
+        &program_id,
+    )
+    .0;
     let escrow_pda = Pubkey::find_program_address(
         &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let white_profile_pda = Pubkey::find_program_address(
+        &[PROFILE_SEED, white_player.as_ref()],
         &program_id,
     )
     .0;
@@ -144,8 +170,11 @@ pub fn join_game_ix(
         program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
+            AccountMeta::new(player_profile_pda, false),
             AccountMeta::new(escrow_pda, false),
+            AccountMeta::new_readonly(white_profile_pda, false),
             AccountMeta::new(player, true),
+            AccountMeta::new(fee_payer, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -283,44 +312,36 @@ pub fn finalize_game_ix(
 }
 
 // ---------------------------------------------------------------------------
-// commit_move_batch  (used by rollup_network_bridge)
+// init_profile
 // ---------------------------------------------------------------------------
 
-/// Build a `commit_move_batch` instruction.
-pub fn commit_move_batch_ix(
-    payer: Pubkey,
-    game_pda: Pubkey,
-    game_id: u64,
-    nonce_start: u64,
-    moves: Vec<String>,
-    next_fens: Vec<String>,
-    _signatures: Vec<[u8; 64]>,
+/// Build an `init_profile` instruction.
+pub fn init_profile_ix(
+    program_id: Pubkey,
+    player: Pubkey,
+    username: String,
+    country: String,
 ) -> Result<Instruction> {
-    let program_id: Pubkey = PROGRAM_ID.parse()?;
+    let profile_pda = Pubkey::find_program_address(
+        &[PROFILE_SEED, player.as_ref()],
+        &program_id,
+    ).0;
+    let username_record_pda = Pubkey::find_program_address(
+        &[USERNAME_SEED, username.as_bytes()],
+        &program_id,
+    ).0;
 
-    let mut data = anchor_discriminator("commit_move_batch").to_vec();
-    // game_id: u64
-    data.extend_from_slice(&game_id.to_le_bytes());
-    // nonce_start: u64
-    data.extend_from_slice(&nonce_start.to_le_bytes());
-    // moves: Vec<String> (serialized as 4-byte length + each string)
-    data.extend_from_slice(&(moves.len() as u32).to_le_bytes());
-    for move_str in moves {
-        data.extend_from_slice(&(move_str.len() as u32).to_le_bytes());
-        data.extend_from_slice(move_str.as_bytes());
-    }
-    // next_fens: Vec<String>
-    data.extend_from_slice(&(next_fens.len() as u32).to_le_bytes());
-    for fen in next_fens {
-        data.extend_from_slice(&(fen.len() as u32).to_le_bytes());
-        data.extend_from_slice(fen.as_bytes());
-    }
+    let mut data = anchor_discriminator("init_profile").to_vec();
+    data.extend(borsh_string(&username));
+    data.extend(borsh_string(&country));
 
     Ok(Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(payer, true),
-            AccountMeta::new(game_pda, false),
+            AccountMeta::new(profile_pda, false),
+            AccountMeta::new(username_record_pda, false),
+            AccountMeta::new(player, true),
+            AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
     })

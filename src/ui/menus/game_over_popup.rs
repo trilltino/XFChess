@@ -88,9 +88,10 @@ pub fn game_over_popup_system(
         .resizable(false)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .fixed_size([320.0, 0.0])
+        .fixed_size([460.0, 260.0])
         .frame(frame)
         .show(ctx, |ui| {
+            ui.set_width(420.0);
             ui.vertical_centered(|ui| {
                 // Game Over header
                 ui.label(
@@ -225,12 +226,12 @@ pub fn game_over_popup_system(
                 ui.add_space(16.0);
 
                 // Action buttons
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 12.0;
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 14.0;
 
                     // New Game button
                     let new_game_btn = ui.add_sized(
-                        [120.0, 36.0],
+                        [150.0, 42.0],
                         egui::Button::new(
                             egui::RichText::new("New Game")
                                 .size(13.0)
@@ -246,7 +247,7 @@ pub fn game_over_popup_system(
 
                     // Main Menu button
                     let main_menu_btn = ui.add_sized(
-                        [120.0, 36.0],
+                        [150.0, 42.0],
                         egui::Button::new(
                             egui::RichText::new("Main Menu")
                                 .size(13.0)

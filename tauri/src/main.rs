@@ -8,14 +8,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tauri::Manager;
-use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
-use backend::signing::storage::tournament::TournamentStore;
-use sqlx::SqlitePool;
-use dotenvy;
 use tauri_plugin_deep_link::DeepLinkExt;
-
-#[cfg(windows)]
-use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+use axum::http::{StatusCode, Method};
+use axum::response::IntoResponse; // <--- Added import
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -45,37 +40,65 @@ fn get_backend_url() -> String {
         .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string())
 }
 
-/// Open the login page in the browser.
-fn open_production_site() {
-    let backend_url = get_backend_url();
-    let is_local = backend_url.contains("localhost") || backend_url.contains("127.0.0.1");
-    
-    let url = if is_local {
-        format!("http://localhost:{}/auth/login", http_port())
-    } else {
-        format!("{}/auth/login", backend_url.replace(":8090", ""))
-    };
-    
-    match open::that(&url) {
-        Ok(_) => println!("[TAURI] Opened login page in browser: {}", url),
-        Err(e) => eprintln!("[TAURI] Failed to open site: {}", e),
-    }
+/// Redirect auth pages to the onboarding SPA
+async fn redirect_to_onboard() -> impl IntoResponse {
+    axum::response::Redirect::to("/onboard")
 }
 
-/// Open the wallet signing page when a transaction needs signing.
-/// This is called during gameplay when the Bevy game needs a signature.
+/// Open the wallet popup in the default browser so Chrome extensions (Phantom/Solflare) are available.
+fn show_wallet_popup_window(_app: &tauri::AppHandle) {
+    open_in_browser("http://localhost:7454/wallet-popup/");
+}
+
+/// Open the signing page in the default browser so Chrome extensions can sign.
 fn show_signing_window(_app: &tauri::AppHandle) {
-    let port = http_port();
-    let url = format!("http://localhost:{}/onboard", port);
-    let _ = open::that(&url);
+    open_in_browser("http://localhost:7454/wallet-popup/");
+}
+
+/// Open a URL in Chrome app-mode (compact popup, no address bar).
+/// Falls back to the system default browser if Chrome is not found.
+fn open_in_browser(url: &str) {
+    // Append timestamp so Chrome never serves a stale cached version.
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let url = format!("{}?_t={}", url, ts);
+    let url = url.as_str();
+
+    #[cfg(windows)]
+    {
+        let chrome_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ];
+        let app_flag = format!("--app={}", url);
+        for path in &chrome_paths {
+            if std::path::Path::new(path).exists() {
+                let _ = std::process::Command::new(path)
+                    .args([&app_flag, "--window-size=420,500"])
+                    .spawn();
+                return;
+            }
+        }
+        // Fallback: open in default browser
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
 }
 
 /// Register the xfchess:// protocol in Windows registry on first run.
 /// Uses HKCU (user-level) so no admin/UAC prompt is required.
 #[cfg(windows)]
+use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+
+#[cfg(windows)]
 fn register_protocol() {
-    use winreg::enums::{KEY_WRITE, REG_SZ};
-    
     let exe_path = std::env::current_exe()
         .ok()
         .and_then(|p| p.to_str().map(|s| s.to_string()))
@@ -110,8 +133,6 @@ fn register_protocol() {
 async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: WalletPubkey) {
     use axum::{
         extract::State,
-        http::{Method, StatusCode},
-        response::IntoResponse,
         routing::{get, post},
         Json, Router,
     };
@@ -170,6 +191,14 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
         StatusCode::OK
     }
 
+    // POST /hide — React posts here to hide the Tauri window
+    async fn post_hide(State(state): State<LocalAppState>) -> impl IntoResponse {
+        if let Some(w) = state.app.get_webview_window("main") {
+            let _ = w.hide();
+        }
+        StatusCode::OK
+    }
+
     // GET /status — health-check / wallet info for the React page
     async fn get_status(State(state): State<LocalAppState>) -> impl IntoResponse {
         let pubkey = state.wallet_pubkey.0.lock().unwrap().clone();
@@ -221,35 +250,111 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
         }
     }
 
-    // POST /api/auth/register — proxy to :8090
+    // POST /api/auth/register — wallet register proxy to :8090
     async fn api_register(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+        proxy_post(&format!("{}/api/auth/register", get_backend_url()), body).await
+    }
+
+    // POST /api/auth/login-email — email login proxy to :8090
+    async fn api_login_email(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+        proxy_post(&format!("{}/api/auth/login-email", get_backend_url()), body).await
+    }
+
+    // POST /api/auth/register-email — email register proxy to :8090
+    async fn api_register_email(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+        proxy_post(&format!("{}/api/auth/register-email", get_backend_url()), body).await
+    }
+
+    // POST /api/auth/link-wallet — link wallet to email account proxy to :8090
+    async fn api_link_wallet(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+        proxy_post(&format!("{}/api/auth/link-wallet", get_backend_url()), body).await
+    }
+
+    // POST /api/auth/sync-profile — proxy to :8090, forwards Authorization header
+    async fn api_sync_profile(
+        headers: axum::http::HeaderMap,
+    ) -> impl IntoResponse {
+        proxy_post_auth(&format!("{}/api/auth/sync-profile", get_backend_url()), serde_json::Value::Null, &headers).await
+    }
+
+    // POST /api/auth/add-email — proxy to :8090, forwards Authorization header
+    async fn api_add_email(
+        headers: axum::http::HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        proxy_post_auth(&format!("{}/api/auth/add-email", get_backend_url()), body, &headers).await
+    }
+
+    // GET /api/auth/me — proxy to :8090, forwards Authorization header
+    async fn api_me(headers: axum::http::HeaderMap) -> impl IntoResponse {
         let client = reqwest::Client::new();
-        let base = get_backend_url();
-        // Register
-        match client.post(format!("{}/api/auth/register", base)).json(&body).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                // Auto-login after register
-                let login_body = serde_json::json!({
-                    "email": body["email"], "password": body["password"]
-                });
-                match client.post(format!("{}/api/auth/login", base)).json(&login_body).send().await {
-                    Ok(lr) if lr.status().is_success() => {
-                        match lr.json::<serde_json::Value>().await {
-                            Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-                            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-                        }
-                    }
-                    Ok(lr) => {
-                        let text = lr.text().await.unwrap_or_default();
-                        (StatusCode::BAD_REQUEST, text).into_response()
-                    }
+        let url = format!("{}/api/auth/me", get_backend_url());
+        let mut req = client.get(&url);
+        if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
+            if let Ok(v) = auth.to_str() { req = req.header("Authorization", v); }
+        }
+        match req.send().await {
+            Ok(resp) => {
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+                match resp.json::<serde_json::Value>().await {
+                    Ok(v) => (status, Json(v)).into_response(),
                     Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
                 }
             }
+            Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        }
+    }
+
+    // PATCH /api/auth/username — proxy to :8090, forwards Authorization header
+    async fn api_set_username(
+        headers: axum::http::HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/auth/username", get_backend_url());
+        let mut req = client.patch(&url).json(&body);
+        if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
+            if let Ok(v) = auth.to_str() { req = req.header("Authorization", v); }
+        }
+        match req.send().await {
             Ok(resp) => {
-                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_REQUEST);
-                let text = resp.text().await.unwrap_or_default();
-                (status, text).into_response()
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+                match resp.json::<serde_json::Value>().await {
+                    Ok(v) => (status, Json(v)).into_response(),
+                    Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+                }
+            }
+            Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        }
+    }
+
+    async fn proxy_post_auth(url: &str, body: serde_json::Value, headers: &axum::http::HeaderMap) -> impl IntoResponse {
+        let client = reqwest::Client::new();
+        let mut req = client.post(url).json(&body);
+        if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
+            if let Ok(v) = auth.to_str() { req = req.header("Authorization", v); }
+        }
+        match req.send().await {
+            Ok(resp) => {
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+                match resp.json::<serde_json::Value>().await {
+                    Ok(v) => (status, Json(v)).into_response(),
+                    Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+                }
+            }
+            Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        }
+    }
+
+    async fn proxy_post(url: &str, body: serde_json::Value) -> impl IntoResponse {
+        let client = reqwest::Client::new();
+        match client.post(url).json(&body).send().await {
+            Ok(resp) => {
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+                match resp.json::<serde_json::Value>().await {
+                    Ok(v) => (status, Json(v)).into_response(),
+                    Err(e) => (status, e.to_string()).into_response(),
+                }
             }
             Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
         }
@@ -291,7 +396,7 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH])
         .allow_headers(Any);
 
     let state = LocalAppState {
@@ -301,20 +406,45 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     };
 
     let app = Router::new()
-        // Wallet onboarding SPA — served at /onboard (ServeDir with SPA index fallback)
+        // Auth pages - redirect to onboarding
+        .route("/auth/login", get(redirect_to_onboard))
+        .route("/auth/register", get(redirect_to_onboard))
+        // Wallet popup — served at /wallet-popup/
         .nest_service(
-            "/onboard",
-            tower_http::services::ServeDir::new(dist_path())
-                .fallback(tower_http::services::ServeFile::new(dist_path().join("index.html"))),
+            "/wallet-popup",
+            tower_http::services::ServeDir::new(wallet_popup_path())
+                .fallback(tower_http::services::ServeFile::new(wallet_popup_path().join("index.html"))),
+        )
+        // Wallet onboarding SPA
+        .route("/onboard", get(move || async {
+            match std::fs::read(dist_path().join("index.html")) {
+                Ok(bytes) => (
+                    [(axum::http::header::CONTENT_TYPE, "text/html")],
+                    bytes
+                ).into_response(),
+                Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+            }
+        }))
+        .nest_service(
+            "/onboard/assets",
+            tower_http::services::ServeDir::new(dist_path().join("assets")),
         )
         // API routes
         .route("/pending", get(get_pending))
         .route("/resolved", post(post_resolved))
         .route("/wallet", post(post_wallet))
+        .route("/hide", post(post_hide))
         .route("/status", get(get_status))
         .route("/api/consent", get(api_get_consent).post(api_post_consent))
         .route("/api/auth/login", post(api_login))
         .route("/api/auth/register", post(api_register))
+        .route("/api/auth/login-email", post(api_login_email))
+        .route("/api/auth/register-email", post(api_register_email))
+        .route("/api/auth/link-wallet", post(api_link_wallet))
+        .route("/api/auth/sync-profile", post(api_sync_profile))
+        .route("/api/auth/add-email", post(api_add_email))
+        .route("/api/auth/me", get(api_me))
+        .route("/api/auth/username", axum::routing::patch(api_set_username))
         .route("/api/game/launch", post(api_launch_game))
         // Web-solana marketing site — serves everything else at /
         .fallback_service(
@@ -376,9 +506,9 @@ async fn tcp_signing_server(app: tauri::AppHandle, pending: PendingTx, wallet_pu
                 return;
             }
 
-            // OPEN command — open the wallet signing page
+            // OPEN command — open the wallet popup
             if &len_buf == b"OPEN" {
-                show_signing_window(&app);
+                show_wallet_popup_window(&app);
                 return;
             }
 
@@ -449,7 +579,6 @@ async fn tcp_signing_server(app: tauri::AppHandle, pending: PendingTx, wallet_pu
 // Helpers
 // ---------------------------------------------------------------------------
 
-
 /// Path to the built wallet-ui SPA.
 fn dist_path() -> PathBuf {
     let self_dir = std::env::current_exe()
@@ -463,6 +592,11 @@ fn dist_path() -> PathBuf {
         }
     }
     PathBuf::from("tauri/wallet-ui/dist")
+}
+
+/// Path to the wallet popup files — same dist as the main onboarding SPA.
+fn wallet_popup_path() -> PathBuf {
+    dist_path()
 }
 
 /// Path to the built web-solana site.
@@ -597,7 +731,7 @@ async fn get_wallet_status() -> serde_json::Value {
 
 #[tauri::command]
 async fn wallet_connect() -> Result<String, String> {
-    Ok("open_browser".to_string())
+    Ok("wallet-popup".to_string())
 }
 
 #[tauri::command]
@@ -680,7 +814,7 @@ fn load_consent() -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
-/// Launch the Bevy game and open browser for wallet connection (Tauri window stays hidden)
+/// Launch the Bevy game and keep the Tauri wallet popup available for connection/signing.
 #[tauri::command]
 async fn launch_game(
     app: tauri::AppHandle,
@@ -723,6 +857,24 @@ fn hide_main_window_cmd(app: tauri::AppHandle) {
     }
 }
 
+/// Show the wallet popup window
+#[tauri::command]
+fn show_wallet_popup(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("wallet-popup") {
+        w.show().map_err(|e| e.to_string())?;
+        w.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Store wallet pubkey from popup connection
+#[tauri::command]
+fn wallet_connected(pubkey: String, wallet_pubkey_state: tauri::State<'_, WalletPubkey>) -> Result<(), String> {
+    let mut lock = wallet_pubkey_state.0.lock().unwrap();
+    *lock = Some(pubkey);
+    println!("[TAURI] Wallet connected: {}", lock.as_ref().unwrap());
+    Ok(())
+}
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -732,57 +884,6 @@ fn consent_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("xfchess")
         .join("consent.json")
-}
-
-// ---------------------------------------------------------------------------
-// Embedded Signing Server (VPS)
-// ---------------------------------------------------------------------------
-
-async fn start_embedded_signing_server() {
-    dotenvy::dotenv().ok();
-    
-    let config = SigningConfig::from_env();
-    let port = config.port;
-    
-    let pool = match SqlitePool::connect("sqlite://sessions.db?mode=rwc").await {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("[SIGN-SRV] Failed to connect to SQLite: {}", e);
-            return;
-        }
-    };
-    
-    let vault_pool = match SqlitePool::connect("sqlite://vault.db?mode=rwc").await {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("[SIGN-SRV] Failed to connect to vault DB: {}", e);
-            return;
-        }
-    };
-    
-    let tournament_store = Arc::new(TournamentStore::new(pool.clone()).await);
-    let state = SigningAppState::new(config, pool.clone(), vault_pool, tournament_store);
-    if let Err(e) = state.store.init().await {
-        eprintln!("[SIGN-SRV] Failed to init session store: {}", e);
-        return;
-    }
-    
-    let app = build_signing_router(state);
-    let addr = format!("0.0.0.0:{}", port);
-    
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("[SIGN-SRV] Failed to bind to {}: {}", addr, e);
-            return;
-        }
-    };
-    
-    println!("[SIGN-SRV] VPS signing server listening on http://{}", addr);
-    
-    if let Err(e) = axum::serve(listener, app).await {
-        eprintln!("[SIGN-SRV] Server error: {}", e);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -812,12 +913,14 @@ fn main() {
             load_consent,
             launch_game,
             hide_main_window_cmd,
+            show_wallet_popup,
+            wallet_connected,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
 
             // Handle deep-link protocol events (xfchess://launch?pubkey=X&username=Y)
-            let handle_clone = handle.clone();
+            let _handle_clone = handle.clone();
             let wallet_clone = pubkey_for_setup.clone();
             app.deep_link().on_open_url(move |event| {
                 for url in event.urls() {
@@ -869,16 +972,6 @@ fn main() {
                 }
             });
 
-            // Show the Tauri window initially, then hide after Chrome opens successfully
-            // This prevents invisible crashes if Chrome fails to launch
-            let handle_for_chrome = handle.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(2000));
-                if let Some(w) = handle_for_chrome.get_webview_window("main") {
-                    let _ = w.hide();
-                }
-            });
-
             // Start HTTP wallet server.
             let p = pending_for_setup.clone();
             let w = pubkey_for_setup.clone();
@@ -893,13 +986,6 @@ fn main() {
 
             // NOTE: Local embedded server disabled - using Hetzner backend at 178.104.55.19:8090
             // tauri::async_runtime::spawn(start_embedded_signing_server());
-
-            // Open Chrome to the production site after server starts
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(800));
-                println!("[TAURI] Opening site: {}", get_backend_url());
-                open_production_site();
-            });
 
             Ok(())
         })

@@ -18,7 +18,7 @@ pub mod tournament_scheduler;
 pub async fn spawn_background_tasks(
     mut state: AppState,
 ) -> Result<(), AppError> {
-    let (orchestrator_tx, orchestrator_rx) = tokio::sync::mpsc::channel::<OrchestratorEvent>(100);
+    let (orchestrator_tx, _orchestrator_rx) = tokio::sync::mpsc::channel::<OrchestratorEvent>(100);
     state.orchestrator_tx = Some(orchestrator_tx);
 
     let state = Arc::new(state);
@@ -28,17 +28,17 @@ pub async fn spawn_background_tasks(
     let ws_subscriber = WebSocketSubscriber::new(
         Cluster::Devnet,
         Some("wss://devnet-eu.magicblock.app"),
-        100,
     ).await.unwrap();
-    let ws_subscriber = Arc::new(ws_subscriber);
-    let tournament_handle = spawn_tournament_scheduler(
+    let _ws_subscriber = Arc::new(ws_subscriber);
+    let _tournament_handle = spawn_tournament_scheduler(
         (*state.tournament_store).clone(),
+        Some(state.tournament_gossip.clone()),
     );
     // Placeholder for gossip_handle if needed
-    let gossip_handle = tokio::spawn(async move {
+    let _gossip_handle = tokio::spawn(async move {
         // Placeholder for tournament gossip service
     });
-    let orchestrator_handle = spawn_orchestrator(
+    let _orchestrator_handle = spawn_orchestrator(
         tournament_store,
         swiss_service,
         None,

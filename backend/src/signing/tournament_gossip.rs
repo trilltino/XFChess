@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::signing::storage::tournament::{TournamentRecord, TournamentStore};
+use crate::signing::storage::tournament::TournamentStore;
 
 /// Handle to an active tournament gossip topic
 pub struct TopicHandle {
@@ -136,7 +136,7 @@ impl TournamentGossipService {
             .players
             .iter()
             .filter(|p| *p != requesting_player)
-            .choose_multiple(&mut rand::thread_rng(), 4);
+            .choose_multiple(&mut rand::rng(), 4);
 
         for player in other_players {
             if let Some(node_id_str) = tournament.node_ids.get(player) {
@@ -238,6 +238,7 @@ impl TournamentGossipService {
             SwissMessage::RoundStarted { round, .. } => (*round, "RoundStarted"),
             SwissMessage::ResultRecorded { round, .. } => (*round, "ResultRecorded"),
             SwissMessage::StandingsUpdated { .. } => (0, "StandingsUpdated"),
+            SwissMessage::BracketFired { .. } => (0, "BracketFired"),
         };
 
         let message_json = match serde_json::to_string(message) {

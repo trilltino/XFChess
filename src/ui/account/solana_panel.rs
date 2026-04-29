@@ -56,12 +56,13 @@ pub fn render_solana_panel(
                 
                 ui.horizontal(|ui| {
                     if ui.button(egui::RichText::new("👻 Phantom").strong()).on_hover_text("Connect via Phantom Extension").clicked() {
-                        // The automated system in systems.rs already polls for pubkey via Tauri bridge
-                        info!("[WALLET] User selected Phantom - awaiting connection...");
+                        crate::multiplayer::solana::tauri_signer::open_wallet_browser();
+                        info!("[WALLET] User selected Phantom - opening Tauri popup...");
                     }
                     ui.add_space(5.0);
                     if ui.button(egui::RichText::new("☀️ Solflare").strong()).on_hover_text("Connect via Solflare Extension").clicked() {
-                        info!("[WALLET] User selected Solflare - awaiting connection...");
+                        crate::multiplayer::solana::tauri_signer::open_wallet_browser();
+                        info!("[WALLET] User selected Solflare - opening Tauri popup...");
                     }
                 });
             }
@@ -78,7 +79,6 @@ pub fn render_solana_panel(
                 let has_profile = status.as_ref().map(|s| s.has_profile).unwrap_or(false);
                 let has_email = status.as_ref().map(|s| s.has_email).unwrap_or(false);
                 let has_kyc = status.as_ref().map(|s| s.has_kyc).unwrap_or(false);
-                let can_wager = status.as_ref().map(|s| s.can_wager).unwrap_or(false);
 
                 ui.horizontal(|ui| {
                     ui.label(if has_profile { "✓" } else { "✗" });

@@ -8,64 +8,204 @@ use crate::ui::system_params::GameUIParams;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
+#[derive(Resource, Default)]
+pub struct InGameHudVisibility {
+    pub visible: bool,
+}
+
+pub fn reset_in_game_hud_visibility(mut hud_visibility: ResMut<InGameHudVisibility>) {
+    hud_visibility.visible = true;
+}
+
+pub fn toggle_in_game_hud(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut hud_visibility: ResMut<InGameHudVisibility>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyB) {
+        hud_visibility.visible = !hud_visibility.visible;
+    }
+}
+
+pub fn in_game_hud_visible(hud_visibility: Res<InGameHudVisibility>) -> bool {
+    hud_visibility.visible
+}
+
 /// Main in-game UI: timer, turn indicator, and optional side panel.
 pub fn game_status_ui(mut params: GameUIParams) {
+    if !params.hud_visibility.visible {
+        return;
+    }
+
     let Ok(ctx) = params.contexts.ctx_mut() else {
         return;
     };
 
     // === FLOATING TIMER ===
-    egui::Window::new("floating_timer")
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0]) // Centered below top bar
-        .frame(
-            egui::Frame::default()
-                .fill(UiColors::BG_OVERLAY)
-                .corner_radius(10.0)
-                .inner_margin(15.0)
-                .stroke(egui::Stroke::new(1.0, UiColors::BORDER)),
-        )
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                // Timer title
-                ui.label(
-                    egui::RichText::new("GAME TIMER")
-                        .size(12.0)
-                        .color(UiColors::TEXT_TERTIARY),
-                );
-                ui.add_space(5.0);
+    // Skip when no time control is active.
+    use crate::game::time_control::TimeControl;
+    let tc = params.active_time_control.control;
+    let show_timers = !matches!(tc, TimeControl::Unlimited);
 
-                // White timer
-                let white_time = format_time(params.game_timer.white_time_left);
-                ui.label(
-                    egui::RichText::new(format!("White: {}", white_time))
-                        .size(16.0)
-                        .color(UiColors::TEXT_PRIMARY)
-                        .strong(),
-                );
+    if show_timers {
+        let white_active = params.current_turn.color == PieceColor::White;
+        let inc = params.game_timer.increment;
+        let tc_label = tc.short_label();
 
-                ui.add_space(5.0);
-                ui.separator();
-                ui.add_space(5.0);
+        egui::Window::new("floating_timer")
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::RIGHT_TOP, [-20.0, 60.0])
+            .frame(
+                egui::Frame::default()
+                    .fill(egui::Color32::TRANSPARENT)
+                    .corner_radius(10.0)
+                    .inner_margin(15.0)
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    // Mode badge
+                    ui.label(
+                        egui::RichText::new(tc_label)
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(160, 160, 160)),
+                    );
+                    ui.add_space(4.0);
 
-                // Black timer
-                let black_time = format_time(params.game_timer.black_time_left);
-                ui.label(
-                    egui::RichText::new(format!("Black: {}", black_time))
-                        .size(16.0)
-                        .color(UiColors::TEXT_PRIMARY)
-                        .strong(),
-                );
+                    // White timer
+                    let white_time = format_time(params.game_timer.white_time_left);
+                    let white_secs = params.game_timer.white_time_left;
+                    let white_color = if white_active {
+                        if white_secs < 10.0 { egui::Color32::from_rgb(255, 80, 80) }
+                        else { egui::Color32::WHITE }
+                    } else {
+                        egui::Color32::from_rgb(140, 140, 140)
+                    };
+                    ui.label(
+                        egui::RichText::new(format!("♔ {}", white_time))
+                            .size(if white_active { 18.0 } else { 15.0 })
+                            .color(white_color)
+                            .strong(),
+                    );
+
+                    ui.add_space(6.0);
+
+                    // Black timer
+                    let black_time = format_time(params.game_timer.black_time_left);
+                    let black_secs = params.game_timer.black_time_left;
+                    let black_active = !white_active;
+                    let black_color = if black_active {
+                        if black_secs < 10.0 { egui::Color32::from_rgb(255, 80, 80) }
+                        else { egui::Color32::WHITE }
+                    } else {
+                        egui::Color32::from_rgb(140, 140, 140)
+                    };
+                    ui.label(
+                        egui::RichText::new(format!("♚ {}", black_time))
+                            .size(if black_active { 18.0 } else { 15.0 })
+                            .color(black_color)
+                            .strong(),
+                    );
+
+                    if inc > 0.0 {
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(format!("+{}s", inc as u32))
+                                .size(10.0)
+                                .color(egui::Color32::from_rgb(120, 180, 120)),
+                        );
+                    }
+                });
             });
-        });
+    }
 
     // === CHECK/CHECKMATE BANNER ===
     // Removed check banner - only show checkmate
     match params.game_state.game_phase.0 {
         GamePhase::Checkmate => render_checkmate_banner(&ctx, &params.game_state),
         _ => {} // No banner for Playing, Stalemate, or Check
+    }
+
+    if params.exit_confirmation.visible && !params.game_state.game_over.is_game_over() {
+        let is_online = matches!(
+            *params.game_mode,
+            GameMode::BraidMultiplayer | GameMode::MultiplayerCompetitive
+        );
+        let confirmation_text = if is_online {
+            "Are you sure you want to exit? If you leave an online game, it will be forfeited."
+        } else {
+            "Are you sure you want to exit this game?"
+        };
+
+        egui::Window::new("exit_game_confirmation")
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .fixed_size([420.0, 180.0])
+            .frame(
+                egui::Frame::default()
+                    .fill(UiColors::BG_OVERLAY)
+                    .corner_radius(12.0)
+                    .inner_margin(20.0)
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new("EXIT GAME")
+                            .size(18.0)
+                            .color(UiColors::TEXT_PRIMARY)
+                            .strong(),
+                    );
+                    ui.add_space(10.0);
+                    ui.label(
+                        egui::RichText::new(confirmation_text)
+                            .size(13.0)
+                            .color(UiColors::TEXT_TERTIARY),
+                    );
+                    ui.add_space(18.0);
+                    ui.horizontal_centered(|ui| {
+                        ui.spacing_mut().item_spacing.x = 14.0;
+                        if ui
+                            .add_sized(
+                                [120.0, 36.0],
+                                egui::Button::new(
+                                    egui::RichText::new("No")
+                                        .size(13.0)
+                                        .color(UiColors::TEXT_PRIMARY)
+                                        .strong(),
+                                )
+                                .fill(UiColors::BG_OVERLAY)
+                                .stroke(egui::Stroke::NONE),
+                            )
+                            .clicked()
+                        {
+                            params.exit_confirmation.visible = false;
+                            params.exit_confirmation.pending_exit = false;
+                        }
+
+                        if ui
+                            .add_sized(
+                                [120.0, 36.0],
+                                egui::Button::new(
+                                    egui::RichText::new("Yes")
+                                        .size(13.0)
+                                        .color(UiColors::TEXT_PRIMARY)
+                                        .strong(),
+                                )
+                                .fill(UiColors::DANGER)
+                                .stroke(egui::Stroke::NONE),
+                            )
+                            .clicked()
+                        {
+                            params.exit_confirmation.pending_exit = true;
+                        }
+                    });
+                });
+            });
     }
 
     // Top bar removed - no turn indicator displayed
@@ -91,15 +231,11 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     ui.colored_label(UiColors::ACCENT_GOLD, egui::RichText::new("👁 SPECTATING").size(16.0).strong());
                     ui.add_space(4.0);
                 }
-
-                ui.separator();
                 ui.add_space(8.0);
-                
-                let is_singleplayer = *params.game_mode == GameMode::SinglePlayer;
                 
                 // Get player names and ELO
                 let is_competitive = *params.game_mode == GameMode::MultiplayerCompetitive;
-                let (white_name, white_elo, white_flag, white_sol) = if is_spectating {
+                let (white_name, white_elo, _white_flag, white_sol) = if is_spectating {
                     let w = params.spectator_mode.white_player.as_ref();
                     (
                         format!("{} {}", w.map(|p| country_to_flag(&p.country)).unwrap_or_else(|| "🏳".to_string()), w.map(|p| p.username.clone()).unwrap_or_else(|| "White Player".to_string())),
@@ -130,7 +266,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     ("White Player".to_string(), "".to_string(), "🏳".to_string(), "".to_string())
                 };
 
-                let (black_name, black_elo, black_flag, black_sol) = if is_spectating {
+                let (black_name, black_elo, _black_flag, black_sol) = if is_spectating {
                     let b = params.spectator_mode.black_player.as_ref();
                     (
                         format!("{} {}", b.map(|p| country_to_flag(&p.country)).unwrap_or_else(|| "🏳".to_string()), b.map(|p| p.username.clone()).unwrap_or_else(|| "Black Player".to_string())),
@@ -141,7 +277,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 } else if is_competitive {
                     #[cfg(feature = "solana")]
                     {
-                        if let (Some(profile), Some(comp)) = (params.solana_profile.as_ref(), params.competitive_match.as_ref()) {
+                        if let (Some(_profile), Some(comp)) = (params.solana_profile.as_ref(), params.competitive_match.as_ref()) {
                             (
                                 format!("{} {}", country_to_flag(&comp.opponent_country), comp.opponent_username),
                                 format!("{} ELO", comp.opponent_elo),
@@ -168,15 +304,11 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 render_player_info(ui, &black_name, &black_elo, &black_sol, false);
                 
                 ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(12.0);
 
                 // === MATERIAL SCORE BAR ===
                 render_material_score_bar(ui, params.game_state.captured.material_advantage());
                 
                 ui.add_space(15.0);
-                ui.separator();
-                ui.add_space(12.0);
 
                 // === MOVE HISTORY (Algebraic Notation) ===
                 ui.label(
@@ -191,7 +323,6 @@ pub fn game_status_ui(mut params: GameUIParams) {
 
                 // === VIEW MODE TOGGLE ===
                 ui.add_space(15.0);
-                ui.separator();
                 ui.add_space(12.0);
                 
                 ui.label(
@@ -218,7 +349,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                             .strong(),
                     )
                     .fill(UiColors::BG_OVERLAY)
-                    .stroke(egui::Stroke::new(1.0, UiColors::BORDER)),
+                    .stroke(egui::Stroke::NONE),
                 ).clicked() {
                     params.view_preferences.toggle_view();
                     *params.view_mode = params.view_preferences.local_view;
@@ -227,7 +358,6 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 
                 // === EXIT BUTTON (ESC) ===
                 ui.add_space(15.0);
-                ui.separator();
                 ui.add_space(12.0);
                 
                 ui.label(
@@ -239,7 +369,6 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 // Game Over Section - Show winner and exit button when game ends
                 if params.game_state.game_over.is_game_over() {
                     ui.add_space(20.0);
-                    ui.separator();
                     ui.add_space(12.0);
 
                     ui.vertical_centered(|ui| {
@@ -583,7 +712,7 @@ fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
                 .fill(egui::Color32::from_rgba_unmultiplied(220, 20, 60, 230)) // Red with transparency
                 .corner_radius(15.0)
                 .inner_margin(25.0)
-                .stroke(egui::Stroke::new(4.0, egui::Color32::from_rgb(150, 0, 0))), // Dark red border
+                .stroke(egui::Stroke::NONE),
         )
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {

@@ -94,7 +94,6 @@ pub struct BalanceResult {
 pub async fn get_action_metadata(
     tournament_id: u64,
     store: &TournamentStore,
-    program_id: &Pubkey,
 ) -> Result<ActionMetadata> {
     let tournament = store.get(tournament_id).await.ok_or_else(|| {
         anyhow::anyhow!("Tournament {} not found", tournament_id)

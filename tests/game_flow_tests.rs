@@ -97,7 +97,7 @@ fn test_move_changes_position() {
         .iter()
         .find(|m| m.from() == Some(Square::E2) && m.to() == Square::E4)
         .expect("e2-e4 must be available");
-    let new_pos = game.clone().play(e4_move).expect("e2-e4 must be playable");
+    let new_pos = game.clone().play(*e4_move).expect("e2-e4 must be playable");
     // It's now black's turn
     assert_eq!(new_pos.turn(), Color::Black);
     // e4 should have a white pawn
@@ -135,7 +135,7 @@ fn test_black_responds_to_e4() {
         .iter()
         .find(|m| m.from() == Some(Square::E2) && m.to() == Square::E4)
         .unwrap();
-    let pos2 = game.play(e4).unwrap();
+    let pos2 = game.play(*e4).unwrap();
     assert_eq!(pos2.turn(), Color::Black);
     let black_moves = pos2.legal_moves();
     assert!(!black_moves.is_empty(), "Black should have moves after e4");
@@ -152,7 +152,7 @@ fn test_empty_squares_starting_position() {
     // Ranks 3-6 (0-indexed: squares 16..=47 in index, i.e. files a-h, ranks 3-6)
     use shakmaty::Rank;
     for rank in [Rank::Third, Rank::Fourth, Rank::Fifth, Rank::Sixth] {
-        for sq in Square::all() {
+        for sq in Square::ALL {
             if sq.rank() == rank {
                 assert!(
                     board.piece_at(sq).is_none(),

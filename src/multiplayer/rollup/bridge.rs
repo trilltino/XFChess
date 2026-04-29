@@ -51,6 +51,25 @@ pub struct RollupNetworkBridge {
     /// Monotonically increasing nonce for record_move replay protection.
     /// Starts at 1 because the program requires nonce == move_log.nonce + 1 (on-chain starts at 0).
     move_nonce: u64,
+    /// Finalization deferred because opponent pubkey was not yet available at game end.
+    /// Retried each frame up to MAX_FINALIZATION_WAIT_FRAMES.
+    pending_finalization: Option<PendingFinalization>,
+}
+
+/// Maximum frames to wait for opponent pubkey before giving up on deferred finalization.
+/// At 60 fps this is ~10 seconds.
+const MAX_FINALIZATION_WAIT_FRAMES: u32 = 600;
+
+/// Captures the data needed to finalize a game when `opponent_pubkey` was not yet
+/// available in `SolanaIntegrationState` at the moment `GameEndedEvent` fired.
+#[derive(Debug)]
+struct PendingFinalization {
+    game_id: u64,
+    winner: Option<String>,
+    is_delegated: bool,
+    local_pk: Pubkey,
+    is_creator: bool,
+    frames_waited: u32,
 }
 
 impl RollupNetworkBridge {
@@ -89,6 +108,7 @@ impl Plugin for RollupNetworkBridgePlugin {
         app.add_systems(Update, handle_magic_block_events);
 
         app.add_systems(Update, poll_delegation_tasks);
+        app.add_systems(Update, retry_pending_finalization);
 
         info!("RollupNetworkBridgePlugin initialized with Magic Block ER support");
     }
@@ -630,6 +650,7 @@ fn handle_game_end_undelegation(
     solana_state: Option<Res<SolanaIntegrationState>>,
     rollup_manager: Res<EphemeralRollupManager>,
     mut magicblock_events: MessageWriter<MagicBlockEvent>,
+    mut bridge: ResMut<RollupNetworkBridge>,
 ) {
     for event in game_ended_events.read() {
         // Use the Solana on-chain game_id (rollup_manager), not the P2P event ID.
@@ -679,41 +700,110 @@ fn handle_game_end_undelegation(
         };
 
         if white_pk == Pubkey::default() || black_pk == Pubkey::default() {
-            warn!("[FINALIZE] Missing white or black pubkey — skipping finalization for game {}", game_id);
+            warn!("[FINALIZE] Opponent pubkey unavailable for game {} — deferring finalization", game_id);
+            let local_pk = solana_state.as_ref().and_then(|s| s.wallet_pubkey).unwrap_or_default();
+            bridge.pending_finalization = Some(PendingFinalization {
+                game_id,
+                winner: event.winner.clone(),
+                is_delegated,
+                local_pk,
+                is_creator: rollup_manager.is_creator,
+                frames_waited: 0,
+            });
             continue;
         }
 
         let winner = event.winner.clone();
-
-        bevy::tasks::IoTaskPool::get()
-            .spawn(async move {
-                use crate::multiplayer::vps_client;
-
-                if !is_delegated {
-                    info!("[FINALIZE] Game {} — not delegator, skipping undelegate+finalize", game_id);
-                    return;
-                }
-
-                // Wait for any in-flight record_move calls to complete before undelegating.
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                match vps_client::vps_undelegate_game(game_id) {
-                    Ok(sig) => info!("[UNDELEGATE] ER committed for game {} sig {}", game_id, sig),
-                    Err(e) => error!("[UNDELEGATE] Failed for game {}: {e} — continuing to finalize", game_id),
-                }
-                // Allow ER → devnet commit to propagate before finalizing.
-                std::thread::sleep(std::time::Duration::from_secs(15));
-
-                let w_str = white_pk.to_string();
-                let b_str = black_pk.to_string();
-                let win_ref = winner.as_deref();
-
-                match vps_client::vps_finalize_game(game_id, win_ref, &w_str, &b_str) {
-                    Ok(sig) => info!("[FINALIZE] Game {} finalized on-chain sig {}", game_id, sig),
-                    Err(e) => error!("[FINALIZE] Game {} finalization failed: {e}", game_id),
-                }
-            })
-            .detach();
+        spawn_finalization_task(game_id, winner, white_pk, black_pk, is_delegated);
     }
+}
+
+/// Spawns the async undelegate + finalize flow off the Bevy main thread.
+/// Shared by the immediate path in `handle_game_end_undelegation` and the
+/// deferred path in `retry_pending_finalization`.
+fn spawn_finalization_task(
+    game_id: u64,
+    winner: Option<String>,
+    white_pk: Pubkey,
+    black_pk: Pubkey,
+    is_delegated: bool,
+) {
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            use crate::multiplayer::vps_client;
+
+            if !is_delegated {
+                info!("[FINALIZE] Game {} — not delegator, skipping undelegate+finalize", game_id);
+                return;
+            }
+
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            match vps_client::vps_undelegate_game(game_id) {
+                Ok(sig) => info!("[UNDELEGATE] ER committed for game {} sig {}", game_id, sig),
+                Err(e) => error!("[UNDELEGATE] Failed for game {}: {e} — continuing to finalize", game_id),
+            }
+            std::thread::sleep(std::time::Duration::from_secs(15));
+
+            let w_str = white_pk.to_string();
+            let b_str = black_pk.to_string();
+            let win_ref = winner.as_deref();
+
+            match vps_client::vps_finalize_game(game_id, win_ref, &w_str, &b_str) {
+                Ok(sig) => info!("[FINALIZE] Game {} finalized on-chain sig {}", game_id, sig),
+                Err(e) => error!("[FINALIZE] Game {} finalization failed: {e}", game_id),
+            }
+        })
+        .detach();
+}
+
+/// Retries a deferred game finalization each frame until `opponent_pubkey` becomes
+/// available in `SolanaIntegrationState` (set by `handle_session_info_from_network`)
+/// or `MAX_FINALIZATION_WAIT_FRAMES` elapses.
+fn retry_pending_finalization(
+    mut bridge: ResMut<RollupNetworkBridge>,
+    solana_state: Option<Res<SolanaIntegrationState>>,
+) {
+    let pending = match bridge.pending_finalization.take() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let opponent_pk = solana_state.as_ref().and_then(|s| s.opponent_pubkey);
+    let (white_pk, black_pk) = match opponent_pk {
+        Some(opp) => {
+            if pending.is_creator {
+                (pending.local_pk, opp)
+            } else {
+                (opp, pending.local_pk)
+            }
+        }
+        None => {
+            let new_frames = pending.frames_waited + 1;
+            if new_frames > MAX_FINALIZATION_WAIT_FRAMES {
+                warn!(
+                    "[FINALIZE] Opponent pubkey not received after {} frames for game {} — giving up",
+                    new_frames, pending.game_id
+                );
+                return;
+            }
+            bridge.pending_finalization = Some(PendingFinalization {
+                frames_waited: new_frames,
+                ..pending
+            });
+            return;
+        }
+    };
+
+    if white_pk == Pubkey::default() || black_pk == Pubkey::default() {
+        warn!("[FINALIZE] Resolved pubkeys still default for game {} — skipping", pending.game_id);
+        return;
+    }
+
+    info!(
+        "[FINALIZE] Opponent pubkey arrived after {} frames for game {} — finalizing",
+        pending.frames_waited, pending.game_id
+    );
+    spawn_finalization_task(pending.game_id, pending.winner, white_pk, black_pk, pending.is_delegated);
 }
 
 /// Handles Magic Block events for logging and error handling

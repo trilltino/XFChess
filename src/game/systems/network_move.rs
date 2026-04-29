@@ -1,8 +1,9 @@
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, Piece, PieceType};
-use crate::game::events::{NetworkMoveEvent, RemoteMoveApplied};
+use crate::game::events::{NetworkMoveEvent, RemoteMoveApplied, ResignEvent};
 use crate::game::resources::{
-    CapturedPieces, CurrentTurn, GameSounds, MoveHistory, PendingTurnAdvance, Selection,
+    CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingTurnAdvance,
+    Selection,
 };
 use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
 use bevy::prelude::*;
@@ -127,5 +128,27 @@ pub fn handle_network_moves(
         } else {
             warn!("[NETWORK_MOVE] Source piece not found at {:?}", event.from);
         }
+    }
+}
+
+pub fn handle_resign_events(
+    mut events: MessageReader<ResignEvent>,
+    mut game_over: ResMut<GameOverState>,
+) {
+    for event in events.read() {
+        *game_over = match event.winner.as_str() {
+            "white" => GameOverState::WhiteWonByResignation,
+            "black" => GameOverState::BlackWonByResignation,
+            winner => {
+                warn!("[RESIGN] Unknown winner '{}', ignoring resign event", winner);
+                continue;
+            }
+        };
+
+        info!(
+            "[RESIGN] Applied {} resignation result (remote={})",
+            event.winner,
+            event.remote
+        );
     }
 }

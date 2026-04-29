@@ -28,8 +28,6 @@ pub use menus::stats;
 use auth::AuthUiPlugin;
 use bevy::prelude::*;
 use spectator_mode::SpectatorModePlugin;
-#[cfg(feature = "solana")]
-use crate::core::states::GameState;
 
 pub struct UiPlugin;
 

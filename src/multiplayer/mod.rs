@@ -60,6 +60,8 @@ impl Plugin for MultiplayerPlugin {
         app.add_plugins((
             network::p2p::P2PConnectionPlugin,
             network::p2p_vps::P2PVpsPlugin,
+            // Comment out auth_ws plugin as the module is not found or linked
+            // auth_ws::AuthWebSocketPlugin,
         ));
 
         #[cfg(feature = "solana")]

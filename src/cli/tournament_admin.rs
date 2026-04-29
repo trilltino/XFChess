@@ -25,11 +25,9 @@ const TOURNAMENT_SEED: &[u8] = b"tournament";
 const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 
-use super::TournamentCommand;
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-pub fn run(action: &TournamentCommand, rpc_url: &str, vps_url: &str, keypair_path: &str) {
+pub fn run(action: &super::TournamentCommand, rpc_url: &str, vps_url: &str, keypair_path: &str) {
     let keypair = read_keypair_file(keypair_path).unwrap_or_else(|e| {
         eprintln!("[ERROR] Cannot read keypair {}: {}", keypair_path, e);
         std::process::exit(1);
@@ -38,60 +36,41 @@ pub fn run(action: &TournamentCommand, rpc_url: &str, vps_url: &str, keypair_pat
     let program_id: Pubkey = PROGRAM_ID.parse().expect("invalid program ID");
     let rpc = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
 
+    dispatch(&rpc, &keypair, program_id, vps_url, action);
+}
+
+fn dispatch(rpc: &RpcClient, authority: &Keypair, program_id: Pubkey, vps: &str, action: &super::TournamentCommand) {
     match action {
-        TournamentCommand::Create { name, entry_fee } => {
-            cmd_create(&rpc, &keypair, program_id, vps_url, name, *entry_fee);
+        super::TournamentCommand::Create { name, entry_fee, base_time_seconds, increment_seconds, password } => {
+            cmd_create(rpc, authority, program_id, vps, name, *entry_fee, *base_time_seconds, *increment_seconds, password.clone());
         }
-        TournamentCommand::Start { id } => {
-            cmd_start(&rpc, &keypair, program_id, vps_url, *id);
+        super::TournamentCommand::List => {
+            println!("[LIST] Active tournaments — query the VPS at {}/tournaments", vps);
         }
-        TournamentCommand::Record { id, match_index, winner } => {
-            let winner_pk: Pubkey = winner.parse().unwrap_or_else(|_| {
-                eprintln!("[ERROR] Invalid winner pubkey: {}", winner);
-                std::process::exit(1);
-            });
-            cmd_record(&rpc, &keypair, program_id, vps_url, *id, *match_index, winner_pk);
+        super::TournamentCommand::Info { id } => {
+            cmd_status(rpc, program_id, *id);
         }
-        TournamentCommand::Advance { id } => {
-            cmd_advance(&rpc, &keypair, program_id, *id);
+        super::TournamentCommand::Start { id } => {
+            cmd_start(rpc, authority, program_id, vps, *id);
         }
-        TournamentCommand::Status { id } => {
-            cmd_status(&rpc, program_id, *id);
+        super::TournamentCommand::Record { id, match_index, winner } => {
+            let winner_pubkey = winner.parse().expect("Invalid winner pubkey");
+            cmd_record(rpc, authority, program_id, vps, *id, *match_index, winner_pubkey);
         }
-        TournamentCommand::TestFill { id } => {
-            cmd_test_fill(&rpc, &keypair, program_id, *id);
+        super::TournamentCommand::Advance { id } => {
+            cmd_advance(rpc, authority, program_id, *id);
         }
-        TournamentCommand::List => {
-            println!("[LIST] Fetching tournaments from {}", vps_url);
-            let client = reqwest::blocking::Client::new();
-            match client.get(format!("{}/tournaments", vps_url)).send() {
-                Ok(r) => {
-                    if let Ok(text) = r.text() {
-                        println!("{}", text);
-                    }
-                }
-                Err(e) => eprintln!("[ERROR] Failed to fetch list: {}", e),
-            }
+        super::TournamentCommand::Status { id } => {
+            cmd_status(rpc, program_id, *id);
         }
-        TournamentCommand::Info { id } => {
-            println!("[INFO] Fetching info for {} from {}", id, vps_url);
-            let client = reqwest::blocking::Client::new();
-            match client.get(format!("{}/tournament/{}", vps_url, id)).send() {
-                Ok(r) => {
-                    if let Ok(text) = r.text() {
-                        println!("{}", text);
-                    }
-                }
-                Err(e) => eprintln!("[ERROR] Failed to fetch info: {}", e),
-            }
+        super::TournamentCommand::TestFill { id } => {
+            cmd_test_fill(rpc, authority, program_id, *id);
         }
-        TournamentCommand::Cancel { id } => {
-            println!("[CANCEL] Canceling tournament {} on {}", id, vps_url);
-            let client = reqwest::blocking::Client::new();
-            match client.post(format!("{}/admin/tournament/{}/cancel", vps_url, id)).send() {
-                Ok(r) => println!("Status: {}", r.status()),
-                Err(e) => eprintln!("[ERROR] Failed to cancel: {}", e),
-            }
+        super::TournamentCommand::Cancel { id } => {
+            println!("[CANCEL] Tournament {} — implement cancel logic", id);
+        }
+        super::TournamentCommand::SetPassword { id, password } => {
+            cmd_set_password(vps, *id, password.clone());
         }
     }
 }
@@ -105,6 +84,9 @@ fn cmd_create(
     vps: &str,
     name: &str,
     entry_fee_sol: f64,
+    base_time_seconds: u64,
+    increment_seconds: u16,
+    password: Option<String>,
 ) {
     let entry_fee_lamports = (entry_fee_sol * 1_000_000_000.0) as u64;
     let tournament_id = std::time::SystemTime::now()
@@ -113,18 +95,25 @@ fn cmd_create(
         .as_secs()
         % 1_000_000;
 
-    println!("[CREATE] Tournament \"{}\"  ID={}  fee={} SOL", name, tournament_id, entry_fee_sol);
+    println!("[CREATE] Tournament \"{}\"  ID={}  fee={} SOL  time={}+{}s",
+        name, tournament_id, entry_fee_sol, base_time_seconds, increment_seconds);
+    if password.is_some() {
+        println!("[CREATE] Tournament is private with password set");
+    }
 
-    let ix = initialize_tournament_ix(program_id, authority.pubkey(), tournament_id, name, entry_fee_lamports);
+    let ix = initialize_tournament_ix(program_id, authority.pubkey(), tournament_id, name, entry_fee_lamports, base_time_seconds, increment_seconds);
     send_and_confirm(rpc, authority, &[ix], "initialize_tournament");
 
     println!("\n[VPS] Registering tournament with signing server...");
     let client = reqwest::blocking::Client::new();
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "tournament_id": tournament_id,
         "name": name,
         "entry_fee_lamports": entry_fee_lamports
     });
+    if let Some(pw) = password {
+        body["password"] = serde_json::Value::String(pw);
+    }
     match client.post(format!("{}/admin/tournament/create", vps)).json(&body).send() {
         Ok(r) => println!("[VPS] {}", r.status()),
         Err(e) => eprintln!("[VPS] Warning: {}", e),
@@ -277,6 +266,19 @@ fn cmd_status(rpc: &RpcClient, program_id: Pubkey, id: u64) {
     }
 }
 
+fn cmd_set_password(vps: &str, tournament_id: u64, password: String) {
+    println!("[SET_PASSWORD] Setting password for tournament ID={}", tournament_id);
+    let client = reqwest::blocking::Client::new();
+    let body = serde_json::json!({
+        "password": password
+    });
+    match client.post(format!("{}/admin/tournament/{}/set-password", vps, tournament_id)).json(&body).send() {
+        Ok(r) => println!("[VPS] {}", r.status()),
+        Err(e) => eprintln!("[VPS] Error: {}", e),
+    }
+    println!("[SET_PASSWORD] Password updated for tournament {}", tournament_id);
+}
+
 // ── Transaction helper ────────────────────────────────────────────────────────
 
 fn send_and_confirm(rpc: &RpcClient, signer: &Keypair, ixs: &[Instruction], label: &str) {
@@ -322,11 +324,13 @@ fn match_pda(program_id: Pubkey, id: u64, index: u8) -> Pubkey {
     Pubkey::find_program_address(&[TOURNAMENT_MATCH_SEED, &id.to_le_bytes(), &[index]], &program_id).0
 }
 
-fn initialize_tournament_ix(program_id: Pubkey, authority: Pubkey, id: u64, name: &str, entry_fee: u64) -> Instruction {
+fn initialize_tournament_ix(program_id: Pubkey, authority: Pubkey, id: u64, name: &str, entry_fee: u64, base_time_seconds: u64, increment_seconds: u16) -> Instruction {
     let mut data = discriminator("initialize_tournament").to_vec();
     data.extend_from_slice(&id.to_le_bytes());
     data.extend(borsh_string(name));
     data.extend_from_slice(&entry_fee.to_le_bytes());
+    data.extend_from_slice(&base_time_seconds.to_le_bytes());
+    data.extend_from_slice(&increment_seconds.to_le_bytes());
     Instruction {
         program_id,
         accounts: vec![

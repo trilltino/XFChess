@@ -91,6 +91,23 @@ pub enum GameErrorCode {
     #[msg("Game is not in the required status for this operation.")]
     InvalidGameStatus,       // Generic status mismatch (e.g. trying to end a finished game)
 
+    #[msg("Game is not finished")]
+    GameNotFinished,
+    #[msg("Invalid winner specified")]
+    InvalidWinner,
+    #[msg("Not your turn to move")]
+    NotYourTurn,
+    #[msg("Duplicate player account detected")]
+    DuplicatePlayerAccount,
+    #[msg("Missing player account")]
+    MissingPlayerAccount,
+    #[msg("Invalid player account")]
+    InvalidPlayerAccount,
+    #[msg("Prize already claimed")]
+    PrizeAlreadyClaimed,
+    #[msg("Invalid mint for USDC")]
+    InvalidMint,
+
     // ── Disputes ──────────────────────────────────────────────────────────────
     #[msg("Game is not currently disputed.")]
     GameNotDisputed,         // resolve_dispute called on a game with no open dispute
@@ -141,9 +158,14 @@ pub enum GameErrorCode {
     #[msg("Insufficient treasury balance for refunds.")]
     InsufficientTreasuryForRefund, // host_treasury doesn't have enough SOL to refund players on cancel
 
+    #[msg("Insufficient funds")]
+    InsufficientFunds,
+    #[msg("Insufficient prize funds")]
+    InsufficientPrizeFunds,
+
     // ── Timeout / resign ──────────────────────────────────────────────────────
     #[msg("No time limit is set for this game.")]
-    NoTimeLimit,             // claim_timeout called on a game with time_per_move == 0
+    NoTimeLimit,             // claim_timeout called on a game with base_time_seconds == 0
 
     #[msg("Timeout period has not elapsed yet.")]
     TimeoutNotExpired,       // claim_timeout called before the move timer has run out
@@ -173,6 +195,17 @@ pub enum GameErrorCode {
     FeePayerMismatch,
     #[msg("Arithmetic overflow occurred")]
     ArithmeticOverflow,
+
+    #[msg("ELO is out of range")]
+    EloOutOfRange,
+    #[msg("Invalid session")]
+    InvalidSession,
+    #[msg("Spending limit exceeded")]
+    SpendingLimitExceeded,
+    #[msg("Wager limit exceeded")]
+    WagerLimitExceeded,
+    #[msg("Invalid tournament status")]
+    InvalidTournamentStatus,
 }
 
 // Alias so the rest of the codebase can use either name.

@@ -35,10 +35,13 @@ use crate::game::components::{
 };
 
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
+use crate::ui::game_ui::{
+    reset_in_game_hud_visibility, toggle_in_game_hud,
+    InGameHudVisibility,
+};
 use bevy::input::common_conditions::{input_toggle_active, input_just_pressed};
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
-use bevy_egui::EguiPrimaryContextPass;
 
 /// Game plugin for XFChess
 ///
@@ -54,6 +57,7 @@ impl Plugin for GamePlugin {
             .init_resource::<Selection>()
             .init_resource::<MoveHistory>()
             .init_resource::<GameTimer>()
+            .init_resource::<crate::game::resources::active_time_control::ActiveTimeControl>()
             .init_resource::<CapturedPieces>()
             .init_resource::<GameOverState>()
             .init_resource::<DebugThrottle>()
@@ -68,7 +72,9 @@ impl Plugin for GamePlugin {
             .init_resource::<GameSounds>()
             .init_resource::<super::camera_modes::CameraViewMode>()
             .init_resource::<super::camera_modes::CinematicSequence>()
-            .init_resource::<super::camera_modes::CinematicFadeOverlay>();
+            .init_resource::<super::camera_modes::CinematicFadeOverlay>()
+            .init_resource::<InGameHudVisibility>()
+            .init_resource::<super::systems::input::InGameExitConfirmation>();
 
         // Register types for reflection (needed for inspector)
         app.register_type::<CurrentTurn>()
@@ -117,6 +123,8 @@ impl Plugin for GamePlugin {
             (
                 reset_game_resources,
                 initialize_players,
+                reset_in_game_hud_visibility,
+                reset_in_game_exit_confirmation,
                 setup_game_camera,
                 setup_game_scene,
             )
@@ -193,6 +201,8 @@ impl Plugin for GamePlugin {
                         *view_mode != super::view_mode::ViewMode::TempleOS
                     },
                 ),
+                crate::game::systems::network_move::handle_resign_events
+                    .in_set(GameSystems::Execution),
                 // Promotion detection and handling (disabled in TempleOS)
                 detect_pawn_promotion.in_set(GameSystems::Execution).run_if(
                     |view_mode: Res<super::view_mode::ViewMode>| {
@@ -222,18 +232,26 @@ impl Plugin for GamePlugin {
             ),
         );
 
-        // Conditional 2D rendering system
+        // Egui UI systems must run in EguiPrimaryContextPass (bevy_egui 0.39+)
+        // so that button clicks and other pointer interactions are received.
         app.add_systems(
-            EguiPrimaryContextPass,
-            crate::ui::game_2d::render_2d_board
-                .run_if(in_state(GameState::InGame))
-                .run_if(view_mode_is_2d),
+            bevy_egui::EguiPrimaryContextPass,
+            (
+                crate::ui::game::game_ui::game_status_ui,
+                crate::ui::game_2d::render_2d_board,
+            )
+                .chain()
+                .run_if(in_state(GameState::InGame)),
         );
 
         // Conditional 3D visibility system
         app.add_systems(
             Update,
-            toggle_3d_visibility
+            (
+                toggle_3d_visibility,
+                toggle_in_game_hud,
+                confirm_exit_game,
+            )
                 .run_if(in_state(GameState::InGame)),
         );
 

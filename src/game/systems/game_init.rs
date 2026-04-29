@@ -56,6 +56,7 @@ pub fn reset_game_resources(
     mut game_over: ResMut<GameOverState>,
     mut turn_context: ResMut<TurnStateContext>,
     mut engine: ResMut<ChessEngine>,
+    active_tc: Res<crate::game::resources::active_time_control::ActiveTimeControl>,
 ) {
     info!("[GAME_INIT] Resetting all game resources for new game");
 
@@ -81,11 +82,27 @@ pub fn reset_game_resources(
         move_history.len()
     );
 
-    // Reset timer to 10 minutes; start is deferred until pieces are present.
-    *game_timer = GameTimer::default();
+    // Reset timer from the chosen time control; start is deferred until pieces are present.
+    let base = active_tc.control.base_seconds() as f32;
+    let inc = active_tc.control.increment_seconds() as f32;
+    *game_timer = if base > 0.0 {
+        GameTimer {
+            white_time_left: base,
+            black_time_left: base,
+            increment: inc,
+            is_running: false,
+        }
+    } else {
+        GameTimer {
+            white_time_left: f32::MAX,
+            black_time_left: f32::MAX,
+            increment: 0.0,
+            is_running: false,
+        }
+    };
     info!(
-        "[GAME_INIT] Timer reset: {}s per player, waiting for pieces",
-        game_timer.white_time_left
+        "[GAME_INIT] Timer reset: {}s per player (+{}s inc), waiting for pieces",
+        game_timer.white_time_left, game_timer.increment
     );
 
     // Clear captured pieces
@@ -147,7 +164,7 @@ pub fn initialize_players(
             player_2: Player::new(2, "Player 2".to_string(), PieceColor::Black, true),
         };
         info!("[GAME_INIT] Local PvP players initialized (both human)");
-    } else if let Some(my_color) = multiplayer_color {
+    } else if let Some(_my_color) = multiplayer_color {
         // Multiplayer mode: Both players are human
         *players = Players {
             player_1: Player::new(1, "Host".to_string(), PieceColor::White, true),
@@ -162,11 +179,15 @@ pub fn initialize_players(
             PieceColor::Black => PieceColor::White,
         };
 
-        let is_host = true;
-
-        *players = Players {
-            player_1: Player::new(1, "Player 1".to_string(), human_color, true),
-            player_2: Player::new(2, "AI".to_string(), ai_color, false),
+        *players = match ai_color {
+            PieceColor::White => Players {
+                player_1: Player::new(1, "AI".to_string(), PieceColor::White, false),
+                player_2: Player::new(2, "Player 1".to_string(), PieceColor::Black, true),
+            },
+            PieceColor::Black => Players {
+                player_1: Player::new(1, "Player 1".to_string(), PieceColor::White, true),
+                player_2: Player::new(2, "AI".to_string(), PieceColor::Black, false),
+            },
         };
 
         info!(

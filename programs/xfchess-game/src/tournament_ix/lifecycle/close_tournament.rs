@@ -22,118 +22,80 @@ pub struct CloseTournament<'info> {
         bump
     )]
     pub prize_escrow_pda: UncheckedAccount<'info>,
-    /// Top 8 winners (ordered by placement).
-    /// CHECK: Validated by checking against tournament.winner, second_place, etc.
-    #[account(mut)]
-    pub winner: UncheckedAccount<'info>,
-    /// CHECK: Validated by checking against tournament.second_place
-    #[account(mut)]
-    pub second_place: UncheckedAccount<'info>,
-    /// CHECK: Validated by checking against tournament.third_place
-    #[account(mut)]
-    pub third_place: UncheckedAccount<'info>,
-    /// CHECK: Validated by checking against tournament.fourth_place
-    #[account(mut)]
-    pub fourth_place: UncheckedAccount<'info>,
-    /// CHECK: Placeholder for 5th place (not tracked in current state)
-    #[account(mut)]
-    pub fifth_place: UncheckedAccount<'info>,
-    /// CHECK: Placeholder for 6th place (not tracked in current state)
-    #[account(mut)]
-    pub sixth_place: UncheckedAccount<'info>,
-    /// CHECK: Placeholder for 7th place (not tracked in current state)
-    #[account(mut)]
-    pub seventh_place: UncheckedAccount<'info>,
-    /// CHECK: Placeholder for 8th place (not tracked in current state)
-    #[account(mut)]
-    pub eighth_place: UncheckedAccount<'info>,
-    /// CHECK: Placeholder for 9th place (not tracked in current state)
-    #[account(mut)]
-    pub ninth_place: UncheckedAccount<'info>,
-    /// CHECK: Placeholder for 10th place (not tracked in current state)
-    #[account(mut)]
-    pub tenth_place: UncheckedAccount<'info>,
+    /// CHECK: Platform treasury vault for fee reimbursement
+    #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
+    pub treasury_vault: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: Authority (tournament host or admin)
+    #[account(mut)]
+    pub authority: UncheckedAccount<'info>,
 }
 
 pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
-
-    // Only allow close after tournament completion
     require!(
-        tournament.status == TournamentStatus::Completed,
-        GameErrorCode::TournamentNotCompleted
+        tournament.status == TournamentStatus::Completed ||
+        tournament.status == TournamentStatus::Active,
+        GameErrorCode::InvalidTournamentStatus
     );
 
-    // Get prize escrow balance
-    let prize_pool = ctx.accounts.prize_escrow_pda.lamports();
-
-    require!(prize_pool > 0, GameErrorCode::NoPrizeToClaim);
-
-    // Validate winner accounts match tournament state
+    // Validate authority (tournament host or admin)
     require!(
-        ctx.accounts.winner.key() == tournament.winner.unwrap(),
-        GameErrorCode::NoPrizeToClaim
+        ctx.accounts.authority.key() == tournament.authority ||
+        ctx.accounts.authority.key() == crate::constants::vps_authority::ID,
+        GameErrorCode::UnauthorizedAccess
     );
 
-    // Distribute prizes to top 10 based on prize_shares
-    let winners = [
-        &ctx.accounts.winner,
-        &ctx.accounts.second_place,
-        &ctx.accounts.third_place,
-        &ctx.accounts.fourth_place,
-        &ctx.accounts.fifth_place,
-        &ctx.accounts.sixth_place,
-        &ctx.accounts.seventh_place,
-        &ctx.accounts.eighth_place,
-        &ctx.accounts.ninth_place,
-        &ctx.accounts.tenth_place,
-    ];
+    // Mark tournament as closed
+    tournament.status = TournamentStatus::Closed;
 
-    let placements = [
-        tournament.winner,
-        tournament.second_place,
-        tournament.third_place,
-        tournament.fourth_place,
-        tournament.fifth_place,
-        tournament.sixth_place,
-        tournament.seventh_place,
-        tournament.eighth_place,
-        tournament.ninth_place,
-        tournament.tenth_place,
-    ];
+    // Distribute prizes if any remain
+    let prize_escrow_lamports = ctx.accounts.prize_escrow_pda.lamports();
+    if prize_escrow_lamports > 0 {
+        let num_players = tournament.num_registered_players as usize;
+        let mut remaining_lamports = prize_escrow_lamports;
+        let mut distributed = 0;
 
-    for (i, (winner_account, placement)) in winners.iter().zip(placements.iter()).enumerate() {
-        let share_bps = tournament.prize_shares[i];
-        if share_bps == 0 {
-            continue;
+        // Calculate total shares
+        let total_shares: u64 = tournament.prize_shares.iter().map(|&s| s as u64).sum();
+        if total_shares > 0 {
+            // Distribute based on prize shares to top finishers
+            for i in 0..tournament.prize_shares.len().min(num_players) {
+                if remaining_lamports == 0 { break; }
+                let share = tournament.prize_shares[i] as u64;
+                if share == 0 { continue; }
+
+                let prize_amount = (prize_escrow_lamports * share) / total_shares;
+                if prize_amount == 0 { continue; }
+
+                // Get player account from remaining_accounts
+                if let Some(player_account) = ctx.remaining_accounts.get(i) {
+                    **player_account.lamports.borrow_mut() += prize_amount;
+                    remaining_lamports -= prize_amount;
+                    distributed += prize_amount;
+                    msg!("Distributed prize {} to player {}", prize_amount, player_account.key());
+                }
+            }
+        } else if tournament.winner_takes_all && num_players > 0 {
+            // Winner takes all
+            if let Some(winner_account) = ctx.remaining_accounts.first() {
+                **winner_account.lamports.borrow_mut() += prize_escrow_lamports;
+                remaining_lamports = 0;
+                distributed = prize_escrow_lamports;
+                msg!("Distributed full prize {} to winner {}", prize_escrow_lamports, winner_account.key());
+            }
         }
 
-        // For 5th-10th place, skip if not set (None)
-        if i >= 4 && placement.is_none() {
-            continue;
+        // Return any undistributed lamports to treasury
+        if remaining_lamports > 0 {
+            **ctx.accounts.treasury_vault.lamports.borrow_mut() += remaining_lamports;
+            msg!("Returned undistributed {} to treasury", remaining_lamports);
         }
 
-        let payout = (prize_pool as u128 * share_bps as u128 / 10000) as u64;
-
-        if payout > 0 {
-            **ctx.accounts.prize_escrow_pda.to_account_info().try_borrow_mut_lamports()? -= payout;
-            **winner_account.to_account_info().try_borrow_mut_lamports()? += payout;
-
-            msg!(
-                "Payout {} lamports to place {} ({} bps)",
-                payout,
-                i + 1,
-                share_bps
-            );
-        }
+        // Drain escrow account
+        **ctx.accounts.prize_escrow_pda.lamports.borrow_mut() = 0;
     }
 
-    msg!(
-        "Tournament {} closed. {} lamports distributed to top 10",
-        tournament_id,
-        prize_pool
-    );
-
+    msg!("Tournament {} closed", tournament_id);
     Ok(())
 }

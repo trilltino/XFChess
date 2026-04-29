@@ -46,7 +46,8 @@ pub struct NetworkMoveEvent {
 
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
 pub struct ResignEvent {
-    pub player: String,
+    pub winner: String,
+    pub remote: bool,
 }
 
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]

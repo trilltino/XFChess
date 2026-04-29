@@ -92,3 +92,24 @@ pub fn submit_signed_tx(rpc: &RpcClient, tx_bytes: &[u8]) -> Result<Signature> {
     )
     .map_err(|e| anyhow!(e))
 }
+
+/// Co-signs a wallet-signed legacy transaction with the provided session keypair,
+/// then submits it.
+///
+/// Used by `activate_session` when `create_game` / `join_game` require both the
+/// player wallet signature (already present) and the VPS session key signature.
+pub fn cosign_and_submit_tx(
+    rpc: &RpcClient,
+    session_keypair: &Keypair,
+    tx_bytes: &[u8],
+) -> Result<Signature> {
+    let mut tx: Transaction = bincode::deserialize(tx_bytes)
+        .map_err(|e| anyhow!("deserialize tx: {e}"))?;
+    let blockhash = tx.message.recent_blockhash;
+    tx.partial_sign(&[session_keypair], blockhash);
+    rpc.send_and_confirm_transaction_with_spinner_and_commitment(
+        &tx,
+        CommitmentConfig::confirmed(),
+    )
+    .map_err(|e| anyhow!(e))
+}

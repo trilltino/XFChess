@@ -27,6 +27,7 @@
 //! - `swiss`: Swiss pairing tournament system
 //! - `relayer`: Relayer routes
 //! - `tee_relayer`: Tee Relayer routes
+//! - `auth_ws`: WebSocket authentication
 
 pub mod auth;
 pub mod blinks;
@@ -50,8 +51,11 @@ pub mod relayer {
     //! Re-export relayer routes from the routes module.
     pub use crate::signing::routes::relayer::*;
 }
+pub mod auth_ws;
 
 use axum::Router;
+use axum::routing::get;
+use crate::signing::auth_ws::handle_auth_websocket;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use std::sync::Arc;
@@ -127,7 +131,7 @@ impl AppState {
                     .ok()
                     .and_then(|s| serde_json::from_str(&s).ok())
                     .unwrap_or_default();
-                Keypair::try_from(bytes.as_slice()).unwrap_or_else(|_| Keypair::new())
+                Keypair::from_bytes(&bytes).unwrap_or_else(|_| Keypair::new())
             } else {
                 Keypair::from_base58_string(val)
             }
@@ -226,6 +230,9 @@ pub fn build_router(state: AppState) -> Router {
         // Relayer infrastructure
         .merge(relayer::routes())
         .merge(tee_relayer::routes())
+        
+        // WebSocket route for authentication sync
+        .route("/ws/auth", get(handle_auth_websocket))
         
         // State injection
         .with_state(state)

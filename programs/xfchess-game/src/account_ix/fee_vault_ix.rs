@@ -197,8 +197,9 @@ pub fn handler_update_elo(
     won_amount: u64,
 ) -> Result<()> {
     let p = &mut ctx.accounts.profile;
-    // ELO updates are now handled in finalize_game with Glicko-2
-    // This instruction is deprecated - kept for backward compatibility
+    // ELO rating (elo_rating field) is updated exclusively in finalize_game using K=32.
+    // This instruction updates lifetime stats only (wins/losses/draws/wagered/won).
+    // The _opponent_rating and _opponent_rd parameters are kept for ABI compatibility.
 
     match outcome {
         10000 => {

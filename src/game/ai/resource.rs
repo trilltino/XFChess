@@ -260,6 +260,11 @@ impl AIDifficulty {
         }
     }
 
+    /// Time per move in seconds.
+    pub fn seconds_per_move(self) -> f32 {
+        self.stockfish_movetime_ms().unwrap_or(0) as f32 / 1000.0
+    }
+
     /// Friendly description for UI with ELO equivalent
     pub fn description(self) -> &'static str {
         match self {

@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 
 use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
 use crate::solana::instructions::{
-    authorize_session_key_ix, create_game_ix, join_game_ix, GameType, GAME_SEED,
+    authorize_session_key_ix, create_game_ix, join_game_ix, GAME_SEED,
     PROGRAM_ID as SOLANA_PROGRAM_ID,
 };
 
@@ -249,8 +249,20 @@ async fn async_create_game(
         .parse()
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
 
-    let create_ix = create_game_ix(program_id, wallet_pubkey, game_id, wager_lamports, GameType::PvP)
-        .map_err(|e| format!("build create_game_ix: {e}"))?;
+    // match_type: Free=0, Ranked=1, Wager=2
+    let match_type: u8 = if wager_lamports > 0 { 2 } else { 0 };
+    let create_ix = create_game_ix(
+        program_id,
+        wallet_pubkey,
+        session_pubkey,
+        game_id,
+        wager_lamports,
+        match_type,
+        "US",
+        300, // base_time_seconds: Blitz 5+0 default
+        0,   // increment_seconds
+    )
+    .map_err(|e| format!("build create_game_ix: {e}"))?;
     let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
         .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
 
@@ -401,24 +413,46 @@ async fn async_join_game(
     require_wager_eligibility_with_url(&wallet_pubkey.to_string())?;
 
     // 1. Ask VPS for a session keypair for this game.
+    // The VPS uses get-or-create semantics, so the same session pubkey that was
+    // stored in game.fee_payer during create_game is returned here.
     let session_pubkey_str = vps_client::create_session(game_id, &wallet_pubkey.to_string())
         .map_err(|e| format!("vps create_session: {e}"))?;
     let session_pubkey: Pubkey = session_pubkey_str
         .parse()
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
 
-    let join_ix = join_game_ix(program_id, wallet_pubkey, game_id)
+    // 2. Read the game account to get the white player pubkey for white_profile PDA.
+    let game_pda = Pubkey::find_program_address(
+        &[GAME_SEED, &game_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let rpc = solana_client::rpc_client::RpcClient::new(rpc_url.clone());
+    let game_data = rpc
+        .get_account_data(&game_pda)
+        .map_err(|e| format!("fetch game account: {e}"))?;
+    // Game layout: 8 disc + 8 game_id + 32 white pubkey
+    const WHITE_OFFSET: usize = 8 + 8;
+    if game_data.len() < WHITE_OFFSET + 32 {
+        return Err("game account too small to read white pubkey".to_string());
+    }
+    let white_bytes: [u8; 32] = game_data[WHITE_OFFSET..WHITE_OFFSET + 32]
+        .try_into()
+        .map_err(|_| "bad white bytes".to_string())?;
+    let white_player = Pubkey::from(white_bytes);
+
+    let join_ix = join_game_ix(program_id, wallet_pubkey, white_player, session_pubkey, game_id)
         .map_err(|e| format!("build join_game_ix: {e}"))?;
     let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
         .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
 
     let ixs = vec![join_ix, auth_ix];
 
-    // 3. ONE wallet popup — signs everything together.
+    // ONE wallet popup — signs everything together.
     let signed_bytes = sign_via_tauri_only(&rpc_url, wallet_pubkey, &ixs, &[])
         .map_err(|e| format!("sign bundled TX: {e}"))?;
 
-    // 3. VPS submits + funds.
+    // VPS adds its session key co-signature and submits.
     vps_client::activate_session(game_id, &signed_bytes)
         .map_err(|e| format!("vps activate_session: {e}"))?;
 

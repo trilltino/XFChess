@@ -30,14 +30,14 @@ pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData)
     }
     
     // Skip if no time control set
-    if game.time_per_move == 0 {
+    if game.base_time_seconds == 0 {
         msg!("Game {} has no time control", game.game_id);
         return Ok(());
     }
     
-    // Calculate time elapsed since last move
+    // Calculate time elapsed since last move (3× base_time safety window)
     let time_elapsed = (now - game.updated_at) as u64;
-    let time_limit = game.time_per_move as u64;
+    let time_limit = game.base_time_seconds.saturating_mul(3);
     
     // Check if time has expired
     if time_elapsed > time_limit {

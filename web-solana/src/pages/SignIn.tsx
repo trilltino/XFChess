@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import bs58 from 'bs58';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletReadyState } from '@solana/wallet-adapter-base';
 import { Loader2, Shield, ShieldCheck, Trophy, Zap, ChevronRight, RefreshCw, Cpu, X } from 'lucide-react';
@@ -251,8 +252,8 @@ function CredentialsStep({
         if (!email || !password) { setErr('Email and password are required'); return; }
         setLoading(true);
         try {
-            const body = { email, password, username: email.split('@')[0] }; // Default username from email for now
-            const path = m === 'login' ? '/api/auth/login' : '/api/auth/register';
+            const body = { email, password, username: email.split('@')[0] };
+            const path = m === 'login' ? '/api/auth/login-email' : '/api/auth/register-email';
             const res = await apiPost<AuthResult>(path, body);
             localStorage.setItem('xfchess_token', res.token);
             localStorage.setItem('xfchess_username', res.username);
@@ -338,6 +339,7 @@ function CredentialsStep({
 function ConnectWalletStep({ username, onConnected }: { username: string; onConnected: () => void }) {
     const { select, wallets, connected, connecting, publicKey } = useWallet();
     const [err, setErr] = useState<string | null>(null);
+    const isTauri = !!(window as any).__TAURI__;
 
     useEffect(() => {
         if (connected) {
@@ -387,6 +389,37 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                         w.readyState === WalletReadyState.NotDetected ||
                         w.readyState === WalletReadyState.Unsupported;
                     if (notInstalled) {
+                        const isExtensionWallet = w.adapter.name === 'Phantom' || w.adapter.name === 'Solflare';
+                        
+                        if (isTauri && isExtensionWallet) {
+                            return (
+                                <button
+                                    key={w.adapter.name}
+                                    style={{ ...walletBtn, opacity: 0.9, borderColor: 'rgba(173,92,47,0.3)' }}
+                                    onClick={() => {
+                                        const url = window.location.href.split('?')[0]; // Open clean URL in browser
+                                        if ((window as any).__TAURI__) {
+                                            (window as any).__TAURI__.invoke('open_external_browser', { url });
+                                        } else {
+                                            window.open(url, '_blank');
+                                        }
+                                    }}
+                                    onMouseEnter={e => {
+                                        (e.currentTarget as HTMLButtonElement).style.borderColor = '#ad5c2f';
+                                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(173,92,47,0.12)';
+                                    }}
+                                    onMouseLeave={e => {
+                                        (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(173,92,47,0.3)';
+                                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
+                                    }}
+                                >
+                                    <img src={w.adapter.icon} alt={w.adapter.name} width={28} height={28} style={{ borderRadius: 6 }} />
+                                    <span style={{ flex: 1 }}>{w.adapter.name}</span>
+                                    <span style={{ fontSize: 11, color: '#ad5c2f', fontWeight: 700 }}>Open in Browser →</span>
+                                </button>
+                            );
+                        }
+
                         return (
                             <a
                                 key={w.adapter.name}
@@ -583,8 +616,19 @@ function ProfileStep() {
     const [profile, setProfile] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [createHandle, setCreateHandle] = useState('');
+    const [country, setCountry] = useState('GB');
+    const [taxId, setTaxId] = useState('');
     const [creating, setCreating] = useState(false);
     const [err, setErr] = useState<string | null>(null);
+
+    const countries = [
+        { code: 'GB', label: 'United Kingdom', taxLabel: 'NI Number' },
+        { code: 'BR', label: 'Brazil', taxLabel: 'CPF' },
+        { code: 'CA', label: 'Canada', taxLabel: 'SIN' },
+        { code: 'DE', label: 'Germany', taxLabel: 'Tax ID' },
+    ];
+
+    const currentCountry = countries.find(c => c.code === country);
 
     // AI Setup state
     const [showAiSetup, setShowAiSetup] = useState(false);
@@ -616,6 +660,24 @@ function ProfileStep() {
         setLoading(true);
         setErr(null);
         try {
+            // Check backend first: existing wallet-registered users skip profile creation.
+            try {
+                const pk = wallet.publicKey.toBase58();
+                const r = await fetch(`${API}/api/auth/check-wallet/${pk}`);
+                if (r.ok) {
+                    const data = await r.json();
+                    if (data?.registered && data?.username) {
+                        localStorage.setItem('xfchess_username', data.username);
+                        localStorage.setItem('xfchess_wallet', pk);
+                        if (data.token) localStorage.setItem('xfchess_token', data.token);
+                        navigate('/');
+                        return;
+                    }
+                }
+            } catch {
+                // Not fatal — fall through to on-chain lookup.
+            }
+
             const program = getAnchorProgram(connection, wallet);
             const p = await fetchPlayerProfile(program, wallet.publicKey);
             setProfile(p);
@@ -633,7 +695,51 @@ function ProfileStep() {
         setErr(null);
         try {
             const program = getAnchorProgram(connection, wallet);
-            await createPlayerProfile(program, wallet.publicKey, createHandle);
+            // 1. On-chain initialization (Username + Country ONLY, no PII)
+            await createPlayerProfile(program, wallet.publicKey, createHandle, country);
+            
+            // 2. Backend registration (timestamp in seconds for signature verification)
+            let authToken = localStorage.getItem('xfchess_token');
+            try {
+                const timestamp = Math.floor(Date.now() / 1000);
+                const message = `xfchess:register:${timestamp}`;
+                const encodedMessage = new TextEncoder().encode(message);
+                const signature = await wallet.signMessage!(encodedMessage);
+                const sigStrB58 = bs58.encode(signature);
+                const auth = await apiPost<{ token: string; username: string }>('/api/auth/register', {
+                    wallet: wallet.publicKey.toBase58(),
+                    signature: sigStrB58,
+                    timestamp,
+                    username: createHandle,
+                });
+                authToken = auth.token;
+                localStorage.setItem('xfchess_token', auth.token);
+                localStorage.setItem('xfchess_username', auth.username);
+                localStorage.setItem('xfchess_wallet', wallet.publicKey.toBase58());
+            } catch (e: any) {
+                // 409 = already registered — existing token still valid
+                if (!e.message?.includes('409') && !e.message?.includes('already')) {
+                    console.warn("Backend registration skipped/failed:", e);
+                }
+            }
+
+            // 3. Sync on-chain username → SQLite (canonical source of truth)
+            if (authToken) {
+                try {
+                    const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) || 'http://localhost:8090';
+                    const r = await fetch(`${backendUrl}/api/auth/sync-profile`, {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${authToken}` },
+                    });
+                    if (r.ok) {
+                        const { username: synced } = await r.json();
+                        localStorage.setItem('xfchess_username', synced);
+                    }
+                } catch (e) {
+                    console.warn('sync-profile non-critical:', e);
+                }
+            }
+
             // Wait for chain confirmation then reload
             setTimeout(loadProfile, 1800);
         } catch (e: any) {
@@ -892,22 +998,53 @@ function ProfileStep() {
                     </div>
 
                     <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                            Chess Handle (username on SOL)
-                        </label>
-                        <input
-                            style={{ ...input, fontSize: 18, fontWeight: 700, textAlign: 'center' }}
-                            value={createHandle}
-                            onChange={e => setCreateHandle(e.target.value)}
-                            placeholder="YourChessHandle"
-                            maxLength={20}
-                            required
-                            onFocus={e => (e.target.style.borderColor = '#ad5c2f')}
-                            onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
-                        />
-                        <button type="submit" style={{ ...primaryBtn, opacity: creating || !createHandle ? 0.6 : 1 }} disabled={creating || !createHandle}>
+                        <div style={{ marginBottom: 4 }}>
+                            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                                Chess Handle (Username)
+                            </label>
+                            <input
+                                style={{ ...input, fontSize: 18, fontWeight: 700, textAlign: 'center' }}
+                                value={createHandle}
+                                onChange={e => setCreateHandle(e.target.value)}
+                                placeholder="YourChessHandle"
+                                maxLength={20}
+                                required
+                                onFocus={e => (e.target.style.borderColor = '#ad5c2f')}
+                                onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
+                            />
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <label style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                                    Country
+                                </label>
+                                <select
+                                    style={{ ...input, padding: '10px 12px' }}
+                                    value={country}
+                                    onChange={e => setCountry(e.target.value)}
+                                >
+                                    {countries.map(c => (
+                                        <option key={c.code} value={c.code} style={{ background: '#1a1a17' }}>{c.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <label style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                                    {currentCountry?.taxLabel ?? 'Tax ID'}
+                                </label>
+                                <input
+                                    style={{ ...input, padding: '10px 12px' }}
+                                    value={taxId}
+                                    onChange={e => setTaxId(e.target.value)}
+                                    placeholder="Required"
+                                    required
+                                />
+                            </div>
+                        </div>
+                        <button type="submit" style={{ ...primaryBtn, opacity: creating || !createHandle || !taxId ? 0.6 : 1, marginTop: 8 }} disabled={creating || !createHandle || !taxId}>
                             {creating ? <Loader2 size={16} className="spinner" /> : <Zap size={16} />}
-                            Create Username on SOL
+                            Initialize Profile
                         </button>
                     </form>
                 </>
@@ -918,7 +1055,13 @@ function ProfileStep() {
 
 // ─── Root: orchestrates the steps ───────────────────────────────────────────
 export function SignIn(_: { defaultMode?: 'login' | 'register' } = {}) {
-    const [step, setStep] = useState<FlowStep>('identity');
+    const [step, setStep] = useState<FlowStep>(() => {
+        const params = new URLSearchParams(window.location.search);
+        const s = params.get('step');
+        if (s === 'connect_wallet') return 'connect_wallet';
+        if (s === 'identity') return 'identity';
+        return 'identity';
+    });
     const [credMode, setCredMode] = useState<'login' | 'register'>('login');
     const [authUser, setAuthUser] = useState<AuthResult | null>(null);
     const { connected } = useWallet();

@@ -141,7 +141,7 @@ fn calculate_sonneborn_berger(
 
 /// Update player scores based on results
 pub fn update_scores(players: &mut [SwissPlayer], results: &[(u8, Pairing, MatchResult)]) {
-    for (round, pairing, result) in results {
+    for (_, pairing, result) in results {
         if let Some(white) = players.iter_mut().find(|p| p.id == pairing.white) {
             white.score += result.white_score();
             white.opponents.push(pairing.black.clone());

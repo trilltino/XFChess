@@ -31,11 +31,11 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
         GameErrorCode::TournamentNotInRegistration
     );
     require!(
-        tournament.registered_count == tournament.max_players,
+        tournament.num_registered_players == tournament.max_players,
         GameErrorCode::TournamentFull
     );
 
-    let player_count = tournament.registered_count as usize;
+    let player_count = tournament.num_registered_players as usize;
 
     // Sort players by ELO descending
     let mut indexed: Vec<(usize, u32)> = tournament

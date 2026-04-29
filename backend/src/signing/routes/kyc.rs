@@ -10,11 +10,23 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::signing::AppState;
 use crate::signing::storage::vault::{KycInput, VaultStore};
+
+/// Country-specific tax ID validation patterns.
+fn get_tax_id_pattern(country: &str) -> Option<Regex> {
+    match country {
+        "GB" => Some(Regex::new(r"^[A-Za-z]{2}\d{6}[A-Za-z]$").unwrap()), // UK NI: AB123456C
+        "BR" => Some(Regex::new(r"^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$").unwrap()), // Brazil CPF
+        "DE" => Some(Regex::new(r"^\d{11}$").unwrap()), // Germany Tax ID: 11 digits
+        "CA" => Some(Regex::new(r"^\d{3}-?\d{3}-?\d{3}$").unwrap()), // Canada SIN
+        _ => None,
+    }
+}
 
 /// KYC submission payload from the frontend.
 #[derive(Deserialize, Serialize, Clone)]
@@ -51,6 +63,14 @@ pub async fn submit_kyc(
         || req.country.trim().is_empty()
     {
         return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // Validate tax ID format for supported countries
+    if let Some(pattern) = get_tax_id_pattern(&req.country) {
+        if !pattern.is_match(&req.tax_id) {
+            tracing::warn!("[kyc] Invalid tax ID format for country {}: {}", req.country, req.tax_id);
+            return Err(StatusCode::BAD_REQUEST);
+        }
     }
 
     let vault = VaultStore::new((*state.vault_pool).clone());

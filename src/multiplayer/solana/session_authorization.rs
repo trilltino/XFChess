@@ -10,6 +10,7 @@ use solana_sdk::{
     transaction::Transaction,
     instruction::Instruction,
 };
+#[allow(deprecated)]
 use solana_sdk::system_program;
 use anyhow::Result;
 

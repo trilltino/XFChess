@@ -76,7 +76,7 @@ pub fn handler_authorize_tournament_session(
     );
 
     require!(
-        tournament.players.iter().any(|p| p == player.key),
+        tournament.players.iter().any(|p| *p == *player.key),
         XfchessGameError::UnauthorizedAccess
     );
 

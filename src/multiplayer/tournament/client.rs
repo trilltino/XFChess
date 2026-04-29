@@ -5,7 +5,6 @@
 
 use bevy::prelude::*;
 use braid_iroh::protocol::{SwissMessage, SwissPairing};
-use futures::StreamExt;
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -197,7 +196,7 @@ fn process_gossip_messages(
                     msg_tournament_id, round, board);
 
                 let (white_score, black_score) = match result {
-                    braid_iroh::protocol::MatchResult::Win { winner } => {
+                    braid_iroh::protocol::MatchResult::Win { winner: _ } => {
                         // Need to look up who was white/black in the pairing
                         // For now, assume 1-0 or 0-1
                         (1.0, 0.0) // Simplified - would need pairing info
@@ -242,6 +241,18 @@ fn process_gossip_messages(
                     standings: entries,
                     my_rank,
                 });
+            }
+            SwissMessage::BracketFired {
+                tournament_id: msg_tournament_id,
+                player_count,
+                started_at,
+            } => {
+                info!(
+                    "[tournament-client] Bracket fired for tournament {} ({} players) at {}",
+                    msg_tournament_id,
+                    player_count,
+                    started_at
+                );
             }
         }
     }

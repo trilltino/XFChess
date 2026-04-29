@@ -138,7 +138,6 @@ pub struct AiPollParams<'w, 's> {
 fn spawn_ai_task_system(
     mut commands: Commands,
     mut params: AiSpawnParams,
-    // braid_manager: Option<Res<crate::multiplayer::network::braid::BraidNodeManager>>, // Temporarily disabled
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     let _start_time = std::time::Instant::now();
@@ -188,29 +187,6 @@ fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result
         
         info!("[AI] Starting Stockfish process at: {}", stockfish_path.display());
 
-        /// Spawn Stockfish UCI engine as a child process.
-        ///
-        /// Stockfish communicates via the Universal Chess Interface (UCI) protocol:
-        /// - stdin:  Send commands to the engine (uci, isready, position, go, quit)
-        /// - stdout: Receive engine responses (uciok, readyok, info, bestmove)
-        /// - stderr: Discarded (engine logs not needed for gameplay)
-        ///
-        /// The UCI protocol is stateful - we first initialize the engine,
-        /// then feed positions and search commands, finally reading the best move.
-        ///
-        /// # Protocol Flow
-        /// 1. "uci" -> wait for "uciok"
-        /// 2. "isready" -> wait for "readyok"
-        /// 3. "position fen <FEN>" -> set board state
-        /// 4. "go movetime <ms>" or "go depth <n>" -> start search
-        /// 5. Parse "info" lines for score/depth updates
-        /// 6. Read "bestmove <move>" -> search complete
-        /// 7. "quit" -> terminate engine
-        ///
-        /// # Stockfish Documentation
-        /// - UCI Protocol: https://backscattering.de/chess/uci/
-        /// - Stockfish GitHub: https://github.com/official-stockfish/Stockfish
-        /// - Stockfish Wiki: https://github.com/official-stockfish/Stockfish/wiki
         let mut child = Command::new(&stockfish_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -381,7 +357,6 @@ fn should_skip_ai_spawn(
 fn poll_ai_task_system(
     mut commands: Commands,
     mut params: AiPollParams,
-    // braid_manager: Option<Res<crate::multiplayer::network::braid::BraidNodeManager>>, // Temporarily disabled
 ) {
     let Some(mut task_resource) = params.task_resource else {
         return;
@@ -452,6 +427,11 @@ fn poll_ai_task_system(
             } else {
                 (None, None)
             };
+
+            {
+                let pieces = params.pieces_queries.p1();
+                params.engine.sync_ecs_to_engine(&pieces);
+            }
 
             let mut p0 = params.pieces_queries.p0();
 

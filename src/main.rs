@@ -1,4 +1,5 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, debug_assertions), windows_subsystem = "console")]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 /// XFChess main entry point for decentralized chess on Solana
 use clap::Parser;

@@ -9,7 +9,6 @@ import {
   UserPlus,
   CheckCircle2,
   XCircle,
-  ShieldCheck,
   AlertCircle,
 } from 'lucide-react';
 import {
@@ -18,22 +17,32 @@ import {
   createPlayerProfile,
 } from '../lib/anchor_client';
 import bs58 from 'bs58';
-import { submitSignup, getUserStatus, registerWithWallet, checkUsernameAvailable, type UserStatus } from '../lib/api';
+import { submitSignup, getUserStatus, registerWithWallet, checkUsernameAvailable, addEmail, syncProfile, type UserStatus } from '../lib/api';
 import { KycModal } from '../components/KycModal';
 import { MatchHistory } from '../components/MatchHistory';
+
+const COUNTRIES = [
+  { code: 'GB', label: 'United Kingdom' },
+  { code: 'US', label: 'United States' },
+  { code: 'BR', label: 'Brazil' },
+  { code: 'DE', label: 'Germany' },
+  { code: 'CA', label: 'Canada' },
+  { code: 'AU', label: 'Australia' },
+];
 
 interface SignupFormProps {
   newUsername: string;
   setNewUsername: (v: string) => void;
   email: string;
   setEmail: (v: string) => void;
+  country: string;
+  setCountry: (v: string) => void;
   usernameError: string | null;
   setUsernameError: (v: string | null) => void;
   emailError: string | null;
   setEmailError: (v: string | null) => void;
   creationLoading: boolean;
   handleCreateProfile: (e: React.FormEvent) => void;
-  onKycClick: () => void;
 }
 
 // Username validation: 3-20 chars, alphanumeric + underscore/dot/hyphen, no pure symbols, must start with letter
@@ -59,15 +68,15 @@ function SignupForm({
   setNewUsername,
   email,
   setEmail,
+  country,
+  setCountry,
   usernameError,
   setUsernameError,
   emailError,
   setEmailError,
   creationLoading,
   handleCreateProfile,
-  onKycClick,
 }: SignupFormProps) {
-  const [showKycButton, setShowKycButton] = useState(false);
   const [checkingUsername, setCheckingUsername] = useState(false);
 
   const handleUsernameChange = (value: string) => {
@@ -96,14 +105,7 @@ function SignupForm({
     return () => clearTimeout(timer);
   }, [newUsername, setUsernameError]);
 
-  // Show KYC button only when both email and username are valid
-  useEffect(() => {
-    const isUsernameValid = !validateUsername(newUsername) && !usernameError && newUsername.length > 0;
-    const isEmailValid = !validateEmail(email) && email.length > 0;
-    setShowKycButton(isUsernameValid && isEmailValid && !checkingUsername);
-  }, [newUsername, email, usernameError, checkingUsername]);
-
-  const isFormValid = !usernameError && !emailError && newUsername && email && !checkingUsername;
+  const isFormValid = !usernameError && !emailError && newUsername && email && country && !checkingUsername;
 
   return (
     <form
@@ -148,6 +150,21 @@ function SignupForm({
             }
           </div>
         )}
+      </div>
+
+      {/* Country selector */}
+      <div style={{ marginBottom: '12px' }}>
+        <select
+          value={country}
+          onChange={e => setCountry(e.target.value)}
+          required
+          style={{ ...inputStyle, width: '100%', textAlign: 'center', cursor: 'pointer' }}
+        >
+          <option value="">Select your country…</option>
+          {COUNTRIES.map(c => (
+            <option key={c.code} value={c.code}>{c.label}</option>
+          ))}
+        </select>
       </div>
 
       {/* Email field with validation */}
@@ -208,26 +225,9 @@ function SignupForm({
         {creationLoading ? <Loader2 className="spinner" /> : 'Create Account'}
       </button>
 
-      {/* KYC Verification Button - Only shown after valid email and username entered */}
-      {showKycButton && (
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={onKycClick}
-          style={{
-            background: 'var(--primary)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            width: '100%',
-            textAlign: 'center',
-          }}
-        >
-          <ShieldCheck size={18} />
-          KYC Verification
-        </button>
-      )}
+      <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textAlign: 'center', margin: '8px 0 0' }}>
+        Complete KYC verification after account creation to unlock wagered play.
+      </p>
     </form>
   );
 }
@@ -243,6 +243,7 @@ export function ProfileViewer() {
   // Signup state
   const [newUsername, setNewUsername] = useState('');
   const [email, setEmail] = useState('');
+  const [country, setCountry] = useState('');
   const [creationLoading, setCreationLoading] = useState(false);
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -250,6 +251,29 @@ export function ProfileViewer() {
   // Verification state
   const [status, setStatus] = useState<UserStatus | null>(null);
   const [kycOpen, setKycOpen] = useState(false);
+
+  // Add-email state
+  const [emailAddOpen, setEmailAddOpen] = useState(false);
+  const [emailAddValue, setEmailAddValue] = useState('');
+  const [emailAddLoading, setEmailAddLoading] = useState(false);
+  const [emailAddError, setEmailAddError] = useState<string | null>(null);
+
+  const handleAddEmail = async () => {
+    const token = localStorage.getItem('xfchess_token');
+    if (!token || !emailAddValue) return;
+    setEmailAddLoading(true);
+    setEmailAddError(null);
+    try {
+      await addEmail(emailAddValue, token);
+      localStorage.setItem('xfchess_email', emailAddValue);
+      setEmailAddOpen(false);
+      setStatus(prev => prev ? { ...prev, has_email: true } : prev);
+    } catch (e: any) {
+      setEmailAddError(e.message || 'Failed to add email');
+    } finally {
+      setEmailAddLoading(false);
+    }
+  };
 
   const loadProfile = useCallback(
     async (pubkey: PublicKey) => {
@@ -312,7 +336,7 @@ export function ProfileViewer() {
 
       // 2. Create on-chain Anchor profile
       const program = getAnchorProgram(connection, wallet);
-      await createPlayerProfile(program, wallet.publicKey, newUsername);
+      await createPlayerProfile(program, wallet.publicKey, newUsername, country);
 
       // 3. Register in backend DB (wallet signature proves ownership, no password)
       const timestamp = Math.floor(Date.now() / 1000);
@@ -320,20 +344,39 @@ export function ProfileViewer() {
       const sigBytes = await wallet.signMessage(msg);
       const signature = bs58.encode(sigBytes);
 
+      let token = localStorage.getItem('xfchess_token');
       try {
-        await registerWithWallet({
+        const auth = await registerWithWallet({
           wallet: wallet.publicKey.toBase58(),
           signature,
           timestamp,
           username: newUsername,
           email: email || null,
         });
-      } catch (regErr) {
-        // Non-fatal: on-chain profile created; backend may already have this wallet
-        console.warn('Backend registration call failed:', regErr);
+        // Fresh registration — store token and username
+        token = auth.token;
+        localStorage.setItem('xfchess_token', auth.token);
+        localStorage.setItem('xfchess_username', auth.username);
+        localStorage.setItem('xfchess_wallet', wallet.publicKey.toBase58());
+      } catch (regErr: any) {
+        // 409 = wallet already registered — existing token is still valid
+        if (!regErr.message?.includes('409') && !regErr.message?.includes('already')) {
+          console.warn('Backend registration call failed:', regErr);
+        }
       }
 
-      // 4. Send welcome email with PDF guide via SendGrid (non-blocking)
+      // 4. Sync on-chain username → SQLite (canonical source of truth).
+      // Runs for both new and existing wallets — idempotent.
+      if (token) {
+        try {
+          const { username: synced } = await syncProfile(token);
+          localStorage.setItem('xfchess_username', synced);
+        } catch (syncErr) {
+          console.warn('sync-profile failed (non-critical):', syncErr);
+        }
+      }
+
+      // 5. Send welcome email with PDF guide via SendGrid (non-blocking)
       if (email) {
         try {
           await submitSignup({
@@ -406,13 +449,14 @@ export function ProfileViewer() {
             setNewUsername={setNewUsername}
             email={email}
             setEmail={setEmail}
+            country={country}
+            setCountry={setCountry}
             usernameError={usernameError}
             setUsernameError={setUsernameError}
             emailError={emailError}
             setEmailError={setEmailError}
             creationLoading={creationLoading}
             handleCreateProfile={handleCreateProfile}
-            onKycClick={() => setKycOpen(true)}
           />
         )}
 
@@ -423,7 +467,33 @@ export function ProfileViewer() {
               Verification
             </h3>
             <ChecklistRow label="Wallet connected" ok={true} />
-            <ChecklistRow label="Email registered" ok={status?.has_email ?? false} />
+            <ChecklistRow
+              label="Email registered"
+              ok={status?.has_email ?? false}
+              action={
+                !(status?.has_email) ? (
+                  emailAddOpen ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="email"
+                        value={emailAddValue}
+                        onChange={e => setEmailAddValue(e.target.value)}
+                        placeholder="your@email.com"
+                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--glass)', color: '#fff', fontSize: 13 }}
+                        onKeyDown={e => { if (e.key === 'Enter') handleAddEmail(); }}
+                      />
+                      <button className="btn-small" onClick={handleAddEmail} disabled={emailAddLoading}>
+                        {emailAddLoading ? '…' : 'Save'}
+                      </button>
+                      <button className="btn-small" style={{ background: 'transparent', opacity: 0.6 }} onClick={() => { setEmailAddOpen(false); setEmailAddError(null); }}>✕</button>
+                      {emailAddError && <span style={{ color: '#ff8080', fontSize: 11 }}>{emailAddError}</span>}
+                    </span>
+                  ) : (
+                    <button className="btn-small" onClick={() => setEmailAddOpen(true)}>Add Email</button>
+                  )
+                ) : undefined
+              }
+            />
             <ChecklistRow
               label="KYC verified"
               ok={status?.has_kyc ?? false}

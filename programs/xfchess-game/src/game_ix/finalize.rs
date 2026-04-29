@@ -34,8 +34,9 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     require!(
         game.status == GameStatus::Finished,
-        GameErrorCode::GameNotActive
+        GameErrorCode::GameNotFinished
     );
+    game.status = GameStatus::Settled;
 
     // Result was already set on-chain by resign / claim_timeout / auto-checkmate detection.
     // Extract copies before releasing the mutable borrow for CPI calls
@@ -58,6 +59,27 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
         let game_id_bytes = _game_id.to_le_bytes();
         let bump = ctx.bumps.escrow_pda;
         let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[bump]]];
+        
+        // Reimburse platform fees from escrow if fees were advanced
+        let platform_reimbursement = game.fees_advanced.min(escrow_balance);
+        if platform_reimbursement > 0 {
+            anchor_lang::system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.escrow_pda.to_account_info(),
+                        to: ctx.accounts.treasury_vault.to_account_info(),
+                    },
+                    escrow_seeds,
+                ),
+                platform_reimbursement,
+            )?;
+            
+            msg!(
+                "Platform fees reimbursed: {} lamports from escrow",
+                platform_reimbursement
+            );
+        }
 
         match result {
             GameResult::Winner(winner) => {
@@ -66,42 +88,59 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                 } else {
                     ctx.accounts.black_authority.to_account_info()
                 };
-                anchor_lang::system_program::transfer(
-                    CpiContext::new_with_signer(
-                        ctx.accounts.system_program.to_account_info(),
-                        anchor_lang::system_program::Transfer {
-                            from: ctx.accounts.escrow_pda.to_account_info(),
-                            to: dest,
-                        },
-                        escrow_seeds,
-                    ),
-                    pot,
-                )?;
+                let rent = Rent::get()?;
+                let balance_after = dest.lamports().saturating_add(pot);
+                if rent.is_exempt(balance_after, dest.data_len()) {
+                    anchor_lang::system_program::transfer(
+                        CpiContext::new_with_signer(
+                            ctx.accounts.system_program.to_account_info(),
+                            anchor_lang::system_program::Transfer {
+                                from: ctx.accounts.escrow_pda.to_account_info(),
+                                to: dest,
+                            },
+                            escrow_seeds,
+                        ),
+                        pot,
+                    )?;
+                } else {
+                    msg!("Skipping prize transfer to winner: not rent-exempt after transfer");
+                }
             }
             GameResult::Draw => {
                 let half = wager_amount;
-                anchor_lang::system_program::transfer(
-                    CpiContext::new_with_signer(
-                        ctx.accounts.system_program.to_account_info(),
-                        anchor_lang::system_program::Transfer {
-                            from: ctx.accounts.escrow_pda.to_account_info(),
-                            to: ctx.accounts.white_authority.to_account_info(),
-                        },
-                        escrow_seeds,
-                    ),
-                    half,
-                )?;
-                anchor_lang::system_program::transfer(
-                    CpiContext::new_with_signer(
-                        ctx.accounts.system_program.to_account_info(),
-                        anchor_lang::system_program::Transfer {
-                            from: ctx.accounts.escrow_pda.to_account_info(),
-                            to: ctx.accounts.black_authority.to_account_info(),
-                        },
-                        escrow_seeds,
-                    ),
-                    half,
-                )?;
+                let rent = Rent::get()?;
+                let white_balance_after = ctx.accounts.white_authority.lamports().saturating_add(half);
+                let black_balance_after = ctx.accounts.black_authority.lamports().saturating_add(half);
+                if rent.is_exempt(white_balance_after, ctx.accounts.white_authority.data_len()) {
+                    anchor_lang::system_program::transfer(
+                        CpiContext::new_with_signer(
+                            ctx.accounts.system_program.to_account_info(),
+                            anchor_lang::system_program::Transfer {
+                                from: ctx.accounts.escrow_pda.to_account_info(),
+                                to: ctx.accounts.white_authority.to_account_info(),
+                            },
+                            escrow_seeds,
+                        ),
+                        half,
+                    )?;
+                } else {
+                    msg!("Skipping refund to white player: not rent-exempt after transfer");
+                }
+                if rent.is_exempt(black_balance_after, ctx.accounts.black_authority.data_len()) {
+                    anchor_lang::system_program::transfer(
+                        CpiContext::new_with_signer(
+                            ctx.accounts.system_program.to_account_info(),
+                            anchor_lang::system_program::Transfer {
+                                from: ctx.accounts.escrow_pda.to_account_info(),
+                                to: ctx.accounts.black_authority.to_account_info(),
+                            },
+                            escrow_seeds,
+                        ),
+                        half,
+                    )?;
+                } else {
+                    msg!("Skipping refund to black player: not rent-exempt after transfer");
+                }
             }
             _ => {}
         }
@@ -198,14 +237,6 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
 
         white_profile.elo_rating = new_w_rating;
         black_profile.elo_rating = new_b_rating;
-        
-        // K=32 doesn't use RD/volatility, but we keep them in struct for ABI compatibility.
-        // We set them to 0 or leave them unchanged. The plan says set rd=0.0 at init.
-        // We'll leave them as they are or set to 0.0 if we want to be clean.
-        white_profile.rd = 0.0;
-        black_profile.rd = 0.0;
-        white_profile.volatility = 0.0;
-        black_profile.volatility = 0.0;
 
         white_profile.last_played = Clock::get()?.unix_timestamp;
         black_profile.last_played = Clock::get()?.unix_timestamp;
@@ -224,7 +255,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
             }
             loser.win_streak = 0;
 
-            if match_type == MatchType::Tournament {
+            if match_type != MatchType::Free {
                 winner.tournament_wins += 1;
             }
 

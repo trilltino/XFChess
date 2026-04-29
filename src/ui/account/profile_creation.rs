@@ -1,15 +1,18 @@
 #![allow(dead_code)]
 //! Profile Creation UI - Username selection screen
 //!
-//! Implements the "Option 2: Manual Username Selection" flow from
 //! the design document at logs/profile-creation-option2-090cd2.md
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::core::states::{DespawnOnExit, MenuState};
-#[cfg(feature = "solana")]
 use crate::multiplayer::solana::addon::SolanaWallet;
+use crate::multiplayer::solana::tauri_signer;
+use crate::multiplayer::TokioRuntime;
+use crate::solana::instructions::{init_profile_ix, get_program_id};
+use crate::multiplayer::vps_client;
+use base64::Engine;
 
 /// Resource tracking profile creation state
 #[derive(Resource, Default)]
@@ -21,6 +24,9 @@ pub struct ProfileCreationState {
     pub country_code: String,           // ISO 3166-1 alpha-2 (e.g., "GB", "BR", "CA", "DE")
     pub tax_id: String,                 // Country-specific tax ID
     pub tax_id_valid: bool,            // Tax ID format validation status
+    pub email: String,
+    pub dob: String,
+    pub address: String,
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -37,12 +43,24 @@ pub enum UsernameAvailability {
 #[derive(Component)]
 pub struct ProfileCreationUi;
 
+/// Event triggered when user clicks "Create Profile"
+#[derive(Message, Clone)]
+pub struct ProfileSubmissionEvent {
+    pub username: String,
+    pub country: String,
+    pub tax_id: String,
+    pub email: String,
+    pub dob: String,
+    pub address: String,
+}
+
 /// System that renders the profile creation UI
 pub fn profile_creation_ui_system(
     mut contexts: EguiContexts,
     mut state: ResMut<ProfileCreationState>,
-    mut menu_state: ResMut<NextState<MenuState>>,
+    _menu_state: ResMut<NextState<MenuState>>,
     wallet: Res<SolanaWallet>,
+    mut submission_events: MessageWriter<ProfileSubmissionEvent>,
 ) {
     let ctx = contexts.ctx_mut().expect("Failed to get Egui context");
     let screen_size = ctx.content_rect().size();
@@ -210,6 +228,56 @@ pub fn profile_creation_ui_system(
                         
                         ui.add_space(16.0);
                     }
+
+                    // Email, DOB, Address inputs
+                    ui.label(egui::RichText::new("Identity Details (Backend Only)")
+                        .color(egui::Color32::from_rgb(150, 150, 160))
+                        .size(13.0));
+                    ui.add_space(8.0);
+
+                    ui.add(egui::TextEdit::singleline(&mut state.email)
+                        .hint_text("Email Address")
+                        .min_size(egui::vec2(280.0, 32.0)));
+                    ui.add_space(8.0);
+
+                    ui.add(egui::TextEdit::singleline(&mut state.dob)
+                        .hint_text("Date of Birth (YYYY-MM-DD)")
+                        .min_size(egui::vec2(280.0, 32.0)));
+                    ui.add_space(8.0);
+
+                    ui.add(egui::TextEdit::singleline(&mut state.address)
+                        .hint_text("Residential Address")
+                        .min_size(egui::vec2(280.0, 32.0)));
+                    ui.add_space(20.0);
+
+                    // Wallet Connection Section
+                    ui.label(egui::RichText::new("Solana Wallet (Required for Wagers)")
+                        .color(egui::Color32::from_rgb(150, 150, 160))
+                        .size(13.0));
+                    ui.add_space(8.0);
+
+                    if let Some(pubkey) = wallet.pubkey {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("✓ Connected:").color(egui::Color32::from_rgb(34, 197, 94)));
+                            let pk_str = pubkey.to_string();
+                            ui.label(egui::RichText::new(format!("{}...{}", &pk_str[..6], &pk_str[pk_str.len()-4..]))
+                                .monospace()
+                                .color(egui::Color32::WHITE));
+                        });
+                    } else {
+                        ui.horizontal(|ui| {
+                            if ui.button(egui::RichText::new("👻 Phantom").strong()).clicked() {
+                                crate::multiplayer::solana::tauri_signer::open_wallet_browser();
+                            }
+                            ui.add_space(8.0);
+                            if ui.button(egui::RichText::new("☀️ Solflare").strong()).clicked() {
+                                crate::multiplayer::solana::tauri_signer::open_wallet_browser();
+                            }
+                        });
+                        ui.label(egui::RichText::new("Please connect your wallet to proceed.").color(egui::Color32::from_rgb(200, 100, 100)).size(11.0));
+                    }
+
+                    ui.add_space(24.0);
                     
                     // Validation feedback
                     ui.add_space(12.0);
@@ -277,11 +345,16 @@ pub fn profile_creation_ui_system(
                     );
                     
                     if button_response.clicked() && can_submit {
-                        // TODO: Submit transaction to set username
-                        info!("[PROFILE] Creating profile with username: {}", state.username_input);
+                        info!("[PROFILE] Triggering profile submission for: {}", state.username_input);
                         state.is_validating = true;
-                        // Transition back to main menu after success
-                        menu_state.set(MenuState::Main);
+                        submission_events.write(ProfileSubmissionEvent {
+                            username: state.username_input.clone(),
+                            country: state.country_code.clone(),
+                            tax_id: state.tax_id.clone(),
+                            email: state.email.clone(),
+                            dob: state.dob.clone(),
+                            address: state.address.clone(),
+                        });
                     }
                     
                     ui.add_space(16.0);
@@ -392,6 +465,162 @@ pub fn spawn_profile_creation_ui(mut commands: Commands) {
         ProfileCreationUi,
         DespawnOnExit(MenuState::ProfileCreation),
     ));
+}
+
+/// System to handle profile submission events (async)
+pub fn handle_profile_submission(
+    mut events: MessageReader<ProfileSubmissionEvent>,
+    mut state: ResMut<ProfileCreationState>,
+    wallet: Res<SolanaWallet>,
+    tokio: Res<TokioRuntime>,
+    mut menu_state: ResMut<NextState<MenuState>>,
+    mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
+    auth_state: Res<crate::ui::account::auth::AuthState>,
+) {
+    for event in events.read() {
+        // Push "Check Wallet" notification
+        popup_queue.push(crate::ui::menus::popup::GamePopup {
+            title: "Wallet Signature Needed".to_string(),
+            message: "Please approve the transaction in your Phantom/Solflare wallet to create your profile.".to_string(),
+            copy_text: None,
+            url: None,
+            url_label: None,
+            lifetime: 15.0,
+            remaining: 15.0,
+            dismissed: false,
+        });
+        let username = event.username.clone();
+        let country = event.country.clone();
+        let tax_id = event.tax_id.clone();
+        let _email = event.email.clone();
+        let dob = event.dob.clone();
+        let address = event.address.clone();
+        
+        // Credentials for linking
+        let auth_email = auth_state.email.clone();
+        let auth_password = auth_state.password.clone();
+        
+        let wallet_pubkey = match wallet.pubkey {
+            Some(pk) => pk,
+            None => {
+                state.error_message = Some("Wallet not connected".to_string());
+                state.is_validating = false;
+                continue;
+            }
+        };
+
+        info!("[PROFILE] Starting async submission for {}", username);
+        
+        tokio.0.spawn(async move {
+            // 1. Sign and send on-chain transaction (Username + Country ONLY, no PII)
+            let program_id = get_program_id().unwrap();
+            let ix = match init_profile_ix(program_id, wallet_pubkey, username.clone(), country.clone()) {
+                Ok(ix) => ix,
+                Err(e) => {
+                    error!("[PROFILE] Failed to build IX: {}", e);
+                    return;
+                }
+            };
+
+            info!("[PROFILE] Sending on-chain transaction...");
+            match tauri_signer::sign_and_send_via_tauri("https://api.devnet.solana.com", wallet_pubkey, &[ix], &[]) {
+                Ok(sig) => info!("[PROFILE] On-chain success: {}", sig),
+                Err(e) => {
+                    error!("[PROFILE] On-chain failed: {}", e);
+                    // In a real app, we'd send an error event back to main thread
+                    return;
+                }
+            }
+
+            // 2. Register with backend
+            info!("[PROFILE] Registering with backend...");
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            
+            let auth_msg = format!("xfchess:register:{}", timestamp);
+            let signature = match tauri_signer::sign_message_via_tauri(&auth_msg) {
+                Ok(sig) => sig,
+                Err(e) => {
+                    error!("[PROFILE] Backend sign failed: {}", e);
+                    return;
+                }
+            };
+            
+            let sig_str = base64::engine::general_purpose::STANDARD.encode(&signature);
+            let reg_req = vps_client::RegisterReq {
+                wallet: wallet_pubkey.to_string(),
+                signature: sig_str,
+                timestamp,
+                username: username.clone(),
+            };
+
+            if let Err(e) = vps_client::register_wallet(&reg_req) {
+                warn!("[PROFILE] Backend registration skipped/failed: {}", e);
+            }
+
+            // 2.5 Link wallet if account was created via email
+            if !auth_email.is_empty() {
+                info!("[PROFILE] Linking wallet to email account {}...", auth_email);
+                let link_msg = format!("xfchess:link:{}", timestamp);
+                let link_sig = match tauri_signer::sign_message_via_tauri(&link_msg) {
+                    Ok(sig) => sig,
+                    Err(e) => {
+                        error!("[PROFILE] Link sign failed: {}", e);
+                        return;
+                    }
+                };
+
+                let link_req = vps_client::LinkWalletReq {
+                    email: auth_email,
+                    password: auth_password,
+                    wallet: wallet_pubkey.to_string(),
+                    signature: bs58::encode(&link_sig).into_string(),
+                    timestamp,
+                };
+
+                if let Err(e) = vps_client::link_wallet(&link_req) {
+                    error!("[PROFILE] Wallet linking failed: {}", e);
+                } else {
+                    info!("[PROFILE] Wallet successfully linked to email account.");
+                }
+            }
+
+            // 3. Submit KYC to backend
+            info!("[PROFILE] Submitting KYC...");
+            let kyc_msg = format!("register_identity:{}:{}", wallet_pubkey, timestamp);
+            let kyc_sig = match tauri_signer::sign_message_via_tauri(&kyc_msg) {
+                Ok(sig) => sig,
+                Err(e) => {
+                    error!("[PROFILE] KYC sign failed: {}", e);
+                    return;
+                }
+            };
+            let _kyc_sig_str = bs58::encode(&kyc_sig).into_string();
+            let kyc_payload = vps_client::IdentityPayload {
+                pubkey: wallet_pubkey.to_string(),
+                full_name: username.clone(), // Use username as fallback for full name if not provided
+                dob,
+                address,
+                country: country.clone(),
+                tax_id: tax_id.clone(),
+                signature: bs58::encode(&kyc_sig).into_string(), // Signature Display is base58
+                timestamp,
+                consent_kyc: true,
+                consent_retention_years: 5,
+            };
+
+            if let Err(e) = vps_client::register_identity(&kyc_payload) {
+                warn!("[PROFILE] KYC submission skipped/failed: {}", e);
+            }
+
+            info!("[PROFILE] All steps completed for {}", username);
+        });
+        
+        // Optimistically return to main menu
+        menu_state.set(MenuState::Main);
+    }
 }
 
 /// Cleanup system

@@ -1,7 +1,7 @@
 use solana_program::program_error::ProgramError;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XfChessError {
     #[error("Game is already full")]
     GameFull,

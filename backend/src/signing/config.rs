@@ -92,3 +92,9 @@ impl SigningConfig {
         }
     }
 }
+
+impl Default for SigningConfig {
+    fn default() -> Self {
+        Self::from_env()
+    }
+}

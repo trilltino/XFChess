@@ -15,7 +15,9 @@ pub struct Tournament {
     /// Maximum players (must be power of 2 for single-elimination: 8, 16, 32, 64, 128, 256).
     pub max_players: u16,
     /// Current number of registered players.
-    pub registered_count: u16,
+    pub player_count: u16,
+    /// Current number of registered players.
+    pub num_registered_players: u16,
     pub status: TournamentStatus,
     pub start_time: Option<i64>,
     pub end_time: Option<i64>,
@@ -74,6 +76,10 @@ pub struct Tournament {
     pub completed_at: Option<i64>,
     pub bump: u8,
     // USDC prize pool fields (new)
+    /// Bitflags for claimed prizes (bit 0 = winner, bit 1 = second_place, etc.)
+    pub prizes_claimed: u16,
+    /// Accumulated platform fee pool (from £0.50 cuts) to cover transaction fees and rent
+    pub platform_fee_pool: u64,
     /// USDC mint address (None = SOL-only tournament).
     pub usdc_prize_mint: Option<Pubkey>,
     /// Total USDC locked in prize escrow (in USDC base units, 6 decimals).
@@ -88,6 +94,12 @@ pub struct Tournament {
     pub payout_type: PayoutType,
     /// Streaming vesting parameters (if applicable)
     pub vesting_params: Option<VestingParams>,
+    /// Total clock per player in seconds for each match (0 = no time limit).
+    pub base_time_seconds: u64,
+    /// Fischer increment added after each move in seconds.
+    pub increment_seconds: u16,
+    /// Winner takes all flag.
+    pub winner_takes_all: bool,
 }
 
 /// Prize distribution type
@@ -112,18 +124,21 @@ pub struct VestingParams {
     pub cliff_seconds: Option<i64>,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq, InitSpace)]
+pub enum TournamentType {
+    Swiss {
+        rounds: u8,
+    },
+    SingleElimination,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum TournamentStatus {
     Registration,
     Active,
     Completed,
+    Closed,
     Cancelled,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
-pub enum TournamentType {
-    SingleElimination,
-    Swiss { rounds: u8 },
 }
 
 /// Swiss tournament standing for a single player.
@@ -134,6 +149,17 @@ pub struct SwissStanding {
     pub buchholz: u16,  // Sum of opponents' scores
     pub sonneborn: u16,  // Sum of defeated opponents' scores + 0.5*draws
     pub color_balance: i8,  // Whites - blacks (should balance to 0)
+}
+
+impl Tournament {
+    /// Bytes needed for a tournament with exactly `max_players` capacity.
+    ///
+    /// Fixed non-vec fields:  726 bytes (added 8 + 2 for time control)
+    /// Vec length prefixes:    12 bytes (3 × 4)
+    /// Per-player:            players(32) + player_elos(4) + swiss_standings(38) = 74 bytes
+    pub fn space_for(max_players: u16) -> usize {
+        726 + 12 + (max_players as usize) * 74
+    }
 }
 
 /// Returns competitive default prize distribution based on tournament size.

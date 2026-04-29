@@ -33,10 +33,11 @@ fn tcp_port_range() -> std::ops::RangeInclusive<u16> {
     base.saturating_sub(11)..=base.saturating_sub(2)
 }
 
-/// Fire-and-forget: tells Tauri to open `http://localhost:7454` in the default browser.
+/// Fire-and-forget: requests the Tauri wallet popup window for wallet connection.
 /// Spawns a background thread so Bevy is never blocked.
 pub fn open_wallet_browser() {
     std::thread::spawn(|| {
+        // Send OPEN command over TCP to the Tauri wallet bridge.
         use std::io::Write;
         use std::net::TcpStream;
         for port in tcp_port_range() {

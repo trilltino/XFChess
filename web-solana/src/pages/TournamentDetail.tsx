@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useWallet } from '@solana/wallet-adapter-react';
+import TournamentFeeInfo from '../components/TournamentFeeInfo';
 
 interface ScheduleStatus {
     phase: string;
@@ -121,6 +122,10 @@ export default function TournamentDetail() {
                 <Link to={`/spectate/${id}`} style={{ color: '#6c5ce7' }}>
                     Spectate
                 </Link>
+            </div>
+
+            <div style={{ marginTop: '2rem' }}>
+                <TournamentFeeInfo />
             </div>
         </div>
     );

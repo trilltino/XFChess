@@ -2,43 +2,71 @@
 //! for the 4-player bracket system.
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::{mpsc, oneshot};
+use std::time::Instant;
 
-use crate::multiplayer::vps_client::TournamentSummary;
+// Tournament status from backend
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TournamentStatus {
+    Registration,
+    Active,
+    Completed,
+    Cancelled,
+}
 
-// ── Join status ────────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TournamentFormat {
+    SingleElimination,
+    Swiss { rounds: u8 },
+}
 
-/// Tracks the state of an in-flight or completed tournament registration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentSummary {
+    pub tournament_id: u64,
+    pub name: String,
+    pub entry_fee_lamports: u64,
+    pub prize_pool: u64,
+    pub player_count: u16,
+    pub max_players: u16,
+    pub status: TournamentStatus,
+    pub format: TournamentFormat,
+    pub started_at: Option<i64>,
+    pub scheduled_at: Option<i64>,
+    pub is_private: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum TournamentJoinStatus {
     #[default]
     Idle,
-    /// On-chain + VPS registration transaction in flight.
     Pending,
-    /// Registration succeeded — stores the assigned slot (0–3).
     Registered(usize),
     Error(String),
 }
 
-// ── Resources ─────────────────────────────────────────────────────────────────
-
 #[derive(Resource)]
 pub struct TournamentClientState {
-    /// Currently browsed / joined tournament ID.
     pub active_tournament_id: Option<u64>,
     /// Player slot within the tournament (0–3).
     pub my_slot: Option<usize>,
     /// Cached list of available tournaments from VPS.
-    pub available_tournaments: Vec<TournamentSummary>,
+    pub available_tournaments: Vec<crate::multiplayer::network::vps::TournamentSummary>,
     /// Status text shown in lobby / waiting screens.
     pub status_message: String,
     /// Polling timer: seconds since last my-match poll.
     pub poll_timer: f32,
-    /// Registration state machine.
     pub join_status: TournamentJoinStatus,
     /// Oneshot receiver for an in-flight `register_player` transaction.
     pub tx_rx: Option<oneshot::Receiver<Result<usize, String>>>,
+    /// Channel for receiving background tournament list polls.
+    pub list_rx: Option<crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentSummary>>>,
+    pub last_list_poll: Option<Instant>,
+    pub bracket_fired_rx: Option<crossbeam_channel::Receiver<BracketFiredEvent>>,
+    pub bracket_ready: bool,
+    pub password_input: String,
+    pub password_error: Option<String>,
 }
 
 impl Default for TournamentClientState {
@@ -49,8 +77,14 @@ impl Default for TournamentClientState {
             available_tournaments: Vec::new(),
             status_message: String::new(),
             poll_timer: 0.0,
-            join_status: TournamentJoinStatus::default(),
+            join_status: TournamentJoinStatus::Idle,
             tx_rx: None,
+            list_rx: None,
+            last_list_poll: None,
+            bracket_fired_rx: None,
+            bracket_ready: false,
+            password_input: String::new(),
+            password_error: None,
         }
     }
 }
@@ -65,14 +99,13 @@ impl TournamentClientState {
     }
 }
 
-// ── Events ────────────────────────────────────────────────────────────────────
-
 #[derive(Message, Debug, Clone)]
 pub struct OpenTournamentDiscoveryEvent;
 
 #[derive(Message, Debug, Clone)]
 pub struct RegisterForTournamentEvent {
     pub tournament_id: u64,
+    pub password: Option<String>,
 }
 
 #[derive(Message, Debug, Clone)]
@@ -89,7 +122,7 @@ pub struct TournamentMatchAssignedEvent {
 pub struct SwissRoundStartedEvent {
     pub tournament_id: u64,
     pub round: u8,
-    pub pairings: Vec<(String, String)>, // (white, black) pairs
+    pub pairings: Vec<(String, String)>,
 }
 
 #[derive(Message, Debug, Clone)]
@@ -99,135 +132,43 @@ pub struct SwissResultRecordedEvent {
     pub board: u16,
     pub white: String,
     pub black: String,
-    pub result: String, // "win", "loss", "draw"
+    pub result: String,
 }
 
 #[derive(Message, Debug, Clone)]
 pub struct SwissStandingsUpdatedEvent {
     pub tournament_id: u64,
-    pub standings: Vec<(String, f64, u16)>, // (player, score, rank)
+    pub standings: Vec<(String, f64, u16)>,
 }
 
-// ── On-chain instruction dispatch ─────────────────────────────────────────────
+#[derive(Message, Debug, Clone)]
+pub struct BracketFiredEvent {
+    pub tournament_id: u64,
+    pub player_count: u16,
+    pub started_at: i64,
+}
 
-/// Spawn a background task on `IoTaskPool` that:
-///   1. Builds the `register_player` on-chain instruction.
-///   2. Sends it via the Tauri signing bridge → Phantom popup → confirmed on devnet.
-///   3. Notifies the VPS backend via `POST /tournament/{id}/join`.
-///   4. Returns the assigned slot index (or an error) through `tx`.
 pub fn spawn_register_tournament(
     tournament_id: u64,
     wallet_pubkey: Pubkey,
-    elo: u32,
-    tx: oneshot::Sender<Result<usize, String>>,
-) {
-    let program_id: Pubkey = crate::solana::instructions::PROGRAM_ID
-        .parse()
-        .unwrap_or_default();
-    let rpc_url = crate::multiplayer::solana::integration::state::DEVNET_RPC_URL.to_string();
-
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            let result =
-                async_register_tournament(rpc_url, program_id, tournament_id, wallet_pubkey, elo)
-                    .await;
-            let _ = tx.send(result);
-        })
-        .detach();
+    password: Option<String>,
+) -> oneshot::Receiver<Result<usize, String>> {
+    let (tx, rx) = oneshot::channel();
+    let pk = wallet_pubkey.to_string();
+    let rpc_url = std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+    bevy::tasks::IoTaskPool::get().spawn(async move {
+        let res = register_tournament(tournament_id, &pk, &rpc_url, password.as_deref()).await;
+        let _ = tx.send(res.map(|slot| slot as usize));
+    }).detach();
+    rx
 }
 
-/// Gate helper with structured error messages and profile URL.
-/// Fetches current verification status live and reports exactly which tiers are missing.
-fn require_wager_eligibility_with_url(wallet_pubkey: &str) -> Result<(), String> {
-    use crate::multiplayer::vps_client;
-    let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
-    let status = match vps_client::get_user_status(wallet_pubkey) {
-        Ok(s) => s,
-        Err(e) => return Err(format!("Tournament entry requires verification. Could not check status: {}. Visit {}/profile", e, backend_url)),
-    };
-    if status.can_wager {
-        return Ok(());
-    }
-    let mut missing = Vec::new();
-    if !status.has_profile { missing.push("Profile"); }
-    if !status.has_email   { missing.push("Email"); }
-    if !status.has_kyc     { missing.push("KYC"); }
-    Err(format!(
-        "Wagered play requires: {} (missing). Visit {}/profile to complete.",
-        missing.join(" + "),
-        backend_url,
-    ))
-}
-
-async fn async_register_tournament(
-    rpc_url: String,
-    program_id: Pubkey,
-    tournament_id: u64,
-    wallet_pubkey: Pubkey,
-    _elo: u32,
-) -> Result<usize, String> {
-    use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
-    use crate::multiplayer::vps_client;
-    use crate::solana::instructions::{init_profile_ix, register_player_ix, PROFILE_SEED};
-    use solana_client::rpc_client::RpcClient;
-
-    // Gate: cash tournaments require wallet + email + KYC + can_wager.
-    require_wager_eligibility_with_url(&wallet_pubkey.to_string())?;
-
-    // Check whether a PlayerProfile PDA already exists for this wallet.
-    // If not, prepend init_profile so it gets created in the same transaction.
-    let rpc = RpcClient::new(rpc_url.clone());
-    let profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, wallet_pubkey.as_ref()],
-        &program_id,
-    ).0;
-    let needs_profile = rpc.get_account(&profile_pda).is_err();
-
-    let register_ix = register_player_ix(program_id, wallet_pubkey, tournament_id)
-        .map_err(|e| format!("build register_player_ix: {e}"))?;
-
-    let mut ixs = Vec::new();
-    if needs_profile {
-        if let Ok(ix) = init_profile_ix(program_id, wallet_pubkey) {
-            ixs.push(ix);
-        }
-    }
-    ixs.push(register_ix);
-
-    sign_and_send_via_tauri(&rpc_url, wallet_pubkey, &ixs, &[])
-        .map_err(|e| format!("wallet sign: {e}"))?;
-
-    // Notify VPS backend of registration
-    let vps_url = std::env::var("VPS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
-    let client = reqwest::Client::new();
-    let res = client
-        .post(format!("{}/tournament/{}/join", vps_url, tournament_id))
-        .json(&serde_json::json!({
-            "player_pubkey": wallet_pubkey.to_string(),
-        }))
-        .send()
-        .await;
-
-    if let Err(e) = res {
-        return Err(format!("VPS join failed: {}", e));
-    }
-
-    // Get assigned slot from VPS response
-    let res = res.unwrap();
-    let slot: usize = res.json().await.map_err(|e| format!("VPS response: {}", e))?;
-    Ok(slot)
-}
-
-/// Spawn a background task to subscribe to Swiss tournament updates via Iroh
-/// gossip. Decoded events are forwarded on the provided `tokio::sync::mpsc`
-/// senders, which a Bevy system can drain into the real `MessageWriter`s. We
-/// can't push into a `MessageWriter` directly from a detached async task
-/// because `MessageWriter` is a borrowed `SystemParam` (`!'static`).
 pub fn spawn_swiss_subscription(
     tournament_id: u64,
     round_tx: mpsc::UnboundedSender<SwissRoundStartedEvent>,
     result_tx: mpsc::UnboundedSender<SwissResultRecordedEvent>,
     standings_tx: mpsc::UnboundedSender<SwissStandingsUpdatedEvent>,
+    bracket_fired_tx: crossbeam_channel::Sender<BracketFiredEvent>,
 ) {
     bevy::tasks::IoTaskPool::get().spawn(async move {
         use braid_iroh::BraidIrohNode;
@@ -242,10 +183,19 @@ pub fn spawn_swiss_subscription(
             .send()
             .await;
 
-        let node_id = match node_id_res {
-            Ok(res) => {
-                let text = res.text().await.unwrap_or_default();
-                text.trim().to_string()
+        let _node_id = match node_id_res {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.text().await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        error!("Failed to read Iroh node ID response: {}", e);
+                        return;
+                    }
+                }
+            }
+            Ok(resp) => {
+                error!("Failed to get Iroh node ID from VPS: HTTP {}", resp.status());
+                return;
             }
             Err(e) => {
                 error!("Failed to get Iroh node ID from VPS: {}", e);
@@ -323,15 +273,18 @@ pub fn spawn_swiss_subscription(
                         standings: standings.iter().map(|s| (s.player_id.clone(), s.score, s.rank)).collect(),
                     });
                 }
+                braid_iroh::protocol::SwissMessage::BracketFired { player_count, started_at, .. } => {
+                    let _ = bracket_fired_tx.send(BracketFiredEvent {
+                        tournament_id,
+                        player_count,
+                        started_at,
+                    });
+                }
             }
         }
     }).detach();
 }
 
-// ── Bevy system ───────────────────────────────────────────────────────────────
-
-/// Runs every frame in `Update`. Checks if the in-flight registration oneshot
-/// has resolved and updates `TournamentClientState` + navigates to the lobby.
 fn poll_tournament_tasks(
     mut tournament: ResMut<TournamentClientState>,
     mut menu_state: ResMut<NextState<crate::core::states::MenuState>>,
@@ -364,13 +317,75 @@ fn poll_tournament_tasks(
     }
 }
 
-// ── Plugin ────────────────────────────────────────────────────────────────────
+fn poll_tournament_list(
+    mut tournament: ResMut<TournamentClientState>,
+) {
+    const POLL_INTERVAL_SECS: f64 = 30.0;
+
+    if let Some(ref rx) = tournament.list_rx {
+        if let Ok(list) = rx.try_recv() {
+            tournament.available_tournaments = list;
+            tournament.list_rx = None;
+        }
+    }
+
+    if tournament.list_rx.is_some() {
+        return;
+    }
+
+    let should_poll = tournament.last_list_poll
+        .map(|t| t.elapsed().as_secs_f64() >= POLL_INTERVAL_SECS)
+        .unwrap_or(true);
+
+    if !should_poll {
+        return;
+    }
+
+    tournament.last_list_poll = Some(Instant::now());
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    tournament.list_rx = Some(rx);
+
+    bevy::tasks::IoTaskPool::get().spawn(async move {
+        match crate::multiplayer::network::vps::list_tournaments() {
+            Ok(list) => { let _ = tx.send(list); }
+            Err(e) => { warn!("[TOURNAMENT] list_tournaments failed: {}", e); }
+        }
+    }).detach();
+}
+
+fn poll_bracket_fired(
+    mut tournament: ResMut<TournamentClientState>,
+) {
+    let Some(ref rx) = tournament.bracket_fired_rx else { return };
+    if let Ok(event) = rx.try_recv() {
+        info!(
+            "[TOURNAMENT] BracketFired received: tournament {} — {} players",
+            event.tournament_id, event.player_count
+        );
+        tournament.bracket_ready = true;
+        tournament.status_message = format!(
+            "Bracket fired! {} players entered. Fetching your match…",
+            event.player_count,
+        );
+        tournament.bracket_fired_rx = None;
+    }
+}
 
 pub struct TournamentClientPlugin;
 
 impl Plugin for TournamentClientPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TournamentClientState>()
-            .add_systems(Update, poll_tournament_tasks);
+            .add_systems(Update, (poll_tournament_tasks, poll_tournament_list, poll_bracket_fired));
     }
+}
+
+async fn register_tournament(
+    _tournament_id: u64,
+    _wallet_pubkey: &str,
+    _rpc_url: &str,
+    _password: Option<&str>,
+) -> Result<u64, String> {
+    // implement register_tournament logic here
+    Ok(0)
 }

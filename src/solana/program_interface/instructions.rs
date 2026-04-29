@@ -14,7 +14,6 @@ use solana_sdk::{
 #[allow(deprecated)]
 use solana_sdk::system_program;
 
-pub use xfchess_game::state::game::GameType;
 
 /// Deployed program ID (must match `declare_id!` in xfchess-game).
 pub const PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
@@ -62,14 +61,21 @@ fn borsh_string(s: &str) -> Vec<u8> {
 ///
 /// On-chain signature:
 /// ```ignore
-/// pub fn create_game(ctx, game_id: u64, wager_amount: u64, game_type: GameType)
+/// pub fn create_game(ctx, game_id: u64, wager_amount: u64, match_type: MatchType, country: String, base_time_seconds: u64, increment_seconds: u16)
 /// ```
+///
+/// `match_type` encoding: Free=0, Ranked=1, Wager=2.
+/// `fee_payer` is the VPS session key — must co-sign the transaction.
 pub fn create_game_ix(
     program_id: Pubkey,
-    payer: Pubkey,
+    player: Pubkey,
+    fee_payer: Pubkey,
     game_id: u64,
     wager_amount: u64,
-    game_type: GameType,
+    match_type: u8,
+    country: &str,
+    base_time_seconds: u64,
+    increment_seconds: u16,
 ) -> Result<Instruction> {
     let game_pda = Pubkey::find_program_address(
         &[GAME_SEED, &game_id.to_le_bytes()],
@@ -90,11 +96,14 @@ pub fn create_game_ix(
     let mut data = anchor_discriminator("create_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&wager_amount.to_le_bytes());
-    // GameType is a single-byte Anchor enum: PvP = 0, PvAI = 1
-    data.push(match game_type {
-        GameType::PvP => 0,
-        GameType::PvAI => 1,
-    });
+    // MatchType Anchor enum: Free=0, Ranked=1, Wager=2
+    data.push(match_type);
+    // country: Borsh String (u32 len prefix + utf-8 bytes)
+    data.extend_from_slice(&(country.len() as u32).to_le_bytes());
+    data.extend_from_slice(country.as_bytes());
+    // base_time_seconds: u64 LE, increment_seconds: u16 LE
+    data.extend_from_slice(&base_time_seconds.to_le_bytes());
+    data.extend_from_slice(&increment_seconds.to_le_bytes());
 
     Ok(Instruction {
         program_id,
@@ -102,7 +111,8 @@ pub fn create_game_ix(
             AccountMeta::new(game_pda, false),
             AccountMeta::new(move_log_pda, false),
             AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(payer, true),
+            AccountMeta::new(player, true),
+            AccountMeta::new(fee_payer, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -119,9 +129,14 @@ pub fn create_game_ix(
 /// ```ignore
 /// pub fn join_game(ctx, game_id: u64)
 /// ```
+///
+/// `white_player` is the pubkey stored in `game.white` (read from chain before calling).
+/// `fee_payer` must match `game.fee_payer` (the VPS session key set during create_game).
 pub fn join_game_ix(
     program_id: Pubkey,
     player: Pubkey,
+    white_player: Pubkey,
+    fee_payer: Pubkey,
     game_id: u64,
 ) -> Result<Instruction> {
     let game_pda = Pubkey::find_program_address(
@@ -129,8 +144,18 @@ pub fn join_game_ix(
         &program_id,
     )
     .0;
+    let player_profile_pda = Pubkey::find_program_address(
+        &[PROFILE_SEED, player.as_ref()],
+        &program_id,
+    )
+    .0;
     let escrow_pda = Pubkey::find_program_address(
         &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let white_profile_pda = Pubkey::find_program_address(
+        &[PROFILE_SEED, white_player.as_ref()],
         &program_id,
     )
     .0;
@@ -142,8 +167,11 @@ pub fn join_game_ix(
         program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
+            AccountMeta::new(player_profile_pda, false),
             AccountMeta::new(escrow_pda, false),
+            AccountMeta::new_readonly(white_profile_pda, false),
             AccountMeta::new(player, true),
+            AccountMeta::new(fee_payer, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -368,19 +396,32 @@ pub fn authorize_session_key_ix(
 ///   1. player          (mut, signer)
 ///   2. system_program
 #[allow(dead_code)]
-pub fn init_profile_ix(program_id: Pubkey, player: Pubkey) -> Result<Instruction> {
+/// Build an `init_profile` instruction.
+pub fn init_profile_ix(
+    program_id: Pubkey,
+    player: Pubkey,
+    username: String,
+    country: String,
+) -> Result<Instruction> {
     let player_profile_pda = Pubkey::find_program_address(
         &[PROFILE_SEED, player.as_ref()],
         &program_id,
-    )
-    .0;
+    ).0;
+    
+    let username_record_pda = Pubkey::find_program_address(
+        &[USERNAME_SEED, username.as_bytes()],
+        &program_id,
+    ).0;
 
-    let data = anchor_discriminator("init_profile").to_vec();
+    let mut data = anchor_discriminator("init_profile").to_vec();
+    data.extend(borsh_string(&username));
+    data.extend(borsh_string(&country));
 
     Ok(Instruction {
         program_id,
         accounts: vec![
             AccountMeta::new(player_profile_pda, false),
+            AccountMeta::new(username_record_pda, false),
             AccountMeta::new(player, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
@@ -475,6 +516,8 @@ pub fn initialize_tournament_ix(
     tournament_id: u64,
     name: &str,
     entry_fee: u64,
+    base_time_seconds: u64,
+    increment_seconds: u16,
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
@@ -491,6 +534,9 @@ pub fn initialize_tournament_ix(
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend(borsh_string(name));
     data.extend_from_slice(&entry_fee.to_le_bytes());
+    // base_time_seconds: u64 LE, increment_seconds: u16 LE
+    data.extend_from_slice(&base_time_seconds.to_le_bytes());
+    data.extend_from_slice(&increment_seconds.to_le_bytes());
 
     Ok(Instruction {
         program_id,

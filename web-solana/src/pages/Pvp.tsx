@@ -46,7 +46,7 @@ export function Pvp() {
                         <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> PvP wagering requires a Solana wallet and KYC verification.
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <Link to="http://localhost:5173/kyc" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
+                        <Link to="/kyc" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
                         <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
                     </div>
                 </div>

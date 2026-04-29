@@ -4,7 +4,6 @@
 //! and provides GBP→lamports conversion for dynamic fee calculation.
 
 use serde::Deserialize;
-use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
 
@@ -15,7 +14,6 @@ struct PythPriceResponse {
 
 #[derive(Debug, Deserialize)]
 struct PythPriceData {
-    id: String,
     price: PythPrice,
 }
 

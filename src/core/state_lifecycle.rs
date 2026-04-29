@@ -92,9 +92,43 @@ macro_rules! create_cleanup_system {
 
 // Create cleanup systems for each state
 create_cleanup_system!(cleanup_main_menu, GameState::MainMenu);
-create_cleanup_system!(cleanup_in_game, GameState::InGame);
 create_cleanup_system!(cleanup_paused, GameState::Paused);
 create_cleanup_system!(cleanup_game_over, GameState::GameOver);
+
+pub fn cleanup_in_game(
+    query: Query<(Entity, Option<&Name>, &DespawnOnExit<GameState>)>,
+    mut commands: Commands,
+    state: Res<State<GameState>>,
+) {
+    if *state.get() == GameState::GameOver {
+        debug!(
+            "[STATE_LIFECYCLE] Skipping InGame cleanup during transition to GameOver so cinematic background remains visible"
+        );
+        return;
+    }
+
+    let target_state = GameState::InGame;
+    let mut despawned_count = 0;
+
+    for (entity, name, despawn_marker) in query.iter() {
+        if despawn_marker.0 == target_state {
+            let entity_name = name.map(|n| n.as_str()).unwrap_or("unnamed");
+            debug!(
+                "[STATE_LIFECYCLE] Despawning entity {:?}: {} (marked for {:?})",
+                entity, entity_name, target_state
+            );
+            commands.entity(entity).despawn();
+            despawned_count += 1;
+        }
+    }
+
+    if despawned_count > 0 {
+        debug!(
+            "[STATE_LIFECYCLE] Despawned {} entities on exit from {:?}",
+            despawned_count, target_state
+        );
+    }
+}
 /// Verify picking events only occur in InGame state
 /// This catches bugs where picking systems run in wrong states
 pub fn verify_picking_scope(state: Res<State<GameState>>) {

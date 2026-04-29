@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import chessboardSpace from '../assets/chessboard-space.png';
+import TournamentFeeInfo from '../components/TournamentFeeInfo';
 
 export function Tournaments() {
     const [showNotice, setShowNotice] = useState(true);
@@ -46,7 +47,7 @@ export function Tournaments() {
                         <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> Cash Tournaments require a Solana wallet and KYC verification.
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <Link to="http://localhost:5173/kyc" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
+                        <Link to="/kyc" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
                         <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
                     </div>
                 </div>
@@ -257,6 +258,8 @@ export function Tournaments() {
                         </div>
                     </div>
                 </div>
+
+                <TournamentFeeInfo />
             </div>
         </main>
     );

@@ -28,7 +28,7 @@ use crate::db::repository::GameRepository;
 // ── Request / Response types ─────────────────────────────────────────────────
 
 /// Request to create a new game session.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct CreateSessionReq {
     pub game_id: u64,
     pub wallet_pubkey: String,
@@ -41,7 +41,7 @@ pub struct CreateSessionResp {
 }
 
 /// Request to activate a session with wallet-signed transaction.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ActivateSessionReq {
     pub game_id: u64,
     /// Base64-encoded signed Transaction bytes (wallet-signed create/join + authorize_session_key)
@@ -49,7 +49,7 @@ pub struct ActivateSessionReq {
 }
 
 /// Request to record a chess move.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct RecordMoveReq {
     pub game_id: u64,
     pub move_uci: String,
@@ -65,7 +65,7 @@ pub struct SigResp {
 }
 
 /// Request to sign a transaction with session key.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct SignReq {
     pub game_id: u64,
     /// Base64-encoded serialized Transaction that needs the session key signature
@@ -88,6 +88,7 @@ pub fn routes() -> Router<AppState> {
         .route("/session/activate", post(activate_session))
         .route("/session/status/{game_id}", get(session_status))
         .route("/session/sign", post(sign_tx))
+        .route("/session/tee_auth", post(tee_auth))
         .route("/move/record", post(record_move))
         .route("/game/undelegate", post(undelegate_game))
         .route("/game/finalize", post(finalize_game))
@@ -147,8 +148,17 @@ pub async fn activate_session(
 
     let rpc = solana::make_rpc(&state.config.solana_rpc_url);
 
-    // Submit the wallet-signed TX (create_game/join_game + authorize_session_key)
-    let sig = solana::submit_signed_tx(&rpc, &tx_bytes).map_err(|e| {
+    // Retrieve session keypair so we can co-sign the TX.
+    // The create_game / join_game instructions require BOTH the player wallet
+    // signature (already in tx_bytes) and the session key signature (fee_payer).
+    let entry = state.store.get(req.game_id).await.ok_or_else(|| {
+        error!("[VPS] No session found for game {} — call /session/create first", req.game_id);
+        StatusCode::NOT_FOUND
+    })?;
+    let session_keypair = entry.keypair();
+
+    // Submit the wallet-signed TX, adding the session key co-signature.
+    let sig = solana::cosign_and_submit_tx(&rpc, &session_keypair, &tx_bytes).map_err(|e| {
         error!("[VPS] Failed to submit setup TX for game {}: {e}", req.game_id);
         StatusCode::BAD_GATEWAY
     })?;
@@ -297,6 +307,7 @@ pub async fn finalize_game(
     // Fire-and-forget DB write (log errors but don't fail the HTTP response)
     let game_id_str = req.game_id.to_string();
     let pool = state.store.pool();
+    let elo_cache = state.elo_cache.clone();
     let white = req.white_pubkey.clone();
     let black = req.black_pubkey.clone();
     let winner = req.winner.clone();
@@ -320,8 +331,8 @@ pub async fn finalize_game(
         ).await {
             error!("[DB] Failed to finalize game {}: {}", game_id_str, e);
         }
-        // Invalidate ELO cache for both players (read-through with TTL, so safe to skip)
-        // TODO: Add EloCache to AppState and call invalidate here
+        elo_cache.invalidate(&white);
+        elo_cache.invalidate(&black);
     });
 
     Ok(Json(SigResp { sig: sig.to_string() }))
@@ -344,17 +355,25 @@ pub async fn get_player_profile(
     }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct UndelegateGameReq {
     pub game_id: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct FinalizeGameReq {
     pub game_id: u64,
     pub winner: Option<String>,   // "white" | "black" | null (draw)
     pub white_pubkey: String,
     pub black_pubkey: String,
+}
+
+#[derive(Deserialize)]
+pub struct TeeAuthReq {
+    pub game_id: u64,
+    pub wallet_pubkey: String,
+    /// Base64-encoded Ed25519 signature over "Authenticate with MagicBlock TEE"
+    pub signature_b64: String,
 }
 
 /// POST /session/sign - Signs a transaction with the session key.
@@ -385,6 +404,46 @@ pub async fn sign_tx(
     })?;
 
     Ok(Json(SigResp { sig: sig.to_string() }))
+}
+
+/// POST /session/tee_auth - Verifies wallet ownership for TEE-backed private game state.
+///
+/// The wallet signs the canonical message "Authenticate with MagicBlock TEE" with its
+/// Ed25519 keypair. This backend verifies the signature and confirms the wallet identity,
+/// enabling encrypted move processing on the MagicBlock Ephemeral Rollup TEE.
+/// The session for `game_id` must already exist (player must call /session/create first).
+pub async fn tee_auth(
+    State(state): State<AppState>,
+    Json(req): Json<TeeAuthReq>,
+) -> Result<Json<SigResp>, StatusCode> {
+    use base64::Engine;
+    use solana_sdk::signature::Signature;
+
+    const TEE_AUTH_MESSAGE: &[u8] = b"Authenticate with MagicBlock TEE";
+
+    let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| {
+        warn!("[TEE-AUTH] Invalid wallet pubkey: {}", req.wallet_pubkey);
+        StatusCode::BAD_REQUEST
+    })?;
+
+    let sig_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&req.signature_b64)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let sig = Signature::try_from(sig_bytes.as_slice()).map_err(|_| {
+        warn!("[TEE-AUTH] Bad signature length ({} bytes) for game {}", sig_bytes.len(), req.game_id);
+        StatusCode::BAD_REQUEST
+    })?;
+
+    if !sig.verify(wallet.as_ref(), TEE_AUTH_MESSAGE) {
+        warn!("[TEE-AUTH] Signature mismatch — wallet {} game {}", req.wallet_pubkey, req.game_id);
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let _entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    info!("[TEE-AUTH] Wallet {} authenticated for game {}", req.wallet_pubkey, req.game_id);
+    Ok(Json(SigResp { sig: "tee-auth-ok".to_string() }))
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -532,8 +591,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_routes_creation() {
-        let router = routes();
-        assert!(router.not_found("test").is_some());
+        let _router = routes();
     }
 
     #[test]

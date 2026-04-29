@@ -40,7 +40,6 @@ struct SessionNote {
 struct MatchResult {
     winner: String,
     winner_index: usize,
-    game_id: u64,
 }
 
 // Import tournament instructions
@@ -48,7 +47,6 @@ use xfchess::solana::instructions::{
     initialize_tournament_ix, register_player_ix, start_tournament_ix, 
     record_match_result_ix, advance_final_ix, PROGRAM_ID
 };
-use xfchess::solana::instructions::GameType;
 
 const DEVNET_RPC: &str = "https://api.devnet.solana.com";
 
@@ -294,7 +292,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 struct PlayerWithKeypair {
     name: String,
     keypair: std::sync::Arc<Keypair>,
-    elo: u32,
 }
 
 fn load_players_with_keypairs() -> Result<Vec<PlayerWithKeypair>, Box<dyn std::error::Error>> {
@@ -313,7 +310,6 @@ fn load_players_with_keypairs() -> Result<Vec<PlayerWithKeypair>, Box<dyn std::e
         players.push(PlayerWithKeypair {
             name: name.to_string(),
             keypair,
-            elo,
         });
         println!("  👤 {}: {} (ELO: {})", name, pubkey, elo);
     }
@@ -347,7 +343,15 @@ async fn initialize_tournament_on_chain(
     name: &str,
     entry_fee: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let ix = initialize_tournament_ix(*program_id, admin.pubkey(), tournament_id, name, entry_fee)?;
+    let ix = initialize_tournament_ix(
+        *program_id,
+        admin.pubkey(),
+        tournament_id,
+        name,
+        entry_fee,
+        600,
+        5,
+    )?;
     
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -367,7 +371,12 @@ async fn create_player_profile_on_chain(
     player_keypair: &Keypair,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let program_id: Pubkey = PROGRAM_ID.parse()?;
-    let ix = xfchess::solana::instructions::init_profile_ix(program_id, player_keypair.pubkey())?;
+    let ix = xfchess::solana::instructions::init_profile_ix(
+        program_id,
+        player_keypair.pubkey(),
+        player_keypair.pubkey().to_string(),
+        "US".to_string(),
+    )?;
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&player_keypair.pubkey()),
@@ -489,7 +498,6 @@ async fn play_real_game(
     Ok(MatchResult {
         winner: winner_name,
         winner_index: player1_index,
-        game_id,
     })
 }
 
@@ -499,7 +507,17 @@ async fn create_game_on_chain(
     player: &Keypair,
     game_id: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let ix = xfchess::solana::instructions::create_game_ix(*program_id, player.pubkey(), game_id, 1_000_000, GameType::PvP)?;
+    let ix = xfchess::solana::instructions::create_game_ix(
+        *program_id,
+        player.pubkey(),
+        player.pubkey(),
+        game_id,
+        1_000_000,
+        0,
+        "US",
+        600,
+        5,
+    )?;
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
     
     let sig = rpc.send_and_confirm_transaction(&tx)?;
@@ -513,7 +531,13 @@ async fn join_game_on_chain(
     player: &Keypair,
     game_id: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let ix = xfchess::solana::instructions::join_game_ix(*program_id, player.pubkey(), game_id)?;
+    let ix = xfchess::solana::instructions::join_game_ix(
+        *program_id,
+        player.pubkey(),
+        player.pubkey(),
+        player.pubkey(),
+        game_id,
+    )?;
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
     
     let sig = rpc.send_and_confirm_transaction(&tx)?;
@@ -646,10 +670,10 @@ fn load_keypair(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> {
     // Try JSON format first (array of numbers)
     if path.ends_with(".json") {
         let bytes: Vec<u8> = serde_json::from_slice(&data)?;
-        Ok(Keypair::try_from(bytes.as_slice())?)
+        Ok(Keypair::from_bytes(&bytes)?)
     } else {
         // Try binary format
-        Ok(Keypair::try_from(data.as_slice())?)
+        Ok(Keypair::from_bytes(&data)?)
     }
 }
 
@@ -659,9 +683,6 @@ async fn generate_tournament_data(
     champion: &str,
     tournament_id: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Create directory if it doesn't exist
-    std::fs::create_dir_all("web-react/src/data")?;
-    
     // Generate TypeScript file for web interface
     let ts_content = format!(
         r#"
@@ -731,7 +752,7 @@ export const GENERATED_AT = '{}';
 <body>
     <h1 class="header">🏆 XFChess Tournament Report</h1>
     <div class="header">
-        <div class="champion">Champion: Magnus</div>
+        <div class="champion">Champion: {}</div>
         <div>Tournament ID: {}</div>
         <div>Generated: {}</div>
     </div>
@@ -745,7 +766,8 @@ export const GENERATED_AT = '{}';
     </div>
 </body>
 </html>
-        "#,
+"#,
+        champion,
         champion,
         tournament_id,
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
@@ -775,7 +797,7 @@ export const GENERATED_AT = '{}';
     println!("📄 web-react/src/data/tournamentData.ts - for web interface");
     println!("📄 tournament_data.js - JavaScript export");
     println!("📄 tournament_report.html - Visual report");
-    println!("🏆 Champion: Magnus");
+    println!("🏆 Champion: {}", champion);
 
     Ok(())
 }

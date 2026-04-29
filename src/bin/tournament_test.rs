@@ -340,5 +340,5 @@ async fn generate_html_report(result: &TournamentResult) -> Result<(), Box<dyn s
 
 fn read_keypair_file(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> {
     let data = std::fs::read(path)?;
-    Ok(Keypair::try_from(data.as_slice())?)
+    Ok(Keypair::from_bytes(&data)?)
 }

@@ -30,7 +30,7 @@ export async function fetchPlayerProfile(program: Program, walletPubkey: PublicK
   }
 }
 
-export async function createPlayerProfile(program: Program, walletPubkey: PublicKey, username: string) {
+export async function createPlayerProfile(program: Program, walletPubkey: PublicKey, username: string, country: string) {
   const [profilePda] = PublicKey.findProgramAddressSync(
     [Buffer.from("profile"), walletPubkey.toBuffer()],
     program.programId
@@ -43,7 +43,7 @@ export async function createPlayerProfile(program: Program, walletPubkey: Public
 
 
   return await (program.methods as any)
-    .initProfile(username)
+    .initProfile(username, country)
     .accounts({
       playerProfile: profilePda,
       usernameRecord: usernameRecord,

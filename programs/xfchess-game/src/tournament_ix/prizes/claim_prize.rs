@@ -50,7 +50,7 @@ pub struct ClaimTournamentPrize<'info> {
 }
 
 pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result<()> {
-    let tournament = &ctx.accounts.tournament;
+    let tournament = &mut ctx.accounts.tournament;
     let claimant_key = ctx.accounts.claimant.key();
 
     require!(
@@ -58,7 +58,9 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         GameErrorCode::TournamentNotCompleted
     );
 
-    // Determine which place the claimant finished and their prize share
+    // Determine which place the claimant finished and their prize share.
+    // Covers all 10 prize positions so 128-player (top 5) and 256-player (top 10)
+    // tournaments can pay out every eligible winner.
     let (place, prize_share_bps) = if Some(claimant_key) == tournament.winner {
         (1u8, tournament.prize_shares[0])
     } else if Some(claimant_key) == tournament.second_place {
@@ -67,11 +69,31 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         (3u8, tournament.prize_shares[2])
     } else if Some(claimant_key) == tournament.fourth_place {
         (4u8, tournament.prize_shares[3])
+    } else if Some(claimant_key) == tournament.fifth_place {
+        (5u8, tournament.prize_shares[4])
+    } else if Some(claimant_key) == tournament.sixth_place {
+        (6u8, tournament.prize_shares[5])
+    } else if Some(claimant_key) == tournament.seventh_place {
+        (7u8, tournament.prize_shares[6])
+    } else if Some(claimant_key) == tournament.eighth_place {
+        (8u8, tournament.prize_shares[7])
+    } else if Some(claimant_key) == tournament.ninth_place {
+        (9u8, tournament.prize_shares[8])
+    } else if Some(claimant_key) == tournament.tenth_place {
+        (10u8, tournament.prize_shares[9])
     } else {
-        return Err(GameErrorCode::UnauthorizedAccess.into());
+        return Err(GameErrorCode::NotTournamentWinner.into());
     };
 
     require!(prize_share_bps > 0, GameErrorCode::NoPrizeToClaim);
+
+    // Prevent double-claiming using bitflags
+    let place_bit = 1u16 << (place - 1);
+    require!(
+        (tournament.prizes_claimed & place_bit) == 0,
+        GameErrorCode::PrizeAlreadyClaimed
+    );
+    tournament.prizes_claimed |= place_bit;
 
     // USDC prize path
     if tournament.usdc_prize_mint.is_some() {
@@ -134,18 +156,13 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         let tournament_id_bytes = tournament_id.to_le_bytes();
         let bump = ctx.bumps.escrow_pda;
         let escrow_seeds: &[&[&[u8]]] = &[&[TOURNAMENT_ESCROW_SEED, &tournament_id_bytes, &[bump]]];
+        let _ = escrow_seeds; // Suppress unused variable warning
 
-        anchor_lang::system_program::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.system_program.to_account_info(),
-                anchor_lang::system_program::Transfer {
-                    from: ctx.accounts.escrow_pda.to_account_info(),
-                    to: ctx.accounts.claimant_wallet.to_account_info(),
-                },
-                escrow_seeds,
-            ),
-            prize,
-        )?;
+        let escrow_lamports = ctx.accounts.escrow_pda.lamports();
+        require!(escrow_lamports >= prize, GameErrorCode::InsufficientPrizeFunds);
+
+        **ctx.accounts.escrow_pda.lamports.borrow_mut() -= prize;
+        **ctx.accounts.claimant_wallet.lamports.borrow_mut() += prize;
 
         msg!(
             "Tournament {} SOL prize claimed: {} lamports to {} (Place {} - {}%)",

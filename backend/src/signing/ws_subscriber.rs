@@ -1,9 +1,6 @@
 use futures::{Stream, StreamExt, SinkExt};
-use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::pin::Pin;
-use std::str::FromStr;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -40,14 +37,10 @@ pub struct AccountUpdate {
 /// Manages WebSocket subscriptions to Solana accounts
 pub struct WebSocketSubscriber {
     cluster: Cluster,
-    /// Maximum number of subscriptions per connection to stay under free-tier limits
-    max_subs_per_connection: usize,
     /// WebSocket connections for L1 subscriptions
     l1_connections: Vec<mpsc::Sender<(Pubkey, mpsc::Sender<AccountUpdate>)>>,
     /// WebSocket connections for ER subscriptions (if applicable)
     er_connections: Vec<mpsc::Sender<(Pubkey, mpsc::Sender<AccountUpdate>)>>,
-    /// RPC client for fallback getAccountInfo calls on reconnect
-    rpc_client: Arc<RpcClient>,
 }
 
 impl WebSocketSubscriber {
@@ -55,15 +48,7 @@ impl WebSocketSubscriber {
     pub async fn new(
         cluster: Cluster,
         er_endpoint: Option<&str>,
-        max_subs_per_connection: usize,
     ) -> Result<Self, AppError> {
-        let rpc_url = match cluster {
-            Cluster::Localnet => "http://localhost:8899".to_string(),
-            Cluster::Devnet => "https://api.devnet.solana.com".to_string(),
-            Cluster::Mainnet => "https://api.mainnet-beta.solana.com".to_string(),
-        };
-        let rpc_client = Arc::new(RpcClient::new(rpc_url));
-
         // Spawn two L1 WebSocket connections to split subscription load
         let mut l1_connections = Vec::new();
         for i in 0..2 {
@@ -86,10 +71,8 @@ impl WebSocketSubscriber {
 
         Ok(Self {
             cluster,
-            max_subs_per_connection,
             l1_connections,
             er_connections,
-            rpc_client,
         })
     }
 
@@ -202,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_websocket_subscriber_new() {
-        let subscriber = WebSocketSubscriber::new(Cluster::Localnet, None, 100).await;
+        let subscriber = WebSocketSubscriber::new(Cluster::Localnet, None).await;
         assert!(subscriber.is_ok());
     }
 }

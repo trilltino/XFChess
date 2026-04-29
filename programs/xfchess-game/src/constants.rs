@@ -25,7 +25,7 @@ pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation"; // Derives a p
 
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";       // Derives the TournamentState PDA
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";  // Derives the prize-pool escrow vault for a tournament
-pub const TOURNAMENT_PRIZE_ESCROW_SEED: &[u8] = b"t_prize";  // Derives the prize escrow vault (85% of fees)
+pub const TOURNAMENT_PRIZE_ESCROW_SEED: &[u8] = b"tournament_prize_escrow";  // Derives the prize escrow vault (85% of fees)
 pub const TOURNAMENT_OPS_ESCROW_SEED: &[u8] = b"t_ops";      // Derives the ops escrow vault (10% of fees)
 pub const TOURNAMENT_OPERATOR_ESCROW_SEED: &[u8] = b"t_operator";  // Derives the operator escrow vault (5% of fees)
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";    // Derives an individual match record within a tournament
@@ -35,35 +35,36 @@ pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";  // Derives the S
 // Privileged authority keypairs
 // ---------------------------------------------------------------------------
 
-/// The AI signer that can autonomously record moves on behalf of a player
-/// during AI-assisted games. Replaced at deploy time with a real keypair.
-pub mod ai_authority {
-    use anchor_lang::prelude::declare_id;
-    declare_id!("AJwEwo74nRiZ3MPKX3XRh92rJaHj5ktPGRiY8kXhVozp");
-}
-
 /// The KYC/identity verification authority (VPS backend signer).
 /// Called by `verify_profile` to mark a player as CARF-compliant on-chain.
 /// TODO: Replace with a real keypair before mainnet deploy.
 pub mod kyc_authority {
-    use anchor_lang::prelude::declare_id;
-    declare_id!("uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"); // Devnet consolidated authority
+    use super::*;
+    pub const ID: Pubkey = Pubkey::new_from_array([
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2
+    ]);
 }
 
 /// The platform dispute-resolution authority — the only signer allowed to
 /// call `resolve_dispute`. Set to a secure offline keypair before mainnet.
 /// TODO: Replace with a real keypair before mainnet deploy.
 pub mod dispute_authority {
-    use anchor_lang::prelude::declare_id;
-    declare_id!("uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"); // Devnet consolidated authority
+    use super::*;
+    pub const ID: Pubkey = Pubkey::new_from_array([
+        // Replace with actual pubkey for dispute authority
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+    ]);
 }
 
 /// The VPS/backend operational authority — the only signer allowed to call
 /// privileged instructions such as `update_elo` and `collect_fee`.
 /// Solflare wallet - user's main wallet for signing operations.
 pub mod vps_authority {
-    use anchor_lang::prelude::declare_id;
-    declare_id!("uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"); // Devnet consolidated authority
+    use super::*;
+    pub const ID: Pubkey = Pubkey::new_from_array([
+        // Replace with actual pubkey for VPS authority
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ]);
 }
 
 /// Hard cap on a single wager so no one can lock more than 10 SOL in one game.
@@ -98,6 +99,10 @@ pub const CANADA_FEE_LAMPORTS: u64 = 40_000_000; // 0.04 SOL (~40c CAD)
 
 /// Germany: 30 cents EUR per wager/tournament game (backend converts to lamports)
 pub const GERMANY_FEE_LAMPORTS: u64 = 30_000_000; // 0.03 SOL (~30c EUR)
+
+/// Platform fee per player in lamports (approximately £0.50, assuming 1 SOL ≈ £125, so £0.50 ≈ 0.004 SOL = 4,000,000 lamports)
+pub const PLATFORM_FEE_LAMPORTS: u64 = 4_000_000;
+pub const PLATFORM_FEE_PERCENT: u64 = 5; // 5% fee on wagers
 
 /// ELO update fee per player
 pub const ELO_FEE_LAMPORTS: u64 = 5_000; // 0.000005 SOL per ELO update

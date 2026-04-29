@@ -42,6 +42,15 @@ pub enum SwissMessage {
         tournament_id: u64,
         standings: Vec<SwissStandingsEntry>,
     },
+    /// Bracket has fired (async fill or scheduled start).
+    /// Clients should fetch GET /tournament/{id}/bracket to find their match.
+    BracketFired {
+        tournament_id: u64,
+        /// Number of players who entered the bracket.
+        player_count: u16,
+        /// Unix timestamp of the start.
+        started_at: i64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

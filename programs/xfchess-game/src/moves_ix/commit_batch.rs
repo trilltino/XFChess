@@ -1,5 +1,6 @@
 //! Instruction for syncing batched moves from an ephemeral session to the base layer.
 
+use crate::constants::COMMIT_ER_COST;
 use crate::errors::XfchessGameError;
 use crate::state::{Game, GameStatus, SessionDelegation};
 use crate::state::move_log::MoveLog;
@@ -94,6 +95,8 @@ pub fn handler_commit_move_batch(
         black_delegation.enabled && clock.unix_timestamp <= black_delegation.expires_at,
         XfchessGameError::SessionExpiredOrDisabled
     );
+
+    game.fees_advanced = game.fees_advanced.checked_add(COMMIT_ER_COST).ok_or(XfchessGameError::ArithmeticOverflow)?;
 
     #[cfg(feature = "move-validation")]
     {

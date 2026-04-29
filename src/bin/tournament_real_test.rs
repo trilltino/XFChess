@@ -29,7 +29,7 @@ use chrono;
 
 // Import tournament instructions
 use xfchess::solana::instructions::{
-    create_game_ix, join_game_ix, record_move_ix, finalize_game_ix, GameType, PROFILE_SEED, PROGRAM_ID
+    create_game_ix, join_game_ix, record_move_ix, finalize_game_ix, PROFILE_SEED, PROGRAM_ID
 };
 
 // Tournament-specific imports (these need to be created in instructions.rs)
@@ -545,7 +545,7 @@ async fn airdrop_sol(rpc: &RpcClient, pubkey: &Pubkey) -> Result<String, Box<dyn
 
 fn load_keypair(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> {
     let data = std::fs::read(path)?;
-    Ok(Keypair::try_from(&data[..])?)
+    Ok(Keypair::from_bytes(&data)?)
 }
 
 #[derive(Debug)]

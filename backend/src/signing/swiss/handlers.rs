@@ -6,7 +6,7 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
-use swiss_pairing::{MatchResult, Pairing, SwissRound, StandingsEntry};
+use swiss_pairing::{MatchResult, SwissRound, StandingsEntry};
 
 use super::service::{SwissService, SwissServiceError};
 

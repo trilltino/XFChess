@@ -1,0 +1,43 @@
+﻿
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+crates\swiss-pairing\src\pairing.rs:2:12: warning: unused import: `FloatStatus`
+crates\swiss-pairing\src\lib.rs:14:9: warning: unused import: `pairing::*`
+crates\swiss-pairing\src\pairing.rs:184:5: warning: unused variable: `already_used`: help: if this is intentional, prefix it with an underscore: `_already_used`
+crates\swiss-pairing\src\standings.rs:144:10: warning: unused variable: `round`: help: if this is intentional, prefix it with an underscore: `_round`
+warning: `swiss-pairing` (lib) generated 4 warnings (run `cargo fix --lib -p swiss-pairing` to apply 2 suggestions)
+backend\src\infrastructure\tasks.rs:10:5: warning: unused import: `std::sync::Arc`
+backend\src\signing\blinks\onboarding.rs:6:5: warning: unused import: `once_cell::sync::OnceCell`
+backend\src\signing\ws_subscriber.rs:4:5: warning: unused import: `std::str::FromStr`
+backend\src\signing\pyth_oracle.rs:7:5: warning: unused import: `std::sync::Arc`
+backend\src\signing\routes\tournament.rs:21:74: warning: unused import: `TournamentStore`
+backend\src\signing\storage\vault.rs:12:15: warning: unused import: `error`
+backend\src\signing\swiss\service.rs:10:65: warning: unused imports: `Pairing` and `TournamentFormat as SwissFormat`
+backend\src\signing\swiss\service.rs:13:5: warning: unused import: `thiserror::Error`
+backend\src\signing\swiss\handlers.rs:9:34: warning: unused import: `Pairing`
+backend\src\signing\swiss\orchestrator.rs:16:73: warning: unused import: `TournamentMatch`
+backend\src\signing\swiss\orchestrator.rs:21:43: warning: unused import: `SwissRound`
+backend\src\signing\tournament_gossip.rs:19:43: warning: unused import: `TournamentRecord`
+backend\src\signing\auth_ws.rs:4:12: warning: unused imports: `HeaderValue` and `StatusCode`
+backend\src\signing\auth_ws.rs:6:5: warning: unused import: `axum::http::header::CONTENT_TYPE`
+backend\src\signing\tournament_gossip.rs:139:41: warning: use of deprecated function `rand::thread_rng`: Renamed to `rng`
+backend\src\signing\blinks\core.rs:97:5: warning: unused variable: `program_id`: help: if this is intentional, prefix it with an underscore: `_program_id`
+backend\src\signing\tee_relayer.rs:23:9: warning: unused variable: `instructions`: help: if this is intentional, prefix it with an underscore: `_instructions`
+backend\src\signing\tee_relayer.rs:24:9: warning: unused variable: `recent_blockhash`: help: if this is intentional, prefix it with an underscore: `_recent_blockhash`
+backend\src\signing\tee_relayer.rs:49:11: warning: unused variable: `state`: help: if this is intentional, prefix it with an underscore: `_state`
+backend\src\signing\tee_relayer.rs:58:11: warning: unused variable: `state`: help: if this is intentional, prefix it with an underscore: `_state`
+backend\src\signing\routes\tournament.rs:616:9: warning: unused variable: `tournament`: help: if this is intentional, prefix it with an underscore: `_tournament`
+backend\src\signing\routes\relayer.rs:10:11: warning: unused variable: `state`: help: if this is intentional, prefix it with an underscore: `_state`
+backend\src\signing\routes\relayer.rs:19:11: warning: unused variable: `state`: help: if this is intentional, prefix it with an underscore: `_state`
+backend\src\signing\storage\tournament.rs:607:39: warning: unused variable: `rounds`: help: try ignoring the field: `rounds: _`
+backend\src\signing\swiss\orchestrator.rs:223:24: warning: unused variable: `i`: help: if this is intentional, prefix it with an underscore: `_i`
+backend\src\signing\auth_ws.rs:15:11: warning: unused variable: `state`: help: if this is intentional, prefix it with an underscore: `_state`
+backend\src\tasks\mod.rs:21:27: warning: unused variable: `orchestrator_rx`: help: if this is intentional, prefix it with an underscore: `_orchestrator_rx`
+backend\src\tasks\mod.rs:32:9: warning: unused variable: `ws_subscriber`: help: if this is intentional, prefix it with an underscore: `_ws_subscriber`
+backend\src\tasks\mod.rs:33:9: warning: unused variable: `tournament_handle`: help: if this is intentional, prefix it with an underscore: `_tournament_handle`
+backend\src\tasks\mod.rs:38:9: warning: unused variable: `gossip_handle`: help: if this is intentional, prefix it with an underscore: `_gossip_handle`
+backend\src\tasks\mod.rs:41:9: warning: unused variable: `orchestrator_handle`: help: if this is intentional, prefix it with an underscore: `_orchestrator_handle`
+backend\src\signing\pyth_oracle.rs:18:5: warning: field `id` is never read
+backend\src\signing\routes\auth.rs:329:9: warning: multiple fields are never read
+warning: `backend` (lib) generated 33 warnings (run `cargo fix --lib -p backend` to apply 14 suggestions)
+
+

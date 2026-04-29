@@ -49,10 +49,18 @@ pub fn handler(
         game.status == GameStatus::Active,
         GameErrorCode::GameNotActive
     );
+    let expected_player = if game.turn % 2 == 1 { game.white } else { game.black };
+    require!(
+        expected_player == _moving_player,
+        GameErrorCode::NotYourTurn
+    );
 
     // Replay Protection
     require!(nonce == move_log.nonce + 1, GameErrorCode::InvalidNonce);
     move_log.nonce = nonce;
+
+    // Increment fees_advanced for platform reimbursement
+    game.fees_advanced = game.fees_advanced.checked_add(RECORD_RESULT_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
 
     // --- ON-CHAIN CHESS VALIDATION ---
     #[cfg(feature = "move-validation")]

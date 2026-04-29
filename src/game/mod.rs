@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod board_coords;
+pub mod time_control;
 pub mod components;
 pub mod events;
 pub mod plugin;

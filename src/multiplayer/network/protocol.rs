@@ -64,6 +64,10 @@ pub enum NetworkMessage {
         committed_fen: String,
         committed_turn: u16,
     },
+    Resign {
+        game_id: u64,
+        winner: String,
+    },
     BatchConfirmation {
         game_id: u64,
         batch_hash: String,
@@ -106,6 +110,7 @@ impl NetworkMessage {
             NetworkMessage::Committed { game_id, .. } => *game_id,
             NetworkMessage::ResyncRequest { game_id, .. } => *game_id,
             NetworkMessage::ResyncResponse { game_id, .. } => *game_id,
+            NetworkMessage::Resign { game_id, .. } => *game_id,
             NetworkMessage::BatchConfirmation { game_id, .. } => *game_id,
             NetworkMessage::GameInvite { game_id, .. } => *game_id,
             NetworkMessage::InviteResponse { game_id, .. } => *game_id,

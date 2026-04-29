@@ -90,6 +90,11 @@ const KEYFRAMES = `
 `;
 
 // ---------------------------------------------------------------------------
+// Environment detection
+// ---------------------------------------------------------------------------
+const isTauri = !!(window as any).__TAURI__;
+
+// ---------------------------------------------------------------------------
 // Layout helpers
 // ---------------------------------------------------------------------------
 const page: CSSProperties = {
@@ -105,8 +110,8 @@ function SiteNav() {
   const HOME = window.location.origin + "/";
   return (
     <nav style={{
-      position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)",
-      width: "92%", maxWidth: 520, height: 56, padding: "0 20px",
+      position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
+      width: "92%", maxWidth: 520, height: 42, padding: "0 20px",
       display: "flex", alignItems: "center", justifyContent: "space-between",
       zIndex: 100,
       background: "rgba(8,26,20,0.75)",
@@ -170,7 +175,23 @@ function LogoMark({ size = 40 }: { size?: number }) {
   );
 }
 
-function Card({ children, style }: { children: React.ReactNode; style?: CSSProperties }) {
+function Card({ children, style, showClose = true, onClose }: { children: React.ReactNode; style?: CSSProperties; showClose?: boolean; onClose?: () => void }) {
+  const close = async () => {
+    if (onClose) {
+      onClose();
+      return;
+    }
+    try {
+      if ((window as any).__TAURI__) {
+         await fetch("http://localhost:7454/hide", { method: "POST" });
+      } else {
+         window.close();
+      }
+    } catch {
+      window.close();
+    }
+  };
+
   return (
     <div style={{
       width: "92%", maxWidth: 400, padding: "28px 32px", background: CARD_BG,
@@ -179,6 +200,21 @@ function Card({ children, style }: { children: React.ReactNode; style?: CSSPrope
       boxShadow: `0 10px 40px rgba(0,0,0,0.6), 0 0 50px rgba(173,92,47,0.08)`,
       animation: "fadeUp 0.4s ease", position: "relative", zIndex: 1, ...style,
     }}>
+      {showClose && (
+        <button 
+          onClick={close}
+          style={{
+            position: "absolute", top: 12, right: 12, 
+            background: "rgba(255,255,255,0.1)", border: "none", color: "#ffffff",
+            fontSize: 16, cursor: "pointer", width: 32, height: 32, borderRadius: "50%",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "all 0.2s", zIndex: 100, fontWeight: "bold",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(173,92,47,0.8)"; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.1)"; }}
+        >×</button>
+      )}
       {children}
     </div>
   );
@@ -262,12 +298,31 @@ function StepDots({ step }: { step: Step }) {
 // Step 0.5 — Entry Path Selection
 // ---------------------------------------------------------------------------
 function EntryStep({
-  onChoice
+  onChoice,
+  onClose
 }: {
   onChoice: (choice: "wallet" | "email") => void;
+  onClose?: () => void;
 }) {
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+
+  const playOffline = async () => {
+    setLaunchError(null);
+    setLaunching(true);
+    try {
+      const kp = web3.Keypair.generate();
+      const pubkey = kp.publicKey.toBase58();
+      sessionStorage.setItem("xfchess_session_key", JSON.stringify(Array.from(kp.secretKey)));
+      await apiPost("/api/game/launch", { pubkey, hot: true, username: "LocalPlayer" });
+    } catch (e: any) {
+      setLaunchError(e.message || String(e));
+      setLaunching(false);
+    }
+  };
+
   return (
-    <Card>
+    <Card showClose={true} onClose={onClose}>
       <StepDots step="entry" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
         <LogoMark size={44} />
@@ -279,7 +334,26 @@ function EntryStep({
         </p>
       </div>
 
+      {launchError && <ErrorMsg msg={launchError} />}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <button
+          style={{ ...pathBtn, borderColor: ACCENT, background: "rgba(244,187,68,0.08)" }}
+          onClick={playOffline}
+          disabled={launching}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(244,187,68,0.15)"; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(244,187,68,0.08)"; }}
+        >
+          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.12)" }}>🎮</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: ACCENT }}>Play Now (Offline)</div>
+            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Local play — no wallet or account needed</div>
+          </div>
+          {launching && <div style={{ width: 16, height: 16, border: `2px solid rgba(244,187,68,0.3)`, borderTop: `2px solid ${ACCENT}`, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
+        </button>
+
+        <div style={{ margin: "4px 0", height: 1, background: "rgba(255,255,255,0.05)" }} />
+
         <button
           style={pathBtn}
           onClick={() => onChoice("wallet")}
@@ -306,8 +380,6 @@ function EntryStep({
           </div>
         </button>
 
-        <div style={{ margin: "8px 0", height: 1, background: "rgba(255,255,255,0.05)" }} />
-
       </div>
     </Card>
   );
@@ -327,14 +399,14 @@ const iconCircle: CSSProperties = {
 // ---------------------------------------------------------------------------
 // Step 0 — Legal / GDPR Consent
 // ---------------------------------------------------------------------------
-function ConsentStep({ onAccept }: { onAccept: () => void }) {
+function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: () => void }) {
   const [checkedTos, setTos] = useState(false);
   const [checkedGdpr, setGdpr] = useState(false);
   const [checkedAge, setAge] = useState(false);
   const canContinue = checkedTos && checkedGdpr && checkedAge;
 
   return (
-    <Card style={{ maxWidth: 360, padding: "20px 24px" }}>
+    <Card showClose={true} onClose={onClose} style={{ maxWidth: 360, padding: "20px 24px" }}>
       <div style={{ textAlign: "center" as const, marginBottom: 24 }}>
         <LogoMark size={44} />
         <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 6, letterSpacing: "0.12em", textTransform: "uppercase" as const }}>
@@ -417,7 +489,7 @@ function ConsentStep({ onAccept }: { onAccept: () => void }) {
 // ---------------------------------------------------------------------------
 // Step 1 — Login / Register (Email Path)
 // ---------------------------------------------------------------------------
-function AuthStep({ onAuth, onBack }: { onAuth: (token: string, username: string) => void; onBack: () => void }) {
+function AuthStep({ onAuth, onBack, onClose }: { onAuth: (token: string, username: string) => void; onBack: () => void; onClose?: () => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -431,11 +503,11 @@ function AuthStep({ onAuth, onBack }: { onAuth: (token: string, username: string
     try {
       let res: AuthResponse;
       if (mode === "login") {
-        res = await apiPost<AuthResponse>("/api/auth/login", { email, password });
+        res = await apiPost<AuthResponse>("/api/auth/login-email", { email, password });
       } else {
         // Registration now uses a default username (email prefix)
         // Sol Name is finalized in the profile step later
-        res = await apiPost<AuthResponse>("/api/auth/register", { 
+        res = await apiPost<AuthResponse>("/api/auth/register-email", { 
           email, password, username: email.split('@')[0] 
         });
       }
@@ -451,7 +523,7 @@ function AuthStep({ onAuth, onBack }: { onAuth: (token: string, username: string
   const handleKey = (e: React.KeyboardEvent) => { if (e.key === "Enter") submit(); };
 
   return (
-    <Card>
+    <Card showClose={true} onClose={onClose}>
       <StepDots step="auth" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
         <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Space Grotesk', sans-serif", color: TEXT }}>
@@ -501,12 +573,13 @@ function AuthStep({ onAuth, onBack }: { onAuth: (token: string, username: string
 import * as web3 from "@solana/web3.js";
 
 function WalletStep({
-  mode, onContinue, onAuth, onBack
+  mode, onContinue, onAuth, onBack, onClose
 }: {
   mode: "login" | "link";
   onContinue: (pubkey: string) => void;
-  onAuth: (token: string, user: string) => void;
+  onAuth: (token: string, user: string, pubkey?: string) => void;
   onBack: () => void;
+  onClose?: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<"phantom" | "solflare" | null>(null);
@@ -516,41 +589,72 @@ function WalletStep({
     solflare: { label: "Solflare", icon: "☀️", installUrl: "https://solflare.com/", provider: () => (window as any).solflare },
   };
 
-  const handleConnect = async (walletName: "phantom" | "solflare") => {
+  const handleConnect = async (walletName: "phantom" | "solflare" | "hot") => {
     setError(null);
-    setConnecting(walletName);
+    setConnecting(walletName === "hot" ? null : walletName);
     try {
-      const provider = WALLET_META[walletName].provider();
-      if (!provider) {
-        throw new Error(`${WALLET_META[walletName].label} extension not detected.`);
-      }
+      let pubkey: string;
+      let provider: any;
 
-      const resp = await provider.connect();
-      const pubkey = resp.publicKey?.toBase58?.();
-      if (!pubkey) throw new Error("No public key returned from wallet");
-
-      if (mode === "login") {
-        // Path 1: Login with signature
-        const ts = Math.floor(Date.now() / 1000);
-        const message = `login_wallet:${ts}`;
-        const encodedMessage = new TextEncoder().encode(message);
-        const { signature } = await provider.signMessage(encodedMessage, "utf8");
-        const sigBase58 = bs58.encode(signature);
-
-        const auth = await apiPost<AuthResponse>("/api/auth/login-wallet", {
-          wallet: pubkey,
-          signature: sigBase58,
-          timestamp: ts
-        });
-        onAuth(auth.token, auth.username);
+      if (walletName === "hot") {
+        // Generate or load a local session key
+        const kp = web3.Keypair.generate();
+        pubkey = kp.publicKey.toBase58();
+        const secretArr = Array.from(kp.secretKey);
+        sessionStorage.setItem("xfchess_session_key", JSON.stringify(secretArr));
+        localStorage.setItem("xfchess_wallet", pubkey);
       } else {
-        // Path 2: Linking wallet to existing email session
-        const email = localStorage.getItem("xfchess_email");
-        if (email) {
-          await apiPost("/api/auth/link-wallet", { email, wallet: pubkey });
+        provider = WALLET_META[walletName].provider();
+        if (!provider) {
+          throw new Error(`${WALLET_META[walletName].label} extension not detected.`);
         }
-        onContinue(pubkey);
+        const resp = await provider.connect();
+        // Phantom: publicKey is on the response object
+        // Solflare: publicKey is on the provider after connect, not on resp
+        pubkey = resp?.publicKey?.toBase58?.()
+          ?? resp?.publicKey?.toString?.()
+          ?? provider.publicKey?.toBase58?.()
+          ?? provider.publicKey?.toString?.();
       }
+
+      if (!pubkey) throw new Error("No public key returned from wallet");
+      localStorage.setItem("xfchess_wallet", pubkey);
+      await apiPost("/wallet", { pubkey });
+
+      if (walletName === "hot") {
+        // Hot wallet is device-only — no backend auth needed for local play
+        onAuth("offline", "LocalPlayer", pubkey);
+      } else {
+        // Signs raw bytes — no "utf8" arg to avoid Phantom>=0.16 off-chain prefix.
+        const signRaw = async (msg: string): Promise<string> => {
+          const bytes = new TextEncoder().encode(msg);
+          const { signature: sig } = await provider.signMessage(bytes);
+          return bs58.encode(sig);
+        };
+
+        // Check registration status first — avoids redundant signing requests.
+        const checkResp = await fetch(`${API_BASE}/api/auth/check-wallet/${pubkey}`);
+        const isRegistered = checkResp.ok;
+
+        let auth: AuthResponse;
+        if (isRegistered) {
+          const ts = Math.floor(Date.now() / 1000);
+          const sig = await signRaw(`xfchess:login:${ts}`);
+          auth = await apiPost<AuthResponse>("/api/auth/login", {
+            wallet: pubkey, signature: sig, timestamp: ts,
+          });
+        } else {
+          const ts = Math.floor(Date.now() / 1000);
+          const sig = await signRaw(`xfchess:register:${ts}`);
+          auth = await apiPost<AuthResponse>("/api/auth/register", {
+            wallet: pubkey, signature: sig, timestamp: ts,
+            username: pubkey.slice(0, 8),
+          });
+        }
+        onAuth(auth.token, auth.username, pubkey);
+      }
+
+      onContinue(pubkey);
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -565,7 +669,7 @@ function WalletStep({
   };
 
   return (
-    <Card>
+    <Card showClose={true} onClose={onClose}>
       <StepDots step="wallet" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
         <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Space Grotesk', sans-serif", color: TEXT }}>
@@ -579,6 +683,18 @@ function WalletStep({
       {error && <ErrorMsg msg={error} />}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Hot Wallet Option — Primary for Tauri */}
+        {isTauri && (
+          <button
+            style={{ ...walletBtnStyle, borderColor: PRIMARY_BORDER, background: PRIMARY_DIM }}
+            onClick={() => handleConnect("hot")}
+          >
+            <span style={{ fontSize: 20 }}>🔥</span>
+            <span style={{ flex: 1 }}>Software Wallet (Hot Wallet)</span>
+            <span style={{ fontSize: 11, color: PRIMARY, fontWeight: 800 }}>RECOMMENDED</span>
+          </button>
+        )}
+
         {(["phantom", "solflare"] as const).map((w) => {
           const meta = WALLET_META[w];
           const isInstalled = !!meta.provider();
@@ -721,8 +837,12 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
         body: JSON.stringify({ signed: signedB64 }),
       });
       setPendingTx(null);
-      // Close browser tab after successful software sign
-      window.close();
+      // Close window/hide in Tauri, close tab in browser
+      if (isTauri) {
+        await fetch("http://localhost:7454/hide", { method: "POST" });
+      } else {
+        window.close();
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -760,7 +880,11 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
                headers: { "Content-Type": "application/json" },
                body: JSON.stringify({ signed: signedB64 }),
              });
-             window.close();
+             if (isTauri) {
+               await fetch("http://localhost:7454/hide", { method: "POST" });
+             } else {
+               window.close();
+             }
           }
         }}>Sign with Extension</PrimaryBtn>
       )}
@@ -775,44 +899,120 @@ function ProfileStep({
   onComplete,
   pubkey,
   isHotWallet = false,
+  onClose,
 }: {
   onComplete: (handle: string) => void;
   pubkey?: string | null;
   isHotWallet?: boolean;
+  onClose?: () => void;
 }) {
   const [handle, setHandle] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [synced, setSynced] = useState<string | null>(null);
+
+  // On mount: try sync-profile (pulls on-chain canonical username into DB).
+  // If the user already has an on-chain profile we skip the form entirely.
+  useEffect(() => {
+    const trySync = async () => {
+      const token = localStorage.getItem("xfchess_token");
+      if (!token || isHotWallet) { setLoading(false); return; }
+      try {
+        const r = await fetch(`${API_BASE}/api/auth/sync-profile`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (r.ok) {
+          const { username } = await r.json();
+          localStorage.setItem("xfchess_username", username);
+          setSynced(username);
+          setLoading(false);
+          return;
+        }
+      } catch { /* no on-chain profile yet — show form */ }
+      setLoading(false);
+    };
+    trySync();
+  }, [isHotWallet]);
 
   const submit = async () => {
     if (!handle) return;
-    setLoading(true);
+    setSaving(true);
+    setError(null);
     try {
-      // Logic to save handle to backend or on-chain
-      // For now, we'll just proceed
+      const token = localStorage.getItem("xfchess_token");
+      if (token) {
+        const r = await fetch(`${API_BASE}/api/auth/username`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ username: handle }),
+        });
+        if (!r.ok) {
+          const msg = await r.text().catch(() => "Failed to save username");
+          throw new Error(msg);
+        }
+      }
       localStorage.setItem("xfchess_username", handle);
       onComplete(handle);
     } catch (e: any) {
       setError(e.message);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
+  if (loading) {
+    return (
+      <Card showClose={true} onClose={onClose}>
+        <div style={{ textAlign: "center", padding: "40px 0" }}>
+          <div style={{ width: 24, height: 24, border: `2px solid ${RED_BORDER}`, borderTop: `2px solid ${RED}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
+          <p style={{ color: TEXT_DIM, fontSize: 13 }}>Loading profile…</p>
+        </div>
+      </Card>
+    );
+  }
+
+  // On-chain username found — confirm and proceed
+  if (synced) {
+    return (
+      <Card showClose={true} onClose={onClose}>
+        <StepDots step="profile" />
+        <div style={{ textAlign: "center" as const, marginBottom: 24 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>✓</div>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: TEXT }}>Profile Found</h2>
+          <p style={{ fontSize: 14, color: TEXT_DIM, marginTop: 8 }}>
+            On-chain username: <strong style={{ color: PRIMARY }}>{synced}</strong>
+          </p>
+        </div>
+        <PrimaryBtn onClick={() => onComplete(synced)}>
+          Enter Arena →
+        </PrimaryBtn>
+      </Card>
+    );
+  }
+
   return (
-    <Card>
+    <Card showClose={true} onClose={onClose}>
       <StepDots step="profile" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
         <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Space Grotesk', sans-serif", color: TEXT }}>
-          Finalise Your Profile
+          Choose Your Handle
         </h2>
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
-          Choose your public chess handle on SOL
+          Pick a display name for the arena (3–20 chars)
         </p>
       </div>
       {error && <ErrorMsg msg={error} />}
-      <InputField label="Chess Handle" value={handle} onChange={setHandle} placeholder="Enter your handle..." />
-      <PrimaryBtn onClick={submit} loading={loading} disabled={!handle}>
+      <InputField label="Chess Handle" value={handle} onChange={setHandle} placeholder="e.g. DragonKnight99" />
+      <p style={{ fontSize: 11, color: TEXT_MUTED, textAlign: "center", marginBottom: 16 }}>
+        Create a full on-chain profile at{" "}
+        <a href="http://localhost:5173/profile" target="_blank" rel="noreferrer" style={{ color: PRIMARY }}>
+          xfchess.io/profile
+        </a>
+        {" "}to lock your username globally.
+      </p>
+      <PrimaryBtn onClick={submit} loading={saving} disabled={!handle || handle.length < 3}>
         Finalise &amp; Enter Arena
       </PrimaryBtn>
     </Card>
@@ -823,18 +1023,53 @@ function ProfileStep({
 // Root orchestrator
 // ---------------------------------------------------------------------------
 function Onboarding() {
-  const [step, setStep] = useState<Step>("consent");
+  const [step, setStep] = useState<Step>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const s = params.get("step");
+    if (s === "connect_wallet") return "wallet";
+    return "consent";
+  });
   const [username, setUsername] = useState("Player");
   const [ready, setReady] = useState(false);
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [path, setPath] = useState<"wallet" | "email" | "hot" | null>(null);
 
+  // Force exact window size — Chrome ignores --window-size when already running
   useEffect(() => {
-    apiGet<ConsentRecord | null>("/api/consent").then(record => {
-      if (record && record.version >= CONSENT_VERSION) {
-        setStep("entry");
+    window.resizeTo(420, 500);
+  }, []);
+
+  useEffect(() => {
+    const resumeSession = async () => {
+      const token = localStorage.getItem("xfchess_token");
+      const wallet = localStorage.getItem("xfchess_wallet");
+      if (token && wallet) {
+        try {
+          const r = await fetch(`${API_BASE}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (r.ok) {
+            const user = await r.json();
+            localStorage.setItem("xfchess_username", user.username);
+            setUsername(user.username);
+            setPubkey(wallet);
+            setStep("splash");
+            handleGameLaunch(wallet, false, user.username);
+            setReady(true);
+            return;
+          }
+        } catch { /* network down — fall through to normal flow */ }
+        // Token invalid/expired — clear and re-auth
+        localStorage.removeItem("xfchess_token");
       }
-    }).catch(() => { /* no consent yet */ }).finally(() => setReady(true));
+      // Normal consent check
+      apiGet<ConsentRecord | null>("/api/consent").then(record => {
+        if (record && record.version >= CONSENT_VERSION) {
+          setStep("entry");
+        }
+      }).catch(() => { /* no consent yet */ }).finally(() => setReady(true));
+    };
+    resumeSession();
   }, []);
 
   const handleConsent = async () => {
@@ -851,15 +1086,24 @@ function Onboarding() {
     }
   };
 
-  const handleAuth = (token: string, user: string) => {
+  const handleAuth = (token: string, user: string, nextPubkey?: string) => {
     localStorage.setItem("xfchess_token", token);
     localStorage.setItem("xfchess_username", user);
     setUsername(user);
+    if (nextPubkey) {
+      localStorage.setItem("xfchess_wallet_pubkey", nextPubkey);
+      setPubkey(nextPubkey);
+    }
+    if (path === "wallet" && nextPubkey) {
+      setStep("profile");
+      return;
+    }
     // After email auth, we MUST connect a wallet to link them
     setStep("wallet");
   };
 
   const handleWalletContinue = (pk: string) => {
+    localStorage.setItem("xfchess_wallet", pk);
     setPubkey(pk);
     setStep("profile");
   };
@@ -871,8 +1115,9 @@ function Onboarding() {
   };
 
   const handleGameLaunch = async (pk: string, hot: boolean, user: string) => {
+    const token = localStorage.getItem("xfchess_token");
     try { 
-      await apiPost("/api/game/launch", { pubkey: pk, hot, username: user }); 
+      await apiPost("/api/game/launch", { pubkey: pk, hot, username: user, token }); 
     } catch (e) { 
       console.error("[API] launch_game failed:", e); 
     }
@@ -892,12 +1137,13 @@ function Onboarding() {
     <div style={{ ...page }}>
       <GridBg />
       <SiteNav />
-      {step === "consent" && <ConsentStep onAccept={handleConsent} />}
-      {step === "entry"   && <EntryStep onChoice={onChoice} />}
+      {step === "consent" && <ConsentStep onAccept={handleConsent} onClose={() => window.close()} />}
+      {step === "entry"   && <EntryStep onChoice={onChoice} onClose={() => window.close()} />}
       
       {step === "auth"    && <AuthStep 
         onAuth={handleAuth} 
-        onBack={() => setStep("entry")} 
+        onBack={() => setStep("entry")}
+        onClose={() => window.close()}
       />}
       
       {step === "wallet"  && <WalletStep 
@@ -905,6 +1151,7 @@ function Onboarding() {
         onContinue={handleWalletContinue}
         onAuth={handleAuth}
         onBack={() => setStep("entry")}
+        onClose={() => window.close()}
       />}
       
       {step === "profile" && (
@@ -912,6 +1159,7 @@ function Onboarding() {
           onComplete={handleProfileComplete}
           pubkey={pubkey}
           isHotWallet={path === "hot"}
+          onClose={() => window.close()}
         />
       )}
       

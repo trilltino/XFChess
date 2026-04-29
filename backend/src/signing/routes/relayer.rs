@@ -7,7 +7,7 @@ use crate::signing::AppState;
 
 /// Returns the relayer public key and attestation for client verification
 async fn get_relayer_pubkey(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> Json<Value> {
     // Placeholder for actual relayer public key
     let relayer_pubkey = "PlaceholderRelayerPubkey";
@@ -16,7 +16,7 @@ async fn get_relayer_pubkey(
 
 /// Returns the current TEE attestation quote for verification
 async fn get_relayer_attestation(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> Json<Value> {
     // Placeholder for actual attestation quote
     let attestation_quote = "PlaceholderAttestationQuote";

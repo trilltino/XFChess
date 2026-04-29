@@ -13,12 +13,12 @@
 //! Reference: session_create_game instruction —
 //! `programs/xfchess-game/src/tournament_ix/session/session_create_game.rs`
 
-use crate::signing::storage::tournament::{TournamentStore, MatchStatus, TournamentMatch};
+use crate::signing::storage::tournament::{TournamentStore, MatchStatus};
 use crate::signing::swiss::service::SwissService;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use swiss_pairing::{MatchResult, Pairing, SwissRound};
+use swiss_pairing::{MatchResult, Pairing};
 use tokio::sync::{mpsc, RwLock};
 use tracing::{error, info, warn};
 use xfchess_braid_server::{bridge, ResourceHub};
@@ -220,7 +220,7 @@ impl SwissOrchestrator {
             let pairings_with_ids: Vec<serde_json::Value> = pairings
                 .iter()
                 .enumerate()
-                .map(|(i, p)| {
+                .map(|(_, p)| {
                     serde_json::json!({
                         "board": p.board,
                         "white": p.white,

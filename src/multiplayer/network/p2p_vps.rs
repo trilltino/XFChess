@@ -40,7 +40,7 @@ impl Default for P2PVpsState {
     fn default() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
         Self {
-            use_vps_relay: false,
+            use_vps_relay: true,
             last_poll: None,
             cached_games: Vec::new(),
             outgoing_queue: VecDeque::new(),
@@ -69,7 +69,8 @@ pub struct VpsGameListing {
     pub display_name: String,
     pub stake_amount: f64,
     pub game_type: String,
-    pub time_control_minutes: u32,
+    pub base_time_seconds: u32,
+    pub increment_seconds: u16,
     pub username: Option<String>,
     pub elo: Option<u16>,
     pub region: Option<String>,
@@ -156,7 +157,8 @@ fn handle_vps_responses(
                         display_name: g.display_name,
                         stake_amount: g.stake_amount,
                         game_type: g.game_type,
-                        time_control_minutes: g.time_control_minutes,
+                        base_time_seconds: g.base_time_seconds,
+                        increment_seconds: g.increment_seconds,
                         username: g.username,
                         elo: g.elo,
                         region: g.region,

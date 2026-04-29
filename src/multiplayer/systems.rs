@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use iroh::{EndpointId, SecretKey};
 use iroh_gossip::api::Event as IrohEvent;
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::time::Instant;
 use futures_lite::StreamExt;
@@ -8,8 +9,8 @@ use braid_iroh::{BraidGameConfig, BraidIrohNode, DiscoveryConfig};
 use braid_core::{Update, Version};
 
 use crate::multiplayer::types::*;
-use crate::multiplayer::traits::*;
 use crate::multiplayer::network::protocol::NetworkMessage;
+use crate::game::events::ResignEvent;
 
 #[cfg(feature = "solana")]
 use crate::game::events::{MoveMadeEvent, GameEndedEvent};
@@ -76,7 +77,7 @@ pub fn initialize_braid_network(
         let node_bootstrap = node_arc.clone();
 
         // Outgoing message loop
-        bevy::tasks::IoTaskPool::get().spawn(async move {
+        let _send_task = bevy::tasks::IoTaskPool::get().spawn(async move {
             while let Some(msg) = msg_rx.recv().await {
                 let json = match serde_json::to_vec(&msg) {
                     Ok(b) => b,
@@ -94,7 +95,7 @@ pub fn initialize_braid_network(
         });
 
         // Bootstrap loop
-        bevy::tasks::IoTaskPool::get().spawn(async move {
+        let _bootstrap_task = bevy::tasks::IoTaskPool::get().spawn(async move {
             while let Some(peer_id) = bootstrap_rx.recv().await {
                 if let Err(e) = node_bootstrap.join_peers(GAME_TOPIC, vec![peer_id]).await {
                     error!("Failed to join peer {}: {}", peer_id, e);
@@ -164,6 +165,7 @@ pub fn initialize_braid_network(
 pub fn handle_network_events(
     mut network_state: ResMut<BraidNetworkState>,
     mut network_events: MessageWriter<NetworkEvent>,
+    mut resign_events: MessageWriter<ResignEvent>,
 ) {
     let events: Vec<NetworkEvent> = {
         if let Some(ref mut receiver) = network_state.event_receiver {
@@ -293,6 +295,12 @@ pub fn handle_network_events(
                                 initial_fen: initial_fen.clone(),
                                 last_active: Instant::now(),
                             }),
+                        });
+                    }
+                    NetworkMessage::Resign { winner, .. } => {
+                        resign_events.write(ResignEvent {
+                            winner: winner.clone(),
+                            remote: true,
                         });
                     }
                     _ => {}
@@ -432,8 +440,10 @@ pub fn emit_game_ended_event(
     let (winner, reason) = match *game_over {
         GameOverState::WhiteWon => (Some("white".to_string()), "checkmate"),
         GameOverState::WhiteWonByTime => (Some("white".to_string()), "timeout"),
+        GameOverState::WhiteWonByResignation => (Some("white".to_string()), "resignation"),
         GameOverState::BlackWon => (Some("black".to_string()), "checkmate"),
         GameOverState::BlackWonByTime => (Some("black".to_string()), "timeout"),
+        GameOverState::BlackWonByResignation => (Some("black".to_string()), "resignation"),
         GameOverState::Stalemate => (None, "stalemate"),
         GameOverState::InsufficientMaterial => (None, "insufficient_material"),
         GameOverState::Playing => return,
@@ -447,6 +457,20 @@ pub fn emit_game_ended_event(
 }
 
 pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
+    // Derive a stable key from the wallet pubkey when Tauri sets XFCHESS_WALLET_PUBKEY.
+    // Same wallet → same NodeID across every session.
+    if let Ok(pubkey_str) = std::env::var("XFCHESS_WALLET_PUBKEY") {
+        if !pubkey_str.is_empty() {
+            let hash = Sha256::digest(pubkey_str.as_bytes());
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&hash);
+            let sk = SecretKey::from_bytes(&arr);
+            info!("[NET] NodeID derived from wallet pubkey (stable)");
+            return (sk, arr);
+        }
+    }
+
+    // Fall back to identity file if set.
     let key_file = if let Ok(env_path) = std::env::var("XFCHESS_IDENTITY") {
         PathBuf::from(env_path)
     } else {

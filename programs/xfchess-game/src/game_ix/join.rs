@@ -83,8 +83,8 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
 
     // --- Cross-Border Fee Logic ---
     // Calculate fee for both countries
-    let white_fee = get_country_fee(white_country, game.match_type);
-    let black_fee = get_country_fee(player_country, game.match_type);
+    let white_fee = get_country_fee(white_country, game.match_type.clone());
+    let black_fee = get_country_fee(player_country, game.match_type.clone());
     
     // Apply cross-border logic: lower fee if countries differ
     let final_fee = apply_cross_border_fee_logic(white_country, player_country, white_fee, black_fee);

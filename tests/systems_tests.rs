@@ -4,10 +4,11 @@
 //! initializing necessary resources, running the system, and verifying state changes.
 
 use bevy::prelude::*;
-use xfchess::game::components::GamePhase;
+use xfchess::engine::board_state::ChessEngine;
+use xfchess::game::components::{GamePhase, MoveRecord};
 use xfchess::game::resources::*;
 use xfchess::game::systems::game_init::reset_game_resources;
-use xfchess::rendering::pieces::PieceColor;
+use xfchess::rendering::{PieceColor, PieceType};
 
 /// Test that `reset_game_resources` correctly resets all game state to defaults
 #[test]

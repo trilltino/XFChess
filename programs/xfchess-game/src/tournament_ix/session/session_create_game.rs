@@ -26,10 +26,10 @@ fn get_country_fee(country: &str, match_type: MatchType) -> u64 {
     tournament_id: u64,
     game_id: u64,
     wager_amount: u64,
-    game_type: GameType,
     match_type: MatchType,
     country: String,
-    time_per_move: u16
+    base_time_seconds: u64,
+    increment_seconds: u16
 )]
 pub struct SessionCreateGame<'info> {
     #[account(
@@ -55,7 +55,7 @@ pub struct SessionCreateGame<'info> {
     pub session_signer: Signer<'info>,
 
     #[account(
-        constraint = tournament.players.iter().any(|p| p == player.key) @ XfchessGameError::UnauthorizedAccess,
+        constraint = tournament.players.iter().any(|p| *p == player.key()) @ XfchessGameError::UnauthorizedAccess,
     )]
     /// CHECK: Verified against tournament player list and delegation PDA.
     pub player: UncheckedAccount<'info>,
@@ -72,11 +72,11 @@ pub struct SessionCreateGame<'info> {
     #[account(
         init,
         payer = session_delegation,
-        space = 10240,
         seeds = [MOVE_LOG_SEED, &game_id.to_le_bytes()],
-        bump
+        bump,
+        space = MoveLog::LEN
     )]
-    pub move_log: Box<Account<'info, MoveLog>>,
+    pub move_log: Account<'info, MoveLog>,
 
     /// CHECK: PDA for escrowing SOL wager.
     #[account(
@@ -91,68 +91,78 @@ pub struct SessionCreateGame<'info> {
 
 pub fn handler(
     ctx: Context<SessionCreateGame>,
-    _tournament_id: u64,
+    tournament_id: u64,
     game_id: u64,
     wager_amount: u64,
-    game_type: GameType,
     match_type: MatchType,
     country: String,
-    time_per_move: u16,
+    base_time_seconds: u64,
+    increment_seconds: u16,
 ) -> Result<()> {
-    let delegation = &mut ctx.accounts.session_delegation;
+    let session = &ctx.accounts.session_delegation;
+    let tournament = &ctx.accounts.tournament;
     let game = &mut ctx.accounts.game;
+    let move_log = &mut ctx.accounts.move_log;
+    let escrow_pda = &ctx.accounts.escrow_pda;
+    let fee_payer = &ctx.accounts.session_signer;
+    let system_program = &ctx.accounts.system_program;
+    let rent = &Rent::get()?;
 
-    let now = Clock::get()?.unix_timestamp;
-    require!(delegation.is_valid(now), XfchessGameError::SessionExpired);
+    // Validate session
     require!(
-        delegation.session_key == ctx.accounts.session_signer.key(),
-        XfchessGameError::SessionNotAuthorized
+        session.tournament_id == tournament_id,
+        GameErrorCode::InvalidSession
+    );
+    require!(
+        session.is_valid(Clock::get()?.unix_timestamp),
+        GameErrorCode::SessionExpired
+    );
+    require!(
+        session.total_spent.saturating_add(wager_amount) <= session.spending_limit,
+        GameErrorCode::SpendingLimitExceeded
     );
 
-    require!(wager_amount <= delegation.max_wager, XfchessGameError::WagerExceedsSessionCap);
-
-    let rent = Rent::get()?;
-    let game_rent = rent.minimum_balance(8 + Game::INIT_SPACE);
-    let move_log_rent = rent.minimum_balance(10240);
-    let total_cost = game_rent.saturating_add(move_log_rent).saturating_add(wager_amount);
-
+    // Check wager limits
     require!(
-        delegation.total_spent.saturating_add(total_cost) <= delegation.spending_limit,
-        XfchessGameError::SessionSpendingLimitExceeded
+        wager_amount <= session.max_wager,
+        GameErrorCode::WagerLimitExceeded
+    );
+
+    // Validate tournament state
+    require!(
+        tournament.status == TournamentStatus::Active,
+        GameErrorCode::InvalidTournamentStatus
     );
 
     // Initialize game
+    let now = Clock::get()?.unix_timestamp;
     game.game_id = game_id;
     game.white = ctx.accounts.player.key();
-    game.black = match game_type {
-        GameType::PvAI => crate::constants::ai_authority::ID,
-        GameType::PvP => Pubkey::default(),
-    };
-    game.status = match game_type {
-        GameType::PvAI => GameStatus::Active,
-        GameType::PvP => GameStatus::WaitingForOpponent,
-    };
-    game.result = GameResult::None;
-    game.fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
-    game.move_count = 0;
-    game.turn = 1;
-    game.created_at = Clock::get()?.unix_timestamp;
-    game.updated_at = game.created_at;
-    game.wager_amount = wager_amount;
-    game.wager_token = None;
-    game.game_type = game_type;
+    game.black = Pubkey::default();
+    game.status = GameStatus::WaitingForOpponent;
     game.match_type = match_type;
     game.country_fee = get_country_fee(&country, match_type);
-    game.time_per_move = i64::from(time_per_move);
-    game.bump = ctx.bumps.game;
+    game.wager_amount = wager_amount;
+    game.base_time_seconds = base_time_seconds;
+    game.increment_seconds = increment_seconds;
+    game.fee_payer = fee_payer.key();
 
-    require!(wager_amount <= MAX_WAGER_AMOUNT, GameErrorCode::WagerTooHigh);
+    // Initialize move log
+    move_log.game_id = game_id;
+    move_log.moves = Vec::new();
+    move_log.timestamps = Vec::new();
+    move_log.player_signatures = Vec::new();
+    move_log.nonce = 0;
 
-    // Transfer wager from delegation PDA vault to escrow
+    // Transfer wager from session vault to escrow
     if wager_amount > 0 {
-        let tid_bytes = delegation.tournament_id.to_le_bytes();
-        let player_bytes = delegation.player.to_bytes();
-        let bump = [delegation.bump];
+        require!(
+            session.total_spent + wager_amount <= session.spending_limit,
+            GameErrorCode::InsufficientFunds
+        );
+        let tid_bytes = session.tournament_id.to_le_bytes();
+        let player_bytes = session.player.to_bytes();
+        let bump = [session.bump];
         let delegation_seeds: [&[u8]; 4] = [
             TournamentSessionDelegation::SEED,
             tid_bytes.as_ref(),
@@ -165,7 +175,7 @@ pub fn handler(
             CpiContext::new_with_signer(
                 ctx.accounts.system_program.to_account_info(),
                 anchor_lang::system_program::Transfer {
-                    from: delegation.to_account_info(),
+                    from: session.to_account_info(),
                     to: ctx.accounts.escrow_pda.to_account_info(),
                 },
                 signer_seeds,
@@ -174,23 +184,39 @@ pub fn handler(
         )?;
     }
 
-    // Initialize move_log
-    let move_log = &mut ctx.accounts.move_log;
-    move_log.game_id = game_id;
-    move_log.moves = Vec::new();
-    move_log.timestamps = Vec::new();
-    move_log.player_signatures = Vec::new();
-    move_log.nonce = 0;
-
-    // Update delegation spending
-    delegation.total_spent = delegation.total_spent.saturating_add(total_cost);
-    delegation.games_played = delegation.games_played.saturating_add(1);
-
-    msg!(
-        "Session-created game {} in tournament {}. Wager: {} SOL",
-        game_id,
-        delegation.tournament_id,
-        wager_amount
+    // Calculate and transfer rent for move_log
+    let move_log_rent = rent.minimum_balance(MoveLog::LEN);
+    require!(
+        session.total_spent + wager_amount + move_log_rent <= session.spending_limit,
+        GameErrorCode::SpendingLimitExceeded
     );
+    let tid_bytes = session.tournament_id.to_le_bytes();
+    let player_bytes = session.player.to_bytes();
+    let bump = [session.bump];
+    let delegation_seeds: [&[u8]; 4] = [
+        TournamentSessionDelegation::SEED,
+        tid_bytes.as_ref(),
+        player_bytes.as_ref(),
+        bump.as_ref(),
+    ];
+    let signer_seeds: &[&[&[u8]]] = &[&delegation_seeds];
+
+    anchor_lang::system_program::transfer(
+        CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            anchor_lang::system_program::Transfer {
+                from: session.to_account_info(),
+                to: ctx.accounts.move_log.to_account_info(),
+            },
+            signer_seeds,
+        ),
+        move_log_rent,
+    )?;
+
+    // Update session spent amount
+    let session_account = &mut ctx.accounts.session_delegation;
+    session_account.total_spent += wager_amount + move_log_rent;
+
+    msg!("Session created game {} in tournament {}", game_id, tournament_id);
     Ok(())
 }

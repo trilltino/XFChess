@@ -73,14 +73,14 @@ pub fn initialize_solana_integration(
                             match SessionKeyManager::load_session(&pubkey) {
                                 Ok(session_manager) => {
                                     info!("[SESSION] Loaded existing session key: {}", session_manager.pubkey());
-                                    solana_state.session_keypair = Some(solana_sdk::signature::Keypair::try_from(session_manager.signer().to_bytes().as_slice()).unwrap());
+                                    solana_state.session_keypair = Some(solana_sdk::signature::Keypair::from_bytes(&session_manager.signer().to_bytes()).unwrap());
                                 }
                                 Err(e) => {
                                     info!("[SESSION] No valid session key found ({}), will create new one", e);
                                     // Create new session key
                                     let session_manager = SessionKeyManager::new(&pubkey);
                                     let session_pubkey = session_manager.pubkey();
-                                    solana_state.session_keypair = Some(solana_sdk::signature::Keypair::try_from(session_manager.signer().to_bytes().as_slice()).unwrap());
+                                    solana_state.session_keypair = Some(solana_sdk::signature::Keypair::from_bytes(&session_manager.signer().to_bytes()).unwrap());
                                     
                                     // Save session data (24 hour default)
                                     if let Err(e) = session_manager.save_session(&pubkey, 24) {
@@ -129,13 +129,13 @@ pub fn initialize_solana_integration(
     let (tx, receiver) = crossbeam_channel::bounded::<Option<String>>(1);
     *rx = Some(receiver);
     tokio_runtime.0.spawn(async move {
-        let _ = tx.send(query_wallet_pubkey_from_tauri().await);
+        let _ = tx.send(query_wallet_pubkey_from_tauri());
     });
 }
 
-pub async fn query_wallet_pubkey_from_tauri() -> Option<String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
+pub fn query_wallet_pubkey_from_tauri() -> Option<String> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
 
     let base: u16 = std::env::var("XFCHESS_WALLET_PORT")
         .ok()
@@ -144,13 +144,14 @@ pub async fn query_wallet_pubkey_from_tauri() -> Option<String> {
     let tcp_start = base.saturating_sub(11);
     let tcp_end = base.saturating_sub(2);
     for port in tcp_start..=tcp_end {
-        let mut stream = match TcpStream::connect(("127.0.0.1", port)).await {
+        let mut stream = match TcpStream::connect(("127.0.0.1", port)) {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let _ = stream.write_all(b"PKEY").await;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+        let _ = stream.write_all(b"PKEY");
         let mut len_buf = [0u8; 4];
-        if stream.read_exact(&mut len_buf).await.is_err() {
+        if stream.read_exact(&mut len_buf).is_err() {
             return None;
         }
         let len = u32::from_le_bytes(len_buf) as usize;
@@ -158,7 +159,7 @@ pub async fn query_wallet_pubkey_from_tauri() -> Option<String> {
             return None; 
         }
         let mut buf = vec![0u8; len];
-        if stream.read_exact(&mut buf).await.is_err() {
+        if stream.read_exact(&mut buf).is_err() {
             return None;
         }
         return String::from_utf8(buf).ok();
@@ -188,6 +189,7 @@ pub fn update_wallet_balance(
 pub fn monitor_network_handshakes(
     mut solana_state: ResMut<SolanaIntegrationState>,
     mut network_events: MessageReader<crate::multiplayer::NetworkEvent>,
+    mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
 ) {
     for event in network_events.read() {
         if let crate::multiplayer::NetworkEvent::WagerHandshake {
@@ -195,6 +197,17 @@ pub fn monitor_network_handshakes(
             game_id,
         } = event
         {
+            // Push "Check Wallet" notification
+            popup_queue.push(crate::ui::menus::popup::GamePopup {
+                title: "Confirm Wager".to_string(),
+                message: "A wager match is starting. Please confirm the wager transaction in your wallet.".to_string(),
+                copy_text: None,
+                url: None,
+                url_label: None,
+                lifetime: 15.0,
+                remaining: 15.0,
+                dismissed: false,
+            });
             let game_id_owned = *game_id;
             let wallet_pubkey = match solana_state.wallet_pubkey {
                 Some(pk) => pk,
@@ -212,8 +225,14 @@ pub fn monitor_network_handshakes(
                 use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
                 use crate::solana::instructions::join_game_ix;
 
-                let ix = join_game_ix(program_id, wallet_pubkey, game_id_owned)
-                    .map_err(|e| format!("build join_game_ix: {}", e))?;
+                let ix = join_game_ix(
+                    program_id,
+                    wallet_pubkey,
+                    wallet_pubkey, // white_player — will be resolved properly via lobby flow
+                    wallet_pubkey, // fee_payer — placeholder; session key used in real path
+                    game_id_owned,
+                )
+                .map_err(|e| format!("build join_game_ix: {}", e))?;
 
                 sign_and_send_via_tauri(DEVNET_RPC_URL, wallet_pubkey, &[ix], &[])
                     .map(|_sig| game_id_owned)
@@ -334,7 +353,7 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
             Ok(contents) => {
                 // Try to parse as JSON byte array (standard solana-keygen format)
                 match serde_json::from_str::<Vec<u8>>(&contents) {
-                    Ok(bytes) => match Keypair::try_from(bytes.as_slice()) {
+                    Ok(bytes) => match Keypair::from_bytes(&bytes) {
                         Ok(kp) => return Some(kp),
                         Err(e) => error!("[WALLET] Failed to parse keypair from bytes: {}", e),
                     },
@@ -375,7 +394,7 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
 /// Runs periodically (every 30s) when wallet is connected
 pub fn fetch_user_status(
     solana_wallet: Option<Res<crate::multiplayer::solana::addon::SolanaWallet>>,
-    mut solana_wallet_mut: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
+    solana_wallet_mut: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
     time: Res<Time>,
     mut timer: Local<f32>,
 ) {
@@ -385,7 +404,7 @@ pub fn fetch_user_status(
     }
     *timer = 30.0; // Refresh every 30 seconds
 
-    let (wallet, wallet_mut) = match (solana_wallet, solana_wallet_mut) {
+    let (wallet, _wallet_mut) = match (solana_wallet, solana_wallet_mut) {
         (Some(w), Some(wm)) => (w, wm),
         _ => return,
     };
@@ -530,16 +549,16 @@ pub fn setup_solana_system(
 }
 
 pub fn handle_game_transactions(
-    mut game_state: ResMut<GameState>,
-    solana_rpc: Res<SolanaRpc>,
+    _game_state: ResMut<GameState>,
+    _solana_rpc: Res<SolanaRpc>,
 ) {
     // Use solana_rpc.fee_payer for transactions
     // Placeholder for transaction logic
 }
 
 pub fn handle_tournament_transactions(
-    mut tournament_state: ResMut<TournamentClientState>,
-    solana_rpc: Res<SolanaRpc>,
+    _tournament_state: ResMut<TournamentClientState>,
+    _solana_rpc: Res<SolanaRpc>,
 ) {
     // Use solana_rpc.fee_payer for tournament transactions
     // Placeholder for transaction logic

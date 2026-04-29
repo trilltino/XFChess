@@ -8,9 +8,10 @@ use solana_sdk::{
     instruction::AccountMeta,
     pubkey::Pubkey,
     signature::Keypair,
-    system_program,
     transaction::Transaction,
 };
+#[allow(deprecated)]
+use solana_sdk::system_program;
 use std::collections::HashMap;
 
 /// PDA seed prefix matching the on-chain constant.
@@ -77,7 +78,7 @@ pub fn build_authorize_tournament_session_ix(
     program_id: &Pubkey,
     tournament_id: u64,
     tournament_pubkey: &Pubkey,
-    tournament_bump: u8,
+    _tournament_bump: u8,
     session_delegation_pubkey: &Pubkey,
     player_pubkey: &Pubkey,
     args: AuthorizeTournamentSessionArgs,
@@ -212,6 +213,7 @@ fn build_register_player_ix(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solana_sdk::signature::Signer;
 
     #[test]
     fn tournament_session_pda_deterministic() {

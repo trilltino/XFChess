@@ -7,10 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use swiss_pairing::{
-    calculate_standings, generate_pairings, Color, MatchResult, Pairing, SwissPlayer, SwissRound,
-    StandingsEntry, TournamentFormat as SwissFormat,
+    calculate_standings, generate_pairings, Color, MatchResult, SwissPlayer, SwissRound,
+    StandingsEntry,
 };
-use thiserror::Error;
 use tracing::{info, warn};
 
 /// Swiss-specific tournament data

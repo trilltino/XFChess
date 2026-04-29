@@ -126,7 +126,7 @@ impl SessionKeyManager {
         let mut array = [0u8; 64];
         array.copy_from_slice(&keypair_bytes);
 
-        Keypair::try_from(&array[..]).map_err(|e| SessionKeyError::InvalidKeypair(e.to_string()))
+        Keypair::from_bytes(&array).map_err(|e| SessionKeyError::InvalidKeypair(e.to_string()))
     }
 
     fn get_key_path(&self) -> Result<PathBuf, SessionKeyError> {

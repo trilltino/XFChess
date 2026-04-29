@@ -28,73 +28,66 @@ pub struct RegisterPlayer<'info> {
         constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess
     )]
     pub host_treasury: UncheckedAccount<'info>,
+    /// The platform treasury vault (receives platform fees).
+    #[account(
+        mut,
+        constraint = treasury_vault.key() == platform_treasury_vault.key() @ GameErrorCode::UnauthorizedAccess
+    )]
+    pub treasury_vault: Signer<'info>,
+    /// CHECK: The platform treasury vault — must match the hardcoded pubkey.
+    pub platform_treasury_vault: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<RegisterPlayer>, _tournament_id: u64) -> Result<()> {
+pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
-    let player_key = ctx.accounts.player.key();
-    let player_elo = (ctx.accounts.player_profile.elo_rating / 100.0) as u32;
+    let player = ctx.accounts.player.key();
+    let _treasury_vault = ctx.accounts.treasury_vault.key();
+    let _platform_treasury_vault = ctx.accounts.platform_treasury_vault.key();
 
+    // Validate tournament state
     require!(
         tournament.status == TournamentStatus::Registration,
-        GameErrorCode::TournamentNotInRegistration
+        GameErrorCode::InvalidTournamentStatus
     );
     require!(
-        tournament.registered_count < tournament.max_players,
+        tournament.num_registered_players < tournament.max_players,
         GameErrorCode::TournamentFull
     );
+    require!(
+        tournament.elo_min <= elo && elo <= tournament.elo_max,
+        GameErrorCode::EloOutOfRange
+    );
 
-    // For USDC prize pool tournaments, require prize to be funded first
-    if tournament.usdc_prize_mint.is_some() {
+    // Check for duplicate registration
+    for i in 0..tournament.num_registered_players as usize {
         require!(
-            tournament.usdc_prize_funded,
-            GameErrorCode::UsdcPrizeNotFunded
+            tournament.players[i] != player,
+            GameErrorCode::AlreadyRegistered
         );
     }
 
-    // ELO filtering
+    // Record player
+    let index = tournament.num_registered_players as usize;
+    tournament.players[index] = player;
+    tournament.player_elos[index] = elo;
+    tournament.num_registered_players += 1;
+
+    // Transfer entry fee + platform fee to treasury
+    let entry_fee_total = tournament.entry_fee + PLATFORM_FEE_LAMPORTS;
+    let player_lamports = ctx.accounts.player.lamports();
     require!(
-        player_elo >= tournament.elo_min,
-        GameErrorCode::EloTooLow
-    );
-    require!(
-        player_elo <= tournament.elo_max,
-        GameErrorCode::EloTooHigh
+        player_lamports >= entry_fee_total,
+        GameErrorCode::InsufficientFunds
     );
 
-    // Check not already registered
-    for existing in tournament.players.iter() {
-        require!(*existing != player_key, GameErrorCode::AlreadyRegistered);
-    }
+    **ctx.accounts.player.lamports.borrow_mut() -= entry_fee_total;
+    **ctx.accounts.treasury_vault.lamports.borrow_mut() += tournament.entry_fee;
+    **ctx.accounts.platform_treasury_vault.lamports.borrow_mut() += PLATFORM_FEE_LAMPORTS;
 
-    // Add player to vectors
-    tournament.players.push(player_key);
-    tournament.player_elos.push(player_elo);
-    tournament.registered_count += 1;
+    // Update prize pool
+    tournament.prize_pool += tournament.entry_fee;
 
-    // Transfer entry fee directly to host treasury
-    if tournament.entry_fee > 0 {
-        anchor_lang::system_program::transfer(
-            CpiContext::new(
-                ctx.accounts.system_program.to_account_info(),
-                anchor_lang::system_program::Transfer {
-                    from: ctx.accounts.player.to_account_info(),
-                    to: ctx.accounts.host_treasury.to_account_info(),
-                },
-            ),
-            tournament.entry_fee,
-        )?;
-    }
-
-    msg!(
-        "Player {} (ELO: {}) registered for tournament {} (slot {}/{}). Entry fee: {} lamports -> host treasury",
-        player_key,
-        player_elo,
-        tournament.tournament_id,
-        tournament.registered_count,
-        tournament.max_players,
-        tournament.entry_fee
-    );
+    msg!("Player {} registered in tournament {}", player, tournament_id);
     Ok(())
 }

@@ -3,6 +3,7 @@ import chessboardSpace from '../assets/chessboard-space.png';
 import chessWageringUI from '../assets/chess-wagering-ui.png';
 import highFidelityChess from '../assets/high-fidelity-chess.png';
 import xfchessLogo from '../assets/xfchess-logo.png';
+import learnTheGame from '../assets/learn-the-game.png';
 
 export function Home() {
 
@@ -98,6 +99,25 @@ export function Home() {
                         <p className="feature-desc">
                             Challenge opponents with clear stakes. Winner takes all in these PvP encounters. Put your money where your mind is - Wager on your chess skills in secure, transparent matches. Financial transactions settle in real-time to your wallet allowing you to access your gains. Weekly Tournaments attract larger prize pools.
                         </p>
+                    </div>
+                </div>
+            </section>
+
+            {/* SECTION: LEARN THE GAME */}
+            <section className="fullscreen-section" style={{
+                backgroundImage: `url('/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_medieval_battle_hero_1775215627149.png')`
+            }}>
+                <div className="section-overlay"></div>
+                <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
+                    <div style={{ flex: '1' }}>
+                        <h2 className="feature-title">Learn the Game</h2>
+
+                        <p className="feature-desc">
+                            Learn from the historic game modes represented in a 2D or 3D interface, understand the people who changed the game for centuries, common pitfalls and how to teach chess to your peers.
+                        </p>
+                    </div>
+                    <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>
+                        <img src={learnTheGame} alt="Learn the game" style={{ display: 'block', maxWidth: '400px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
                     </div>
                 </div>
             </section>

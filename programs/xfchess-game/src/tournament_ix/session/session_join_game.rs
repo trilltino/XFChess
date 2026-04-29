@@ -60,7 +60,7 @@ pub struct SessionJoinGame<'info> {
     pub session_signer: Signer<'info>,
 
     #[account(
-        constraint = tournament.players.iter().any(|p| p == player.key) @ XfchessGameError::UnauthorizedAccess,
+        constraint = tournament.players.iter().any(|p| *p == player.key()) @ XfchessGameError::UnauthorizedAccess,
     )]
     /// CHECK: Verified against tournament player list and delegation PDA.
     pub player: UncheckedAccount<'info>,
@@ -112,8 +112,8 @@ pub fn handler(
     let white_country = &ctx.accounts.white_profile.country;
     let player_country = &ctx.accounts.player_profile.country;
 
-    let white_fee = get_country_fee(white_country, game.match_type);
-    let black_fee = get_country_fee(player_country, game.match_type);
+    let white_fee = get_country_fee(white_country, game.match_type.clone());
+    let black_fee = get_country_fee(player_country, game.match_type.clone());
     let final_fee = apply_cross_border_fee_logic(white_country, player_country, white_fee, black_fee);
 
     let total_cost = game.wager_amount.saturating_add(final_fee);

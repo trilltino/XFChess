@@ -54,33 +54,44 @@ pub fn handler(ctx: Context<ClaimStaleDispute>, _game_id: u64) -> Result<()> {
 
     let wager_amount = game.wager_amount;
     if wager_amount > 0 {
+        let half = wager_amount / 2;
+        let rent = Rent::get()?;
+        let white_balance_after = ctx.accounts.white_authority.lamports().saturating_add(half);
+        let black_balance_after = ctx.accounts.black_authority.lamports().saturating_add(half);
         let game_id_bytes = _game_id.to_le_bytes();
         let bump = ctx.bumps.escrow_pda;
         let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[bump]]];
 
-        anchor_lang::system_program::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.system_program.to_account_info(),
-                anchor_lang::system_program::Transfer {
-                    from: ctx.accounts.escrow_pda.to_account_info(),
-                    to: ctx.accounts.white_authority.to_account_info(),
-                },
-                escrow_seeds,
-            ),
-            wager_amount,
-        )?;
-
-        anchor_lang::system_program::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.system_program.to_account_info(),
-                anchor_lang::system_program::Transfer {
-                    from: ctx.accounts.escrow_pda.to_account_info(),
-                    to: ctx.accounts.black_authority.to_account_info(),
-                },
-                escrow_seeds,
-            ),
-            wager_amount,
-        )?;
+        if rent.is_exempt(white_balance_after, ctx.accounts.white_authority.data_len()) {
+            anchor_lang::system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.escrow_pda.to_account_info(),
+                        to: ctx.accounts.white_authority.to_account_info(),
+                    },
+                    escrow_seeds,
+                ),
+                half,
+            )?;
+        } else {
+            msg!("Skipping refund to white player: not rent-exempt after transfer");
+        }
+        if rent.is_exempt(black_balance_after, ctx.accounts.black_authority.data_len()) {
+            anchor_lang::system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.escrow_pda.to_account_info(),
+                        to: ctx.accounts.black_authority.to_account_info(),
+                    },
+                    escrow_seeds,
+                ),
+                half,
+            )?;
+        } else {
+            msg!("Skipping refund to black player: not rent-exempt after transfer");
+        }
     }
 
     msg!(

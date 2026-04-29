@@ -153,25 +153,48 @@ pub struct TournamentRecord {
     /// Whether all entrants must have completed CACF KYC before joining
     #[serde(default)]
     pub kyc_required: bool,
+    /// Optional bcrypt hash of join password (if private). When `Some`, `/join` must supply matching password.
+    pub password_hash: Option<String>,
 }
 
 impl TournamentRecord {
     /// Creates a new tournament record.
     /// Default: 8 players, winner-take-all (10000 bps = 100%), single elimination
-    pub fn new(tournament_id: u64, name: String, entry_fee_lamports: u64) -> Self {
-        Self::with_config(
+    pub fn new(tournament_id: u64, name: &str, entry_fee_lamports: u64) -> Self {
+        Self {
             tournament_id,
-            name,
+            name: name.to_string(),
             entry_fee_lamports,
-            8,
-            [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            TournamentFormat::SingleElimination,
-            None,
-            None,
-            None,
-            None,
-            false,
-        )
+            prize_pool: 0,
+            max_players: 8,
+            status: TournamentStatus::Registration,
+            format: TournamentFormat::SingleElimination,
+            players: Vec::new(),
+            player_elos: Vec::new(),
+            node_ids: HashMap::new(),
+            matches: vec![None; 7],
+            winner: None,
+            second_place: None,
+            third_place: None,
+            fourth_place: None,
+            fifth_place: None,
+            sixth_place: None,
+            seventh_place: None,
+            eighth_place: None,
+            ninth_place: None,
+            tenth_place: None,
+            password_hash: None,
+            scheduled_at: None,
+            started_at: None,
+            completed_at: None,
+            min_players: None,
+            swiss_data: None,
+            prize_shares: [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            elo_min: None,
+            elo_max: None,
+            created_at: chrono::Utc::now().timestamp(),
+            kyc_required: false,
+        }
     }
 
     /// Creates a tournament with custom configuration.
@@ -211,15 +234,16 @@ impl TournamentRecord {
             eighth_place: None,
             ninth_place: None,
             tenth_place: None,
-            prize_shares,
-            swiss_data: None,
-            elo_min,
-            elo_max,
-            min_players,
-            created_at: chrono::Utc::now().timestamp(),
+            password_hash: None,
             scheduled_at,
             started_at: None,
             completed_at: None,
+            min_players,
+            swiss_data: None,
+            prize_shares,
+            elo_min,
+            elo_max,
+            created_at: chrono::Utc::now().timestamp(),
             kyc_required,
         }
     }
@@ -580,7 +604,7 @@ impl TournamentStore {
                     return Err("Failed to generate bracket".to_string());
                 }
             }
-            TournamentFormat::Swiss { rounds } => {
+            TournamentFormat::Swiss { .. } => {
                 // Swiss bracket generation handled by swiss service
                 // Just verify we have enough players
                 if tournament.players.len() < tournament.min_players.unwrap_or(8) as usize {
@@ -600,5 +624,44 @@ impl TournamentStore {
         }).await;
         
         Ok(())
+    }
+}
+
+impl Default for TournamentRecord {
+    fn default() -> Self {
+        Self {
+            tournament_id: 0,
+            name: String::new(),
+            entry_fee_lamports: 0,
+            prize_pool: 0,
+            max_players: 8,
+            status: TournamentStatus::Registration,
+            format: TournamentFormat::SingleElimination,
+            players: Vec::new(),
+            player_elos: Vec::new(),
+            node_ids: HashMap::new(),
+            matches: vec![None; 7],
+            winner: None,
+            second_place: None,
+            third_place: None,
+            fourth_place: None,
+            fifth_place: None,
+            sixth_place: None,
+            seventh_place: None,
+            eighth_place: None,
+            ninth_place: None,
+            tenth_place: None,
+            password_hash: None,
+            scheduled_at: None,
+            started_at: None,
+            completed_at: None,
+            min_players: None,
+            swiss_data: None,
+            prize_shares: [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            elo_min: None,
+            elo_max: None,
+            created_at: chrono::Utc::now().timestamp(),
+            kyc_required: false,
+        }
     }
 }

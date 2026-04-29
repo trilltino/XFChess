@@ -3,7 +3,7 @@
 
 const BACKEND_URL: string =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ||
-  ''; // Empty string for relative paths (proxied via Tauri in prod)
+  'http://localhost:8090';
 
 export interface SignupRequest {
   email: string;
@@ -119,4 +119,33 @@ export interface DisputeStatus {
 
 export function getDisputeStatus(gameId: number): Promise<DisputeStatus> {
   return request(`/api/dispute/${gameId}`, { method: 'GET' });
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  username: string;
+}
+
+export function loginWithEmail(body: LoginRequest): Promise<LoginResponse> {
+  return request('/api/auth/login', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function syncProfile(token: string): Promise<{ username: string }> {
+  return request('/api/auth/sync-profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  });
+}
+
+export function addEmail(email: string, token: string): Promise<{ ok: boolean }> {
+  return request('/api/auth/add-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ email }),
+  });
 }

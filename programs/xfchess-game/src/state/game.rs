@@ -26,8 +26,11 @@ pub struct Game {
     pub game_type: GameType,
     pub match_type: MatchType, // Free, Ranked, Wager, or Tournament
     pub country_fee: u64,    // Treasury fee in lamports for this game
-    pub time_per_move: i64,  // Seconds each player has per move; 0 = no time limit
+    pub base_time_seconds: u64, // Total clock per player in seconds; 0 = no time limit
+    pub increment_seconds: u16,  // Fischer increment added after each move
     pub bump: u8,            // PDA canonical bump stored for use in signed CPI calls
+    pub is_delegated: bool,  // True once delegate_game is called; false after undelegate
+    pub tournament_id: Option<u64>,
 }
 
 /// Short-lived delegation allowing a VPS session key to submit moves on behalf
@@ -54,6 +57,7 @@ pub enum GameStatus {
     Inactive,
     Disputed,
     Finished,
+    Settled,
     Expired,
     Cancelled,
 }
@@ -66,23 +70,19 @@ pub enum GameResult {
     Draw,            // Agreed or stalemate draw
 }
 
-/// Whether this is a human vs human or human vs AI game.
+/// Match variant — always player vs player; AI games are handled off-chain.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum GameType {
-    PvP,  // Black slot stays empty until join_game is called
-    PvAI, // Black is set to ai_authority::ID immediately; game is Active from creation
+    PvP,
 }
 
 /// Match type determines fee structure and ELO impact.
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum MatchType {
     Free,
-    Ranked,
-    Wager,
-    Casual,
-    Tournament,
+    Rated,
 }
 
 impl Game {
-    pub const LEN: usize = 32 + 32 + 8 + 8 + 1 + 1 + 8 + 8 + 32 + 1 + 32;
+    pub const LEN: usize = 32 + 32 + 8 + 8 + 1 + 1 + 8 + 8 + 32 + 1 + 32 + 8;
 }

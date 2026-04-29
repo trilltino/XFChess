@@ -4,282 +4,359 @@
 //! This allows players to play chess with a traditional 2D view while maintaining
 //! full compatibility with the existing game state and networking systems.
 
-use crate::rendering::pieces::Piece;
+use crate::game::systems::input::{
+    can_move_color, clear_selection_state, is_human_turn, try_move_sequence, try_select_piece,
+    InputSystemParams,
+};
+use crate::game::systems::shared::CapturedTarget;
+use crate::game::view_mode::ViewMode;
+use crate::rendering::pieces::{PieceColor, PieceType};
 use bevy::prelude::*;
 use bevy_egui::egui;
+use std::collections::HashMap;
 
-
-/// Square colors for the chess board
-fn square_color(file: u8, rank: u8) -> egui::Color32 {
-    // Standard chess board coloring: a1 is dark
-    if (file + rank) % 2 == 0 {
-        egui::Color32::from_rgb(240, 217, 181) // Light squares
-    } else {
-        egui::Color32::from_rgb(181, 136, 99) // Dark squares
+#[allow(dead_code)]
+fn ai_level_label(difficulty: crate::game::ai::resource::AIDifficulty) -> &'static str {
+    match difficulty {
+        crate::game::ai::resource::AIDifficulty::Level1 => "400 ELO",
+        crate::game::ai::resource::AIDifficulty::Level2 => "700 ELO",
+        crate::game::ai::resource::AIDifficulty::Level3 => "1000 ELO",
+        crate::game::ai::resource::AIDifficulty::Level4 => "1300 ELO",
+        crate::game::ai::resource::AIDifficulty::Level5 => "1600 ELO",
+        crate::game::ai::resource::AIDifficulty::Level6 => "1900 ELO",
+        crate::game::ai::resource::AIDifficulty::Level7 => "2200 ELO",
+        crate::game::ai::resource::AIDifficulty::Level8 => "2500+ ELO",
     }
 }
 
-/// Highlight colors for move indicators
+#[allow(dead_code)]
+fn player_card_text(name: &str, elo: &str) -> String {
+    if elo.is_empty() {
+        name.to_string()
+    } else {
+        format!("{} - {}", name, elo)
+    }
+}
+
+fn is_black_view(ai_mode: crate::game::ai::resource::GameMode) -> bool {
+    match ai_mode {
+        crate::game::ai::resource::GameMode::VsAI { ai_color } => {
+            ai_color == crate::rendering::pieces::PieceColor::White
+        }
+        crate::game::ai::resource::GameMode::Multiplayer
+        | crate::game::ai::resource::GameMode::MultiplayerCompetitive => false,
+    }
+}
+
+/// Convert board (file, rank) to screen offset within the board widget.
+/// White view: a-file on left, rank 1 at bottom.
+/// Black view: h-file on left, rank 8 at bottom.
+fn board_to_screen(file: u8, rank: u8, black_view: bool, square_size: f32) -> egui::Vec2 {
+    let (sx, sy) = if black_view {
+        (7 - file, rank)
+    } else {
+        (file, 7 - rank)
+    };
+    egui::Vec2::new(sx as f32 * square_size, sy as f32 * square_size)
+}
+
+/// Square background color (Lichess-style).
+/// a1 is a dark square: (file + rank) % 2 == 0 → dark.
+fn square_color(file: u8, rank: u8) -> egui::Color32 {
+    if (file + rank) % 2 == 0 {
+        egui::Color32::from_rgb(181, 136, 99) // Dark squares (#b58863)
+    } else {
+        egui::Color32::from_rgb(240, 217, 181) // Light squares (#f0d9b5)
+    }
+}
+
+/// Highlight overlay colors.
 fn highlight_color(highlight_type: HighlightType) -> egui::Color32 {
     match highlight_type {
         HighlightType::Selected => egui::Color32::from_rgba_unmultiplied(255, 255, 0, 100),
-        HighlightType::LegalMove => egui::Color32::from_rgba_unmultiplied(0, 255, 0, 80),
-        HighlightType::Check => egui::Color32::from_rgba_unmultiplied(255, 0, 0, 120),
-        HighlightType::LastMove => egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60),
+        HighlightType::LegalMove => egui::Color32::from_rgba_unmultiplied(0, 200, 0, 90),
+        HighlightType::Capture => egui::Color32::from_rgba_unmultiplied(255, 80, 0, 110),
     }
 }
 
-/// Types of square highlights
+/// Types of square highlights.
 #[derive(Debug, Clone, Copy)]
 enum HighlightType {
     Selected,
     LegalMove,
-    Check,
-    LastMove,
+    Capture,
 }
 
-/// Main 2D board rendering system
-pub fn render_2d_board(
-    mut input_params: crate::game::systems::input::InputSystemParams,
-    mut contexts: bevy_egui::EguiContexts,
-    sprite_handles: Option<Res<crate::rendering::pieces::PieceSpriteHandles>>,
-    game_phase: Res<crate::game::resources::CurrentGamePhase>,
-) {
-    // Pre-register all piece textures to avoid double-borrowing contexts in the CentralPanel closure
-    let mut texture_ids = std::collections::HashMap::new();
-    if let Some(ref handles) = sprite_handles {
-        for &color in &[crate::rendering::pieces::PieceColor::White, crate::rendering::pieces::PieceColor::Black] {
-            for &ptype in &[
-                crate::game::components::PieceType::Pawn,
-                crate::game::components::PieceType::Knight,
-                crate::game::components::PieceType::Bishop,
-                crate::game::components::PieceType::Rook,
-                crate::game::components::PieceType::Queen,
-                crate::game::components::PieceType::King,
-            ] {
-                let handle = handles.get(ptype, color);
-                let id = contexts.add_image(bevy_egui::EguiTextureHandle::Strong(handle));
-                texture_ids.insert((ptype, color), id);
-            }
-        }
+/// Unicode chess piece symbols.
+fn piece_symbol(piece_type: PieceType, color: PieceColor) -> &'static str {
+    match (piece_type, color) {
+        (PieceType::King, PieceColor::White) => "♔",
+        (PieceType::Queen, PieceColor::White) => "♕",
+        (PieceType::Rook, PieceColor::White) => "♖",
+        (PieceType::Bishop, PieceColor::White) => "♗",
+        (PieceType::Knight, PieceColor::White) => "♘",
+        (PieceType::Pawn, PieceColor::White) => "♙",
+        (PieceType::King, PieceColor::Black) => "♚",
+        (PieceType::Queen, PieceColor::Black) => "♛",
+        (PieceType::Rook, PieceColor::Black) => "♜",
+        (PieceType::Bishop, PieceColor::Black) => "♝",
+        (PieceType::Knight, PieceColor::Black) => "♞",
+        (PieceType::Pawn, PieceColor::Black) => "♟",
     }
+}
 
-    let ctx = contexts.ctx_mut().expect("Failed to get egui context");
-
-    // Don't render if game is over (let 3D handle endgame screen)
-    if input_params.game_over.is_game_over() {
+/// Main 2D board rendering system.
+pub fn render_2d_board(
+    mut input_params: InputSystemParams,
+    mut contexts: bevy_egui::EguiContexts,
+    _sprite_handles: Option<Res<crate::rendering::pieces::PieceSpriteHandles>>,
+    _game_phase: Res<crate::game::resources::CurrentGamePhase>,
+    ai_config: Res<crate::game::ai::ChessAIResource>,
+    #[cfg(feature = "solana")] _solana_profile: Option<Res<crate::multiplayer::solana::addon::SolanaProfile>>,
+    #[cfg(feature = "solana")] _competitive_match: Option<Res<crate::multiplayer::solana::addon::CompetitiveMatchState>>,
+    view_mode: Res<ViewMode>,
+    _hud_visibility: Res<crate::ui::game::game_ui::InGameHudVisibility>,
+) {
+    if *view_mode != ViewMode::Standard2D {
         return;
     }
 
-    egui::CentralPanel::default().show(ctx, |ui| {
-        ui.vertical_centered(|ui| {
-            // Calculate board size based on available space
-            let available_size = ui.available_size();
-            let board_size = available_size.x.min(available_size.y * 0.9);
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+
+    let black_view = is_black_view(ai_config.mode);
+    let is_human = is_human_turn(&input_params);
+    let game_over = input_params.game_over.is_game_over();
+    let in_check = input_params.engine.is_check();
+    let check_color = input_params.engine.current_turn;
+
+    // Collect piece positions before the egui closure (read-only borrow).
+    let piece_map: HashMap<(u8, u8), (PieceType, PieceColor, Entity)> = {
+        let q = input_params.pieces.p1();
+        q.iter()
+            .map(|(e, p, _, _)| ((p.x, p.y), (p.piece_type, p.color, e)))
+            .collect()
+    };
+
+    let selected_pos = input_params.selection.selected_position;
+    let legal_moves = input_params.selection.possible_moves.clone();
+    let is_selected = input_params.selection.is_selected();
+
+    let mut clicked_square: Option<(u8, u8)> = None;
+
+    egui::CentralPanel::default()
+        .frame(egui::Frame::NONE.fill(egui::Color32::from_rgb(30, 30, 35)))
+        .show(ctx, |ui| {
+            let available = ui.available_size();
+            let board_size = available.x.min(available.y) * 0.88;
             let square_size = board_size / 8.0;
 
-            // Create the chess board interaction area
-            let response = ui.allocate_response(
-                egui::Vec2::new(board_size, board_size),
-                egui::Sense::click_and_drag(),
-            );
+            let x_offset = (available.x - board_size) / 2.0;
+            let y_offset = (available.y - board_size) / 2.0;
 
-            // Draw the board and pieces
-            let painter = ui.painter();
-            let board_rect = response.rect;
+            ui.add_space(y_offset);
+            ui.horizontal(|ui| {
+                ui.add_space(x_offset);
 
-            // Handle drag-and-drop start
-            if response.drag_started() {
-                let mouse_pos = response.interact_pointer_pos().unwrap_or(board_rect.center());
-                let local_pos = mouse_pos - board_rect.min;
-                let raw_file = (local_pos.x / square_size) as u8;
-                let rank = 7 - (local_pos.y / square_size) as u8;
-                let file = 7 - raw_file;
-                
-                if file < 8 && rank < 8 {
-                    let pieces = input_params.pieces.p1();
-                    if let Some((entity, piece)) = crate::game::systems::shared::find_piece_on_square(&pieces, (file, rank)) {
-                        // Only start drag if it's our piece and our turn
-                        if piece.color == input_params.current_turn.color && crate::game::systems::input::can_move_color(&input_params, piece.color) {
-                            input_params.selection.selected_entity = Some(entity);
-                            input_params.selection.selected_position = Some((file, rank));
-                            input_params.selection.begin_drag();
-                            // Calculate legal moves for dragging
-                            let legal_moves = input_params.engine.get_legal_moves_for_square((file, rank), piece.color);
-                            input_params.selection.possible_moves = legal_moves;
+                // Allocate board space for layout only; interaction is per-square below.
+                let (board_rect, _) = ui.allocate_exact_size(
+                    egui::Vec2::splat(board_size),
+                    egui::Sense::hover(),
+                );
+
+                let painter = ui.painter_at(board_rect);
+
+                for rank in 0..8u8 {
+                    for file in 0..8u8 {
+                        let offset = board_to_screen(file, rank, black_view, square_size);
+                        let sq_rect = egui::Rect::from_min_size(
+                            board_rect.min + offset,
+                            egui::Vec2::splat(square_size),
+                        );
+
+                        painter.rect_filled(sq_rect, 0.0, square_color(file, rank));
+
+                        if Some((file, rank)) == selected_pos {
+                            painter.rect_filled(
+                                sq_rect,
+                                0.0,
+                                highlight_color(HighlightType::Selected),
+                            );
                         }
-                    }
-                }
-            }
 
-            // Draw squares
-            for rank in 0..8 {
-                for file in 0..8 {
-                    let square_rect = egui::Rect::from_min_size(
-                        board_rect.min + egui::Vec2::new((7 - file) as f32 * square_size, (7 - rank) as f32 * square_size),
-                        egui::Vec2::new(square_size, square_size),
-                    );
-
-                    // Draw square background
-                    painter.rect_filled(square_rect, 0.0, square_color(file, rank));
-
-                    // Highlight Last Move
-                    if let Some(last_move) = input_params.move_history.last_move() {
-                        if (last_move.from.0 == file && last_move.from.1 == rank) || 
-                           (last_move.to.0 == file && last_move.to.1 == rank) {
-                            painter.rect_filled(square_rect, 0.0, highlight_color(HighlightType::LastMove));
+                        if legal_moves.contains(&(file, rank)) {
+                            if piece_map.contains_key(&(file, rank)) {
+                                painter.rect_filled(
+                                    sq_rect,
+                                    0.0,
+                                    highlight_color(HighlightType::Capture),
+                                );
+                            } else {
+                                painter.circle_filled(
+                                    sq_rect.center(),
+                                    square_size * 0.15,
+                                    highlight_color(HighlightType::LegalMove),
+                                );
+                            }
                         }
-                    }
 
-                    // Highlight King in Check
-                    if game_phase.0 == crate::game::components::GamePhase::Check {
-                        let pieces = input_params.pieces.p1();
-                        for (_, piece, _, _) in pieces.iter() {
-                            if piece.piece_type == crate::game::components::PieceType::King && 
-                               piece.color == input_params.current_turn.color &&
-                               piece.x == file && piece.y == rank {
-                                painter.rect_filled(square_rect, 0.0, highlight_color(HighlightType::Check));
+                        if let Some((pt, pc, _)) = piece_map.get(&(file, rank)) {
+                            let symbol = piece_symbol(*pt, *pc);
+                            let font_size = square_size * 0.72;
+
+                            let shadow_col = if *pc == PieceColor::White {
+                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160)
+                            } else {
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)
+                            };
+                            painter.text(
+                                sq_rect.center() + egui::Vec2::new(1.5, 1.5),
+                                egui::Align2::CENTER_CENTER,
+                                symbol,
+                                egui::FontId::proportional(font_size),
+                                shadow_col,
+                            );
+
+                            let piece_col = if *pc == PieceColor::White {
+                                egui::Color32::WHITE
+                            } else {
+                                egui::Color32::from_rgb(18, 18, 18)
+                            };
+                            painter.text(
+                                sq_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                symbol,
+                                egui::FontId::proportional(font_size),
+                                piece_col,
+                            );
+                        }
+
+                        // Per-square click detection — reliable, no pointer-position math needed.
+                        if is_human && !game_over {
+                            let sq_id = egui::Id::new("board_sq")
+                                .with(file as u32 * 8 + rank as u32);
+                            let sq_resp = ui.interact(sq_rect, sq_id, egui::Sense::click());
+                            if sq_resp.clicked() {
+                                clicked_square = Some((file, rank));
                             }
                         }
                     }
-
-                    // Check for highlights
-                    if let Some(selected) = input_params.selection.selected_position {
-                        if selected == (file, rank) {
-                            painter.rect_filled(square_rect, 0.0, highlight_color(HighlightType::Selected));
-                        }
-                    }
-
-                    // Highlight legal moves
-                    for &(legal_file, legal_rank) in &input_params.selection.possible_moves {
-                        if legal_file == file && legal_rank == rank {
-                            painter.rect_filled(square_rect, 0.0, highlight_color(HighlightType::LegalMove));
-                        }
-                    }
-                }
-            }
-
-            // Draw pieces
-            let pieces = input_params.pieces.p1();
-            let mut drag_piece: Option<(Piece, egui::Rect)> = None;
-
-            for (_, piece, _, _) in pieces.iter() {
-                let is_being_dragged = input_params.selection.is_dragging && 
-                                      input_params.selection.selected_position == Some((piece.x, piece.y));
-
-                // Debug: Log first few pieces to verify positions
-                if piece.piece_type == crate::game::components::PieceType::Pawn && piece.color == crate::rendering::pieces::PieceColor::White {
-                    debug!("[2D_RENDER] White pawn at ({}, {}) - 2D pos: ({}, {})", 
-                        piece.x, piece.y,
-                        piece.x as f32 * square_size,
-                        (7 - piece.y) as f32 * square_size);
                 }
 
-                let piece_rect = if is_being_dragged {
-                    let mouse_pos = ui.ctx().pointer_latest_pos().unwrap_or(board_rect.center());
-                    let rect = egui::Rect::from_center_size(mouse_pos, egui::Vec2::new(square_size, square_size));
-                    drag_piece = Some((*piece, rect));
-                    continue; // Draw dragging piece last (on top)
-                } else {
-                    egui::Rect::from_min_size(
-                        board_rect.min + egui::Vec2::new((7 - piece.x) as f32 * square_size, (7 - piece.y) as f32 * square_size),
-                        egui::Vec2::new(square_size, square_size),
-                    )
-                };
+                // Coordinate labels
+                for i in 0..8u8 {
+                    let file_label = (b'a' + i) as char;
+                    let rank_label = (i + 1).to_string();
 
-                if let Some(texture_id) = texture_ids.get(&(piece.piece_type, piece.color)) {
-                    painter.image(
-                        *texture_id,
-                        piece_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    let file_offset = board_to_screen(i, 0, black_view, square_size);
+                    painter.text(
+                        egui::Pos2::new(
+                            board_rect.min.x + file_offset.x + square_size / 2.0,
+                            board_rect.max.y + 5.0,
+                        ),
+                        egui::Align2::CENTER_TOP,
+                        file_label.to_string(),
+                        egui::FontId::proportional(11.0),
+                        egui::Color32::from_rgb(160, 160, 160),
+                    );
+
+                    let rank_offset = board_to_screen(0, i, black_view, square_size);
+                    painter.text(
+                        egui::Pos2::new(
+                            board_rect.min.x - 10.0,
+                            board_rect.min.y + rank_offset.y + square_size / 2.0,
+                        ),
+                        egui::Align2::RIGHT_CENTER,
+                        rank_label,
+                        egui::FontId::proportional(11.0),
+                        egui::Color32::from_rgb(160, 160, 160),
+                    );
+                }
+
+                // ── Check notification badge ──────────────────────────────────
+                if in_check && !game_over {
+                    let label = match check_color {
+                        PieceColor::White => "♔  White is in Check!",
+                        PieceColor::Black => "♚  Black is in Check!",
+                    };
+                    let badge_w = 200.0_f32;
+                    let badge_h = 32.0_f32;
+                    let badge_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(
+                            board_rect.center().x - badge_w / 2.0,
+                            board_rect.min.y + 8.0,
+                        ),
+                        egui::Vec2::new(badge_w, badge_h),
+                    );
+                    painter.rect_filled(
+                        badge_rect,
+                        6.0,
+                        egui::Color32::from_rgba_unmultiplied(200, 40, 40, 235),
+                    );
+                    painter.text(
+                        badge_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        label,
+                        egui::FontId::proportional(13.5),
                         egui::Color32::WHITE,
                     );
                 }
-            }
-
-            // Draw dragging piece on top
-            if let Some((piece, rect)) = drag_piece {
-                if let Some(texture_id) = texture_ids.get(&(piece.piece_type, piece.color)) {
-                    painter.image(
-                        *texture_id,
-                        rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 200), // Slightly transparent
-                    );
-                }
-            }
-
-            // Handle input
-            if response.clicked() {
-                let mouse_pos = response.interact_pointer_pos().unwrap_or(board_rect.center());
-                let local_pos = mouse_pos - board_rect.min;
-                
-                let raw_file = (local_pos.x / square_size) as u8;
-                let rank = 7 - (local_pos.y / square_size) as u8;
-                let file = 7 - raw_file;
-
-                if file < 8 && rank < 8 {
-                    handle_2d_click(file as u8, rank as u8, &mut input_params);
-                }
-            } else if response.drag_stopped() {
-                let mouse_pos = ui.ctx().pointer_latest_pos().unwrap_or(board_rect.center());
-                let local_pos = mouse_pos - board_rect.min;
-                let raw_file = (local_pos.x / square_size) as u8;
-                let rank = 7 - (local_pos.y / square_size) as u8;
-                let file = 7 - raw_file;
-
-                debug!("[2D_DRAG] Mouse: {:?}, Local: {:?}, Calculated: file={}, rank={}", 
-                    mouse_pos, local_pos, file, rank);
-
-                if file < 8 && rank < 8 {
-                    handle_2d_click(file as u8, rank as u8, &mut input_params);
-                }
-                input_params.selection.end_drag();
-            }
+            });
         });
-    });
-}
 
-/// Handle mouse clicks on the 2D board
-fn handle_2d_click(
-    file: u8,
-    rank: u8,
-    params: &mut crate::game::systems::input::InputSystemParams,
-) {
-    use crate::game::systems::input::{can_move_color, try_select_piece, try_move_sequence};
-    use crate::game::systems::shared::{find_piece_on_square, CapturedTarget};
-
-    let target_pos = (file, rank);
-    debug!("[2D] Clicked square at ({}, {})", file, rank);
-
-    // Find if there's a piece on this square
-    let occupant = {
-        let q = params.pieces.p1();
-        find_piece_on_square(&q, target_pos)
-    };
-
-    if let Some((piece_entity, piece)) = occupant {
-        // Case 1: Clicked our own piece -> Select
-        if piece.color == params.current_turn.color {
-            if can_move_color(params, piece.color) {
-                try_select_piece(params, piece_entity, piece, true);
-                return;
-            }
-        }
-
-        // Case 2: Clicked enemy piece -> Capture
-        if params.selection.is_selected() && piece.color != params.current_turn.color {
-            try_move_sequence(params, target_pos, Some(CapturedTarget {
-                entity: piece_entity,
-                piece_type: piece.piece_type,
-                color: piece.color,
-            }), "2d_piece_capture");
-            return;
-        }
+    if game_over || !is_human {
+        return;
     }
 
-    // Case 3: Clicked empty square -> Move
-    if params.selection.is_selected() {
-        try_move_sequence(params, target_pos, None, "2d_square_click");
+    let Some((cf, cr)) = clicked_square else {
+        return;
+    };
+
+    let target = (cf, cr);
+
+    if is_selected {
+        if legal_moves.contains(&target) {
+            let capture_info = {
+                let q = input_params.pieces.p1();
+                q.iter()
+                    .find(|(_, p, _, _)| p.x == cf && p.y == cr)
+                    .map(|(e, p, _, _)| CapturedTarget {
+                        entity: e,
+                        piece_type: p.piece_type,
+                        color: p.color,
+                    })
+            };
+            try_move_sequence(&mut input_params, target, capture_info, "2d_board");
+        } else {
+            let piece_at = {
+                let q = input_params.pieces.p1();
+                q.iter()
+                    .find(|(_, p, _, _)| p.x == cf && p.y == cr)
+                    .map(|(e, p, _, _)| (e, *p))
+            };
+            match piece_at {
+                Some((entity, piece)) if can_move_color(&input_params, piece.color) => {
+                    try_select_piece(&mut input_params, entity, piece, true);
+                }
+                _ => clear_selection_state(
+                    &mut input_params.commands,
+                    &mut input_params.selection,
+                    &input_params.selected_pieces,
+                ),
+            }
+        }
+    } else {
+        let piece_at = {
+            let q = input_params.pieces.p1();
+            q.iter()
+                .find(|(_, p, _, _)| p.x == cf && p.y == cr)
+                .map(|(e, p, _, _)| (e, *p))
+        };
+        if let Some((entity, piece)) = piece_at {
+            if can_move_color(&input_params, piece.color) {
+                try_select_piece(&mut input_params, entity, piece, true);
+            }
+        }
     }
 }

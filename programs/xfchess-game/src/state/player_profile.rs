@@ -8,8 +8,6 @@ pub struct PlayerProfile {
     pub authority: Pubkey,
     #[max_len(2)]
     pub country: String,           // ISO 3166-1 alpha-2
-    #[max_len(50)]
-    pub tax_id: String,           // Country-specific tax ID
     pub wins: u32,
     pub losses: u32,
     pub draws: u32,

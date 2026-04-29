@@ -289,6 +289,88 @@ pub struct UserStatus {
     pub can_wager: bool,
 }
 
+#[derive(Serialize)]
+pub struct IdentityPayload {
+    pub pubkey: String,
+    pub full_name: String,
+    pub dob: String,
+    pub address: String,
+    pub country: String,
+    pub tax_id: String,
+    pub signature: String,
+    pub timestamp: u64,
+    pub consent_kyc: bool,
+    pub consent_retention_years: u8,
+}
+
+/// Register user identity and KYC data securely in the VPS vault.
+pub fn register_identity(payload: &IdentityPayload) -> Result<(), String> {
+    let response = client()
+        .post(format!("{}/identity/register", vps_base()))
+        .json(payload)
+        .send()
+        .map_err(|e| format!("vps register_identity: {e}"))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("vps register_identity: HTTP {status} — {body}"));
+    }
+    
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct RegisterReq {
+    pub wallet: String,
+    pub signature: String,
+    pub timestamp: u64,
+    pub username: String,
+}
+
+/// Register a wallet with a username in the backend.
+pub fn register_wallet(req: &RegisterReq) -> Result<(), String> {
+    let response = client()
+        .post(format!("{}/api/auth/register", vps_base()))
+        .json(req)
+        .send()
+        .map_err(|e| format!("vps register_wallet: {e}"))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("vps register_wallet: HTTP {status} — {body}"));
+    }
+    
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct LinkWalletReq {
+    pub email: String,
+    pub password: String,
+    pub wallet: String,
+    pub signature: String,
+    pub timestamp: u64,
+}
+
+/// Link a wallet to an email-based account.
+pub fn link_wallet(req: &LinkWalletReq) -> Result<(), String> {
+    let response = client()
+        .post(format!("{}/api/auth/link-wallet", vps_base()))
+        .json(req)
+        .send()
+        .map_err(|e| format!("vps link_wallet: {e}"))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("vps link_wallet: HTTP {status} — {body}"));
+    }
+    
+    Ok(())
+}
+
 /// Fetch verification status for a wallet. Returns defaults on network error so
 /// callers can decide whether to block hard or degrade gracefully.
 pub fn get_user_status(wallet_pubkey: &str) -> Result<UserStatus, String> {
@@ -342,6 +424,7 @@ pub struct TournamentSummary {
     pub prize_pool: u64,
     pub registered: usize,
     pub status: String,
+    pub is_private: bool,
 }
 
 pub fn list_tournaments() -> Result<Vec<TournamentSummary>, String> {
@@ -356,11 +439,14 @@ pub fn list_tournaments() -> Result<Vec<TournamentSummary>, String> {
         .map_err(|e| format!("vps list_tournaments parse: {e}"))
 }
 
-pub fn join_tournament(tournament_id: u64, player_pubkey: &str) -> Result<u32, String> {
-    let body = serde_json::json!({
+pub fn join_tournament(tournament_id: u64, player_pubkey: &str, password: Option<&str>) -> Result<u32, String> {
+    let mut body = serde_json::json!({
         "player": player_pubkey,
         "elo": 1200
     });
+    if let Some(pw) = password {
+        body["password"] = serde_json::Value::String(pw.to_string());
+    }
     let resp = client()
         .post(format!("{}/tournament/{}/join", vps_base(), tournament_id))
         .json(&body)
@@ -388,7 +474,8 @@ struct P2PAnnounceReq<'a> {
     display_name: &'a str,
     stake_amount: f64,
     game_type: &'a str,
-    time_control_minutes: u32,
+    base_time_seconds: u32,
+    increment_seconds: u16,
     username: Option<String>,
     elo: Option<u16>,
     region: Option<String>,
@@ -413,7 +500,8 @@ pub struct P2PGameListing {
     pub display_name: String,
     pub stake_amount: f64,
     pub game_type: String,
-    pub time_control_minutes: u32,
+    pub base_time_seconds: u32,
+    pub increment_seconds: u16,
     pub status: String,
     pub username: Option<String>,
     pub elo: Option<u16>,
@@ -439,7 +527,8 @@ pub fn p2p_announce_game(
     display_name: &str,
     stake_amount: f64,
     game_type: &str,
-    time_control_minutes: u32,
+    base_time_seconds: u32,
+    increment_seconds: u16,
     username: Option<String>,
     elo: Option<u16>,
     region: Option<String>,
@@ -452,7 +541,8 @@ pub fn p2p_announce_game(
             display_name,
             stake_amount,
             game_type,
-            time_control_minutes,
+            base_time_seconds,
+            increment_seconds,
             username,
             elo,
             region,

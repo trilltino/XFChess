@@ -52,6 +52,7 @@
 //! - `reference/chess_engine/src/types.rs` - Chess data structures
 
 // Submodules
+pub mod active_time_control;
 pub mod history;
 pub mod player;
 pub mod sounds;
@@ -65,6 +66,7 @@ pub mod system_params;
 mod tests;
 
 // Re-export all resources for convenience
+pub use active_time_control::*;
 pub use debug::*;
 pub use history::*;
 pub use player::*;

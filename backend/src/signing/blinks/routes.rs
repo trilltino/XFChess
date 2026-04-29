@@ -48,10 +48,7 @@ async fn get_tournament_action(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<ActionMetadata>, StatusCode> {
-    let program_id = std::str::FromStr::from_str(&state.config.program_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let metadata = get_action_metadata(id, &state.tournament_store, &program_id)
+    let metadata = get_action_metadata(id, &state.tournament_store)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
 

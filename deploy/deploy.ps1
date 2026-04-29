@@ -151,11 +151,8 @@ Run-Remote "chown xfchess:xfchess /home/xfchess"
 Run-Remote "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups /opt/xfchess/keys /opt/xfchess/src"
 Run-Remote "chown -R xfchess:xfchess /opt/xfchess"
 Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates"
-Run-Remote "command -v cargo >/dev/null 2>&1 || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh && chmod +x /tmp/rustup.sh && su - xfchess -c '/tmp/rustup.sh -y')"
-
-# Install nightly cron backup (3am UTC, keeps 14 days)
-$cronJob = '0 3 * * * sqlite3 /opt/xfchess/data/sessions.db ".backup ''/opt/xfchess/backups/sessions-$(date +%%Y%%m%%d).db''" ; sqlite3 /opt/xfchess/data/vault.db ".backup ''/opt/xfchess/backups/vault-$(date +%%Y%%m%%d).db''" ; find /opt/xfchess/backups -name ''*.db'' -mtime +14 -delete'
-Run-Remote "(crontab -l 2>/dev/null | grep -v xfchess/backups; echo '$cronJob') | crontab -"
+Run-Remote "command -v cargo >/dev/null 2>&1 || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh && chmod +x /tmp/rustup.sh && /tmp/rustup.sh -y)"
+Run-Remote "(crontab -l 2>/dev/null | grep -v xfchess/backups; echo '0 3 * * * sqlite3 /opt/xfchess/data/sessions.db "".backup ''/opt/xfchess/backups/sessions-$(date +%%Y%%m%%d).db''" ; sqlite3 /opt/xfchess/data/vault.db "".backup ''/opt/xfchess/backups/vault-$(date +%%Y%%m%%d).db''" ; find /opt/xfchess/backups -name ''*.db'' -mtime +14 -delete') | crontab -"
 Write-Host "Nightly backup cron installed (3am UTC, 14-day retention)" -ForegroundColor DarkGray
 
 # ── Step 3: Sync source and build backend on server ───────────────────────────

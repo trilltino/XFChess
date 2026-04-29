@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
-use crate::signing::storage::tournament::{MatchStatus, TournamentRecord, TournamentStore, TournamentStatus, TournamentFormat};
+use crate::signing::storage::tournament::{MatchStatus, TournamentRecord, TournamentStatus, TournamentFormat};
 use crate::signing::{AppState, TournamentTrigger};
 
 // ── Request / Response types ──────────────────────────────────────────────────
@@ -128,17 +128,17 @@ pub fn tournament_player_app_state_routes() -> Router<AppState> {
 /// Creates admin tournament routes.
 pub fn admin_tournament_routes() -> Router<AppState> {
     Router::new()
-        .route("/create", post(create_tournament))
-        .route("/{id}/record-result", post(record_result))
-        .route("/{id}/set-match-game-id", post(set_match_game_id))
-        .route("/{id}/initialize-swiss", post(initialize_swiss_tournament))
+        .route("/create", post(create_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/record-result", post(record_result).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/set-match-game-id", post(set_match_game_id).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/initialize-swiss", post(initialize_swiss_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
 }
 
 /// Creates admin tournament routes requiring AppState (for USDC operations).
 pub fn admin_tournament_app_state_routes() -> Router<AppState> {
     Router::new()
-        .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction))
-        .route("/{id}/cancel", post(build_cancel_transaction))
+        .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/cancel", post(build_cancel_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
 }
 
 /// Creates tournament listing routes.
@@ -613,7 +613,7 @@ async fn build_fund_prize_transaction(
     info!("[tournament] Building fund prize tx for tournament {} amount {}", id, req.amount);
     
     // Verify tournament exists
-    let tournament = state.tournament_store.get(id).await
+    state.tournament_store.get(id).await
         .ok_or(StatusCode::NOT_FOUND)?;
 
     // Build transaction (simplified - actual implementation would use solana_sdk)
@@ -1025,4 +1025,22 @@ async fn get_schedule_status(
         max_players: tournament.max_players,
         my_session_authorized: None, // populated by client from wallet state
     }))
+}
+
+/// Middleware to enforce admin authentication for privileged routes.
+async fn admin_auth_middleware(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, StatusCode> {
+    let auth_header = req.headers().get("Authorization");
+    if let Some(auth) = auth_header {
+        if auth.to_str().unwrap_or("").starts_with("Bearer ") {
+            let token = auth.to_str().unwrap_or("").trim_start_matches("Bearer ");
+            // In a real implementation, validate token against an environment variable or database
+            if token == std::env::var("ADMIN_TOKEN").unwrap_or("admin_token".to_string()) {
+                return Ok(next.run(req).await);
+            }
+        }
+    }
+    Err(StatusCode::UNAUTHORIZED)
 }

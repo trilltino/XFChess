@@ -16,6 +16,8 @@
 //! ## Time Control
 //! - **WhiteWonByTime**: Black's time expired
 //! - **BlackWonByTime**: White's time expired
+//! - **WhiteWonByResignation**: Black resigned
+//! - **BlackWonByResignation**: White resigned
 //!
 //! # Integration
 //!
@@ -132,6 +134,16 @@ pub enum GameOverState {
     /// White's time expired before completing their move. Only possible in
     /// timed games.
     BlackWonByTime,
+
+    /// White won by resignation
+    ///
+    /// Black voluntarily resigned the game.
+    WhiteWonByResignation,
+
+    /// Black won by resignation
+    ///
+    /// White voluntarily resigned the game.
+    BlackWonByResignation,
 }
 
 impl GameOverState {
@@ -184,6 +196,8 @@ impl GameOverState {
             GameOverState::InsufficientMaterial => "Draw by insufficient material",
             GameOverState::WhiteWonByTime => "White wins on time!",
             GameOverState::BlackWonByTime => "Black wins on time!",
+            GameOverState::WhiteWonByResignation => "White wins by resignation!",
+            GameOverState::BlackWonByResignation => "Black wins by resignation!",
         }
     }
 
@@ -209,8 +223,12 @@ impl GameOverState {
     /// ```
     pub fn winner(&self) -> Option<PieceColor> {
         match self {
-            GameOverState::WhiteWon | GameOverState::WhiteWonByTime => Some(PieceColor::White),
-            GameOverState::BlackWon | GameOverState::BlackWonByTime => Some(PieceColor::Black),
+            GameOverState::WhiteWon
+            | GameOverState::WhiteWonByTime
+            | GameOverState::WhiteWonByResignation => Some(PieceColor::White),
+            GameOverState::BlackWon
+            | GameOverState::BlackWonByTime
+            | GameOverState::BlackWonByResignation => Some(PieceColor::Black),
             _ => None,
         }
     }
@@ -228,6 +246,13 @@ impl GameOverState {
     /// ```
     pub fn is_checkmate(&self) -> bool {
         matches!(self, GameOverState::WhiteWon | GameOverState::BlackWon)
+    }
+
+    pub fn is_resignation(&self) -> bool {
+        matches!(
+            self,
+            GameOverState::WhiteWonByResignation | GameOverState::BlackWonByResignation
+        )
     }
 }
 
@@ -286,6 +311,13 @@ mod tests {
     }
 
     #[test]
+    fn test_is_game_over_resignation_black() {
+        //! Tests that BlackWonByResignation is game over
+        let state = GameOverState::BlackWonByResignation;
+        assert!(state.is_game_over());
+    }
+
+    #[test]
     fn test_is_game_over_timeout_black() {
         //! Tests that BlackWonByTime is game over
         let state = GameOverState::BlackWonByTime;
@@ -304,6 +336,13 @@ mod tests {
         //! Tests message for White checkmate victory
         let state = GameOverState::WhiteWon;
         assert_eq!(state.message(), "White wins by checkmate!");
+    }
+
+    #[test]
+    fn test_message_white_won_by_resignation() {
+        //! Tests message for White resignation victory
+        let state = GameOverState::WhiteWonByResignation;
+        assert_eq!(state.message(), "White wins by resignation!");
     }
 
     #[test]

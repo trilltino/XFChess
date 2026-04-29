@@ -1,6 +1,6 @@
 //! Instruction to create a new active wagered game context.
 
-use crate::constants::{MAX_WAGER_AMOUNT, GAME_SEED, MOVE_LOG_SEED, WAGER_ESCROW_SEED};
+use crate::constants::{MAX_WAGER_AMOUNT, GAME_SEED, MOVE_LOG_SEED, WAGER_ESCROW_SEED, CREATE_GAME_COST};
 use crate::state::{Game, GameStatus, GameResult, GameType, MatchType};
 use crate::state::move_log::MoveLog;
 use crate::errors::GameErrorCode;
@@ -23,11 +23,11 @@ fn get_country_fee(country: &str, match_type: MatchType) -> u64 {
 }
 
 #[derive(Accounts)]
-#[instruction(game_id: u64, wager_amount: u64, game_type: GameType, match_type: MatchType, country: String, time_per_move: u16)]
+#[instruction(game_id: u64, wager_amount: u64, match_type: MatchType, country: String, base_time_seconds: u64, increment_seconds: u16)]
 pub struct CreateGame<'info> {
     #[account(
         init, 
-        payer = player, 
+        payer = fee_payer, 
         space = 8 + Game::INIT_SPACE, 
         seeds = [GAME_SEED, &game_id.to_le_bytes()], 
         bump
@@ -35,8 +35,8 @@ pub struct CreateGame<'info> {
     pub game: Account<'info, Game>,
     #[account(
         init, 
-        payer = player, 
-        space = 10240, // Sufficient space for moves, timestamps, and signatures
+        payer = fee_payer, 
+        space = 36, // Minimal size: discriminator + fixed fields + empty vecs; grows via realloc
         seeds = [MOVE_LOG_SEED, &game_id.to_le_bytes()], 
         bump
     )]
@@ -46,6 +46,9 @@ pub struct CreateGame<'info> {
     pub escrow_pda: UncheckedAccount<'info>,
     #[account(mut)]
     pub player: Signer<'info>,
+    /// The VPS relayer wallet that covers rent and is reimbursed via fees_advanced.
+    #[account(mut)]
+    pub fee_payer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -53,22 +56,16 @@ pub fn handler(
     ctx: Context<CreateGame>,
     game_id: u64,
     wager_amount: u64,
-    game_type: GameType,
     match_type: MatchType,
     country: String,
-    time_per_move: u16,
+    base_time_seconds: u64,
+    increment_seconds: u16,
 ) -> Result<()> {
     let game = &mut ctx.accounts.game;
     game.game_id = game_id;
     game.white = ctx.accounts.player.key();
-    game.black = match game_type {
-        GameType::PvAI => crate::constants::ai_authority::ID,
-        GameType::PvP => Pubkey::default(),
-    };
-    game.status = match game_type {
-        GameType::PvAI => GameStatus::Active,
-        GameType::PvP => GameStatus::WaitingForOpponent,
-    };
+    game.black = Pubkey::default();
+    game.status = GameStatus::WaitingForOpponent;
     game.result = GameResult::None;
     game.fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
     game.move_count = 0;
@@ -77,11 +74,15 @@ pub fn handler(
     game.updated_at = game.created_at;
     game.wager_amount = wager_amount;
     game.wager_token = None;
-    game.game_type = game_type;
-    game.match_type = match_type;
-    game.country_fee = get_country_fee(&country, match_type);
-    game.time_per_move = i64::from(time_per_move);
+    game.game_type = GameType::PvP;
+    game.match_type = match_type.clone();
+    game.country_fee = get_country_fee(&country, match_type.clone());
+    game.base_time_seconds = base_time_seconds;
+    game.increment_seconds = increment_seconds;
     game.bump = ctx.bumps.game;
+    game.fee_payer = ctx.accounts.fee_payer.key();
+    game.fees_advanced = CREATE_GAME_COST;
+    game.is_delegated = false;
 
     require!(wager_amount <= MAX_WAGER_AMOUNT, GameErrorCode::WagerTooHigh);
 
@@ -106,9 +107,8 @@ pub fn handler(
     move_log.nonce = 0;
 
     msg!(
-        "Game {} created. Type: {:?}. Wager: {} SOL",
+        "Game {} created. Wager: {} lamports",
         game_id,
-        game_type,
         wager_amount
     );
     Ok(())

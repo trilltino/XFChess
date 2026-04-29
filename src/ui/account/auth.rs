@@ -1,6 +1,7 @@
 use crate::core::GameState;
+use crate::states::main_menu::PlayerIdentity;
 use bevy::prelude::*;
-use bevy::tasks::{AsyncComputeTaskPool, Task};
+use bevy::tasks::Task;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use futures_lite::future;
 use serde::Deserialize;
@@ -22,6 +23,15 @@ pub struct AuthState {
     pub is_loading: bool,
     pub mode: AuthMode,
     pub token: Option<String>,
+    pub show_modal: bool,
+    pub wallet_connected: bool,
+    pub wallet_pubkey: Option<String>,
+    pub wallet_needs_registration: bool,
+}
+
+#[derive(Resource, Default)]
+pub struct ProfileConsentState {
+    pub show: bool,
 }
 
 #[derive(Default, PartialEq, Eq, Debug)]
@@ -29,10 +39,18 @@ pub enum AuthMode {
     #[default]
     Login,
     Register,
+    WalletConnect,
+    WalletRegister,
 }
 
 #[derive(Resource)]
-pub struct AuthTask(Task<Result<AuthResponse, String>>);
+pub struct AuthTask(Task<Result<AuthTaskResult, String>>);
+
+#[derive(Debug)]
+enum AuthTaskResult {
+    Auth(AuthResponse),
+    WalletCheck { pubkey: String, registered: bool, has_kyc: bool },
+}
 
 // --- API Types ---
 
@@ -40,6 +58,8 @@ pub struct AuthTask(Task<Result<AuthResponse, String>>);
 pub struct AuthResponse {
     pub token: String,
     pub username: String,
+    #[serde(default)]
+    pub wallet: String,
 }
 
 // --- Plugin ---
@@ -49,12 +69,17 @@ pub struct AuthUiPlugin;
 impl Plugin for AuthUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AuthState>()
+            .init_resource::<ProfileConsentState>()
             .add_systems(OnEnter(GameState::Auth), setup_auth)
             .add_systems(
                 EguiPrimaryContextPass,
                 auth_ui_system.run_if(in_state(GameState::Auth)),
             )
-            .add_systems(Update, handle_auth_task.run_if(in_state(GameState::Auth)));
+            .add_systems(
+                EguiPrimaryContextPass,
+                render_profile_consent_modal.run_if(in_state(GameState::Auth)),
+            )
+            .add_systems(Update, handle_auth_task);
     }
 }
 
@@ -69,9 +94,13 @@ fn setup_auth(mut auth_state: ResMut<AuthState>) {
 fn auth_ui_system(
     mut contexts: EguiContexts,
     mut auth_state: ResMut<AuthState>,
+    consent_state: Res<ProfileConsentState>,
     mut commands: Commands,
     mut frames: Local<usize>,
 ) {
+    if consent_state.show {
+        return;
+    }
     if *frames < 5 {
         *frames += 1;
         return;
@@ -167,7 +196,8 @@ fn auth_ui_system(
                     let input_height = 45.0;
                     let font_size = 18.0;
 
-                    if auth_state.mode == AuthMode::Register {
+                    // Show username field for Register or WalletRegister modes
+                    if auth_state.mode == AuthMode::Register || auth_state.mode == AuthMode::WalletRegister {
                         ui.add_sized(
                             [container_width, input_height],
                             egui::TextEdit::singleline(&mut auth_state.username)
@@ -217,6 +247,8 @@ fn auth_ui_system(
                     let button_text = match auth_state.mode {
                         AuthMode::Login => "LOGIN",
                         AuthMode::Register => "CREATE ACCOUNT",
+                        AuthMode::WalletRegister => "REGISTER WALLET",
+                        AuthMode::WalletConnect => "CONNECT WALLET",
                     };
 
                     if ui
@@ -233,7 +265,17 @@ fn auth_ui_system(
                         )
                         .clicked()
                     {
-                        perform_auth(&mut auth_state, &mut commands);
+                        match auth_state.mode {
+                            AuthMode::Login | AuthMode::Register => {
+                                perform_auth(&mut auth_state, &mut commands);
+                            }
+                            AuthMode::WalletRegister => {
+                                perform_wallet_register(&mut auth_state, &mut commands);
+                            }
+                            AuthMode::WalletConnect => {
+                                perform_wallet_connect(&mut auth_state, &mut commands);
+                            }
+                        }
                     }
 
                     ui.add_space(20.0);
@@ -244,6 +286,8 @@ fn auth_ui_system(
                     let toggle_text = match auth_state.mode {
                         AuthMode::Login => "CREATE NEW ACCOUNT",
                         AuthMode::Register => "BACK TO LOGIN",
+                        AuthMode::WalletRegister => "BACK TO LOGIN",
+                        AuthMode::WalletConnect => "BACK TO LOGIN",
                     };
 
                     if ui
@@ -261,11 +305,20 @@ fn auth_ui_system(
                         )
                         .clicked()
                     {
-                        auth_state.mode = match auth_state.mode {
-                            AuthMode::Login => AuthMode::Register,
-                            AuthMode::Register => AuthMode::Login,
-                        };
+                        auth_state.mode = AuthMode::Login;
                         auth_state.error = None;
+                        auth_state.wallet_needs_registration = false;
+                    }
+
+                    ui.add_space(10.0);
+
+                    // Login with Wallet (New Option) - only show in Login mode
+                    if auth_state.mode == AuthMode::Login {
+                        if ui.add_sized([200.0, 40.0], egui::Button::new(
+                            egui::RichText::new("LOGIN WITH WALLET").strong().color(egui::Color32::WHITE)
+                        ).fill(egui::Color32::from_rgb(50, 50, 60)).corner_radius(8.0)).clicked() {
+                            perform_wallet_connect(&mut auth_state, &mut commands);
+                        }
                     }
                 }
             });
@@ -310,85 +363,240 @@ fn render_floating_title(ui: &mut egui::Ui, color: egui::Color32) {
         let text_layout = painter.layout_no_wrap(ch.to_string(), font_id.clone(), color);
         let width = text_layout.size().x;
 
-        painter.galley(pos, text_layout, egui::Color32::BLACK);
-
+        painter.galley(pos, text_layout, color);
         x_offset += width;
     }
 }
 
-fn perform_auth(auth_state: &mut ResMut<AuthState>, commands: &mut Commands) {
+pub fn perform_auth(auth_state: &mut ResMut<AuthState>, commands: &mut Commands) {
     auth_state.is_loading = true;
     auth_state.error = None;
 
-    let thread_pool = AsyncComputeTaskPool::get();
+    let thread_pool = bevy::tasks::AsyncComputeTaskPool::get();
     let base_url = auth_base_url();
     let email = auth_state.email.clone();
     let password = auth_state.password.clone();
     let username = auth_state.username.clone();
-    let mode = auth_state.mode == AuthMode::Register;
+    let is_register = auth_state.mode == AuthMode::Register;
 
-    // Use blocking HTTP client to avoid Tokio runtime requirement
     let task = thread_pool.spawn(async move {
-        // Run blocking code in a separate thread
-        std::thread::spawn(move || {
-            let client = reqwest::blocking::Client::new();
-            let url = if mode {
-                format!("{}/auth/register", base_url)
-            } else {
-                format!("{}/auth/login", base_url)
-            };
+        let client = reqwest::blocking::Client::new();
+        let url = if is_register {
+            format!("{}/api/auth/register-email", base_url)
+        } else {
+            format!("{}/api/auth/login-email", base_url)
+        };
 
-            let res = if mode {
-                let body = serde_json::json!({
-                    "username": username,
-                    "email": email,
-                    "password": password,
-                });
-                client.post(&url).json(&body).send()
-            } else {
-                let body = serde_json::json!({
-                    "email": email,
-                    "password": password,
-                });
-                client.post(&url).json(&body).send()
-            };
+        let body = if is_register {
+            serde_json::json!({
+                "email": email,
+                "password": password,
+                "username": username,
+            })
+        } else {
+            serde_json::json!({
+                "email": email,
+                "password": password,
+            })
+        };
 
-            match res {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        if mode {
-                            // After registration, auto-login
-                            let login_body = serde_json::json!({
-                                "email": email,
-                                "password": password,
-                            });
-                            let login_url = format!("{}/auth/login", base_url);
-                            let login_res = client.post(&login_url).json(&login_body).send();
-                            match login_res {
-                                Ok(l_res) => {
-                                    if l_res.status().is_success() {
-                                        l_res.json::<AuthResponse>().map_err(|e| e.to_string())
-                                    } else {
-                                        Err("Registration successful, but auto-login failed."
-                                            .to_string())
-                                    }
-                                }
-                                Err(e) => Err(e.to_string()),
-                            }
-                        } else {
-                            response.json::<AuthResponse>().map_err(|e| e.to_string())
-                        }
+        let res = client.post(&url).json(&body).send();
+
+        match res {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let ct = response.headers().get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if ct.contains("application/json") {
+                        response.json::<AuthResponse>().map_err(|e| e.to_string()).map(|r| AuthTaskResult::Auth(r))
                     } else {
-                        let status = response.status();
                         let text = response.text().unwrap_or_default();
-                        Err(format!("Request failed ({}): {}", status, text))
+                        Err(format!("Auth returned non-JSON response: {}", text))
                     }
+                } else {
+                    let status = response.status();
+                    let text = response.text().unwrap_or_default();
+                    Err(format!("Auth failed ({}): {}", status, text))
                 }
-                Err(e) => Err(e.to_string()),
             }
-        })
-        .join()
-        .unwrap_or_else(|_| Err("Thread panicked".to_string()))
+            Err(e) => Err(e.to_string()),
+        }
+    });
+
+    commands.insert_resource(AuthTask(task));
+}
+
+pub fn perform_wallet_connect(auth_state: &mut ResMut<AuthState>, commands: &mut Commands) {
+    auth_state.is_loading = true;
+    auth_state.error = None;
+
+    // Trigger the Tauri wallet popup to open
+    crate::multiplayer::solana::tauri_signer::open_wallet_browser();
+
+    let thread_pool = bevy::tasks::AsyncComputeTaskPool::get();
+    let base_url = auth_base_url();
+
+    let task = thread_pool.spawn(async move {
+        // Poll for wallet pubkey with retries (give user time to connect)
+        let mut pubkey = None;
+        for _attempt in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            pubkey = crate::multiplayer::solana::integration::systems::query_wallet_pubkey_from_tauri();
+            if pubkey.is_some() {
+                break;
+            }
+        }
+
+        let pubkey = match pubkey {
+            Some(pk) => pk,
+            None => return Err("Wallet not connected. Please connect your wallet in the popup window.".to_string()),
+        };
+
+        let client = reqwest::blocking::Client::new();
+
+        // Check if wallet is registered
+        let url = format!("{}/api/auth/check-wallet/{}", base_url, pubkey);
+        let res = client.get(&url).send();
+
+        let is_registered = match res {
+            Ok(response) => response.status().is_success(),
+            Err(e) => return Err(e.to_string()),
+        };
+
+        // Check KYC status
+        let kyc_url = format!("{}/api/user/status/{}", base_url, pubkey);
+        let kyc_res = client.get(&kyc_url).send();
+        let has_kyc = match kyc_res {
+            Ok(response) => {
+                if response.status().is_success() {
+                    if let Ok(status) = response.json::<serde_json::Value>() {
+                        status.get("has_kyc").and_then(|v| v.as_bool()).unwrap_or(false)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        };
+
+        Ok(AuthTaskResult::WalletCheck { pubkey, registered: is_registered, has_kyc })
+    });
+
+    commands.insert_resource(AuthTask(task));
+}
+
+pub fn perform_wallet_register(auth_state: &mut ResMut<AuthState>, commands: &mut Commands) {
+    auth_state.is_loading = true;
+    auth_state.error = None;
+
+    let thread_pool = bevy::tasks::AsyncComputeTaskPool::get();
+    let base_url = auth_base_url();
+    let username = auth_state.username.clone();
+    let email = auth_state.email.clone();
+    let pubkey = auth_state.wallet_pubkey.clone().unwrap_or_default();
+
+    let task = thread_pool.spawn(async move {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let msg = format!("xfchess:register:{}", timestamp);
+        let signature = match crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&msg) {
+            Ok(sig) => sig,
+            Err(e) => return Err(format!("Wallet sign failed: {}", e)),
+        };
+
+        let body = serde_json::json!({
+            "wallet": pubkey,
+            "signature": bs58::encode(&signature).into_string(),
+            "timestamp": timestamp,
+            "username": username,
+            "email": email,
+        });
+
+        let client = reqwest::blocking::Client::new();
+        let url = format!("{}/api/auth/register", base_url);
+        let res = client.post(&url).json(&body).send();
+
+        match res {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let ct = response.headers().get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if ct.contains("application/json") {
+                        response.json::<AuthResponse>().map_err(|e| e.to_string()).map(|r| AuthTaskResult::Auth(r))
+                    } else {
+                        let text = response.text().unwrap_or_default();
+                        Err(format!("Register returned non-JSON response: {}", text))
+                    }
+                } else {
+                    let status = response.status();
+                    let text = response.text().unwrap_or_default();
+                    Err(format!("Register failed ({}): {}", status, text))
+                }
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    });
+
+    commands.insert_resource(AuthTask(task));
+}
+
+pub fn perform_wallet_login(auth_state: &mut ResMut<AuthState>, commands: &mut Commands) {
+    auth_state.is_loading = true;
+    auth_state.error = None;
+
+    let thread_pool = bevy::tasks::AsyncComputeTaskPool::get();
+    let base_url = auth_base_url();
+    let pubkey = auth_state.wallet_pubkey.clone().unwrap_or_default();
+
+    let task = thread_pool.spawn(async move {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let msg = format!("xfchess:login:{}", timestamp);
+        let signature = match crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&msg) {
+            Ok(sig) => sig,
+            Err(e) => return Err(format!("Wallet sign failed: {}", e)),
+        };
+
+        let body = serde_json::json!({
+            "wallet": pubkey,
+            "signature": bs58::encode(&signature).into_string(),
+            "timestamp": timestamp,
+        });
+
+        let client = reqwest::blocking::Client::new();
+        let url = format!("{}/api/auth/login", base_url);
+        let res = client.post(&url).json(&body).send();
+
+        match res {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let ct = response.headers().get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if ct.contains("application/json") {
+                        response.json::<AuthResponse>().map_err(|e| e.to_string()).map(|r| AuthTaskResult::Auth(r))
+                    } else {
+                        let text = response.text().unwrap_or_default();
+                        Err(format!("Login returned non-JSON response: {}", text))
+                    }
+                } else {
+                    let status = response.status();
+                    let text = response.text().unwrap_or_default();
+                    Err(format!("Login failed ({}): {}", status, text))
+                }
+            }
+            Err(e) => Err(e.to_string()),
+        }
     });
 
     commands.insert_resource(AuthTask(task));
@@ -398,16 +606,43 @@ fn handle_auth_task(
     mut commands: Commands,
     auth_task: Option<ResMut<AuthTask>>,
     mut auth_state: ResMut<AuthState>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut consent_state: ResMut<ProfileConsentState>,
+    _next_state: ResMut<NextState<GameState>>,
+    _current_state: Res<State<GameState>>,
+    player_identity: Option<ResMut<PlayerIdentity>>,
 ) {
     if let Some(mut task) = auth_task {
         if let Some(result) = future::block_on(future::poll_once(&mut task.0)) {
             auth_state.is_loading = false;
             match result {
-                Ok(response) => {
+                Ok(AuthTaskResult::Auth(response)) => {
                     auth_state.token = Some(response.token);
+                    auth_state.show_modal = false;
+                    auth_state.error = None;
+                    if let Some(mut identity) = player_identity {
+                        identity.username = Some(response.username.clone());
+                    }
                     info!("Authenticated as: {}", response.username);
-                    next_state.set(GameState::MainMenu);
+                    
+                    // After successful auth, show the "Complete Profile" consent modal
+                    consent_state.show = true;
+                }
+                Ok(AuthTaskResult::WalletCheck { pubkey, registered, has_kyc }) => {
+                    auth_state.wallet_pubkey = Some(pubkey.clone());
+                    auth_state.wallet_connected = true;
+                    if registered {
+                        if !has_kyc {
+                            // Wallet registered but no KYC, prompt for KYC
+                            auth_state.error = Some("Account exists but KYC verification required. Please complete KYC on the web site.".to_string());
+                        } else {
+                            // Wallet registered and KYC complete, proceed to login
+                            perform_wallet_login(&mut auth_state, &mut commands);
+                        }
+                    } else {
+                        // Wallet not registered, show registration form
+                        auth_state.mode = AuthMode::WalletRegister;
+                        auth_state.wallet_needs_registration = true;
+                    }
                 }
                 Err(e) => {
                     auth_state.error = Some(e);
@@ -495,4 +730,69 @@ mod tests {
         assert_eq!(response.token, "jwt_token_here");
         assert_eq!(response.username, "testuser");
     }
+}
+
+pub fn render_profile_consent_modal(
+    mut contexts: EguiContexts,
+    mut consent_state: ResMut<ProfileConsentState>,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut menu_state: ResMut<NextState<crate::core::states::MenuState>>,
+) {
+    if !consent_state.show {
+        return;
+    }
+
+    let ctx = contexts.ctx_mut().unwrap();
+    
+    egui::Window::new("Complete Profile")
+        .id(egui::Id::new("profile_consent_modal"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .fixed_size([400.0, 250.0])
+        .frame(egui::Frame::window(&ctx.style())
+            .fill(egui::Color32::from_rgb(15, 15, 20))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 140, 60)))
+            .corner_radius(12.0)
+            .inner_margin(20.0))
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(10.0);
+                ui.heading(egui::RichText::new("Verification Required")
+                    .color(egui::Color32::from_rgb(220, 140, 60))
+                    .size(24.0));
+                
+                ui.add_space(20.0);
+                
+                ui.label(egui::RichText::new("In order to participate in Wager matches KYC and a Solana Wallet is required do you wish to proceed?")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE));
+                
+                ui.add_space(30.0);
+                
+                ui.horizontal(|ui| {
+                    ui.add_space(20.0);
+                    
+                    // Yes button
+                    if ui.add_sized([160.0, 40.0], egui::Button::new(
+                        egui::RichText::new("Yes").strong().size(16.0)
+                    ).fill(egui::Color32::from_rgb(220, 140, 60)).corner_radius(8.0)).clicked() {
+                        consent_state.show = false;
+                        next_state.set(GameState::MainMenu); // Ensure we are in MainMenu before showing sub-menus
+                        menu_state.set(crate::core::states::MenuState::ProfileCreation);
+                    }
+                    
+                    ui.add_space(20.0);
+                    
+                    // No button with italic text
+                    if ui.add_sized([160.0, 40.0], egui::Button::new(
+                        egui::RichText::new("No, I want to play local-online").italics()
+                            .size(13.0)
+                    ).fill(egui::Color32::from_rgb(40, 40, 45)).corner_radius(8.0)).clicked() {
+                        consent_state.show = false;
+                        next_state.set(GameState::MainMenu);
+                    }
+                });
+            });
+        });
 }

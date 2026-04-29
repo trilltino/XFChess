@@ -1,12 +1,181 @@
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { submitKyc, type KycSubmission } from '../lib/api';
+
+const COUNTRIES = [
+  { code: 'GB', label: 'United Kingdom', taxLabel: 'National Insurance Number', pattern: /^[A-Za-z]{2}\d{6}[A-Za-z]$/, example: 'AB123456C' },
+  { code: 'BR', label: 'Brazil', taxLabel: 'CPF', pattern: /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, example: '123.456.789-01' },
+  { code: 'DE', label: 'Germany', taxLabel: 'Steueridentifikationsnummer', pattern: /^\d{11}$/, example: '12345678901' },
+  { code: 'CA', label: 'Canada', taxLabel: 'Social Insurance Number', pattern: /^\d{3}-?\d{3}-?\d{3}$/, example: '123-456-789' },
+];
 
 const KycPage = () => {
+  const walletPubkey = localStorage.getItem('xfchess_wallet') || localStorage.getItem('xfchess_wallet_pubkey') || '';
+  const [form, setForm] = useState<KycSubmission>({
+    wallet_pubkey: walletPubkey,
+    country: 'GB',
+    full_name: '',
+    dob: '',
+    residence: '',
+    tax_id: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [taxIdError, setTaxIdError] = useState<string | null>(null);
+
+  const currentCountry = useMemo(
+    () => COUNTRIES.find((country) => country.code === form.country),
+    [form.country],
+  );
+
+  const updateField = <K extends keyof KycSubmission>(key: K, value: KycSubmission[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+
+    // Validate tax_id when it changes
+    if (key === 'tax_id' && currentCountry?.pattern) {
+      if (!currentCountry.pattern.test(value.toString())) {
+        setTaxIdError(`Invalid format. Example: ${currentCountry.example}`);
+      } else {
+        setTaxIdError(null);
+      }
+    }
+  };
+
+  // Reset tax_id error when country changes
+  const handleCountryChange = (value: string) => {
+    updateField('country', value);
+    setTaxIdError(null);
+    setForm((current) => ({ ...current, tax_id: '' }));
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    if (!form.wallet_pubkey.trim()) {
+      setError('Connect a wallet before submitting KYC.');
+      return;
+    }
+
+    if (taxIdError) {
+      setError('Please fix the tax ID format before submitting.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await submitKyc(form);
+      setSuccess('KYC details submitted successfully. You can now return to wagering setup.');
+    } catch (submissionError) {
+      setError(submissionError instanceof Error ? submissionError.message : 'KYC submission failed.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="content-wrap page-overlay">
       <section className="section">
         <Link to="/" className="back-btn"><ArrowLeft size={18} /> Back</Link>
+
+        <div style={{ maxWidth: '760px', margin: '0 auto 32px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '32px' }}>
+          <div className="section-label">Verification</div>
+          <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '10px' }}>Complete KYC</h1>
+          <p style={{ color: 'var(--text-dim)', lineHeight: 1.7, marginBottom: '24px' }}>
+            Enter the details required for wagering eligibility. This submits directly to your local/backend `/api/kyc/submit` endpoint.
+          </p>
+
+          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '16px' }}>
+            <label style={{ display: 'grid', gap: '8px' }}>
+              <span>Wallet public key</span>
+              <input
+                type="text"
+                value={form.wallet_pubkey}
+                onChange={(event) => updateField('wallet_pubkey', event.target.value)}
+                placeholder="Connect wallet first or paste pubkey"
+                style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff' }}
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: '8px' }}>
+              <span>Country of residence</span>
+              <select
+                value={form.country}
+                onChange={(event) => handleCountryChange(event.target.value)}
+                style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff' }}
+              >
+                {COUNTRIES.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: 'grid', gap: '8px' }}>
+              <span>Legal full name</span>
+              <input
+                type="text"
+                required
+                value={form.full_name}
+                onChange={(event) => updateField('full_name', event.target.value)}
+                style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff' }}
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: '8px' }}>
+              <span>Date of birth</span>
+              <input
+                type="date"
+                required
+                value={form.dob}
+                onChange={(event) => updateField('dob', event.target.value)}
+                style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff' }}
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: '8px' }}>
+              <span>Residential address</span>
+              <input
+                type="text"
+                required
+                value={form.residence}
+                onChange={(event) => updateField('residence', event.target.value)}
+                style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff' }}
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: '8px' }}>
+              <span>{currentCountry?.taxLabel ?? 'Tax ID'}</span>
+              <input
+                type="text"
+                required
+                value={form.tax_id}
+                onChange={(event) => updateField('tax_id', event.target.value)}
+                placeholder={`Example: ${currentCountry?.example ?? ''}`}
+                style={{ padding: '12px 14px', borderRadius: '10px', border: taxIdError ? '1px solid rgba(255, 80, 80, 0.5)' : '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff' }}
+              />
+              {taxIdError && <span style={{ color: '#ffd0d0', fontSize: '0.85rem' }}>{taxIdError}</span>}
+              {currentCountry?.example && !taxIdError && <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>Format: {currentCountry.example}</span>}
+            </label>
+
+            {error && <div style={{ color: '#ffd0d0', background: 'rgba(255, 80, 80, 0.12)', border: '1px solid rgba(255, 80, 80, 0.3)', borderRadius: '10px', padding: '12px 16px' }}>{error}</div>}
+            {success && <div style={{ color: '#d6ffe0', background: 'rgba(80, 200, 120, 0.12)', border: '1px solid rgba(80, 200, 120, 0.3)', borderRadius: '10px', padding: '12px 16px' }}>{success}</div>}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              style={{ padding: '14px 20px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #ad5c2f, #8c4a26)', color: '#fff', fontWeight: 800, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}
+            >
+              {submitting ? <Loader2 size={18} className="spinner" /> : null}
+              {submitting ? 'Submitting...' : 'Submit KYC'}
+            </button>
+          </form>
+        </div>
 
         <div className="legal-compliance-container">
           <div className="legal-header">

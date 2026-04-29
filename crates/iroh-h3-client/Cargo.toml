@@ -2,6 +2,7 @@
 name = "iroh-h3-client"
 version = "0.3.0"
 edition = "2024"
+autotests = false
 description = "HTTP/3 client utilities over Iroh's QUIC P2P transport."
 license = "MIT"
 repository = "https://github.com/Le-Maz/iroh-h3"
@@ -19,7 +20,7 @@ http = "1.4.0"
 http-body = "1.0.1"
 http-body-util = "0.1.3"
 thiserror = "2.0.18"
-tokio = { version = "1.49.0", features = ["sync"] }
+tokio = { version = "1.50.0", features = ["sync"] }
 dashmap = "6.1.0"
 tracing = "0.1.44"
 cookie = { version = "0.18.1", features = ["percent-encode"] }

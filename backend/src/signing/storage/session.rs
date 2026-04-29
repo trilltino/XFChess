@@ -21,7 +21,7 @@ pub struct SessionEntry {
 impl SessionEntry {
     /// Extracts the Keypair from stored bytes.
     pub fn keypair(&self) -> Keypair {
-        Keypair::try_from(self.keypair_bytes.as_slice()).expect("valid keypair bytes")
+        Keypair::from_bytes(&self.keypair_bytes).expect("valid keypair bytes")
     }
 
     /// Gets the session's public key.
@@ -68,7 +68,8 @@ impl SessionStore {
             CREATE TABLE IF NOT EXISTS users_v2 (
                 wallet      TEXT PRIMARY KEY,
                 username    TEXT NOT NULL,
-                email       TEXT,
+                email       TEXT UNIQUE,
+                password_hash TEXT,
                 kyc_status  TEXT NOT NULL DEFAULT 'none',
                 created_at  INTEGER NOT NULL DEFAULT 0,
                 deleted_at  INTEGER
@@ -87,10 +88,10 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Finds a user by wallet pubkey. Returns (wallet, username, email, kyc_status).
-    pub async fn find_user_by_wallet(&self, wallet: &str) -> Option<(String, String, Option<String>, String)> {
+    /// Finds a user by wallet pubkey. Returns (wallet, username, email, kyc_status, password_hash).
+    pub async fn find_user_by_wallet(&self, wallet: &str) -> Option<(String, String, Option<String>, String, Option<String>)> {
         sqlx::query_as(
-            "SELECT wallet, username, email, kyc_status FROM users_v2 WHERE wallet = ? AND deleted_at IS NULL",
+            "SELECT wallet, username, email, kyc_status, password_hash FROM users_v2 WHERE wallet = ? AND deleted_at IS NULL",
         )
         .bind(wallet)
         .fetch_one(&self.pool)
@@ -98,15 +99,56 @@ impl SessionStore {
         .ok()
     }
 
-    /// Finds a user by email (for notification / contact lookups).
-    pub async fn find_user_by_email(&self, email: &str) -> Option<(String, String, Option<String>, String)> {
+    /// Finds a user by email.
+    pub async fn find_user_by_email(&self, email: &str) -> Option<(String, String, Option<String>, String, Option<String>)> {
         sqlx::query_as(
-            "SELECT wallet, username, email, kyc_status FROM users_v2 WHERE email = ? AND deleted_at IS NULL",
+            "SELECT wallet, username, email, kyc_status, password_hash FROM users_v2 WHERE email = ? AND deleted_at IS NULL",
         )
         .bind(email)
         .fetch_one(&self.pool)
         .await
         .ok()
+    }
+
+    /// Creates a new user with email and password.
+    pub async fn register_with_email(
+        &self,
+        email: &str,
+        username: &str,
+        password_hash: &str,
+    ) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "INSERT INTO users_v2 (wallet, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("") // Wallet is empty until linked
+        .bind(username)
+        .bind(email)
+        .bind(password_hash)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Links a wallet to an existing email-based account.
+    pub async fn link_wallet(&self, email: &str, wallet: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users_v2 SET wallet = ? WHERE email = ?")
+            .bind(wallet)
+            .bind(email)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Sets the email on an existing wallet-first account.
+    pub async fn set_email(&self, wallet: &str, email: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users_v2 SET email = ? WHERE wallet = ?")
+            .bind(email)
+            .bind(wallet)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     /// Creates a new wallet-first user.
@@ -129,10 +171,10 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Updates the email for a wallet (optional field, notifications only).
-    pub async fn set_email(&self, wallet: &str, email: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE users_v2 SET email = ? WHERE wallet = ?")
-            .bind(email)
+    /// Overwrites the username for a wallet (used when syncing from on-chain profile).
+    pub async fn update_username(&self, wallet: &str, username: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users_v2 SET username = ? WHERE wallet = ?")
+            .bind(username)
             .bind(wallet)
             .execute(&self.pool)
             .await?;
@@ -174,9 +216,13 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Creates a new session for the given game and wallet.
+    /// Creates a new session for the given game and wallet, or returns the
+    /// existing session pubkey if one already exists for this game_id.
     ///
-    /// Generates a fresh session keypair and stores it in the database.
+    /// Using get-or-create semantics ensures that the joiner calling
+    /// create_session with the same game_id gets back the same session pubkey
+    /// that was stored in game.fee_payer during create_game, preventing
+    /// FeePayerMismatch errors in join_game.
     ///
     /// # Arguments
     /// * `game_id` - The unique game identifier
@@ -185,6 +231,11 @@ impl SessionStore {
     /// # Returns
     /// The session's public key
     pub async fn create(&self, game_id: u64, wallet_pubkey: Pubkey) -> Pubkey {
+        // Return the existing session pubkey if one already exists for this game.
+        if let Some(existing) = self.get(game_id).await {
+            return existing.session_pubkey();
+        }
+
         let kp = Keypair::new();
         let pubkey = kp.pubkey();
         let keypair_bytes = kp.to_bytes();
@@ -192,7 +243,7 @@ impl SessionStore {
 
         sqlx::query(
             r#"
-            INSERT OR REPLACE INTO sessions (game_id, keypair, wallet, active)
+            INSERT OR IGNORE INTO sessions (game_id, keypair, wallet, active)
             VALUES (?1, ?2, ?3, 0)
             "#,
         )

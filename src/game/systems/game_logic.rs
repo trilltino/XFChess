@@ -139,9 +139,20 @@ pub fn update_game_timer(
     time: Res<Time>,
     current_turn: Res<CurrentTurn>,
     game_phase: Res<CurrentGamePhase>,
+    active_tc: Res<crate::game::resources::active_time_control::ActiveTimeControl>,
+    ai_config: Res<crate::game::ai::resource::ChessAIResource>,
 ) {
     if !timer.is_running || game_phase.0 != GamePhase::Playing {
         return;
+    }
+
+    // In AI games, skip clock decrement when it is the AI's turn.
+    if active_tc.ai_game {
+        if let crate::game::ai::resource::GameMode::VsAI { ai_color } = ai_config.mode {
+            if current_turn.color == ai_color {
+                return;
+            }
+        }
     }
 
     let delta = time.delta_secs();

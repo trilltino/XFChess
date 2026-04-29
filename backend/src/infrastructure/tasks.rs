@@ -7,7 +7,6 @@ use crate::signing::{AppState, SigningConfig, TournamentTrigger};
 use crate::tasks::matchmaking;
 use crate::tasks::fee_claimer;
 use crate::tasks::tournament_scheduler::spawn_tournament_scheduler;
-use std::sync::Arc;
 use tracing::info;
 
 /// Spawns all background tasks for the application.
@@ -38,10 +37,11 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> tokio::
         fee_claimer::run_fee_claimer_service(rpc_url, program_id_str, feepayer).await;
     });
 
-    // Spawn tournament scheduler
+    // Spawn tournament scheduler (with gossip so it can broadcast BracketFired)
     let tournament_store = (*state.tournament_store).clone();
-    let trigger_tx = spawn_tournament_scheduler(tournament_store);
-    info!("[Tasks] Tournament scheduler spawned with Braid pub/sub");
+    let gossip = Some(state.tournament_gossip.clone());
+    let trigger_tx = spawn_tournament_scheduler(tournament_store, gossip);
+    info!("[Tasks] Tournament scheduler spawned with async-fill and gossip broadcast");
 
     info!("[Tasks] All background tasks spawned successfully");
     trigger_tx

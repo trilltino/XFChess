@@ -1,10 +1,12 @@
 use bevy::prelude::*;
+use bevy::app::App;
 
 use super::profile_check::{check_profile_on_connect, handle_profile_check_tasks};
 use super::state::{SolanaIntegrationState, BalanceRefreshTimer};
 use super::systems::*;
 use crate::ui::profile_creation::{
-    despawn_profile_creation_ui, profile_creation_ui_system, spawn_profile_creation_ui, validate_username_system
+    despawn_profile_creation_ui, handle_profile_submission, profile_creation_ui_system, 
+    spawn_profile_creation_ui, validate_username_system, ProfileCreationState, ProfileSubmissionEvent
 };
 use crate::core::states::MenuState;
 
@@ -15,6 +17,8 @@ impl Plugin for SolanaIntegrationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SolanaIntegrationState>();
         app.init_resource::<BalanceRefreshTimer>();
+        app.init_resource::<ProfileCreationState>();
+        app.add_message::<ProfileSubmissionEvent>();
         app.add_systems(Update, initialize_solana_integration);
         app.add_systems(Update, update_wallet_balance);
         app.add_systems(Update, handle_pending_solana_tasks);
@@ -27,8 +31,9 @@ impl Plugin for SolanaIntegrationPlugin {
         
         // Profile creation UI systems
         app.add_systems(OnEnter(MenuState::ProfileCreation), spawn_profile_creation_ui);
-        app.add_systems(Update, profile_creation_ui_system.run_if(in_state(MenuState::ProfileCreation)));
-        app.add_systems(Update, validate_username_system.run_if(in_state(MenuState::ProfileCreation)));
+        app.add_systems(Update, (profile_creation_ui_system).run_if(in_state(MenuState::ProfileCreation)));
+        app.add_systems(Update, (validate_username_system).run_if(in_state(MenuState::ProfileCreation)));
+        app.add_systems(Update, handle_profile_submission);
         app.add_systems(OnExit(MenuState::ProfileCreation), despawn_profile_creation_ui);
     }
 }

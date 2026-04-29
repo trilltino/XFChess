@@ -223,23 +223,10 @@ struct TournamentDetail {
     second_place: Option<String>,
     third_place: Option<String>,
     fourth_place: Option<String>,
-    matches: Option<Vec<Option<MatchDetail>>>,
     kyc_required: Option<bool>,
     scheduled_at: Option<i64>,
     elo_min: Option<u32>,
     elo_max: Option<u32>,
-    format: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MatchDetail {
-    match_index: u16,
-    round: u8,
-    player_white: Option<String>,
-    player_black: Option<String>,
-    winner: Option<String>,
-    game_id: Option<u64>,
-    status: String,
 }
 
 #[derive(Debug, Serialize)]

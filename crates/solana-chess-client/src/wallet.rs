@@ -26,10 +26,7 @@ impl KeypairWallet {
     pub fn load_from_file(path: &PathBuf) -> Result<Self> {
         let data = fs::read_to_string(path)?;
         let bytes: Vec<u8> = serde_json::from_str(&data)?;
-        let mut secret = [0u8; 32];
-        let len = bytes.len().min(32);
-        secret[..len].copy_from_slice(&bytes[..len]);
-        let keypair = Keypair::new_from_array(secret);
+        let keypair = Keypair::from_bytes(&bytes)?;
         Ok(Self { keypair })
     }
 
@@ -58,6 +55,7 @@ impl Wallet for KeypairWallet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn keypair_wallet_generate_new() {

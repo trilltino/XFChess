@@ -29,8 +29,7 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();
 
-    let black_has_joined = game.black != Pubkey::default()
-        && game.black != crate::constants::ai_authority::ID;
+    let black_has_joined = game.black != Pubkey::default();
 
     match game.status {
         GameStatus::WaitingForOpponent => {

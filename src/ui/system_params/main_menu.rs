@@ -2,6 +2,7 @@ use crate::assets::{GameAssets, LoadingProgress};
 use crate::core::{GameMode as CoreGameMode, GameSettings, GameState, PreviousState};
 use crate::game::ai::ChessAIResource;
 use crate::game::view_mode::ViewMode;
+use crate::ui::account::auth::AuthState;
 use crate::multiplayer::network::p2p::{
     ConnectToPeerEvent, HostGameEvent, P2PConnectionState, P2PUIState,
 };
@@ -46,6 +47,7 @@ use bevy_egui::EguiContexts;
 /// - [`EventWriter<ConnectToPeerEvent>`] - For connecting to peers
 #[derive(SystemParam)]
 pub struct MainMenuUIContext<'w, 's> {
+    pub commands: Commands<'w, 's>,
     pub contexts: EguiContexts<'w, 's>,
     pub next_state: ResMut<'w, NextState<GameState>>,
     pub menu_state: ResMut<'w, NextState<crate::core::MenuState>>,
@@ -80,11 +82,15 @@ pub struct MainMenuUIContext<'w, 's> {
     pub solana_lobby: Option<ResMut<'w, SolanaLobbyState>>,
     #[cfg(feature = "solana")]
     pub solana_state: Option<Res<'w, SolanaIntegrationState>>,
+    #[cfg(feature = "solana")]
+    pub tournament_client: Option<ResMut<'w, crate::multiplayer::solana::tournament::TournamentClientState>>,
     #[allow(dead_code)]
     pub tournament_lobby: ResMut<'w, crate::states::tournament_menu::TournamentLobbyState>,
     pub compliance: ResMut<'w, crate::ui::compliance_modal::ComplianceState>,
-    pub player_identity: Res<'w, crate::states::main_menu::PlayerIdentity>,
+    pub auth_state: ResMut<'w, AuthState>,
+    pub player_identity: ResMut<'w, crate::states::main_menu::PlayerIdentity>,
     pub brand_logo: ResMut<'w, crate::states::main_menu::BrandLogoState>,
     pub news_banner: ResMut<'w, crate::states::main_menu::NewsBannerState>,
     pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
+    pub active_time_control: ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
 }

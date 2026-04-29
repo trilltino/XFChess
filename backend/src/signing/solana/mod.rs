@@ -18,7 +18,7 @@ pub use instructions::{
 };
 pub use rpc::make_rpc;
 pub use transactions::{
-    fund_account, sign_and_submit, sign_and_submit_er, submit_signed_tx,
+    cosign_and_submit_tx, fund_account, sign_and_submit, sign_and_submit_er, submit_signed_tx,
 };
 
 /// PDA seed for game accounts

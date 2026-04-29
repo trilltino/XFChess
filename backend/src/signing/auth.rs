@@ -7,8 +7,8 @@ use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
-/// Token time-to-live in seconds (2 hours)
-const TOKEN_TTL_SECS: i64 = 7200;
+/// Token time-to-live in seconds (7 days)
+const TOKEN_TTL_SECS: i64 = 604_800;
 
 /// JWT claims structure containing wallet identity and expiration.
 #[derive(Debug, Serialize, Deserialize)]

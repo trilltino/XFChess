@@ -22,13 +22,15 @@ const VALID_PLAYER_COUNTS: [u16; 6] = [8, 16, 32, 64, 128, 256];
     prize_shares: [u16; 10],
     winner_takes_all: bool,
     host_treasury: Pubkey,
-    usdc_mint: Option<Pubkey>
+    usdc_mint: Option<Pubkey>,
+    base_time_seconds: u64,
+    increment_seconds: u16
 )]
 pub struct InitializeTournament<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + Tournament::INIT_SPACE,
+        space = 8 + Tournament::space_for(max_players),
         seeds = [TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
@@ -73,6 +75,8 @@ pub fn handler(
     winner_takes_all: bool,
     host_treasury: Pubkey,
     usdc_mint: Option<Pubkey>,
+    base_time_seconds: u64,
+    increment_seconds: u16,
 ) -> Result<()> {
     require!(name.len() <= 64, GameErrorCode::InvalidGameStatus);
     require!(
@@ -109,9 +113,9 @@ pub fn handler(
     t.entry_fee = entry_fee;
     t.prize_pool = 0;
     t.max_players = max_players;
-    t.registered_count = 0;
+    t.num_registered_players = 0;
     t.status = TournamentStatus::Registration;
-    t.tournament_type = tournament_type;
+    t.tournament_type = tournament_type.clone();
     t.current_round = 0;
     t.total_rounds = match tournament_type {
         TournamentType::Swiss { rounds } => rounds,
@@ -140,11 +144,16 @@ pub fn handler(
     t.started_at = None;
     t.completed_at = None;
     t.bump = ctx.bumps.tournament;
+    t.fee_payer = ctx.accounts.authority.key();
+    t.fees_advanced = 0;
+    t.platform_fee_pool = 0;
     // USDC prize pool fields
     t.usdc_prize_mint = usdc_mint;
     t.usdc_prize_pool = 0;
     t.usdc_prize_funded = false;
     t.host_treasury = host_treasury;
+    t.base_time_seconds = base_time_seconds;
+    t.increment_seconds = increment_seconds;
 
     msg!(
         "Tournament {} '{}' created. Type: {:?}, Players: {}, Entry fee: {} lamports, Host treasury: {}",

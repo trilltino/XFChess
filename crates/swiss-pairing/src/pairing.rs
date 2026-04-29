@@ -1,5 +1,5 @@
 use crate::{
-    Color, FloatStatus, Pairing, PairingError, PairingResult, Scoregroup, SwissPlayer, SwissRound,
+    Color, Pairing, PairingError, PairingResult, Scoregroup, SwissPlayer, SwissRound,
 };
 use tracing::{debug, trace, warn};
 
@@ -64,7 +64,7 @@ pub fn generate_pairings(
         }
 
         // Try to pair this scoregroup
-        let (pairings, bye, remaining) = pair_scoregroup(&available, &used_players)?;
+        let (pairings, bye, remaining) = pair_scoregroup(&available)?;
         
         all_pairings.extend(pairings);
         if let Some(bye_player) = bye {
@@ -181,7 +181,6 @@ fn group_by_score(players: &[SwissPlayer]) -> Vec<Scoregroup> {
 /// Returns (pairings, bye_player_if_any, used_player_ids)
 fn pair_scoregroup(
     players: &[SwissPlayer],
-    already_used: &[String],
 ) -> PairingResult<(Vec<Pairing>, Option<String>, Vec<String>)> {
     if players.is_empty() {
         return Ok((Vec::new(), None, Vec::new()));
@@ -437,6 +436,7 @@ fn find_player<'a>(players: &'a [SwissPlayer], id: &str) -> PairingResult<&'a Sw
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FloatStatus;
 
     fn test_player(id: &str, rating: u32, score: f64) -> SwissPlayer {
         SwissPlayer {

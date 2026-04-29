@@ -149,7 +149,19 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
         if statement.is_empty() || statement.starts_with("--") {
             continue;
         }
-        // ALTER TABLE ADD COLUMN is idempotent via ignore — SQLite errors if col exists
+        let _ = sqlx::query(statement).execute(&pools.session_pool).await;
+    }
+
+    // ── Migration 007: add password_hash to users_v2 ─────────────────────────
+    // Migration 003 removed this column for wallet-first auth, but the
+    // email/password auth routes still reference it.
+    let migration_007 = include_str!("../../migrations/007_add_password_hash.sql");
+    for statement in migration_007.split(';') {
+        let statement = statement.trim();
+        if statement.is_empty() || statement.starts_with("--") {
+            continue;
+        }
+        // Ignore "duplicate column" errors — idempotent on re-runs
         let _ = sqlx::query(statement).execute(&pools.session_pool).await;
     }
 

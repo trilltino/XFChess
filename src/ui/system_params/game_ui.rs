@@ -1,6 +1,7 @@
 use crate::core::{GameMode as CoreGameMode, GameState, PreviousState};
 use crate::game::resources::{AIParams, GameStateParams};
-use crate::game::resources::{GameTimer, MoveHistory, Players};
+use crate::game::systems::input::InGameExitConfirmation;
+use crate::game::resources::{CurrentTurn, GameTimer, MoveHistory, Players};
 use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::addon::{
@@ -13,6 +14,7 @@ use crate::multiplayer::rollup::manager::EphemeralRollupManager;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
+use crate::ui::game::game_ui::InGameHudVisibility;
 
 /// System parameter grouping UI-related resources
 #[derive(SystemParam)]
@@ -24,6 +26,7 @@ pub struct GameUIParams<'w, 's> {
     pub move_history: Res<'w, MoveHistory>,
     #[allow(dead_code)]
     pub players: Res<'w, Players>,
+    pub exit_confirmation: ResMut<'w, InGameExitConfirmation>,
     pub game_timer: Res<'w, GameTimer>,
     pub next_state: ResMut<'w, NextState<GameState>>,
     #[allow(dead_code)]
@@ -31,6 +34,7 @@ pub struct GameUIParams<'w, 's> {
     pub game_mode: Res<'w, CoreGameMode>,
     pub view_preferences: ResMut<'w, PlayerViewPreferences>,
     pub view_mode: ResMut<'w, ViewMode>,
+    pub hud_visibility: Res<'w, InGameHudVisibility>,
     #[cfg(feature = "solana")]
     pub solana_wallet: Option<ResMut<'w, SolanaWallet>>,
     #[cfg(feature = "solana")]
@@ -44,4 +48,6 @@ pub struct GameUIParams<'w, 's> {
     #[cfg(feature = "solana")]
     pub rollup_manager: Option<ResMut<'w, EphemeralRollupManager>>,
     pub spectator_mode: Res<'w, crate::ui::spectator_mode::SpectatorMode>,
+    pub active_time_control: Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
+    pub current_turn: Res<'w, CurrentTurn>,
 }

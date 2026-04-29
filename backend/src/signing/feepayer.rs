@@ -22,7 +22,7 @@ fn load_keypair_from_file(path: &str) -> Option<Keypair> {
     let bytes: Vec<u8> = serde_json::from_str(&text)
         .map_err(|e| tracing::error!("[FeepayerPool] invalid JSON in {path}: {e}"))
         .ok()?;
-    Keypair::try_from(bytes.as_slice())
+    Keypair::from_bytes(&bytes)
         .map_err(|e| tracing::error!("[FeepayerPool] invalid keypair bytes in {path}: {e}"))
         .ok()
 }
@@ -57,7 +57,7 @@ impl FeepayerPool {
                     load_keypair_from_file(k)
                 } else {
                     let bytes = bs58::decode(k).into_vec().ok()?;
-                    Keypair::try_from(bytes.as_slice()).ok()
+                    Keypair::from_bytes(&bytes).ok()
                 }
             })
             .collect();

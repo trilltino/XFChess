@@ -5,6 +5,7 @@ use ephemeral_rollups_sdk::cpi::undelegate_account;
 
 pub mod account_ix;
 pub mod constants;
+#[cfg(feature = "cranks")]
 pub mod crank_ix;
 pub mod delegation_ix;
 pub mod elo;
@@ -19,6 +20,7 @@ pub mod tournament_ix;
 // can find them via their `use super::*` chain.
 pub use account_ix::{InitProfile, VerifyProfile, SetUsername, WithdrawExpiredWager,
     InitializeFeeVault, CollectFee, ClaimFees, CreateSession, RevokeSession, UpdateElo};
+#[cfg(feature = "cranks")]
 pub use crank_ix::{ScheduleTimeCheck, CrankTimeCheck, ScheduleTimeCheckArgs, crank_time_check, schedule_time_check_crank, crank_time_check::CrankTimeCheckData};
 pub use delegation_ix::{
     AuthorizeSessionCtx, DelegateGameCtx, InitializeAfterUndelegation, RevokeSessionCtx,
@@ -26,7 +28,7 @@ pub use delegation_ix::{
 };
 pub use game_ix::{CancelGame, CreateGame, EndGame, JoinGame, ResignGame, ClaimTimeout};
 pub use governance_ix::{ClaimStaleDispute, DisputeGame, ResolveDispute};
-pub use moves_ix::{CommitMoveBatchCtx, RecordMove};
+pub use moves_ix::RecordMove;
 pub use tournament_ix::{
     AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
     CancelTournament, ClaimTournamentPrize, FundUsdcPrize, InitializeMatch, InitializeTournament,
@@ -88,9 +90,6 @@ pub mod __client_accounts_dispute_game {
 }
 pub mod __client_accounts_resolve_dispute {
     pub use crate::governance_ix::resolve::__client_accounts_resolve_dispute::*;
-}
-pub mod __client_accounts_commit_move_batch_ctx {
-    pub use crate::moves_ix::commit_batch::__client_accounts_commit_move_batch_ctx::*;
 }
 pub mod __client_accounts_record_move {
     pub use crate::moves_ix::record::__client_accounts_record_move::*;
@@ -155,9 +154,11 @@ pub mod __client_accounts_revoke_session {
 pub mod __client_accounts_update_elo {
     pub use crate::account_ix::fee_vault_ix::__client_accounts_update_elo::*;
 }
+#[cfg(feature = "cranks")]
 pub mod __client_accounts_schedule_time_check {
     pub use crate::crank_ix::schedule_time_check::__client_accounts_schedule_time_check::*;
 }
+#[cfg(feature = "cranks")]
 pub mod __client_accounts_crank_time_check {
     pub use crate::crank_ix::crank_time_check::__client_accounts_crank_time_check::*;
 }
@@ -174,8 +175,8 @@ declare_id!("C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf");
 pub mod xfchess_game {
     use super::*;
 
-    pub fn init_profile(ctx: Context<InitProfile>, username: String) -> Result<()> {
-        crate::account_ix::profile::handler(ctx, username)
+    pub fn init_profile(ctx: Context<InitProfile>, username: String, country: String) -> Result<()> {
+        crate::account_ix::profile::handler(ctx, username, country)
     }
 
     pub fn verify_profile(ctx: Context<VerifyProfile>) -> Result<()> {
@@ -190,26 +191,30 @@ pub mod xfchess_game {
         ctx: Context<CreateGame>,
         game_id: u64,
         wager_amount: u64,
-        game_type: state::GameType,
         match_type: state::MatchType,
         country: String,
-        time_per_move: u16,
+        base_time_seconds: u64,
+        increment_seconds: u16,
     ) -> Result<()> {
         crate::game_ix::create::handler(
             ctx,
             game_id,
             wager_amount,
-            game_type,
             match_type,
             country,
-            time_per_move,
+            base_time_seconds,
+            increment_seconds,
         )
     }
 
     pub fn join_game(
-        ctx: Context<JoinGame>
+        ctx: Context<JoinGame>,
+        game_id: u64,
     ) -> Result<()> {
-        crate::game_ix::join::join_game(ctx)
+        crate::game_ix::join::handler(
+            ctx,
+            game_id,
+        )
     }
 
     pub fn record_move(
@@ -220,7 +225,14 @@ pub mod xfchess_game {
         nonce: u64,
         signature: Option<Vec<u8>>,
     ) -> Result<()> {
-        crate::moves_ix::record::handler(ctx, game_id, move_str, next_fen, nonce, signature)
+        crate::moves_ix::record::handler(
+            ctx,
+            game_id,
+            move_str,
+            next_fen,
+            nonce,
+            signature,
+        )
     }
 
     pub fn finalize_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
@@ -281,22 +293,6 @@ pub mod xfchess_game {
         crate::delegation_ix::session::handler_revoke_session_key(ctx, game_id)
     }
 
-    pub fn commit_move_batch(
-        ctx: Context<CommitMoveBatchCtx>,
-        game_id: u64,
-        nonce_start: u64,
-        moves: Vec<String>,
-        next_fens: Vec<String>,
-    ) -> Result<()> {
-        crate::moves_ix::commit_batch::handler_commit_move_batch(
-            ctx,
-            game_id,
-            nonce_start,
-            moves,
-            next_fens,
-        )
-    }
-
     pub fn delegate_game(
         ctx: Context<DelegateGameCtx>,
         game_id: u64,
@@ -344,6 +340,8 @@ pub mod xfchess_game {
         winner_takes_all: bool,
         host_treasury: Pubkey,
         usdc_mint: Option<Pubkey>,
+        base_time_seconds: u64,
+        increment_seconds: u16,
     ) -> Result<()> {
         crate::tournament_ix::lifecycle::initialize::handler(
             ctx,
@@ -359,6 +357,8 @@ pub mod xfchess_game {
             winner_takes_all,
             host_treasury,
             usdc_mint,
+            base_time_seconds,
+            increment_seconds,
         )
     }
 
@@ -378,8 +378,8 @@ pub mod xfchess_game {
         )
     }
 
-    pub fn register_player(ctx: Context<RegisterPlayer>, tournament_id: u64) -> Result<()> {
-        crate::tournament_ix::registration::register::handler(ctx, tournament_id)
+    pub fn register_player(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Result<()> {
+        crate::tournament_ix::registration::register::handler(ctx, tournament_id, elo)
     }
 
     pub fn start_tournament(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> {
@@ -473,20 +473,20 @@ pub mod xfchess_game {
         tournament_id: u64,
         game_id: u64,
         wager_amount: u64,
-        game_type: state::GameType,
         match_type: state::MatchType,
         country: String,
-        time_per_move: u16,
+        base_time_seconds: u64,
+        increment_seconds: u16,
     ) -> Result<()> {
         crate::tournament_ix::session::session_create_game::handler(
             ctx,
             tournament_id,
             game_id,
             wager_amount,
-            game_type,
             match_type,
             country,
-            time_per_move,
+            base_time_seconds,
+            increment_seconds,
         )
     }
 
@@ -555,6 +555,7 @@ pub mod xfchess_game {
     // ── Crank (Scheduled Tasks) ─────────────────────────────────────────────────
 
     /// Schedule an automatic time check crank for a game
+    #[cfg(feature = "cranks")]
     pub fn schedule_time_check(
         ctx: Context<ScheduleTimeCheck>,
         args: ScheduleTimeCheckArgs,
@@ -563,6 +564,7 @@ pub mod xfchess_game {
     }
 
     /// Automatic time check called by the scheduled crank
+    #[cfg(feature = "cranks")]
     pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData) -> Result<()> {
         crate::crank_ix::crank_time_check::crank_time_check(ctx, _data)
     }

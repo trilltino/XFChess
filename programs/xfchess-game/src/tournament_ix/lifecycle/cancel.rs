@@ -58,7 +58,7 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
 
     let tournament = &ctx.accounts.tournament;
     let refund_amount = tournament.entry_fee;
-    let registered = tournament.registered_count as usize;
+    let registered = tournament.players.len();
 
     // Step 1: Return USDC prize pool to operator (if funded)
     if tournament.usdc_prize_mint.is_some() && tournament.usdc_prize_funded {
@@ -94,6 +94,15 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
                 usdc_balance
             );
         }
+    }
+
+    // Check for duplicate player accounts to prevent double-refunds
+    let mut seen_players = std::collections::HashSet::new();
+    for player_key in tournament.players.iter() {
+        require!(
+            seen_players.insert(player_key),
+            GameErrorCode::DuplicatePlayerAccount
+        );
     }
 
     // Step 2: Refund entry fees to players from host_treasury

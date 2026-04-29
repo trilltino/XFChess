@@ -7,6 +7,7 @@
 use crate::core::GameState;
 use crate::game::camera_modes::{CameraViewMode, CinematicSequence};
 use crate::game::resources::{GameOverState, MoveHistory};
+use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
 use crate::ui::menus::game_over_popup::GameOverPopupPlugin;
 use bevy::prelude::*;
 
@@ -41,6 +42,7 @@ pub struct AutoCinematicMarker;
 fn setup_cinematic_camera(
     mut camera_view_mode: ResMut<CameraViewMode>,
     mut cinematic_sequence: ResMut<CinematicSequence>,
+    mut view_preferences: ResMut<PlayerViewPreferences>,
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut commands: Commands,
 ) {
@@ -48,6 +50,7 @@ fn setup_cinematic_camera(
 
     // Switch to cinematic camera mode
     *camera_view_mode = CameraViewMode::Cinematic;
+    view_preferences.local_view = ViewMode::Standard3D;
 
     // Reset and start the cinematic sequence
     cinematic_sequence.reset();

@@ -17,6 +17,7 @@
 //! 4. If invalid -> Clear selection.
 
 use crate::engine::board_state::ChessEngine;
+use crate::core::states::GameMode;
 use crate::game::components::{HasMoved, SelectedPiece};
 use crate::game::resources::{
     CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingTurnAdvance,
@@ -26,8 +27,10 @@ use crate::game::resources::player::Players;
 use crate::game::systems::shared::{
     execute_move, find_piece_on_square, CapturedTarget, MoveContext,
 };
+use crate::multiplayer::network::protocol::NetworkMessage;
+use crate::multiplayer::types::BraidNetworkState;
 #[cfg(feature = "solana")]
-use crate::multiplayer::solana::addon::SolanaGameSync;
+use crate::multiplayer::solana::addon::{CompetitiveMatchState, SolanaGameSync};
 use crate::rendering::pieces::{Piece, PieceColor};
 use crate::rendering::utils::Square;
 use bevy::ecs::system::SystemParam;
@@ -50,6 +53,17 @@ pub type PieceReadOnlyQuery<'w, 's> = Query<
         &'static Transform,
     ),
 >;
+
+#[derive(Resource, Default)]
+pub struct InGameExitConfirmation {
+    pub visible: bool,
+    pub pending_exit: bool,
+}
+
+pub fn reset_in_game_exit_confirmation(mut confirmation: ResMut<InGameExitConfirmation>) {
+    confirmation.visible = false;
+    confirmation.pending_exit = false;
+}
 
 /// Grouped system parameters for input handling to reduce argument count
 #[derive(SystemParam)]
@@ -568,10 +582,103 @@ pub fn toggle_fullscreen(
 /// System: Handle ESC key to exit to main menu (forfeit/leave game)
 pub fn handle_escape_key(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut next_state: ResMut<NextState<crate::core::GameState>>,
+    mut confirmation: ResMut<InGameExitConfirmation>,
 ) {
     if keyboard.just_pressed(KeyCode::Escape) {
-        info!("[INPUT] ESC pressed - returning to main menu");
-        next_state.set(crate::core::GameState::MainMenu);
+        confirmation.visible = !confirmation.visible;
+        if !confirmation.visible {
+            confirmation.pending_exit = false;
+        }
+        info!("[INPUT] ESC pressed - toggling exit confirmation to {}", confirmation.visible);
     }
+}
+
+pub fn confirm_exit_game(
+    mut confirmation: ResMut<InGameExitConfirmation>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+    game_mode: Res<GameMode>,
+    current_turn: Res<CurrentTurn>,
+    players: Res<Players>,
+    mut game_over: ResMut<GameOverState>,
+    mut resign_events: MessageWriter<crate::game::events::ResignEvent>,
+    network_state: Option<Res<BraidNetworkState>>,
+    #[cfg(feature = "solana")] competitive_match: Option<Res<CompetitiveMatchState>>,
+) {
+    if !confirmation.pending_exit {
+        return;
+    }
+
+    confirmation.pending_exit = false;
+    confirmation.visible = false;
+
+    let winner = match current_turn.color {
+        PieceColor::White => PieceColor::Black,
+        PieceColor::Black => PieceColor::White,
+    };
+    let winner_label = match winner {
+        PieceColor::White => "white",
+        PieceColor::Black => "black",
+    };
+
+    match *game_mode {
+        GameMode::BraidMultiplayer => {
+            if let Some(network_state) = network_state.as_ref() {
+                if let Some(session) = network_state.active_session.as_ref() {
+                    if let (Some(sender), Some(game_state)) = (
+                        network_state.message_sender.as_ref(),
+                        session.game_state.as_ref(),
+                    ) {
+                        if let Err(error) = sender.send(NetworkMessage::Resign {
+                            game_id: game_state.game_id,
+                            winner: winner_label.to_string(),
+                        }) {
+                            warn!("[INPUT] Failed to send resign message: {}", error);
+                        }
+                    }
+                }
+            } else {
+                warn!("[INPUT] Braid multiplayer exit requested without network state");
+            }
+
+            *game_over = if winner == PieceColor::White {
+                GameOverState::WhiteWonByResignation
+            } else {
+                GameOverState::BlackWonByResignation
+            };
+        }
+        GameMode::MultiplayerCompetitive => {
+            #[cfg(feature = "solana")]
+            {
+                if competitive_match.as_ref().and_then(|m| m.game_id).is_some() {
+                    *game_over = if winner == PieceColor::White {
+                        GameOverState::WhiteWonByResignation
+                    } else {
+                        GameOverState::BlackWonByResignation
+                    };
+                } else {
+                    next_state.set(crate::core::GameState::MainMenu);
+                    return;
+                }
+            }
+            #[cfg(not(feature = "solana"))]
+            {
+                next_state.set(crate::core::GameState::MainMenu);
+                return;
+            }
+        }
+        GameMode::MultiplayerLocal => {
+            next_state.set(crate::core::GameState::MainMenu);
+            return;
+        }
+        GameMode::SinglePlayer | GameMode::Spectator => {
+            next_state.set(crate::core::GameState::MainMenu);
+            return;
+        }
+    }
+
+    let _winner_player = players.current(winner);
+    resign_events.write(crate::game::events::ResignEvent {
+        winner: winner_label.to_string(),
+        remote: false,
+    });
 }

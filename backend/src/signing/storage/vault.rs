@@ -9,7 +9,7 @@
 
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// Stored KYC record (read from DB).
 #[derive(Debug, Clone, sqlx::FromRow)]

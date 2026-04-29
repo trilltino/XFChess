@@ -9,7 +9,7 @@ use anchor_lang::solana_program::system_instruction;
 use anchor_lang::Discriminator;
 
 #[derive(Accounts)]
-#[instruction(username: String)]
+#[instruction(username: String, country: String)]
 pub struct InitProfile<'info> {
     /// CHECK: Seeds and ownership are verified manually in the handler to allow re-initialization.
     #[account(mut)]
@@ -30,7 +30,7 @@ pub struct InitProfile<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<InitProfile>, username: String) -> Result<()> {
+pub fn handler(ctx: Context<InitProfile>, username: String, country: String) -> Result<()> {
     // Validate username format
     validate_username(&username)?;
     
@@ -70,7 +70,7 @@ pub fn handler(ctx: Context<InitProfile>, username: String) -> Result<()> {
         // 2. Ensure enough space (Realloc if needed for legacy accounts)
         let required_space = 8 + PlayerProfile::INIT_SPACE;
         if profile_info.data_len() < required_space {
-            profile_info.resize(required_space)?;
+            profile_info.realloc(required_space, false)?;
             
             // Adjust lamports for rent exemption
             let rent = Rent::get()?;
@@ -108,6 +108,7 @@ pub fn handler(ctx: Context<InitProfile>, username: String) -> Result<()> {
     profile.is_verified = false;
     profile.username = username.clone();
     profile.username_set = true;
+    profile.country = country;
 
     // Write Discriminator
     let disc = PlayerProfile::DISCRIMINATOR;

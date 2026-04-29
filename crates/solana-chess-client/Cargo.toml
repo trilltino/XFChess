@@ -4,16 +4,17 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-solana-client.workspace = true
-solana-sdk.workspace = true
+anchor-lang = { version = "=0.31.1", features = ["init-if-needed"] }
+solana-client = "=2.2.1"
+solana-sdk = "=2.2.1"
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-anchor-lang = "0.32.1"
 xfchess-game = { path = "../../programs/xfchess-game" }
 solana-program.workspace = true
+borsh = "=1.5.7"
 
 [dev-dependencies]
 assert_matches = "1.5"

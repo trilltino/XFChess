@@ -3,7 +3,6 @@
 //! This module manages the onboarding state for users without wallets or SOL,
 //! guiding them through wallet creation, funding, and registration.
 
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::RwLock;

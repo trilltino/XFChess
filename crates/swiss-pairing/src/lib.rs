@@ -11,7 +11,6 @@ pub mod types;
 
 pub use color::*;
 pub use error::*;
-pub use pairing::*;
 pub use standings::*;
 pub use types::*;
 

@@ -9,7 +9,7 @@ use solana_sdk::{
 use xfchess_game::constants::{
     GAME_SEED, MOVE_LOG_SEED, PROFILE_SEED, SESSION_DELEGATION_SEED, WAGER_ESCROW_SEED,
 };
-use xfchess_game::state::{Game, GameType, PlayerProfile};
+use xfchess_game::state::{Game, PlayerProfile};
 use xfchess_game::state::game::MatchType;
 
 /// Get the system program Pubkey (11111...1).
@@ -104,7 +104,7 @@ impl ChessRpcClient {
     }
 
     /// Creates an instruction to initialize a player profile.
-    pub fn create_init_profile_ix(&self, player: Pubkey, username: String) -> Instruction {
+    pub fn create_init_profile_ix(&self, player: Pubkey, username: String, country: String) -> Instruction {
         let profile_pda = self.get_profile_pda(&player);
         // Derive the username record PDA (needed by the Anchor accounts struct).
         let username_record_pda = self.derive_pda(&[b"username", username.as_bytes()]);
@@ -117,17 +117,23 @@ impl ChessRpcClient {
                 AccountMeta::new(player, true),
                 AccountMeta::new_readonly(system_program_id(), false),
             ],
-            data: xfchess_game::instruction::InitProfile { username }.data(),
+            data: xfchess_game::instruction::InitProfile { username, country }.data(),
         }
     }
 
     /// Creates an instruction to create a new game.
+    ///
+    /// `fee_payer` is the VPS session key pubkey — must co-sign the transaction.
     pub fn create_create_game_ix(
         &self,
         player: Pubkey,
+        fee_payer: Pubkey,
         game_id: u64,
         wager_amount: u64,
-        game_type: GameType,
+        match_type: MatchType,
+        country: String,
+        base_time_seconds: u64,
+        increment_seconds: u16,
     ) -> Instruction {
         let game_pda = self.get_game_pda(game_id);
         let move_log_pda = self.get_move_log_pda(game_id);
@@ -140,34 +146,49 @@ impl ChessRpcClient {
                 AccountMeta::new(move_log_pda, false),
                 AccountMeta::new(escrow_pda, false),
                 AccountMeta::new(player, true),
+                AccountMeta::new(fee_payer, true),
                 AccountMeta::new_readonly(system_program_id(), false),
             ],
             data: xfchess_game::instruction::CreateGame {
                 game_id,
                 wager_amount,
-                game_type,
-                country: "US".to_string(), // Default country, should be passed from UI
-                match_type: MatchType::Free, // Default match type (Free), should be passed from UI
-                time_per_move: 600, // Default 10 minutes per move
+                match_type,
+                country,
+                base_time_seconds,
+                increment_seconds,
             }
             .data(),
         }
     }
 
     /// Creates an instruction to join an existing game.
-    pub fn create_join_game_ix(&self, player: Pubkey, game_id: u64) -> Instruction {
+    ///
+    /// `white_player` is read from `game.white` on-chain.
+    /// `fee_payer` must match `game.fee_payer` (the session key set during create_game).
+    pub fn create_join_game_ix(
+        &self,
+        player: Pubkey,
+        white_player: Pubkey,
+        fee_payer: Pubkey,
+        game_id: u64,
+    ) -> Instruction {
         let game_pda = self.get_game_pda(game_id);
+        let player_profile_pda = self.get_profile_pda(&player);
         let escrow_pda = self.get_escrow_pda(game_id);
+        let white_profile_pda = self.get_profile_pda(&white_player);
 
         Instruction {
             program_id: self.program_id,
             accounts: vec![
                 AccountMeta::new(game_pda, false),
+                AccountMeta::new(player_profile_pda, false),
                 AccountMeta::new(escrow_pda, false),
+                AccountMeta::new_readonly(white_profile_pda, false),
                 AccountMeta::new(player, true),
+                AccountMeta::new(fee_payer, true),
                 AccountMeta::new_readonly(system_program_id(), false),
             ],
-            data: xfchess_game::instruction::JoinGame {}.data(),
+            data: xfchess_game::instruction::JoinGame { game_id }.data(),
         }
     }
 
@@ -284,41 +305,6 @@ impl ChessRpcClient {
         }
     }
 
-    pub fn create_commit_move_batch_ix(
-        &self,
-        game_id: u64,
-        nonce_start: u64,
-        moves: Vec<String>,
-        next_fens: Vec<String>,
-        white: Pubkey,
-        black: Pubkey,
-        white_session: Pubkey,
-        black_session: Pubkey,
-    ) -> Instruction {
-        let game_pda = self.get_game_pda(game_id);
-        let move_log_pda = self.get_move_log_pda(game_id);
-        let white_delegation = self.get_session_delegation_pda(game_id, &white);
-        let black_delegation = self.get_session_delegation_pda(game_id, &black);
-
-        Instruction {
-            program_id: self.program_id,
-            accounts: vec![
-                AccountMeta::new(game_pda, false),
-                AccountMeta::new(move_log_pda, false),
-                AccountMeta::new(white_delegation, false),
-                AccountMeta::new(black_delegation, false),
-                AccountMeta::new_readonly(white, false),
-                AccountMeta::new_readonly(black, false),
-                AccountMeta::new_readonly(white_session, false),
-                AccountMeta::new_readonly(black_session, false),
-            ],
-            data: xfchess_game::instruction::CommitMoveBatch {
-                game_id,
-                nonce_start,
-                moves,
-                next_fens,
-            }
-            .data(),
-        }
-    }
+    // create_commit_move_batch_ix removed: CommitMoveBatch instruction was deleted from the contract.
+    // All move batching now happens via the Ephemeral Rollup (ER) using record_move.
 }

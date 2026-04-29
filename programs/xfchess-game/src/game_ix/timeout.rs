@@ -34,12 +34,16 @@ pub fn handler(ctx: Context<ClaimTimeout>, _game_id: u64) -> Result<()> {
         game.status == GameStatus::Active,
         GameErrorCode::GameNotActive
     );
+    // Use base_time × 3 as inactivity window (generous safety net for abandoned games).
+    // Real clock enforcement is done client-side; VPS calls `resign` when a player's
+    // total clock hits zero. This instruction is a permissionless fallback.
+    let inactivity_window: i64 = if game.base_time_seconds > 0 {
+        (game.base_time_seconds as i64).saturating_mul(3)
+    } else {
+        86_400 // 24 h for correspondence / no-clock games
+    };
     require!(
-        game.time_per_move > 0,
-        GameErrorCode::NoTimeLimit
-    );
-    require!(
-        clock.unix_timestamp - game.updated_at > game.time_per_move as i64,
+        clock.unix_timestamp - game.updated_at > inactivity_window,
         GameErrorCode::TimeoutNotExpired
     );
 
@@ -58,9 +62,9 @@ pub fn handler(ctx: Context<ClaimTimeout>, _game_id: u64) -> Result<()> {
     game.updated_at = clock.unix_timestamp;
 
     msg!(
-        "XFChess: Timeout — {} wins (opponent exceeded {}s time limit)",
+        "XFChess: Timeout — {} wins (opponent inactive > {}s)",
         winner,
-        game.time_per_move
+        if game.base_time_seconds > 0 { game.base_time_seconds * 3 } else { 86_400 }
     );
 
     // Pay out escrow immediately

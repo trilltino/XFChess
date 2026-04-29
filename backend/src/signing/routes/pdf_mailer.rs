@@ -379,6 +379,8 @@ mod tests {
             let req = SignUpRequest {
                 email: email.to_string(),
                 referral: None,
+                username: Some("test-user".to_string()),
+                wallet_pubkey: Some("test-wallet-pubkey".to_string()),
             };
             assert!(req.email.contains('@'));
             assert!(req.email.contains('.'));
@@ -391,6 +393,8 @@ mod tests {
         let req_with_referral = SignUpRequest {
             email: "test@example.com".to_string(),
             referral: Some("friend".to_string()),
+            username: Some("test-user".to_string()),
+            wallet_pubkey: Some("test-wallet-pubkey".to_string()),
         };
         assert_eq!(req_with_referral.referral, Some("friend".to_string()));
 
@@ -398,6 +402,8 @@ mod tests {
         let req_without_referral = SignUpRequest {
             email: "test@example.com".to_string(),
             referral: None,
+            username: Some("test-user".to_string()),
+            wallet_pubkey: Some("test-wallet-pubkey".to_string()),
         };
         assert_eq!(req_without_referral.referral, None);
     }

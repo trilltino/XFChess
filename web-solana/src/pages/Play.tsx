@@ -5,12 +5,91 @@ import { useState } from 'react';
 
 const PlayPage = () => {
   const [showNotice, setShowNotice] = useState(true);
+  const [launchStatus, setLaunchStatus] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   const launchGame = () => {
-    // Attempt to launch via deep link protocol with auth context
-    const token = localStorage.getItem('xfchess_token') || '';
+    const walletPubkey = localStorage.getItem('xfchess_wallet') || localStorage.getItem('xfchess_wallet_pubkey') || '';
     const username = localStorage.getItem('xfchess_username') || '';
-    window.location.href = `xfchess://launch?token=${token}&username=${username}`;
+    const token = localStorage.getItem('xfchess_token') || '';
+    const launchUrl = `xfchess://launch?pubkey=${encodeURIComponent(walletPubkey)}&username=${encodeURIComponent(username)}`;
+    let pageHidden = false;
+    let localApiLaunchSucceeded = false;
+
+    setLaunchError(null);
+    setLaunchStatus('Attempting to open XFChess desktop app...');
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        pageHidden = true;
+        setLaunchStatus('XFChess launch request sent. If the app is installed, it should open now.');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange, { once: true });
+
+    window.setTimeout(() => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (!pageHidden && !localApiLaunchSucceeded) {
+        setLaunchStatus(null);
+        setLaunchError('Launch request was sent, but the browser did not switch to the desktop app. Check the browser prompt, confirm XFChess protocol is allowed, and make sure xfchess-tauri.exe is already running.');
+        console.error('[XFChess Launch] Deep link did not hide the page.', {
+          launchUrl,
+          username,
+          hasWallet: walletPubkey.length > 0,
+          origin: window.location.origin,
+        });
+      }
+    }, 2500);
+
+    console.log('[XFChess Launch] Attempting deep link', {
+      launchUrl,
+      username,
+      hasWallet: walletPubkey.length > 0,
+      origin: window.location.origin,
+    });
+
+    // After deep link attempt, also try direct local API call to Tauri if running
+    window.setTimeout(() => {
+      if (!pageHidden) {
+        console.log('[XFChess Launch] Attempting fallback local API call to Tauri');
+        fetch('http://localhost:7454/api/game/launch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            pubkey: walletPubkey,
+            username: username,
+            token: token || undefined,
+          }),
+        })
+        .then(response => {
+          if (response.ok) {
+            localApiLaunchSucceeded = true;
+            setLaunchStatus('Game launch triggered via local API.');
+            setLaunchError(null);
+            console.log('[XFChess Launch] Local API launch successful');
+          } else {
+            console.log('[XFChess Launch] Local API launch failed with status', response.status);
+            setLaunchError(`Local API launch failed with status ${response.status}. Please ensure the XFChess app is running.`);
+          }
+        })
+        .catch(err => {
+          console.log('[XFChess Launch] Local API launch error', err);
+          setLaunchError(`Local API launch error: ${err.message}. Please ensure the XFChess app is running on port 7454.`);
+        });
+      }
+    }, 1500);
+
+    try {
+      window.location.href = launchUrl;
+    } catch (error) {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      setLaunchStatus(null);
+      setLaunchError('Browser blocked the launch request before it could be sent.');
+      console.error('[XFChess Launch] Failed to assign deep link', error);
+    }
   };
 
   return (
@@ -22,7 +101,18 @@ const PlayPage = () => {
         <h1 style={{ fontSize: '2.5rem', fontWeight: 900, marginBottom: '8px' }}>Ready to Move?</h1>
         <p style={{ color: 'var(--text-dim)', marginBottom: '32px' }}>Launch the desktop application to play wagering and tournament games.</p>
 
-        {/* Launch / Download Buttons */}
+        {launchStatus && (
+          <div style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '10px', background: 'rgba(173, 92, 47, 0.12)', border: '1px solid rgba(173, 92, 47, 0.3)', color: '#f3d4c4' }}>
+            {launchStatus}
+          </div>
+        )}
+
+        {launchError && (
+          <div style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '10px', background: 'rgba(255, 80, 80, 0.12)', border: '1px solid rgba(255, 80, 80, 0.3)', color: '#ffd0d0' }}>
+            {launchError}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: '16px', marginTop: '32px', flexWrap: 'wrap' }}>
           <button
             onClick={launchGame}
@@ -94,7 +184,6 @@ const PlayPage = () => {
             </p>
         </div>
 
-        {/* Floating Wagering Notice Tooltip */}
         {showNotice && (
           <div style={{
             position: 'fixed',

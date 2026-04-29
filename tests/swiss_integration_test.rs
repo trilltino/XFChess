@@ -89,7 +89,7 @@ async fn test_swiss_tournament_full_lifecycle() {
 
     // Create app state
     let config = SigningConfig::default();
-    let state = AppState::new(
+    let mut state = AppState::new(
         config.clone(),
         pools.session_pool.clone(),
         pools.vault_pool.clone(),
@@ -202,7 +202,7 @@ async fn test_swiss_tournament_full_lifecycle() {
     ];
 
     for (board, winner, is_draw) in results_r1 {
-        record_result(&client, &base_url, tournament_id, 1, board, winner, is_draw).await;
+        record_result(&client, &base_url, tournament_id, 1, board, winner.clone(), is_draw).await;
         info!("  Recorded result on board {}: {:?} (draw: {})", board, winner, is_draw);
     }
 

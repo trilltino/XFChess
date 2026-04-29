@@ -18,4 +18,4 @@ pub use session::{
     AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx, RevokeTournamentSessionCtx,
     SessionCreateGame, SessionJoinGame,
 };
-pub use prizes::{ClaimStreamingPrize, ClaimTournamentPrize, FundUsdcPrize, OperatorWithdraw};
+pub use prizes::{ClaimTournamentPrize, FundUsdcPrize};

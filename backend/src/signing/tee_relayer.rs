@@ -7,34 +7,21 @@ use crate::signing::AppState;
 use serde_json::{json, Value};
 use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
-use std::env;
-use std::sync::Arc;
 
 /// HTTP client for MagicBlock TEE endpoint
-pub struct TEERelayer {
-    tee_url: String,
-    tee_token: String,
-}
+pub struct TEERelayer;
 
 impl TEERelayer {
     /// Creates a new TEERelayer instance
     pub fn new() -> Result<Self, AppError> {
-        let tee_url = env::var("MAGICBLOCK_TEE_URL")
-            .map_err(|_| AppError::ConfigurationError("Missing MAGICBLOCK_TEE_URL".to_string()))?;
-        let tee_token = env::var("MAGICBLOCK_TEE_TOKEN")
-            .map_err(|_| AppError::ConfigurationError("Missing MAGICBLOCK_TEE_TOKEN".to_string()))?;
-
-        Ok(TEERelayer {
-            tee_url,
-            tee_token,
-        })
+        Ok(TEERelayer)
     }
 
     /// Signs and submits instructions via the TEE relayer
     pub async fn sign_and_submit(
         &self,
-        instructions: Vec<Instruction>,
-        recent_blockhash: &str,
+        _instructions: Vec<Instruction>,
+        _recent_blockhash: &str,
     ) -> Result<String, AppError> {
         // Placeholder for actual HTTP request to TEE endpoint
         // Build unsigned transaction with TEE pubkey as fee_payer
@@ -59,7 +46,7 @@ impl TEERelayer {
 
 /// Returns the TEE relayer public key
 async fn get_tee_pubkey(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> Json<Value> {
     // Placeholder for actual TEE public key
     let tee_pubkey = "PlaceholderTEEPubkey";
@@ -68,7 +55,7 @@ async fn get_tee_pubkey(
 
 /// Returns the current TEE attestation quote
 async fn get_tee_attestation(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> Json<Value> {
     // Placeholder for actual attestation quote
     let attestation = "PlaceholderTEEAttestation";
@@ -87,10 +74,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_tee_relayer_new() {
-        // Set environment variables for test
-        std::env::set_var("MAGICBLOCK_TEE_URL", "https://devnet-tee.magicblock.app");
-        std::env::set_var("MAGICBLOCK_TEE_TOKEN", "test_token");
-
         let relayer = TEERelayer::new();
         assert!(relayer.is_ok());
     }
