@@ -11,6 +11,7 @@ use braid_core::{Update, Version};
 use crate::multiplayer::types::*;
 use crate::multiplayer::network::protocol::NetworkMessage;
 use crate::game::events::ResignEvent;
+use crate::multiplayer::TokioRuntime;
 
 #[cfg(feature = "solana")]
 use crate::game::events::{MoveMadeEvent, GameEndedEvent};
@@ -24,6 +25,7 @@ pub const GAME_TOPIC: &str = "/xfchess-game";
 /// Initializes the Braid/Iroh networking layer in a background Tokio task.
 pub fn initialize_braid_network(
     mut network_state: ResMut<BraidNetworkState>,
+    tokio_runtime: Res<TokioRuntime>,
 ) {
     info!("Initializing Braid/Iroh networking layer");
 
@@ -37,7 +39,8 @@ pub fn initialize_braid_network(
 
     let event_tx_clone = event_tx.clone();
 
-    bevy::tasks::IoTaskPool::get().spawn(async move {
+    tokio_runtime.0.spawn(async move {
+        info!("[NET] Starting Iroh node task...");
         let (secret_key, raw_bytes) = load_or_generate_key();
 
         let config = BraidGameConfig {
@@ -51,12 +54,15 @@ pub fn initialize_braid_network(
         let node = match BraidIrohNode::spawn(config).await {
             Ok(n) => n,
             Err(e) => {
-                error!("Failed to spawn BraidIrohNode: {}", e);
+                error!("❌ Failed to spawn BraidIrohNode: {}", e);
+                event_tx_clone.send(NetworkEvent::PeerDisconnected(format!("Spawn failed: {}", e))).ok();
                 return;
             }
         };
 
         let node_id = node.node_id();
+        info!("[NET] BraidIrohNode spawned successfully (ID: {})", node_id);
+        
         event_tx_clone
             .send(NetworkEvent::NetworkInitialized {
                 node_id,
@@ -67,7 +73,7 @@ pub fn initialize_braid_network(
         let mut rx = match node.subscribe(GAME_TOPIC, vec![]).await {
             Ok(r) => r,
             Err(e) => {
-                error!("Failed to subscribe to gossip topic: {}", e);
+                error!("❌ Failed to subscribe to gossip topic: {}", e);
                 return;
             }
         };
@@ -77,7 +83,8 @@ pub fn initialize_braid_network(
         let node_bootstrap = node_arc.clone();
 
         // Outgoing message loop
-        let _send_task = bevy::tasks::IoTaskPool::get().spawn(async move {
+        let event_tx_error = event_tx_clone.clone();
+        tokio::spawn(async move {
             while let Some(msg) = msg_rx.recv().await {
                 let json = match serde_json::to_vec(&msg) {
                     Ok(b) => b,
@@ -90,12 +97,13 @@ pub fn initialize_braid_network(
                 let update = Update::snapshot(version, json.into());
                 if let Err(e) = node_send.put(GAME_TOPIC, update).await {
                     error!("Failed to broadcast message: {}", e);
+                    event_tx_error.send(NetworkEvent::PeerDisconnected(format!("Broadcast error: {}", e))).ok();
                 }
             }
         });
 
         // Bootstrap loop
-        let _bootstrap_task = bevy::tasks::IoTaskPool::get().spawn(async move {
+        tokio::spawn(async move {
             while let Some(peer_id) = bootstrap_rx.recv().await {
                 if let Err(e) = node_bootstrap.join_peers(GAME_TOPIC, vec![peer_id]).await {
                     error!("Failed to join peer {}: {}", peer_id, e);
@@ -158,7 +166,7 @@ pub fn initialize_braid_network(
                 _ => {}
             }
         }
-    }).detach();
+    });
 }
 
 /// Polling system to read NetworkEvents from the background task and write them as Bevy events.

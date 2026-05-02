@@ -167,7 +167,6 @@ impl Plugin for GamePlugin {
                     .in_set(GameSystems::Input)
                     .run_if(super::systems::camera::camera_controls_enabled),
                 camera_mode_cycle_system.in_set(GameSystems::Input),
-                cinematic_camera_system.in_set(GameSystems::Input),
                 camera_rotate_on_turn_detection_system
                     .in_set(GameSystems::Input)
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
@@ -181,11 +180,15 @@ impl Plugin for GamePlugin {
                 // Validation set: Sync board state before validation (disabled in TempleOS)
 
                 // Execution set: Update game state (disabled in TempleOS)
-                update_game_phase.in_set(GameSystems::Execution).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
+                // update_game_phase is gated on CurrentTurn changing so the shakmaty
+                // FEN rebuild and legal-move generation only fire once per move,
+                // not every frame (60x/s savings).
+                update_game_phase
+                    .in_set(GameSystems::Execution)
+                    .run_if(|ct: Res<CurrentTurn>| ct.is_changed())
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
-                    },
-                ),
+                    }),
                 start_timer_when_ready.in_set(GameSystems::Execution).run_if(
                     |view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
@@ -196,11 +199,15 @@ impl Plugin for GamePlugin {
                         *view_mode != super::view_mode::ViewMode::TempleOS
                     },
                 ),
-                check_game_over_state.in_set(GameSystems::Execution).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
+                // check_game_over_state is gated on GameOverState changing so it
+                // doesn't poll every frame — it only fires when a move sets a
+                // terminal condition (checkmate, stalemate, timeout, resign).
+                check_game_over_state
+                    .in_set(GameSystems::Execution)
+                    .run_if(|go: Res<GameOverState>| go.is_changed())
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
-                    },
-                ),
+                    }),
                 crate::game::systems::network_move::handle_resign_events
                     .in_set(GameSystems::Execution),
                 // Promotion detection and handling (disabled in TempleOS)
@@ -218,17 +225,27 @@ impl Plugin for GamePlugin {
                 crate::game::systems::network_move::handle_network_moves
                     .in_set(GameSystems::Execution),
                 // Visual set: Update rendering (disabled in TempleOS)
-                highlight_possible_moves.in_set(GameSystems::Visual).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
+                // highlight_possible_moves is gated on Selection changing so the
+                // 64-square iteration and material handle clones only happen when a
+                // piece is clicked or a move is made (not 60x/s on idle frames).
+                highlight_possible_moves
+                    .in_set(GameSystems::Visual)
+                    .run_if(|sel: Res<Selection>| sel.is_changed())
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
-                    },
-                ),
-                animate_piece_movement.in_set(GameSystems::Visual).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
+                    }),
+                // animate_piece_movement is skipped entirely when no piece has a
+                // PieceMoveAnimation component (archetype cache lookup — zero cost).
+                animate_piece_movement
+                    .in_set(GameSystems::Visual)
+                    .run_if(any_with_component::<PieceMoveAnimation>)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
-                    },
-                ),
-                animate_capture_fade.in_set(GameSystems::Visual),
+                    }),
+                // animate_capture_fade is skipped when nothing is mid-fade.
+                animate_capture_fade
+                    .in_set(GameSystems::Visual)
+                    .run_if(any_with_component::<FadingCapture>),
             ),
         );
 
@@ -253,6 +270,13 @@ impl Plugin for GamePlugin {
                 confirm_exit_game,
             )
                 .run_if(in_state(GameState::InGame)),
+        );
+
+        // Cinematic camera must run in both InGame and GameOver so the game-over
+        // cinematic actually ticks. InGameplay covers InGame + Paused + GameOver.
+        app.add_systems(
+            Update,
+            cinematic_camera_system.run_if(crate::core::in_gameplay),
         );
 
         // Debug system - toggle with F12 key

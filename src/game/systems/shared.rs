@@ -71,20 +71,45 @@ pub fn play_move_audio(
 }
 
 /// Apply visual and logical state for a captured piece.
-/// Inserts a FadingCapture (scale-to-zero) component; the 2D tally panel shows captures.
+///
+/// Inserts a [`FadingCapture`] component that drives a parabolic arc + spin +
+/// scale-to-zero animation before the entity is despawned.
+///
+/// `current_pos` should be the piece's current world `Transform.translation`.
 pub fn apply_capture(
     commands: &mut Commands,
     captured_pieces: &mut CapturedPieces,
     capture_sound: Option<Handle<AudioSource>>,
     target: CapturedTarget,
+    current_pos: Vec3,
 ) {
     if let Some(sound) = capture_sound {
         commands.spawn(AudioPlayer::new(sound));
     }
     captured_pieces.add_capture(target.color, target.piece_type);
+
+    // Derive cheap pseudo-random variation from the entity bits so each
+    // capture looks slightly different without requiring an RNG resource.
+    let bits = target.entity.to_bits();
+    let angle_seed = (bits & 0xFF) as f32 / 255.0; // 0.0 – 1.0
+
+    // Spin axis alternates between XZ-diagonal axes based on the entity index.
+    let spin_axis = if bits & 1 == 0 {
+        Vec3::new(1.0, 0.3, 0.5).normalize()
+    } else {
+        Vec3::new(-0.5, 0.3, 1.0).normalize()
+    };
+
     commands.entity(target.entity).insert(FadingCapture {
-        timer: bevy::time::Timer::from_seconds(0.35, bevy::time::TimerMode::Once),
-        capture_zone_pos: bevy::math::Vec3::ZERO,
+        // 0.45 s gives the arc time to look smooth at 60 fps.
+        timer: bevy::time::Timer::from_seconds(0.45, bevy::time::TimerMode::Once),
+        initial_pos: current_pos,
+        capture_zone_pos: Vec3::ZERO,
+        // Randomise arc height between 0.8 and 1.6 world units.
+        arc_height: 0.8 + angle_seed * 0.8,
+        spin_axis,
+        // 1.5 – 2.5 full turns.
+        spin_radians: std::f32::consts::TAU * (1.5 + angle_seed),
     });
 }
 
@@ -228,11 +253,19 @@ pub fn execute_move(
 
     // 2. Handle Capture
     if let Some(target_cap) = ctx.capture {
+        // The captured piece stands on ctx.target — derive world position
+        // using the same formula as piece spawning (x=file, z=rank, y=board surface).
+        let cap_world_pos = Vec3::new(
+            ctx.target.0 as f32,
+            PIECE_ON_BOARD_Y,
+            ctx.target.1 as f32,
+        );
         apply_capture(
             commands,
             captured_pieces,
             ctx.capture_sound.clone(),
             target_cap,
+            cap_world_pos,
         );
     }
 

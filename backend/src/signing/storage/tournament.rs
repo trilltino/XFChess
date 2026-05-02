@@ -492,6 +492,19 @@ impl TournamentStore {
         self.update(id, |t| { t.node_ids.insert(player, node_id); }).await
     }
 
+    /// Removes a player from the tournament and decrements the prize pool.
+    pub async fn leave_tournament(&self, id: u64, player: &str) -> bool {
+        self.update(id, |t| {
+            if let Some(pos) = t.players.iter().position(|p| p == player) {
+                t.players.remove(pos);
+                t.player_elos.remove(pos);
+                if t.prize_pool >= t.entry_fee_lamports {
+                    t.prize_pool -= t.entry_fee_lamports;
+                }
+            }
+        }).await
+    }
+
     /// Sets the game ID for a specific match.
     pub async fn set_match_game_id(&self, id: u64, match_index: usize, game_id: u64) -> bool {
         self.update(id, |t| {

@@ -10,7 +10,7 @@ pub mod prizes;
 pub use lifecycle::{
     CancelTournament, CloseTournament, InitializeTournament, StartTournament,
 };
-pub use registration::RegisterPlayer;
+pub use registration::{RegisterPlayer, LeaveTournament};
 pub use matches::{
     AdvanceWinner, InitializeMatch, RecordMatchResult, RecordSwissResult, SwissMatchResult,
 };

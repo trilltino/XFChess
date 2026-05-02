@@ -80,6 +80,15 @@ pub struct PlayerProfileResp {
     pub username: String,
 }
 
+/// Response for user verification status.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct UserStatus {
+    pub has_profile: bool,
+    pub has_email: bool,
+    pub has_kyc: bool,
+    pub can_wager: bool,
+}
+
 /// Creates the main API routes router.
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -94,6 +103,35 @@ pub fn routes() -> Router<AppState> {
         .route("/game/finalize", post(finalize_game))
         .route("/player/{pubkey}", get(get_player_profile))
         .route("/stats", get(get_stats))
+        .route("/api/user/status/{pubkey}", get(get_user_status))
+}
+
+/// GET /api/user/status/{pubkey} - Gets user verification status.
+pub async fn get_user_status(
+    Path(pubkey): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<UserStatus>, StatusCode> {
+    let user = state.store.find_user_by_wallet(&pubkey).await;
+    
+    if let Some(user_data) = user {
+        // user_data is (wallet, username, email, kyc_status, ...)
+        let has_profile = !user_data.1.is_empty();
+        let has_email = user_data.2.is_some();
+        let has_kyc = user_data.3 == "verified";
+        
+        // Simple wagering rule: need profile and KYC (or email for testing)
+        let can_wager = has_profile && (has_kyc || state.config.solana_rpc_url.contains("devnet"));
+
+        Ok(Json(UserStatus {
+            has_profile,
+            has_email,
+            has_kyc,
+            can_wager,
+        }))
+    } else {
+        // Return negative status but success (200 OK) so the client can show the "Register" prompt
+        Ok(Json(UserStatus::default()))
+    }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -295,10 +333,14 @@ pub async fn finalize_game(
     let black = Pubkey::from_str(&req.black_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
     let winner = req.winner.as_deref();
 
-    let ix = solana::finalize_game_ix(&program_id, req.game_id, &white, &black, winner);
+    // Use session key as fee_payer for now (will be replaced with ER relayer pubkey in production)
+    let fee_payer = session_kp.pubkey();
+
+    let ix = solana::finalize_game_ix(&program_id, req.game_id, &white, &black, winner, &fee_payer);
     let rpc = solana::make_rpc(&state.config.solana_rpc_url);
 
-    let sig = solana::sign_and_submit(&rpc, &session_kp, &[ix]).map_err(|e| {
+    // Submit through ER relayer for transaction fee reimbursement
+    let sig = solana::sign_and_submit_er(&rpc, &session_kp, &[ix]).map_err(|e| {
         error!("[VPS] finalize_game failed for game {}: {e}", req.game_id);
         StatusCode::BAD_GATEWAY
     })?;

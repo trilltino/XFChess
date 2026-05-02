@@ -4,6 +4,7 @@
 //! This allows players to play chess with a traditional 2D view while maintaining
 //! full compatibility with the existing game state and networking systems.
 
+use crate::game::components::FadingCapture;
 use crate::game::systems::input::{
     can_move_color, clear_selection_state, is_human_turn, try_move_sequence, try_select_piece,
     InputSystemParams,
@@ -116,6 +117,7 @@ pub fn render_2d_board(
     #[cfg(feature = "solana")] _competitive_match: Option<Res<crate::multiplayer::solana::addon::CompetitiveMatchState>>,
     view_mode: Res<ViewMode>,
     _hud_visibility: Res<crate::ui::game::game_ui::InGameHudVisibility>,
+    fading_captures: Query<&FadingCapture>,
 ) {
     if *view_mode != ViewMode::Standard2D {
         return;
@@ -130,6 +132,19 @@ pub fn render_2d_board(
     let game_over = input_params.game_over.is_game_over();
     let in_check = input_params.engine.is_check();
     let check_color = input_params.engine.current_turn;
+
+    // Collect active capture flashes: board square → animation progress (0..1).
+    // initial_pos.x = file, initial_pos.z = rank (board coord formula).
+    let capture_flashes: HashMap<(u8, u8), f32> = fading_captures
+        .iter()
+        .map(|fc| {
+            let file = fc.initial_pos.x.round() as u8;
+            let rank = fc.initial_pos.z.round() as u8;
+            (file, rank, fc.timer.fraction())
+        })
+        .filter(|(f, r, _)| *f < 8 && *r < 8)
+        .map(|(f, r, prog)| ((f, r), prog))
+        .collect();
 
     // Collect piece positions before the egui closure (read-only borrow).
     let piece_map: HashMap<(u8, u8), (PieceType, PieceColor, Entity)> = {
@@ -197,6 +212,32 @@ pub fn render_2d_board(
                                     sq_rect.center(),
                                     square_size * 0.15,
                                     highlight_color(HighlightType::LegalMove),
+                                );
+                            }
+                        }
+
+                        // Capture flash: pulsing ring that fades out with the
+                        // 3D piece animation so both modes feel in sync.
+                        if let Some(&prog) = capture_flashes.get(&(file, rank)) {
+                            // opacity peaks early (t=0.1) then fades to zero.
+                            let alpha = ((1.0 - prog) * 220.0) as u8;
+                            // Ring radius shrinks inward as animation progresses.
+                            let ring_r = square_size * 0.5 * (1.0 - prog * 0.4);
+                            painter.circle_stroke(
+                                sq_rect.center(),
+                                ring_r,
+                                egui::Stroke::new(
+                                    3.0,
+                                    egui::Color32::from_rgba_unmultiplied(255, 80, 20, alpha),
+                                ),
+                            );
+                            // Inner fill flash at start of animation.
+                            if prog < 0.25 {
+                                let fill_alpha = ((1.0 - prog / 0.25) * 80.0) as u8;
+                                painter.rect_filled(
+                                    sq_rect,
+                                    0.0,
+                                    egui::Color32::from_rgba_unmultiplied(255, 100, 20, fill_alpha),
                                 );
                             }
                         }

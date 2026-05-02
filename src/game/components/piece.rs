@@ -130,14 +130,29 @@ pub struct HasMoved {
 #[reflect(Component)]
 pub struct Captured;
 
-/// Component for fading out a captured piece before moving to capture zone
+/// Component for fading out a captured piece before despawning.
+///
+/// Drives a 3-phase capture animation:
+/// 1. **Arc** — piece flies upward along a parabolic arc
+/// 2. **Spin** — piece rotates around a random axis
+/// 3. **Scale** — piece shrinks to zero as it lands
+///
+/// All three run simultaneously for a fluid, cinematic feel.
 #[derive(Component, Debug, Reflect)]
 #[reflect(Component)]
 pub struct FadingCapture {
-    /// Timer tracking fade duration
+    /// Timer tracking total animation duration
     pub timer: Timer,
-    /// Target position in capture zone (applied after fade completes)
+    /// Starting world position (set at capture time)
+    pub initial_pos: Vec3,
+    /// Target position in capture zone (applied after animation completes)
     pub capture_zone_pos: Vec3,
+    /// Peak height of the parabolic arc (world units)
+    pub arc_height: f32,
+    /// Rotation axis for spin effect (normalised)
+    pub spin_axis: Vec3,
+    /// Total rotation in radians over the full animation
+    pub spin_radians: f32,
 }
 
 /// Component representing an active straight-line animation for a piece move
@@ -160,8 +175,13 @@ impl PieceMoveAnimation {
         }
     }
 
+    /// Smooth-step progress (cubic ease in-out): slow start → fast middle → slow end.
+    ///
+    /// t = 3t² - 2t³  maps [0,1] → [0,1] with zero first-derivative at both ends.
+    /// This matches the feel of chess.com and Lichess move animations.
     pub fn progress(&self) -> f32 {
-        (self.elapsed / self.duration).clamp(0.0, 1.0)
+        let t = (self.elapsed / self.duration).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
     }
 }
 

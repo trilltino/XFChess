@@ -167,5 +167,3 @@ rustdoc-args = ["--cfg", "iroh_docsrs"]
 [profile.bench]
 debug = true
 
-[profile.release]
-debug = true

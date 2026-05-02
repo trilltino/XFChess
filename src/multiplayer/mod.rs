@@ -45,6 +45,10 @@ pub struct MultiplayerPlugin;
 
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
+        // Initialize Tokio runtime for background tasks
+        let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+        app.insert_resource(TokioRuntime(runtime));
+
         // 1. Register shared types and events
         app.init_resource::<BraidNetworkState>()
             .init_resource::<BraidGameSync>()

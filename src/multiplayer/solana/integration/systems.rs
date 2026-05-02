@@ -393,8 +393,7 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
 /// Fetches user verification status from VPS backend and caches it in SolanaWallet
 /// Runs periodically (every 30s) when wallet is connected
 pub fn fetch_user_status(
-    solana_wallet: Option<Res<crate::multiplayer::solana::addon::SolanaWallet>>,
-    solana_wallet_mut: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
+    mut solana_wallet: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
     time: Res<Time>,
     mut timer: Local<f32>,
 ) {
@@ -404,8 +403,8 @@ pub fn fetch_user_status(
     }
     *timer = 30.0; // Refresh every 30 seconds
 
-    let (wallet, _wallet_mut) = match (solana_wallet, solana_wallet_mut) {
-        (Some(w), Some(wm)) => (w, wm),
+    let wallet = match solana_wallet.as_mut() {
+        Some(w) => w,
         _ => return,
     };
 
@@ -435,8 +434,7 @@ pub fn fetch_user_status(
 /// Alternative version that uses a channel-based approach for async-to-main communication
 /// This is the preferred pattern for Bevy
 pub fn fetch_user_status_async(
-    solana_wallet: Option<Res<crate::multiplayer::solana::addon::SolanaWallet>>,
-    mut solana_wallet_mut: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
+    mut solana_wallet: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
     time: Res<Time>,
     mut timer: Local<f32>,
     tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
@@ -462,7 +460,7 @@ pub fn fetch_user_status_async(
 
     // Try to receive immediately (non-blocking)
     if let Ok(Some(status)) = rx.try_recv() {
-        if let Some(ref mut w) = solana_wallet_mut {
+        if let Some(ref mut w) = solana_wallet {
             w.user_status = Some(status);
             info!("[USER_STATUS] Updated cached status for {}", pubkey_display);
         }

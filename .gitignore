@@ -1,152 +1,80 @@
 # Rust
-/target/
+target/
+Cargo.lock
 **/*.rs.bk
 *.pdb
-Cargo.lock
 
-# Build artifacts
-/build/
-/dist/
-build.log
-compilation_error.log
-error_ascii*.txt
-
-# Error and check files
-check_errors*.txt
-current_errors.txt
-final_check.txt
-test_run.log
-build_errors.txt
-
-# Analysis and plan files
-REFERENCE_ANALYSIS.md
-FIX_PLAN.md
-dispute-system-plan.md
-TESTING.md
-
-# Windsurf / AI session note files (hex-suffix .md files)
-*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].md
-
-# Temporary scripts
-temp_clone_repos.bat
-temp_analysis/
+# Dependencies
+node_modules/
 
 # Logs
-/logs/
+logs/
 *.log
 
-# IDE / Editor
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.DS_Store
-
-# Database files
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
-# Binary executables
-*.exe
-stockfish
-stockfish.exe
-
-# All keypairs — entire keys/ tree is secret, never committed
-keys/**
-!keys/KEYS_README.md
-
-# Root-level stray keypairs
-fee-payer.json
-kyc-authority.json
-vps-authority.json
-program-authority.json
-new-program-id.json
-
-# Wallets directory
-/wallets/
-*.key
 
 # OS
+.DS_Store
 Thumbs.db
-desktop.ini
 
-# Local SQLite databases (dev state, never commit)
-/*.db
+# Environment
+.env
+.env.*
+.env.local
 
-# Reference materials (too large for git)
-/references/
-/reference/
+# Keys (sensitive)
+keys/
 
-# Web build
-/web/dist/
-/web/pkg/
-/web/target/
-web-solana/dist/
+# Large binaries
+stockfish.exe
 
-# Personal settings (contains user preferences)
-settings.json
+# IDE specific
+.windsurf/
 
-# Temporary files
-*.tmp
-*.temp
+# Test data
+tmp/
+temp/
+*.test
 
-# P2P identity keys (unique per peer instance)
-xfchess_identity.key
-xfchess_peer_*.key
-launch_peer_*.bat
+# Build artifacts
+dist/
+build/
+release/
 
-# Environment files — NEVER commit real secrets
-**/.env
-**/.env.local
-**/.env.production
-**/.env.staging
-# Allow example/template files (no real values)
-!**/.env.example
+# Anchor
+.anchor/
 
-# Deploy secrets specifically
-deploy/.env.production
+# Vite cache
+web-solana/node_modules/.vite/
 
-# Sensitive wallet and key files
-*.json
-!web-react/package.json
-!Cargo.toml
-!Anchor.toml
-!programs/xfchess-game/Cargo.toml
-!backend/Cargo.toml
-!crates/*/Cargo.toml
-!wallet-popup/Cargo.toml
-!web-react/tsconfig.json
-!web-react/package.json
-!web-react/vite.config.ts
-!web-react/eslint.config.js
-!wallet-popup/tauri.conf.json
-!tauri/tauri.conf.json
-!tauri/wallet-ui/package.json
-!tauri/wallet-ui/tsconfig.json
-!tauri/wallet-ui/vite.config.ts
-!tauri/Cargo.toml
-# web-solana JSON config files
-!web-solana/package.json
-!web-solana/package-lock.json
-!web-solana/tsconfig.json
-!web-solana/tsconfig.app.json
-!web-solana/tsconfig.node.json
+# Tauri
+tauri/target/
 
-# Exclude all JSON files except specific ones
-!idl.json
-!idl_full.json
-!web-solana/public/actions.json
+# Rust build artifacts
+*.so
+*.dll
+*.dylib
 
-# Node modules (filename too long issues)
-node_modules/
-**/node_modules/
+# SQLite database files
+*.db-shm
+*.db-wal
 
-# Authorities and keypair files in deploy/
-keys/authorities/
-keys/program-authority.json
-deploy/*.json
-deploy/.env*
-!deploy/.env.example
+# Tauri generated
+tauri/gen/
+
+# Package lock files (keep only root)
+**/package-lock.json
+
+# Generated JSON files
+web-solana/src/lib/*.json
+
+# WASM package
+xfchess-wasm/pkg/
+
+# Temp markdown files
+xfchess-anticheat-crate-*.md

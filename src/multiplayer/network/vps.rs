@@ -651,3 +651,28 @@ pub fn p2p_poll_messages(
     
     Ok((result.messages, result.next_index))
 }
+#[derive(Serialize)]
+struct P2PLeaveReq<'a> {
+    game_id: String,
+    node_id: &'a str,
+}
+
+/// Leave or cancel a P2P game on the VPS relay
+pub fn p2p_leave_game(game_id: String, node_id: &str) -> Result<(), String> {
+    let resp = client()
+        .post(format!("{}/p2p/leave", vps_base()))
+        .json(&P2PLeaveReq {
+            game_id,
+            node_id,
+        })
+        .send()
+        .map_err(|e| format!("vps p2p_leave: {e}"))?;
+    
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(format!("vps p2p_leave: HTTP {status} - {body}"));
+    }
+    
+    Ok(())
+}

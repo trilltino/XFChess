@@ -1,0 +1,54 @@
+# AlertManager configuration for XFChess
+# Routes alerts to appropriate channels
+
+global:
+  # Default SMTP settings (configure if you want email alerts)
+  # smtp_smarthost: 'localhost:587'
+  # smtp_from: 'alerts@xfchess.com'
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'web.hook'
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      continue: true
+    
+    # Warning alerts - batched
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      continue: true
+
+receivers:
+  # Default webhook receiver (configure your own webhook URL)
+  - name: 'web.hook'
+    webhook_configs:
+      - url: 'http://host.docker.internal:8090/api/webhook/alerts'
+        send_resolved: true
+  
+  # Critical alerts - Discord/Slack webhook recommended
+  - name: 'critical-alerts'
+    webhook_configs:
+      # Add your Discord/Slack webhook URL here
+      # - url: 'https://discord.com/api/webhooks/YOUR_WEBHOOK'
+      #   send_resolved: true
+  
+  # Warning alerts - can be less urgent
+  - name: 'warning-alerts'
+    webhook_configs:
+      # - url: 'https://discord.com/api/webhooks/YOUR_WEBHOOK'
+      #   send_resolved: true
+
+inhibit_rules:
+  # If a critical alert is firing, suppress warning for same alert
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']

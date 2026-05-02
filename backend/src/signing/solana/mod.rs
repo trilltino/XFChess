@@ -9,14 +9,18 @@
 //! Also provides RPC client helpers for signing and submitting transactions
 //! to both devnet and the MagicBlock Execution Rollup.
 
+pub mod debug;
 pub mod instructions;
 pub mod rpc;
+pub mod telemetry;
 pub mod transactions;
 
+pub use debug::{debug_transaction, format_debug_info, parse_program_error, TransactionDebugInfo};
 pub use instructions::{
-    claim_fees_ix, finalize_game_ix, record_move_ix, undelegate_game_ix, verify_profile_ix,
+    claim_fees_ix, finalize_game_ix, leave_tournament_ix, record_move_ix, undelegate_game_ix, verify_profile_ix,
 };
 pub use rpc::make_rpc;
+pub use telemetry::{submit_er_with_telemetry, submit_with_telemetry, TxErrorCategory, TxErrorDetail};
 pub use transactions::{
     cosign_and_submit_tx, fund_account, sign_and_submit, sign_and_submit_er, submit_signed_tx,
 };
@@ -33,6 +37,8 @@ pub const PROFILE_SEED: &[u8] = b"profile";
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 /// PDA seed for platform fee vault
 pub const PLATFORM_FEE_VAULT_SEED: &[u8] = b"platform_fee_vault";
+/// PDA seed for tournament accounts
+pub const TOURNAMENT_SEED: &[u8] = b"tournament";
 
 /// MagicBlock magic context account (ER-only)
 pub const MAGIC_CONTEXT_PUBKEY: &str = "MagicContext1111111111111111111111111111111";

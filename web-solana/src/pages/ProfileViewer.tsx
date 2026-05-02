@@ -15,6 +15,7 @@ import {
   getAnchorProgram,
   fetchPlayerProfile,
   createPlayerProfile,
+  PROGRAM_ID,
 } from '../lib/anchor_client';
 import bs58 from 'bs58';
 import { submitSignup, getUserStatus, registerWithWallet, checkUsernameAvailable, addEmail, syncProfile, type UserStatus } from '../lib/api';
@@ -562,7 +563,7 @@ export function ProfileViewer() {
                     </div>
                   </div>
 
-                  <div style={{ marginTop: 24, textAlign: 'center' }}>
+                  <div style={{ marginTop: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
                     <a
                       href={`xfchess://launch?pubkey=${wallet.publicKey?.toBase58()}&username=${profile.data.username || ''}&token=${localStorage.getItem('xfchess_token') || ''}`}
                       className="btn btn-primary"
@@ -573,6 +574,20 @@ export function ProfileViewer() {
                       </svg>
                       Launch Game
                     </a>
+                    {wallet.publicKey && (
+                      <a
+                        href={`https://solscan.io/account/${PublicKey.findProgramAddressSync(
+                          [Buffer.from("profile"), wallet.publicKey.toBuffer()],
+                          PROGRAM_ID
+                        )[0].toBase58()}?cluster=devnet`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-secondary"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 24px', fontSize: '0.9rem' }}
+                      >
+                        View Profile on Solscan
+                      </a>
+                    )}
                   </div>
                 </div>
               )}

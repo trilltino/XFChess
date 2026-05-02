@@ -91,6 +91,7 @@ pub struct MainMenuUIContext<'w, 's> {
     pub player_identity: ResMut<'w, crate::states::main_menu::PlayerIdentity>,
     pub brand_logo: ResMut<'w, crate::states::main_menu::BrandLogoState>,
     pub news_banner: ResMut<'w, crate::states::main_menu::NewsBannerState>,
+    pub p2p_host: ResMut<'w, crate::states::main_menu::P2PHostState>,
     pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
     pub active_time_control: ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
 }

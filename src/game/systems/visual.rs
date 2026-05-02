@@ -151,7 +151,14 @@ pub fn animate_piece_movement(
     }
 }
 
-/// System to animate captured pieces shrinking to zero, then despawning.
+/// System to animate captured pieces with a parabolic arc, spin, and scale-to-zero.
+///
+/// # Animation phases (all simultaneous over 0.45 s)
+///
+/// - **Arc**: piece rises to `arc_height` at t=0.5, then falls back toward the board.
+///   Uses a parabolic curve: `y_offset = arc_height * 4t(1-t)`.
+/// - **Spin**: piece rotates `spin_radians` around its `spin_axis` using smooth-step t.
+/// - **Scale**: piece shrinks to zero using smooth-step easing.
 pub fn animate_capture_fade(
     time: Res<Time>,
     mut commands: Commands,
@@ -159,8 +166,26 @@ pub fn animate_capture_fade(
 ) {
     for (entity, mut transform, mut fading) in query.iter_mut() {
         fading.timer.tick(time.delta());
-        let scale = 1.0 - fading.timer.fraction();
-        transform.scale = Vec3::splat(scale.max(0.0));
+
+        // Raw linear t ∈ [0, 1]
+        let t = fading.timer.fraction();
+
+        // Smooth-step for scale and spin so they ease in/out.
+        let t_smooth = t * t * (3.0 - 2.0 * t);
+
+        // 1. Scale: 1 → 0 with smooth-step
+        let scale = (1.0 - t_smooth).max(0.0);
+        transform.scale = Vec3::splat(scale);
+
+        // 2. Arc: parabolic Y offset — peaks at t=0.5, zero at start and end.
+        //    y_arc = arc_height * 4 * t * (1 - t)
+        let arc_y = fading.arc_height * 4.0 * t * (1.0 - t);
+        transform.translation = fading.initial_pos + Vec3::Y * arc_y;
+
+        // 3. Spin: rotate around spin_axis by smooth-step progress.
+        let spin_angle = fading.spin_radians * t_smooth;
+        transform.rotation = Quat::from_axis_angle(fading.spin_axis, spin_angle);
+
         if fading.timer.just_finished() {
             commands.entity(entity).despawn();
         }

@@ -82,7 +82,7 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Re
     );
 
     **ctx.accounts.player.lamports.borrow_mut() -= entry_fee_total;
-    **ctx.accounts.treasury_vault.lamports.borrow_mut() += tournament.entry_fee;
+    **ctx.accounts.host_treasury.lamports.borrow_mut() += tournament.entry_fee;
     **ctx.accounts.platform_treasury_vault.lamports.borrow_mut() += PLATFORM_FEE_LAMPORTS;
 
     // Update prize pool

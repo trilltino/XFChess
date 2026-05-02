@@ -2,6 +2,7 @@
 pub mod assets;
 pub mod cli;
 pub mod core;
+pub mod crash_reporter;
 pub mod engine;
 pub mod game;
 pub mod input;
@@ -180,7 +181,8 @@ pub fn build_app(game_config: GameConfig) -> App {
         states::pause::PausePlugin,
         states::piece_viewer::PieceViewerPlugin,
     ))
-    .add_plugins(singleplayer::SingleplayerPlugin);
+    .add_plugins(singleplayer::SingleplayerPlugin)
+    .add_plugins(multiplayer::MultiplayerPlugin);
 
     #[cfg(feature = "solana")]
     app.add_plugins(solana::SolanaPlugin);

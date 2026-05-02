@@ -2,7 +2,6 @@
 
 pub mod game_over;
 pub mod main_menu;
-pub mod multiplayer_menu;
 pub mod pause;
 pub mod piece_viewer;
 pub mod tournament_menu;

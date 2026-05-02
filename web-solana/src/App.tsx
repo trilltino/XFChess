@@ -248,7 +248,7 @@ function AppContent() {
                         </button>
                         <AnimatePresence>
                             {isLegalOpen && (
-                                <motion.div 
+                                <motion.div
                                     className="nav-legal-dropdown-menu"
                                     variants={dropdownVariants}
                                     initial="hidden"
@@ -263,6 +263,23 @@ function AppContent() {
                             )}
                         </AnimatePresence>
                     </div>
+                    {isLoggedIn ? (
+                        <button onClick={() => {
+                            localStorage.removeItem('xfchess_token');
+                            localStorage.removeItem('xfchess_email');
+                            localStorage.removeItem('xfchess_username');
+                            setIsLoggedIn(false);
+                            setUserEmail(null);
+                            setUsername(null);
+                            setIsMenuOpen(false);
+                        }} className="nav-link" style={{ fontSize: '12px', fontWeight: '600', letterSpacing: '0.04em' }}>
+                            Logout
+                        </button>
+                    ) : (
+                        <button onClick={() => { setIsLoginModalOpen(true); setIsMenuOpen(false); }} className="nav-link" style={{ fontSize: '12px', fontWeight: '600', letterSpacing: '0.04em' }}>
+                            Login
+                        </button>
+                    )}
                     {connected && (
                         <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
                             {username || "Set Name"}
@@ -270,26 +287,9 @@ function AppContent() {
                     )}
 
                     <div className="nav-wallet-wrap">
-                        {isLoggedIn ? (
-                            <button onClick={() => {
-                                localStorage.removeItem('xfchess_token');
-                                localStorage.removeItem('xfchess_email');
-                                localStorage.removeItem('xfchess_username');
-                                setIsLoggedIn(false);
-                                setUserEmail(null);
-                                setUsername(null);
-                                setIsMenuOpen(false);
-                            }} className="btn-secondary" style={{ height: '44px', padding: '0 20px', borderRadius: '4px', fontSize: '0.9rem', fontWeight: 700, border: 'none', marginRight: '8px' }}>
-                                Logout
-                            </button>
-                        ) : (
-                            <button onClick={() => { setIsLoginModalOpen(true); setIsMenuOpen(false); }} className="nav-link" style={{ fontSize: '12px', fontWeight: '600', letterSpacing: '0.04em', marginRight: '8px' }}>
-                                Login
-                            </button>
-                        )}
                         {connected ? (
-                            <button onClick={() => { disconnect(); setIsMenuOpen(false); }} className="btn-secondary" style={{ height: '44px', padding: '0 20px', borderRadius: '4px', fontSize: '0.9rem', fontWeight: 700, border: 'none' }}>
-                                Disconnect
+                            <button onClick={() => { disconnect(); setIsMenuOpen(false); }} className="btn-secondary disconnect-btn" style={{ height: '44px', width: '44px', padding: '0', borderRadius: '4px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <X size={24} />
                             </button>
                         ) : (
                             <button onClick={() => { setIsModalOpen(true); setIsMenuOpen(false); }} className="nav-link" style={{ fontSize: '12px', fontWeight: '600', letterSpacing: '0.04em' }}>

@@ -121,13 +121,12 @@ impl ChessEngine {
         &mut self,
         pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
     ) {
-        // Collect piece data first to avoid borrow issues
+        // Collect piece data to avoid a conflicting borrow on pieces_query.
         let pieces_data: Vec<(Entity, Piece, HasMoved)> = pieces_query
             .iter_mut()
             .map(|(e, p, h)| (e, *p, *h))
             .collect();
-        
-        // Now call the impl with the collected data as references
+
         self.sync_ecs_to_engine_impl(
             pieces_data.iter().map(|(e, p, h)| (*e, p, h)),
         );

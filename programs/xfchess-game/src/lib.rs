@@ -32,7 +32,7 @@ pub use moves_ix::RecordMove;
 pub use tournament_ix::{
     AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
     CancelTournament, ClaimTournamentPrize, FundUsdcPrize, InitializeMatch, InitializeTournament,
-    RecordMatchResult, RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx,
+    RecordMatchResult, RecordSwissResult, RegisterPlayer, LeaveTournament, RevokeTournamentSessionCtx,
     SessionCreateGame, SessionJoinGame, StartTournament, SwissMatchResult,
 };
 
@@ -99,6 +99,9 @@ pub mod __client_accounts_initialize_tournament {
 }
 pub mod __client_accounts_register_player {
     pub use crate::tournament_ix::registration::register::__client_accounts_register_player::*;
+}
+pub mod __client_accounts_leave_tournament {
+    pub use crate::tournament_ix::registration::leave::__client_accounts_leave_tournament::*;
 }
 pub mod __client_accounts_start_tournament {
     pub use crate::tournament_ix::lifecycle::start::__client_accounts_start_tournament::*;
@@ -380,6 +383,10 @@ pub mod xfchess_game {
 
     pub fn register_player(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Result<()> {
         crate::tournament_ix::registration::register::handler(ctx, tournament_id, elo)
+    }
+
+    pub fn leave_tournament(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> {
+        crate::tournament_ix::registration::leave::handler(ctx, tournament_id)
     }
 
     pub fn start_tournament(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> {

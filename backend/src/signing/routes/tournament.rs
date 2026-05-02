@@ -16,7 +16,15 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
+use solana_sdk::{
+    pubkey::Pubkey,
+    signature::Signer,
+    transaction::Transaction,
+    message::Message,
+};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use std::str::FromStr;
 
 use crate::signing::storage::tournament::{MatchStatus, TournamentRecord, TournamentStatus, TournamentFormat};
 use crate::signing::{AppState, TournamentTrigger};
@@ -123,6 +131,8 @@ pub fn tournament_routes() -> Router<AppState> {
 pub fn tournament_player_app_state_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}/join", post(join_tournament))
+        .route("/{id}/build-leave-tx", post(build_leave_transaction))
+        .route("/{id}/leave", post(leave_tournament))
 }
 
 /// Creates admin tournament routes.
@@ -145,6 +155,7 @@ pub fn admin_tournament_app_state_routes() -> Router<AppState> {
 pub fn tournaments_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(list_tournaments))
+        .route("/my", get(list_my_tournaments))
 }
 
 /// Creates gossip-enabled tournament routes (requires AppState).
@@ -301,6 +312,30 @@ async fn list_tournaments(
         status: format!("{:?}", t.status),
     }).collect();
     Json(summaries)
+}
+
+/// GET /tournaments/my?player=<pubkey> - Lists tournaments a specific player has registered for.
+async fn list_my_tournaments(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Vec<TournamentSummary>>, StatusCode> {
+    let player = params.get("player").ok_or(StatusCode::BAD_REQUEST)?;
+    let store = &state.tournament_store;
+    
+    let all = store.list().await;
+    let my_tournaments = all.into_iter()
+        .filter(|t| t.players.contains(player))
+        .map(|t| TournamentSummary {
+            tournament_id: t.tournament_id,
+            name: t.name,
+            entry_fee_lamports: t.entry_fee_lamports,
+            prize_pool: t.prize_pool,
+            max_players: t.max_players,
+            registered: t.players.len(),
+            status: format!("{:?}", t.status),
+        }).collect();
+        
+    Ok(Json(my_tournaments))
 }
 
 /// GET /tournament/:id - Gets tournament details.
@@ -569,6 +604,85 @@ async fn join_tournament(
         "tournament_full": just_full,
         "elo_rejected": elo_rejected,
         "elo_range": elo_min.zip(elo_max)
+    })))
+}
+
+/// Request to build a leave transaction.
+#[derive(Deserialize)]
+pub struct BuildLeaveTxReq {
+    pub player: String,
+}
+
+/// POST /tournament/:id/build-leave-tx - Builds a partially signed transaction to leave a tournament.
+async fn build_leave_transaction(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<BuildLeaveTxReq>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let store = &state.tournament_store;
+    let _tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    let player_pubkey = Pubkey::from_str(&req.player).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let host_treasury = state.vps_authority.pubkey();
+
+    // 1. Build the instruction
+    let instruction = crate::signing::solana::leave_tournament_ix(
+        &program_id,
+        id,
+        &player_pubkey,
+        &host_treasury,
+    );
+
+    // 2. Fetch latest blockhash
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let blockhash = rpc.get_latest_blockhash().map_err(|e| {
+        error!("[tournament] Failed to get blockhash: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // 3. Build and partially sign the transaction
+    // Fee payer is the player (for simplicity in this flow, or host_treasury if you prefer)
+    let message = Message::new(&[instruction], Some(&player_pubkey));
+    let mut transaction = Transaction::new_unsigned(message);
+    
+    // Partially sign with the host_treasury (vps_authority)
+    transaction.try_partial_sign(&[&*state.vps_authority], blockhash).map_err(|e| {
+        error!("[tournament] Failed to partially sign: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // 4. Serialize to base64
+    let tx_bytes = bincode::serialize(&transaction).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let transaction_base64 = BASE64_STANDARD.encode(&tx_bytes);
+
+    info!("[tournament] Built leave transaction for {} in tournament {}", req.player, id);
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "transaction": transaction_base64,
+    })))
+}
+
+/// POST /tournament/:id/leave - Removes a player from a tournament after tx is confirmed.
+async fn leave_tournament(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<BuildLeaveTxReq>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let store = &state.tournament_store;
+    
+    // Attempt to leave
+    let ok = store.leave_tournament(id, &req.player).await;
+    if !ok {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    info!("[tournament] {} left tournament {}", req.player, id);
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "player": req.player,
     })))
 }
 

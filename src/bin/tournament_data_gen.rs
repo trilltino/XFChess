@@ -615,7 +615,8 @@ async fn finalize_game_on_chain(
         game_id,
         winner,
         white_pubkey,
-        black_pubkey
+        black_pubkey,
+        player.pubkey() // Use player as fee_payer for now
     )?;
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
     

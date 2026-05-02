@@ -27,6 +27,9 @@ pub struct EndGame<'info> {
     /// CHECK: Platform treasury vault — seeded PDA prevents redirection to arbitrary wallets.
     #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub treasury_vault: UncheckedAccount<'info>,
+    /// CHECK: Fee payer account (ephemeral rollups relayer) - reimbursed from escrow
+    #[account(mut)]
+    pub fee_payer: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -55,6 +58,31 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
     // Only pay out if escrow still holds funds (resign/claim_timeout may have already paid)
     let escrow_balance = ctx.accounts.escrow_pda.lamports();
     let pot = wager_amount * 2;
+    
+    // Reimburse fee payer (ephemeral rollups relayer) from escrow for transaction fee
+    // Fixed fee estimate of 10000 lamports to cover transaction costs
+    let tx_fee = 10_000;
+    if wager_amount > 0 && wager_token.is_none() && escrow_balance >= pot + tx_fee {
+        let game_id_bytes = _game_id.to_le_bytes();
+        let bump = ctx.bumps.escrow_pda;
+        let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[bump]]];
+        
+        // Transfer transaction fee to fee_payer (relayer)
+        anchor_lang::system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.escrow_pda.to_account_info(),
+                    to: ctx.accounts.fee_payer.to_account_info(),
+                },
+                escrow_seeds,
+            ),
+            tx_fee,
+        )?;
+        
+        msg!("Transaction fee reimbursed to relayer: {} lamports", tx_fee);
+    }
+    
     if wager_amount > 0 && wager_token.is_none() && escrow_balance >= pot {
         let game_id_bytes = _game_id.to_le_bytes();
         let bump = ctx.bumps.escrow_pda;
@@ -88,8 +116,10 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                 } else {
                     ctx.accounts.black_authority.to_account_info()
                 };
+                // Reduce payout by transaction fee that was reimbursed to relayer
+                let payout = pot.saturating_sub(tx_fee);
                 let rent = Rent::get()?;
-                let balance_after = dest.lamports().saturating_add(pot);
+                let balance_after = dest.lamports().saturating_add(payout);
                 if rent.is_exempt(balance_after, dest.data_len()) {
                     anchor_lang::system_program::transfer(
                         CpiContext::new_with_signer(
@@ -100,7 +130,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                             },
                             escrow_seeds,
                         ),
-                        pot,
+                        payout,
                     )?;
                 } else {
                     msg!("Skipping prize transfer to winner: not rent-exempt after transfer");
@@ -108,9 +138,11 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
             }
             GameResult::Draw => {
                 let half = wager_amount;
+                // Reduce each refund by half the transaction fee
+                let refund = half.saturating_sub(tx_fee / 2);
                 let rent = Rent::get()?;
-                let white_balance_after = ctx.accounts.white_authority.lamports().saturating_add(half);
-                let black_balance_after = ctx.accounts.black_authority.lamports().saturating_add(half);
+                let white_balance_after = ctx.accounts.white_authority.lamports().saturating_add(refund);
+                let black_balance_after = ctx.accounts.black_authority.lamports().saturating_add(refund);
                 if rent.is_exempt(white_balance_after, ctx.accounts.white_authority.data_len()) {
                     anchor_lang::system_program::transfer(
                         CpiContext::new_with_signer(
@@ -121,7 +153,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                             },
                             escrow_seeds,
                         ),
-                        half,
+                        refund,
                     )?;
                 } else {
                     msg!("Skipping refund to white player: not rent-exempt after transfer");
@@ -136,7 +168,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                             },
                             escrow_seeds,
                         ),
-                        half,
+                        refund,
                     )?;
                 } else {
                     msg!("Skipping refund to black player: not rent-exempt after transfer");
@@ -162,7 +194,9 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
         }
 
         // --- Collect Treasury Fee ---
-        if escrow_balance >= country_fee && country_fee > 0 {
+        // Adjust escrow balance check to account for transaction fee reimbursement
+        let adjusted_escrow_balance = escrow_balance.saturating_sub(tx_fee);
+        if adjusted_escrow_balance >= country_fee && country_fee > 0 {
             let game_id_bytes = _game_id.to_le_bytes();
             let escrow_bump = ctx.bumps.escrow_pda;
             let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[escrow_bump]]];
@@ -185,7 +219,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
 
         // --- Collect ELO Fee (split between players) ---
         let elo_fee_total = ELO_FEE_LAMPORTS;
-        if escrow_balance >= country_fee + elo_fee_total && elo_fee_total > 0 {
+        if adjusted_escrow_balance >= country_fee + elo_fee_total && elo_fee_total > 0 {
             let game_id_bytes = _game_id.to_le_bytes();
             let escrow_bump = ctx.bumps.escrow_pda;
             let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[escrow_bump]]];

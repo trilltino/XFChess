@@ -432,7 +432,10 @@ pub fn perform_wallet_connect(auth_state: &mut ResMut<AuthState>, commands: &mut
     auth_state.error = None;
 
     // Trigger the Tauri wallet popup to open
+    #[cfg(feature = "solana")]
     crate::multiplayer::solana::tauri_signer::open_wallet_browser();
+    #[cfg(not(feature = "solana"))]
+    bevy::prelude::info!("Solana feature disabled. Cannot open wallet browser.");
 
     let thread_pool = bevy::tasks::AsyncComputeTaskPool::get();
     let base_url = auth_base_url();
@@ -442,7 +445,14 @@ pub fn perform_wallet_connect(auth_state: &mut ResMut<AuthState>, commands: &mut
         let mut pubkey = None;
         for _attempt in 0..30 {
             std::thread::sleep(std::time::Duration::from_millis(500));
-            pubkey = crate::multiplayer::solana::integration::systems::query_wallet_pubkey_from_tauri();
+            #[cfg(feature = "solana")]
+            {
+                pubkey = crate::multiplayer::solana::integration::systems::query_wallet_pubkey_from_tauri();
+            }
+            #[cfg(not(feature = "solana"))]
+            {
+                pubkey = None;
+            }
             if pubkey.is_some() {
                 break;
             }
@@ -505,7 +515,13 @@ pub fn perform_wallet_register(auth_state: &mut ResMut<AuthState>, commands: &mu
             .as_secs();
         
         let msg = format!("xfchess:register:{}", timestamp);
-        let signature = match crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&msg) {
+        
+        #[cfg(feature = "solana")]
+        let sig_result = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&msg);
+        #[cfg(not(feature = "solana"))]
+        let sig_result: Result<Vec<u8>, String> = Err("Solana feature disabled".to_string());
+
+        let signature = match sig_result {
             Ok(sig) => sig,
             Err(e) => return Err(format!("Wallet sign failed: {}", e)),
         };
@@ -562,7 +578,13 @@ pub fn perform_wallet_login(auth_state: &mut ResMut<AuthState>, commands: &mut C
             .as_secs();
         
         let msg = format!("xfchess:login:{}", timestamp);
-        let signature = match crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&msg) {
+        
+        #[cfg(feature = "solana")]
+        let sig_result = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&msg);
+        #[cfg(not(feature = "solana"))]
+        let sig_result: Result<Vec<u8>, String> = Err("Solana feature disabled".to_string());
+
+        let signature = match sig_result {
             Ok(sig) => sig,
             Err(e) => return Err(format!("Wallet sign failed: {}", e)),
         };

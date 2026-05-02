@@ -9,7 +9,15 @@ echo.
 
 set SCRIPT_DIR=%~dp0
 set ROOT=%SCRIPT_DIR%..
-set TARGET_DIR=%ROOT%\target\debug
+set RELEASE_DIR=%ROOT%\target\release
+
+:: --- Build Optimizations ---
+:: Enable maximum Rust/Bevy build optimizations for fast, optimized binaries
+set CARGO_PROFILE_RELEASE_LTO=true
+set CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+set CARGO_PROFILE_RELEASE_OPT_LEVEL=3
+set CARGO_PROFILE_RELEASE_STRIP=false
+set RUSTFLAGS=-C target-cpu=native
 
 :: --- Environment Configuration (Synced with backend/.env) ---
 set XFCHESS_FAST_LOCAL_BUILD=1
@@ -23,7 +31,7 @@ set IDENTITY_SALT=abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567
 
 :: Solana / Authority Keys
 set SOLANA_RPC_URL=https://api.devnet.solana.com
-set PROGRAM_ID=A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W
+set PROGRAM_ID=C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf
 set FEE_PAYER_KEYS=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
 set VPS_AUTHORITY_KEY=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
 set KYC_AUTHORITY_KEY=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
@@ -61,9 +69,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Building XFChess Tauri host from latest source...
+echo Building XFChess Tauri host from latest source - LTO + native CPU optimized...
 cd /d "%ROOT%"
-cargo build -p xfchess-tauri
+cargo build -p xfchess-tauri --release
 if errorlevel 1 (
     echo Tauri build failed.
     pause
@@ -72,16 +80,28 @@ if errorlevel 1 (
 
 :: --- Launch Services ---
 echo.
-echo [1/3] Launching Signing Server on http://127.0.0.1:8090...
+echo [1/4] Checking local monitoring stack...
+cd /d "%ROOT%\deploy\monitoring"
+docker-compose -f docker-compose.local.yml ps >nul 2>&1
+if errorlevel 1 (
+    echo Starting local monitoring stack...
+    docker-compose -f docker-compose.local.yml up -d
+    timeout /t 5 /nobreak >nul
+) else (
+    echo Monitoring stack already running.
+)
+cd /d "%ROOT%"
+
+echo [2/4] Launching Signing Server on http://127.0.0.1:8090...
 set ALLOWED_ORIGINS=http://localhost:7454,http://localhost:5173
 set RUST_LOG=info
-start "XFChess Backend" /D "%ROOT%\backend" cmd /c "%TARGET_DIR%\signing-server-http.exe 2>&1 || pause"
+start "XFChess Backend" /D "%ROOT%\backend" cmd /c "%RELEASE_DIR%\signing-server-http.exe 2>&1 || pause"
 
 :: Wait for backend to start
 timeout /t 3 /nobreak >nul
 
 echo [2/3] Launching XFChess (Tauri hosts wallet UI + HTTP server on port 7454)...
-set RELEASE_DIR=%ROOT%\target\debug
+set RELEASE_DIR=%ROOT%\target\release
 if exist "%ROOT%\stockfish.exe" (
     set STOCKFISH_PATH=%ROOT%\stockfish.exe
 ) else if exist "%ROOT%\references\Stockfish\stockfish.exe" (
@@ -91,15 +111,16 @@ if exist "%ROOT%\stockfish.exe" (
 )
 
 set XFCHESS_WALLET_MODE=tauri
+set RELEASE_DIR=%ROOT%\target\release
 start "XFChess Tauri" /D "%ROOT%" /MIN cmd /c "%RELEASE_DIR%\xfchess-tauri.exe || pause"
 
 :: Wait for Tauri TCP bridge to initialize before launching game
 timeout /t 2 /nobreak >nul
 
-echo [3/4] Launching XFChess Game...
+echo [3/5] Launching XFChess Game...
 start "XFChess Game" /D "%ROOT%" cmd /c "%RELEASE_DIR%\xfchess.exe || pause"
 
-echo [4/4] Launching web-solana frontend on http://localhost:5173...
+echo [4/5] Launching web-solana frontend on http://localhost:5173...
 start "XFChess Web" /D "%ROOT%\web-solana" cmd /c "npm run dev"
 
 :: Wait a moment then open the browser
@@ -113,13 +134,16 @@ echo ========================================
 echo Backend:        http://127.0.0.1:8090
 echo Tauri/Wallet:   http://127.0.0.1:7454 (managed by xfchess-tauri.exe)
 echo Web Frontend:   http://localhost:5173
+echo Grafana:        http://localhost:3000 (admin/admin)
+echo Prometheus:     http://localhost:9090
 echo Program ID:     %PROGRAM_ID%
 echo Solana RPC:     %SOLANA_RPC_URL%
 echo.
 echo Game launched. When you click "Connect Wallet", it will open
 echo the Tauri wallet popup window for wallet signing.
 echo.
-echo Close the game, wallet server, backend, and web server when finished.
+echo Monitoring dashboards available at Grafana/Prometheus.
+echo Close the game, wallet server, backend, web server, and monitoring when finished.
 echo ========================================
 echo.
 endlocal

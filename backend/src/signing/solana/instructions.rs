@@ -6,7 +6,7 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
-use super::{GAME_SEED, MAGIC_CONTEXT_PUBKEY, MAGIC_PROGRAM_PUBKEY, MOVE_LOG_SEED, PLATFORM_FEE_VAULT_SEED, PROFILE_SEED, SESSION_DELEGATION_SEED, WAGER_ESCROW_SEED};
+use super::{GAME_SEED, MAGIC_CONTEXT_PUBKEY, MAGIC_PROGRAM_PUBKEY, MOVE_LOG_SEED, PLATFORM_FEE_VAULT_SEED, PROFILE_SEED, SESSION_DELEGATION_SEED, TOURNAMENT_SEED, WAGER_ESCROW_SEED};
 
 /// Computes the Anchor discriminator for a given instruction name.
 fn anchor_discriminator(name: &str) -> [u8; 8] {
@@ -103,17 +103,21 @@ pub fn undelegate_game_ix(program_id: &Pubkey, session_pubkey: &Pubkey, game_id:
 ///
 /// Sets game.status = Finished, pays out the wager escrow, and updates ELO.
 /// Winner: Some("white") | Some("black") | None (draw).
+///
+/// `fee_payer` is the ephemeral rollups relayer pubkey that gets reimbursed from escrow.
 pub fn finalize_game_ix(
     program_id: &Pubkey,
     game_id: u64,
     white: &Pubkey,
     black: &Pubkey,
     winner: Option<&str>,
+    fee_payer: &Pubkey,
 ) -> Instruction {
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let white_profile = Pubkey::find_program_address(&[PROFILE_SEED, white.as_ref()], program_id).0;
     let black_profile = Pubkey::find_program_address(&[PROFILE_SEED, black.as_ref()], program_id).0;
     let escrow_pda = Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], program_id).0;
+    let treasury_vault = Pubkey::find_program_address(&[b"treasury_vault"], program_id).0;
 
     let mut data = anchor_discriminator("finalize_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
@@ -134,6 +138,8 @@ pub fn finalize_game_ix(
             AccountMeta::new(*white, false),
             AccountMeta::new(*black, false),
             AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(treasury_vault, false),
+            AccountMeta::new(*fee_payer, false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ],
         data,
@@ -187,6 +193,34 @@ pub fn claim_fees_ix(
             AccountMeta::new(*caller, true),
             AccountMeta::new(fee_vault_pda, false),
             AccountMeta::new(*host_wallet, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+        data,
+    }
+}
+
+/// Builds a `leave_tournament` instruction for devnet.
+///
+/// Removes a player from the tournament and triggers a refund.
+pub fn leave_tournament_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    player: &Pubkey,
+    host_treasury: &Pubkey,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let data = anchor_discriminator("leave_tournament").to_vec();
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(*player, true),
+            AccountMeta::new(*host_treasury, true),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ],
         data,

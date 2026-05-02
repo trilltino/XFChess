@@ -266,12 +266,15 @@ pub fn record_move_ix(
 ///   0 → `GameResult::None`
 ///   1 + 32-byte pubkey → `GameResult::Winner(Pubkey)`
 ///   2 → `GameResult::Draw`
+///
+/// `fee_payer` is the ephemeral rollups relayer pubkey
 pub fn finalize_game_ix(
     program_id: Pubkey,
     game_id: u64,
     result_code: u8,
     white_pubkey: Pubkey,
     black_pubkey: Pubkey,
+    fee_payer: Pubkey,
 ) -> Result<Instruction> {
     let game_pda = Pubkey::find_program_address(
         &[GAME_SEED, &game_id.to_le_bytes()],
@@ -290,6 +293,11 @@ pub fn finalize_game_ix(
     .0;
     let escrow_pda = Pubkey::find_program_address(
         &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let treasury_vault = Pubkey::find_program_address(
+        &[b"treasury_vault"],
         &program_id,
     )
     .0;
@@ -324,6 +332,8 @@ pub fn finalize_game_ix(
             AccountMeta::new(white_pubkey, false),
             AccountMeta::new(black_pubkey, false),
             AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(treasury_vault, false),
+            AccountMeta::new(fee_payer, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,

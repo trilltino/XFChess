@@ -121,6 +121,21 @@ pub fn sign_and_send_via_tauri(
     submit_signed_to_rpc(rpc_url, &signed_bytes)
 }
 
+/// Sign and send a pre-built base64-encoded transaction via the Tauri bridge.
+pub fn sign_and_send_b64_via_tauri(
+    rpc_url: &str,
+    tx_b64: &str,
+) -> Result<Signature, String> {
+    use base64::{Engine as _, engine::general_purpose};
+    
+    let tx_bytes = general_purpose::STANDARD.decode(tx_b64)
+        .map_err(|e| format!("decode_b64: {}", e))?;
+        
+    let signed_bytes = send_to_tauri_blocking(&tx_bytes)?;
+    
+    submit_signed_to_rpc(rpc_url, &signed_bytes)
+}
+
 /// Sign an arbitrary message (e.g. for TEE authentication) via the Tauri signing bridge.
 pub fn sign_message_via_tauri(message: &str) -> Result<Vec<u8>, String> {
     info!("[TAURI-SIGN] Requesting message signature: '{}'", message);

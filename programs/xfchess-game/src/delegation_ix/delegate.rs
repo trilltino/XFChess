@@ -43,10 +43,15 @@ mod inner {
             system_program: &ctx.accounts.system_program.to_account_info(),
         };
 
-        delegate_account(delegate_accounts, seeds, config.clone())?;
+        delegate_account(delegate_accounts, seeds, config)?;
 
         // Delegate the move_log PDA
         let ml_seeds: &[&[u8]] = &[MOVE_LOG_SEED, &game_id_bytes];
+
+        let config = DelegateConfig {
+            commit_frequency_ms: (valid_until as u32).saturating_mul(1000),
+            validator: Some(eu_validator),
+        };
 
         let ml_delegate_accounts = DelegateAccounts {
             payer: &ctx.accounts.payer.to_account_info(),

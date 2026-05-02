@@ -218,6 +218,9 @@ impl AppState {
 /// Note: tournament routes are mounted in build_app_router to avoid duplication.
 pub fn build_router(state: AppState) -> Router {
     Router::new()
+        // Debug and health routes
+        .merge(crate::signing::routes::debug::debug_routes())
+        
         // Core game session and move routes (These were missing from build_app_router)
         .merge(crate::signing::routes::main::routes())
         

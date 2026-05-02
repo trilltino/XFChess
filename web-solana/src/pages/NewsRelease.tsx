@@ -37,7 +37,6 @@ export default function NewsRelease() {
                 <div style={{ 
                     width: '100%', 
                     height: '400px', 
-                    background: 'linear-gradient(135deg, #1a3d2e 0%, #0f2a1f 50%, #1a2d3e 100%)',
                     borderRadius: '16px',
                     marginBottom: '48px',
                     display: 'flex',
@@ -47,12 +46,6 @@ export default function NewsRelease() {
                     position: 'relative',
                     overflow: 'hidden'
                 }}>
-                    <div style={{ 
-                        position: 'absolute',
-                        inset: 0,
-                        background: 'url("/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_medieval_battle_hero_1775215627149.png") center/cover',
-                        opacity: 0.3
-                    }}></div>
                     <div style={{ position: 'relative', zIndex: 1, textAlign: 'center' }}>
                         <span style={{ fontSize: '4rem', fontWeight: 900, color: 'var(--primary)' }}>XF</span>
                         <span style={{ fontSize: '4rem', fontWeight: 900, color: '#fff' }}>Chess</span>
@@ -101,7 +94,6 @@ export default function NewsRelease() {
                     <div style={{ 
                         width: '100%', 
                         height: '300px', 
-                        background: 'linear-gradient(135deg, #2d1a3e 0%, #1a2d3e 100%)',
                         borderRadius: '12px',
                         marginBottom: '48px',
                         display: 'flex',
@@ -111,12 +103,6 @@ export default function NewsRelease() {
                         position: 'relative',
                         overflow: 'hidden'
                     }}>
-                        <div style={{ 
-                            position: 'absolute',
-                            inset: 0,
-                            background: 'url("/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_tech_engineering_1775215698765.png") center/cover',
-                            opacity: 0.3
-                        }}></div>
                         <div style={{ position: 'relative', zIndex: 1, color: 'var(--text-dim)', fontSize: '1.2rem' }}>
                             [Screenshot: XFChess 3D Board with Real-time Move Validation]
                         </div>

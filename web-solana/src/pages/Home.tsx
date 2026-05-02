@@ -11,7 +11,6 @@ export function Home() {
         <main className="home-root">
             {/* HERO: STRATEGY / ACTION CHESS */}
             <section className="fullscreen-section" style={{
-                backgroundImage: `url('/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_medieval_battle_hero_1775215627149.png')`,
                 paddingTop: '160px'
             }}>
                 <div className="section-overlay"></div>
@@ -46,10 +45,7 @@ export function Home() {
             </section>
 
             {/* SECTION: SANDBOX WAR TABLE */}
-            <section className="fullscreen-section" style={{
-                backgroundImage: `url('/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_war_table_strategy_1775215651444.png')`,
-                backgroundPosition: 'top center'
-            }}>
+            <section className="fullscreen-section">
                 <div className="section-overlay" style={{ background: 'linear-gradient(to left, rgba(8, 26, 20, 0.95), rgba(8, 26, 20, 0.2))' }}></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-start' }}>
@@ -66,9 +62,7 @@ export function Home() {
             </section>
 
             {/* SECTION: HIGH FIDELITY */}
-            <section className="fullscreen-section" style={{
-                backgroundImage: `url('/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_tech_engineering_1775215698765.png')`
-            }}>
+            <section className="fullscreen-section">
                 <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
@@ -85,9 +79,7 @@ export function Home() {
             </section>
 
             {/* SECTION: ECONOMY */}
-            <section className="fullscreen-section" style={{
-                backgroundImage: `url('/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_economy_gold_pieces_1775215677989.png')`
-            }}>
+            <section className="fullscreen-section">
                 <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-start' }}>
@@ -104,9 +96,7 @@ export function Home() {
             </section>
 
             {/* SECTION: LEARN THE GAME */}
-            <section className="fullscreen-section" style={{
-                backgroundImage: `url('/C:/Users/isich/.gemini/antigravity/brain/0a9ca3a9-366a-46e5-8c2d-238d39256994/chess_medieval_battle_hero_1775215627149.png')`
-            }}>
+            <section className="fullscreen-section">
                 <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>

@@ -37,6 +37,7 @@ impl Plugin for UiPlugin {
         app.add_plugins(compliance_modal::CompliancePlugin);
         app.add_plugins(popup::PopupPlugin);
         app.add_plugins(stats::StatsPlugin);
+        app.add_plugins(multiplayer_menu::MultiplayerMenuPlugin);
         app.add_plugins(SpectatorModePlugin);
     }
 }

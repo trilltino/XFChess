@@ -1,0 +1,83 @@
+version: '3.8'
+
+# XFChess Full Stack Docker Compose
+# Includes backend, monitoring, and optional services
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: xfchess-backend
+    ports:
+      - "8090:8090"
+    environment:
+      - RUST_LOG=info
+      - DATABASE_URL=sqlite:///data/sessions.db?mode=rwc
+      - VAULT_DB_URL=sqlite:///data/vault.db?mode=rwc
+      - SIGNING_PORT=8090
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+      - JWT_SECRET=${JWT_SECRET}
+      - IDENTITY_ENCRYPTION_KEY=${IDENTITY_ENCRYPTION_KEY}
+      - IDENTITY_SALT=${IDENTITY_SALT}
+    volumes:
+      - backend-data:/app/data
+    restart: unless-stopped
+    networks:
+      - xfchess
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: xfchess-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - xfchess
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: xfchess-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    restart: unless-stopped
+    networks:
+      - xfchess
+    depends_on:
+      - prometheus
+
+volumes:
+  backend-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  xfchess:
+    driver: bridge
