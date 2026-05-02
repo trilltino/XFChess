@@ -5,6 +5,7 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  base: './',
   resolve: {
     alias: {
       '/wasm/xfchess_wasm.js': path.resolve(__dirname, '../xfchess-wasm/pkg/xfchess_wasm.js'),
