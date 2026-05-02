@@ -10,6 +10,9 @@ use xfchess::{Cli, PlayerColor as CliPlayerColor, GameConfig, PlayerColor, build
 
 #[tokio::main]
 async fn main() {
+    // Initialize telemetry / crash reporting
+    xfchess::crash_reporter::setup_enhanced_panic_hook();
+
     // Check wallet mode (Tauri vs standalone)
     let wallet_mode = std::env::var("XFCHESS_WALLET_MODE").unwrap_or_default() == "tauri";
     if !wallet_mode {
