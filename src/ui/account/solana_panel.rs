@@ -1,4 +1,4 @@
-//! Solana-specific UI components for competitive mode
+﻿//! Solana-specific UI components for competitive mode
 //!
 //! Includes wallet connection status, ELO stats, and wagering UI.
 
@@ -30,7 +30,7 @@ pub fn render_solana_panel(
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(&short_pk).color(UiColors::TEXT_SECONDARY));
                     if ui
-                        .small_button("📋")
+                        .small_button("")
                         .on_hover_text(format!("Copy address\n{}", pk_str))
                         .clicked()
                     {
@@ -55,12 +55,12 @@ pub fn render_solana_panel(
                 ui.add_space(5.0);
                 
                 ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new("👻 Phantom").strong()).on_hover_text("Connect via Phantom Extension").clicked() {
+                    if ui.button(egui::RichText::new(" Phantom").strong()).on_hover_text("Connect via Phantom Extension").clicked() {
                         crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                         info!("[WALLET] User selected Phantom - opening Tauri popup...");
                     }
                     ui.add_space(5.0);
-                    if ui.button(egui::RichText::new("☀️ Solflare").strong()).on_hover_text("Connect via Solflare Extension").clicked() {
+                    if ui.button(egui::RichText::new("️ Solflare").strong()).on_hover_text("Connect via Solflare Extension").clicked() {
                         crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                         info!("[WALLET] User selected Solflare - opening Tauri popup...");
                     }
@@ -81,15 +81,15 @@ pub fn render_solana_panel(
                 let has_kyc = status.as_ref().map(|s| s.has_kyc).unwrap_or(false);
 
                 ui.horizontal(|ui| {
-                    ui.label(if has_profile { "✓" } else { "✗" });
+                    ui.label(if has_profile { "" } else { "" });
                     ui.label("Profile");
                 });
                 ui.horizontal(|ui| {
-                    ui.label(if has_email { "✓" } else { "✗" });
+                    ui.label(if has_email { "" } else { "" });
                     ui.label("Email");
                 });
                 ui.horizontal(|ui| {
-                    ui.label(if has_kyc { "✓" } else { "✗" });
+                    ui.label(if has_kyc { "" } else { "" });
                     ui.colored_label(if has_kyc { UiColors::SUCCESS } else { UiColors::DANGER }, "KYC — required for wagered play");
                 });
 
@@ -167,3 +167,4 @@ pub fn render_solana_panel(
         }
     });
 }
+

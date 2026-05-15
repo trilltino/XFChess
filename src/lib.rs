@@ -1,59 +1,136 @@
 /// XFChess library module for decentralized chess on Solana
+
 pub mod assets;
-pub mod cli;
 pub mod core;
-pub mod crash_reporter;
 pub mod engine;
 pub mod game;
 pub mod input;
 pub mod multiplayer;
 pub mod presentation;
 pub mod rendering;
-pub mod singleplayer;
 #[cfg(feature = "solana")]
 pub mod solana;
 pub mod states;
 pub mod ui;
 pub mod xf_animate;
 
-pub use cli::{Cli, PlayerColor};
-pub use core::persistent_camera::PersistentEguiCamera;
-
 use bevy::prelude::*;
 use bevy::asset::AssetMetaCheck;
 use bevy::audio::{AudioPlugin, Volume};
 use bevy::log::LogPlugin;
 use bevy_egui::EguiPlugin;
+use clap::{Parser, Subcommand, ValueEnum};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-/// Game configuration from CLI arguments and environment variables
-#[derive(Resource, Debug, Clone)]
+pub use core::persistent_camera::PersistentEguiCamera;
+
+/// Player color option
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+pub enum PlayerColor {
+    White,
+    Black,
+}
+
+/// Game configuration from CLI arguments and environment variables.
+/// This struct serves as both the CLI parser and the Bevy resource.
+#[derive(Parser, Resource, Debug, Clone)]
+#[command(name = "xfchess")]
+#[command(about = "XFChess - Decentralized Chess with Ephemeral Rollups")]
+#[command(version = "0.1.0")]
 pub struct GameConfig {
     /// Optional game ID for joining an existing game
+    #[arg(long)]
     pub game_id: Option<u64>,
+
     /// Player color (White or Black)
+    #[arg(long, value_enum)]
     pub player_color: Option<PlayerColor>,
+
     /// Solana RPC endpoint URL
+    #[arg(long, default_value = "https://api.devnet.solana.com", env = "XFCHESS_RPC_URL")]
     pub rpc_url: String,
-    /// Session key for delegation
+
+    /// Session key (base58 encoded) for signing rollups
+    #[arg(long, env = "XFCHESS_SESSION_KEY")]
     pub session_key: Option<String>,
+
     /// Session public key
+    #[arg(long, env = "XFCHESS_SESSION_PUBKEY")]
     pub session_pubkey: Option<String>,
+
     /// P2P network port
+    #[arg(long, default_value = "5001", env = "XFCHESS_P2P_PORT")]
     pub p2p_port: u16,
-    /// Bootstrap node for P2P networking
+
+    /// Bootstrap node ID (for Player 2 to connect to Player 1)
+    #[arg(long, env = "XFCHESS_BOOTSTRAP_NODE")]
     pub bootstrap_node: Option<String>,
+
     /// Game PDA address
+    #[arg(long, env = "XFCHESS_GAME_PDA")]
     pub game_pda: Option<String>,
+
     /// Wager amount in SOL
+    #[arg(long, env = "XFCHESS_WAGER_AMOUNT")]
     pub wager_amount: Option<f64>,
-    /// Debug mode flag
+
+    /// Enable transaction debugger / debug mode
+    #[arg(long)]
     pub debug: bool,
+
     /// Log file path
+    #[arg(long, default_value = "rollup_debug.log")]
     pub log_file: String,
+
     /// AI difficulty (1-5)
+    #[arg(long, env = "XFCHESS_AI_DIFFICULTY")]
     pub ai_difficulty: Option<u8>,
+
     /// AI side (White or Black)
+    #[arg(long, env = "XFCHESS_AI_SIDE")]
     pub ai_side: Option<PlayerColor>,
+
+    /// Session config JSON file path
+    #[arg(long)]
+    pub session_config: Option<PathBuf>,
+
+    /// Subcommand for CLI-only tools
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum Commands {
+    /// Tournament administrator controls
+    Tournament {
+        #[command(subcommand)]
+        action: TournamentCommand,
+    },
+    /// Run the transaction debugger (integrated view)
+    Debug {
+        /// Game ID to monitor
+        #[arg(long)]
+        game_id: u64,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum TournamentCommand {
+    /// Create a new tournament on-chain
+    Create {
+        #[arg(long, default_value = "XFChess Cup")]
+        name: String,
+        #[arg(long, default_value = "0.05")]
+        entry_fee: f64,
+    },
+    /// List active tournaments
+    List,
+    /// Start tournament bracket
+    Start {
+        #[arg(long)]
+        id: u64,
+    },
 }
 
 impl Default for GameConfig {
@@ -72,17 +149,48 @@ impl Default for GameConfig {
             log_file: "rollup_debug.log".to_string(),
             ai_difficulty: None,
             ai_side: None,
+            session_config: None,
+            command: None,
         }
     }
 }
 
+impl GameConfig {
+    /// Load session config from JSON file if specified
+    pub fn load_session_config(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(ref path) = self.session_config {
+            info!("Loading session config from: {}", path.display());
+            let contents = std::fs::read_to_string(path)?;
+            let session: SessionConfigFile = serde_json::from_str(&contents)?;
+
+            self.game_id = Some(session.game_id.parse()?);
+            self.player_color = Some(match session.player_color.to_lowercase().as_str() {
+                "white" => PlayerColor::White,
+                "black" => PlayerColor::Black,
+                _ => PlayerColor::White,
+            });
+            self.session_key = Some(session.session_key);
+            self.session_pubkey = Some(session.session_pubkey);
+            self.rpc_url = session.rpc_url;
+            self.game_pda = Some(session.game_pda);
+            self.wager_amount = Some(session.wager_amount);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+struct SessionConfigFile {
+    pub game_id: String,
+    pub player_color: String,
+    pub session_key: String,
+    pub session_pubkey: String,
+    pub rpc_url: String,
+    pub game_pda: String,
+    pub wager_amount: f64,
+}
+
 /// Builds the Bevy application with all plugins and configuration
-/// 
-/// This function configures the Bevy app with:
-/// - Default plugins (window, audio, logging)
-/// - Custom XFChess plugins
-/// - Game configuration resource
-/// - Optional AI configuration
 pub fn build_app(game_config: GameConfig) -> App {
     let mut app = App::new();
     
@@ -108,18 +216,11 @@ pub fn build_app(game_config: GameConfig) -> App {
 
     app.insert_resource(game_config.clone())
         .init_resource::<PersistentEguiCamera>()
-        // Disable bevy_egui's auto-attachment of PrimaryEguiContext. We attach
-        // it manually to the persistent camera in `setup_persistent_egui_camera`
-        // so additional cameras spawned later (e.g. `xf_animate`'s mini
-        // showcase camera) cannot accidentally claim the primary egui context.
         .insert_resource(bevy_egui::EguiGlobalSettings {
             auto_create_primary_context: false,
             ..default()
         })
-        // Startup (not PreStartup): the primary window must exist before we spawn
-        // a Camera3d so that bevy_egui can attach an egui context to it.
         .add_systems(Startup, core::persistent_camera::setup_persistent_egui_camera);
-
 
     // Add core plugins
     app.add_plugins(
@@ -166,7 +267,7 @@ pub fn build_app(game_config: GameConfig) -> App {
     )
     .add_plugins(EguiPlugin::default());
 
-    // Add custom plugins - split into groups due to Bevy tuple size limits
+    // Add custom plugins
     app.add_plugins((
         core::CorePlugin,
         game::GamePlugin,
@@ -180,8 +281,8 @@ pub fn build_app(game_config: GameConfig) -> App {
         states::game_over::GameOverPlugin,
         states::pause::PausePlugin,
         states::piece_viewer::PieceViewerPlugin,
+        xf_animate::XfAnimatePlugin,
     ))
-    .add_plugins(singleplayer::SingleplayerPlugin)
     .add_plugins(multiplayer::MultiplayerPlugin);
 
     #[cfg(feature = "solana")]

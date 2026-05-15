@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         braid_iroh::DiscoveryConfig::Real,
         Some(pools.session_pool.clone()),
         Some(app),
-    ).await.expect("failed to spawn braid-iroh node");
+    ).await.map_err(|e| anyhow::anyhow!("failed to spawn braid-iroh node: {}", e))?;
 
     // ── Spawn background tasks ───────────────────────────────────────────────
     let tournament_trigger = spawn_background_tasks(state.clone(), config);
@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("[signing-server] Background tasks spawned with tournament scheduler");
 
     // ── Wait for shutdown signal ───────────────────────────────────────────
-    tokio::signal::ctrl_c().await.expect("failed to wait for sigint");
+    tokio::signal::ctrl_c().await.map_err(|e| anyhow::anyhow!("failed to wait for sigint: {}", e))?;
     info!("[signing-server] Shutting down");
 
     Ok(())

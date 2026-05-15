@@ -147,3 +147,4 @@ Check out our translation project on [Crowdin](https://crowdin.com/) (coming soo
 See [https://xfchess.org/help/contribute](https://xfchess.org/help/contribute) for more ways to help.
 
 Thank you for contributing to XFChess!
+    

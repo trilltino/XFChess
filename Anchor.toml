@@ -3,10 +3,10 @@ seeds = true
 skip-lint = false
 
 [programs.localnet]
-xfchess_game = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf"
+xfchess_game = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
 
 [programs.devnet]
-xfchess_game = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf"
+xfchess_game = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
 
 [registry]
 url = "https://api.apr.dev"

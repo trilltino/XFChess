@@ -345,7 +345,9 @@ mod tests {
 
         let pairing = find_player_pairing("player1", 1, &pairings);
         assert!(pairing.is_some());
-        let p = pairing.unwrap();
+        let Some(p) = pairing else {
+            panic!("Pairing should be Some");
+        };
         assert_eq!(p.round, 1);
         assert_eq!(p.board, 1);
         assert_eq!(p.opponent, "player2");
@@ -364,7 +366,9 @@ mod tests {
 
         let pairing = find_player_pairing("player2", 1, &pairings);
         assert!(pairing.is_some());
-        let p = pairing.unwrap();
+        let Some(p) = pairing else {
+            panic!("Pairing should be Some");
+        };
         assert_eq!(p.opponent, "player1");
         assert!(matches!(p.color, PlayerColor::Black));
     }

@@ -25,7 +25,7 @@ mod inner {
         // EU devnet validator for devnet-eu.magicblock.app
         let eu_validator = "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e"
             .parse::<Pubkey>()
-            .unwrap();
+            .map_err(|_| GameErrorCode::InvalidArgument)?;
         let config = DelegateConfig {
             commit_frequency_ms: (valid_until as u32).saturating_mul(1000),
             validator: Some(eu_validator),

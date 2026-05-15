@@ -27,15 +27,19 @@ pub fn initialize_braid_network(
     mut network_state: ResMut<BraidNetworkState>,
     tokio_runtime: Res<TokioRuntime>,
 ) {
-    info!("Initializing Braid/Iroh networking layer");
+    if network_state.connected {
+        return;
+    }
 
     let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<NetworkEvent>();
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<NetworkMessage>();
     let (bootstrap_tx, mut bootstrap_rx) = tokio::sync::mpsc::unbounded_channel::<EndpointId>();
+    let (sub_tx, mut sub_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     network_state.event_receiver = Some(event_rx);
     network_state.message_sender = Some(msg_tx);
     network_state.bootstrap_sender = Some(bootstrap_tx);
+    network_state.subscription_sender = Some(sub_tx);
 
     let event_tx_clone = event_tx.clone();
 
@@ -70,7 +74,7 @@ pub fn initialize_braid_network(
             })
             .ok();
 
-        let mut rx = match node.subscribe(GAME_TOPIC, vec![]).await {
+        let rx = match node.subscribe(GAME_TOPIC, vec![]).await {
             Ok(r) => r,
             Err(e) => {
                 error!("❌ Failed to subscribe to gossip topic: {}", e);
@@ -81,8 +85,9 @@ pub fn initialize_braid_network(
         let node_arc = std::sync::Arc::new(node);
         let node_send = node_arc.clone();
         let node_bootstrap = node_arc.clone();
+        let node_sub = node_arc.clone();
 
-        // Outgoing message loop
+        // 1. Outgoing message loop
         let event_tx_error = event_tx_clone.clone();
         tokio::spawn(async move {
             while let Some(msg) = msg_rx.recv().await {
@@ -93,16 +98,44 @@ pub fn initialize_braid_network(
                         continue;
                     }
                 };
+
+                // Determine topic: 
+                // Invites and discovery go to the global topic. 
+                // Moves and session info go to game-specific topics to reduce noise.
+                let topic = match &msg {
+                    NetworkMessage::GameInvite { .. } | 
+                    NetworkMessage::InviteResponse { .. } | 
+                    NetworkMessage::GameStart { .. } => GAME_TOPIC.to_string(),
+                    _ => format!("{}/{}", GAME_TOPIC, msg.game_id()),
+                };
+
                 let version = Version::new(uuid::Uuid::new_v4().to_string());
                 let update = Update::snapshot(version, json.into());
-                if let Err(e) = node_send.put(GAME_TOPIC, update).await {
-                    error!("Failed to broadcast message: {}", e);
+                if let Err(e) = node_send.put(&topic, update).await {
+                    error!("Failed to broadcast message to {}: {}", topic, e);
                     event_tx_error.send(NetworkEvent::PeerDisconnected(format!("Broadcast error: {}", e))).ok();
                 }
             }
         });
 
-        // Bootstrap loop
+        // 2. Subscription loop
+        let event_tx_sub = event_tx_clone.clone();
+        tokio::spawn(async move {
+            while let Some(topic) = sub_rx.recv().await {
+                info!("[NET] Dynamically subscribing to topic: {}", topic);
+                let event_tx_inner = event_tx_sub.clone();
+                match node_sub.subscribe(&topic, vec![]).await {
+                    Ok(rx_new) => {
+                        tokio::spawn(process_gossip_stream(rx_new, event_tx_inner));
+                    }
+                    Err(e) => {
+                        error!("Failed to subscribe to topic {}: {}", topic, e);
+                    }
+                }
+            }
+        });
+
+        // 3. Bootstrap loop
         tokio::spawn(async move {
             while let Some(peer_id) = bootstrap_rx.recv().await {
                 if let Err(e) = node_bootstrap.join_peers(GAME_TOPIC, vec![peer_id]).await {
@@ -111,62 +144,65 @@ pub fn initialize_braid_network(
             }
         });
 
-        // Incoming gossip loop
-        while let Some(result) = rx.next().await {
-            match result {
-                Ok(IrohEvent::NeighborUp(peer_id)) => {
-                    info!("GOSSIP NeighborUp: {}", peer_id);
-                    let bs58_id = bs58::encode(peer_id.as_bytes()).into_string();
-                    event_tx_clone
-                        .send(NetworkEvent::PeerConnected(bs58_id.clone()))
-                        .ok();
+        // 4. Main gossip pump (global topic)
+        process_gossip_stream(rx, event_tx_clone).await;
+    });
+}
 
-                    event_tx_clone
-                        .send(NetworkEvent::PeerDiscovered(PeerInfo {
-                            node_id: bs58_id.clone(),
-                            wallet_address: format!("sol:{}...", &bs58_id[..8]),
-                            game_preferences: GamePreferences {
-                                stake_amount: 0.5,
-                                time_control: TimeControl {
-                                    base_time_seconds: 600,
-                                    increment_seconds: 2,
-                                },
-                                variant: ChessVariant::Standard,
-                            },
-                            last_seen: Instant::now(),
-                            role: NodeRole::Player,
-                            connected_game: None,
-                        }))
-                        .ok();
-                }
-                Ok(IrohEvent::Received(msg)) => {
-                    match serde_json::from_slice::<Update>(&msg.content) {
-                        Ok(update) => {
-                            if let Some(body) = update.body {
-                                match serde_json::from_slice::<NetworkMessage>(&body) {
-                                    Ok(net_msg) => {
-                                        event_tx_clone.send(NetworkEvent::MessageReceived(net_msg)).ok();
-                                    }
-                                    Err(_) => {}
+async fn process_gossip_stream(
+    mut rx: iroh_gossip::api::GossipReceiver,
+    event_tx: tokio::sync::mpsc::UnboundedSender<NetworkEvent>,
+) {
+    while let Some(result) = rx.next().await {
+        match result {
+            Ok(IrohEvent::NeighborUp(peer_id)) => {
+                info!("GOSSIP NeighborUp: {}", peer_id);
+                let bs58_id = bs58::encode(peer_id.as_bytes()).into_string();
+                event_tx.send(NetworkEvent::PeerConnected(bs58_id.clone())).ok();
+
+                event_tx.send(NetworkEvent::PeerDiscovered(PeerInfo {
+                    node_id: bs58_id.clone(),
+                    wallet_address: format!("sol:{}...", &bs58_id[..8]),
+                    game_preferences: GamePreferences {
+                        stake_amount: 0.5,
+                        time_control: TimeControl {
+                            base_time_seconds: 600,
+                            increment_seconds: 2,
+                        },
+                        variant: ChessVariant::Standard,
+                    },
+                    last_seen: Instant::now(),
+                    role: NodeRole::Player,
+                    connected_game: None,
+                })).ok();
+            }
+            Ok(IrohEvent::Received(msg)) => {
+                match serde_json::from_slice::<Update>(&msg.content) {
+                    Ok(update) => {
+                        if let Some(body) = update.body {
+                            match serde_json::from_slice::<NetworkMessage>(&body) {
+                                Ok(net_msg) => {
+                                    event_tx.send(NetworkEvent::MessageReceived(net_msg)).ok();
                                 }
-                            }
-                        }
-                        Err(_) => {
-                            if let Ok(net_msg) = serde_json::from_slice::<NetworkMessage>(&msg.content) {
-                                event_tx_clone.send(NetworkEvent::MessageReceived(net_msg)).ok();
+                                Err(_) => {}
                             }
                         }
                     }
+                    Err(_) => {
+                        if let Ok(net_msg) = serde_json::from_slice::<NetworkMessage>(&msg.content) {
+                            event_tx.send(NetworkEvent::MessageReceived(net_msg)).ok();
+                        }
+                    }
                 }
-                Ok(IrohEvent::NeighborDown(peer_id)) => {
-                    info!("GOSSIP NeighborDown: {}", peer_id);
-                    let bs58_id = bs58::encode(peer_id.as_bytes()).into_string();
-                    event_tx_clone.send(NetworkEvent::PeerDisconnected(bs58_id)).ok();
-                }
-                _ => {}
             }
+            Ok(IrohEvent::NeighborDown(peer_id)) => {
+                info!("GOSSIP NeighborDown: {}", peer_id);
+                let bs58_id = bs58::encode(peer_id.as_bytes()).into_string();
+                event_tx.send(NetworkEvent::PeerDisconnected(bs58_id)).ok();
+            }
+            _ => {}
         }
-    });
+    }
 }
 
 /// Polling system to read NetworkEvents from the background task and write them as Bevy events.

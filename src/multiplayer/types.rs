@@ -85,6 +85,7 @@ pub struct BraidNetworkState {
     pub event_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<NetworkEvent>>,
     pub message_sender: Option<tokio::sync::mpsc::UnboundedSender<NetworkMessage>>,
     pub bootstrap_sender: Option<tokio::sync::mpsc::UnboundedSender<EndpointId>>,
+    pub subscription_sender: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 impl Default for BraidNetworkState {
@@ -100,6 +101,7 @@ impl Default for BraidNetworkState {
             event_receiver: None,
             message_sender: None,
             bootstrap_sender: None,
+            subscription_sender: None,
         }
     }
 }
@@ -126,4 +128,20 @@ pub enum NetworkEvent {
     GameEnded(String),
     PeerConnected(String),
     PeerDisconnected(String),
+}
+
+/// Central configuration for multiplayer backend URLs.
+#[derive(Resource, Debug, Clone)]
+pub struct NetworkConfig {
+    pub vps_base_url: String,
+    pub relay_base_url: String,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            vps_base_url: "http://178.104.55.19".to_string(), // Unified production IP
+            relay_base_url: "http://178.104.55.19".to_string(),
+        }
+    }
 }

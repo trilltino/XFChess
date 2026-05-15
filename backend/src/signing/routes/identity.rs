@@ -289,13 +289,6 @@ async fn log_audit_event(pubkey: &str, action: &str, pool: &Arc<sqlx::SqlitePool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode},
-        routing::Router,
-    };
-    use tower::ServiceExt;
-    use solana_sdk::signature::{Keypair, Signer};
     use std::time::SystemTime;
 
     #[test]

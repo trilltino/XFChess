@@ -26,7 +26,10 @@ pub fn check_profile_on_connect(
         return;
     }
 
-    let wallet_pubkey = solana_state.wallet_pubkey.unwrap();
+    let Some(wallet_pubkey) = solana_state.wallet_pubkey else {
+        warn!("[PROFILE] No wallet pubkey available for check");
+        return;
+    };
     *last_wallet = Some(wallet_pubkey.to_string());
 
     // Skip if already checking

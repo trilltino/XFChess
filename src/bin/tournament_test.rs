@@ -1,4 +1,4 @@
-#![cfg(feature = "solana")]
+﻿#![cfg(feature = "solana")]
 #![allow(dead_code)]
 #![allow(unused_imports)]
 #![allow(unused_variables)]
@@ -68,7 +68,7 @@ struct MatchResult {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🏆 XFChess Tournament Test - 4 Player Simulation");
+    println!(" XFChess Tournament Test - 4 Player Simulation");
     println!("================================================");
 
     let args = Args::parse();
@@ -78,65 +78,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let admin_keypair = read_keypair_file(&args.keypair)
         .map_err(|_| format!("Failed to read admin keypair from {}", args.keypair))?;
     
-    println!("🔑 Admin: {}", admin_keypair.pubkey());
+    println!(" Admin: {}", admin_keypair.pubkey());
     
     // Check admin balance
     let admin_balance = rpc.get_account(&admin_keypair.pubkey())?.lamports;
-    println!("💰 Admin balance: {} SOL", admin_balance as f64 / 1_000_000_000.0);
+    println!(" Admin balance: {} SOL", admin_balance as f64 / 1_000_000_000.0);
     
     if admin_balance < 10_000_000_000 {
-        println!("⚠️  Admin balance low - please fund with devnet SOL");
+        println!("️  Admin balance low - please fund with devnet SOL");
     }
 
     // Create 4 test players
     let players = create_players().await?;
     
     // Airdrop SOL to each player
-    println!("\n💸 Airdropping 1 SOL to each player...");
+    println!("\n Airdropping 1 SOL to each player...");
     for player in &players {
         airdrop_sol(&rpc, &player.pubkey).await?;
-        println!("  ✅ {} got 1 SOL", player.name);
+        println!("   {} got 1 SOL", player.name);
     }
 
     // Create player profiles
-    println!("\n👤 Creating player profiles...");
+    println!("\n Creating player profiles...");
     for player in &players {
         create_player_profile(&rpc, &admin_keypair, &player.pubkey).await?;
-        println!("  ✅ {} profile created", player.name);
+        println!("   {} profile created", player.name);
     }
 
     // Initialize tournament
-    println!("\n🏆 Initializing tournament...");
+    println!("\n Initializing tournament...");
     initialize_tournament(&rpc, &admin_keypair).await?;
-    println!("  ✅ Tournament {} initialized", TOURNAMENT_ID);
+    println!("   Tournament {} initialized", TOURNAMENT_ID);
 
     // Register all players
-    println!("\n📝 Registering players...");
+    println!("\n Registering players...");
     for player in &players {
         register_player(&rpc, &player.keypair).await?;
-        println!("  ✅ {} registered", player.name);
+        println!("   {} registered", player.name);
     }
 
     // Start tournament
-    println!("\n🚀 Starting tournament...");
+    println!("\n Starting tournament...");
     start_tournament(&rpc, &admin_keypair).await?;
-    println!("  ✅ Tournament started");
+    println!("   Tournament started");
 
     // Play matches
     let mut results = Vec::new();
     
     // SF1: Magnus vs Vidit
-    println!("\n🎮 SF1: Magnus vs Vidit");
+    println!("\n SF1: Magnus vs Vidit");
     let sf1_result = play_match(&rpc, &players[0], &players[3], "SF1").await?;
     results.push(sf1_result);
     
     // SF2: Fabiano vs Anish
-    println!("\n🎮 SF2: Fabiano vs Anish");
+    println!("\n SF2: Fabiano vs Anish");
     let sf2_result = play_match(&rpc, &players[1], &players[2], "SF2").await?;
     results.push(sf2_result);
     
     // Final: Winner SF1 vs Winner SF2
-    println!("\n🏆 Final: {} vs {}", results[0].winner, results[1].winner);
+    println!("\n Final: {} vs {}", results[0].winner, results[1].winner);
     let final_result = play_final(&rpc, &results).await?;
     results.push(final_result);
 
@@ -148,9 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     generate_html_report(&tournament_result).await?;
 
-    println!("\n✅ Tournament complete!");
-    println!("🏆 Champion: {}", tournament_result.champion);
-    println!("📄 Report generated: tournament_report.html");
+    println!("\n Tournament complete!");
+    println!(" Champion: {}", tournament_result.champion);
+    println!(" Report generated: tournament_report.html");
 
     Ok(())
 }
@@ -202,7 +202,7 @@ async fn create_players() -> Result<Vec<Player>, Box<dyn std::error::Error>> {
 async fn airdrop_sol(rpc: &RpcClient, pubkey: &Pubkey) -> Result<(), Box<dyn std::error::Error>> {
     // In a real implementation, this would call the devnet airdrop API
     // For now, we'll just simulate it
-    println!("  💸 Airdropping to {}...", pubkey);
+    println!("   Airdropping to {}...", pubkey);
     sleep(Duration::from_secs(2)).await;
     Ok(())
 }
@@ -213,7 +213,7 @@ async fn create_player_profile(
     player: &Pubkey,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Implement profile creation instruction
-    println!("  👤 Creating profile for {}...", player);
+    println!("   Creating profile for {}...", player);
     sleep(Duration::from_secs(1)).await;
     Ok(())
 }
@@ -223,7 +223,7 @@ async fn initialize_tournament(
     admin: &Keypair,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Implement tournament initialization instruction
-    println!("  🏆 Initializing tournament...");
+    println!("   Initializing tournament...");
     sleep(Duration::from_secs(2)).await;
     Ok(())
 }
@@ -233,7 +233,7 @@ async fn register_player(
     player: &Keypair,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Implement player registration instruction
-    println!("  📝 Registering player...");
+    println!("   Registering player...");
     sleep(Duration::from_secs(1)).await;
     Ok(())
 }
@@ -243,7 +243,7 @@ async fn start_tournament(
     admin: &Keypair,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Implement tournament start instruction
-    println!("  🚀 Starting tournament...");
+    println!("   Starting tournament...");
     sleep(Duration::from_secs(1)).await;
     Ok(())
 }
@@ -254,7 +254,7 @@ async fn play_match(
     player2: &Player,
     round: &str,
 ) -> Result<MatchResult, Box<dyn std::error::Error>> {
-    println!("  🎮 Playing {} match: {} vs {}", round, player1.name, player2.name);
+    println!("   Playing {} match: {} vs {}", round, player1.name, player2.name);
     
     // Simulate match play
     sleep(Duration::from_secs(3)).await;
@@ -281,7 +281,7 @@ async fn play_final(rpc: &RpcClient, semifinal_results: &[MatchResult]) -> Resul
     let sf1_winner = &semifinal_results[0].winner;
     let sf2_winner = &semifinal_results[1].winner;
     
-    println!("  🏆 Playing Final: {} vs {}", sf1_winner, sf2_winner);
+    println!("   Playing Final: {} vs {}", sf1_winner, sf2_winner);
     sleep(Duration::from_secs(3)).await;
     
     // Simplified - first semifinal winner wins
@@ -309,7 +309,7 @@ async fn generate_html_report(result: &TournamentResult) -> Result<(), Box<dyn s
     </style>
 </head>
 <body>
-    <h1 class="header">🏆 XFChess Tournament Report</h1>
+    <h1 class="header"> XFChess Tournament Report</h1>
     <h2 class="header">Champion: {}</h2>
     
     <h3>Match Results</h3>
@@ -342,3 +342,4 @@ fn read_keypair_file(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> 
     let data = std::fs::read(path)?;
     Ok(Keypair::from_bytes(&data)?)
 }
+

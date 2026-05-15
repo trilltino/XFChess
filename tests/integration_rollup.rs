@@ -2,6 +2,8 @@
 //!
 //! These are pure unit-level tests: no Bevy app or Solana RPC is required.
 
+#![cfg(feature = "solana")]
+
 use xfchess::multiplayer::rollup::manager::{EphemeralRollupManager, GameStateStatus};
 
 /// After exactly `max_batch_size` local moves, `should_flush()` must return

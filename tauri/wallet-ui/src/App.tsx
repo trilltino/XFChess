@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from "react";
+﻿import { useState, useEffect, type CSSProperties } from "react";
 import bs58 from "bs58";
 
 // ---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ function SiteNav() {
         display: "flex", alignItems: "center", gap: 8,
         textDecoration: "none", userSelect: "none",
       }}>
-        <span style={{ fontSize: 22, lineHeight: 1 }}>♛</span>
+        <span style={{ fontSize: 22, lineHeight: 1 }}></span>
         <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.04em" }}>
           <span style={{ color: PRIMARY }}>XF</span>
           <span style={{ color: TEXT }}>Chess</span>
@@ -166,7 +166,7 @@ function GridBg() {
 function LogoMark({ size = 40 }: { size?: number }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, userSelect: "none" }}>
-      <span style={{ fontSize: size * 0.7, lineHeight: 1 }}>♛</span>
+      <span style={{ fontSize: size * 0.7, lineHeight: 1 }}></span>
       <span style={{ fontSize: size * 0.55, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 800, letterSpacing: "-0.04em" }}>
         <span style={{ color: RED }}>XF</span>
         <span style={{ color: TEXT }}>Chess</span>
@@ -274,7 +274,7 @@ function ErrorMsg({ msg }: { msg: string }) {
       padding: "10px 14px", borderRadius: 10, background: "rgba(173,92,47,0.1)",
       border: `1px solid ${PRIMARY_BORDER}`, color: ACCENT, fontSize: 13, marginBottom: 16,
     }}>
-      ⚠ {msg}
+       {msg}
     </div>
   );
 }
@@ -344,7 +344,7 @@ function EntryStep({
           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(244,187,68,0.15)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(244,187,68,0.08)"; }}
         >
-          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.12)" }}>🎮</div>
+          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.12)" }}></div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 15, color: ACCENT }}>Play Now (Offline)</div>
             <div style={{ fontSize: 12, color: TEXT_MUTED }}>Local play — no wallet or account needed</div>
@@ -360,7 +360,7 @@ function EntryStep({
           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
         >
-          <div style={{ ...iconCircle, background: "rgba(173,92,47,0.1)" }}>💎</div>
+          <div style={{ ...iconCircle, background: "rgba(173,92,47,0.1)" }}></div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 15 }}>Login with Wallet</div>
             <div style={{ fontSize: 12, color: TEXT_MUTED }}>Instant sign-in for existing users</div>
@@ -373,7 +373,7 @@ function EntryStep({
           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
         >
-          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.1)" }}>✉️</div>
+          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.1)" }}>️</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 15 }}>Create Account</div>
             <div style={{ fontSize: 12, color: TEXT_MUTED }}>Use Email + Password</div>
@@ -418,7 +418,7 @@ function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: ()
         height: 280, overflowY: "auto" as const, marginBottom: 20, paddingRight: 8,
         fontSize: 13, lineHeight: 1.7, color: TEXT_DIM,
       }}>
-        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}>📜 Terms of Service</p>
+        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}> Terms of Service</p>
         <p style={{ marginBottom: 12 }}>
           XFChess is a decentralised chess platform operating on the Solana blockchain. By using
           this application you acknowledge that wagered games involve real cryptocurrency. All wagers
@@ -427,7 +427,7 @@ function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: ()
           must be 18+ to participate in wagered games.
         </p>
 
-        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}>🔒 Privacy &amp; GDPR Notice</p>
+        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}> Privacy &amp; GDPR Notice</p>
         <p style={{ marginBottom: 8 }}>We collect and store the following data securely:</p>
         <ul style={{ paddingLeft: 18, marginBottom: 12 }}>
           <li>Account credentials (email + bcrypt-hashed password — plaintext never stored)</li>
@@ -447,7 +447,7 @@ function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: ()
           contact the ICO (UK) or your local supervisory authority.
         </p>
 
-        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}>🏦 CARF 2026 Compliance</p>
+        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}> CARF 2026 Compliance</p>
         <p style={{ marginBottom: 8 }}>
           XFChess is a Reporting Crypto-Asset Service Provider (RCASP) under CARF 2026. If you
           wager cryptocurrency assets, we are legally required to collect, verify, and in some
@@ -471,7 +471,7 @@ function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: ()
               border: `2px solid ${checked ? RED : BORDER}`, background: checked ? RED_DIM : "transparent",
               display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1, transition: "all 0.15s",
             }}>
-              {checked && <span style={{ color: RED, fontSize: 11, fontWeight: 800 }}>✓</span>}
+              {checked && <span style={{ color: RED, fontSize: 11, fontWeight: 800 }}></span>}
             </div>
             <span onClick={() => set(!checked)}>{label}</span>
           </label>
@@ -585,8 +585,8 @@ function WalletStep({
   const [connecting, setConnecting] = useState<"phantom" | "solflare" | null>(null);
 
   const WALLET_META = {
-    phantom: { label: "Phantom", icon: "👻", installUrl: "https://phantom.app/", provider: () => (window as any).phantom?.solana },
-    solflare: { label: "Solflare", icon: "☀️", installUrl: "https://solflare.com/", provider: () => (window as any).solflare },
+    phantom: { label: "Phantom", icon: "", installUrl: "https://phantom.app/", provider: () => (window as any).phantom?.solana },
+    solflare: { label: "Solflare", icon: "️", installUrl: "https://solflare.com/", provider: () => (window as any).solflare },
   };
 
   const handleConnect = async (walletName: "phantom" | "solflare" | "hot") => {
@@ -689,7 +689,7 @@ function WalletStep({
             style={{ ...walletBtnStyle, borderColor: PRIMARY_BORDER, background: PRIMARY_DIM }}
             onClick={() => handleConnect("hot")}
           >
-            <span style={{ fontSize: 20 }}>🔥</span>
+            <span style={{ fontSize: 20 }}></span>
             <span style={{ flex: 1 }}>Software Wallet (Hot Wallet)</span>
             <span style={{ fontSize: 11, color: PRIMARY, fontWeight: 800 }}>RECOMMENDED</span>
           </button>
@@ -748,7 +748,7 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
       <div style={{
         fontSize: 72, marginBottom: 16,
         animation: "glow 2s ease-in-out infinite, wave 3s ease-in-out infinite", display: "inline-block",
-      }}>♞</div>
+      }}></div>
 
       <div style={{ marginBottom: 8 }}>
         <div style={{
@@ -979,7 +979,7 @@ function ProfileStep({
       <Card showClose={true} onClose={onClose}>
         <StepDots step="profile" />
         <div style={{ textAlign: "center" as const, marginBottom: 24 }}>
-          <div style={{ fontSize: 40, marginBottom: 8 }}>✓</div>
+          <div style={{ fontSize: 40, marginBottom: 8 }}></div>
           <h2 style={{ fontSize: 22, fontWeight: 800, color: TEXT }}>Profile Found</h2>
           <p style={{ fontSize: 14, color: TEXT_DIM, marginTop: 8 }}>
             On-chain username: <strong style={{ color: PRIMARY }}>{synced}</strong>
@@ -1181,3 +1181,4 @@ export default function App() {
     </>
   );
 }
+

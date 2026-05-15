@@ -4,7 +4,10 @@
 //! This allows players to play chess with a traditional 2D view while maintaining
 //! full compatibility with the existing game state and networking systems.
 
+use crate::core::states::GameMode;
+use crate::game::resources::{CurrentTurn, Players};
 use crate::game::components::FadingCapture;
+use crate::game::systems::camera::get_is_black_view;
 use crate::game::systems::input::{
     can_move_color, clear_selection_state, is_human_turn, try_move_sequence, try_select_piece,
     InputSystemParams,
@@ -39,15 +42,8 @@ fn player_card_text(name: &str, elo: &str) -> String {
     }
 }
 
-fn is_black_view(ai_mode: crate::game::ai::resource::GameMode) -> bool {
-    match ai_mode {
-        crate::game::ai::resource::GameMode::VsAI { ai_color } => {
-            ai_color == crate::rendering::pieces::PieceColor::White
-        }
-        crate::game::ai::resource::GameMode::Multiplayer
-        | crate::game::ai::resource::GameMode::MultiplayerCompetitive => false,
-    }
-}
+    // The local is_black_view function is removed in favor of the shared helper in camera.rs
+
 
 /// Convert board (file, rank) to screen offset within the board widget.
 /// White view: a-file on left, rank 1 at bottom.
@@ -110,12 +106,15 @@ fn piece_symbol(piece_type: PieceType, color: PieceColor) -> &'static str {
 pub fn render_2d_board(
     mut input_params: InputSystemParams,
     mut contexts: bevy_egui::EguiContexts,
-    _sprite_handles: Option<Res<crate::rendering::pieces::PieceSpriteHandles>>,
+    sprite_handles: Option<Res<crate::rendering::pieces::PieceSpriteHandles>>,
     _game_phase: Res<crate::game::resources::CurrentGamePhase>,
     ai_config: Res<crate::game::ai::ChessAIResource>,
     #[cfg(feature = "solana")] _solana_profile: Option<Res<crate::multiplayer::solana::addon::SolanaProfile>>,
     #[cfg(feature = "solana")] _competitive_match: Option<Res<crate::multiplayer::solana::addon::CompetitiveMatchState>>,
     view_mode: Res<ViewMode>,
+    game_mode: Res<GameMode>,
+    players: Res<Players>,
+    current_turn: Res<CurrentTurn>,
     _hud_visibility: Res<crate::ui::game::game_ui::InGameHudVisibility>,
     fading_captures: Query<&FadingCapture>,
 ) {
@@ -123,11 +122,24 @@ pub fn render_2d_board(
         return;
     }
 
+    // Pre-calculate texture IDs for piece sprites to avoid borrow conflicts with contexts.ctx_mut()
+    let mut texture_map: HashMap<(PieceType, PieceColor), egui::TextureId> = HashMap::new();
+    if let Some(handles) = &sprite_handles {
+        for pt in [PieceType::Pawn, PieceType::Knight, PieceType::Bishop, PieceType::Rook, PieceType::Queen, PieceType::King] {
+            for pc in [PieceColor::White, PieceColor::Black] {
+                let handle = handles.get(pt, pc);
+                if let Some(id) = contexts.image_id(&handle) {
+                    texture_map.insert((pt, pc), id);
+                }
+            }
+        }
+    }
+
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
 
-    let black_view = is_black_view(ai_config.mode);
+    let black_view = get_is_black_view(&players, &current_turn, *game_mode);
     let is_human = is_human_turn(&input_params);
     let game_over = input_params.game_over.is_game_over();
     let in_check = input_params.engine.is_check();
@@ -243,34 +255,50 @@ pub fn render_2d_board(
                         }
 
                         if let Some((pt, pc, _)) = piece_map.get(&(file, rank)) {
-                            let symbol = piece_symbol(*pt, *pc);
-                            let font_size = square_size * 0.72;
+                            let mut piece_drawn = false;
 
-                            let shadow_col = if *pc == PieceColor::White {
-                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160)
-                            } else {
-                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)
-                            };
-                            painter.text(
-                                sq_rect.center() + egui::Vec2::new(1.5, 1.5),
-                                egui::Align2::CENTER_CENTER,
-                                symbol,
-                                egui::FontId::proportional(font_size),
-                                shadow_col,
-                            );
+                            // Try to draw sprite first
+                            if let Some(id) = texture_map.get(&(*pt, *pc)) {
+                                painter.image(
+                                    *id,
+                                    sq_rect.shrink(square_size * 0.1),
+                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+                                piece_drawn = true;
+                            }
 
-                            let piece_col = if *pc == PieceColor::White {
-                                egui::Color32::WHITE
-                            } else {
-                                egui::Color32::from_rgb(18, 18, 18)
-                            };
-                            painter.text(
-                                sq_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                symbol,
-                                egui::FontId::proportional(font_size),
-                                piece_col,
-                            );
+                            // Fallback to Unicode if sprite not available
+                            if !piece_drawn {
+                                let symbol = piece_symbol(*pt, *pc);
+                                let font_size = square_size * 0.72;
+
+                                let shadow_col = if *pc == PieceColor::White {
+                                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160)
+                                } else {
+                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)
+                                };
+                                painter.text(
+                                    sq_rect.center() + egui::Vec2::new(1.5, 1.5),
+                                    egui::Align2::CENTER_CENTER,
+                                    symbol,
+                                    egui::FontId::proportional(font_size),
+                                    shadow_col,
+                                );
+
+                                let piece_col = if *pc == PieceColor::White {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::from_rgb(18, 18, 18)
+                                };
+                                painter.text(
+                                    sq_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    symbol,
+                                    egui::FontId::proportional(font_size),
+                                    piece_col,
+                                );
+                            }
                         }
 
                         // Per-square click detection — reliable, no pointer-position math needed.
@@ -318,8 +346,8 @@ pub fn render_2d_board(
                 // ── Check notification badge ──────────────────────────────────
                 if in_check && !game_over {
                     let label = match check_color {
-                        PieceColor::White => "♔  White is in Check!",
-                        PieceColor::Black => "♚  Black is in Check!",
+                        PieceColor::White => "  White is in Check!",
+                        PieceColor::Black => "  Black is in Check!",
                     };
                     let badge_w = 200.0_f32;
                     let badge_h = 32.0_f32;
@@ -401,3 +429,4 @@ pub fn render_2d_board(
         }
     }
 }
+

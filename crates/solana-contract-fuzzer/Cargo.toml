@@ -6,9 +6,9 @@ authors.workspace = true
 
 [dependencies]
 proptest = "1.4"
-anchor-lang = "0.32.1"
+anchor-lang = "0.31.1"
 solana-client = { workspace = true }
-solana-sdk = "=2.1.21"
+solana-sdk = "2.2.1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 anyhow = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

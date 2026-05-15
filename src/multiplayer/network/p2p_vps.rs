@@ -146,6 +146,8 @@ fn handle_vps_responses(
     mut menu_state: ResMut<NextState<crate::core::MenuState>>,
     #[cfg(feature = "solana")]
     mut solana_lobby: Option<ResMut<crate::multiplayer::solana::lobby::SolanaLobbyState>>,
+    mut braid_pvp_session: ResMut<crate::multiplayer::network::braid_pvp::BraidPvpSession>,
+    network_config: Res<crate::multiplayer::types::NetworkConfig>,
 ) {
     while let Ok(response) = vps_state.response_rx.try_recv() {
         match response {
@@ -174,6 +176,15 @@ fn handle_vps_responses(
                     connect_events.write(ConnectToPeerEvent {
                         peer_node_id: host_id,
                     });
+                    
+                    // Initialize Braid-HTTP relay session as fallback
+                    if vps_state.use_vps_relay {
+                        crate::multiplayer::network::braid_pvp::start_session(
+                            &mut braid_pvp_session,
+                            network_config.vps_base_url.clone(),
+                            game_id.clone(),
+                        );
+                    }
                     
                     if stake_amount > 0.0 {
                         #[cfg(feature = "solana")]

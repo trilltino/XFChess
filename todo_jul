@@ -1,0 +1,4 @@
+- Create a system to clean up unused `bevy_egui::EguiPlugin` resources.
+- Edit UI for Local Lobby 
+- Validate that Local Games can connect within the UI
+- Validate Braid/iroh games work Locally

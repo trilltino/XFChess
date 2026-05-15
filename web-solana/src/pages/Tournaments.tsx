@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import chessboardSpace from '../assets/chessboard-space.png';
@@ -167,19 +167,19 @@ export function Tournaments() {
                     }}>
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '16px' }}>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}>✓</span>
+                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>KYC Verification:</strong> Complete identity verification to participate in cash tournaments.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}>✓</span>
+                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Solana Wallet:</strong> Connected wallet with sufficient SOL for entry fee and gas.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}>✓</span>
+                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Minimum Rating:</strong> Some tournaments require a minimum Elo rating to ensure competitive balance.
                                 </p>
@@ -196,19 +196,19 @@ export function Tournaments() {
                     <div style={{ background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', padding: '32px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '20px' }}>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}>✓</span>
+                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Instant Payout:</strong> Prize money transfers directly to winners' wallets immediately after tournament completion.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}>✓</span>
+                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Transparent Distribution:</strong> Prize splits are defined in smart contracts and visible to all participants.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}>✓</span>
+                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Multiple Tiers:</strong> Grand tournaments offer larger prize pools, while daily tournaments provide frequent opportunities.
                                 </p>
@@ -264,3 +264,4 @@ export function Tournaments() {
         </main>
     );
 }
+

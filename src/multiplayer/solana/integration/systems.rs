@@ -73,14 +73,24 @@ pub fn initialize_solana_integration(
                             match SessionKeyManager::load_session(&pubkey) {
                                 Ok(session_manager) => {
                                     info!("[SESSION] Loaded existing session key: {}", session_manager.pubkey());
-                                    solana_state.session_keypair = Some(solana_sdk::signature::Keypair::from_bytes(&session_manager.signer().to_bytes()).unwrap());
+                                    match solana_sdk::signature::Keypair::from_bytes(&session_manager.signer().to_bytes()) {
+                                        Ok(kp) => solana_state.session_keypair = Some(kp),
+                                        Err(e) => {
+                                            error!("[SESSION] Failed to convert session manager to Keypair: {}", e);
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     info!("[SESSION] No valid session key found ({}), will create new one", e);
                                     // Create new session key
                                     let session_manager = SessionKeyManager::new(&pubkey);
                                     let session_pubkey = session_manager.pubkey();
-                                    solana_state.session_keypair = Some(solana_sdk::signature::Keypair::from_bytes(&session_manager.signer().to_bytes()).unwrap());
+                                    match solana_sdk::signature::Keypair::from_bytes(&session_manager.signer().to_bytes()) {
+                                        Ok(kp) => solana_state.session_keypair = Some(kp),
+                                        Err(e) => {
+                                            error!("[SESSION] Failed to convert session manager to Keypair: {}", e);
+                                        }
+                                    }
                                     
                                     // Save session data (24 hour default)
                                     if let Err(e) = session_manager.save_session(&pubkey, 24) {

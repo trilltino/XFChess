@@ -1,4 +1,4 @@
-use backend::signing::{AppState, SigningConfig};
+﻿use backend::signing::{AppState, SigningConfig};
 use backend::signing::storage::tournament::TournamentStore;
 use backend::infrastructure::{initialize_pools, run_migrations, build_app_router, spawn_background_tasks};
 
@@ -70,10 +70,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Bind and serve via HTTP ───────────────────────────────────────────
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    info!("[signing-server] HTTP server listening on port {}", port);
+    info!("============================================================");
+    info!(" XFCHESS BACKEND IS NOW ONLINE");
+    info!(" Listening on: http://127.0.0.1:{}", port);
+    info!(" Admin Key: Configured in .env");
+    info!("============================================================");
 
     // ── Serve HTTP ───────────────────────────────────────────────────────
     axum::serve(listener, app).await?;
 
     Ok(())
 }
+

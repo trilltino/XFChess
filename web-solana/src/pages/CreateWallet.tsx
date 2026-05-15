@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 
 interface CreateWalletProps {
   onWalletCreated?: (address: string) => void;
@@ -15,14 +15,14 @@ export default function CreateWallet({ onWalletCreated, onCancel }: CreateWallet
   const wallets = {
     phantom: {
       name: 'Phantom',
-      logo: '👻',
+      logo: '',
       description: 'Most popular Solana wallet with excellent mobile support',
       downloadUrl: 'https://phantom.app',
       deepLink: 'https://phantom.app/ul/browse/https://xfchess.com',
     },
     solflare: {
       name: 'Solflare',
-      logo: '☀️',
+      logo: '️',
       description: 'Secure wallet with built-in DEX and staking features',
       downloadUrl: 'https://solflare.com',
       deepLink: 'https://solflare.com/ul/browse/https://xfchess.com',
@@ -106,7 +106,7 @@ export default function CreateWallet({ onWalletCreated, onCancel }: CreateWallet
                       <p className="text-sm text-gray-500">{wallet.description}</p>
                     </div>
                     {selectedWallet === key && (
-                      <span className="ml-auto text-purple-500 text-2xl">✓</span>
+                      <span className="ml-auto text-purple-500 text-2xl"></span>
                     )}
                   </div>
                 </button>
@@ -237,7 +237,7 @@ export default function CreateWallet({ onWalletCreated, onCancel }: CreateWallet
 
             {isVerified && (
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-                <p className="text-green-700 font-semibold">✓ Recovery phrase verified!</p>
+                <p className="text-green-700 font-semibold"> Recovery phrase verified!</p>
               </div>
             )}
 
@@ -263,3 +263,4 @@ export default function CreateWallet({ onWalletCreated, onCancel }: CreateWallet
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-# iroh-h3
+﻿# iroh-h3
 
 ## Purpose
 
@@ -17,8 +17,8 @@ This crate provides HTTP/3 server capabilities that could be used for:
 
 | Aspect | Status |
 |--------|--------|
-| In workspace | ✅ Yes |
-| Used by main app | ❌ No |
+| In workspace |  Yes |
+| Used by main app |  No |
 | Used by other crates | `iroh-h3-axum`, `iroh-h3-client` |
 
 ## Recommendation
@@ -36,3 +36,4 @@ This crate provides HTTP/3 server capabilities that could be used for:
 - **Experimental** HTTP/3 over Iroh
 - Part of advanced Iroh networking stack
 - Not required for basic P2P gameplay
+

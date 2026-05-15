@@ -1,4 +1,4 @@
-# iroh-h3-client
+﻿# iroh-h3-client
 
 ## Purpose
 
@@ -16,8 +16,8 @@ Client-side counterpart to `iroh-h3`:
 
 | Aspect | Status |
 |--------|--------|
-| In workspace | ✅ Yes |
-| Used by main app | ❌ No |
+| In workspace |  Yes |
+| Used by main app |  No |
 | Depends on | `iroh-h3` |
 
 ## Recommendation
@@ -34,3 +34,4 @@ Client-side counterpart to `iroh-h3`:
 - **Companion crate** to `iroh-h3`
 - Only needed for HTTP/3 client connections over Iroh
 - Not required for current chess functionality
+

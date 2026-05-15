@@ -95,9 +95,11 @@ pub struct AppState {
     pub host_treasury_pubkey: Pubkey,
     pub usdc_mint_pubkey: Pubkey,
     pub pyth_oracle: Arc<PythOracle>,
+    pub rate_cache: crate::signing::routes::rates::RateCache,
     pub tournament_trigger: Option<tokio::sync::mpsc::Sender<TournamentTrigger>>,
     pub orchestrator_tx: Option<tokio::sync::mpsc::Sender<OrchestratorEvent>>,
     pub braid_hub: Arc<ResourceHub>,
+    pub metrics: Arc<crate::telemetry::metrics::Metrics>,
 }
 
 impl AppState {
@@ -171,6 +173,8 @@ impl AppState {
 
         // Initialize Pyth oracle for dynamic pricing
         let pyth_oracle = Arc::new(PythOracle::new());
+        let rate_cache = routes::rates::RateCache::default();
+        let metrics = Arc::new(crate::telemetry::metrics::Metrics::new());
 
         Self {
             config: Arc::new(config),
@@ -190,9 +194,11 @@ impl AppState {
             host_treasury_pubkey,
             usdc_mint_pubkey,
             pyth_oracle,
+            rate_cache,
             tournament_trigger: None,
             orchestrator_tx: None,
             braid_hub,
+            metrics,
         }
     }
 
@@ -227,6 +233,11 @@ pub fn build_router(state: AppState) -> Router {
         // Feature-specific nested routes
         .nest("/api/auth", crate::signing::routes::auth::auth_routes())
         .nest("/api/actions", blinks::blinks_routes())
+        .nest(
+            "/api/rates",
+            crate::signing::routes::rates::rates_routes()
+                .with_state(state.rate_cache.clone()),
+        )
         .merge(p2p_relay::p2p_routes())
         .nest("/identity", crate::signing::routes::identity::identity_routes())
         

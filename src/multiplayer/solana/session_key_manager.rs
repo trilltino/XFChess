@@ -12,6 +12,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     signature::Signature,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
 use directories::ProjectDirs;
 use aes_gcm::{
@@ -43,11 +44,17 @@ pub struct SessionKeyManager {
     keypair: Arc<Keypair>,
     /// Encryption key for local storage (derived from wallet)
     encryption_key: Vec<u8>,
-    /// Project directories for storage
-    project_dirs: ProjectDirs,
+    /// Local data directory for storage
+    data_dir: PathBuf,
 }
 
 impl SessionKeyManager {
+    fn storage_dir() -> PathBuf {
+        ProjectDirs::from("com", "xfchess", "XFChess")
+            .map(|dirs| dirs.data_local_dir().to_path_buf())
+            .unwrap_or_else(|| std::env::temp_dir().join("XFChess"))
+    }
+
     /// Creates a new session key manager with a new ephemeral keypair.
     ///
     /// # Arguments
@@ -58,13 +65,12 @@ impl SessionKeyManager {
     pub fn new(wallet_pubkey: &Pubkey) -> Self {
         let keypair = Arc::new(Keypair::new());
         let encryption_key = Self::derive_encryption_key(wallet_pubkey);
-        let project_dirs = ProjectDirs::from("com", "xfchess", "XFChess")
-            .expect("Failed to get project directories");
+        let data_dir = Self::storage_dir();
 
         Self {
             keypair,
             encryption_key,
-            project_dirs,
+            data_dir,
         }
     }
 
@@ -116,11 +122,10 @@ impl SessionKeyManager {
         let encoded = general_purpose::STANDARD.encode(encrypted);
 
         // Save to file
-        let data_dir = self.project_dirs.data_local_dir();
-        std::fs::create_dir_all(data_dir)
+        std::fs::create_dir_all(&self.data_dir)
             .map_err(|e| format!("Failed to create data directory: {}", e))?;
         
-        let session_file = data_dir.join("session_key.enc");
+        let session_file = self.data_dir.join("session_key.enc");
         std::fs::write(&session_file, encoded)
             .map_err(|e| format!("Failed to write session file: {}", e))?;
 
@@ -135,10 +140,7 @@ impl SessionKeyManager {
     /// # Returns
     /// The reconstructed SessionKeyManager if found and valid
     pub fn load_session(wallet_pubkey: &Pubkey) -> Result<Self, String> {
-        let project_dirs = ProjectDirs::from("com", "xfchess", "XFChess")
-            .expect("Failed to get project directories");
-        
-        let data_dir = project_dirs.data_local_dir();
+        let data_dir = Self::storage_dir();
         let session_file = data_dir.join("session_key.enc");
 
         if !session_file.exists() {
@@ -189,16 +191,13 @@ impl SessionKeyManager {
         Ok(Self {
             keypair: Arc::new(keypair),
             encryption_key,
-            project_dirs,
+            data_dir,
         })
     }
 
     /// Deletes the session key file from local storage.
     pub fn delete_session() -> Result<(), String> {
-        let project_dirs = ProjectDirs::from("com", "xfchess", "XFChess")
-            .expect("Failed to get project directories");
-        
-        let data_dir = project_dirs.data_local_dir();
+        let data_dir = Self::storage_dir();
         let session_file = data_dir.join("session_key.enc");
 
         if session_file.exists() {

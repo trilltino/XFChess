@@ -1,4 +1,4 @@
-//! Sequence playback: steps through the encoded game and schedules animations.
+﻿//! Sequence playback: steps through the encoded game and schedules animations.
 
 use bevy::prelude::*;
 

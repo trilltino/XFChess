@@ -1,0 +1,296 @@
+//! Modal popups owned by the main menu.
+//!
+//! Renders the two purely local-state popups reached from the website-style
+//! main menu: the AI setup modal (strength / time-control / side picker that
+//! immediately starts a Vs-Computer game) and the controls cheat-sheet opened
+//! from the navbar. Both take the bare resources they need so they can be
+//! called without the full `MainMenuUIContext`.
+
+use super::*;
+use crate::core::{GameMode as CoreGameMode, GameState};
+use crate::game::ai::GameMode;
+use bevy::prelude::NextState;
+use bevy_egui::egui;
+use tracing::info;
+
+/// Render AI setup modal with strength and side selection.
+///
+/// Clicking a side button applies the current strength + time-control and
+/// transitions the game into [`GameState::InGame`] as a single-player AI match.
+pub(super) fn render_ai_setup_modal(
+    ctx: &egui::Context,
+    competitive: &mut CompetitiveMenuState,
+    ai_config: &mut crate::game::ai::resource::ChessAIResource,
+    core_mode: &mut CoreGameMode,
+    next_state: &mut NextState<GameState>,
+    active_tc: &mut crate::game::resources::active_time_control::ActiveTimeControl,
+) {
+    let accent_color = egui::Color32::from_rgb(173, 92, 47); // #ad5c2f
+
+    egui::Window::new("Game Setup")
+        .collapsible(false)
+        .resizable(false)
+        .fixed_size(egui::Vec2::new(380.0, 400.0))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .frame(egui::Frame {
+            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
+            corner_radius: egui::CornerRadius::same(4),
+            stroke: egui::Stroke::new(2.0, BEZEL_GREY),
+            inner_margin: egui::Margin::same(16),
+            ..Default::default()
+        })
+        .show(ctx, |ui| {
+            // Close button only (window title already shows "Game Setup")
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        competitive.show_ai_setup = false;
+                    }
+                });
+            });
+
+            ui.add_space(12.0);
+
+            // Strength section
+            ui.label(
+                egui::RichText::new("Strength")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+
+            // Strength grid (1-8) - compact
+            let elos = [0, 400, 700, 1000, 1300, 1600, 1900, 2200, 2500];
+            ui.horizontal(|ui| {
+                for lvl in 1..=8 {
+                    let response = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(format!("{}", lvl))
+                                .size(14.0)
+                                .color(if competitive.ai_difficulty == lvl {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 160)
+                                })
+                        )
+                        .min_size(egui::Vec2::new(32.0, 32.0))
+                        .fill(if competitive.ai_difficulty == lvl {
+                            accent_color
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
+                        })
+                        .corner_radius(4.0)
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            if competitive.ai_difficulty == lvl {
+                                accent_color
+                            } else {
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                            }
+                        ))
+                    );
+
+                    if response.clicked() {
+                        competitive.ai_difficulty = lvl;
+                    }
+                    ui.add_space(4.0);
+                }
+            });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{} ELO", elos[competitive.ai_difficulty as usize]))
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(150, 150, 150)),
+                );
+            });
+
+            ui.add_space(16.0);
+
+            // ── Time Control ─────────────────────────────────────────────────
+            ui.label(
+                egui::RichText::new("Time Control")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+
+            use crate::game::time_control::TimeControl;
+            let tc_presets = [
+                ("∞",   TimeControl::Unlimited),
+                ("15s", TimeControl::UltraBullet),
+                ("1+0", TimeControl::Bullet),
+                ("3+0", TimeControl::BlitzThree),
+                ("5+0", TimeControl::Blitz),
+                ("10+0",TimeControl::Rapid),
+                ("30m", TimeControl::Classical),
+            ];
+            ui.horizontal_wrapped(|ui| {
+                for (label, tc) in tc_presets {
+                    let selected = competitive.ai_time_control == tc;
+                    let btn = egui::Button::new(
+                        egui::RichText::new(label).size(13.0).color(egui::Color32::WHITE),
+                    )
+                    .min_size(egui::Vec2::new(44.0, 28.0))
+                    .corner_radius(4.0)
+                    .fill(if selected { accent_color } else { egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5) })
+                    .stroke(egui::Stroke::new(1.0, if selected { accent_color } else { egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10) }));
+                    if ui.add(btn).clicked() {
+                        competitive.ai_time_control = tc;
+                    }
+                    ui.add_space(3.0);
+                }
+            });
+
+            ui.add_space(16.0);
+
+            // Side selection (buttons are self-explanatory)
+            ui.add_space(6.0);
+
+            // Side selection — clicking a side immediately starts the game with
+            // that side as the player's choice (no separate Play button).
+            ui.horizontal(|ui| {
+                for (label, side) in [
+                    ("Black", AISide::Black),
+                    ("Random", AISide::Random),
+                    ("White", AISide::White),
+                ] {
+                    let selected = competitive.ai_side == side;
+                    let btn = egui::Button::new(egui::RichText::new(label).size(14.0))
+                        .min_size(egui::Vec2::new(70.0, 40.0))
+                        .corner_radius(4.0)
+                        .fill(if selected {
+                            accent_color
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
+                        })
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            if selected {
+                                accent_color
+                            } else {
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                            },
+                        ));
+                    if ui.add(btn).clicked() {
+                        competitive.ai_side = side;
+                    }
+                    ui.add_space(8.0);
+                }
+            });
+
+            ui.add_space(24.0);
+
+            // ── START GAME BUTTON ───────────────────────────────────────────
+            ui.vertical_centered(|ui| {
+                let start_btn = egui::Button::new(
+                    egui::RichText::new("START GAME")
+                        .size(18.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                )
+                .fill(egui::Color32::from_rgb(45, 100, 45)) // Greenish start button
+                .corner_radius(6.0)
+                .min_size(egui::Vec2::new(ui.available_width() * 0.8, 44.0));
+
+                if ui.add(start_btn).clicked() {
+                    info!("[MENU] AI setup modal - START GAME clicked with side: {:?}", competitive.ai_side);
+                    ai_config.difficulty = crate::game::ai::resource::AIDifficulty::from_u8(competitive.ai_difficulty);
+                    ai_config.mode = GameMode::VsAI {
+                        ai_color: match competitive.ai_side {
+                            AISide::Black => crate::rendering::pieces::PieceColor::White,
+                            AISide::Random => {
+                                if rand::random::<bool>() {
+                                    crate::rendering::pieces::PieceColor::White
+                                } else {
+                                    crate::rendering::pieces::PieceColor::Black
+                                }
+                            }
+                            AISide::White => crate::rendering::pieces::PieceColor::Black,
+                        },
+                    };
+                    *core_mode = CoreGameMode::SinglePlayer;
+                    active_tc.control = competitive.ai_time_control;
+                    active_tc.ai_game = true;
+                    next_state.set(GameState::InGame);
+                    competitive.show_ai_setup = false;
+                }
+            });
+        });
+}
+
+/// Render the controls / keybindings popup reached from the navbar.
+pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut CompetitiveMenuState) {
+    egui::Window::new("Controls")
+        .collapsible(false)
+        .resizable(false)
+        .fixed_size(egui::Vec2::new(420.0, 360.0))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .title_bar(false)
+        .frame(egui::Frame {
+            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
+            corner_radius: egui::CornerRadius::same(4),
+            stroke: egui::Stroke::new(2.0, BEZEL_GREY),
+            inner_margin: egui::Margin::same(16),
+            ..Default::default()
+        })
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Controls")
+                        .size(18.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        competitive.show_controls_popup = false;
+                    }
+                });
+            });
+
+            ui.add_space(12.0);
+
+            ui.label(
+                egui::RichText::new("Controls")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+
+            let rows: [(&str, &str); 8] = [
+                ("Left Click", "Select piece / confirm move"),
+                ("Right Click", "Deselect / cancel"),
+                ("Mouse Wheel", "Zoom camera"),
+                ("Middle Drag", "Orbit camera"),
+                ("Esc", "Pause / back to menu"),
+                ("R", "Reset camera view"),
+                ("F", "Flip board"),
+                ("U", "Undo last move (local only)"),
+            ];
+
+            for (key, desc) in rows {
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        [130.0, 20.0],
+                        egui::Label::new(
+                            egui::RichText::new(key)
+                                .size(13.0)
+                                .color(egui::Color32::from_rgb(220, 180, 120))
+                                .strong(),
+                        ),
+                    );
+                    ui.label(
+                        egui::RichText::new(desc)
+                            .size(13.0)
+                            .color(egui::Color32::from_rgb(210, 210, 210)),
+                    );
+                });
+                ui.add_space(4.0);
+            }
+        });
+}

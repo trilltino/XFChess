@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS kyc_records (
     tax_id_hash     TEXT    NOT NULL,   -- SHA-256 blind hash, never raw
     data_source     TEXT    NOT NULL DEFAULT 'self_submitted',
     created_at      INTEGER NOT NULL,   -- Unix timestamp
-    deleted_at      INTEGER,            -- NULL = active; set on GDPR erasure
+    deleted_at      INTEGER,            -- NULL = active, set on GDPR erasure
     UNIQUE(wallet_pubkey)
 );
 

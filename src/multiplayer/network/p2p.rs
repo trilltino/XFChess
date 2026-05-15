@@ -330,6 +330,11 @@ fn handle_network_events(
                                     "Sent game invite {} to peer {} after network connect",
                                     game_id, peer_id
                                 );
+                                
+                                // Subscribe to game-specific topic for move traffic
+                                if let Some(sub_tx) = &network_state.subscription_sender {
+                                    let _ = sub_tx.send(format!("{}/{}", crate::multiplayer::systems::GAME_TOPIC, game_id));
+                                }
                             }
                         } else {
                             error!("Network not initialized - cannot send invite");
@@ -383,6 +388,11 @@ fn handle_network_events(
                             connection_state.game_id = Some(*game_id);
                             connection_state.status = P2PConnectionStatus::Connected;
                             connection_state.player_color = Some(Color::Black);
+                            
+                            // Subscribe to game-specific topic for move traffic
+                            if let Some(sub_tx) = &network_state.subscription_sender {
+                                let _ = sub_tx.send(format!("{}/{}", crate::multiplayer::systems::GAME_TOPIC, game_id));
+                            }
                         }
                     }
 

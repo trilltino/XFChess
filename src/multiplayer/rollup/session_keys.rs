@@ -216,8 +216,8 @@ mod tests {
         let manager2 = SessionKeyManager::new(222222);
 
         // Different game IDs should result in different key paths
-        let path1 = manager1.get_key_path().unwrap();
-        let path2 = manager2.get_key_path().unwrap();
+        let path1 = manager1.get_key_path().expect("should have valid path for manager1");
+        let path2 = manager2.get_key_path().expect("should have valid path for manager2");
 
         assert_ne!(path1, path2);
     }

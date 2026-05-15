@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 use shakmaty::fen::Fen;
-use shakmaty::{Chess, Color, Move, Position, Role, Square};
+use shakmaty::{Chess, Color, Position, Role, Square};
 
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 

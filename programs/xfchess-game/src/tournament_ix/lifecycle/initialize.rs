@@ -20,6 +20,7 @@ const VALID_PLAYER_COUNTS: [u16; 6] = [8, 16, 32, 64, 128, 256];
     elo_max: u32,
     min_players: u16,
     prize_shares: [u16; 10],
+    platform_fee: u64,
     winner_takes_all: bool,
     host_treasury: Pubkey,
     usdc_mint: Option<Pubkey>,
@@ -72,6 +73,7 @@ pub fn handler(
     elo_max: u32,
     min_players: u16,
     prize_shares: [u16; 10],
+    platform_fee: u64,
     winner_takes_all: bool,
     host_treasury: Pubkey,
     usdc_mint: Option<Pubkey>,
@@ -111,6 +113,7 @@ pub fn handler(
     t.authority = ctx.accounts.authority.key();
     t.name = name;
     t.entry_fee = entry_fee;
+    t.platform_fee = platform_fee;
     t.prize_pool = 0;
     t.max_players = max_players;
     t.num_registered_players = 0;

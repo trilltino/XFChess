@@ -1,4 +1,4 @@
-//! Standalone Transaction Debugger Binary
+﻿//! Standalone Transaction Debugger Binary
 //!
 //! This binary runs as a sidecar process to monitor rollup transactions
 //! from the XFChess game client.
@@ -73,11 +73,11 @@ fn main() {
     // Create log file
     let log_file = match File::create(&args.log_file) {
         Ok(file) => {
-            println!("✓ Log file created: {:?}", args.log_file);
+            println!(" Log file created: {:?}", args.log_file);
             Some(file)
         }
         Err(e) => {
-            eprintln!("✗ Failed to create log file: {}", e);
+            eprintln!(" Failed to create log file: {}", e);
             None
         }
     };
@@ -175,9 +175,9 @@ fn monitor_simulation(
 
     let event_types = vec![
         ("BatchProposed", "\x1b[33m[⟳ PROPOSED]\x1b[0m"),
-        ("BatchAccepted", "\x1b[32m[✓ ACCEPTED]\x1b[0m"),
+        ("BatchAccepted", "\x1b[32m[ ACCEPTED]\x1b[0m"),
         ("SolanaSubmitted", "\x1b[36m[→ SUBMITTED]\x1b[0m"),
-        ("SolanaConfirmed", "\x1b[32m[✓ CONFIRMED]\x1b[0m"),
+        ("SolanaConfirmed", "\x1b[32m[ CONFIRMED]\x1b[0m"),
     ];
 
     let mut event_index = 0;
@@ -250,7 +250,7 @@ fn start_websocket_server(port: u16, entries: Arc<Mutex<Vec<LogEntry>>>) {
 
     match TcpListener::bind(&addr) {
         Ok(listener) => {
-            println!("✓ WebSocket server listening on ws://{}", addr);
+            println!(" WebSocket server listening on ws://{}", addr);
 
             for stream in listener.incoming() {
                 match stream {
@@ -270,7 +270,7 @@ fn start_websocket_server(port: u16, entries: Arc<Mutex<Vec<LogEntry>>>) {
             }
         }
         Err(e) => {
-            eprintln!("✗ Failed to bind WebSocket server: {}", e);
+            eprintln!(" Failed to bind WebSocket server: {}", e);
         }
     }
 }
@@ -282,3 +282,4 @@ fn current_timestamp() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+

@@ -32,6 +32,9 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
+/// Channel buffer size for tournament trigger events.
+pub const TOURNAMENT_TRIGGER_CHANNEL_SIZE: usize = 256;
+
 /// Messages that can trigger tournament actions via Braid pub/sub.
 #[derive(Debug, Clone)]
 pub enum TournamentTrigger {
@@ -60,7 +63,7 @@ pub struct TournamentScheduler {
 
 impl TournamentScheduler {
     pub fn new(store: TournamentStore) -> (Self, mpsc::Sender<TournamentTrigger>) {
-        let (trigger_tx, trigger_rx) = mpsc::channel(256);
+        let (trigger_tx, trigger_rx) = mpsc::channel(TOURNAMENT_TRIGGER_CHANNEL_SIZE);
         (
             Self {
                 store,

@@ -34,8 +34,9 @@
 //! - `reference/bevy/examples/3d/3d_scene.rs` - Camera transform manipulation
 //! - Total War series camera controls - RTS standard
 
+use crate::core::states::GameMode;
 use crate::game::camera_modes::{CameraViewMode, CinematicSequence, TransitionType, CameraControlsDisabled};
-use crate::game::resources::Selection;
+use crate::game::resources::{CurrentTurn, Selection, Players};
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
     prelude::*,
@@ -416,6 +417,28 @@ pub fn camera_rotation_system(
     }
 }
 
+/// Helper to determine if the camera should show the Black player's perspective
+pub fn get_is_black_view(
+    players: &Players,
+    current_turn: &CurrentTurn,
+    game_mode: GameMode,
+) -> bool {
+    // In local multiplayer, flip based on whose turn it is
+    if game_mode == GameMode::MultiplayerLocal {
+        return current_turn.color == crate::rendering::pieces::PieceColor::Black;
+    }
+
+    // In other modes (SinglePlayer vs AI, Online), fix to the human player's perspective
+    if players.player_1.is_human && players.player_1.color == crate::rendering::pieces::PieceColor::Black {
+        return true;
+    }
+    if players.player_2.is_human && players.player_2.color == crate::rendering::pieces::PieceColor::Black {
+        return true;
+    }
+
+    false
+}
+
 /// Resource tracking camera rotation state for turn-based rotation
 ///
 /// When a turn switches, the camera should rotate 180° around the board center
@@ -451,38 +474,45 @@ impl CameraRotationState {
 /// In local PvP mode, rotates camera 180° so each player sees the board from their side.
 /// In AI or online multiplayer mode, camera stays fixed on the human player's perspective.
 pub fn camera_rotate_on_turn_detection_system(
-    current_turn: Res<crate::game::resources::CurrentTurn>,
-    ai_config: Res<crate::game::ai::ChessAIResource>,
+    current_turn: Res<CurrentTurn>,
+    players: Res<Players>,
+    game_mode: Res<GameMode>,
     mut rotation_state: ResMut<CameraRotationState>,
 ) {
-    use crate::game::ai::resource::GameMode;
     use crate::rendering::pieces::PieceColor;
 
-    // Only auto-rotate in local PvP (both players human, no AI, no network)
-    let is_local_pvp = matches!(ai_config.mode, GameMode::Multiplayer);
-    if !is_local_pvp {
-        return;
+    // Detect turn change or initial setup
+    let turn_color = current_turn.color;
+
+    if rotation_state.last_turn_color == Some(turn_color) {
+        return; // No change in turn
     }
 
-    // Detect turn change
-    let turn_color = match current_turn.color {
-        PieceColor::White => Some(crate::rendering::pieces::PieceColor::White),
-        PieceColor::Black => Some(crate::rendering::pieces::PieceColor::Black),
-    };
+    let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
+    let is_local_pvp = *game_mode == GameMode::MultiplayerLocal;
 
-    if turn_color == rotation_state.last_turn_color {
-        return; // No change
+    if is_local_pvp {
+        // In local PvP, rotate camera every turn
+        rotation_state.target_yaw = if is_black_view { PI } else { 0.0 };
+        rotation_state.last_turn_color = Some(turn_color);
+        rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED;
+        rotation_state.is_rotating = true;
+    } else if rotation_state.last_turn_color.is_none() {
+        // At start of game in other modes, rotate to human player's side
+        let target_yaw = if is_black_view { PI } else { 0.0 };
+        
+        rotation_state.target_yaw = target_yaw;
+        rotation_state.last_turn_color = Some(turn_color);
+        
+        // If we need to rotate initially, do it instantly or smoothly
+        if (target_yaw - rotation_state.current_yaw).abs() > 0.01 {
+            rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED * 2.0; // Faster initial rotation
+            rotation_state.is_rotating = true;
+        }
+    } else {
+        // In single player/network, don't rotate on turn changes after initial setup
+        rotation_state.last_turn_color = Some(turn_color);
     }
-
-    rotation_state.last_turn_color = turn_color;
-
-    // White's turn: camera at 0° (Z=-8 side), Black's turn: camera at 180° (Z=+15 side)
-    rotation_state.target_yaw = match current_turn.color {
-        PieceColor::White => 0.0,
-        PieceColor::Black => PI,
-    };
-    rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED;
-    rotation_state.is_rotating = true;
 }
 
 /// System that smoothly rotates camera around board center when turn switches
@@ -800,8 +830,9 @@ pub fn setup_game_camera(
     persistent_camera: Res<crate::PersistentEguiCamera>,
     view_mode: Res<crate::game::view_mode::ViewMode>,
     mut query: Query<(&mut Transform, &mut Camera)>,
-    // connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
-    // network_state: Option<Res<crate::multiplayer::BraidNetworkState>>, // Temporarily disabled
+    players: Res<Players>,
+    current_turn: Res<CurrentTurn>,
+    game_mode: Res<GameMode>,
     ai_config: Res<crate::game::ai::ChessAIResource>,
 ) {
     // Only configure for standard views (TempleOS handles its own camera/view)
@@ -820,13 +851,7 @@ pub fn setup_game_camera(
             let distance_behind = 8.0; // Distance behind the board edge
 
             // Determine if the human player is Black:
-            // In AI mode: human plays the opposite color of ai_color
-            let is_black_view = match &ai_config.mode {
-                crate::game::ai::resource::GameMode::VsAI { ai_color } => {
-                    *ai_color == crate::rendering::pieces::PieceColor::White
-                }
-                _ => false, // Default to white view for single-player
-            };
+            let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
 
             let board_center = Vec3::new(3.5, 0.0, 3.5);
 
@@ -905,11 +930,14 @@ pub fn reset_game_camera(
 /// System to reset camera to default "Standard Perspective" when 'N' is pressed
 pub fn camera_reset_system(
     keyboard: Res<ButtonInput<KeyCode>>,
+    players: Res<Players>,
+    current_turn: Res<CurrentTurn>,
+    game_mode: Res<GameMode>,
     mut query: Query<(&mut Transform, &mut CameraController)>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyN) {
-        // Player color detection disabled - defaults to white view
-        let is_black_view = false;
+        // Player color detection enabled
+        let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
 
         for (mut transform, mut controller) in query.iter_mut() {
             // Standard Perspective defaults
@@ -948,8 +976,9 @@ pub fn view_mode_toggle_input_system(
     commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
     query: Query<(&mut Transform, &mut Camera)>,
-    // connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
-    // network_state: Option<Res<crate::multiplayer::BraidNetworkState>>, // Temporarily disabled
+    players: Res<Players>,
+    current_turn: Res<CurrentTurn>,
+    game_mode: Res<GameMode>,
     ai_config: Res<crate::game::ai::ChessAIResource>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyV) {
@@ -963,6 +992,9 @@ pub fn view_mode_toggle_input_system(
             persistent_camera,
             view_mode.into(), // Convert ResMut to Res
             query,
+            players,
+            current_turn,
+            game_mode,
             ai_config,
         );
     }
@@ -976,8 +1008,9 @@ pub fn camera_mode_cycle_system(
     mut commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut query: Query<(&mut Transform, &mut CameraController), With<Camera3d>>,
-    // connection_state: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
-    // network_state: Option<Res<crate::multiplayer::BraidNetworkState>>, // Temporarily disabled
+    players: Res<Players>,
+    current_turn: Res<CurrentTurn>,
+    game_mode: Res<GameMode>,
     ai_config: Res<crate::game::ai::ChessAIResource>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyR) {
@@ -1022,12 +1055,7 @@ pub fn camera_mode_cycle_system(
                         let distance = 6.0;
                         
                         // Determine player color for orientation
-                        let is_black_view = match &ai_config.mode {
-                            crate::game::ai::resource::GameMode::VsAI { ai_color } => {
-                                *ai_color == crate::rendering::pieces::PieceColor::White
-                            }
-                            _ => false, // Default to white view for single-player
-                        };
+                        let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
 
                         let camera_pos = if is_black_view {
                             Vec3::new(3.5, height, 7.0 + distance)
@@ -1045,12 +1073,7 @@ pub fn camera_mode_cycle_system(
                         let initial_height = 16.0;
                         let distance_behind = 8.0;
                         
-                        let is_black_view = match &ai_config.mode {
-                            crate::game::ai::resource::GameMode::VsAI { ai_color } => {
-                                *ai_color == crate::rendering::pieces::PieceColor::White
-                            }
-                            _ => false, // Default to white view for single-player
-                        };
+                        let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
 
                         let camera_pos = if is_black_view {
                             Vec3::new(3.5, initial_height, 7.0 + distance_behind)

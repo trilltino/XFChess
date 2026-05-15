@@ -105,13 +105,9 @@ fn auth_ui_system(
         *frames += 1;
         return;
     }
-    let ctx = contexts.ctx_mut();
-
-    // Safety check for context
-    if ctx.is_err() {
+    let Ok(ctx) = contexts.ctx_mut() else {
         return;
-    }
-    let ctx = ctx.unwrap();
+    };
 
     // Request repaint for smooth animation
     ctx.request_repaint();
@@ -514,10 +510,10 @@ pub fn perform_wallet_register(auth_state: &mut ResMut<AuthState>, commands: &mu
             .unwrap()
             .as_secs();
         
-        let msg = format!("xfchess:register:{}", timestamp);
+        let _msg = format!("xfchess:register:{}", timestamp);
         
         #[cfg(feature = "solana")]
-        let sig_result = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&msg);
+        let sig_result = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&_msg);
         #[cfg(not(feature = "solana"))]
         let sig_result: Result<Vec<u8>, String> = Err("Solana feature disabled".to_string());
 
@@ -547,12 +543,12 @@ pub fn perform_wallet_register(auth_state: &mut ResMut<AuthState>, commands: &mu
                     if ct.contains("application/json") {
                         response.json::<AuthResponse>().map_err(|e| e.to_string()).map(|r| AuthTaskResult::Auth(r))
                     } else {
-                        let text = response.text().unwrap_or_default();
+                        let text = response.text().unwrap_or_else(|e| format!("[failed to read response: {}]", e));
                         Err(format!("Register returned non-JSON response: {}", text))
                     }
                 } else {
                     let status = response.status();
-                    let text = response.text().unwrap_or_default();
+                    let text = response.text().unwrap_or_else(|e| format!("[failed to read response: {}]", e));
                     Err(format!("Register failed ({}): {}", status, text))
                 }
             }
@@ -577,10 +573,10 @@ pub fn perform_wallet_login(auth_state: &mut ResMut<AuthState>, commands: &mut C
             .unwrap()
             .as_secs();
         
-        let msg = format!("xfchess:login:{}", timestamp);
+        let _msg = format!("xfchess:login:{}", timestamp);
         
         #[cfg(feature = "solana")]
-        let sig_result = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&msg);
+        let sig_result = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&_msg);
         #[cfg(not(feature = "solana"))]
         let sig_result: Result<Vec<u8>, String> = Err("Solana feature disabled".to_string());
 
@@ -747,7 +743,10 @@ mod tests {
             "username": "testuser"
         }"#;
 
-        let response: AuthResponse = serde_json::from_str(json).expect("Should deserialize");
+        let response: AuthResponse = match serde_json::from_str(json) {
+            Ok(response) => response,
+            Err(e) => panic!("Should deserialize: {}", e),
+        };
 
         assert_eq!(response.token, "jwt_token_here");
         assert_eq!(response.username, "testuser");
@@ -764,7 +763,9 @@ pub fn render_profile_consent_modal(
         return;
     }
 
-    let ctx = contexts.ctx_mut().unwrap();
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
     
     egui::Window::new("Complete Profile")
         .id(egui::Id::new("profile_consent_modal"))

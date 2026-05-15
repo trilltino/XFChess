@@ -7,6 +7,7 @@ use crate::signing::{AppState, SigningConfig, TournamentTrigger};
 use crate::tasks::matchmaking;
 use crate::tasks::fee_claimer;
 use crate::tasks::tournament_scheduler::spawn_tournament_scheduler;
+use crate::tasks::archiver;
 use tracing::info;
 
 /// Spawns all background tasks for the application.
@@ -42,6 +43,13 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> tokio::
     let gossip = Some(state.tournament_gossip.clone());
     let trigger_tx = spawn_tournament_scheduler(tournament_store, gossip);
     info!("[Tasks] Tournament scheduler spawned with async-fill and gossip broadcast");
+ 
+    // Spawn game archiver
+    let pool = state.store.pool();
+    tokio::spawn(async move {
+        archiver::run_archiver_service(pool).await;
+    });
+    info!("[Tasks] Game archiver service spawned");
 
     info!("[Tasks] All background tasks spawned successfully");
     trigger_tx

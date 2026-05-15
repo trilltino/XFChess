@@ -8,6 +8,8 @@ use crate::multiplayer::network::p2p::{
 };
 use crate::multiplayer::network::p2p_vps::P2PVpsState;
 #[cfg(feature = "solana")]
+use crate::multiplayer::solana::wager_rate::SolGbpRate;
+#[cfg(feature = "solana")]
 use crate::multiplayer::solana::addon::{
     CompetitiveMatchState, SolanaGameSync, SolanaWallet,
 };
@@ -82,6 +84,8 @@ pub struct MainMenuUIContext<'w, 's> {
     pub solana_lobby: Option<ResMut<'w, SolanaLobbyState>>,
     #[cfg(feature = "solana")]
     pub solana_state: Option<Res<'w, SolanaIntegrationState>>,
+    #[cfg(feature = "solana")]
+    pub sol_gbp_rate: Option<Res<'w, SolGbpRate>>,
     #[cfg(feature = "solana")]
     pub tournament_client: Option<ResMut<'w, crate::multiplayer::solana::tournament::TournamentClientState>>,
     #[allow(dead_code)]

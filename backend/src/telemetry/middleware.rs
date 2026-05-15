@@ -5,7 +5,6 @@
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::StatusCode,
     middleware::Next,
     response::Response,
 };
@@ -14,11 +13,17 @@ use std::time::Instant;
 use super::logging::RequestContext;
 use super::metrics::Metrics;
 
+/// HTTP status code threshold for server errors.
+pub const HTTP_STATUS_SERVER_ERROR: u16 = 500;
+
+/// HTTP status code threshold for client errors.
+pub const HTTP_STATUS_CLIENT_ERROR: u16 = 400;
+
 /// Middleware that adds telemetry to all requests
 pub async fn telemetry_middleware(
     State(metrics): State<std::sync::Arc<tokio::sync::RwLock<Metrics>>>,
     request: Request<Body>,
-    next: Next<Body>,
+    next: Next,
 ) -> Response {
     let start = Instant::now();
     let endpoint = format!("{} {}", request.method(), request.uri().path());
@@ -47,31 +52,42 @@ pub async fn telemetry_middleware(
     }
     
     // Log request completion
-    let level = if status >= 500 {
-        tracing::Level::ERROR
-    } else if status >= 400 {
-        tracing::Level::WARN
+    if status as u16 >= HTTP_STATUS_SERVER_ERROR {
+        tracing::error!(
+            request_id = %context.request_id,
+            method = %context.endpoint.split_whitespace().next().unwrap_or("UNKNOWN"),
+            path = %context.endpoint.split_whitespace().nth(1).unwrap_or("/"),
+            status = status,
+            duration_ms = duration_ms,
+            "request_completed"
+        );
+    } else if status >= HTTP_STATUS_CLIENT_ERROR {
+        tracing::warn!(
+            request_id = %context.request_id,
+            method = %context.endpoint.split_whitespace().next().unwrap_or("UNKNOWN"),
+            path = %context.endpoint.split_whitespace().nth(1).unwrap_or("/"),
+            status = status,
+            duration_ms = duration_ms,
+            "request_completed"
+        );
     } else {
-        tracing::Level::INFO
-    };
-    
-    tracing::event!(
-        level,
-        request_id = %context.request_id,
-        method = %context.endpoint.split_whitespace().next().unwrap_or("UNKNOWN"),
-        path = %context.endpoint.split_whitespace().nth(1).unwrap_or("/"),
-        status = status,
-        duration_ms = duration_ms,
-        "request_completed"
-    );
+        tracing::info!(
+            request_id = %context.request_id,
+            method = %context.endpoint.split_whitespace().next().unwrap_or("UNKNOWN"),
+            path = %context.endpoint.split_whitespace().nth(1).unwrap_or("/"),
+            status = status,
+            duration_ms = duration_ms,
+            "request_completed"
+        );
+    }
     
     response
 }
 
 /// Middleware that extracts wallet/game info from JWT/auth headers
 pub async fn extract_context_middleware(
-    mut request: Request<Body>,
-    next: Next<Body>,
+    request: Request<Body>,
+    next: Next,
 ) -> Response {
     // Try to extract wallet pubkey from Authorization header or JWT
     // This is a placeholder - actual implementation depends on your auth structure
@@ -83,8 +99,6 @@ pub async fn extract_context_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
-    use axum::http::Request;
     
     #[tokio::test]
     async fn test_request_context_creation() {

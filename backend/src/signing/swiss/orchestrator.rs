@@ -306,6 +306,25 @@ impl SwissOrchestrator {
             .is_round_complete(tournament_id, active.round)
             .await
         {
+            let current_round = match self.swiss.get_current_round(tournament_id).await {
+                Ok(round) => round,
+                Err(e) => {
+                    error!(
+                        "[orchestrator] Failed to read current round for tournament {}: {}",
+                        tournament_id, e
+                    );
+                    return;
+                }
+            };
+
+            if current_round > active.round {
+                info!(
+                    "[orchestrator] Tournament {} already advanced to round {}",
+                    tournament_id, current_round
+                );
+                return;
+            }
+
             info!(
                 "[orchestrator] Round {} complete for tournament {}. Starting next round.",
                 active.round, tournament_id
@@ -379,7 +398,7 @@ mod tests {
             game_id: 42,
             finished: false,
         };
-        let json = serde_json::to_string(&game).unwrap();
+        let json = serde_json::to_string(&game).expect("serialization should succeed");
         assert!(json.contains("alice"));
         assert!(json.contains("bob"));
     }
@@ -398,7 +417,9 @@ mod tests {
 
         {
             let mut inner = state.inner.write().await;
-            *inner.finished_counts.get_mut(&(1, 1)).unwrap() = 2;
+            let count = inner.finished_counts.get_mut(&(1, 1))
+                .expect("finished_counts should contain (1, 1)");
+            *count = 2;
         }
         assert!(state.is_round_complete(1, 1).await);
     }

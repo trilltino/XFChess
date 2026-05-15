@@ -9,7 +9,6 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::{AppExtStates, MinimalPlugins, ResMut, Resource};
 use bevy::state::{
     condition::in_state,
-    prelude::States,
     state::{NextState, State},
 };
 use xfchess::core::{debug_current_gamestate, GameState};

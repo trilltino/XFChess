@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 
 interface FundWalletProps {
   walletAddress?: string;
@@ -19,7 +19,7 @@ export default function FundWallet({
   const providers = {
     moonpay: {
       name: 'MoonPay',
-      logo: '🌙',
+      logo: '',
       url: 'https://buy.moonpay.com',
       apiKey: import.meta.env.VITE_MOONPAY_API_KEY || '',
       publishableKey: import.meta.env.VITE_MOONPAY_PUBLISHABLE_KEY || '',
@@ -27,14 +27,14 @@ export default function FundWallet({
     },
     transak: {
       name: 'Transak',
-      logo: '⚡',
+      logo: '',
       url: 'https://transak.com',
       apiKey: import.meta.env.VITE_TRANSAK_API_KEY || '',
       supportedRegions: ['UK', 'Brazil', 'Germany', 'Canada'],
     },
     banxa: {
       name: 'Banxa',
-      logo: '💎',
+      logo: '',
       url: 'https://banxa.com',
       apiKey: import.meta.env.VITE_BANXA_API_KEY || '',
       supportedRegions: ['UK', 'Brazil', 'Germany', 'Canada'],
@@ -155,7 +155,7 @@ export default function FundWallet({
                     </div>
                   </div>
                   {selectedProvider === key && (
-                    <span className="text-purple-500">✓</span>
+                    <span className="text-purple-500"></span>
                   )}
                 </div>
               </button>
@@ -184,3 +184,4 @@ export default function FundWallet({
     </div>
   );
 }
+

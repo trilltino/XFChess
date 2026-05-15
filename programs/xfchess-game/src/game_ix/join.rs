@@ -113,22 +113,3 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     msg!("Player joined game. Match started with cross-border fee: {}", final_fee);
     Ok(())
 }
-
-pub fn join_game(
-    ctx: Context<JoinGame>
-) -> Result<()> {
-    let game = &mut ctx.accounts.game;
-    let joiner = &ctx.accounts.player;
-    let fee_payer = &ctx.accounts.fee_payer;
-
-    require!(game.status == GameStatus::WaitingForOpponent, GameErrorCode::GameNotActive);
-    require!(game.black == Pubkey::default(), GameErrorCode::GameNotActive);
-    require!(game.white != joiner.key(), GameErrorCode::GameNotActive);
-    require!(game.fee_payer == fee_payer.key(), GameErrorCode::FeePayerMismatch);
-
-    game.black = joiner.key();
-    game.status = GameStatus::Active;
-    game.fees_advanced = game.fees_advanced.checked_add(JOIN_GAME_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
-
-    Ok(())
-}

@@ -13,9 +13,8 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use solana_sdk::signature::Signature;
+use serde::Serialize;
+use solana_sdk::signature::{Signature, Signer};
 use std::str::FromStr;
 
 use crate::signing::{
@@ -70,7 +69,7 @@ pub async fn health_check() -> impl IntoResponse {
 pub async fn detailed_health_check(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let start = std::time::Instant::now();
+    let _start = std::time::Instant::now();
     let mut checks = vec![];
     
     // Check database connectivity
@@ -166,7 +165,7 @@ pub async fn detailed_health_check(
 
 /// Metrics endpoint for Prometheus
 pub async fn metrics_endpoint(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> impl IntoResponse {
     // For now, return a simple Prometheus format
     // In full implementation, this would use the telemetry metrics
@@ -234,8 +233,7 @@ pub fn debug_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health_check))
         .route("/health/detailed", get(detailed_health_check))
-        .route("/metrics", get(metrics_endpoint))
-        .route("/api/debug/tx/:signature", get(debug_transaction_endpoint))
+        .route("/api/debug/tx/{signature}", get(debug_transaction_endpoint))
 }
 
 // Health check helpers
@@ -322,7 +320,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_health_check() {
-        let response = health_check().await;
+        let _response = health_check().await;
         // Just verify it doesn't panic
     }
 }

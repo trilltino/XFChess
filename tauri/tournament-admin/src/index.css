@@ -1,0 +1,88 @@
+:root {
+    --primary: #ad5c2f;
+    --primary-hover: #8c4a26;
+    --accent: #f4bb44;
+    --bg: #081a14;
+    --surface: #0a211a;
+    --text: #ffffff;
+    --text-dim: #a0a0a0;
+    --glass: rgba(255, 255, 255, 0.03);
+    --border: rgba(255, 255, 255, 0.08);
+    font-family: 'Outfit', 'Inter', -apple-system, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    color-scheme: dark;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+}
+
+#root {
+    width: 100%;
+}
+
+.onboarding-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+}
+
+.onboarding-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(173,92,47,0.12) 0%, transparent 70%),
+                 radial-gradient(ellipse 60% 40% at 80% 80%, rgba(244,187,68,0.06) 0%, transparent 60%);
+}
+
+.onboarding-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(rgba(173,92,47,0.06) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(173,92,47,0.06) 1px, transparent 1px);
+    background-size: 56px 56px;
+}
+
+button {
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    padding: 0.6em 1.2em;
+    font-size: 14px;
+    font-weight: 600;
+    background: var(--glass);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(8px);
+}
+
+button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+button.primary {
+    background: var(--primary);
+    border-color: transparent;
+}
+
+button.primary:hover {
+    background: var(--primary-hover);
+}
+
+h1, h2, h3, h4 {
+    letter-spacing: -0.02em;
+}

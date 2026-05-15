@@ -236,12 +236,7 @@ impl Plugin for GamePlugin {
                     }),
                 // animate_piece_movement is skipped entirely when no piece has a
                 // PieceMoveAnimation component (archetype cache lookup — zero cost).
-                animate_piece_movement
-                    .in_set(GameSystems::Visual)
-                    .run_if(any_with_component::<PieceMoveAnimation>)
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
-                    }),
+                animate_piece_movement.in_set(GameSystems::Visual),
                 // animate_capture_fade is skipped when nothing is mid-fade.
                 animate_capture_fade
                     .in_set(GameSystems::Visual)

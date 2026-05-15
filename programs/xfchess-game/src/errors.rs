@@ -196,6 +196,9 @@ pub enum GameErrorCode {
     #[msg("Arithmetic overflow occurred")]
     ArithmeticOverflow,
 
+    #[msg("Invalid argument")]
+    InvalidArgument,
+
     #[msg("ELO is out of range")]
     EloOutOfRange,
     #[msg("Invalid session")]

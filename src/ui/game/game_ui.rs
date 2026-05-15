@@ -1,4 +1,4 @@
-//! In-game UI for chess game display
+﻿//! In-game UI for chess game display
 use crate::core::GameMode;
 use crate::game::components::GamePhase;
 use crate::game::resources::system_params::GameStateParams;
@@ -83,7 +83,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                         egui::Color32::from_rgb(140, 140, 140)
                     };
                     ui.label(
-                        egui::RichText::new(format!("♔ {}", white_time))
+                        egui::RichText::new(format!(" {}", white_time))
                             .size(if white_active { 18.0 } else { 15.0 })
                             .color(white_color)
                             .strong(),
@@ -102,7 +102,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                         egui::Color32::from_rgb(140, 140, 140)
                     };
                     ui.label(
-                        egui::RichText::new(format!("♚ {}", black_time))
+                        egui::RichText::new(format!(" {}", black_time))
                             .size(if black_active { 18.0 } else { 15.0 })
                             .color(black_color)
                             .strong(),
@@ -228,7 +228,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 let is_spectating = *params.game_mode == GameMode::Spectator;
                 
                 if is_spectating {
-                    ui.colored_label(UiColors::ACCENT_GOLD, egui::RichText::new("👁 SPECTATING").size(16.0).strong());
+                    ui.colored_label(UiColors::ACCENT_GOLD, egui::RichText::new(" SPECTATING").size(16.0).strong());
                     ui.add_space(4.0);
                 }
                 ui.add_space(8.0);
@@ -238,7 +238,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 let (white_name, white_elo, _white_flag, white_sol) = if is_spectating {
                     let w = params.spectator_mode.white_player.as_ref();
                     (
-                        format!("{} {}", w.map(|p| country_to_flag(&p.country)).unwrap_or_else(|| "🏳".to_string()), w.map(|p| p.username.clone()).unwrap_or_else(|| "White Player".to_string())),
+                        format!("{} {}", w.map(|p| country_to_flag(&p.country)).unwrap_or_else(|| "".to_string()), w.map(|p| p.username.clone()).unwrap_or_else(|| "White Player".to_string())),
                         w.map(|p| format!("{} ELO", p.rating)).unwrap_or_default(),
                         "".to_string(),
                         "".to_string()
@@ -255,21 +255,21 @@ pub fn game_status_ui(mut params: GameUIParams) {
                                 format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
                             )
                         } else {
-                            ("White Player".to_string(), "1200 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
+                            ("White Player".to_string(), "1200 ELO".to_string(), "".to_string(), "0.5 SOL".to_string())
                         }
                     }
                     #[cfg(not(feature = "solana"))]
                     {
-                        ("White Player".to_string(), "1200 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
+                        ("White Player".to_string(), "1200 ELO".to_string(), "".to_string(), "0.5 SOL".to_string())
                     }
                 } else {
-                    ("White Player".to_string(), "".to_string(), "🏳".to_string(), "".to_string())
+                    ("White Player".to_string(), "".to_string(), "".to_string(), "".to_string())
                 };
 
                 let (black_name, black_elo, _black_flag, black_sol) = if is_spectating {
                     let b = params.spectator_mode.black_player.as_ref();
                     (
-                        format!("{} {}", b.map(|p| country_to_flag(&p.country)).unwrap_or_else(|| "🏳".to_string()), b.map(|p| p.username.clone()).unwrap_or_else(|| "Black Player".to_string())),
+                        format!("{} {}", b.map(|p| country_to_flag(&p.country)).unwrap_or_else(|| "".to_string()), b.map(|p| p.username.clone()).unwrap_or_else(|| "Black Player".to_string())),
                         b.map(|p| format!("{} ELO", p.rating)).unwrap_or_default(),
                         "".to_string(),
                         "".to_string()
@@ -285,15 +285,15 @@ pub fn game_status_ui(mut params: GameUIParams) {
                                 format!("{:.1} SOL", comp.wager_lamports as f64 / 1_000_000_000.0)
                             )
                         } else {
-                            ("Black Player".to_string(), "1180 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
+                            ("Black Player".to_string(), "1180 ELO".to_string(), "".to_string(), "0.5 SOL".to_string())
                         }
                     }
                     #[cfg(not(feature = "solana"))]
                     {
-                        ("Black Player".to_string(), "1180 ELO".to_string(), "🏳".to_string(), "0.5 SOL".to_string())
+                        ("Black Player".to_string(), "1180 ELO".to_string(), "".to_string(), "0.5 SOL".to_string())
                     }
                 } else {
-                    ("Black Player".to_string(), "".to_string(), "🏳".to_string(), "".to_string())
+                    ("Black Player".to_string(), "".to_string(), "".to_string(), "".to_string())
                 };
 
                 // White Player Info
@@ -447,12 +447,12 @@ pub fn game_status_ui(mut params: GameUIParams) {
                                     .size(10.0)
                                     .color(UiColors::SUCCESS),
                             );
-                            if ui.small_button("📋").on_hover_text("Copy signature").clicked() {
+                            if ui.small_button("").on_hover_text("Copy signature").clicked() {
                                 ui.output_mut(|o| {
                                     o.commands.push(egui::OutputCommand::CopyText(sig.clone()))
                                 });
                             }
-                            if ui.small_button("🔗").on_hover_text("Open in explorer").clicked() {
+                            if ui.small_button("").on_hover_text("Open in explorer").clicked() {
                                 ui.output_mut(|o| {
                                     o.commands.push(egui::OutputCommand::OpenUrl(
                                         egui::OpenUrl::new_tab(url),
@@ -678,7 +678,7 @@ fn render_check_banner(ctx: &egui::Context) {
             ui.horizontal_centered(|ui| {
                 // Crown icon for check indication
                 ui.label(
-                    egui::RichText::new("♛")
+                    egui::RichText::new("")
                         .size(16.0)
                         .color(egui::Color32::from_rgb(244, 187, 68)), // Gold color
                 );
@@ -717,7 +717,7 @@ fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.label(
-                    egui::RichText::new("♟️ CHECKMATE!")
+                    egui::RichText::new("️ CHECKMATE!")
                         .size(40.0)
                         .color(egui::Color32::WHITE)
                         .strong(),
@@ -750,7 +750,7 @@ fn format_time(seconds: f32) -> String {
 /// Helper to convert ISO country code to emoji flag
 fn country_to_flag(country_code: &str) -> String {
     if country_code.len() != 2 {
-        return "🏳".to_string();
+        return "".to_string();
     }
     let mut flag = String::new();
     for c in country_code.to_uppercase().chars() {
@@ -761,3 +761,4 @@ fn country_to_flag(country_code: &str) -> String {
     }
     flag
 }
+

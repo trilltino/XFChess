@@ -77,7 +77,7 @@ pub fn handler(
     // Transfer wager if applicable
     if game.wager_amount > 0 {
         let wager_total = game.wager_amount * 2;
-        if let Some(winner_key) = winner {
+        if winner.is_some() {
             // Winner takes all minus platform fee
             let platform_fee = (wager_total * PLATFORM_FEE_PERCENT) / 100;
             let winner_amount = wager_total - platform_fee;

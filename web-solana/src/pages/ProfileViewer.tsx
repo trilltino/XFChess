@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { Link } from 'react-router-dom';
@@ -486,7 +486,7 @@ export function ProfileViewer() {
                       <button className="btn-small" onClick={handleAddEmail} disabled={emailAddLoading}>
                         {emailAddLoading ? '…' : 'Save'}
                       </button>
-                      <button className="btn-small" style={{ background: 'transparent', opacity: 0.6 }} onClick={() => { setEmailAddOpen(false); setEmailAddError(null); }}>✕</button>
+                      <button className="btn-small" style={{ background: 'transparent', opacity: 0.6 }} onClick={() => { setEmailAddOpen(false); setEmailAddError(null); }}></button>
                       {emailAddError && <span style={{ color: '#ff8080', fontSize: 11 }}>{emailAddError}</span>}
                     </span>
                   ) : (
@@ -662,3 +662,4 @@ const inputStyle: React.CSSProperties = {
   color: '#fff',
   fontSize: '1rem',
 };
+

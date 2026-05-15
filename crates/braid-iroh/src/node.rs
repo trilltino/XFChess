@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::discovery::{DiscoveryConfig, MockDiscoveryMap};
+use crate::discovery::DiscoveryConfig;
 use crate::protocol::{self, BraidAppState};
 use crate::subscription::SubscriptionManager;
 
@@ -53,7 +53,7 @@ pub struct ProxyConfig {
 impl Default for BraidGameConfig {
     fn default() -> Self {
         Self {
-            discovery: DiscoveryConfig::Mock(MockDiscoveryMap::new()),
+            discovery: DiscoveryConfig::Real,
             secret_key: None,
             proxy_config: None,
             app_router: None,
@@ -91,15 +91,8 @@ impl BraidIrohNode {
         }
 
         // Apply discovery logic
-        match config.discovery {
-            DiscoveryConfig::Mock(map) => {
-                builder = builder.address_lookup(map);
-            }
-            DiscoveryConfig::Real => {
-                // Default Iroh discovery is already enabled by default in Endpoint::builder()
-                // unless we override it. So we do nothing here.
-            }
-        }
+        // DiscoveryConfig::Real uses Iroh's built-in discovery (DNS + Pkarr + MDNS)
+        // No additional configuration needed
 
         let endpoint = builder.bind().await?;
 

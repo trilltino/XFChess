@@ -43,7 +43,8 @@ pub fn update_move_hints_system(
             commands.spawn((
                 Mesh3d(materials.hint_mesh.clone()),
                 MeshMaterial3d(materials.hover_matl.clone()),
-                Transform::from_translation(Vec3::new(x as f32, 0.01, y as f32)),
+                Transform::from_translation(Vec3::new(x as f32, 0.051, y as f32))
+                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                 MoveHint,
                 Name::new("Move Hint"),
                 // Ensure hints are cleaned up if state exits

@@ -1,4 +1,4 @@
-# iroh-h3-axum
+﻿# iroh-h3-axum
 
 ## Purpose
 
@@ -17,8 +17,8 @@ Provides Axum compatibility layer for `iroh-h3`:
 
 | Aspect | Status |
 |--------|--------|
-| In workspace | ✅ Yes |
-| Used by main app | ❌ No |
+| In workspace |  Yes |
+| Used by main app |  No |
 | Depends on | `iroh-h3` |
 
 ## Recommendation
@@ -35,3 +35,4 @@ Provides Axum compatibility layer for `iroh-h3`:
 - **Companion crate** to `iroh-h3`
 - Only needed if building HTTP/3 Axum servers over Iroh
 - Not required for current chess functionality
+

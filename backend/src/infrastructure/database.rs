@@ -69,101 +69,67 @@ pub async fn initialize_pools(
 /// # Arguments
 /// * `pools` - Database pools to run migrations on
 pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
+    // Helper to run a semicolon-separated SQL script on a pool
+    async fn run_script(pool: &sqlx::SqlitePool, script: &str, name: &str) -> Result<(), sqlx::Error> {
+        // Strip comments to avoid breaking on semicolons inside comments
+        let mut clean_script = String::new();
+        for line in script.lines() {
+            if let Some(comment_start) = line.find("--") {
+                clean_script.push_str(&line[..comment_start]);
+            } else {
+                clean_script.push_str(line);
+            }
+            clean_script.push(' '); // Replace newline with space
+        }
+
+        for statement in clean_script.split(';') {
+            let statement = statement.trim();
+            if statement.is_empty() {
+                continue;
+            }
+            if let Err(e) = sqlx::query(statement).execute(pool).await {
+                // For ALTER TABLE, we ignore "duplicate column" errors
+                let err_msg = e.to_string().to_lowercase();
+                if err_msg.contains("duplicate column") || err_msg.contains("already exists") {
+                    continue;
+                }
+                tracing::error!("Migration {} failed on statement: {}: {}", name, statement, e);
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
     // ── Migration 001: initial schema ─────────────────────────────────────────
     let migration_001 = include_str!("../../migrations/001_initial.sql");
-    for statement in migration_001.split(';') {
-        let statement = statement.trim();
-        if statement.is_empty() || statement.starts_with("--") {
-            continue;
-        }
-        if statement.contains("CREATE TABLE IF NOT EXISTS sessions")
-            || statement.contains("CREATE TABLE IF NOT EXISTS users")
-        {
-            sqlx::query(statement).execute(&pools.session_pool).await
-                .map_err(|e| { tracing::error!("Migration 001 (session) failed on statement: {}: {}", statement, e); e })?;
-        } else if statement.contains("CREATE TABLE IF NOT EXISTS vault_users")
-            || statement.contains("CREATE TABLE IF NOT EXISTS audit_log")
-        {
-            sqlx::query(statement).execute(&pools.vault_pool).await
-                .map_err(|e| { tracing::error!("Migration 001 (vault) failed on statement: {}: {}", statement, e); e })?;
-        }
-    }
+    run_script(&pools.session_pool, migration_001, "001 (session)").await?;
+    run_script(&pools.vault_pool, migration_001, "001 (vault)").await?;
 
     // ── Migration 002: GDPR KYC tables ────────────────────────────────────────
     let migration_002 = include_str!("../../migrations/002_kyc_gdpr.sql");
-    for statement in migration_002.split(';') {
-        let statement = statement.trim();
-        if statement.is_empty() || statement.starts_with("--") {
-            continue;
-        }
-        let is_vault = statement.contains("CREATE TABLE IF NOT EXISTS kyc_records")
-            || statement.contains("CREATE TABLE IF NOT EXISTS deletion_requests");
-        let is_session = statement.contains("ALTER TABLE users");
+    run_script(&pools.vault_pool, migration_002, "002 (vault)").await?;
+    run_script(&pools.session_pool, migration_002, "002 (session)").await?;
 
-        if is_vault {
-            sqlx::query(statement).execute(&pools.vault_pool).await
-                .map_err(|e| { tracing::error!("Migration 002 (vault) failed on statement: {}: {}", statement, e); e })?;
-        } else if is_session {
-            // ALTER TABLE ADD COLUMN fails silently if column exists
-            let _ = sqlx::query(statement).execute(&pools.session_pool).await;
-        }
-    }
-
-    // ── Migration 003: wallet-first auth (no passwords) ───────────────────────
+    // ── Migration 003: wallet-first auth ──────────────────────────────────────
     let migration_003 = include_str!("../../migrations/003_wallet_first_auth.sql");
-    for statement in migration_003.split(';') {
-        let statement = statement.trim();
-        if statement.is_empty() || statement.starts_with("--") {
-            continue;
-        }
-        let _ = sqlx::query(statement).execute(&pools.session_pool).await;
-    }
+    run_script(&pools.session_pool, migration_003, "003").await?;
 
     // ── Migration 004: performance indexes ────────────────────────────────────
     let migration_004 = include_str!("../../migrations/004_indexes_and_wal.sql");
-    for statement in migration_004.split(';') {
-        let statement = statement.trim();
-        if statement.is_empty() || statement.starts_with("--") {
-            continue;
-        }
-        // Indexes on audit_log and deletion_requests live in vault pool
-        let _ = sqlx::query(statement).execute(&pools.vault_pool).await;
-        // Also try session pool (for any future session-side indexes)
-        let _ = sqlx::query(statement).execute(&pools.session_pool).await;
-    }
+    run_script(&pools.vault_pool, migration_004, "004 (vault)").await?;
+    run_script(&pools.session_pool, migration_004, "004 (session)").await?;
 
     // ── Migration 005: disputes table ─────────────────────────────────────────
     let migration_005 = include_str!("../../migrations/005_disputes.sql");
-    for statement in migration_005.split(';') {
-        let statement = statement.trim();
-        if statement.is_empty() || statement.starts_with("--") {
-            continue;
-        }
-        let _ = sqlx::query(statement).execute(&pools.session_pool).await;
-    }
+    run_script(&pools.session_pool, migration_005, "005").await?;
 
     // ── Migration 006: game history + move counter ────────────────────────────
     let migration_006 = include_str!("../../migrations/006_game_history.sql");
-    for statement in migration_006.split(';') {
-        let statement = statement.trim();
-        if statement.is_empty() || statement.starts_with("--") {
-            continue;
-        }
-        let _ = sqlx::query(statement).execute(&pools.session_pool).await;
-    }
+    run_script(&pools.session_pool, migration_006, "006").await?;
 
-    // ── Migration 007: add password_hash to users_v2 ─────────────────────────
-    // Migration 003 removed this column for wallet-first auth, but the
-    // email/password auth routes still reference it.
+    // ── Migration 007: add password_hash ──────────────────────────────────────
     let migration_007 = include_str!("../../migrations/007_add_password_hash.sql");
-    for statement in migration_007.split(';') {
-        let statement = statement.trim();
-        if statement.is_empty() || statement.starts_with("--") {
-            continue;
-        }
-        // Ignore "duplicate column" errors — idempotent on re-runs
-        let _ = sqlx::query(statement).execute(&pools.session_pool).await;
-    }
+    run_script(&pools.session_pool, migration_007, "007").await?;
 
     info!("[Database] All migrations completed successfully");
     Ok(())

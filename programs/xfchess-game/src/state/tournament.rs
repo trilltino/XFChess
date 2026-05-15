@@ -11,6 +11,7 @@ pub struct Tournament {
     #[max_len(64)]
     pub name: String,
     pub entry_fee: u64,
+    pub platform_fee: u64,
     pub prize_pool: u64,
     /// Maximum players (must be power of 2 for single-elimination: 8, 16, 32, 64, 128, 256).
     pub max_players: u16,
@@ -153,12 +154,8 @@ pub struct SwissStanding {
 
 impl Tournament {
     /// Bytes needed for a tournament with exactly `max_players` capacity.
-    ///
-    /// Fixed non-vec fields:  726 bytes (added 8 + 2 for time control)
-    /// Vec length prefixes:    12 bytes (3 × 4)
-    /// Per-player:            players(32) + player_elos(4) + swiss_standings(38) = 74 bytes
     pub fn space_for(max_players: u16) -> usize {
-        726 + 12 + (max_players as usize) * 74
+        Self::INIT_SPACE + (max_players as usize) * 74
     }
 }
 

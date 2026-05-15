@@ -4,9 +4,6 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::RwLock;
 
 /// Core metrics collection
 #[derive(Debug)]
@@ -61,7 +58,7 @@ impl Metrics {
         let key = (endpoint.to_string(), status);
         self.http_requests_total
             .entry(key)
-            .or_insert_with(AtomicU64::new(0))
+            .or_insert_with(|| AtomicU64::new(0))
             .fetch_add(1, Ordering::Relaxed);
         
         self.http_request_duration
@@ -76,7 +73,7 @@ impl Metrics {
         let key = (method.to_string(), status.to_string());
         self.solana_rpc_calls_total
             .entry(key)
-            .or_insert_with(AtomicU64::new(0))
+            .or_insert_with(|| AtomicU64::new(0))
             .fetch_add(1, Ordering::Relaxed);
         
         self.solana_rpc_latency
@@ -89,7 +86,7 @@ impl Metrics {
     pub fn record_transaction_submitted(&mut self, chain_type: &str) {
         self.transactions_submitted_total
             .entry(chain_type.to_string())
-            .or_insert_with(AtomicU64::new(0))
+            .or_insert_with(|| AtomicU64::new(0))
             .fetch_add(1, Ordering::Relaxed);
     }
     
@@ -97,7 +94,7 @@ impl Metrics {
     pub fn record_transaction_confirmed(&mut self, chain_type: &str, confirmation_time_ms: f64) {
         self.transactions_confirmed_total
             .entry(chain_type.to_string())
-            .or_insert_with(AtomicU64::new(0))
+            .or_insert_with(|| AtomicU64::new(0))
             .fetch_add(1, Ordering::Relaxed);
         
         self.transaction_confirmation_time
@@ -111,7 +108,7 @@ impl Metrics {
         let key = (chain_type.to_string(), error_type.to_string());
         self.transactions_failed_total
             .entry(key)
-            .or_insert_with(AtomicU64::new(0))
+            .or_insert_with(|| AtomicU64::new(0))
             .fetch_add(1, Ordering::Relaxed);
     }
     

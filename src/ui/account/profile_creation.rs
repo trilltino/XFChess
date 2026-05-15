@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+﻿#![allow(dead_code)]
 //! Profile Creation UI - Username selection screen
 //!
 //! the design document at logs/profile-creation-option2-090cd2.md
@@ -62,7 +62,9 @@ pub fn profile_creation_ui_system(
     wallet: Res<SolanaWallet>,
     mut submission_events: MessageWriter<ProfileSubmissionEvent>,
 ) {
-    let ctx = contexts.ctx_mut().expect("Failed to get Egui context");
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
     let screen_size = ctx.content_rect().size();
     
     // Centered panel
@@ -99,7 +101,7 @@ pub fn profile_creation_ui_system(
                 ui.vertical_centered(|ui| {
                     // Header
                     ui.add_space(20.0);
-                    ui.heading(egui::RichText::new("⚡ Create Username on SOL")
+                    ui.heading(egui::RichText::new(" Create Username on SOL")
                         .color(egui::Color32::from_rgb(230, 57, 70))
                         .size(28.0));
                     ui.add_space(8.0);
@@ -218,9 +220,9 @@ pub fn profile_creation_ui_system(
                         let tax_id_valid = validate_tax_id_format(&state.country_code, &state.tax_id);
                         if !state.tax_id.is_empty() {
                             let (text, color) = if tax_id_valid {
-                                ("✓ Valid format", egui::Color32::from_rgb(34, 197, 94))
+                                (" Valid format", egui::Color32::from_rgb(34, 197, 94))
                             } else {
-                                ("✗ Invalid format", egui::Color32::from_rgb(239, 68, 68))
+                                (" Invalid format", egui::Color32::from_rgb(239, 68, 68))
                             };
                             ui.label(egui::RichText::new(text).color(color).size(12.0));
                             state.tax_id_valid = tax_id_valid;
@@ -258,7 +260,7 @@ pub fn profile_creation_ui_system(
 
                     if let Some(pubkey) = wallet.pubkey {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("✓ Connected:").color(egui::Color32::from_rgb(34, 197, 94)));
+                            ui.label(egui::RichText::new(" Connected:").color(egui::Color32::from_rgb(34, 197, 94)));
                             let pk_str = pubkey.to_string();
                             ui.label(egui::RichText::new(format!("{}...{}", &pk_str[..6], &pk_str[pk_str.len()-4..]))
                                 .monospace()
@@ -266,11 +268,11 @@ pub fn profile_creation_ui_system(
                         });
                     } else {
                         ui.horizontal(|ui| {
-                            if ui.button(egui::RichText::new("👻 Phantom").strong()).clicked() {
+                            if ui.button(egui::RichText::new(" Phantom").strong()).clicked() {
                                 crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                             }
                             ui.add_space(8.0);
-                            if ui.button(egui::RichText::new("☀️ Solflare").strong()).clicked() {
+                            if ui.button(egui::RichText::new("️ Solflare").strong()).clicked() {
                                 crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                             }
                         });
@@ -284,9 +286,9 @@ pub fn profile_creation_ui_system(
                     let status_text = match state.availability_status {
                         UsernameAvailability::Unknown => ("", egui::Color32::GRAY),
                         UsernameAvailability::Checking => ("⏳ Checking availability...", egui::Color32::YELLOW),
-                        UsernameAvailability::Available => ("✓ Username available!", egui::Color32::from_rgb(34, 197, 94)),
-                        UsernameAvailability::Taken => ("✗ Username already taken", egui::Color32::from_rgb(239, 68, 68)),
-                        UsernameAvailability::Invalid => ("✗ Invalid username format", egui::Color32::from_rgb(239, 68, 68)),
+                        UsernameAvailability::Available => (" Username available!", egui::Color32::from_rgb(34, 197, 94)),
+                        UsernameAvailability::Taken => (" Username already taken", egui::Color32::from_rgb(239, 68, 68)),
+                        UsernameAvailability::Invalid => (" Invalid username format", egui::Color32::from_rgb(239, 68, 68)),
                     };
                     ui.label(egui::RichText::new(status_text.0).color(status_text.1).size(13.0));
                     
@@ -437,8 +439,10 @@ fn validate_tax_id_format(country: &str, tax_id: &str) -> bool {
     match country {
         "GB" => {
             // UK National Insurance Number: 2 letters + 6 digits + 1 letter (e.g., AB123456C)
-            let pattern = regex::Regex::new(r"^[A-Z]{2}\d{6}[A-Z]$").unwrap();
-            pattern.is_match(tax_id)
+            match regex::Regex::new(r"^[A-Z]{2}\d{6}[A-Z]$") {
+                Ok(pattern) => pattern.is_match(tax_id),
+                Err(_) => false,
+            }
         }
         "BR" => {
             // Brazil CPF: 11 digits with optional formatting (e.g., 123.456.789-00)
@@ -447,13 +451,17 @@ fn validate_tax_id_format(country: &str, tax_id: &str) -> bool {
         }
         "CA" => {
             // Canada SIN: 9 digits (e.g., 123456789)
-            let pattern = regex::Regex::new(r"^\d{9}$").unwrap();
-            pattern.is_match(tax_id)
+            match regex::Regex::new(r"^\d{9}$") {
+                Ok(pattern) => pattern.is_match(tax_id),
+                Err(_) => false,
+            }
         }
         "DE" => {
             // Germany Tax ID: 11 digits (e.g., 12345678901)
-            let pattern = regex::Regex::new(r"^\d{11}$").unwrap();
-            pattern.is_match(tax_id)
+            match regex::Regex::new(r"^\d{11}$") {
+                Ok(pattern) => pattern.is_match(tax_id),
+                Err(_) => false,
+            }
         }
         _ => true, // No strict validation for other countries
     }
@@ -513,7 +521,13 @@ pub fn handle_profile_submission(
         
         tokio.0.spawn(async move {
             // 1. Sign and send on-chain transaction (Username + Country ONLY, no PII)
-            let program_id = get_program_id().unwrap();
+            let program_id = match get_program_id() {
+                Ok(program_id) => program_id,
+                Err(e) => {
+                    error!("[PROFILE] Failed to get program ID: {}", e);
+                    return;
+                }
+            };
             let ix = match init_profile_ix(program_id, wallet_pubkey, username.clone(), country.clone()) {
                 Ok(ix) => ix,
                 Err(e) => {
@@ -534,10 +548,13 @@ pub fn handle_profile_submission(
 
             // 2. Register with backend
             info!("[PROFILE] Registering with backend...");
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            let timestamp = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => duration.as_secs(),
+                Err(e) => {
+                    error!("[PROFILE] Failed to compute timestamp: {}", e);
+                    return;
+                }
+            };
             
             let auth_msg = format!("xfchess:register:{}", timestamp);
             let signature = match tauri_signer::sign_message_via_tauri(&auth_msg) {
@@ -632,3 +649,4 @@ pub fn despawn_profile_creation_ui(
         commands.entity(entity).despawn();
     }
 }
+

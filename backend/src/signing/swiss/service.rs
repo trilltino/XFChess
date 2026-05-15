@@ -1,3 +1,17 @@
+//! Swiss tournament service — pairing, scoring, and live broadcast.
+//!
+//! [`SwissService`] owns the per-tournament Swiss lifecycle on top of the
+//! persistent [`TournamentStore`]: initializing Swiss data, generating
+//! pairings for each round, recording match results, and recomputing
+//! standings with Buchholz/Sonneborn tiebreakers. When a round completes
+//! it auto-starts the next one. Updates are optionally fanned out to
+//! iroh gossip subscribers and Braid hub listeners so clients see live
+//! pairings and standings without polling.
+//!
+//! On-chain and backend scoring conventions differ (integer points vs.
+//! FIDE float); helpers `to_contract_points` / `from_contract_points`
+//! convert between them.
+
 use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
 use crate::signing::tournament_gossip::TournamentGossipService;
 use xfchess_braid_server::{bridge, ResourceHub};
@@ -38,7 +52,11 @@ pub struct SwissService {
 impl SwissService {
     /// Create a new Swiss service
     pub fn new(store: TournamentStore) -> Self {
-        Self { store, gossip: None, braid_hub: None }
+        Self {
+            store,
+            gossip: None,
+            braid_hub: None,
+        }
     }
 
     /// Attach the Braid resource hub so live updates stream to subscribers.
@@ -69,6 +87,8 @@ impl SwissService {
                     results: Vec::new(),
                     standings: Vec::new(),
                 });
+                t.status = TournamentStatus::Active;
+                t.started_at = Some(chrono::Utc::now().timestamp());
             })
             .await;
 
@@ -178,6 +198,14 @@ impl SwissService {
         // Update stored standings
         swiss_data.standings = standings.clone();
 
+        let is_last_round = swiss_data.current_round >= swiss_data.total_rounds;
+        let is_round_complete = round_data.pairings.len()
+            == swiss_data
+                .results
+                .iter()
+                .filter(|(rnum, _, _)| *rnum == round)
+                .count();
+
         self.store
             .update(tournament_id, |t| {
                 t.swiss_data = Some(crate::signing::storage::tournament::SwissStorageData {
@@ -192,7 +220,7 @@ impl SwissService {
                 if round == swiss_data.total_rounds {
                     t.status = TournamentStatus::Completed;
                     t.completed_at = Some(chrono::Utc::now().timestamp());
-                    
+
                     // Set final placements for top 8
                     for (i, entry) in standings.iter().enumerate().take(8) {
                         match i {
@@ -206,6 +234,10 @@ impl SwissService {
                 }
             })
             .await;
+
+        if is_round_complete && !is_last_round {
+            let _ = self.start_round(tournament_id).await;
+        }
 
         // Broadcast result and standings via gossip
         self.broadcast_result_recorded(tournament_id, round, board, &result).await;
@@ -396,6 +428,21 @@ impl SwissService {
             .ok_or(SwissServiceError::NotSwissFormat)?;
 
         Ok(swiss_data.current_round)
+    }
+
+    /// Get the total configured rounds for the Swiss tournament.
+    pub async fn get_total_rounds(&self, tournament_id: u64) -> Result<u8, SwissServiceError> {
+        let tournament = self
+            .store
+            .get(tournament_id)
+            .await
+            .ok_or(SwissServiceError::TournamentNotFound)?;
+
+        let swiss_data = tournament
+            .swiss_data
+            .ok_or(SwissServiceError::NotSwissFormat)?;
+
+        Ok(swiss_data.total_rounds)
     }
 
     /// Build SwissPlayer list from tournament data

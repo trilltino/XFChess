@@ -334,7 +334,7 @@ mod tests {
 
         // Format and parse
         let formatted = format_node_id(&node_id);
-        let parsed = parse_node_id(&formatted).unwrap();
+        let parsed = parse_node_id(&formatted).expect("parse_node_id should succeed");
 
         assert_eq!(node_id, parsed);
     }

@@ -1,5 +1,6 @@
 //! Core module - Game state management and application infrastructure.
 
+pub mod crash;
 pub mod error_handling;
 pub mod persistent_camera;
 pub mod plugin;

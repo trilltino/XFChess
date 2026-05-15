@@ -98,15 +98,8 @@ create_cleanup_system!(cleanup_game_over, GameState::GameOver);
 pub fn cleanup_in_game(
     query: Query<(Entity, Option<&Name>, &DespawnOnExit<GameState>)>,
     mut commands: Commands,
-    state: Res<State<GameState>>,
+    _state: Res<State<GameState>>,
 ) {
-    if *state.get() == GameState::GameOver {
-        debug!(
-            "[STATE_LIFECYCLE] Skipping InGame cleanup during transition to GameOver so cinematic background remains visible"
-        );
-        return;
-    }
-
     let target_state = GameState::InGame;
     let mut despawned_count = 0;
 

@@ -1,4 +1,4 @@
-#![cfg(feature = "solana")]
+﻿#![cfg(feature = "solana")]
 //! Tournament Test - Real On-Chain Tournament Execution
 //! 
 //! Executes a complete tournament on Solana devnet with real transactions
@@ -52,7 +52,7 @@ const DEVNET_RPC: &str = "https://api.devnet.solana.com";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🏆 XFChess Real Tournament E2E Test - Solana Devnet");
+    println!(" XFChess Real Tournament E2E Test - Solana Devnet");
     println!("==================================================");
     
     // Load deployer keypair - this funds everything
@@ -64,10 +64,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Check deployer balance
     let deployer_balance = rpc_client.get_balance(&deployer_keypair.pubkey())?;
-    println!("💰 Deployer balance: {} SOL", deployer_balance as f64 / 1_000_000_000.0);
+    println!(" Deployer balance: {} SOL", deployer_balance as f64 / 1_000_000_000.0);
     
     if deployer_balance < 2_000_000_000 {
-        println!("⚠️  Deployer needs at least 2 SOL to fund tournament");
+        println!("️  Deployer needs at least 2 SOL to fund tournament");
         return Ok(());
     }
 
@@ -75,16 +75,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let players = load_players_with_keypairs()?;
     
     // Fund all players from deployer wallet (not airdrops)
-    println!("\n💸 Funding players from deployer wallet...");
+    println!("\n Funding players from deployer wallet...");
     for player in &players {
         let balance = rpc_client.get_balance(&player.keypair.pubkey())?;
         println!("  {}: {} SOL", player.name, balance as f64 / 1_000_000_000.0);
         
         if balance < 500_000_000 {
-            println!("  💸 Funding 1 SOL to {} from deployer...", player.name);
+            println!("   Funding 1 SOL to {} from deployer...", player.name);
             match fund_player(&rpc_client, &deployer_keypair, &player.keypair.pubkey(), 1_000_000_000).await {
-                Ok(sig) => println!("    ✅ Funded: {}", sig),
-                Err(e) => println!("    ❌ Funding failed: {}", e),
+                Ok(sig) => println!("     Funded: {}", sig),
+                Err(e) => println!("     Funding failed: {}", e),
             }
         }
     }
@@ -95,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
     
-    println!("\n🏆 Tournament Setup:");
+    println!("\n Tournament Setup:");
     println!("  Program ID: {}", program_id);
     println!("  Tournament ID: {}", tournament_id);
     println!("  Entry Fee: 0.001 SOL");
@@ -105,11 +105,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut session_notes = Vec::new();
 
     // Step 1: Initialize tournament
-    println!("\n📋 Step 1: Initializing tournament...");
+    println!("\n Step 1: Initializing tournament...");
     let init_sig = initialize_tournament_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id, "XFChess Cup", 1_000_000).await?;
     lifecycle_steps.push(TournamentStep {
         step: "Tournament Created".to_string(),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: init_sig.clone(),
     });
     session_notes.push(SessionNote {
@@ -118,10 +118,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         severity: "ok".to_string(),
         text: format!("tournament {} created", tournament_id),
     });
-    println!("  ✅ Tournament {} initialized: {}", tournament_id, init_sig);
+    println!("   Tournament {} initialized: {}", tournament_id, init_sig);
 
     // Step 2: Create player profiles
-    println!("\n👤 Step 2: Creating player profiles...");
+    println!("\n Step 2: Creating player profiles...");
     for player in &players {
         match create_player_profile_on_chain(&rpc_client, &program_id, &player.keypair).await {
             Ok(sig) => {
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     severity: "ok".to_string(),
                     text: "profile init confirmed".to_string(),
                 });
-                println!("  ✅ {} profile created: {}", player.name, sig);
+                println!("   {} profile created: {}", player.name, sig);
             }
             Err(e) => {
                 session_notes.push(SessionNote {
@@ -140,13 +140,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     severity: "warn".to_string(),
                     text: format!("profile creation failed: {}", e),
                 });
-                println!("  ❌ {} profile failed: {}", player.name, e);
+                println!("   {} profile failed: {}", player.name, e);
             }
         }
     }
 
     // Step 3: Register all players
-    println!("\n📝 Step 3: Registering players...");
+    println!("\n Step 3: Registering players...");
     for player in &players {
         match register_player_on_chain(&rpc_client, &player.keypair, tournament_id).await {
             Ok(sig) => {
@@ -156,7 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     severity: "ok".to_string(),
                     text: "joined tournament".to_string(),
                 });
-                println!("  ✅ {} registered: {}", player.name, sig);
+                println!("   {} registered: {}", player.name, sig);
             }
             Err(e) => {
                 session_notes.push(SessionNote {
@@ -165,17 +165,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     severity: "warn".to_string(),
                     text: format!("registration failed: {}", e),
                 });
-                println!("  ❌ {} registration failed: {}", player.name, e);
+                println!("   {} registration failed: {}", player.name, e);
             }
         }
     }
 
     // Step 4: Start tournament
-    println!("\n🚀 Step 4: Starting tournament...");
+    println!("\n Step 4: Starting tournament...");
     let start_sig = start_tournament_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id).await?;
     lifecycle_steps.push(TournamentStep {
         step: "Bracket Started".to_string(),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: start_sig.clone(),
     });
     session_notes.push(SessionNote {
@@ -184,10 +184,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         severity: "ok".to_string(),
         text: "bracket seeded by ELO — SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
     });
-    println!("  ✅ Tournament started: {}", start_sig);
+    println!("   Tournament started: {}", start_sig);
 
     // Step 5: SF1 - Magnus vs Vidit (real game with moves)
-    println!("\n🎮 Step 5: SF1 - Magnus vs Vidit");
+    println!("\n Step 5: SF1 - Magnus vs Vidit");
     let sf1_result = play_real_game(
         &rpc_client,
         &program_id,
@@ -201,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
 
     // Step 6: SF2 - Fabiano vs Anish (real game with moves)
-    println!("\n🎮 Step 6: SF2 - Fabiano vs Anish");
+    println!("\n Step 6: SF2 - Fabiano vs Anish");
     let sf2_result = play_real_game(
         &rpc_client,
         &program_id,
@@ -215,27 +215,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
 
     // Step 7: Record SF results
-    println!("\n📊 Step 7: Recording semifinal results...");
+    println!("\n Step 7: Recording semifinal results...");
     let sf1_result_sig = record_match_result_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id, 0, &sf1_result.winner, Pubkey::default()).await?;
     lifecycle_steps.push(TournamentStep {
         step: "SF1 Result Recorded".to_string(),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: sf1_result_sig.clone(),
     });
 
     let sf2_result_sig = record_match_result_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id, 1, &sf2_result.winner, Pubkey::default()).await?;
     lifecycle_steps.push(TournamentStep {
         step: "SF2 Result Recorded".to_string(),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: sf2_result_sig.clone(),
     });
 
     // Step 8: Advance to final
-    println!("\n🏆 Step 8: Advancing to final...");
+    println!("\n Step 8: Advancing to final...");
     let advance_sig = advance_to_final_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id).await?;
     lifecycle_steps.push(TournamentStep {
         step: "Final Advanced".to_string(),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: advance_sig.clone(),
     });
     session_notes.push(SessionNote {
@@ -244,10 +244,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         severity: "ok".to_string(),
         text: format!("SF winners seeded into final: {} (White) vs {} (Black)", sf1_result.winner, sf2_result.winner),
     });
-    println!("  ✅ Advanced to final: {}", advance_sig);
+    println!("   Advanced to final: {}", advance_sig);
 
     // Step 9: Final match (real game with moves)
-    println!("\n🏆 Step 9: Final - {} vs {}", sf1_result.winner, sf2_result.winner);
+    println!("\n Step 9: Final - {} vs {}", sf1_result.winner, sf2_result.winner);
     let final_result = play_real_game(
         &rpc_client,
         &program_id,
@@ -261,11 +261,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
 
     // Step 10: Record final result
-    println!("\n🏆 Step 10: Recording final result...");
+    println!("\n Step 10: Recording final result...");
     let final_result_sig = record_match_result_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id, 2, &final_result.winner, Pubkey::default()).await?;
     lifecycle_steps.push(TournamentStep {
         step: "Final Result Recorded".to_string(),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: final_result_sig.clone(),
     });
 
@@ -279,9 +279,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Generate output files
     generate_tournament_data(&lifecycle_steps, &session_notes, &final_result.winner, tournament_id).await?;
 
-    println!("\n✅ Tournament complete!");
-    println!("🏆 Champion: {}", final_result.winner);
-    println!("📄 Data generated for TournamentDemo.tsx with real explorer links");
+    println!("\n Tournament complete!");
+    println!(" Champion: {}", final_result.winner);
+    println!(" Data generated for TournamentDemo.tsx with real explorer links");
 
     Ok(())
 }
@@ -311,7 +311,7 @@ fn load_players_with_keypairs() -> Result<Vec<PlayerWithKeypair>, Box<dyn std::e
             name: name.to_string(),
             keypair,
         });
-        println!("  👤 {}: {} (ELO: {})", name, pubkey, elo);
+        println!("   {}: {} (ELO: {})", name, pubkey, elo);
     }
 
     Ok(players)
@@ -428,7 +428,7 @@ async fn play_real_game(
     lifecycle: &mut Vec<TournamentStep>,
     notes: &mut Vec<SessionNote>,
 ) -> Result<MatchResult, Box<dyn std::error::Error>> {
-    println!("  🎮 Playing {} - {} vs {}", round, player1.name, player2.name);
+    println!("   Playing {} - {} vs {}", round, player1.name, player2.name);
 
     let game_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
@@ -438,7 +438,7 @@ async fn play_real_game(
     let create_sig = create_game_on_chain(rpc, program_id, &player1.keypair, game_id).await?;
     lifecycle.push(TournamentStep {
         step: format!("{} Created", round),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: create_sig.clone(),
     });
 
@@ -446,7 +446,7 @@ async fn play_real_game(
     let join_sig = join_game_on_chain(rpc, program_id, &player2.keypair, game_id).await?;
     lifecycle.push(TournamentStep {
         step: format!("{} Joined", round),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: join_sig.clone(),
     });
 
@@ -454,7 +454,7 @@ async fn play_real_game(
     let delegate_sig = delegate_to_er_on_chain(rpc, program_id, &player1.keypair, game_id).await?;
     lifecycle.push(TournamentStep {
         step: format!("{} Finalized", round),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: delegate_sig.clone(),
     });
 
@@ -488,7 +488,7 @@ async fn play_real_game(
     let finalize_sig = finalize_game_on_chain(rpc, program_id, &player1.keypair, game_id).await?;
     lifecycle.push(TournamentStep {
         step: format!("{} Finalized", round),
-        status: "✅".to_string(),
+        status: "".to_string(),
         sig: finalize_sig.clone(),
     });
 
@@ -751,7 +751,7 @@ export const GENERATED_AT = '{}';
     </style>
 </head>
 <body>
-    <h1 class="header">🏆 XFChess Tournament Report</h1>
+    <h1 class="header"> XFChess Tournament Report</h1>
     <div class="header">
         <div class="champion">Champion: {}</div>
         <div>Tournament ID: {}</div>
@@ -794,11 +794,12 @@ export const GENERATED_AT = '{}';
 
     std::fs::write("tournament_report.html", html_content)?;
 
-    println!("✅ Tournament data generated successfully!");
-    println!("📄 web-react/src/data/tournamentData.ts - for web interface");
-    println!("📄 tournament_data.js - JavaScript export");
-    println!("📄 tournament_report.html - Visual report");
-    println!("🏆 Champion: {}", champion);
+    println!(" Tournament data generated successfully!");
+    println!(" web-react/src/data/tournamentData.ts - for web interface");
+    println!(" tournament_data.js - JavaScript export");
+    println!(" tournament_report.html - Visual report");
+    println!(" Champion: {}", champion);
 
     Ok(())
 }
+

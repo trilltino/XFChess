@@ -172,7 +172,7 @@ pub mod __client_accounts_claim_stale_dispute {
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
 
-declare_id!("C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf");
+declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
 
 #[program]
 pub mod xfchess_game {
@@ -340,6 +340,7 @@ pub mod xfchess_game {
         elo_max: u32,
         min_players: u16,
         prize_shares: [u16; 10],
+        platform_fee: u64,
         winner_takes_all: bool,
         host_treasury: Pubkey,
         usdc_mint: Option<Pubkey>,
@@ -357,6 +358,7 @@ pub mod xfchess_game {
             elo_max,
             min_players,
             prize_shares,
+            platform_fee,
             winner_takes_all,
             host_treasury,
             usdc_mint,

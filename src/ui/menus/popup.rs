@@ -1,4 +1,4 @@
-//! In-game notification / popup system.
+﻿//! In-game notification / popup system.
 //!
 //! Add a `GamePopup` to the `GamePopupQueue` resource from any system and it
 //! will be rendered as a floating toast in the bottom-right corner while the
@@ -30,7 +30,7 @@ pub struct GamePopup {
     pub lifetime:  f32,
     /// Remaining time (decremented each frame; private — set by the queue).
     pub(crate) remaining: f32,
-    /// Whether the user clicked the ✕ to dismiss early.
+    /// Whether the user clicked the  to dismiss early.
     pub(crate) dismissed:  bool,
 }
 
@@ -181,7 +181,7 @@ fn render_popups(
                         );
                         if ui
                             .small_button(
-                                egui::RichText::new("📋 Copy").size(11.0),
+                                egui::RichText::new(" Copy").size(11.0),
                             )
                             .on_hover_text("Copy address")
                             .clicked()
@@ -237,7 +237,7 @@ fn render_popups(
             y_offset += 120.0;
         }
 
-        // If the ✕ button was clicked, mark dismissed
+        // If the  button was clicked, mark dismissed
         if !open {
             queue.entries[i].dismissed = true;
         }
@@ -260,3 +260,4 @@ impl Plugin for PopupPlugin {
             );
     }
 }
+

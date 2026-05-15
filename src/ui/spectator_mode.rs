@@ -1,4 +1,4 @@
-//! Spectator mode UI for watching live games
+﻿//! Spectator mode UI for watching live games
 //!
 //! Provides a read-only view of ongoing games using egui (following project patterns)
 
@@ -73,7 +73,7 @@ fn spectator_ui_system(
         Err(_) => return,
     };
 
-    egui::Window::new("👁 Spectator Mode")
+    egui::Window::new(" Spectator Mode")
         .default_size([800.0, 600.0])
         .resizable(true)
         .show(ctx, |ui| {
@@ -216,18 +216,18 @@ fn get_square_from_fen(fen_board: &str, file: usize, rank: usize) -> String {
 /// Convert FEN piece character to Unicode chess symbol
 fn piece_symbol(c: char) -> String {
     match c {
-        'P' => "♙".to_string(),
-        'N' => "♘".to_string(),
-        'B' => "♗".to_string(),
-        'R' => "♖".to_string(),
-        'Q' => "♕".to_string(),
-        'K' => "♔".to_string(),
-        'p' => "♟".to_string(),
-        'n' => "♞".to_string(),
-        'b' => "♝".to_string(),
-        'r' => "♜".to_string(),
-        'q' => "♛".to_string(),
-        'k' => "♚".to_string(),
+        'P' => "".to_string(),
+        'N' => "".to_string(),
+        'B' => "".to_string(),
+        'R' => "".to_string(),
+        'Q' => "".to_string(),
+        'K' => "".to_string(),
+        'p' => "".to_string(),
+        'n' => "".to_string(),
+        'b' => "".to_string(),
+        'r' => "".to_string(),
+        'q' => "".to_string(),
+        'k' => "".to_string(),
         _ => " ".to_string(),
     }
 }
@@ -283,7 +283,7 @@ pub fn spectator_menu_ui(
                         ui.horizontal(|ui| {
                             ui.label(format!("Game #{}", game_id));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button("👁 WATCH").clicked() {
+                                if ui.button(" WATCH").clicked() {
                                     spectator.game_id = game_id.to_string();
                                     spectator.active = true;
                                     spectator.connected = true;
@@ -313,3 +313,4 @@ pub fn spectator_menu_ui(
             }
         });
 }
+

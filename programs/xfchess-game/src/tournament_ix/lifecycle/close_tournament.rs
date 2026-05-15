@@ -15,10 +15,10 @@ pub struct CloseTournament<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// CHECK: Prize escrow vault (85% of fees).
+    /// CHECK: Prize escrow vault (entry fees).
     #[account(
         mut,
-        seeds = [TOURNAMENT_PRIZE_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub prize_escrow_pda: UncheckedAccount<'info>,
@@ -54,7 +54,6 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
     if prize_escrow_lamports > 0 {
         let num_players = tournament.num_registered_players as usize;
         let mut remaining_lamports = prize_escrow_lamports;
-        let mut distributed = 0;
 
         // Calculate total shares
         let total_shares: u64 = tournament.prize_shares.iter().map(|&s| s as u64).sum();
@@ -72,7 +71,6 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
                 if let Some(player_account) = ctx.remaining_accounts.get(i) {
                     **player_account.lamports.borrow_mut() += prize_amount;
                     remaining_lamports -= prize_amount;
-                    distributed += prize_amount;
                     msg!("Distributed prize {} to player {}", prize_amount, player_account.key());
                 }
             }
@@ -81,7 +79,6 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
             if let Some(winner_account) = ctx.remaining_accounts.first() {
                 **winner_account.lamports.borrow_mut() += prize_escrow_lamports;
                 remaining_lamports = 0;
-                distributed = prize_escrow_lamports;
                 msg!("Distributed full prize {} to winner {}", prize_escrow_lamports, winner_account.key());
             }
         }

@@ -9,6 +9,11 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct SelectedBorder;
 
+/// Marker component for legal move hints (3D)
+#[derive(Component)]
+pub struct MoveHint;
+
+
 /// System to visually highlight possible moves and selected square
 ///
 /// Updates square materials to provide visual feedback for:
@@ -32,10 +37,10 @@ pub fn highlight_possible_moves(
     squares_query: Query<(&Square, &Children)>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>, With<BoardSquare3DVisual>>,
     mut commands: Commands,
-    border_query: Query<Entity, With<SelectedBorder>>,
+    marker_query: Query<Entity, Or<(With<SelectedBorder>, With<MoveHint>)>>,
 ) {
-    // Clean up old borders first
-    for entity in border_query.iter() {
+    // Clean up old visual markers
+    for entity in marker_query.iter() {
         commands.entity(entity).despawn();
     }
 
@@ -60,12 +65,24 @@ pub fn highlight_possible_moves(
             ));
         }
 
+        if is_valid_move {
+            // Add small grey circle for legal move (matching 2D style)
+            commands.spawn((
+                Mesh3d(square_materials.hint_mesh.clone()),
+                MeshMaterial3d(square_materials.hover_matl.clone()),
+                Transform::from_translation(Vec3::new(square.x as f32, 0.02, square.y as f32))
+                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                MoveHint,
+                Name::new("Move Hint"),
+                crate::core::DespawnOnExit(crate::core::GameState::InGame),
+            ));
+        }
+
+
         // Update the 3D visual child's material
         for child in children.iter() {
             if let Ok(mut material) = material_query.get_mut(child) {
-                if is_valid_move {
-                    material.0 = square_materials.hover_matl.clone();
-                } else if !is_selected {
+                if !is_selected {
                     material.0 = return_materials.get_original_material(square, &square_materials);
                 }
             }
@@ -167,24 +184,27 @@ pub fn animate_capture_fade(
     for (entity, mut transform, mut fading) in query.iter_mut() {
         fading.timer.tick(time.delta());
 
-        // Raw linear t ∈ [0, 1]
+        // t ∈ [0, 1]
         let t = fading.timer.fraction();
 
-        // Smooth-step for scale and spin so they ease in/out.
-        let t_smooth = t * t * (3.0 - 2.0 * t);
+        // 1. Position: Slide horizontally and sink vertically
+        //    Horizontal slide: 0.6 units along knockback_dir
+        //    Vertical sink: start at board height, end at -0.8 (fully submerged)
+        let slide_dist = 0.6 * t;
+        let sink_y = PIECE_ON_BOARD_Y - (1.0 * t * t); // Quadratic sink for weight
+        
+        transform.translation = fading.initial_pos 
+            + (fading.knockback_dir * slide_dist) 
+            + (Vec3::Y * (sink_y - PIECE_ON_BOARD_Y));
 
-        // 1. Scale: 1 → 0 with smooth-step
-        let scale = (1.0 - t_smooth).max(0.0);
+        // 2. Rotation: Tilt back based on impact
+        //    Tilt up to 25 degrees (0.43 rad) and then settle
+        let tilt_angle = 0.43 * t * (1.0 - t) * 4.0; 
+        transform.rotation = Quat::from_axis_angle(fading.tilt_axis, tilt_angle);
+
+        // 3. Scale: Slight shrink to emphasize the 'vanishing'
+        let scale = 1.0 - (0.3 * t);
         transform.scale = Vec3::splat(scale);
-
-        // 2. Arc: parabolic Y offset — peaks at t=0.5, zero at start and end.
-        //    y_arc = arc_height * 4 * t * (1 - t)
-        let arc_y = fading.arc_height * 4.0 * t * (1.0 - t);
-        transform.translation = fading.initial_pos + Vec3::Y * arc_y;
-
-        // 3. Spin: rotate around spin_axis by smooth-step progress.
-        let spin_angle = fading.spin_radians * t_smooth;
-        transform.rotation = Quat::from_axis_angle(fading.spin_axis, spin_angle);
 
         if fading.timer.just_finished() {
             commands.entity(entity).despawn();

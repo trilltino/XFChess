@@ -1,4 +1,4 @@
-//! Pawn Promotion UI
+﻿//! Pawn Promotion UI
 //!
 //! Displays a dialog when a pawn reaches the end of the board,
 //! allowing the player to choose which piece to promote to.
@@ -69,10 +69,10 @@ pub fn promotion_ui_system(
                 ui.horizontal(|ui| {
                     // Piece options
                     let pieces = [
-                        (PieceType::Queen, "♕", "Queen"),
-                        (PieceType::Rook, "♖", "Rook"),
-                        (PieceType::Bishop, "♗", "Bishop"),
-                        (PieceType::Knight, "♘", "Knight"),
+                        (PieceType::Queen, "", "Queen"),
+                        (PieceType::Rook, "", "Rook"),
+                        (PieceType::Bishop, "", "Bishop"),
+                        (PieceType::Knight, "", "Knight"),
                     ];
 
                     for (piece_type, symbol, _name) in pieces {
@@ -97,3 +97,4 @@ pub fn promotion_ui_system(
             });
         });
 }
+

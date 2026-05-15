@@ -89,8 +89,7 @@ pub fn init_board() -> Board {
 mod tests {
     use super::*;
     use crate::constants::{
-        BISHOP_ID, B_BISHOP, B_KING, B_KNIGHT, B_PAWN, B_QUEEN, B_ROOK, COLOR_BLACK, COLOR_WHITE,
-        KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID, W_BISHOP, W_KING, W_KNIGHT, W_PAWN,
+        B_KING, B_QUEEN, B_ROOK, COLOR_BLACK, COLOR_WHITE, KING_ID, PAWN_ID, QUEEN_ID, W_KING,
         W_QUEEN, W_ROOK,
     };
 

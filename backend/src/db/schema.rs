@@ -35,12 +35,17 @@ async fn create_tables(pool: &SqlitePool) -> Result<()> {
             id TEXT PRIMARY KEY,
             player_white TEXT NOT NULL,
             player_black TEXT NOT NULL,
+            white_username TEXT,
+            black_username TEXT,
             stake_amount REAL DEFAULT 0.0,
+            fee_lamports INTEGER DEFAULT 0,
             start_time INTEGER NOT NULL,
             end_time INTEGER,
             winner TEXT,
             final_fen TEXT,
+            finalize_sig TEXT,
             status TEXT DEFAULT 'playing',
+            archived_at INTEGER,
             created_at INTEGER DEFAULT (strftime('%s', 'now'))
         )
         "#,

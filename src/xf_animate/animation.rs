@@ -1,4 +1,4 @@
-//! Animation components + systems for mini pieces.
+﻿//! Animation components + systems for mini pieces.
 
 use bevy::prelude::*;
 

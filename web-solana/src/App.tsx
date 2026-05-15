@@ -28,9 +28,10 @@ import TournamentStandings from './pages/TournamentStandings';
 import TournamentPlay from './pages/TournamentPlay';
 import { ProfileViewer } from './pages/ProfileViewer';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
-import { loginWithEmail } from './lib/api';
-import { Menu, X, ChevronDown, Loader2 } from 'lucide-react';
+import { Menu, X, ChevronDown } from 'lucide-react';
 import { Footer } from './components/Footer';
+import { WalletSelectionModal } from './components/WalletSelectionModal';
+import { LoginModal } from './components/LoginModal';
 
 const dropdownVariants = {
     hidden: { opacity: 0, y: -10 },
@@ -110,7 +111,7 @@ function AppContent() {
     const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
     const [username, setUsername] = useState<string | null>(null);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [userEmail, setUserEmail] = useState<string | null>(null);
+    const [_userEmail, setUserEmail] = useState<string | null>(null);
     const [isLegalOpen, setIsLegalOpen] = useState(false);
     const [isCommunityOpen, setIsCommunityOpen] = useState(false);
     const [isGameTypesOpen, setIsGameTypesOpen] = useState(false);
@@ -238,6 +239,10 @@ function AppContent() {
                                 >
                                     <Link to="/players" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Players</Link>
                                     <a href="https://t.me/+IBdo42qMPqM4Y2Vk" target="_blank" rel="noopener noreferrer" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Telegram</a>
+                                    <Link to="/community/uk" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>UK</Link>
+                                    <Link to="/community/brazil" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Brazil</Link>
+                                    <Link to="/community/germany" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Germany</Link>
+                                    <Link to="/community/canada" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Canada</Link>
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -314,7 +319,7 @@ function AppContent() {
                         <Route path="/legal" element={<LegalPage />} />
                         <Route path="/anti-cheat" element={<AntiCheatPage />} />
                         <Route path="/profile" element={<ProfileViewer />} />
-                        <Route path="/kyc" element={isLoggedIn ? <KycPage /> : <Navigate to="/login" replace />} />
+                        <Route path="/kyc" element={<KycPage />} />
                         <Route path="/news/release" element={<NewsRelease />} />
                         <Route path="/login" element={<SignIn defaultMode="login" />} />
                         <Route path="/auth/login" element={<SignIn defaultMode="login" />} />
@@ -341,138 +346,4 @@ function AppContent() {
     );
 }
 
-function WalletSelectionModal({ onClose }: { onClose: () => void }) {
-    const { wallets, select } = useWallet();
-    
-    const descriptions: Record<string, string> = {
-        'Phantom': isTauri ? 'Requires Chrome Extension (Browser only).' : 'The most popular Solana wallet with a sleek interface.',
-        'Solflare': isTauri ? 'Requires Chrome Extension (Browser only).' : 'A powerful, feature-rich wallet with advanced security.',
-        'WalletConnect': isTauri ? 'Recommended for Desktop App (Connect via Mobile).' : 'Connect to your mobile wallet via a secure bridge.',
-        'Mobile Wallet Adapter': 'Native mobile connection for Android and iOS devices.',
-    };
-
-    // Sort wallets to prioritize WalletConnect in Tauri
-    const sortedWallets = [...wallets].sort((a, b) => {
-        if (isTauri) {
-            if (a.adapter.name === 'WalletConnect') return -1;
-            if (b.adapter.name === 'WalletConnect') return 1;
-        }
-        return 0;
-    });
-
-    return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="custom-wallet-modal" onClick={e => e.stopPropagation()}>
-                <div className="modal-header">
-                    <h3>Select Network Provider {isTauri && <span style={{ fontSize: '0.7rem', opacity: 0.6, background: 'var(--primary)', color: '#fff', padding: '2px 8px', borderRadius: '10px', marginLeft: '10px', verticalAlign: 'middle' }}>DESKTOP APP</span>}</h3>
-                    <button className="modal-close" onClick={onClose}>&times;</button>
-                </div>
-                <div className="wallet-list">
-                    {sortedWallets.map((wallet) => {
-                        const isDisabled = isTauri && (wallet.adapter.name === 'Phantom' || wallet.adapter.name === 'Solflare');
-                        const isRecommended = isTauri && wallet.adapter.name === 'WalletConnect';
-                        
-                        return (
-                            <div 
-                                key={wallet.adapter.name} 
-                                className={`wallet-item ${isDisabled ? 'disabled' : ''} ${isRecommended ? 'recommended' : ''}`}
-                                onClick={() => {
-                                    if (isDisabled) return;
-                                    select(wallet.adapter.name);
-                                    onClose();
-                                }}
-                                style={{
-                                    opacity: isDisabled ? 0.5 : 1,
-                                    cursor: isDisabled ? 'not-allowed' : 'pointer',
-                                    border: isRecommended ? '1px solid var(--primary)' : '1px solid var(--border)'
-                                }}
-                            >
-                                <div className="wallet-icon-wrap">
-                                    <img src={wallet.adapter.icon} alt={wallet.adapter.name} width={32} height={32} />
-                                </div>
-                                <div className="wallet-info">
-                                    <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        {wallet.adapter.name}
-                                        {isRecommended && <span style={{ fontSize: '0.6rem', color: 'var(--primary)', fontWeight: 800 }}>RECOMMENDED</span>}
-                                    </h4>
-                                    <p>{descriptions[wallet.adapter.name] || 'Connect using your preferred Solana vault.'}</p>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function LoginModal({ onClose, onLoginSuccess }: { onClose: () => void; onLoginSuccess: (email: string, username: string) => void }) {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError(null);
-        if (!email || !password) {
-            setError('Email and password are required');
-            return;
-        }
-        setLoading(true);
-        try {
-            const res = await loginWithEmail({ email, password });
-            localStorage.setItem('xfchess_token', res.token);
-            localStorage.setItem('xfchess_username', res.username);
-            localStorage.setItem('xfchess_email', email);
-            onLoginSuccess(email, res.username);
-            onClose();
-        } catch (e: any) {
-            setError(e.message || 'Login failed');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="custom-wallet-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-                <div className="modal-header">
-                    <h3>Login</h3>
-                    <button className="modal-close" onClick={onClose}>&times;</button>
-                </div>
-                <form onSubmit={handleSubmit} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    {error && <div style={{ color: '#ffd0d0', background: 'rgba(255, 80, 80, 0.12)', border: '1px solid rgba(255, 80, 80, 0.3)', borderRadius: '8px', padding: '12px', fontSize: '14px' }}>{error}</div>}
-                    <div>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'rgba(255,255,255,0.6)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Email</label>
-                        <input
-                            type="email"
-                            value={email}
-                            onChange={e => setEmail(e.target.value)}
-                            placeholder="you@example.com"
-                            style={{ width: '100%', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: '14px', outline: 'none' }}
-                        />
-                    </div>
-                    <div>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'rgba(255,255,255,0.6)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Password</label>
-                        <input
-                            type="password"
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            placeholder="••••••••"
-                            style={{ width: '100%', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: '14px', outline: 'none' }}
-                        />
-                    </div>
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        style={{ width: '100%', padding: '14px', borderRadius: '8px', border: 'none', background: 'linear-gradient(135deg, #ad5c2f, #8c4a26)', color: '#fff', fontWeight: 700, fontSize: '14px', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                    >
-                        {loading ? <Loader2 size={16} className="spinner" /> : null}
-                        {loading ? 'Signing in...' : 'Sign In'}
-                    </button>
-                </form>
-            </div>
-        </div>
-    );
-}
+// WalletSelectionModal and LoginModal now live in `./components/`.

@@ -53,6 +53,8 @@ exclude = [
 
 [profile.dev]
 opt-level = 1
+debug = 1        # Only include line numbers, not full symbols (saves GBs of disk space)
+strip = "debuginfo" # Strip debuginfo from the resulting binary (reduces .exe size)
 
 # Enable high optimizations for dependencies (incl. Bevy), but not for our code:
 [profile.dev.package."*"]

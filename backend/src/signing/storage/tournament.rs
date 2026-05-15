@@ -96,6 +96,8 @@ pub struct TournamentRecord {
     pub name: String,
     /// Entry fee per player (in lamports)
     pub entry_fee_lamports: u64,
+    /// Platform fee per player (in lamports)
+    pub platform_fee_lamports: u64,
     /// Total prize pool (sum of entry fees)
     pub prize_pool: u64,
     /// Maximum players (8, 16, 32, 64, 128, 256)
@@ -165,6 +167,7 @@ impl TournamentRecord {
             tournament_id,
             name: name.to_string(),
             entry_fee_lamports,
+            platform_fee_lamports: 4_000_000, // Default to 50p
             prize_pool: 0,
             max_players: 8,
             status: TournamentStatus::Registration,
@@ -202,6 +205,7 @@ impl TournamentRecord {
         tournament_id: u64,
         name: String,
         entry_fee_lamports: u64,
+        platform_fee_lamports: u64,
         max_players: u16,
         prize_shares: [u16; 10],
         format: TournamentFormat,
@@ -216,6 +220,7 @@ impl TournamentRecord {
             tournament_id,
             name,
             entry_fee_lamports,
+            platform_fee_lamports,
             prize_pool: 0,
             max_players,
             status: TournamentStatus::Registration,
@@ -280,6 +285,10 @@ impl TournamentRecord {
     /// # Returns
     /// Match assignment if the player has an active match, None otherwise
     pub fn match_for_player(&self, player: &str) -> Option<MatchAssignment> {
+        if matches!(self.format, TournamentFormat::Swiss { .. }) {
+            return self.swiss_match_for_player(player);
+        }
+
         for m in self.matches.iter().flatten() {
             if m.status == MatchStatus::Completed {
                 continue;
@@ -297,14 +306,63 @@ impl TournamentRecord {
             let opponent_node_id = self.node_ids.get(&opponent).cloned();
             return Some(MatchAssignment {
                 match_index: m.match_index,
+                round: Some(m.round),
+                board: None,
                 game_id: m.game_id,
                 opponent_pubkey: opponent,
                 opponent_node_id,
                 your_color: if is_white { "white" } else { "black" }.to_string(),
                 status: m.status.clone(),
+                is_bye: false,
             });
         }
         None
+    }
+
+    /// Swiss-aware match lookup for the player's current pairing or bye.
+    fn swiss_match_for_player(&self, player: &str) -> Option<MatchAssignment> {
+        let swiss = self.swiss_data.as_ref()?;
+        let round = swiss.rounds.last()?;
+
+        if round.byes.iter().any(|bye| bye == player) {
+            return Some(MatchAssignment {
+                match_index: 0,
+                round: Some(round.round),
+                board: None,
+                game_id: None,
+                opponent_pubkey: String::new(),
+                opponent_node_id: None,
+                your_color: "bye".to_string(),
+                status: MatchStatus::Completed,
+                is_bye: true,
+            });
+        }
+
+        let pairing = round
+            .pairings
+            .iter()
+            .enumerate()
+            .find(|(_, p)| p.white == player || p.black == player)?;
+
+        let (idx, p) = pairing;
+        let is_white = p.white == player;
+        let opponent = if is_white {
+            p.black.clone()
+        } else {
+            p.white.clone()
+        };
+
+        Some(MatchAssignment {
+            match_index: idx as u16,
+            round: Some(round.round),
+            board: Some(p.board),
+            game_id: None,
+            opponent_node_id: self.node_ids.get(&opponent).cloned(),
+            opponent_pubkey: opponent,
+            your_color: if is_white { "white" } else { "black" }.to_string(),
+            status: MatchStatus::Active,
+            is_bye: false,
+        })
     }
 
     /// Generates a complete single-elimination bracket.
@@ -403,6 +461,10 @@ impl TournamentRecord {
 pub struct MatchAssignment {
     /// Match index (0 to total_matches-1)
     pub match_index: u16,
+    /// Swiss round number when applicable.
+    pub round: Option<u8>,
+    /// Swiss board number when applicable.
+    pub board: Option<u16>,
     /// Associated Solana game ID
     pub game_id: Option<u64>,
     /// Opponent's wallet pubkey
@@ -413,6 +475,8 @@ pub struct MatchAssignment {
     pub your_color: String,
     /// Current match status
     pub status: MatchStatus,
+    /// True when the player received a Swiss bye this round.
+    pub is_bye: bool,
 }
 
 /// SQLite-backed tournament store.
@@ -465,7 +529,10 @@ impl TournamentStore {
         let rows = sqlx::query("SELECT data FROM tournaments")
             .fetch_all(&self.pool)
             .await
-            .expect("Failed to fetch tournaments from database");
+            .unwrap_or_else(|e| {
+                tracing::error!("Failed to fetch tournaments from database: {}", e);
+                Vec::new()
+            });
         rows.into_iter()
             .filter_map(|r| serde_json::from_str::<TournamentRecord>(&r.get::<String, _>(0)).ok())
             .collect()
@@ -646,6 +713,7 @@ impl Default for TournamentRecord {
             tournament_id: 0,
             name: String::new(),
             entry_fee_lamports: 0,
+            platform_fee_lamports: 4_000_000,
             prize_pool: 0,
             max_players: 8,
             status: TournamentStatus::Registration,

@@ -4,7 +4,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// TURN relay configuration
 #[derive(Debug, Clone)]

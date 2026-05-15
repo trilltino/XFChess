@@ -33,8 +33,9 @@ impl TEERelayer {
 
     /// Fetches the TEE relayer public key
     pub async fn get_public_key(&self) -> Result<Pubkey, AppError> {
-        // Placeholder for actual public key retrieval
-        Ok(Pubkey::default())
+        // TODO: Fetch actual TEE relayer public key from attestation service
+        // For now, return an error since default pubkey is meaningless
+        Err(AppError::Internal("TEE relayer public key not yet implemented".to_string()))
     }
 
     /// Fetches the current TEE attestation quote

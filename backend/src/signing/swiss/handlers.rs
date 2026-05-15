@@ -1,3 +1,11 @@
+//! HTTP handlers for Swiss-format tournaments.
+//!
+//! Exposes round management endpoints — start/current round, pairings,
+//! result recording, and standings — mounted under `/tournament/{id}/...`
+//! by the signing service router. Handlers delegate to [`SwissService`]
+//! for pairing generation, scoring, and state persistence, and translate
+//! service errors into appropriate HTTP status codes.
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -8,7 +16,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use swiss_pairing::{MatchResult, SwissRound, StandingsEntry};
 
-use super::service::{SwissService, SwissServiceError};
+use crate::signing::AppState;
+use super::service::SwissServiceError;
 
 /// Request to record a match result
 #[derive(Deserialize)]
@@ -28,7 +37,7 @@ pub struct CurrentRoundRes {
 }
 
 /// Create Swiss tournament routes
-pub fn swiss_routes() -> Router<SwissService> {
+pub fn swiss_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}/round", post(start_round))
         .route("/{id}/current-round", get(get_current_round))
@@ -40,8 +49,9 @@ pub fn swiss_routes() -> Router<SwissService> {
 /// POST /tournament/{id}/round - Start next round
 async fn start_round(
     Path(id): Path<u64>,
-    State(service): State<SwissService>,
+    State(state): State<AppState>,
 ) -> Result<Json<SwissRound>, StatusCode> {
+    let service = &state.swiss_service;
     match service.start_round(id).await {
         Ok(round) => {
             tracing::info!("Started round {} for tournament {}", round.round, id);
@@ -60,14 +70,18 @@ async fn start_round(
 /// GET /tournament/{id}/current-round - Get current round info
 async fn get_current_round(
     Path(id): Path<u64>,
-    State(service): State<SwissService>,
+    State(state): State<AppState>,
 ) -> Result<Json<CurrentRoundRes>, StatusCode> {
+    let service = &state.swiss_service;
     match service.get_current_round(id).await {
-        Ok(round) => Ok(Json(CurrentRoundRes {
-            round,
-            total_rounds: 0, // Would need to fetch from tournament
-            is_active: round > 0,
-        })),
+        Ok(round) => {
+            let total_rounds = service.get_total_rounds(id).await.unwrap_or(0);
+            Ok(Json(CurrentRoundRes {
+                round,
+                total_rounds,
+                is_active: round > 0,
+            }))
+        }
         Err(SwissServiceError::TournamentNotFound) => Err(StatusCode::NOT_FOUND),
         Err(SwissServiceError::NotSwissFormat) => Err(StatusCode::BAD_REQUEST),
         Err(e) => {
@@ -80,8 +94,9 @@ async fn get_current_round(
 /// GET /tournament/{id}/pairings/{round} - Get pairings for a round
 async fn get_pairings(
     Path((id, round)): Path<(u64, u8)>,
-    State(service): State<SwissService>,
+    State(state): State<AppState>,
 ) -> Result<Json<SwissRound>, StatusCode> {
+    let service = &state.swiss_service;
     match service.get_pairings(id, round).await {
         Ok(Some(round_data)) => Ok(Json(round_data)),
         Ok(None) => Err(StatusCode::NOT_FOUND),
@@ -97,9 +112,10 @@ async fn get_pairings(
 /// POST /tournament/{id}/result - Record a match result
 async fn record_result(
     Path(id): Path<u64>,
-    State(service): State<SwissService>,
+    State(state): State<AppState>,
     Json(req): Json<RecordResultReq>,
 ) -> Result<Json<Vec<StandingsEntry>>, StatusCode> {
+    let service = &state.swiss_service;
     // Parse result string
     let result = match req.result.as_str() {
         "1-0" | "1-0 " => MatchResult::WhiteWin,
@@ -128,8 +144,9 @@ async fn record_result(
 /// GET /tournament/{id}/standings - Get current standings
 async fn get_standings(
     Path(id): Path<u64>,
-    State(service): State<SwissService>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<StandingsEntry>>, StatusCode> {
+    let service = &state.swiss_service;
     match service.get_standings(id).await {
         Ok(standings) => Ok(Json(standings)),
         Err(SwissServiceError::TournamentNotFound) => Err(StatusCode::NOT_FOUND),

@@ -49,7 +49,10 @@ fn start_auth_websocket(mut auth_ws: ResMut<AuthWebSocket>) {
     };
     info!("Starting WebSocket connection to {}", ws_url);
 
-    let tx = auth_ws.tx.take().unwrap();
+    let Some(tx) = auth_ws.tx.take() else {
+        error!("[AUTH_WS] No tx channel available");
+        return;
+    };
     bevy::tasks::IoTaskPool::get().spawn(async move {
         match connect_async(&ws_url).await {
             Ok((ws_stream, _)) => {

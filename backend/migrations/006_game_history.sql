@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS games (
     final_fen       TEXT,
     finalize_sig    TEXT,
     status          TEXT    NOT NULL DEFAULT 'playing',
+    archived_at     INTEGER,
     created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 

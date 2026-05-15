@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+﻿import { useState, useEffect, useCallback, useRef } from 'react';
 import bs58 from 'bs58';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletReadyState } from '@solana/wallet-adapter-base';
@@ -144,7 +144,7 @@ function ErrBox({ msg }: { msg: string }) {
             padding: '10px 14px', borderRadius: 10,
             background: 'rgba(173,92,47,0.1)', border: '1px solid rgba(173,92,47,0.4)',
             color: '#f4bb44', fontSize: 13, marginBottom: 16
-        }}>⚠ {msg}</div>
+        }}> {msg}</div>
     );
 }
 
@@ -158,7 +158,7 @@ function IdentityStep({
     return (
         <div style={{ ...card, maxWidth: 440 }}>
             <div style={{ textAlign: 'center', marginBottom: 32 }}>
-                <div style={{ fontSize: 36, marginBottom: 6 }}>♛</div>
+                <div style={{ fontSize: 36, marginBottom: 6 }}></div>
                 <h2 style={{ fontSize: 22, fontWeight: 900, margin: '0 0 4px', letterSpacing: '-0.03em' }}>
                     <span style={{ color: '#ad5c2f' }}>XF</span>Chess
                 </h2>
@@ -270,7 +270,7 @@ function CredentialsStep({
             <StepDots current={0} />
 
             <div style={{ textAlign: 'center', marginBottom: 28 }}>
-                <div style={{ fontSize: 36, marginBottom: 4 }}>♛</div>
+                <div style={{ fontSize: 36, marginBottom: 4 }}></div>
                 <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0, letterSpacing: '-0.03em' }}>
                     <span style={{ color: '#ad5c2f' }}>XF</span>Chess
                 </h2>
@@ -372,7 +372,7 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
             <StepDots current={1} />
 
             <div style={{ textAlign: 'center', marginBottom: 28 }}>
-                <div style={{ fontSize: 36, marginBottom: 4 }}>♛</div>
+                <div style={{ fontSize: 36, marginBottom: 4 }}></div>
                 <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
                     Connect Your Wallet
                 </h2>
@@ -478,7 +478,7 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                             window.open(moonpayUrl, '_blank');
                         }}
                     >
-                        <span style={{ fontSize: 20 }}>💳</span>
+                        <span style={{ fontSize: 20 }}></span>
                         <span style={{ flex: 1, fontWeight: 700, fontSize: 13, color: '#9b59b6' }}>Buy SOL with MoonPay</span>
                         <ChevronRight size={16} style={{ color: 'rgba(155,89,182,0.5)' }} />
                     </button>
@@ -935,21 +935,21 @@ function ProfileStep() {
                                             onClick={() => setAiSide('black')}
                                             style={{ ...sideBtn, background: aiSide === 'black' ? '#ad5c2f' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'black' ? '#ad5c2f' : 'rgba(255,255,255,0.1)' }}
                                         >
-                                            <span style={{ fontSize: 24 }}>♟</span>
+                                            <span style={{ fontSize: 24 }}></span>
                                             <div>Black</div>
                                         </button>
                                         <button 
                                             onClick={() => setAiSide('random')}
                                             style={{ ...sideBtn, background: aiSide === 'random' ? '#ad5c2f' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'random' ? '#ad5c2f' : 'rgba(255,255,255,0.1)' }}
                                         >
-                                            <span style={{ fontSize: 24 }}>☯</span>
+                                            <span style={{ fontSize: 24 }}></span>
                                             <div>Random</div>
                                         </button>
                                         <button 
                                             onClick={() => setAiSide('white')}
                                             style={{ ...sideBtn, background: aiSide === 'white' ? '#ad5c2f' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'white' ? '#ad5c2f' : 'rgba(255,255,255,0.1)' }}
                                         >
-                                            <span style={{ fontSize: 24 }}>♙</span>
+                                            <span style={{ fontSize: 24 }}></span>
                                             <div>White</div>
                                         </button>
                                     </div>
@@ -1161,3 +1161,4 @@ const sideBtn: React.CSSProperties = {
 const launchBtn: React.CSSProperties = {
     width: '100%', padding: '16px 0', borderRadius: 8, border: 'none', background: '#ad5c2f', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'filter 0.2s'
 };
+

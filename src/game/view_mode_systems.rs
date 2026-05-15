@@ -26,16 +26,9 @@ pub fn view_mode_is_templeos(view_preferences: Res<PlayerViewPreferences>) -> bo
 
 /// System to hide/show 3D entities based on view mode
 pub fn toggle_3d_visibility(
-    view_preferences: Res<PlayerViewPreferences>,
-    mut piece_query: Query<&mut Visibility, With<Piece>>,
+    _view_preferences: Res<PlayerViewPreferences>,
+    _piece_query: Query<&mut Visibility, With<Piece>>,
 ) {
-    let show_3d = matches!(view_preferences.local_view, ViewMode::Standard3D | ViewMode::TempleOS);
-    
-    for mut visibility in &mut piece_query {
-        *visibility = if show_3d {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
+    // This system is now redundant as piece-specific visuals are handled
+    // in rendering::pieces::view_mode_rendering_toggle_system
 }

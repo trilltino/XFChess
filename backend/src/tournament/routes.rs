@@ -1,3 +1,10 @@
+//! Legacy tournament HTTP routes (password-protected + bracket-based).
+//!
+//! This module exposes the older tournament endpoints kept for backwards
+//! compatibility: admin creation, password gating, player joining with
+//! rate-limited retries, node-ID registration, match/bracket retrieval, and
+//! result/game-id recording. Newer flows live under `signing::routes::tournament`.
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -54,6 +61,8 @@ pub struct TournamentSummary {
     pub prize_pool: u64,
     pub registered: usize,
     pub status: String,
+    pub is_tournament: bool,
+    pub is_private: bool,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -90,6 +99,8 @@ pub async fn list_tournaments(
             prize_pool: t.prize_pool,
             registered: t.players.len(),
             status: format!("{:?}", t.status),
+            is_tournament: true, // All records from /tournaments endpoint are tournaments
+            is_private: false,   // TODO: wire up password_hash field in TournamentRecord
         })
         .collect();
     Json(summaries)
@@ -151,7 +162,7 @@ pub async fn get_bracket(
         "players": t.players,
         "matches": t.matches,
         "winner": t.winner,
-        "current_round": if t.matches[2].is_some() { 1u8 } else { 0u8 },
+        "current_round": if t.matches.get(2).and_then(|m| m.as_ref()).is_some() { 1u8 } else { 0u8 },
     })))
 }
 
@@ -296,31 +307,36 @@ fn start_bracket(t: &mut TournamentRecord) {
     let mut indexed: Vec<(usize, u32)> = t.player_elos.iter().copied().enumerate().collect();
     indexed.sort_by(|a, b| b.1.cmp(&a.1)); // descending ELO
 
-    let sf1_white = t.players[indexed[0].0].clone();
-    let sf1_black = t.players[indexed[3].0].clone();
-    let sf2_white = t.players[indexed[1].0].clone();
-    let sf2_black = t.players[indexed[2].0].clone();
+    let sf1_white = indexed.get(0).and_then(|idx| t.players.get(idx.0)).cloned().unwrap_or_default();
+    let sf1_black = indexed.get(3).and_then(|idx| t.players.get(idx.0)).cloned().unwrap_or_default();
+    let sf2_white = indexed.get(1).and_then(|idx| t.players.get(idx.0)).cloned().unwrap_or_default();
+    let sf2_black = indexed.get(2).and_then(|idx| t.players.get(idx.0)).cloned().unwrap_or_default();
 
-    t.matches[0] = Some(TournamentMatch {
-        match_index: 0,
-        round: 0,
-        player_white: Some(sf1_white),
-        player_black: Some(sf1_black),
-        winner: None,
-        game_id: None,
-        status: MatchStatus::Pending,
-    });
-    t.matches[1] = Some(TournamentMatch {
-        match_index: 1,
-        round: 0,
-        player_white: Some(sf2_white),
-        player_black: Some(sf2_black),
-        winner: None,
-        game_id: None,
-        status: MatchStatus::Pending,
-    });
-    // Final is seeded empty until both SFs complete
-    t.matches[2] = None;
+    if let Some(slot) = t.matches.get_mut(0) {
+        *slot = Some(TournamentMatch {
+            match_index: 0,
+            round: 0,
+            player_white: Some(sf1_white),
+            player_black: Some(sf1_black),
+            winner: None,
+            game_id: None,
+            status: MatchStatus::Pending,
+        });
+    }
+    if let Some(slot) = t.matches.get_mut(1) {
+        *slot = Some(TournamentMatch {
+            match_index: 1,
+            round: 0,
+            player_white: Some(sf2_white),
+            player_black: Some(sf2_black),
+            winner: None,
+            game_id: None,
+            status: MatchStatus::Pending,
+        });
+    }
+    if let Some(slot) = t.matches.get_mut(2) {
+        *slot = None;
+    }
     t.status = super::store::TournamentStatus::Active;
     t.started_at = Some(chrono::Utc::now().timestamp());
 }
@@ -328,7 +344,7 @@ fn start_bracket(t: &mut TournamentRecord) {
 pub fn admin_routes() -> Router<TournamentStore> {
     Router::new()
         .route("/create", post(create_tournament))
-        .route("/:id/set-password", post(set_tournament_password))
-        .route("/:id/record-result", post(record_result))
-        .route("/:id/set-match-game-id", post(set_match_game_id))
+        .route("/{id}/set-password", post(set_tournament_password))
+        .route("/{id}/record-result", post(record_result))
+        .route("/{id}/set-match-game-id", post(set_match_game_id))
 }

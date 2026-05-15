@@ -3,6 +3,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Default maximum ELO rating for tournaments
+pub const DEFAULT_ELO_MAX: u32 = 9999;
+
+/// Default minimum ELO rating for tournaments
+pub const DEFAULT_ELO_MIN: u32 = 0;
+
+/// Default minimum players for tournaments
+pub const DEFAULT_MIN_PLAYERS: u16 = 8;
+
 // ── Tournament Format ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -111,8 +120,8 @@ impl TournamentRecord {
             created_at: chrono::Utc::now().timestamp(),
             started_at: None,
             completed_at: None,
-            elo_min: 0,
-            elo_max: 9999,
+            elo_min: DEFAULT_ELO_MIN,
+            elo_max: DEFAULT_ELO_MAX,
         }
     }
 
@@ -125,7 +134,7 @@ impl TournamentRecord {
         format: TournamentType,
         elo_min: Option<u32>,
         elo_max: Option<u32>,
-        min_players: Option<u16>,
+        min_players: Option<u16>,DEFAULT_MIN_PLAYERS
         scheduled_at: Option<i64>,
         _kyc_required: bool,
     ) -> Self {
@@ -149,8 +158,8 @@ impl TournamentRecord {
             created_at: chrono::Utc::now().timestamp(),
             started_at: None,
             completed_at: None,
-            elo_min: elo_min.unwrap_or(0),
-            elo_max: elo_max.unwrap_or(9999),
+            elo_min: elo_min.unwrap_or(DEFAULT_ELO_MIN),
+            elo_max: elo_max.unwrap_or(DEFAULT_ELO_MAX),
         }
     }
 
@@ -279,26 +288,19 @@ impl TournamentStore {
     ) -> bool {
         self.update(tournament_id, |t| {
             if let Some(m) = t.matches[match_index].as_mut() {
-                m.winner = Some(winner.clone());
-                m.status = MatchStatus::Completed;
             }
 
             // If both semi-finals are done, populate the final
-            if match_index < 2 {
-                let sf1_done = t.matches[0]
-                    .as_ref()
-                    .map(|m| m.status == MatchStatus::Completed)
-                    .unwrap_or(false);
-                let sf2_done = t.matches[1]
-                    .as_ref()
-                    .map(|m| m.status == MatchStatus::Completed)
-                    .unwrap_or(false);
+            let sf1_done = t.matches.get(0).and_then(|m| m.as_ref()).map_or(false, |m| m.status == MatchStatus::Completed);
+            let sf2_done = t.matches.get(1).and_then(|m| m.as_ref()).map_or(false, |m| m.status == MatchStatus::Completed);
 
-                if sf1_done && sf2_done {
-                    let sf1_winner = t.matches[0].as_ref().and_then(|m| m.winner.clone());
-                    let sf2_winner = t.matches[1].as_ref().and_then(|m| m.winner.clone());
-                    if let (Some(w1), Some(w2)) = (sf1_winner, sf2_winner) {
-                        t.matches[2] = Some(TournamentMatch {
+            if sf1_done && sf2_done {
+                let sf1_winner = t.matches.get(0).and_then(|m| m.as_ref()).and_then(|m| m.winner.clone());
+                let sf2_winner = t.matches.get(1).and_then(|m| m.as_ref()).and_then(|m| m.winner.clone());
+
+                if let (Some(w1), Some(w2)) = (sf1_winner, sf2_winner) {
+                    if let Some(final_slot) = t.matches.get_mut(2) {
+                        *final_slot = Some(TournamentMatch {
                             match_index: 2,
                             round: 1,
                             player_white: Some(w1),

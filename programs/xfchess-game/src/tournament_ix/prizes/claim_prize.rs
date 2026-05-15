@@ -111,9 +111,9 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         // Calculate prize amount from USDC prize pool
         let prize = (tournament.usdc_prize_pool as u128)
             .checked_mul(prize_share_bps as u128)
-            .unwrap()
-            .checked_div(10000)
-            .unwrap() as u64;
+            .and_then(|v| v.checked_div(10000))
+            .map(|v| v as u64)
+            .ok_or(GameErrorCode::NoPrizeToClaim)?;
 
         require!(prize > 0, GameErrorCode::NoPrizeToClaim);
 
@@ -147,9 +147,9 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         // SOL fallback path (legacy)
         let prize = (tournament.prize_pool as u128)
             .checked_mul(prize_share_bps as u128)
-            .unwrap()
-            .checked_div(10000)
-            .unwrap() as u64;
+            .and_then(|v| v.checked_div(10000))
+            .map(|v| v as u64)
+            .ok_or(GameErrorCode::NoPrizeToClaim)?;
 
         require!(prize > 0, GameErrorCode::NoPrizeToClaim);
 

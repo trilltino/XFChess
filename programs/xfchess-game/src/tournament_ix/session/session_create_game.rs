@@ -103,9 +103,9 @@ pub fn handler(
     let tournament = &ctx.accounts.tournament;
     let game = &mut ctx.accounts.game;
     let move_log = &mut ctx.accounts.move_log;
-    let escrow_pda = &ctx.accounts.escrow_pda;
+    let _escrow_pda = &ctx.accounts.escrow_pda;
     let fee_payer = &ctx.accounts.session_signer;
-    let system_program = &ctx.accounts.system_program;
+    let _system_program = &ctx.accounts.system_program;
     let rent = &Rent::get()?;
 
     // Validate session
@@ -135,7 +135,6 @@ pub fn handler(
     );
 
     // Initialize game
-    let now = Clock::get()?.unix_timestamp;
     game.game_id = game_id;
     game.white = ctx.accounts.player.key();
     game.black = Pubkey::default();

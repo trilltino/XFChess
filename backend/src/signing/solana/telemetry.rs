@@ -296,7 +296,7 @@ fn classify_error_from_status(
     use solana_sdk::transaction::TransactionError;
     
     let (category, code) = match error {
-        TransactionError::InstructionError(idx, err) => {
+        TransactionError::InstructionError(_idx, err) => {
             // Try to extract program error code
             if let solana_sdk::instruction::InstructionError::Custom(code) = err {
                 (TxErrorCategory::ProgramError(*code), Some(*code))

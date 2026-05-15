@@ -145,14 +145,10 @@ pub struct FadingCapture {
     pub timer: Timer,
     /// Starting world position (set at capture time)
     pub initial_pos: Vec3,
-    /// Target position in capture zone (applied after animation completes)
-    pub capture_zone_pos: Vec3,
-    /// Peak height of the parabolic arc (world units)
-    pub arc_height: f32,
-    /// Rotation axis for spin effect (normalised)
-    pub spin_axis: Vec3,
-    /// Total rotation in radians over the full animation
-    pub spin_radians: f32,
+    /// Direction the piece is knocked back (normalized)
+    pub knockback_dir: Vec3,
+    /// Axis the piece tilts along (perpendicular to knockback)
+    pub tilt_axis: Vec3,
 }
 
 /// Component representing an active straight-line animation for a piece move

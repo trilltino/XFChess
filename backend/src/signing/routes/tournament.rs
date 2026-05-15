@@ -37,6 +37,7 @@ pub struct CreateTournamentReq {
     pub tournament_id: u64,
     pub name: String,
     pub entry_fee_lamports: u64,
+    pub platform_fee_lamports: u64,
     /// Max players: 8, 16, 32, 64, 128, or 256
     pub max_players: u16,
     /// Tournament format: "SingleElimination" or "Swiss"
@@ -271,6 +272,7 @@ async fn create_tournament(
         req.tournament_id,
         req.name.clone(),
         req.entry_fee_lamports,
+        req.platform_fee_lamports,
         req.max_players,
         prize_shares,
         format.clone(),
@@ -291,6 +293,7 @@ async fn create_tournament(
         "max_players": req.max_players,
         "format": format.clone(),
         "prize_shares": prize_shares,
+        "platform_fee": req.platform_fee_lamports,
         "scheduled_at": req.scheduled_at,
         "kyc_required": req.kyc_required,
     })))
@@ -371,11 +374,14 @@ async fn get_my_match(
         Some(a) => Ok(Json(serde_json::json!({
             "found": true,
             "match_index": a.match_index,
+            "round": a.round,
+            "board": a.board,
             "game_id": a.game_id,
             "opponent_pubkey": a.opponent_pubkey,
             "opponent_node_id": a.opponent_node_id,
             "your_color": a.your_color,
             "status": format!("{:?}", a.status),
+            "is_bye": a.is_bye,
         }))),
         None => Ok(Json(serde_json::json!({ "found": false }))),
     }
@@ -389,7 +395,19 @@ async fn get_bracket(
     let t = state.tournament_store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
     let final_idx = t.final_match_index();
     let current_round = if t.matches.get(final_idx).map_or(false, |m| m.is_some()) {
-        let m = t.matches[final_idx].as_ref().expect("Final match should exist");
+        let Some(m) = t.matches[final_idx].as_ref() else {
+            return Ok(Json(serde_json::json!({
+                "tournament_id": t.tournament_id,
+                "status": format!("{:?}", t.status),
+                "current_round": 0u8,
+                "max_players": t.max_players,
+                "players": t.players,
+                "matches": t.matches,
+                "winner": t.winner,
+                "second_place": t.second_place,
+                "third_place": t.third_place,
+            })));
+        };
         if m.status == MatchStatus::Completed { 255u8 } else { m.round }
     } else {
         0u8
@@ -487,6 +505,11 @@ async fn initialize_swiss_tournament(
     });
 
     store.create(seeded_tournament).await;
+
+    if let Err(err) = state.swiss_service.start_round(id).await {
+        error!("[tournament] Failed to start Swiss round 1 for {}: {:?}", id, err);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
     
     info!("[tournament] Swiss tournament {} initialized with {} players, {} rounds", id, current_players, rounds);
     

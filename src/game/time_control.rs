@@ -1,4 +1,4 @@
-//! Named time control presets for chess games.
+﻿//! Named time control presets for chess games.
 //!
 //! Covers the full range from ultra-bullet to correspondence,
 //! plus a custom variant for arbitrary base + increment values.
@@ -80,15 +80,15 @@ impl TimeControl {
         }
     }
 
-    /// Human-readable category + label, e.g. "⚡ Blitz 5+0".
+    /// Human-readable category + label, e.g. " Blitz 5+0".
     pub fn display_name(self) -> String {
         let label = self.short_label();
         match self.category() {
-            TimeCategory::UltraBullet => format!("🚀 UltraBullet {}", label),
-            TimeCategory::Bullet => format!("🐇 Bullet {}", label),
-            TimeCategory::Blitz => format!("⚡ Blitz {}", label),
-            TimeCategory::Rapid => format!("🏃 Rapid {}", label),
-            TimeCategory::Classical => format!("♟ Classical {}", label),
+            TimeCategory::UltraBullet => format!(" UltraBullet {}", label),
+            TimeCategory::Bullet => format!(" Bullet {}", label),
+            TimeCategory::Blitz => format!(" Blitz {}", label),
+            TimeCategory::Rapid => format!(" Rapid {}", label),
+            TimeCategory::Classical => format!(" Classical {}", label),
             TimeCategory::Unlimited => "∞ Unlimited".to_string(),
         }
     }
@@ -137,11 +137,11 @@ pub enum TimeCategory {
 impl TimeCategory {
     pub fn label(self) -> &'static str {
         match self {
-            TimeCategory::UltraBullet => "🚀 UltraBullet",
-            TimeCategory::Bullet => "🐇 Bullet",
-            TimeCategory::Blitz => "⚡ Blitz",
-            TimeCategory::Rapid => "🏃 Rapid",
-            TimeCategory::Classical => "♟ Classical",
+            TimeCategory::UltraBullet => " UltraBullet",
+            TimeCategory::Bullet => " Bullet",
+            TimeCategory::Blitz => " Blitz",
+            TimeCategory::Rapid => " Rapid",
+            TimeCategory::Classical => " Classical",
             TimeCategory::Unlimited => "∞ Unlimited",
         }
     }
@@ -182,3 +182,4 @@ mod tests {
         assert_eq!(TimeControl::Unlimited.category(), TimeCategory::Unlimited);
     }
 }
+

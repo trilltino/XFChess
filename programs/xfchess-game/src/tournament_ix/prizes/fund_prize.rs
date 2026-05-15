@@ -39,7 +39,7 @@ pub struct FundUsdcPrize<'info> {
     pub operator_usdc_ata: Account<'info, TokenAccount>,
     /// The USDC mint account.
     #[account(
-        constraint = usdc_mint.key() == tournament.usdc_prize_mint.unwrap() @ GameErrorCode::InvalidMint
+        constraint = usdc_mint.key() == tournament.usdc_prize_mint.ok_or(GameErrorCode::InvalidMint)? @ GameErrorCode::InvalidMint
     )]
     pub usdc_mint: Account<'info, token::Mint>,
     /// Operator funding the prize pool.

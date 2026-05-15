@@ -63,6 +63,10 @@ pub struct SolanaLobbyState {
     pub cached_balance: f64,
     pub cached_keypair_bytes: Option<Vec<u8>>,
     pub cached_rpc_url: String,
+    /// Cached display name used when announcing wagered games to the VPS relay.
+    pub cached_display_name: Option<String>,
+    /// Cached node ID used when announcing wagered games to the VPS relay.
+    pub cached_node_id: Option<String>,
 }
 
 impl Default for SolanaLobbyState {
@@ -78,6 +82,8 @@ impl Default for SolanaLobbyState {
             cached_balance: 0.0,
             cached_keypair_bytes: None,
             cached_rpc_url: DEVNET_RPC_URL.to_string(),
+            cached_display_name: None,
+            cached_node_id: None,
         }
     }
 }
@@ -364,7 +370,7 @@ async fn async_lookup_game(
 /// Fetches current status live and reports exactly which tiers are missing.
 fn require_wager_eligibility_with_url(wallet_pubkey: &str) -> Result<(), String> {
     use crate::multiplayer::vps_client;
-    let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
+    let backend_url = vps_client::vps_base();
     let status = match vps_client::get_user_status(wallet_pubkey) {
         Ok(s) => s,
         Err(e) => return Err(format!("Wagered play requires verification. Could not check status: {}. Visit {}/profile", e, backend_url)),
@@ -485,6 +491,34 @@ fn poll_lobby_tasks(
                 rollup_manager.game_id = game_id;
                 rollup_manager.is_creator = lobby.mode == LobbyMode::Create;
                 info!("[LOBBY] Active game_id {} stored globally (rollup updated, is_creator={})", game_id, rollup_manager.is_creator);
+
+                if lobby.mode == LobbyMode::Create && lobby.wager_sol > 0.0 {
+                    let display_name = lobby
+                        .cached_display_name
+                        .clone()
+                        .unwrap_or_else(|| "Anonymous".to_string());
+                    let host_node_id = lobby
+                        .cached_node_id
+                        .clone()
+                        .unwrap_or_else(|| "unknown_node_id".to_string());
+
+                    if let Err(e) = crate::multiplayer::vps_client::p2p_announce_game(
+                        game_id.to_string(),
+                        &host_node_id,
+                        &display_name,
+                        lobby.wager_sol as f64,
+                        "solana_wager",
+                        300,
+                        0,
+                        Some(display_name.clone()),
+                        None,
+                        None,
+                    ) {
+                        warn!("[LOBBY] Failed to announce wagered game {} to VPS: {}", game_id, e);
+                    } else {
+                        info!("[LOBBY] Announced wagered game {} to VPS relay", game_id);
+                    }
+                }
             }
             Ok(Err(e)) => {
                 lobby.status = LobbyStatus::Error(e);

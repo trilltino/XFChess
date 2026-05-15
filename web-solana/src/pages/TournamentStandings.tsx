@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { getSwissCurrentRound, getSwissStandings } from '../lib/api';
 
 interface StandingsEntry {
     player_id: string;
@@ -19,6 +20,24 @@ export default function TournamentStandings() {
 
     useEffect(() => {
         if (!id) return;
+        let mounted = true;
+
+        const fetchStandings = async () => {
+            try {
+                const [currentRound, currentStandings] = await Promise.all([
+                    getSwissCurrentRound(id),
+                    getSwissStandings(id),
+                ]);
+                if (!mounted) return;
+                setRound(currentRound.round);
+                setStandings(currentStandings);
+            } catch {
+                // keep the page alive even if the backend is still catching up
+            }
+        };
+
+        fetchStandings();
+
         // Subscribe to Braid-HTTP for live standings patches
         const evtSource = new EventSource(`/braid/tournament/${id}/standings`);
         evtSource.onmessage = (e) => {
@@ -31,7 +50,12 @@ export default function TournamentStandings() {
             }
         };
         evtSource.onerror = () => evtSource.close();
-        return () => evtSource.close();
+        const refresh = setInterval(fetchStandings, 15_000);
+        return () => {
+            mounted = false;
+            evtSource.close();
+            clearInterval(refresh);
+        };
     }, [id]);
 
     return (

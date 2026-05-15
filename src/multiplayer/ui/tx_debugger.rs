@@ -1,4 +1,4 @@
-//! Transaction Debugger - Terminal-based rollup transaction monitoring
+﻿//! Transaction Debugger - Terminal-based rollup transaction monitoring
 //!
 //! This module provides real-time logging of ephemeral rollup transactions
 //! to stdout (with colors) and optionally to a file.
@@ -171,7 +171,7 @@ impl TransactionDebugger {
 
                 if self.pretty_print {
                     println!(
-                        "\x1b[32m[✓]\x1b[0m Game {} updated | Turn: {} | FEN: {}...",
+                        "\x1b[32m[]\x1b[0m Game {} updated | Turn: {} | FEN: {}...",
                         game_id,
                         new_turn,
                         &new_fen[..20.min(new_fen.len())]
@@ -273,7 +273,7 @@ impl TransactionDebugger {
         match (&tx.status, &tx.tx_type) {
             (TransactionStatus::Confirmed, TransactionType::SolanaConfirmed) => {
                 format!(
-                    "\x1b[32m[✓ CONFIRMED]\x1b[0m Game {} | Batch: {}... | Moves: {}",
+                    "\x1b[32m[ CONFIRMED]\x1b[0m Game {} | Batch: {}... | Moves: {}",
                     tx.game_id,
                     &tx.batch_hash[..8.min(tx.batch_hash.len())],
                     tx.moves.len()
@@ -281,14 +281,14 @@ impl TransactionDebugger {
             }
             (TransactionStatus::Confirmed, TransactionType::BatchAccepted) => {
                 format!(
-                    "\x1b[32m[✓ ACCEPTED]\x1b[0m Game {} | Batch: {}...",
+                    "\x1b[32m[ ACCEPTED]\x1b[0m Game {} | Batch: {}...",
                     tx.game_id,
                     &tx.batch_hash[..8.min(tx.batch_hash.len())]
                 )
             }
             (TransactionStatus::Failed, _) => {
                 format!(
-                    "\x1b[31m[✗ FAILED]\x1b[0m Game {} | Batch: {}... | Error: {}",
+                    "\x1b[31m[ FAILED]\x1b[0m Game {} | Batch: {}... | Error: {}",
                     tx.game_id,
                     &tx.batch_hash[..8.min(tx.batch_hash.len())],
                     tx.error.as_ref().unwrap_or(&"Unknown".to_string())
@@ -427,7 +427,8 @@ impl Plugin for TransactionDebuggerPlugin {
 //     }
 // }
 
-/// Calculate a simple batch hash from moves
+/// Calculate a simple batch hash from moves.
+#[cfg(feature = "solana")]
 fn calculate_batch_hash(game_id: u64, moves: &[String], next_fens: &[String]) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -503,3 +504,4 @@ mod tests {
         assert_eq!(debugger.transaction_count(), 1);
     }
 }
+

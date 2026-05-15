@@ -14,7 +14,11 @@ pub struct CreateGame {
 
 impl CreateGame {
     pub fn data(&self) -> Vec<u8> {
-        self.try_to_vec().unwrap()
+        self.try_to_vec().unwrap_or_else(|_| {
+            // Instruction serialization should never fail for valid structs
+            // This is a critical failure if it does
+            panic!("Failed to serialize instruction")
+        })
     }
 }
 
@@ -33,7 +37,11 @@ pub struct JoinGame {
 
 impl JoinGame {
     pub fn data(&self) -> Vec<u8> {
-        self.try_to_vec().unwrap()
+        self.try_to_vec().unwrap_or_else(|_| {
+            // Instruction serialization should never fail for valid structs
+            // This is a critical failure if it does
+            panic!("Failed to serialize instruction")
+        })
     }
 }
 
@@ -49,7 +57,11 @@ pub struct RecordMove {
 
 impl RecordMove {
     pub fn data(&self) -> Vec<u8> {
-        self.try_to_vec().unwrap()
+        self.try_to_vec().unwrap_or_else(|_| {
+            // Instruction serialization should never fail for valid structs
+            // This is a critical failure if it does
+            panic!("Failed to serialize instruction")
+        })
     }
 }
 
@@ -76,7 +88,11 @@ pub struct ResolveDispute {
 
 impl ResolveDispute {
     pub fn data(&self) -> Vec<u8> {
-        self.try_to_vec().unwrap()
+        self.try_to_vec().unwrap_or_else(|_| {
+            // Instruction serialization should never fail for valid structs
+            // This is a critical failure if it does
+            panic!("Failed to serialize instruction")
+        })
     }
 }
 
@@ -102,7 +118,11 @@ pub struct InitializeTournament {
 
 impl InitializeTournament {
     pub fn data(&self) -> Vec<u8> {
-        self.try_to_vec().unwrap()
+        self.try_to_vec().unwrap_or_else(|_| {
+            // Instruction serialization should never fail for valid structs
+            // This is a critical failure if it does
+            panic!("Failed to serialize instruction")
+        })
     }
 }
 
@@ -115,7 +135,11 @@ pub struct RegisterPlayer {
 
 impl RegisterPlayer {
     pub fn data(&self) -> Vec<u8> {
-        self.try_to_vec().unwrap()
+        self.try_to_vec().unwrap_or_else(|_| {
+            // Instruction serialization should never fail for valid structs
+            // This is a critical failure if it does
+            panic!("Failed to serialize instruction")
+        })
     }
 }
 
@@ -139,7 +163,11 @@ pub struct FundUsdcPrize {
 
 impl FundUsdcPrize {
     pub fn data(&self) -> Vec<u8> {
-        self.try_to_vec().unwrap()
+        self.try_to_vec().unwrap_or_else(|_| {
+            // Instruction serialization should never fail for valid structs
+            // This is a critical failure if it does
+            panic!("Failed to serialize instruction")
+        })
     }
 }
 
@@ -157,6 +185,10 @@ pub struct SessionCreateGame {
 
 impl SessionCreateGame {
     pub fn data(&self) -> Vec<u8> {
-        self.try_to_vec().unwrap()
+        self.try_to_vec().unwrap_or_else(|_| {
+            // Instruction serialization should never fail for valid structs
+            // This is a critical failure if it does
+            panic!("Failed to serialize instruction")
+        })
     }
 }

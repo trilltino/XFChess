@@ -1,0 +1,52 @@
+version: '3.8'
+
+# XFChess Monitoring Stack - Local Development
+# Run with: docker-compose -f docker-compose.monitoring.local.yml up -d
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: xfchess-prometheus-local
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data-local:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - monitoring-local
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: xfchess-grafana-local
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data-local:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    restart: unless-stopped
+    networks:
+      - monitoring-local
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data-local:
+    driver: local
+  grafana-data-local:
+    driver: local
+
+networks:
+  monitoring-local:
+    driver: bridge

@@ -21,7 +21,8 @@ pub struct SessionEntry {
 impl SessionEntry {
     /// Extracts the Keypair from stored bytes.
     pub fn keypair(&self) -> Keypair {
-        Keypair::from_bytes(&self.keypair_bytes).expect("valid keypair bytes")
+        Keypair::from_bytes(&self.keypair_bytes)
+            .unwrap_or_else(|e| panic!("invalid keypair bytes: {}", e))
     }
 
     /// Gets the session's public key.
@@ -230,10 +231,10 @@ impl SessionStore {
     ///
     /// # Returns
     /// The session's public key
-    pub async fn create(&self, game_id: u64, wallet_pubkey: Pubkey) -> Pubkey {
+    pub async fn create(&self, game_id: u64, wallet_pubkey: Pubkey) -> anyhow::Result<Pubkey> {
         // Return the existing session pubkey if one already exists for this game.
         if let Some(existing) = self.get(game_id).await {
-            return existing.session_pubkey();
+            return Ok(existing.session_pubkey());
         }
 
         let kp = Keypair::new();
@@ -252,9 +253,12 @@ impl SessionStore {
         .bind(wallet_str)
         .execute(&self.pool)
         .await
-        .expect("Failed to insert session");
+        .map_err(|e| {
+            tracing::error!("Failed to insert session: {}", e);
+            anyhow::anyhow!("Failed to insert session: {}", e)
+        })?;
 
-        pubkey
+        Ok(pubkey)
     }
 
     /// Retrieves a session entry by game ID.
@@ -336,5 +340,15 @@ impl SessionStore {
         .fetch_one(&self.pool)
         .await;
         result.map(|(n,)| n as i32).unwrap_or(1)
+    }
+
+    /// Lists all players in the system.
+    pub async fn list_players(&self, limit: i32) -> Result<Vec<(String, String, String)>, sqlx::Error> {
+        sqlx::query_as(
+            "SELECT wallet, username, kyc_status FROM users_v2 WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?"
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
     }
 }

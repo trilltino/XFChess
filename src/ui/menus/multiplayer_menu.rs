@@ -200,8 +200,20 @@ pub fn multiplayer_menu_system(
                                                     let wallet_ready = wallet_opt.as_ref().map(|w| w.pubkey.is_some()).unwrap_or(false);
                                                     
                                                     if wallet_ready {
-                                                        let pubkey_str = wallet_opt.as_ref().unwrap().pubkey.as_ref().unwrap().clone();
-                                                        let sender = channel_opt.as_ref().unwrap().sender.clone(); // Reuse sender for refresh
+                                                        let Some(wallet) = wallet_opt.as_ref() else {
+                                                            warn!("[MENU] Wallet not available for leave");
+                                                            return;
+                                                        };
+                                                        let Some(pubkey) = wallet.pubkey.as_ref() else {
+                                                            warn!("[MENU] Pubkey not available");
+                                                            return;
+                                                        };
+                                                        let pubkey_str = pubkey.clone();
+                                                        let Some(channel) = channel_opt.as_ref() else {
+                                                            warn!("[MENU] Channel not available");
+                                                            return;
+                                                        };
+                                                        let sender = channel.sender.clone(); // Reuse sender for refresh
                                                         
                                                         #[cfg(feature = "solana")]
                                                         std::thread::spawn(move || {

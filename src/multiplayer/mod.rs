@@ -46,12 +46,15 @@ pub struct MultiplayerPlugin;
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
         // Initialize Tokio runtime for background tasks
-        let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+        let runtime = Runtime::new().unwrap_or_else(|e| {
+            panic!("Failed to create Tokio runtime: {}", e);
+        });
         app.insert_resource(TokioRuntime(runtime));
 
         // 1. Register shared types and events
         app.init_resource::<BraidNetworkState>()
             .init_resource::<BraidGameSync>()
+            .init_resource::<NetworkConfig>()
             .init_resource::<network::braid::BraidP2PConfig>()
             .add_message::<NetworkEvent>()
             .add_message::<crate::game::events::GameStartedEvent>()
@@ -64,6 +67,7 @@ impl Plugin for MultiplayerPlugin {
         app.add_plugins((
             network::p2p::P2PConnectionPlugin,
             network::p2p_vps::P2PVpsPlugin,
+            network::braid_pvp::BraidPvpPlugin,
             // Comment out auth_ws plugin as the module is not found or linked
             // auth_ws::AuthWebSocketPlugin,
         ));
@@ -74,6 +78,7 @@ impl Plugin for MultiplayerPlugin {
             rollup::bridge::RollupNetworkBridgePlugin,
             solana::integration::SolanaIntegrationPlugin,
             solana::lobby::SolanaLobbyPlugin,
+            solana::wager_rate::SolGbpRatePlugin,
         ));
 
         // 3. Register core orchestration systems

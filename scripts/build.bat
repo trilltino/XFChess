@@ -18,7 +18,7 @@ echo ========================================
 echo.
 
 set SCRIPT_DIR=%~dp0
-set ROOT=%SCRIPT_DIR%..
+for %%i in ("%SCRIPT_DIR%..") do set "ROOT=%%~fi"
 set START_TIME=%TIME%
 
 :: Check for required tools
@@ -56,7 +56,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo ✓ Rust crates built successfully
+echo  Rust crates built successfully
 echo.
 
 :: Build Backend
@@ -68,7 +68,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo ✓ Backend built successfully
+echo  Backend built successfully
 echo.
 
 :: Build Game
@@ -80,7 +80,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo ✓ Game built successfully
+echo  Game built successfully
 echo.
 
 :: Build Wallet UI
@@ -99,7 +99,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo ✓ Wallet UI built successfully
+echo  Wallet UI built successfully
 echo.
 
 :: Build Tauri host
@@ -111,7 +111,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo ✓ Tauri host built successfully
+echo  Tauri host built successfully
 echo.
 
 :: Build Web frontend
@@ -129,7 +129,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo ✓ Web frontend built successfully
+echo  Web frontend built successfully
 echo.
 
 :: Build Solana programs (if they exist)
@@ -142,7 +142,7 @@ if exist "build" (
         echo WARNING: Solana program build failed (may not be critical)
         echo Continuing...
     ) else (
-        echo ✓ Solana programs built successfully
+        echo  Solana programs built successfully
     )
 ) else (
     echo ℹ No programs directory found, skipping Solana program build
@@ -169,3 +169,4 @@ echo   scripts\run_offline.bat
 echo.
 echo ========================================
 endlocal
+

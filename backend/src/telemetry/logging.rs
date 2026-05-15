@@ -4,7 +4,6 @@
 //! and structured log output for easier parsing and filtering.
 
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -145,16 +144,22 @@ impl StructuredLogger {
 /// Scrub PII from log messages
 pub fn scrub_pii(input: &str) -> String {
     let mut result = input.to_string();
-    
+
     // Scrub Solana pubkeys (base58, 32-44 chars)
     // This is a simple heuristic - may need refinement
-    let pubkey_regex = regex::Regex::new(r"[A-HJ-NP-Za-km-z1-9]{32,44}").unwrap();
+    let pubkey_regex = match regex::Regex::new(r"[A-HJ-NP-Za-km-z1-9]{32,44}") {
+        Ok(re) => re,
+        Err(_) => return result, // Return original if regex fails
+    };
     result = pubkey_regex.replace_all(&result, "<WALLET>").to_string();
-    
+
     // Scrub emails
-    let email_regex = regex::Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap();
+    let email_regex = match regex::Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}") {
+        Ok(re) => re,
+        Err(_) => return result, // Return original if regex fails
+    };
     result = email_regex.replace_all(&result, "<EMAIL>").to_string();
-    
+
     result
 }
 

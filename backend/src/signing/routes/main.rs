@@ -80,14 +80,7 @@ pub struct PlayerProfileResp {
     pub username: String,
 }
 
-/// Response for user verification status.
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct UserStatus {
-    pub has_profile: bool,
-    pub has_email: bool,
-    pub has_kyc: bool,
-    pub can_wager: bool,
-}
+
 
 /// Creates the main API routes router.
 pub fn routes() -> Router<AppState> {
@@ -103,36 +96,8 @@ pub fn routes() -> Router<AppState> {
         .route("/game/finalize", post(finalize_game))
         .route("/player/{pubkey}", get(get_player_profile))
         .route("/stats", get(get_stats))
-        .route("/api/user/status/{pubkey}", get(get_user_status))
 }
 
-/// GET /api/user/status/{pubkey} - Gets user verification status.
-pub async fn get_user_status(
-    Path(pubkey): Path<String>,
-    State(state): State<AppState>,
-) -> Result<Json<UserStatus>, StatusCode> {
-    let user = state.store.find_user_by_wallet(&pubkey).await;
-    
-    if let Some(user_data) = user {
-        // user_data is (wallet, username, email, kyc_status, ...)
-        let has_profile = !user_data.1.is_empty();
-        let has_email = user_data.2.is_some();
-        let has_kyc = user_data.3 == "verified";
-        
-        // Simple wagering rule: need profile and KYC (or email for testing)
-        let can_wager = has_profile && (has_kyc || state.config.solana_rpc_url.contains("devnet"));
-
-        Ok(Json(UserStatus {
-            has_profile,
-            has_email,
-            has_kyc,
-            can_wager,
-        }))
-    } else {
-        // Return negative status but success (200 OK) so the client can show the "Register" prompt
-        Ok(Json(UserStatus::default()))
-    }
-}
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -161,7 +126,10 @@ pub async fn create_session(
     Json(req): Json<CreateSessionReq>,
 ) -> Result<Json<CreateSessionResp>, StatusCode> {
     let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let session_pubkey = state.store.create(req.game_id, wallet).await;
+    let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
+        error!("[VPS] Failed to create session for game {}: {}", req.game_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     info!("[VPS] Created session for game {} → {}", req.game_id, session_pubkey);
     Ok(Json(CreateSessionResp { session_pubkey: session_pubkey.to_string() }))
 }
@@ -265,7 +233,10 @@ pub async fn record_move(
         &req.next_fen,
         req.nonce,
         Some(sig_bytes),
-    );
+    ).map_err(|e| {
+        error!("[VPS] Failed to build record_move instruction for game {}: {}", req.game_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     let er_rpc = solana::make_rpc(&state.config.er_rpc_url);
 
     let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
@@ -308,7 +279,10 @@ pub async fn undelegate_game(
     let session_kp = entry.keypair();
     let session_pk = entry.session_pubkey();
 
-    let ix = solana::undelegate_game_ix(&program_id, &session_pk, req.game_id);
+    let ix = solana::undelegate_game_ix(&program_id, &session_pk, req.game_id).map_err(|e| {
+        error!("[VPS] Failed to build undelegate_game instruction for game {}: {}", req.game_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     let er_rpc = solana::make_rpc(&state.config.er_rpc_url);
 
     let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
@@ -521,12 +495,6 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<StatsResp>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode},
-        routing::Router,
-    };
-    use tower::ServiceExt;
     use std::time::SystemTime;
 
     #[test]

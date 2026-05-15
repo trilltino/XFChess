@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+﻿#![allow(dead_code)]
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -86,7 +86,7 @@ fn draw_compliance_modal(
 
             if state.status == SubmissionStatus::Success {
                 ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new("✅ Verification complete!").color(egui::Color32::GREEN).strong());
+                    ui.label(egui::RichText::new(" Verification complete!").color(egui::Color32::GREEN).strong());
                     ui.add_space(10.0);
                     if ui.button("Continue to Game").clicked() {
                         state.show = false;
@@ -126,7 +126,7 @@ fn draw_compliance_modal(
                     if ui.button("Cancel").clicked() {
                         state.show = false;
                     }
-                    if ui.button("Next ➡").clicked() {
+                    if ui.button("Next ").clicked() {
                         if state.full_name.is_empty() || state.dob.is_empty() || state.address.is_empty() {
                             state.error_msg = Some("All fields are required".to_string());
                         } else {
@@ -156,7 +156,7 @@ fn draw_compliance_modal(
                         state.error_msg = None;
                     }
 
-                    if ui.button("Submit Securely 🔒").clicked() {
+                    if ui.button("Submit Securely ").clicked() {
                         if state.tax_id.is_empty() {
                             state.error_msg = Some("Tax ID cannot be blank".to_string());
                         } else {
@@ -168,7 +168,13 @@ fn draw_compliance_modal(
                                 "address": state.address,
                                 "country": state.country,
                                 "tax_id": state.tax_id,
-                                "timestamp": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                                "timestamp": std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_else(|e| {
+                                        tracing::error!("Failed to get timestamp: {}", e);
+                                        std::time::Duration::from_secs(0)
+                                    })
+                                    .as_secs(),
                                 "signature": "1111111111111111111111111111111111111111111111111111111111111111" // mock signature for now
                             });
 
@@ -195,11 +201,12 @@ fn draw_compliance_modal(
 
             if let Some(err) = &state.error_msg {
                 ui.add_space(5.0);
-                ui.colored_label(egui::Color32::RED, format!("⚠ {}", err));
+                ui.colored_label(egui::Color32::RED, format!(" {}", err));
             }
             if let SubmissionStatus::Error(err) = &state.status {
                 ui.add_space(5.0);
-                ui.colored_label(egui::Color32::RED, format!("❌ {}", err));
+                ui.colored_label(egui::Color32::RED, format!(" {}", err));
             }
         });
 }
+

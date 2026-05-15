@@ -12,6 +12,15 @@ use std::str::FromStr;
 use tracing::{info, debug, warn};
 use crate::signing::{solana, FeepayerPool};
 
+/// Fee claimer check interval (seconds) - hourly checks
+pub const FEE_CLAIMER_INTERVAL_SECONDS: u64 = 3600;
+
+/// Initial test delay after boot (seconds)
+pub const FEE_CLAIMER_INITIAL_DELAY_SECONDS: u64 = 10;
+
+/// Threshold for claiming fees from vault (lamports) - 0.05 SOL
+pub const FEE_CLAIM_THRESHOLD_LAMPORTS: u64 = 50_000_000;
+
 /// Runs the fee claimer service.
 ///
 /// This service checks the PlatformFeeVault hourly and claims fees
@@ -27,15 +36,20 @@ pub async fn run_fee_claimer_service(
     feepayer: Arc<FeepayerPool>,
 ) {
     // Hourly check
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await; // test once shortly after boot
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(FEE_CLAIMER_INTERVAL_SECONDS));
+    tokio::time::sleep(std::time::Duration::from_secs(FEE_CLAIMER_INITIAL_DELAY_SECONDS)).await; // test once shortly after boot
 
     let rpc_client = RpcClient::new_with_commitment(
         rpc_url,
         CommitmentConfig::confirmed(),
     );
-    let program_id = Pubkey::from_str(&program_id_str)
-        .expect("Invalid program_id in configuration");
+    let program_id = match Pubkey::from_str(&program_id_str) {
+        Ok(program_id) => program_id,
+        Err(e) => {
+            warn!("[FeeClaimer] Invalid program_id in configuration: {}", e);
+            return;
+        }
+    };
 
     loop {
         info!("[FeeClaimer] Checking PlatformFeeVault threshold...");
@@ -44,7 +58,7 @@ pub async fn run_fee_claimer_service(
         match rpc_client.get_account(&vault_pda) {
             Ok(acct) => {
                 // Check threshold: claims if vault accumulated > 0.05 SOL
-                if acct.lamports > 50_000_000 {
+                if acct.lamports > FEE_CLAIM_THRESHOLD_LAMPORTS {
                     info!("[FeeClaimer] Vault has {} lamports. Attempting to claim fees...", acct.lamports);
 
                     // Deserialize vault to get host_wallet

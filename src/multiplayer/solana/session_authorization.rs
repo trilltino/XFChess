@@ -34,7 +34,7 @@ pub fn create_session_instruction(
     duration_hours: Option<i64>,
     spending_limit: Option<u64>,
     max_wager: Option<u64>,
-) -> Instruction {
+) -> Result<Instruction> {
     use sha2::{Digest, Sha256};
     
     // Compute Anchor discriminator for "create_session"
@@ -61,20 +61,23 @@ pub fn create_session_instruction(
     data.extend_from_slice(&wager.to_le_bytes());
     
     // Derive PlayerSession PDA
+    let program_id = PROGRAM_ID
+        .parse::<Pubkey>()
+        .map_err(|e| anyhow::anyhow!("Invalid PROGRAM_ID: {}", e))?;
     let session_pda = Pubkey::find_program_address(
         &[b"player_session", &payer.to_bytes(), &session_key.to_bytes()],
-        &PROGRAM_ID.parse().unwrap(),
+        &program_id,
     ).0;
-    
-    Instruction {
-        program_id: PROGRAM_ID.parse().unwrap(),
+
+    Ok(Instruction {
+        program_id,
         accounts: vec![
             solana_sdk::instruction::AccountMeta::new(*payer, true),
             solana_sdk::instruction::AccountMeta::new(session_pda, false),
             solana_sdk::instruction::AccountMeta::new_readonly(system_program::ID, false),
         ],
         data,
-    }
+    })
 }
 
 /// Authorizes a session key on-chain by sending the CreateSession transaction.
@@ -103,7 +106,7 @@ pub async fn authorize_session_on_chain(
         duration_hours,
         spending_limit,
         max_wager,
-    );
+    )?;
     
     let recent_blockhash = rpc_client.get_latest_blockhash()?;
     let transaction = Transaction::new_signed_with_payer(
@@ -141,13 +144,14 @@ pub async fn revoke_session_on_chain(
     disc.copy_from_slice(&hash[..8]);
     
     // Derive PlayerSession PDA
+    let program_id = PROGRAM_ID.parse::<Pubkey>().map_err(|e| anyhow::anyhow!("Invalid PROGRAM_ID: {}", e))?;
     let session_pda = Pubkey::find_program_address(
         &[b"player_session", &payer.to_bytes(), &session_key.to_bytes()],
-        &PROGRAM_ID.parse().unwrap(),
+        &program_id,
     ).0;
-    
+
     let instruction = Instruction {
-        program_id: PROGRAM_ID.parse().unwrap(),
+        program_id,
         accounts: vec![
             solana_sdk::instruction::AccountMeta::new(payer.pubkey(), true),
             solana_sdk::instruction::AccountMeta::new(session_pda, false),

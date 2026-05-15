@@ -1,4 +1,4 @@
-//! Mini chess pieces rendered on [`MINI_LAYER`] using the same GLTF meshes as
+﻿//! Mini chess pieces rendered on [`MINI_LAYER`] using the same GLTF meshes as
 //! the in-game board.
 
 use bevy::camera::visibility::RenderLayers;
@@ -165,7 +165,7 @@ fn spawn_mini_piece(
     };
     let mesh = assets.meshes.get(kind, color);
 
-    // Mirror the in-game orientation: black pieces rotate 180° so they face white.
+    // Mirror the in-game orientation: black pieces rotate 180┬░ so they face white.
     let rotation = match (kind, color) {
         (PieceType::Knight, _) => knight_rotation(color),
         (_, PieceColor::White) => Quat::IDENTITY,

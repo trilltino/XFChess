@@ -22,12 +22,13 @@ pub struct RegisterPlayer<'info> {
     pub player_profile: Account<'info, PlayerProfile>,
     #[account(mut)]
     pub player: Signer<'info>,
-    /// CHECK: Host treasury wallet — receives entry fees directly.
+    /// CHECK: Tournament escrow PDA — holds entry fees (prize pool).
     #[account(
         mut,
-        constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess
+        seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        bump
     )]
-    pub host_treasury: UncheckedAccount<'info>,
+    pub escrow_pda: UncheckedAccount<'info>,
     /// The platform treasury vault (receives platform fees).
     #[account(
         mut,
@@ -42,7 +43,6 @@ pub struct RegisterPlayer<'info> {
 pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
     let player = ctx.accounts.player.key();
-    let _treasury_vault = ctx.accounts.treasury_vault.key();
     let _platform_treasury_vault = ctx.accounts.platform_treasury_vault.key();
 
     // Validate tournament state
@@ -73,8 +73,8 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Re
     tournament.player_elos[index] = elo;
     tournament.num_registered_players += 1;
 
-    // Transfer entry fee + platform fee to treasury
-    let entry_fee_total = tournament.entry_fee + PLATFORM_FEE_LAMPORTS;
+    // Transfer entry fee + platform fee
+    let entry_fee_total = tournament.entry_fee + tournament.platform_fee;
     let player_lamports = ctx.accounts.player.lamports();
     require!(
         player_lamports >= entry_fee_total,
@@ -82,8 +82,8 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Re
     );
 
     **ctx.accounts.player.lamports.borrow_mut() -= entry_fee_total;
-    **ctx.accounts.host_treasury.lamports.borrow_mut() += tournament.entry_fee;
-    **ctx.accounts.platform_treasury_vault.lamports.borrow_mut() += PLATFORM_FEE_LAMPORTS;
+    **ctx.accounts.escrow_pda.lamports.borrow_mut() += tournament.entry_fee;
+    **ctx.accounts.platform_treasury_vault.lamports.borrow_mut() += tournament.platform_fee;
 
     // Update prize pool
     tournament.prize_pool += tournament.entry_fee;

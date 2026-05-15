@@ -1,4 +1,4 @@
-html {
+﻿html {
     scroll-behavior: smooth;
 }
 
@@ -5027,7 +5027,7 @@ body {
 }
 
 .value-card li::before {
-    content: "✓";
+    content: "";
     position: absolute;
     left: 0;
     color: var(--primary);
@@ -5369,7 +5369,7 @@ body {
 }
 
 .list-check li::before {
-    content: "✓";
+    content: "";
     position: absolute;
     left: 0;
     color: var(--primary);

@@ -1,4 +1,4 @@
-//! Piece Viewer plugin - 3D model viewer for chess pieces
+﻿//! Piece Viewer plugin - 3D model viewer for chess pieces
 //!
 //! Provides a viewer interface for inspecting chess pieces in 3D, similar to viewing
 //! a weapon in an FPS game. Click a piece to open the viewer, then rotate it with the mouse.
@@ -882,8 +882,8 @@ fn piece_viewer_ui(
                 // Rotation instructions
                 ui.heading(TextStyle::heading("Controls", TextSize::MD));
                 Layout::small_space(ui);
-                ui.label(TextStyle::caption("🖱️ Drag to rotate"));
-                ui.label(TextStyle::caption("🖱️ Scroll to zoom"));
+                ui.label(TextStyle::caption("️ Drag to rotate"));
+                ui.label(TextStyle::caption("️ Scroll to zoom"));
                 ui.label(TextStyle::caption("⌨️ WASD to pan"));
                 Layout::item_space(ui);
 
@@ -1108,7 +1108,8 @@ fn update_viewer_model(
         return;
     }
 
-    if viewer_state.model_type != last_model_type.unwrap() || selected_piece.is_changed() {
+    if let Some(last) = *last_model_type {
+        if viewer_state.model_type != last || selected_piece.is_changed() {
         // Model type changed!
         let new_model = viewer_state.model_type;
         *last_model_type = Some(new_model);
@@ -1154,5 +1155,7 @@ fn update_viewer_model(
 
         viewer_state.selected_entity = Some(piece_entity);
         info!("[PIECE_VIEWER] Switched model to {:?}", new_model);
+        }
     }
 }
+

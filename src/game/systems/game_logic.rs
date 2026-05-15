@@ -12,7 +12,7 @@
 //! rendering changes.
 
 use crate::engine::board_state::ChessEngine;
-use crate::game::components::GamePhase;
+use crate::game::components::{GamePhase, PieceMoveAnimation, FadingCapture};
 use crate::game::resources::*;
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
@@ -222,9 +222,16 @@ pub fn check_game_over_state(
     game_over: Res<GameOverState>,
     state: Res<State<crate::core::GameState>>,
     mut next_state: ResMut<NextState<crate::core::GameState>>,
+    animations: Query<(), (With<PieceMoveAnimation>, Without<FadingCapture>)>,
+    fades: Query<(), With<FadingCapture>>,
 ) {
     // Only transition if we are currently InGame and the game is effectively over
-    if *state.get() == crate::core::GameState::InGame && game_over.is_game_over() {
+    // Wait for active animations and capture fades to finish so the final move is visible
+    if *state.get() == crate::core::GameState::InGame 
+        && game_over.is_game_over() 
+        && animations.is_empty() 
+        && fades.is_empty() 
+    {
         info!(
             "[GAME] Game over condition met ({:?}) - transitioning to GameOver state",
             *game_over

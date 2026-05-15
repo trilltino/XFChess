@@ -40,7 +40,7 @@ pub fn schedule_time_check_crank(
             AccountMeta::new_readonly(ctx.accounts.white.key(), false),
             AccountMeta::new_readonly(ctx.accounts.black.key(), false),
         ],
-        data: anchor_lang::prelude::borsh::to_vec(&()).unwrap(), // No instruction data needed
+        data: anchor_lang::prelude::borsh::to_vec(&()).map_err(|_| ErrorCode::InvalidArgument)?, // No instruction data needed
     };
 
     // Serialize the schedule task instruction data

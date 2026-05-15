@@ -34,7 +34,7 @@ pub fn record_move_ix(
     next_fen: &str,
     nonce: u64,
     signature: Option<Vec<u8>>,
-) -> Instruction {
+) -> anyhow::Result<Instruction> {
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let move_log_pda =
         Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], program_id).0;
@@ -42,8 +42,10 @@ pub fn record_move_ix(
         &[SESSION_DELEGATION_SEED, &game_id.to_le_bytes(), wallet_pubkey.as_ref()],
         program_id,
     ).0;
-    let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY.parse().expect("magic context pubkey");
-    let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY.parse().expect("magic program pubkey");
+    let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY.parse()
+        .map_err(|e| anyhow::anyhow!("Invalid magic context pubkey: {}", e))?;
+    let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY.parse()
+        .map_err(|e| anyhow::anyhow!("Invalid magic program pubkey: {}", e))?;
 
     let mut data = anchor_discriminator("record_move").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
@@ -60,7 +62,7 @@ pub fn record_move_ix(
         data.push(0); // None
     }
 
-    Instruction {
+    Ok(Instruction {
         program_id: *program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
@@ -71,22 +73,24 @@ pub fn record_move_ix(
             AccountMeta::new_readonly(magic_program, false),
         ],
         data,
-    }
+    })
 }
 
 /// Builds an `undelegate_game` instruction for the ER.
 ///
 /// Commits the ER state (game + move_log) back to devnet and releases the accounts.
-pub fn undelegate_game_ix(program_id: &Pubkey, session_pubkey: &Pubkey, game_id: u64) -> Instruction {
+pub fn undelegate_game_ix(program_id: &Pubkey, session_pubkey: &Pubkey, game_id: u64) -> anyhow::Result<Instruction> {
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let move_log_pda = Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], program_id).0;
-    let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY.parse().expect("magic context pubkey");
-    let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY.parse().expect("magic program pubkey");
+    let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY.parse()
+        .map_err(|e| anyhow::anyhow!("Invalid magic context pubkey: {}", e))?;
+    let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY.parse()
+        .map_err(|e| anyhow::anyhow!("Invalid magic program pubkey: {}", e))?;
 
     let mut data = anchor_discriminator("undelegate_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
 
-    Instruction {
+    Ok(Instruction {
         program_id: *program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
@@ -96,7 +100,7 @@ pub fn undelegate_game_ix(program_id: &Pubkey, session_pubkey: &Pubkey, game_id:
             AccountMeta::new_readonly(magic_program, false),
         ],
         data,
-    }
+    })
 }
 
 /// Builds a `finalize_game` instruction for devnet.
@@ -212,9 +216,9 @@ pub fn leave_tournament_ix(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
         program_id,
     ).0;
-
+ 
     let data = anchor_discriminator("leave_tournament").to_vec();
-
+ 
     Instruction {
         program_id: *program_id,
         accounts: vec![
@@ -222,6 +226,70 @@ pub fn leave_tournament_ix(
             AccountMeta::new(*player, true),
             AccountMeta::new(*host_treasury, true),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+        data,
+    }
+}
+ 
+/// Builds an `initialize_tournament` instruction for devnet.
+pub fn initialize_tournament_ix(
+    program_id: &Pubkey,
+    admin: &Pubkey,
+    tournament_id: u64,
+    name: &str,
+    entry_fee: u64,
+    platform_fee: u64,
+    max_players: u16,
+    tournament_type: u8, // 0 = SingleElimination, 1 = Swiss
+    swiss_rounds: u8,
+    elo_min: u32,
+    elo_max: u32,
+    min_players: u16,
+    prize_shares: [u16; 10],
+    winner_takes_all: bool,
+    host_treasury: &Pubkey,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+ 
+    let mut data = anchor_discriminator("initialize_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend(borsh_string(name));
+    data.extend_from_slice(&entry_fee.to_le_bytes());
+    data.extend_from_slice(&max_players.to_le_bytes());
+    
+    // TournamentType Borsh encoding
+    data.push(tournament_type);
+    if tournament_type == 1 { // Swiss
+        data.push(swiss_rounds);
+    }
+ 
+    data.extend_from_slice(&elo_min.to_le_bytes());
+    data.extend_from_slice(&elo_max.to_le_bytes());
+    data.extend_from_slice(&min_players.to_le_bytes());
+    for &share in prize_shares.iter() {
+        data.extend_from_slice(&share.to_le_bytes());
+    }
+    data.extend_from_slice(&platform_fee.to_le_bytes());
+    data.push(if winner_takes_all { 1 } else { 0 });
+    data.extend_from_slice(host_treasury.as_ref());
+    
+    // Optional usdc_mint (None = 0)
+    data.push(0); 
+    
+    // Default time controls
+    data.extend_from_slice(&600u64.to_le_bytes()); // 10 mins
+    data.extend_from_slice(&0u16.to_le_bytes()); // 0 inc
+ 
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(*admin, true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
         ],
         data,
     }

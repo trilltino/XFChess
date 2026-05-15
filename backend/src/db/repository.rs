@@ -18,6 +18,7 @@ pub struct GameRecord {
     pub final_fen: Option<String>,
     pub finalize_sig: Option<String>,
     pub status: String,
+    pub archived_at: Option<i64>,
     pub created_at: i64,
 }
 
@@ -370,6 +371,23 @@ impl GameRepository {
         Ok(games)
     }
 
+    /// Get all games for a specific player username (as white or black)
+    pub async fn get_games_by_username(
+        &self,
+        username: &str,
+        limit: i32,
+    ) -> Result<Vec<GameRecord>> {
+        let games = sqlx::query_as::<_, GameRecord>(
+            "SELECT * FROM games WHERE white_username = ? OR black_username = ? ORDER BY start_time DESC LIMIT ?"
+        )
+        .bind(username)
+        .bind(username)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(games)
+    }
+
     /// Batch insert moves for performance
     pub async fn batch_add_moves(&self, moves: &[NewMove]) -> Result<()> {
         if moves.is_empty() {
@@ -399,6 +417,50 @@ impl GameRepository {
 
         tx.commit().await?;
         Ok(())
+    }
+ 
+    /// Gets all completed but not yet archived games
+    pub async fn get_unarchived_games(&self, limit: i32) -> Result<Vec<GameRecord>> {
+        let games = sqlx::query_as::<_, GameRecord>(
+            "SELECT * FROM games WHERE status = 'completed' AND archived_at IS NULL ORDER BY end_time ASC LIMIT ?"
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(games)
+    }
+ 
+    /// Marks a game as archived at the given timestamp
+    pub async fn mark_as_archived(&self, game_id: &str, timestamp: i64) -> Result<()> {
+        sqlx::query("UPDATE games SET archived_at = ? WHERE id = ?")
+            .bind(timestamp)
+            .bind(game_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Lists all active game sessions
+    pub async fn list_active_sessions(&self) -> Result<Vec<serde_json::Value>> {
+        let rows: Vec<sqlx::sqlite::SqliteRow> = sqlx::query(
+            "SELECT * FROM active_sessions WHERE status = 'active'"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        
+        let mut sessions = Vec::new();
+        for row in rows {
+            use sqlx::Row;
+            sessions.push(serde_json::json!({
+                "game_id": row.get::<i64, _>("game_id"),
+                "white": row.get::<String, _>("player_white"),
+                "black": row.get::<String, _>("player_black"),
+                "fen": row.get::<String, _>("current_fen"),
+                "status": row.get::<String, _>("status"),
+                "last_activity": row.get::<i64, _>("last_activity"),
+            }));
+        }
+        Ok(sessions)
     }
 }
 

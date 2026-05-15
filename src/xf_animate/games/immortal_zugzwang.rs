@@ -1,4 +1,4 @@
-//! Sämisch vs Nimzowitsch, Copenhagen 1923 — "Immortal Zugzwang Game".
+﻿//! S├ñmisch vs Nimzowitsch, Copenhagen 1923 ÔÇö "Immortal Zugzwang Game".
 //!
 //! Coordinates: `a1 = (0, 0)`, files 0..7 = a..h, ranks 0..7 = 1..8.
 
@@ -77,7 +77,7 @@ pub const IMMORTAL_ZUGZWANG: &[MoveStep] = &[
     // 24. Qe3 Bd3
     MoveStep { from: (6, 4), to: (4, 2), kind: MoveKind::Normal },
     MoveStep { from: (1, 4), to: (3, 2), kind: MoveKind::Normal },
-    // 25. Rce1 h6!  (zugzwang — White resigned)
+    // 25. Rce1 h6!  (zugzwang ÔÇö White resigned)
     MoveStep { from: (2, 0), to: (4, 0), kind: MoveKind::Normal },
     MoveStep { from: (7, 6), to: (7, 5), kind: MoveKind::Normal },
 ];

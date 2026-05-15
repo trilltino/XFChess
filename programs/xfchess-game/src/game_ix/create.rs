@@ -36,7 +36,7 @@ pub struct CreateGame<'info> {
     #[account(
         init, 
         payer = fee_payer, 
-        space = 36, // Minimal size: discriminator + fixed fields + empty vecs; grows via realloc
+        space = MoveLog::LEN, 
         seeds = [MOVE_LOG_SEED, &game_id.to_le_bytes()], 
         bump
     )]
