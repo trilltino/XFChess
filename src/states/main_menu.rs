@@ -152,6 +152,8 @@ pub struct CompetitiveMenuState {
     pub show_join_popup: bool,
     /// Input field for game ID to join in the join lobby popup.
     pub join_game_id: String,
+    /// Selected AI engine (Stockfish or XFChessEngine).
+    pub ai_engine: crate::game::ai::resource::AIEngine,
 }
 
 impl Default for CompetitiveMenuState {
@@ -166,6 +168,7 @@ impl Default for CompetitiveMenuState {
             show_controls_popup: false,
             show_join_popup: false,
             join_game_id: String::new(),
+            ai_engine: crate::game::ai::resource::AIEngine::Stockfish,
         }
     }
 }

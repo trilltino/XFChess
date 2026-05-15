@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use iroh::EndpointId;
-use shakmaty::Color;
+use crate::rendering::pieces::PieceColor;
 
 use crate::core::states::GameState;
 use crate::game::events::GameStartedEvent;
@@ -20,7 +20,7 @@ pub struct P2PConnectionState {
     /// Whether we are hosting or joining
     pub is_host: bool,
     /// Player color (White = host, Black = joiner for now)
-    pub player_color: Option<Color>,
+    pub player_color: Option<PieceColor>,
     /// When we entered Connecting state (for timeout)
     pub connecting_since: Option<std::time::Instant>,
 }
@@ -171,7 +171,7 @@ fn handle_host_game(
         connection_state.game_id = Some(game_id);
         connection_state.is_host = true;
         connection_state.status = P2PConnectionStatus::Hosting;
-        connection_state.player_color = Some(Color::White);
+        connection_state.player_color = Some(PieceColor::White);
 
         info!("Hosting game {}. Waiting for peer to connect...", game_id);
         info!("Share your Node ID: {:?}", network_state.node_id);
@@ -202,7 +202,7 @@ fn handle_connect_to_peer(
         connection_state.is_host = false;
         connection_state.status = P2PConnectionStatus::Connecting;
         connection_state.connecting_since = Some(std::time::Instant::now());
-        connection_state.player_color = Some(Color::Black);
+        connection_state.player_color = Some(PieceColor::Black);
 
         // Decode peer ID from bs58
         let peer_endpoint_id = match bs58::decode(&event.peer_node_id).into_vec() {
@@ -387,7 +387,7 @@ fn handle_network_events(
                             connection_state.peer_node_id = Some(from_node.clone());
                             connection_state.game_id = Some(*game_id);
                             connection_state.status = P2PConnectionStatus::Connected;
-                            connection_state.player_color = Some(Color::Black);
+                            connection_state.player_color = Some(PieceColor::Black);
                             
                             // Subscribe to game-specific topic for move traffic
                             if let Some(sub_tx) = &network_state.subscription_sender {

@@ -89,6 +89,9 @@ pub struct ChessAIResource {
     /// and playing strength. Higher difficulties search deeper but
     /// take longer to respond.
     pub difficulty: AIDifficulty,
+
+    /// AI engine selection
+    pub engine: AIEngine,
 }
 
 impl Default for ChessAIResource {
@@ -101,8 +104,19 @@ impl Default for ChessAIResource {
                 ai_color: PieceColor::Black,
             },
             difficulty: AIDifficulty::Level4,
+            engine: AIEngine::Stockfish,
         }
     }
+}
+
+/// AI engine selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Default)]
+pub enum AIEngine {
+    /// External Stockfish process (High strength)
+    #[default]
+    Stockfish,
+    /// Internal XFChessEngine (Lightweight, native Rust)
+    XFChessEngine,
 }
 
 /// Game mode selection

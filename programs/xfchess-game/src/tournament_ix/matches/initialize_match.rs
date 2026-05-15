@@ -64,11 +64,5 @@ pub fn handler(
     tm.completed_at = None;
     tm.bump = ctx.bumps.tournament_match;
 
-    msg!(
-        "Match {} initialized for tournament {} (round {})",
-        match_index,
-        tournament_id,
-        round
-    );
     Ok(())
 }

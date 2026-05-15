@@ -211,6 +211,7 @@ pub fn build_app(game_config: GameConfig) -> App {
         app.insert_resource(ChessAIResource {
             mode: GameMode::VsAI { ai_color },
             difficulty,
+            engine: crate::game::ai::resource::AIEngine::Stockfish,
         });
     }
 

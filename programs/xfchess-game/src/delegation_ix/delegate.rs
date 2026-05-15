@@ -3,8 +3,8 @@
 pub use self::inner::*;
 
 mod inner {
-    use crate::constants::{MOVE_LOG_SEED, DELEGATE_COST};
-    use crate::state::{Game, GameStatus, MoveLog};
+    use crate::constants::DELEGATE_COST;
+    use crate::state::{Game, GameStatus};
     use crate::errors::GameErrorCode;
     use anchor_lang::prelude::*;
     use ephemeral_rollups_sdk::cpi::{delegate_account, DelegateAccounts, DelegateConfig};
@@ -45,27 +45,6 @@ mod inner {
 
         delegate_account(delegate_accounts, seeds, config)?;
 
-        // Delegate the move_log PDA
-        let ml_seeds: &[&[u8]] = &[MOVE_LOG_SEED, &game_id_bytes];
-
-        let config = DelegateConfig {
-            commit_frequency_ms: (valid_until as u32).saturating_mul(1000),
-            validator: Some(eu_validator),
-        };
-
-        let ml_delegate_accounts = DelegateAccounts {
-            payer: &ctx.accounts.payer.to_account_info(),
-            pda: &ctx.accounts.move_log.to_account_info(),
-            owner_program: &ctx.accounts.owner_program.to_account_info(),
-            buffer: &ctx.accounts.ml_buffer.to_account_info(),
-            delegation_record: &ctx.accounts.ml_delegation_record.to_account_info(),
-            delegation_metadata: &ctx.accounts.ml_delegation_metadata.to_account_info(),
-            delegation_program: &ctx.accounts.delegation_program.to_account_info(),
-            system_program: &ctx.accounts.system_program.to_account_info(),
-        };
-
-        delegate_account(ml_delegate_accounts, ml_seeds, config)?;
-
         let game = &mut ctx.accounts.game;
         let fee_payer = &ctx.accounts.fee_payer;
 
@@ -87,7 +66,6 @@ mod inner {
             &ctx.accounts.payer.to_account_info(),
             vec![
                 &ctx.accounts.game.to_account_info(),
-                &ctx.accounts.move_log.to_account_info(),
             ],
             &ctx.accounts.magic_context.to_account_info(),
             &ctx.accounts.magic_program.to_account_info(),
@@ -108,13 +86,6 @@ mod inner {
         )]
         pub game: Account<'info, Game>,
 
-        #[account(
-            mut,
-            seeds = [MOVE_LOG_SEED, _game_id.to_le_bytes().as_ref()],
-            bump,
-        )]
-        pub move_log: Account<'info, MoveLog>,
-
         #[account(mut)]
         pub payer: Signer<'info>,
 
@@ -132,18 +103,6 @@ mod inner {
         /// CHECK: Delegation metadata for game PDA.
         #[account(mut)]
         pub delegation_metadata: AccountInfo<'info>,
-
-        /// CHECK: Temporary buffer for move_log PDA delegation.
-        #[account(mut)]
-        pub ml_buffer: AccountInfo<'info>,
-
-        /// CHECK: Delegation record for move_log PDA.
-        #[account(mut)]
-        pub ml_delegation_record: AccountInfo<'info>,
-
-        /// CHECK: Delegation metadata for move_log PDA.
-        #[account(mut)]
-        pub ml_delegation_metadata: AccountInfo<'info>,
 
         /// CHECK: MagicBlock delegation program.
         #[account(address = ephemeral_rollups_sdk::id())]
@@ -164,13 +123,6 @@ mod inner {
             bump = game.bump,
         )]
         pub game: Account<'info, Game>,
-
-        #[account(
-            mut,
-            seeds = [MOVE_LOG_SEED, _game_id.to_le_bytes().as_ref()],
-            bump,
-        )]
-        pub move_log: Account<'info, MoveLog>,
 
         #[account(mut)]
         pub payer: Signer<'info>,

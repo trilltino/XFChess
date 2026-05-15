@@ -103,10 +103,6 @@ pub fn handler(
         }
     }
 
-    msg!(
-        "Swiss result recorded: Tournament {} Round {} Board {}: {:?} - Player {} vs {}",
-        tournament_id, round, board, result, player, opponent
-    );
 
     Ok(())
 }

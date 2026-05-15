@@ -50,7 +50,7 @@ pub fn handler(ctx: Context<SetUsername>, username: String) -> Result<()> {
     profile.username = username;
     profile.username_set = true;
     
-    msg!("Username '{}' set for {}", profile.username, ctx.accounts.player.key());
+
     
     Ok(())
 }

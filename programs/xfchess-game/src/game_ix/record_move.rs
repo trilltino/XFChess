@@ -59,7 +59,6 @@ pub fn handler(
         }
     } else {
         // Handle full move log - shift or expand if needed
-        msg!("Move log full, appending with overflow logic");
         move_log.moves.push(move_str.clone());
         move_log.timestamps.push(Clock::get()?.unix_timestamp);
         if let Some(sig) = signature {
@@ -71,6 +70,5 @@ pub fn handler(
     game.last_move_timestamp = Clock::get()?.unix_timestamp;
     game.current_fen = next_fen;
 
-    msg!("Move recorded for game {} by player {}", game_id, ctx.accounts.player.key());
     Ok(())
 }

@@ -71,8 +71,6 @@ pub fn schedule_time_check_crank(
         &[],
     )?;
 
-    msg!("Scheduled time check crank for game {}: interval={}ms, iterations={}", 
-        args.task_id, args.check_interval_millis, args.iterations);
 
     Ok(())
 }

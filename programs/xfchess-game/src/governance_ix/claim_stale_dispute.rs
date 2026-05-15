@@ -75,7 +75,6 @@ pub fn handler(ctx: Context<ClaimStaleDispute>, _game_id: u64) -> Result<()> {
                 half,
             )?;
         } else {
-            msg!("Skipping refund to white player: not rent-exempt after transfer");
         }
         if rent.is_exempt(black_balance_after, ctx.accounts.black_authority.data_len()) {
             anchor_lang::system_program::transfer(
@@ -90,14 +89,9 @@ pub fn handler(ctx: Context<ClaimStaleDispute>, _game_id: u64) -> Result<()> {
                 half,
             )?;
         } else {
-            msg!("Skipping refund to black player: not rent-exempt after transfer");
         }
     }
 
-    msg!(
-        "XFChess: Stale dispute on game {} auto-resolved — escrow split 50/50",
-        _game_id
-    );
 
     Ok(())
 }

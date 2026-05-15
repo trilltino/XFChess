@@ -61,11 +61,6 @@ pub fn handler(ctx: Context<ClaimTimeout>, _game_id: u64) -> Result<()> {
     game.status = GameStatus::Finished;
     game.updated_at = clock.unix_timestamp;
 
-    msg!(
-        "XFChess: Timeout — {} wins (opponent inactive > {}s)",
-        winner,
-        if game.base_time_seconds > 0 { game.base_time_seconds * 3 } else { 86_400 }
-    );
 
     // Pay out escrow immediately
     let wager_amount = game.wager_amount;

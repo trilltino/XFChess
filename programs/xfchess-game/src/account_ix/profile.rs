@@ -126,7 +126,6 @@ pub fn handler(ctx: Context<InitProfile>, username: String, country: String) -> 
         require!(record.owner == player.key(), UsernameError::UsernameTaken);
     }
 
-    msg!("Profile forced re-init success for {}", player.key());
     Ok(())
 }
 

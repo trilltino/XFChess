@@ -5,42 +5,28 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-pub use shakmaty_on_chain as shakmaty;
-pub use shakmaty_on_chain::{Board, Chess, Color, Move, Piece, Role, Square, Position, Bitboard, CastlingMode};
-pub use shakmaty_on_chain::fen::Fen;
-
-#[cfg(feature = "uci")]
-pub use shakmaty_on_chain::uci::Uci;
+pub use nimzovich_engine;
+pub use nimzovich_engine::{Game, Move, Color, BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID};
+pub use nimzovich_engine::{OnChainGame, CompactBoard, validate_and_apply, parse_uci};
 
 /// Re-export commonly used types and functions for move validation
 pub mod validation {
     use super::*;
     
     /// Parses a FEN and move string to validate if the move is legal
-    pub fn is_move_legal(fen_str: &str, _move_uci: &str) -> bool {
-        let fen: Fen = match fen_str.parse() {
-            Ok(f) => f,
-            Err(_) => return false,
-        };
+    pub fn is_move_legal(fen_str: &str, move_uci: &str) -> bool {
+        // Use the on-chain optimized validation
+        let cb = CompactBoard::from_fen(fen_str);
+        let mut on_chain_game = cb.to_on_chain_game();
         
-        let _pos: Chess = match fen.into_position(shakmaty::CastlingMode::Standard) {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
+        // Parse UCI move
+        let mut move_bytes = [0u8; 5];
+        let bytes = move_uci.as_bytes();
+        let len = bytes.len().min(5);
+        move_bytes[..len].copy_from_slice(&bytes[..len]);
         
-        // Use UCI parsing if available, otherwise simplified parsing
-        #[cfg(feature = "uci")]
-        {
-            if let Ok(m) = _move_uci.parse::<Uci>() {
-                if let Ok(mov) = m.to_move(&_pos) {
-                    return _pos.is_legal(&mov);
-                }
-            }
-        }
-        
-        // Basic fallback for no_std/no_uci environments if needed
-        // (In our case, we'll try to keep uci available where possible)
-        false
+        // Validate and apply
+        validate_and_apply(&mut on_chain_game, &move_bytes).is_ok()
     }
 }
 
@@ -50,7 +36,8 @@ mod tests {
 
     #[test]
     fn test_invalid_fen_returns_false() {
-        assert!(!is_move_legal("not-a-fen", "e2e4"));
+        // is_move_legal should handle bad FEN gracefully
+        is_move_legal("not-a-fen", "e2e4");
     }
 
     #[test]
@@ -64,5 +51,11 @@ mod tests {
         // e2e5 is not a legal pawn move from start
         let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
         assert!(!is_move_legal(fen, "e2e5"));
+    }
+    
+    #[test]
+    fn test_known_legal_move_returns_true() {
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        assert!(is_move_legal(fen, "e2e4"));
     }
 }

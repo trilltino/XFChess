@@ -60,25 +60,14 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
     tournament.current_round = 0;
     tournament.started_at = Some(Clock::get()?.unix_timestamp);
 
-    msg!(
-        "Tournament {} started with {} players. Players seeded by ELO.",
-        tournament_id,
-        player_count
-    );
+
 
     // Log bracket matchups for first round
     let round1_matches = player_count / 2;
     for i in 0..round1_matches {
         let white_idx = i;
         let black_idx = player_count - 1 - i;
-        msg!(
-            "R1 Match {}: Seed {} ({}) vs Seed {} ({})",
-            i,
-            white_idx + 1,
-            tournament.players[white_idx],
-            black_idx + 1,
-            tournament.players[black_idx]
-        );
+
     }
 
     Ok(())

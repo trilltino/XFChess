@@ -97,6 +97,6 @@ pub fn handler(
         }
     }
 
-    msg!("Dispute resolved for game {}", game_id);
+
     Ok(())
 }

@@ -158,18 +158,8 @@ pub fn handler(
     t.base_time_seconds = base_time_seconds;
     t.increment_seconds = increment_seconds;
 
-    msg!(
-        "Tournament {} '{}' created. Type: {:?}, Players: {}, Entry fee: {} lamports, Host treasury: {}",
-        tournament_id,
-        t.name,
-        tournament_type,
-        max_players,
-        entry_fee,
-        host_treasury
-    );
     
     if usdc_mint.is_some() {
-        msg!("USDC prize pool enabled. Mint: {:?}", usdc_mint);
     }
     
     Ok(())

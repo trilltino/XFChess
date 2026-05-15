@@ -1,8 +1,7 @@
 //! Instruction to create a new active wagered game context.
 
-use crate::constants::{MAX_WAGER_AMOUNT, GAME_SEED, MOVE_LOG_SEED, WAGER_ESCROW_SEED, CREATE_GAME_COST};
+use crate::constants::{MAX_WAGER_AMOUNT, GAME_SEED, WAGER_ESCROW_SEED, CREATE_GAME_COST};
 use crate::state::{Game, GameStatus, GameResult, GameType, MatchType};
-use crate::state::move_log::MoveLog;
 use crate::errors::GameErrorCode;
 use anchor_lang::prelude::*;
 
@@ -33,14 +32,6 @@ pub struct CreateGame<'info> {
         bump
     )]
     pub game: Account<'info, Game>,
-    #[account(
-        init, 
-        payer = fee_payer, 
-        space = MoveLog::LEN, 
-        seeds = [MOVE_LOG_SEED, &game_id.to_le_bytes()], 
-        bump
-    )]
-    pub move_log: Account<'info, MoveLog>,
     /// CHECK: PDA for escrowing SOL.
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
@@ -67,9 +58,18 @@ pub fn handler(
     game.black = Pubkey::default();
     game.status = GameStatus::WaitingForOpponent;
     game.result = GameResult::None;
-    game.fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
+    // Starting position (from chess_logic_on_chain::shakmaty or equivalent starting board bytes)
+    #[cfg(feature = "move-validation")]
+    {
+        game.board_state = chess_logic_on_chain::nimzovich_engine::CompactBoard::starting_position().to_bytes();
+    }
+    #[cfg(not(feature = "move-validation"))]
+    {
+        game.board_state = [0; 68]; // default zeroed if validation is off to save compute
+    }
     game.move_count = 0;
     game.turn = 1;
+    game.nonce = 0; // Initialize nonce to zero
     game.created_at = Clock::get()?.unix_timestamp;
     game.updated_at = game.created_at;
     game.wager_amount = wager_amount;
@@ -99,17 +99,6 @@ pub fn handler(
         )?;
     }
 
-    let move_log = &mut ctx.accounts.move_log;
-    move_log.game_id = game_id;
-    move_log.moves = Vec::new();
-    move_log.timestamps = Vec::new();
-    move_log.player_signatures = Vec::new();
-    move_log.nonce = 0;
 
-    msg!(
-        "Game {} created. Wager: {} lamports",
-        game_id,
-        wager_amount
-    );
     Ok(())
 }

@@ -98,10 +98,6 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
     game.status = GameStatus::Expired;
     game.updated_at = Clock::get()?.unix_timestamp;
 
-    msg!(
-        "Expired wager for game {} withdrawn by {}",
-        _game_id,
-        player
-    );
+
     Ok(())
 }

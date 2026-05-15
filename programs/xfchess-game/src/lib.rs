@@ -10,6 +10,7 @@ pub mod crank_ix;
 pub mod delegation_ix;
 pub mod elo;
 pub mod errors;
+pub mod events;
 pub mod game_ix;
 pub mod governance_ix;
 pub mod moves_ix;
@@ -223,16 +224,16 @@ pub mod xfchess_game {
     pub fn record_move(
         ctx: Context<RecordMove>,
         game_id: u64,
-        move_str: String,
-        next_fen: String,
+        move_uci: [u8; 5],
+        next_board: [u8; 68],
         nonce: u64,
         signature: Option<Vec<u8>>,
     ) -> Result<()> {
         crate::moves_ix::record::handler(
             ctx,
             game_id,
-            move_str,
-            next_fen,
+            move_uci,
+            next_board,
             nonce,
             signature,
         )

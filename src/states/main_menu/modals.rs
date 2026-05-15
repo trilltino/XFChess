@@ -147,6 +147,46 @@ pub(super) fn render_ai_setup_modal(
 
             ui.add_space(16.0);
 
+            // ── Engine Selection ─────────────────────────────────────────────
+            ui.label(
+                egui::RichText::new("Engine")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+
+            ui.horizontal(|ui| {
+                for (label, engine) in [
+                    ("Stockfish", crate::game::ai::resource::AIEngine::Stockfish),
+                    ("XFChessEngine", crate::game::ai::resource::AIEngine::XFChessEngine),
+                ] {
+                    let selected = competitive.ai_engine == engine;
+                    let btn = egui::Button::new(egui::RichText::new(label).size(13.0))
+                        .min_size(egui::Vec2::new(100.0, 28.0))
+                        .corner_radius(4.0)
+                        .fill(if selected {
+                            accent_color
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
+                        })
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            if selected {
+                                accent_color
+                            } else {
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                            },
+                        ));
+                    if ui.add(btn).clicked() {
+                        competitive.ai_engine = engine;
+                    }
+                    ui.add_space(8.0);
+                }
+            });
+
+            ui.add_space(16.0);
+
             // Side selection (buttons are self-explanatory)
             ui.add_space(6.0);
 
@@ -212,6 +252,7 @@ pub(super) fn render_ai_setup_modal(
                             AISide::White => crate::rendering::pieces::PieceColor::Black,
                         },
                     };
+                    ai_config.engine = competitive.ai_engine;
                     *core_mode = CoreGameMode::SinglePlayer;
                     active_tc.control = competitive.ai_time_control;
                     active_tc.ai_game = true;

@@ -9,7 +9,7 @@ use anchor_lang::prelude::*;
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct EndGame<'info> {
-    #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
+    #[account(mut, close = fee_payer, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [PROFILE_SEED, game.white.as_ref()], bump)]
     pub white_profile: Account<'info, PlayerProfile>,
@@ -80,7 +80,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
             tx_fee,
         )?;
         
-        msg!("Transaction fee reimbursed to relayer: {} lamports", tx_fee);
+
     }
     
     if wager_amount > 0 && wager_token.is_none() && escrow_balance >= pot {
@@ -103,10 +103,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                 platform_reimbursement,
             )?;
             
-            msg!(
-                "Platform fees reimbursed: {} lamports from escrow",
-                platform_reimbursement
-            );
+
         }
 
         match result {
@@ -133,7 +130,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                         payout,
                     )?;
                 } else {
-                    msg!("Skipping prize transfer to winner: not rent-exempt after transfer");
+
                 }
             }
             GameResult::Draw => {
@@ -156,7 +153,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                         refund,
                     )?;
                 } else {
-                    msg!("Skipping refund to white player: not rent-exempt after transfer");
+
                 }
                 if rent.is_exempt(black_balance_after, ctx.accounts.black_authority.data_len()) {
                     anchor_lang::system_program::transfer(
@@ -171,7 +168,7 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
                         refund,
                     )?;
                 } else {
-                    msg!("Skipping refund to black player: not rent-exempt after transfer");
+
                 }
             }
             _ => {}

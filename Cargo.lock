@@ -3355,25 +3355,17 @@ dependencies = [
 name = "chess-logic-on-chain"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
+ "nimzovich_engine",
  "serde",
- "shakmaty-no-std",
 ]
 
 [[package]]
 name = "chess-logic-shared"
 version = "0.1.0"
 dependencies = [
+ "nimzovich_engine",
  "serde",
- "shakmaty-host-vendored",
-]
-
-[[package]]
-name = "chess_engine"
-version = "0.1.0"
-dependencies = [
- "futures-lite",
- "instant",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -9145,6 +9137,16 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
+
+[[package]]
+name = "nimzovich_engine"
+version = "0.1.0"
+dependencies = [
+ "futures-lite",
+ "instant",
+ "serde",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "nix"
@@ -20859,6 +20861,7 @@ dependencies = [
  "iroh",
  "iroh-gossip",
  "magic-resolver",
+ "nimzovich_engine",
  "openssl",
  "rand 0.9.2",
  "regex",
@@ -20867,7 +20870,6 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
- "shakmaty-host-vendored",
  "shared",
  "solana-chess-client",
  "solana-client",

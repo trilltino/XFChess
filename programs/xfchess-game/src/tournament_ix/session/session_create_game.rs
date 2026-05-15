@@ -69,15 +69,6 @@ pub struct SessionCreateGame<'info> {
     )]
     pub game: Box<Account<'info, Game>>,
 
-    #[account(
-        init,
-        payer = session_delegation,
-        seeds = [MOVE_LOG_SEED, &game_id.to_le_bytes()],
-        bump,
-        space = MoveLog::LEN
-    )]
-    pub move_log: Account<'info, MoveLog>,
-
     /// CHECK: PDA for escrowing SOL wager.
     #[account(
         mut,
@@ -102,11 +93,9 @@ pub fn handler(
     let session = &ctx.accounts.session_delegation;
     let tournament = &ctx.accounts.tournament;
     let game = &mut ctx.accounts.game;
-    let move_log = &mut ctx.accounts.move_log;
     let _escrow_pda = &ctx.accounts.escrow_pda;
     let fee_payer = &ctx.accounts.session_signer;
     let _system_program = &ctx.accounts.system_program;
-    let rent = &Rent::get()?;
 
     // Validate session
     require!(
@@ -145,13 +134,7 @@ pub fn handler(
     game.base_time_seconds = base_time_seconds;
     game.increment_seconds = increment_seconds;
     game.fee_payer = fee_payer.key();
-
-    // Initialize move log
-    move_log.game_id = game_id;
-    move_log.moves = Vec::new();
-    move_log.timestamps = Vec::new();
-    move_log.player_signatures = Vec::new();
-    move_log.nonce = 0;
+    game.nonce = 0;
 
     // Transfer wager from session vault to escrow
     if wager_amount > 0 {
@@ -183,39 +166,9 @@ pub fn handler(
         )?;
     }
 
-    // Calculate and transfer rent for move_log
-    let move_log_rent = rent.minimum_balance(MoveLog::LEN);
-    require!(
-        session.total_spent + wager_amount + move_log_rent <= session.spending_limit,
-        GameErrorCode::SpendingLimitExceeded
-    );
-    let tid_bytes = session.tournament_id.to_le_bytes();
-    let player_bytes = session.player.to_bytes();
-    let bump = [session.bump];
-    let delegation_seeds: [&[u8]; 4] = [
-        TournamentSessionDelegation::SEED,
-        tid_bytes.as_ref(),
-        player_bytes.as_ref(),
-        bump.as_ref(),
-    ];
-    let signer_seeds: &[&[&[u8]]] = &[&delegation_seeds];
-
-    anchor_lang::system_program::transfer(
-        CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
-            anchor_lang::system_program::Transfer {
-                from: session.to_account_info(),
-                to: ctx.accounts.move_log.to_account_info(),
-            },
-            signer_seeds,
-        ),
-        move_log_rent,
-    )?;
-
     // Update session spent amount
     let session_account = &mut ctx.accounts.session_delegation;
-    session_account.total_spent += wager_amount + move_log_rent;
+    session_account.total_spent += wager_amount;
 
-    msg!("Session created game {} in tournament {}", game_id, tournament_id);
     Ok(())
 }

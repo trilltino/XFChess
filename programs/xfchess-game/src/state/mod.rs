@@ -1,7 +1,6 @@
 //! Contains all global Anchor account structs defining the program's on-chain database layout.
 
 pub mod game;
-pub mod move_log;
 pub mod player_profile;
 pub mod dispute;
 pub mod username_record;
@@ -13,7 +12,6 @@ pub mod tournament_session;
 pub mod treasury_vault;
 
 pub use game::*;
-pub use move_log::*;
 pub use player_profile::*;
 pub use dispute::*;
 pub use username_record::*;

@@ -33,6 +33,7 @@ pub const TOURNAMENT_SEED: &[u8] = b"tournament";
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 #[allow(dead_code)]
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
+pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
 /// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
 fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
@@ -82,11 +83,6 @@ pub fn create_game_ix(
         &program_id,
     )
     .0;
-    let move_log_pda = Pubkey::find_program_address(
-        &[MOVE_LOG_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
     let escrow_pda = Pubkey::find_program_address(
         &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
         &program_id,
@@ -109,7 +105,6 @@ pub fn create_game_ix(
         program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
-            AccountMeta::new(move_log_pda, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(player, true),
             AccountMeta::new(fee_payer, true),
@@ -194,43 +189,29 @@ pub fn join_game_ix(
 #[allow(dead_code)]
 pub fn record_move_ix(
     program_id: Pubkey,
-    player: Pubkey,
-    player_wallet: Pubkey, // Base wallet for session delegation PDA
+    session_key: Pubkey,
+    wallet_player: Pubkey,
     game_id: u64,
-    move_str: String,
-    next_fen: String,
+    move_uci: [u8; 5],
+    next_board: [u8; 68],
     nonce: u64,
     signature: Option<Vec<u8>>,
 ) -> Result<Instruction> {
     let game_pda = Pubkey::find_program_address(
         &[GAME_SEED, &game_id.to_le_bytes()],
         &program_id,
-    )
-    .0;
-    let move_log_pda = Pubkey::find_program_address(
-        &[MOVE_LOG_SEED, &game_id.to_le_bytes()],
+    ).0;
+    let session_pda = Pubkey::find_program_address(
+        &[b"session_delegation", &game_id.to_le_bytes(), wallet_player.as_ref()],
         &program_id,
-    )
-    .0;
-    let session_delegation_pda = Pubkey::find_program_address(
-        &[
-            b"session_delegation",
-            &game_id.to_le_bytes(),
-            player_wallet.as_ref(),
-        ],
-        &program_id,
-    )
-    .0;
+    ).0;
 
     let mut data = anchor_discriminator("record_move").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
-    data.extend(borsh_string(&move_str));
-    data.extend(borsh_string(&next_fen));
+    data.extend_from_slice(&move_uci);
+    data.extend_from_slice(&next_board);
     data.extend_from_slice(&nonce.to_le_bytes());
     
-    // Borsh Option<Vec<u8>> encoding:
-    // 0 -> None
-    // 1 -> Some(...)
     if let Some(sig) = signature {
         data.push(1);
         data.extend_from_slice(&(sig.len() as u32).to_le_bytes());
@@ -243,9 +224,8 @@ pub fn record_move_ix(
         program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
-            AccountMeta::new(move_log_pda, false),
-            AccountMeta::new(player, true),
-            AccountMeta::new_readonly(session_delegation_pda, false),
+            AccountMeta::new_readonly(session_key, true),
+            AccountMeta::new(session_pda, false),
         ],
         data,
     })
@@ -271,7 +251,6 @@ pub fn record_move_ix(
 pub fn finalize_game_ix(
     program_id: Pubkey,
     game_id: u64,
-    result_code: u8,
     white_pubkey: Pubkey,
     black_pubkey: Pubkey,
     fee_payer: Pubkey,
@@ -279,49 +258,26 @@ pub fn finalize_game_ix(
     let game_pda = Pubkey::find_program_address(
         &[GAME_SEED, &game_id.to_le_bytes()],
         &program_id,
-    )
-    .0;
+    ).0;
     let white_profile = Pubkey::find_program_address(
         &[PROFILE_SEED, white_pubkey.as_ref()],
         &program_id,
-    )
-    .0;
+    ).0;
     let black_profile = Pubkey::find_program_address(
         &[PROFILE_SEED, black_pubkey.as_ref()],
         &program_id,
-    )
-    .0;
+    ).0;
     let escrow_pda = Pubkey::find_program_address(
         &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
         &program_id,
-    )
-    .0;
+    ).0;
     let treasury_vault = Pubkey::find_program_address(
-        &[b"treasury_vault"],
+        &[TREASURY_VAULT_SEED],
         &program_id,
-    )
-    .0;
+    ).0;
 
     let mut data = anchor_discriminator("finalize_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
-
-    // Encode GameResult as Anchor enum
-    match result_code {
-        0 => {
-            // WhiteWins → GameResult::Winner(white_pubkey)
-            data.push(1);
-            data.extend_from_slice(white_pubkey.as_ref());
-        }
-        1 => {
-            // BlackWins → GameResult::Winner(black_pubkey)
-            data.push(1);
-            data.extend_from_slice(black_pubkey.as_ref());
-        }
-        _ => {
-            // Draw → GameResult::Draw
-            data.push(2);
-        }
-    }
 
     Ok(Instruction {
         program_id,
@@ -333,7 +289,7 @@ pub fn finalize_game_ix(
             AccountMeta::new(black_pubkey, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(treasury_vault, false),
-            AccountMeta::new(fee_payer, false),
+            AccountMeta::new(fee_payer, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,

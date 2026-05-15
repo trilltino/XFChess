@@ -15,8 +15,7 @@ pub struct Game {
     pub fees_advanced: u64, // Accumulator for operational fees paid by relayer
     pub fee_payer: Pubkey, // Relayer wallet that paid; reimbursed at claim
     pub result: GameResult,
-    #[max_len(100)]
-    pub fen: String,         // Current board position in FEN notation
+    pub board_state: [u8; 68], // Compact binary form of the game (replaces FEN string)
     pub move_count: u16,     // Total half-moves made
     pub turn: u8,            // Increments each half-move (1 = white to move, 2 = black, ...)
     pub created_at: i64,     // Unix timestamp
@@ -31,6 +30,7 @@ pub struct Game {
     pub bump: u8,            // PDA canonical bump stored for use in signed CPI calls
     pub is_delegated: bool,  // True once delegate_game is called; false after undelegate
     pub tournament_id: Option<u64>,
+    pub nonce: u64,         // Counter for replay protection
 }
 
 /// Short-lived delegation allowing a VPS session key to submit moves on behalf

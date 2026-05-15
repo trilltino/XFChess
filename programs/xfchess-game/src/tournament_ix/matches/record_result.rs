@@ -55,39 +55,19 @@ pub fn handler(
 
     if match_index == semifinal1_idx {
         tournament.fourth_place = Some(loser);
-        msg!(
-            "Tournament {} Semifinal 1 completed. Winner: {}, Fourth place: {}",
-            tournament_id,
-            winner,
-            loser
-        );
+
     } else if match_index == semifinal2_idx {
         tournament.third_place = Some(loser);
-        msg!(
-            "Tournament {} Semifinal 2 completed. Winner: {}, Third place: {}",
-            tournament_id,
-            winner,
-            loser
-        );
+
     } else if match_index == final_idx {
         // Final completed - tournament done
         tournament.winner = Some(winner);
         tournament.second_place = Some(loser);
         tournament.status = TournamentStatus::Completed;
         tournament.completed_at = Some(Clock::get()?.unix_timestamp);
-        msg!(
-            "Tournament {} FINAL completed. Champion: {}, Second: {}",
-            tournament_id,
-            winner,
-            loser
-        );
+
     } else {
-        msg!(
-            "Tournament {} Match {} completed. Winner: {}",
-            tournament_id,
-            match_index,
-            winner
-        );
+
     }
 
     Ok(())
@@ -147,12 +127,6 @@ pub fn handler_advance_winner(
         target.status = MatchStatus::Pending;
     }
 
-    msg!(
-        "Winner {} advanced from match {} to match {} (slot {})",
-        winner,
-        source_match_index,
-        source.next_match_for_winner.unwrap_or(0),
-        source.next_match_slot
-    );
+
     Ok(())
 }

@@ -19,6 +19,32 @@ use std::time::{Duration, Instant};
 #[derive(Resource)]
 pub struct PendingAIMove(pub Task<Result<AIMove, String>>);
 
+/// Persistent Stockfish process resource
+#[derive(Resource)]
+pub struct StockfishProcess {
+    pub stdin: std::process::ChildStdin,
+    pub reader: std::io::BufReader<std::process::ChildStdout>,
+    pub child: std::process::Child,
+}
+
+impl StockfishProcess {
+    pub fn new() -> Result<Self, String> {
+        let stockfish_path = resolve_stockfish_path()?;
+        let mut child = Command::new(&stockfish_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn Stockfish: {}", e))?;
+        
+        let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+        let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+        let reader = std::io::BufReader::new(stdout);
+        
+        Ok(Self { stdin, reader, child })
+    }
+}
+
 /// AI move representation with Stockfish statistics
 #[derive(Debug, Clone)]
 pub struct AIMove {
@@ -112,6 +138,7 @@ pub struct AiSpawnParams<'w, 's> {
     pub engine: ResMut<'w, ChessEngine>,
     pub pending_turn_advance: Option<Res<'w, crate::game::resources::PendingTurnAdvance>>,
     pub players: Res<'w, crate::game::resources::player::Players>,
+    pub sf_process: Option<ResMut<'w, StockfishProcess>>,
 }
 
 /// System params for polling AI task
@@ -161,21 +188,77 @@ fn spawn_ai_task_system(
     let fen = params.engine.current_fen().to_string();
     let depth = params.ai_config.difficulty.stockfish_depth();
     let movetime_ms = params.ai_config.difficulty.stockfish_movetime_ms();
-    let _ai_color = params.ai_config.mode.ai_color();
+    let ai_color = params.ai_config.mode.ai_color();
 
-    info!(
-        "[AI] Broadcasting board state to Braid network | FEN: {} | depth: {:?} | movetime: {:?}ms",
-        fen, depth, movetime_ms
-    );
+    match params.ai_config.engine {
+        crate::game::ai::resource::AIEngine::Stockfish => {
+            info!("[AI] Spawning Stockfish task (persistent if available)");
+            let depth = depth.unwrap_or(12);
+            let movetime = movetime_ms.unwrap_or(1500);
+            
+            // If we don't have a persistent process yet, try to create one
+            if params.sf_process.is_none() {
+                match StockfishProcess::new() {
+                    Ok(p) => commands.insert_resource(p),
+                    Err(e) => {
+                        error!("[AI] Failed to start persistent Stockfish: {}", e);
+                        // Fallback to one-off task if needed, but for now just error
+                        return;
+                    }
+                }
+            }
 
-    // Stockfish sidecar disabled - spawn Stockfish directly
-    info!("[AI] Spawning Stockfish process directly");
-    
-    let depth = depth.unwrap_or(12);
-    let movetime = movetime_ms.unwrap_or(1500);
-    
-    let task = spawn_stockfish_task(fen, depth, movetime);
-    commands.insert_resource(PendingAIMove(task));
+            let task = spawn_stockfish_task(fen, depth, movetime);
+            commands.insert_resource(PendingAIMove(task));
+        }
+        crate::game::ai::resource::AIEngine::XFChessEngine => {
+            info!("[AI] Spawning internal XFChessEngine task");
+            let task = spawn_xf_engine_task(fen, params.ai_config.difficulty.seconds_per_move(), ai_color);
+            commands.insert_resource(PendingAIMove(task));
+        }
+    }
+}
+
+fn spawn_xf_engine_task(fen: String, think_time: f32, color: crate::rendering::pieces::PieceColor) -> Task<Result<AIMove, String>> {
+    AsyncComputeTaskPool::get().spawn(async move {
+        let start_time = Instant::now();
+        let mut game = nimzovich_engine::game_from_fen(&fen);
+        game.secs_per_move = think_time;
+        
+        let engine_color = match color {
+            crate::rendering::pieces::PieceColor::White => 1,
+            crate::rendering::pieces::PieceColor::Black => -1,
+        };
+        
+        let mv = nimzovich_engine::reply(&mut game, engine_color).await;
+        
+        let from_file = mv.src as u8 % 8;
+        let from_rank = mv.src as u8 / 8;
+        let to_file = mv.dst as u8 % 8;
+        let to_rank = mv.dst as u8 / 8;
+        
+        let from_uci = ChessEngine::coords_to_uci(from_file, from_rank);
+        let to_uci = ChessEngine::coords_to_uci(to_file, to_rank);
+        
+        let promo_char = match mv.promo {
+            5 => "q",
+            4 => "r",
+            3 => "b",
+            2 => "n",
+            _ => "",
+        };
+        
+        let uci = format!("{}{}{}", from_uci, to_uci, promo_char);
+        
+        Ok(AIMove {
+            from: (from_file, from_rank),
+            to: (to_file, to_rank),
+            uci,
+            score: mv.score as i32,
+            depth: game.max_depth_so_far as u8,
+            thinking_time: start_time.elapsed().as_secs_f32(),
+        })
+    })
 }
 
 /// Spawn a task that runs Stockfish process and returns the best move

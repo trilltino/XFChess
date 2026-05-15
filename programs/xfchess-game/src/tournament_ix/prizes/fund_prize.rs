@@ -83,11 +83,6 @@ pub fn handler(ctx: Context<FundUsdcPrize>, tournament_id: u64, amount: u64) -> 
     tournament.usdc_prize_pool = amount;
     tournament.usdc_prize_funded = true;
 
-    msg!(
-        "Tournament {} USDC prize pool funded: {} USDC (6 decimals)",
-        tournament_id,
-        amount
-    );
 
     Ok(())
 }

@@ -87,6 +87,5 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
         tournament.prize_pool -= tournament.entry_fee;
     }
 
-    msg!("Player {} left tournament {} and was refunded {} lamports", player_key, tournament_id, refund_amount);
     Ok(())
 }

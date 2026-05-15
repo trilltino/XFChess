@@ -135,14 +135,6 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
             prize,
         )?;
 
-        msg!(
-            "Tournament {} USDC prize claimed: {} USDC to {} (Place {} - {}%)",
-            tournament_id,
-            prize,
-            claimant_key,
-            place,
-            prize_share_bps as f64 / 100.0
-        );
     } else {
         // SOL fallback path (legacy)
         let prize = (tournament.prize_pool as u128)
@@ -164,14 +156,6 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         **ctx.accounts.escrow_pda.lamports.borrow_mut() -= prize;
         **ctx.accounts.claimant_wallet.lamports.borrow_mut() += prize;
 
-        msg!(
-            "Tournament {} SOL prize claimed: {} lamports to {} (Place {} - {}%)",
-            tournament_id,
-            prize,
-            claimant_key,
-            place,
-            prize_share_bps as f64 / 100.0
-        );
     }
 
     Ok(())

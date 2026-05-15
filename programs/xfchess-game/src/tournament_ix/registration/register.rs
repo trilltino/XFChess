@@ -88,6 +88,5 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Re
     // Update prize pool
     tournament.prize_pool += tournament.entry_fee;
 
-    msg!("Player {} registered in tournament {}", player, tournament_id);
     Ok(())
 }

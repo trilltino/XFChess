@@ -110,6 +110,6 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
         )?;
     }
 
-    msg!("Player joined game. Match started with cross-border fee: {}", final_fee);
+
     Ok(())
 }

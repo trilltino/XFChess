@@ -197,8 +197,8 @@ impl ChessRpcClient {
         &self,
         player: Pubkey,
         game_id: u64,
-        move_str: String,
-        next_fen: String,
+        move_uci: [u8; 5],
+        next_board: [u8; 68],
         nonce: u64,
         signature: Option<Vec<u8>>,
     ) -> Instruction {
@@ -214,8 +214,8 @@ impl ChessRpcClient {
             ],
             data: xfchess_game::instruction::RecordMove {
                 game_id,
-                move_str,
-                next_fen,
+                move_uci,
+                next_board,
                 nonce,
                 signature,
             }

@@ -49,7 +49,6 @@ pub fn handler(ctx: Context<ResignGame>, _game_id: u64) -> Result<()> {
     game.status = GameStatus::Finished;
     game.updated_at = Clock::get()?.unix_timestamp;
 
-    msg!("XFChess: Resign — {} wins by resignation", winner);
 
     // Pay out escrow immediately
     let wager_amount = game.wager_amount;

@@ -158,11 +158,5 @@ pub fn handler(
     delegation.total_spent = delegation.total_spent.saturating_add(total_cost);
     delegation.games_played = delegation.games_played.saturating_add(1);
 
-    msg!(
-        "Session-joined game {} in tournament {}. Total spent: {} lamports",
-        game.game_id,
-        delegation.tournament_id,
-        total_cost
-    );
     Ok(())
 }

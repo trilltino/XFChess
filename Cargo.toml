@@ -103,7 +103,7 @@ rpc-api = { package = "solana-rpc-client-api", version = "=2.2.1" }
 iroh = "=0.96.1"
 iroh-base = "=0.96.1"
 bevy_egui = "=0.39.1"
-shakmaty = { package = "shakmaty-host-vendored", path = "crates/shakmaty-host-vendored" }
+
 webbrowser = "=1.0"
 xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
 braid-core = { path = "crates/braid-core" }
@@ -113,6 +113,7 @@ braid_uri = { path = "crates/braid_uri" }
 iroh-gossip = { path = "crates/iroh-gossip" }
 shared = { path = "crates/shared" }
 solana-chess-client = { path = "crates/solana-chess-client" }
+nimzovich_engine = { path = "crates/nimzovich_engine" }
 braid_stockfish_ai = { path = "crates/braid_stockfish_ai" }
 chess-logic-shared = { path = "crates/chess-logic-shared" }
 chess-logic-on-chain = { path = "crates/chess-logic-on-chain" }
@@ -183,7 +184,7 @@ uuid.workspace = true
 web-time.workspace = true
 reqwest.workspace = true
 anchor-lang = { workspace = true, optional = true }
-shakmaty = { workspace = true }
+nimzovich_engine = { workspace = true }
 bevy_egui = { workspace = true }
 solana-sdk = { workspace = true, optional = true }
 solana-client = { workspace = true, optional = true }

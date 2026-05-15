@@ -55,7 +55,7 @@ pub fn handler(
     dispute.expires_at = now + crate::constants::DISPUTE_TTL_SECS;
     dispute.bump = ctx.bumps.dispute_record;
 
-    msg!("Game {} disputed by {}", _game_id, dispute.challenger);
+
 
     Ok(())
 }

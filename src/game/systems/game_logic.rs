@@ -16,7 +16,7 @@ use crate::game::components::{GamePhase, PieceMoveAnimation, FadingCapture};
 use crate::game::resources::*;
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
-use shakmaty::Color;
+
 
 /// System to update game phase (check, checkmate, etc.)
 ///
@@ -74,11 +74,6 @@ pub fn update_game_phase(
     // Sync ECS → Engine before checking game state
     engine.sync_ecs_to_engine(&pieces_query);
 
-    // Use shakmaty to determine game state
-    let _sm_color = match current_turn.color {
-        PieceColor::White => Color::White,
-        PieceColor::Black => Color::Black,
-    };
 
     let in_check = engine.is_check();
     let legal_moves = engine.legal_moves();

@@ -113,7 +113,7 @@ pub fn handler_claim_fees(ctx: Context<ClaimFees>) -> Result<u64> {
     vault.total_accumulated = 0;
     vault.last_claim_at = now;
 
-    msg!("Claimed {} lamports to host wallet", amount);
+
     Ok(amount)
 }
 

@@ -71,7 +71,6 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
                 if let Some(player_account) = ctx.remaining_accounts.get(i) {
                     **player_account.lamports.borrow_mut() += prize_amount;
                     remaining_lamports -= prize_amount;
-                    msg!("Distributed prize {} to player {}", prize_amount, player_account.key());
                 }
             }
         } else if tournament.winner_takes_all && num_players > 0 {
@@ -79,20 +78,17 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
             if let Some(winner_account) = ctx.remaining_accounts.first() {
                 **winner_account.lamports.borrow_mut() += prize_escrow_lamports;
                 remaining_lamports = 0;
-                msg!("Distributed full prize {} to winner {}", prize_escrow_lamports, winner_account.key());
             }
         }
 
         // Return any undistributed lamports to treasury
         if remaining_lamports > 0 {
             **ctx.accounts.treasury_vault.lamports.borrow_mut() += remaining_lamports;
-            msg!("Returned undistributed {} to treasury", remaining_lamports);
         }
 
         // Drain escrow account
         **ctx.accounts.prize_escrow_pda.lamports.borrow_mut() = 0;
     }
 
-    msg!("Tournament {} closed", tournament_id);
     Ok(())
 }

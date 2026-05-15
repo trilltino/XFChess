@@ -25,13 +25,11 @@ pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData)
     
     // Only check active games
     if game.status != GameStatus::Active {
-        msg!("Game {} is not active (status: {:?})", game.game_id, game.status);
         return Ok(());
     }
     
     // Skip if no time control set
     if game.base_time_seconds == 0 {
-        msg!("Game {} has no time control", game.game_id);
         return Ok(());
     }
     
@@ -63,21 +61,7 @@ pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData)
         game.result = GameResult::Winner(winner);
         game.updated_at = now;
         
-        msg!(
-            "Time control violation: Game {} - Player {} timed out after {}s (limit: {}s). Winner: {}",
-            game.game_id,
-            timed_out_player,
-            time_elapsed,
-            time_limit,
-            winner
-        );
     } else {
-        msg!(
-            "Time check passed: Game {} - {}s elapsed (limit: {}s)",
-            game.game_id,
-            time_elapsed,
-            time_limit
-        );
     }
     
     Ok(())

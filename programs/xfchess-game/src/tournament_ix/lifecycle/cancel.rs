@@ -88,11 +88,6 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
                 usdc_balance,
             )?;
 
-            msg!(
-                "Tournament {} USDC prize pool returned: {} USDC to operator",
-                tournament_id,
-                usdc_balance
-            );
         }
     }
 
@@ -146,21 +141,11 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
             )?;
         }
 
-        msg!(
-            "Tournament {} entry fees refunded: {} players × {} lamports from host treasury",
-            tournament_id,
-            registered,
-            refund_amount
-        );
     }
 
     // Mark tournament as cancelled
     ctx.accounts.tournament.status = TournamentStatus::Cancelled;
     ctx.accounts.tournament.usdc_prize_funded = false;
 
-    msg!(
-        "Tournament {} cancelled. Status: Cancelled",
-        tournament_id
-    );
     Ok(())
 }
