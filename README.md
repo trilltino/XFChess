@@ -6,9 +6,9 @@
 
 **XFChess** is a 3D chess game built with Rust, Bevy, and Solana blockchain integration. Play locally or online with move verification and tournament support.
 
-![Screenshot](https://via.placeholder.com/800x450?text=Gameplay+Screenshot)
-![Screenshot](https://via.placeholder.com/800x450?text=Tournament+Interface)
-![Screenshot](https://via.placeholder.com/800x450?text=Multiplayer+Match)
+![Gameplay Screenshot](assets/screenshot_1.png)
+![Tournament Interface](assets/screenshot_2.png)
+![Multiplayer Match](assets/screenshot_3.png)
 
 ## Table of Contents
 
