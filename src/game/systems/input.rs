@@ -670,7 +670,7 @@ pub fn confirm_exit_game(
             next_state.set(crate::core::GameState::MainMenu);
             return;
         }
-        GameMode::SinglePlayer | GameMode::Spectator => {
+        GameMode::SinglePlayer | GameMode::Spectator | GameMode::PgnReplay => {
             next_state.set(crate::core::GameState::MainMenu);
             return;
         }

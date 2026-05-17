@@ -1,4 +1,5 @@
 MAIN MENU
+
 NETWORKING
 - Validate Braid/iroh games work Locally
 SOLANA NETWORKING
@@ -11,6 +12,8 @@ Tournaments LOBBY
 IN GAME UI 3D
 IN GAME UX 2D
 END GAME UI/UX
+
+
 CHESS P2P PGN REPORT
 CHESS SOLANA PGN REPORT
 CHESS TOURNEY PGN REPORT
@@ -20,3 +23,6 @@ PREFORMANCE & OPTIMIZATION
 - Edit UI for Local Lobby 
 - Validate that Local Games can connect within the UI
 
+
+
+Game Launch Trailer

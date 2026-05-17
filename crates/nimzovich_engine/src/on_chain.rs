@@ -170,6 +170,68 @@ impl CompactBoard {
         g.rebuild_bitboards();
         g
     }
+
+    /// Convert to a FEN string.
+    pub fn to_fen(&self) -> String {
+        let mut fen = String::with_capacity(100);
+
+        // 1. Piece placement
+        for rank in (0..8).rev() {
+            let mut empty_count = 0;
+            for file in 0..8 {
+                let sq = rank * 8 + file;
+                let piece = self.squares[sq];
+                if piece == 0 {
+                    empty_count += 1;
+                } else {
+                    if empty_count > 0 {
+                        fen.push_str(&empty_count.to_string());
+                        empty_count = 0;
+                    }
+                    fen.push(match piece {
+                         1 => 'P',  2 => 'N',  3 => 'B',  4 => 'R',  5 => 'Q',  6 => 'K',
+                        -1 => 'p', -2 => 'n', -3 => 'b', -4 => 'r', -5 => 'q', -6 => 'k',
+                        _ => '?',
+                    });
+                }
+            }
+            if empty_count > 0 {
+                fen.push_str(&empty_count.to_string());
+            }
+            if rank > 0 { fen.push('/'); }
+        }
+
+        // 2. Side to move
+        fen.push(' ');
+        fen.push(if self.side_to_move > 0 { 'w' } else { 'b' });
+
+        // 3. Castling
+        fen.push(' ');
+        if self.castling == 0 {
+            fen.push('-');
+        } else {
+            if self.castling & CASTLE_WK != 0 { fen.push('K'); }
+            if self.castling & CASTLE_WQ != 0 { fen.push('Q'); }
+            if self.castling & CASTLE_BK != 0 { fen.push('k'); }
+            if self.castling & CASTLE_BQ != 0 { fen.push('q'); }
+        }
+
+        // 4. En passant
+        fen.push(' ');
+        if self.ep_target < 0 || self.ep_target > 63 {
+            fen.push('-');
+        } else {
+            let file = (self.ep_target % 8) as u8;
+            let rank = (self.ep_target / 8) as u8;
+            fen.push((b'a' + file) as char);
+            fen.push((b'1' + rank) as char);
+        }
+
+        // 5. Halfmove clock & fullmove number (not tracked in CompactBoard)
+        fen.push_str(" 0 1");
+
+        fen
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -308,5 +370,30 @@ impl OnChainGame {
     pub fn king_square(&self, color: i8) -> Option<u8> {
         let bb = if color > 0 { self.white_kings } else { self.black_kings };
         if bb == 0 { None } else { Some(bb.trailing_zeros() as u8) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::on_chain_attack::is_in_check_fast;
+    use crate::on_chain_moves;
+
+    #[test]
+    fn test_fen_roundtrip_starting_position() {
+        let start_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let cb = CompactBoard::from_fen(start_fen);
+        let out = cb.to_fen();
+        assert_eq!(out, start_fen);
+    }
+
+    #[test]
+    fn test_fen_roundtrip_after_e2e4() {
+        let start_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let mut g = CompactBoard::from_fen(start_fen).to_on_chain_game();
+        let _ = on_chain_moves::validate_and_apply(&mut g, b"e2e4\0").unwrap();
+        let cb = g.to_compact_board();
+        let out = cb.to_fen();
+        assert_eq!(out, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
     }
 }

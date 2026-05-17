@@ -1,144 +1,42 @@
-use serde::{Deserialize, Serialize};
-use std::fmt;
+//! braid-core: Unified Braid Protocol implementation in Rust.
+//!
+//! This crate consolidates several Braid-related components into a single library:
+//!
+//! - **core**: The core Braid-HTTP protocol implementation (types, parser, client, server).
+//! - **antimatter**: Conflict resolution and state management.
+//! - **blob**: Braid-Blob storage and synchronization service.
+//! - **fs**: Filesystem synchronization client logic.
 
-/// Braid protocol version identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Version {
-    String(String),
-    U64(u64),
-}
+pub use smallvec;
+pub mod core;
+pub mod vendor;
 
-impl fmt::Display for Version {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Version::String(s) => write!(f, "{}", s),
-            Version::U64(n) => write!(f, "{}", n),
-        }
-    }
-}
+// Antimatter module removed in favor of Diamond Types
 
-impl Version {
-    pub fn new(s: impl Into<String>) -> Self {
-        Version::String(s.into())
-    }
+#[cfg(feature = "blob")]
+pub use braid_blob as blob;
 
-    /// Returns an iterator over the version (for compatibility with existing code)
-    pub fn iter(&self) -> impl Iterator<Item = &Self> {
-        std::iter::once(self)
-    }
-}
+#[cfg(feature = "fs")]
+pub mod fs;
 
-/// Braid protocol update (a versioned change to a resource)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Update {
-    pub version: Version,
-    pub parents: Vec<Version>,
-    pub body: Option<Vec<u8>>,
-    pub status: u16,
-}
+// Top-level re-exports for common usage
+pub use crate::core::error::{BraidError, Result};
+pub use crate::core::{BraidRequest, BraidResponse, Patch, Update, Version};
+pub use braid_http::types;
 
-impl Update {
-    pub fn snapshot(version: Version, body: bytes::Bytes) -> Self {
-        Self {
-            version,
-            parents: Vec::new(),
-            body: Some(body.to_vec()),
-            status: 200,
-        }
-    }
+#[cfg(feature = "client")]
+pub use crate::core::{BraidClient, ClientConfig, Subscription};
+#[cfg(feature = "client")]
+pub use braid_http::client;
 
-    pub fn body_str(&self) -> Option<&str> {
-        self.body.as_ref().and_then(|b| std::str::from_utf8(b).ok())
-    }
+#[cfg(feature = "server")]
+pub use crate::core::server;
+#[cfg(feature = "server")]
+pub use crate::core::server::{BraidLayer, BraidState, ConflictResolver, ServerConfig};
 
-    pub fn patches(&self) -> Option<&Vec<u8>> {
-        self.body.as_ref()
-    }
-}
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::core::merge;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[cfg(feature = "blob")]
+pub use braid_blob::BlobStore;
 
-    #[test]
-    fn version_new_from_string() {
-        let v = Version::new("root");
-        assert_eq!(v, Version::String("root".to_string()));
-    }
-
-    #[test]
-    fn version_display_string() {
-        let v = Version::String("abc".to_string());
-        assert_eq!(format!("{}", v), "abc");
-    }
-
-    #[test]
-    fn version_display_u64() {
-        let v = Version::U64(42);
-        assert_eq!(format!("{}", v), "42");
-    }
-
-    #[test]
-    fn version_iter_returns_once() {
-        let v = Version::U64(1);
-        let collected: Vec<_> = v.iter().collect();
-        assert_eq!(collected.len(), 1);
-        assert_eq!(collected[0], &v);
-    }
-
-    #[test]
-    fn update_snapshot_roundtrip() {
-        let ver = Version::new("v1");
-        let body = bytes::Bytes::from_static(b"hello");
-        let up = Update::snapshot(ver.clone(), body);
-
-        assert_eq!(up.version, ver);
-        assert_eq!(up.parents.len(), 0);
-        assert_eq!(up.body, Some(b"hello".to_vec()));
-        assert_eq!(up.status, 200);
-    }
-
-    #[test]
-    fn update_body_str_valid_utf8() {
-        let up = Update {
-            version: Version::new("v1"),
-            parents: vec![],
-            body: Some(b"chess".to_vec()),
-            status: 200,
-        };
-        assert_eq!(up.body_str(), Some("chess"));
-    }
-
-    #[test]
-    fn update_body_str_invalid_utf8() {
-        let up = Update {
-            version: Version::new("v1"),
-            parents: vec![],
-            body: Some(vec![0x80, 0x81]),
-            status: 200,
-        };
-        assert_eq!(up.body_str(), None);
-    }
-
-    #[test]
-    fn update_patches_returns_body() {
-        let up = Update {
-            version: Version::new("v1"),
-            parents: vec![],
-            body: Some(vec![1, 2, 3]),
-            status: 200,
-        };
-        assert_eq!(up.patches(), Some(&vec![1, 2, 3]));
-    }
-
-    #[test]
-    fn update_patches_none_when_no_body() {
-        let up = Update {
-            version: Version::new("v1"),
-            parents: vec![Version::new("v0")],
-            body: None,
-            status: 204,
-        };
-        assert_eq!(up.patches(), None);
-    }
-}

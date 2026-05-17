@@ -32,6 +32,7 @@ pub fn new_game() -> Game {
         black_rook_56_has_moved: false,
         black_rook_63_has_moved: false,
         en_passant_target: None,
+        halfmove_clock: 0,
         secs_per_move: 1.5,
 
         rook: utils::create_empty_move_table_array(),
@@ -64,6 +65,10 @@ pub fn new_game() -> Game {
         killer_moves: [[None; 2]; MAX_DEPTH + 1],
         #[cfg(feature = "search")]
         history_table: [[0; 64]; 64],
+        #[cfg(feature = "search")]
+        cap_history: [[[0; 7]; 64]; 7],
+        #[cfg(feature = "search")]
+        conthist: [[0; 64]; 64],
         #[cfg(feature = "search")]
         abort_search: std::sync::Arc::new(core::sync::atomic::AtomicBool::new(false)),
 
@@ -109,6 +114,7 @@ pub fn reset_game(game: &mut Game) {
     game.white_rook_7_has_moved = false;
     game.black_rook_56_has_moved = false;
     game.black_rook_63_has_moved = false;
+    game.halfmove_clock = 0;
     game.max_depth_so_far = 0;
     game.calls = 0;
     game.cut = 0;
@@ -185,9 +191,18 @@ pub fn game_from_fen(fen: &str) -> Game {
         }
     }
 
-    // 5. Halfmove/Fullmove
+    // 5. Halfmove clock
+    if parts.len() >= 5 {
+        game.halfmove_clock = parts[4].parse().unwrap_or(0);
+    }
+
+    // 6. Fullmove counter
     if parts.len() >= 6 {
-        game.move_counter = parts[5].parse().unwrap_or(1);
+        game.move_counter = (parts[5].parse::<i32>().unwrap_or(1) - 1) * 2;
+        // Adjust move_counter based on side to move
+        if parts.len() >= 2 && parts[1] == "b" {
+            game.move_counter += 1;
+        }
     }
 
     // Re-initialize bitboards and hash from the new board state
@@ -196,4 +211,74 @@ pub fn game_from_fen(fen: &str) -> Game {
     init_zobrist(&mut game);
 
     game
+}
+
+/// Generate a FEN string from the current game state.
+#[cfg(feature = "std")]
+pub fn game_to_fen(game: &Game) -> String {
+    // 1. Piece placement
+    let mut ranks = Vec::with_capacity(8);
+    for rank in (0..8u8).rev() {
+        let mut rank_str = String::new();
+        let mut empty = 0u8;
+        for file in 0..8u8 {
+            let sq = (rank * 8 + file) as usize;
+            let id = game.board[sq];
+            if id == 0 {
+                empty += 1;
+            } else {
+                if empty > 0 {
+                    rank_str.push((b'0' + empty) as char);
+                    empty = 0;
+                }
+                let ch = match id.abs() {
+                    1 => 'p',
+                    2 => 'n',
+                    3 => 'b',
+                    4 => 'r',
+                    5 => 'q',
+                    6 => 'k',
+                    _ => '?',
+                };
+                rank_str.push(if id > 0 { ch.to_ascii_uppercase() } else { ch });
+            }
+        }
+        if empty > 0 {
+            rank_str.push((b'0' + empty) as char);
+        }
+        ranks.push(rank_str);
+    }
+    let piece_placement = ranks.join("/");
+
+    // 2. Side to move
+    let side = if game.move_counter % 2 == 0 { 'w' } else { 'b' };
+
+    // 3. Castling rights
+    let mut castling = String::new();
+    if !game.white_king_has_moved && !game.white_rook_7_has_moved { castling.push('K'); }
+    if !game.white_king_has_moved && !game.white_rook_0_has_moved { castling.push('Q'); }
+    if !game.black_king_has_moved && !game.black_rook_63_has_moved { castling.push('k'); }
+    if !game.black_king_has_moved && !game.black_rook_56_has_moved { castling.push('q'); }
+    if castling.is_empty() { castling.push('-'); }
+
+    // 4. En passant target
+    let ep = match game.en_passant_target {
+        Some(sq) => {
+            let file = (sq % 8) as u8;
+            let rank = (sq / 8) as u8;
+            format!("{}{}", (b'a' + file) as char, (b'1' + rank) as char)
+        }
+        None => "-".to_string(),
+    };
+
+    // 5. Halfmove clock
+    let halfmove = game.halfmove_clock;
+
+    // 6. Fullmove counter
+    let fullmove = game.move_counter / 2 + 1;
+
+    format!(
+        "{} {} {} {} {} {}",
+        piece_placement, side, castling, ep, halfmove, fullmove
+    )
 }

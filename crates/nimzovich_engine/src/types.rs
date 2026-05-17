@@ -216,6 +216,7 @@ pub struct Game {
     pub black_rook_56_has_moved: bool,
     pub black_rook_63_has_moved: bool,
     pub en_passant_target: Option<i8>,
+    pub halfmove_clock: u32,
     pub secs_per_move: f32,
 
     pub rook: [KKS; 64],
@@ -271,6 +272,12 @@ pub struct Game {
     /// History heuristic: bonus for moves that have caused cutoffs across the search
     #[cfg(feature = "search")]
     pub history_table: [[u32; 64]; 64],
+    /// Capture history: [piece_type][to][captured_piece_type]
+    #[cfg(feature = "search")]
+    pub cap_history: [[[i32; 7]; 64]; 7],
+    /// Continuation history: [piece_type][to] scores indexed by previous move
+    #[cfg(feature = "search")]
+    pub conthist: [[i32; 64]; 64],
     /// Precomputed bitboards for sliding pieces in each direction
     pub sliding_attack_masks: [[BitSet; 8]; 64],
     /// Atomic flag to abort the search (e.g. on timeout)

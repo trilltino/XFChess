@@ -126,7 +126,7 @@ impl ChessPublisher {
 
         let response = self
             .client
-            .fetch(&url, &request)
+            .fetch(&url, request)
             .await
             .map_err(|e| BraidUriError::Http(e.to_string()))?;
 

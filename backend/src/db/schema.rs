@@ -46,6 +46,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<()> {
             finalize_sig TEXT,
             status TEXT DEFAULT 'playing',
             archived_at INTEGER,
+            pgn_text TEXT,
             created_at INTEGER DEFAULT (strftime('%s', 'now'))
         )
         "#,

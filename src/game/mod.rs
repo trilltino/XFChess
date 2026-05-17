@@ -12,5 +12,6 @@ pub mod systems;
 pub mod types;
 pub mod view_mode;
 pub mod view_mode_systems;
+pub mod replay;
 
 pub use plugin::GamePlugin;

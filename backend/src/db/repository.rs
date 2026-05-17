@@ -19,6 +19,7 @@ pub struct GameRecord {
     pub finalize_sig: Option<String>,
     pub status: String,
     pub archived_at: Option<i64>,
+    pub pgn_text: Option<String>,
     pub created_at: i64,
 }
 
@@ -126,24 +127,26 @@ impl GameRepository {
         Ok(())
     }
 
-    /// Appends a single move. Called from record_move handler.
+    /// Appends a single move with optional SAN. Called from record_move handler.
     pub async fn add_move_simple(
         &self,
         game_id: &str,
         move_number: i32,
         move_uci: &str,
+        move_san: Option<&str>,
         fen_after: Option<&str>,
         player: &str,
     ) -> Result<()> {
         let now = chrono::Utc::now().timestamp();
         sqlx::query(
-            r#"INSERT OR IGNORE INTO moves (game_id, move_number, move_uci, fen_after, player, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?)
+            r#"INSERT OR IGNORE INTO moves (game_id, move_number, move_uci, move_san, fen_after, player, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(game_id)
         .bind(move_number)
         .bind(move_uci)
+        .bind(move_san)
         .bind(fen_after)
         .bind(player)
         .bind(now)
@@ -430,6 +433,27 @@ impl GameRepository {
         Ok(games)
     }
  
+    /// Store pre-assembled PGN text for a game
+    pub async fn set_pgn_text(&self, game_id: &str, pgn: &str) -> Result<()> {
+        sqlx::query("UPDATE games SET pgn_text = ? WHERE id = ?")
+            .bind(pgn)
+            .bind(game_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Retrieve stored PGN text for a game
+    pub async fn get_pgn_text(&self, game_id: &str) -> Result<Option<String>> {
+        let result: Option<(String,)> = sqlx::query_as(
+            "SELECT pgn_text FROM games WHERE id = ?"
+        )
+        .bind(game_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result.map(|(pgn,)| pgn))
+    }
+
     /// Marks a game as archived at the given timestamp
     pub async fn mark_as_archived(&self, game_id: &str, timestamp: i64) -> Result<()> {
         sqlx::query("UPDATE games SET archived_at = ? WHERE id = ?")

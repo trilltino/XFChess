@@ -201,6 +201,7 @@ pub async fn session_status(
 // ── Moves ─────────────────────────────────────────────────────────────────────
 
 /// POST /move/record - Records a move on the Execution Rollup.
+/// Validates engine-side before Solana submission; derives next_fen internally.
 pub async fn record_move(
     State(state): State<AppState>,
     Json(req): Json<RecordMoveReq>,
@@ -210,16 +211,37 @@ pub async fn record_move(
         return Err(StatusCode::PRECONDITION_FAILED);
     }
 
+    // ── Engine-side validation (replay from previous FEN) ──
+    let pool = state.store.pool();
+    let repo = GameRepository::new(pool.clone());
+
+    let prev_fen = if let Ok(moves) = repo.get_moves(&req.game_id.to_string()).await {
+        moves.iter().max_by_key(|m| m.move_number).and_then(|m| m.fen_after.clone())
+    } else {
+        None
+    }.unwrap_or_else(|| "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
+
+    let mut game = nimzovich_engine::on_chain::CompactBoard::from_fen(&prev_fen).to_on_chain_game();
+
+    // Parse UCI into fixed 5-byte array
+    let mv_bytes = uci_to_fixed5(&req.move_uci).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // Validate and apply
+    let _outcome = nimzovich_engine::on_chain_moves::validate_and_apply(&mut game, &mv_bytes)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // Derive next FEN from the engine (discard client-provided next_fen)
+    let derived_next_fen = game.to_compact_board().to_fen();
+
     let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let session_pk = entry.session_pubkey();
     let session_kp = entry.keypair();
 
     // Internal signing for data-level replay protection
-    // Signature = sign(session_key, hash(game_id, move_uci, next_fen, nonce))
     let mut hasher = Sha256::new();
     hasher.update(req.game_id.to_le_bytes());
     hasher.update(req.move_uci.as_bytes());
-    hasher.update(req.next_fen.as_bytes());
+    hasher.update(derived_next_fen.as_bytes());
     hasher.update(req.nonce.to_le_bytes());
     let hash = hasher.finalize();
     let sig_bytes = session_kp.sign_message(&hash).as_ref().to_vec();
@@ -230,7 +252,7 @@ pub async fn record_move(
         &entry.wallet_pubkey,
         req.game_id,
         &req.move_uci,
-        &req.next_fen,
+        &derived_next_fen,
         req.nonce,
         Some(sig_bytes),
     ).map_err(|e| {
@@ -245,28 +267,38 @@ pub async fn record_move(
     })?;
     info!("[VPS] record_move game {} move {} sig {}", req.game_id, req.move_uci, sig);
 
-    // Fire-and-forget DB write (log errors but don't fail the HTTP response)
+    // Fire-and-forget DB write with derived FEN
     let game_id_str = req.game_id.to_string();
     let player_wallet = entry.wallet_pubkey.to_string();
-    let pool = state.store.pool();
     let move_uci = req.move_uci.clone();
-    let next_fen = req.next_fen.clone();
+    let next_fen = derived_next_fen;
     tokio::spawn(async move {
-        // Ensure game row exists on first move
         let repo = GameRepository::new(pool);
         if let Err(e) = repo.upsert_game(&game_id_str).await {
             error!("[DB] Failed to upsert game {}: {}", game_id_str, e);
             return;
         }
-        // Increment move counter and get the new number
         let move_number = repo.get_next_move_number(&game_id_str).await.unwrap_or(1) as i32;
-        // Insert the move
-        if let Err(e) = repo.add_move_simple(&game_id_str, move_number, &move_uci, Some(&next_fen), &player_wallet).await {
+
+        let san = generate_san(&repo, &game_id_str, &move_uci, move_number).await.ok();
+
+        if let Err(e) = repo.add_move_simple(&game_id_str, move_number, &move_uci, san.as_deref(), Some(&next_fen), &player_wallet).await {
             error!("[DB] Failed to insert move for game {}: {}", game_id_str, e);
         }
     });
 
     Ok(Json(SigResp { sig: sig.to_string() }))
+}
+
+/// Convert a UCI string (e.g. "e2e4" or "e7e8q") into a fixed 5-byte array.
+fn uci_to_fixed5(uci: &str) -> Result<[u8; 5], ()> {
+    let bytes = uci.as_bytes();
+    if bytes.len() < 4 || bytes.len() > 5 {
+        return Err(());
+    }
+    let mut out = [0u8; 5];
+    out[..bytes.len()].copy_from_slice(bytes);
+    Ok(out)
 }
 
 /// POST /game/undelegate - Undelegates a game from ER to devnet.
@@ -347,6 +379,36 @@ pub async fn finalize_game(
         ).await {
             error!("[DB] Failed to finalize game {}: {}", game_id_str, e);
         }
+
+        // Assemble and store PGN
+        let moves = repo.get_moves(&game_id_str).await;
+        if let Ok(moves) = moves {
+            use nimzovich_engine::{PgnAssembler, PgnResult};
+            let mut assembler = PgnAssembler::new();
+            let date = chrono::Utc::now().format("%Y.%m.%d").to_string();
+            assembler
+                .tag("Event", "XFChess Game")
+                .tag("Site", "XFChess")
+                .tag("White", white_username.as_deref().unwrap_or(&white))
+                .tag("Black", black_username.as_deref().unwrap_or(&black))
+                .tag("Date", &date);
+            for mv in moves {
+                if let Some(san) = mv.move_san {
+                    assembler.add_move(san);
+                }
+            }
+            let result = match winner.as_deref() {
+                Some("white") => PgnResult::WhiteWins,
+                Some("black") => PgnResult::BlackWins,
+                _ => PgnResult::Draw,
+            };
+            assembler.set_result(result);
+            let pgn = assembler.to_string();
+            if let Err(e) = repo.set_pgn_text(&game_id_str, &pgn).await {
+                error!("[DB] Failed to store PGN for game {}: {}", game_id_str, e);
+            }
+        }
+
         elo_cache.invalidate(&white);
         elo_cache.invalidate(&black);
     });
@@ -490,6 +552,67 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<StatsResp>,
         total_sessions,
         uptime_seconds,
     }))
+}
+
+/// Generate SAN for a move by replaying from the previous position.
+async fn generate_san(
+    repo: &GameRepository,
+    game_id: &str,
+    move_uci: &str,
+    move_number: i32,
+) -> anyhow::Result<String> {
+    use nimzovich_engine::{game_from_fen, do_move, move_to_san};
+
+    // Get previous FEN: last move's fen_after, or start position
+    let prev_fen = if move_number <= 1 {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
+    } else {
+        let prev_moves = repo.get_moves(game_id).await?;
+        prev_moves
+            .iter()
+            .find(|m| m.move_number == move_number - 1)
+            .and_then(|m| m.fen_after.clone())
+            .unwrap_or_else(|| "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string())
+    };
+
+    let mut game = game_from_fen(&prev_fen);
+
+    // Parse UCI: e.g., "e2e4" -> src=12, dst=28, promo=0
+    let bytes = move_uci.as_bytes();
+    if bytes.len() < 4 {
+        return Err(anyhow::anyhow!("Invalid UCI move: {}", move_uci));
+    }
+    let src_file = (bytes[0].wrapping_sub(b'a')) as i8;
+    let src_rank = (bytes[1].wrapping_sub(b'1')) as i8;
+    let dst_file = (bytes[2].wrapping_sub(b'a')) as i8;
+    let dst_rank = (bytes[3].wrapping_sub(b'1')) as i8;
+
+    if src_file < 0 || src_file > 7 || src_rank < 0 || src_rank > 7
+        || dst_file < 0 || dst_file > 7 || dst_rank < 0 || dst_rank > 7
+    {
+        return Err(anyhow::anyhow!("Invalid UCI move: {}", move_uci));
+    }
+
+    let src = src_rank * 8 + src_file;
+    let dst = dst_rank * 8 + dst_file;
+    let promo = if bytes.len() > 4 {
+        match bytes[4] {
+            b'q' | b'Q' => 5,
+            b'r' | b'R' => 4,
+            b'b' | b'B' => 3,
+            b'n' | b'N' => 2,
+            _ => 0,
+        }
+    } else {
+        0
+    };
+
+    // Apply the move
+    do_move(&mut game, src, dst, true);
+
+    // Generate SAN
+    let san = move_to_san(&game, src, dst, promo);
+    Ok(san)
 }
 
 #[cfg(test)]

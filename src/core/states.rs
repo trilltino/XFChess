@@ -38,6 +38,7 @@ pub enum GameMode {
     MultiplayerCompetitive,
     BraidMultiplayer,
     Spectator,
+    PgnReplay,
 }
 
 impl Default for GameMode {

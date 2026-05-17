@@ -105,7 +105,7 @@ impl ChessSubscriber {
 
         let mut subscription: Subscription = self
             .client
-            .subscribe(&url, &request)
+            .subscribe(&url, request)
             .await
             .map_err(|e| BraidUriError::Http(e.to_string()))?;
 
@@ -153,10 +153,12 @@ fn decode_update(update: &Update) -> Option<ChessMessage> {
     if let Some(body_str) = update.body_str() {
         return parse_chess_message(body_str);
     }
-    if let Some(patches) = update.patches() {
-        if let Ok(content) = std::str::from_utf8(patches) {
-            if let Some(msg) = parse_chess_message(content) {
-                return Some(msg);
+    if let Some(patches) = &update.patches {
+        for patch in patches {
+            if let Ok(content) = std::str::from_utf8(&patch.content) {
+                if let Some(msg) = parse_chess_message(content) {
+                    return Some(msg);
+                }
             }
         }
     }

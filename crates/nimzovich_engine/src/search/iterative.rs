@@ -5,6 +5,7 @@
 
 use super::alphabeta::alphabeta;
 use super::make_unmake::{make_move, unmake_move};
+use super::params::SearchParams;
 use crate::constants::*;
 use crate::hash::*;
 use crate::move_gen::is_in_check;
@@ -12,6 +13,8 @@ use crate::move_gen::*;
 use crate::types::*;
 use std::time::Instant;
 use core::sync::atomic::Ordering;
+
+static SP: SearchParams = SearchParams::sarah_tuned();
 
 /// Iterative deepening search (Synchronous)
 pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) -> Move {
@@ -25,9 +28,20 @@ pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) ->
     game.tte_hit = 0;
     game.abort_search.store(false, Ordering::Relaxed);
 
+    let mut prev_score = 0i16;
+
     for depth in 1..=MAX_DEPTH {
+        // Aspiration windows after depth 1
+        let (alpha, beta) = if depth > 1 {
+            let window = (SP.aspiration_base as i16 + (SP.aspiration_mul * depth as i32) as i16)
+                .max(10);
+            (prev_score.saturating_sub(window), prev_score.saturating_add(window))
+        } else {
+            (-AB_INF, AB_INF)
+        };
+
         // Handle search errors gracefully
-        let score = match alphabeta(game, depth as i32, -AB_INF, AB_INF, color) {
+        let mut score = match alphabeta(game, depth as i32, alpha, beta, color) {
             Ok(score) => score,
             Err(e) => {
                 // Log the error but continue with fallback
@@ -41,6 +55,16 @@ pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) ->
                 }
             }
         };
+
+        // Re-search on fail-low or fail-high
+        if score <= alpha || score >= beta {
+            score = match alphabeta(game, depth as i32, -AB_INF, AB_INF, color) {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+        }
+
+        prev_score = score;
 
         // Check if search was aborted (either via time or external signal)
         if game.abort_search.load(Ordering::Relaxed) {

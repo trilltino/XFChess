@@ -203,14 +203,12 @@ pub fn spawn_swiss_subscription(
             }
         };
 
-        // Create Iroh node using BraidGameConfig
-        use braid_iroh::BraidGameConfig;
-        let node = match BraidIrohNode::spawn(BraidGameConfig {
+        // Create Iroh node using BraidIrohConfig
+        use braid_iroh::BraidIrohConfig;
+        let node = match BraidIrohNode::spawn(BraidIrohConfig {
             discovery: DiscoveryConfig::Real,
             secret_key: None,
             proxy_config: None,
-            app_router: None,
-            db: None,
         }).await {
             Ok(node) => node,
             Err(e) => {
@@ -241,22 +239,22 @@ pub fn spawn_swiss_subscription(
                 _ => continue,
             };
             let Ok(text) = std::str::from_utf8(&payload) else { continue };
-            let Ok(swiss_msg) = serde_json::from_str::<braid_iroh::protocol::SwissMessage>(text) else { continue };
+            let Ok(swiss_msg) = serde_json::from_str::<braid_iroh::tournament::SwissMessage>(text) else { continue };
             match swiss_msg {
-                braid_iroh::protocol::SwissMessage::RoundStarted { round, pairings, .. } => {
+                braid_iroh::tournament::SwissMessage::RoundStarted { round, pairings, .. } => {
                     let _ = round_tx.send(SwissRoundStartedEvent {
                         tournament_id,
                         round,
                         pairings: pairings.iter().map(|p| (p.white.clone(), p.black.clone())).collect(),
                     });
                 }
-                braid_iroh::protocol::SwissMessage::ResultRecorded { round, board, result, .. } => {
+                braid_iroh::tournament::SwissMessage::ResultRecorded { round, board, result, .. } => {
                     // `SwissMessage::ResultRecorded` carries only the match outcome;
                     // white/black player identifiers are resolved from the pairing
                     // stored alongside the round.
                     let (white, black) = match &result {
-                        braid_iroh::protocol::MatchResult::Win { winner } => (winner.clone(), String::new()),
-                        braid_iroh::protocol::MatchResult::Draw => (String::new(), String::new()),
+                        braid_iroh::tournament::MatchResult::Win { winner } => (winner.clone(), String::new()),
+                        braid_iroh::tournament::MatchResult::Draw => (String::new(), String::new()),
                     };
                     let _ = result_tx.send(SwissResultRecordedEvent {
                         tournament_id,
@@ -267,13 +265,13 @@ pub fn spawn_swiss_subscription(
                         result: result.to_string(),
                     });
                 }
-                braid_iroh::protocol::SwissMessage::StandingsUpdated { standings, .. } => {
+                braid_iroh::tournament::SwissMessage::StandingsUpdated { standings, .. } => {
                     let _ = standings_tx.send(SwissStandingsUpdatedEvent {
                         tournament_id,
                         standings: standings.iter().map(|s| (s.player_id.clone(), s.score, s.rank)).collect(),
                     });
                 }
-                braid_iroh::protocol::SwissMessage::BracketFired { player_count, started_at, .. } => {
+                braid_iroh::tournament::SwissMessage::BracketFired { player_count, started_at, .. } => {
                     let _ = bracket_fired_tx.send(BracketFiredEvent {
                         tournament_id,
                         player_count,

@@ -181,6 +181,12 @@ pub fn has_non_pawn_material(game: &Game, color: Color) -> bool {
     }
 }
 
+/// Check if a score indicates a mate distance (within mate detection range)
+#[inline]
+pub fn is_mate_score(score: i16) -> bool {
+    score.abs() > KING_VALUE_DIV_2
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

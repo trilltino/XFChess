@@ -169,6 +169,10 @@ class ApiClient {
   async getGameMoves(gameId: string) {
     return this.request<any>(`/games/moves/${gameId}`);
   }
+
+  async getGamePgn(gameId: string) {
+    return this.request<{ pgn: string }>(`/games/${gameId}/pgn`);
+  }
  
   async getArchiveStats() {
     return this.request<any>("/admin/archive/stats");

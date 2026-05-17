@@ -40,11 +40,42 @@ pub(super) fn render_navbar(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContex
 
                 ui.add_space(18.0);
 
-                // === LEFT SIDE: SPECTATOR | COMMUNITY | SOURCE CODE ===
+                // === LEFT SIDE: SPECTATOR | REPLAY | COMMUNITY | SOURCE CODE ===
                 ui.horizontal(|ui| {
                     if nav_link(ui, "Spectator") {
                         info!("[MENU] Spectator clicked - opening spectator popup");
                         ctx_menu.competitive_menu.show_spectator_popup = true;
+                    }
+                    ui.add_space(30.0);
+                    if nav_link(ui, "Replay") {
+                        info!("[MENU] Replay clicked - opening file picker");
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Chess PGN", &["pgn"])
+                            .set_title("Select a PGN file to replay")
+                            .pick_file()
+                        {
+                            match std::fs::read_to_string(&path) {
+                                Ok(text) => {
+                                    match nimzovich_engine::parse_pgn(&text) {
+                                        Ok(pgn_game) => {
+                                            info!("[REPLAY] Loaded PGN with {} moves", pgn_game.moves.len());
+                                            ctx_menu.commands.insert_resource(
+                                                crate::game::replay::ParsedPgnGameResource { inner: pgn_game }
+                                            );
+                                            *ctx_menu.core_mode = crate::core::GameMode::PgnReplay;
+                                            ctx_menu.next_state.set(crate::core::GameState::InGame);
+                                        }
+                                        Err(e) => {
+                                            warn!("[REPLAY] Failed to parse PGN: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("[REPLAY] Failed to read file: {}", e);
+                                }
+                            }
+                        }
                     }
                     ui.add_space(30.0);
                     if nav_link(ui, "Tournaments") {

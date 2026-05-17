@@ -231,6 +231,10 @@ pub const KING_VALUE: i16 = 18000;
 pub const KING_VALUE_DIV_2: i16 = KING_VALUE / 2;
 pub const SURE_CHECKMATE: i16 = KING_VALUE / 2;
 
+// Tapered eval phase constants
+pub const MAX_PHASE: i16 = 24;
+pub const PHASE_VALUES: [i16; 7] = [0, 0, 1, 1, 2, 4, 0]; // [empty, pawn, knight, bishop, rook, queen, king]
+
 pub const FIGURE_VALUE: [i16; KING_ID as usize + 1] = [
     VOID_VALUE,
     PAWN_VALUE,

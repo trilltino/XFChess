@@ -21,7 +21,9 @@
 mod alphabeta;
 mod iterative;
 mod make_unmake;
+mod move_picker;
 mod ordering;
+pub mod params;
 mod quiescence;
 
 pub use iterative::find_best_move;

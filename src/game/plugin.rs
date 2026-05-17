@@ -28,7 +28,7 @@ use super::system_sets::GameSystems;
 use super::systems::spectate_sync::SpectateSyncPlugin;
 use super::systems::*;
 use super::view_mode_systems::*;
-use crate::core::{debug_current_gamestate, GameState};
+use crate::core::{debug_current_gamestate, GameMode, GameState};
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{
     FadingCapture, GamePhase, HasMoved, MoveRecord, PieceMoveAnimation, SelectedPiece,
@@ -74,7 +74,8 @@ impl Plugin for GamePlugin {
             .init_resource::<super::camera_modes::CinematicSequence>()
             .init_resource::<super::camera_modes::CinematicFadeOverlay>()
             .init_resource::<InGameHudVisibility>()
-            .init_resource::<super::systems::input::InGameExitConfirmation>();
+            .init_resource::<super::systems::input::InGameExitConfirmation>()
+            .init_resource::<super::replay::PgnReplayState>();
 
         // Register types for reflection (needed for inspector)
         app.register_type::<CurrentTurn>()
@@ -128,7 +129,20 @@ impl Plugin for GamePlugin {
                 setup_game_camera,
                 setup_game_scene,
             )
-                .chain(),
+                .chain()
+                .run_if(not(in_mode(GameMode::PgnReplay))),
+        );
+
+        // Setup replay when entering InGame in PgnReplay mode
+        app.add_systems(
+            OnEnter(GameState::InGame),
+            (
+                super::replay::setup_replay,
+                setup_game_camera,
+                setup_game_scene,
+            )
+                .chain()
+                .run_if(in_mode(GameMode::PgnReplay)),
         );
 
         // Configure system sets to run in order: Input → Validation → Execution → Visual
@@ -253,7 +267,16 @@ impl Plugin for GamePlugin {
                 crate::ui::game_2d::render_2d_board,
             )
                 .chain()
-                .run_if(in_state(GameState::InGame)),
+                .run_if(in_state(GameState::InGame))
+                .run_if(not(in_mode(GameMode::PgnReplay))),
+        );
+
+        // Replay UI overlay
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            super::replay::replay_ui_system
+                .run_if(in_state(GameState::InGame))
+                .run_if(in_mode(GameMode::PgnReplay)),
         );
 
         // Conditional 3D visibility system
@@ -299,10 +322,35 @@ impl Plugin for GamePlugin {
         app.add_plugins(MeshPickingPlugin);
 
         app.add_systems(OnExit(GameState::InGame), (reset_game_camera,));
+
+        // Replay cleanup
+        app.add_systems(
+            OnExit(GameState::InGame),
+            super::replay::cleanup_replay.run_if(in_mode(GameMode::PgnReplay)),
+        );
+
+        // Replay playback systems (run every frame during InGame + PgnReplay)
+        app.add_systems(
+            Update,
+            (
+                super::replay::replay_auto_advance_system,
+                super::replay::replay_apply_move_system,
+                super::replay::replay_sync_engine_system,
+                super::replay::replay_spawn_pieces_system,
+            )
+                .chain()
+                .run_if(in_state(GameState::InGame))
+                .run_if(in_mode(GameMode::PgnReplay)),
+        );
     }
 }
 
-/// Run condition to check if the current game mode is NOT spectator
-pub fn view_mode_is_not_spectator(game_mode: Res<crate::core::states::GameMode>) -> bool {
-    *game_mode != crate::core::states::GameMode::Spectator
+/// Run condition: current game mode matches `mode`.
+pub fn in_mode(mode: crate::core::states::GameMode) -> impl Fn(Res<crate::core::states::GameMode>) -> bool {
+    move |game_mode: Res<crate::core::states::GameMode>| *game_mode == mode
+}
+
+/// Run condition: current game mode is NOT `mode`.
+pub fn not_in_mode(mode: crate::core::states::GameMode) -> impl Fn(Res<crate::core::states::GameMode>) -> bool {
+    move |game_mode: Res<crate::core::states::GameMode>| *game_mode != mode
 }

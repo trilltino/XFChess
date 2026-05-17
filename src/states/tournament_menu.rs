@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use backend::signing::routes::tournament::TournamentSummary;
+use backend_types::tournament::TournamentSummary;
 use tokio::sync::oneshot;
 
 #[derive(Resource, Default)]

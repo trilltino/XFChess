@@ -241,12 +241,17 @@ pub mod on_chain;
 pub mod on_chain_attack;
 pub mod on_chain_moves;
 
+#[cfg(feature = "std")]
+mod pgn;
+
 // Re-export public API
 #[cfg(feature = "std")]
-pub use api::{game_from_fen, new_game, reset_game};
-pub use api::{do_move, get_game_state, is_legal_move};
+pub use api::{game_from_fen, game_to_fen, new_game, reset_game};
+pub use api::{do_move, do_move_with_promo, get_game_state, is_legal_move};
 #[cfg(feature = "search")]
 pub use api::reply;
+#[cfg(feature = "std")]
+pub use pgn::{move_to_san, PgnAssembler, PgnResult, parse_pgn, san_to_move, ParsedPgnGame, PgnParseError};
 pub use error::{ChessEngineError, ChessEngineResult};
 pub use move_gen::{generate_pseudo_legal_moves, is_in_check};
 

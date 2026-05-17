@@ -71,6 +71,9 @@ regex = "1.12.3"
 # PDF generation for welcome emails
 printpdf = "0.7"
 
+# Chess engine for SAN generation
+nimzovich_engine = { path = "../crates/nimzovich_engine", features = ["std", "search"] }
+
 # Swiss pairing engine
 swiss-pairing = { path = "../crates/swiss-pairing", features = ["network"] }
 

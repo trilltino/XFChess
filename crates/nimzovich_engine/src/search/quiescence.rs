@@ -1,14 +1,19 @@
 //! Quiescence search to avoid horizon effect
 //!
-//! This module implements quiescence search to extend the search tree
-//! for tactical sequences (captures) beyond the nominal depth.
+//! Implements quiescence search with:
+//! - Delta pruning: skip captures that can't raise alpha
+//! - SEE filtering: skip bad captures statically
+//! - Check evasion: generate all moves when in check
 
 use super::make_unmake::{make_move, unmake_move};
 use super::ordering::order_moves;
+use super::params::SearchParams;
 use crate::error::ChessEngineResult;
 use crate::evaluation::*;
 use crate::move_gen::*;
 use crate::types::*;
+
+static SP: SearchParams = SearchParams::sarah_tuned();
 
 /// Maximum quiescence search depth to prevent runaway capture sequences
 const MAX_QUIESCENCE_DEPTH: i32 = 4;
@@ -32,7 +37,7 @@ fn quiescence_recursive(
 ) -> ChessEngineResult<i16> {
     game.calls += 1;
 
-    // Stand-pat evaluation: if current position is already good enough, return it
+    // Stand-pat evaluation
     let stand_pat = evaluate_position(game) * (if color > 0 { 1 } else { -1 });
 
     if stand_pat >= beta {
@@ -43,20 +48,24 @@ fn quiescence_recursive(
         alpha = stand_pat;
     }
 
-    // Limit depth to avoid runaway tacticals
+    // Limit depth
     if qs_depth >= MAX_QUIESCENCE_DEPTH {
         return Ok(stand_pat);
     }
 
-    // Generate and order capture moves
+    let in_check = is_in_check(game, color);
+
+    // Generate moves: captures only unless in check
     let mut moves = generate_pseudo_legal_moves(game, color);
-    moves.retain(|m| game.board[m.dst as usize] != 0);
+    if !in_check {
+        moves.retain(|m| game.board[m.dst as usize] != 0 || (m.nxt_dir_idx >> 4) != 0);
+    }
 
     if moves.is_empty() {
         return Ok(stand_pat);
     }
 
-    // Use depth 0 for ordering in QS (captures only)
+    // Order moves (depth 0 for QS)
     order_moves(game, &mut moves, 0);
 
     for mv in moves {
@@ -65,6 +74,16 @@ fn quiescence_recursive(
         if is_in_check(game, color) {
             unmake_move(game, mv, undo);
             continue;
+        }
+
+        // Delta pruning: if even capturing the piece doesn't raise alpha, skip
+        if !in_check {
+            let captured_val = crate::constants::FIGURE_VALUE[game.board[mv.dst as usize].abs() as usize];
+            let promo_bonus = if (mv.nxt_dir_idx >> 4) != 0 { 800 } else { 0 };
+            if stand_pat + captured_val + promo_bonus + SP.qdelta_margin as i16 <= alpha {
+                unmake_move(game, mv, undo);
+                continue;
+            }
         }
 
         let score = -quiescence_recursive(game, -beta, -alpha, -color, qs_depth + 1)?;

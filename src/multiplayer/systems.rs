@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::time::Instant;
 use futures_lite::StreamExt;
-use braid_iroh::{BraidGameConfig, BraidIrohNode, DiscoveryConfig};
+use braid_iroh::{BraidIrohConfig, BraidIrohNode, DiscoveryConfig};
 use braid_core::{Update, Version};
 
 use crate::multiplayer::types::*;
@@ -47,12 +47,10 @@ pub fn initialize_braid_network(
         info!("[NET] Starting Iroh node task...");
         let (secret_key, raw_bytes) = load_or_generate_key();
 
-        let config = BraidGameConfig {
+        let config = BraidIrohConfig {
             secret_key: Some(secret_key),
             discovery: DiscoveryConfig::Real,
             proxy_config: None,
-            app_router: Default::default(),
-            db: Default::default(),
         };
 
         let node = match BraidIrohNode::spawn(config).await {
@@ -110,7 +108,7 @@ pub fn initialize_braid_network(
                 };
 
                 let version = Version::new(uuid::Uuid::new_v4().to_string());
-                let update = Update::snapshot(version, json.into());
+                let update = Update::snapshot(version, json);
                 if let Err(e) = node_send.put(&topic, update).await {
                     error!("Failed to broadcast message to {}: {}", topic, e);
                     event_tx_error.send(NetworkEvent::PeerDisconnected(format!("Broadcast error: {}", e))).ok();

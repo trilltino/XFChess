@@ -3,9 +3,6 @@
 
 /// XFChess main entry point for decentralized chess on Solana
 use clap::Parser;
-use std::sync::Arc;
-use sqlx::SqlitePool;
-use backend::signing::{AppState as SigningAppState, SigningConfig, build_router as build_signing_router};
 use xfchess::{GameConfig, PlayerColor, build_app};
 
 #[tokio::main]
@@ -89,61 +86,4 @@ async fn main() {
     app.run();
 }
 
-// ---------------------------------------------------------------------------
-// Embedded VPS Signing Server
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-async fn start_embedded_signing_server() {
-    dotenvy::dotenv().ok();
-    
-    let config = SigningConfig::from_env();
-    let port = config.port;
-    
-    // SQLite pool for session persistence
-    let pool = match SqlitePool::connect("sqlite://sessions.db?mode=rwc").await {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("[SIGN-SRV] Failed to connect to SQLite sessions.db: {}", e);
-            return;
-        }
-    };
-    
-    // SQLite pool for vault persistence
-    let vault_pool = match sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect("sqlite://vault.db?mode=rwc")
-        .await 
-    {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("[SIGN-SRV] Failed to connect to SQLite vault.db: {}", e);
-            return;
-        }
-    };
-    
-    let tournament_store = Arc::new(backend::signing::storage::tournament::TournamentStore::new(pool.clone()).await);
-    let state = SigningAppState::new(config, pool.clone(), vault_pool.clone(), tournament_store);
-    if let Err(e) = state.store.init().await {
-        eprintln!("[SIGN-SRV] Failed to init session store: {}", e);
-        return;
-    }
-    
-    let app = build_signing_router(state);
-    let addr = format!("0.0.0.0:{}", port);
-    
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("[SIGN-SRV] Failed to bind to {}: {}", addr, e);
-            return;
-        }
-    };
-    
-    println!("[SIGN-SRV] VPS signing server listening on http://{}", addr);
-    
-    axum::serve(listener, app)
-        .await
-        .unwrap_or_else(|e| eprintln!("[SIGN-SRV] Server error: {}", e));
-}
 

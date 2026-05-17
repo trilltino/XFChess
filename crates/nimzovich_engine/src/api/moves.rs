@@ -86,7 +86,15 @@ pub fn do_move_with_promo(game: &mut Game, src: i8, dst: i8, update_flags: bool,
         piece
     };
 
-    // 6. Execute move
+    // 6. Update halfmove clock
+    let is_capture = game.board[dst as usize] != 0 || (piece_type == PAWN_ID && Some(dst) == game.en_passant_target);
+    if piece_type == PAWN_ID || is_capture {
+        game.halfmove_clock = 0;
+    } else {
+        game.halfmove_clock += 1;
+    }
+
+    // 7. Execute move
     game.board[dst as usize] = final_piece;
     game.board[src as usize] = 0;
     game.move_counter += 1;
@@ -111,13 +119,15 @@ pub fn is_legal_move(game: &mut Game, src: i8, dst: i8, color: Color) -> bool {
             // Simulate move safely
             let board_before = game.board;
             let ep_before = game.en_passant_target;
-            
+            let halfmove_before = game.halfmove_clock;
+
             do_move(game, src, dst, false);
             let legal = !is_in_check(game, color);
-            
+
             // Restore state
             game.board = board_before;
             game.en_passant_target = ep_before;
+            game.halfmove_clock = halfmove_before;
             
             return legal;
         }

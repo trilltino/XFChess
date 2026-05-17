@@ -45,12 +45,59 @@ pub(crate) const KING_PST_MIDDLEGAME: [i16; 64] = [
     -40, -40, -30,
 ];
 
-/// Get piece-square table value for a piece at a position
+/// Endgame PSTs — kings centralize, pawns push, pieces become more active
+pub(crate) const PAWN_PST_EG: [i16; 64] = [
+    0,  0,  0,  0,  0,  0,  0,  0,
+   80, 80, 80, 80, 80, 80, 80, 80,
+   50, 50, 50, 50, 50, 50, 50, 50,
+   30, 30, 30, 30, 30, 30, 30, 30,
+   20, 20, 20, 20, 20, 20, 20, 20,
+   10, 10, 10, 10, 10, 10, 10, 10,
+    0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,
+];
+
+pub(crate) const KNIGHT_PST_EG: [i16; 64] = [
+    -10, -5, 0, 0, 0, 0, -5, -10, -5, 0, 5, 5, 5, 5, 0, -5, 0, 5, 10, 10, 10, 10, 5, 0, 0, 5, 10,
+    15, 15, 10, 5, 0, 0, 5, 10, 15, 15, 10, 5, 0, -5, 0, 5, 10, 10, 5, 0, -5, -10, -5, 0, 0, 0, 0,
+    -5, -10, -20, -10, -5, -5, -5, -5, -10, -20,
+];
+
+pub(crate) const BISHOP_PST_EG: [i16; 64] = [
+    -5, -5, -5, -5, -5, -5, -5, -5, -5, 10, 5, 5, 5, 5, 10, -5, -5, 5, 10, 10, 10, 10, 5, -5, -5,
+    5, 10, 10, 10, 10, 5, -5, -5, 5, 10, 10, 10, 10, 5, -5, -5, 5, 5, 10, 10, 5, 5, -5, -5, 10, 5,
+    5, 5, 5, 10, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+];
+
+pub(crate) const ROOK_PST_EG: [i16; 64] = [
+   10, 10, 10, 10, 10, 10, 10, 10,
+   15, 15, 15, 15, 15, 15, 15, 15,
+    0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,
+];
+
+pub(crate) const QUEEN_PST_EG: [i16; 64] = [
+    -10, -5, -5, 0, 0, -5, -5, -10, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 5, 5, 5, 5, 0, -5, 0, 0, 5,
+    5, 5, 5, 0, 0, 0, 0, 5, 5, 5, 5, 0, 0, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5,
+    -10, -5, -5, 0, 0, -5, -5, -10,
+];
+
+pub(crate) const KING_PST_ENDGAME: [i16; 64] = [
+    -50, -30, -30, -30, -30, -30, -30, -50, -30, -20, -10, 0, 0, -10, -20, -30, -30, -10, 20, 30,
+    30, 20, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30,
+    -10, 20, 30, 30, 20, -10, -30, -30, -20, -10, 0, 0, -10, -20, -30, -50, -30, -30, -30, -30,
+    -30, -30, -50,
+];
+
+/// Get piece-square table value for a piece at a position (single-phase, MG only)
 pub(crate) fn get_pst_value(piece: i8, square: i8) -> i16 {
     let abs_piece = piece.abs();
     let is_white = piece > 0;
 
-    // Flip square for black pieces (they see the board upside down)
     let pst_index = if is_white {
         square as usize
     } else {
@@ -67,9 +114,33 @@ pub(crate) fn get_pst_value(piece: i8, square: i8) -> i16 {
         _ => 0,
     };
 
-    if is_white {
-        value
+    if is_white { value } else { -value }
+}
+
+/// Get tapered piece-square value (MG and EG interpolated by phase)
+pub(crate) fn get_pst_value_tapered(piece: i8, square: i8, phase: i16) -> i16 {
+    let abs_piece = piece.abs();
+    let is_white = piece > 0;
+
+    let pst_index = if is_white {
+        square as usize
     } else {
-        -value
-    }
+        (63 - square) as usize
+    };
+
+    let (mg, eg) = match abs_piece {
+        PAWN_ID => (PAWN_PST[pst_index], PAWN_PST_EG[pst_index]),
+        KNIGHT_ID => (KNIGHT_PST[pst_index], KNIGHT_PST_EG[pst_index]),
+        BISHOP_ID => (BISHOP_PST[pst_index], BISHOP_PST_EG[pst_index]),
+        ROOK_ID => (ROOK_PST[pst_index], ROOK_PST_EG[pst_index]),
+        QUEEN_ID => (QUEEN_PST[pst_index], QUEEN_PST_EG[pst_index]),
+        KING_ID => (KING_PST_MIDDLEGAME[pst_index], KING_PST_ENDGAME[pst_index]),
+        _ => (0, 0),
+    };
+
+    let mg_frac = phase as i16;
+    let eg_frac = (MAX_PHASE - phase) as i16;
+    let value = (mg * mg_frac + eg * eg_frac) / MAX_PHASE;
+
+    if is_white { value } else { -value }
 }

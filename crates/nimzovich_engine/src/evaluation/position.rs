@@ -1,34 +1,46 @@
 //! Full position evaluation
 //!
-//! Evaluates positions using material, piece-square tables, and mobility.
+//! Evaluates positions using tapered material + piece-square tables (MG/EG),
+//! mobility, and attack bonuses.
 
-use super::pst::get_pst_value;
+use super::pst::get_pst_value_tapered;
 use crate::constants::*;
 use crate::move_gen::*;
 use crate::types::*;
 
-/// Evaluate full position (material + positional)
+/// Evaluate full position (tapered material + positional + mobility)
 pub fn evaluate_position(game: &Game) -> i16 {
     let mut score = 0i16;
+    let mut phase = 0i16;
 
-    // Material and piece-square tables
+    // Material and piece-square tables (tapered MG/EG)
     for square in 0..64 {
         let piece = game.board[square];
         if piece != 0 {
+            let abs_piece = piece.abs() as usize;
             // Material
-            let piece_value = FIGURE_VALUE[piece.abs() as usize];
+            let piece_value = FIGURE_VALUE[abs_piece];
             score += if piece > 0 { piece_value } else { -piece_value };
 
-            // Positional
-            let pst_value = get_pst_value(piece, square as i8);
+            // Phase accumulation
+            phase += PHASE_VALUES[abs_piece];
+
+            // Positional (tapered)
+            let pst_value = get_pst_value_tapered(piece, square as i8, phase.min(MAX_PHASE));
             score += pst_value;
         }
     }
 
-    // Mobility bonus (simplified)
-    let white_moves = count_moves(game, COLOR_WHITE);
-    let black_moves = count_moves(game, COLOR_BLACK);
-    score += (white_moves as i16 - black_moves as i16) * 5;
+    // Clamp phase to valid range
+    let phase = phase.min(MAX_PHASE);
+
+    // Mobility bonus (tapered: more important in endgame)
+    let white_moves = count_moves(game, COLOR_WHITE) as i16;
+    let black_moves = count_moves(game, COLOR_BLACK) as i16;
+    let mobility = white_moves - black_moves;
+    // Mobility is more important in endgame
+    let mobility_bonus = (mobility * 3 * (MAX_PHASE - phase) + mobility * 2 * phase) / MAX_PHASE;
+    score += mobility_bonus;
 
     score
 }

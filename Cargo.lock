@@ -719,6 +719,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ashpd"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f3f79755c74fd155000314eb349864caa787c6592eace6c6882dad873d9c39"
+dependencies = [
+ "async-fs",
+ "async-net",
+ "enumflags2",
+ "futures-channel",
+ "futures-util",
+ "rand 0.9.2",
+ "raw-window-handle",
+ "serde",
+ "serde_repr",
+ "url",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "zbus",
+]
+
+[[package]]
 name = "asn1-rs"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -935,6 +957,17 @@ dependencies = [
  "event-listener 5.4.1",
  "event-listener-strategy",
  "pin-project-lite",
+]
+
+[[package]]
+name = "async-net"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b948000fad4873c1c9339d60f2623323a0cfd3816e5181033c6a5cb68b2accf7"
+dependencies = [
+ "async-io",
+ "blocking",
+ "futures-lite",
 ]
 
 [[package]]
@@ -1265,6 +1298,7 @@ dependencies = [
  "hex",
  "iroh-gossip",
  "jsonwebtoken",
+ "nimzovich_engine",
  "once_cell",
  "printpdf",
  "rand 0.9.2",
@@ -1289,6 +1323,13 @@ dependencies = [
  "uuid",
  "wiremock",
  "xfchess-braid-server",
+]
+
+[[package]]
+name = "backend-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -2942,20 +2983,77 @@ dependencies = [
 
 [[package]]
 name = "braid-core"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
+ "anyhow",
+ "async-channel 2.5.0",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "braid-http",
+ "bumpalo",
  "bytes",
+ "chrono",
+ "crc",
+ "futures",
+ "headers",
+ "http 1.4.0",
+ "humansize",
+ "jumprope",
+ "lazy_static",
+ "libc",
+ "lz4_flex",
+ "num_enum",
+ "once_cell",
+ "parking_lot",
+ "percent-encoding",
+ "rand 0.9.2",
+ "regex",
+ "reqwest 0.13.2",
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "smallvec",
+ "smartstring",
+ "str_indices",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.3",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
 ]
 
 [[package]]
 name = "braid-http"
 version = "0.1.0"
 dependencies = [
- "braid-core",
+ "async-channel 2.5.0",
+ "async-trait",
+ "bytes",
+ "futures",
+ "gloo-timers",
+ "http 1.4.0",
+ "js-sys",
+ "once_cell",
+ "percent-encoding",
+ "rand 0.9.2",
+ "regex",
+ "reqwest 0.13.2",
  "serde",
+ "serde_json",
+ "sfv",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -2967,21 +3065,17 @@ dependencies = [
  "blake3",
  "braid-core",
  "bytes",
- "chrono",
  "clap",
  "futures",
  "http 1.4.0",
  "iroh",
  "iroh-gossip",
- "iroh-h3-axum",
- "iroh-h3-client",
  "n0-future",
  "parking_lot",
  "rand 0.10.0",
  "rand 0.9.2",
  "serde",
  "serde_json",
- "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -6613,6 +6707,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "headers"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3314d5adb5d94bcdf56771f2e50dbbc80bb4bdf88967526706205ac9eff24eb"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "headers-core",
+ "http 1.4.0",
+ "httpdate",
+ "mime",
+ "sha1 0.10.6",
+]
+
+[[package]]
+name = "headers-core"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4"
+dependencies = [
+ "http 1.4.0",
+]
+
+[[package]]
 name = "heapless"
 version = "0.7.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6897,6 +7015,15 @@ name = "httpdate"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
+name = "humansize"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cb51c9a029ddc91b07a787f1d86b53ccfa49b0e86688c946ebe8d3555685dd7"
+dependencies = [
+ "libm",
+]
 
 [[package]]
 name = "humantime"
@@ -8033,6 +8160,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jumprope"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "829c74fe88dda0d2a5425b022b44921574a65c4eb78e6e39a61b40eb416a4ef8"
+dependencies = [
+ "rand 0.8.5",
+ "str_indices",
+]
+
+[[package]]
 name = "k256"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8398,6 +8535,15 @@ checksum = "6bd8c0d6c6ed0cd30b3652886bb8711dc4bb01d637a68105a3d5158039b418e6"
 dependencies = [
  "cc",
  "libc",
+]
+
+[[package]]
+name = "lz4_flex"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90071f8077f8e40adfc4b7fe9cd495ce316263f19e75c2211eeff3fdf475a3d9"
+dependencies = [
+ "twox-hash",
 ]
 
 [[package]]
@@ -10649,6 +10795,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+
+[[package]]
 name = "polyval"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11612,6 +11764,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2 0.4.13",
+ "hickory-resolver",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
@@ -11621,6 +11774,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "once_cell",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -11681,6 +11835,30 @@ checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
 dependencies = [
  "hmac 0.12.1",
  "subtle",
+]
+
+[[package]]
+name = "rfd"
+version = "0.15.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef2bee61e6cffa4635c72d7d81a84294e28f0930db0ddcb0f66d10244674ebed"
+dependencies = [
+ "ashpd",
+ "block2 0.6.2",
+ "dispatch2",
+ "js-sys",
+ "log",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "pollster",
+ "raw-window-handle",
+ "urlencoding",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12479,6 +12657,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sfv"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d471eaefb14f4b30032525bdb124b36e55ba9cb1292080e06f1a236cd10fe87"
+dependencies = [
+ "base64 0.22.1",
+ "indexmap 2.13.0",
+ "ref-cast",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12775,6 +12964,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "smartstring"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fb72c633efbaa2dd666986505016c32c3044395ceaf881518399d2f4127ee29"
+dependencies = [
+ "autocfg",
+ "serde",
+ "static_assertions",
+ "version_check",
 ]
 
 [[package]]
@@ -17052,6 +17253,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "str_indices"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d08889ec5408683408db66ad89e0e1f93dff55c73a4ccc71c427d5b277ee47e6"
+
+[[package]]
 name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18914,6 +19121,12 @@ dependencies = [
  "serde",
  "serde_derive",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "urlpattern"
@@ -20832,8 +21045,7 @@ dependencies = [
  "anchor-lang",
  "anyhow",
  "async-trait",
- "axum",
- "backend",
+ "backend-types",
  "base64 0.22.1",
  "bevy",
  "bevy_egui",
@@ -20852,7 +21064,6 @@ dependencies = [
  "crossbeam-channel",
  "directories",
  "dirs 5.0.1",
- "dotenvy",
  "egui 0.29.1",
  "ephemeral-rollups-sdk 0.8.8",
  "futures",
@@ -20866,16 +21077,15 @@ dependencies = [
  "rand 0.9.2",
  "regex",
  "reqwest 0.13.2",
+ "rfd",
  "serde",
  "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
- "shared",
  "solana-chess-client",
  "solana-client",
  "solana-program 2.2.1",
  "solana-sdk",
- "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -21246,6 +21456,7 @@ dependencies = [
  "endi",
  "enumflags2",
  "serde",
+ "url",
  "winnow 1.0.0",
  "zvariant_derive",
  "zvariant_utils",

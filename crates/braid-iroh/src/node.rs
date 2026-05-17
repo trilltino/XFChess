@@ -13,7 +13,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::discovery::DiscoveryConfig;
+use crate::discovery::{DiscoveryConfig, MockDiscoveryMap};
+#[cfg(feature = "proxy")]
 use crate::protocol::{self, BraidAppState};
 use crate::subscription::SubscriptionManager;
 
@@ -23,7 +24,7 @@ pub const BRAID_H3_ALPN: &[u8] = b"braid-h3/0";
 
 /// Configuration for spawning a BraidIrohNode.
 #[derive(Clone)]
-pub struct BraidGameConfig {
+pub struct BraidIrohConfig {
     /// Discovery configuration.
     pub discovery: DiscoveryConfig,
 
@@ -33,13 +34,8 @@ pub struct BraidGameConfig {
 
     /// Optional configuration for the TCP proxy bridge.
     pub proxy_config: Option<ProxyConfig>,
-
-    /// External router to mount alongside P2P Braid routes.
-    pub app_router: Option<axum::Router>,
-
-    /// Core application state persistence block.
-    pub db: Option<sqlx::SqlitePool>,
 }
+
 
 /// Configuration for the TCP proxy bridge.
 #[derive(Clone)]
@@ -50,14 +46,12 @@ pub struct ProxyConfig {
     pub default_peer: EndpointId,
 }
 
-impl Default for BraidGameConfig {
+impl Default for BraidIrohConfig {
     fn default() -> Self {
         Self {
-            discovery: DiscoveryConfig::Real,
+            discovery: DiscoveryConfig::Mock(MockDiscoveryMap::new()),
             secret_key: None,
             proxy_config: None,
-            app_router: None,
-            db: None,
         }
     }
 }
@@ -78,7 +72,7 @@ impl BraidIrohNode {
     /// This sets up the iroh endpoint, starts the gossip protocol,
     /// mounts the Braid-HTTP Axum routes via `IrohAxum`, and begins
     /// accepting incoming connections.
-    pub async fn spawn(config: BraidGameConfig) -> anyhow::Result<Self> {
+    pub async fn spawn(config: BraidIrohConfig) -> anyhow::Result<Self> {
         // 1. Build the iroh endpoint with discovery + Braid ALPN
         let mut builder = Endpoint::builder().alpns(vec![
             BRAID_H3_ALPN.to_vec(),
@@ -91,8 +85,15 @@ impl BraidIrohNode {
         }
 
         // Apply discovery logic
-        // DiscoveryConfig::Real uses Iroh's built-in discovery (DNS + Pkarr + MDNS)
-        // No additional configuration needed
+        match config.discovery {
+            DiscoveryConfig::Mock(map) => {
+                builder = builder.address_lookup(map);
+            }
+            DiscoveryConfig::Real => {
+                // Default Iroh discovery is already enabled by default in Endpoint::builder()
+                // unless we override it. So we do nothing here.
+            }
+        }
 
         let endpoint = builder.bind().await?;
 
@@ -108,20 +109,21 @@ impl BraidIrohNode {
 
         let subscription_mgr = Arc::new(SubscriptionManager::new(gossip.clone()));
 
-        let app_state = BraidAppState {
-            subscriptions: subscription_mgr.clone(),
-            resources: resources.clone(),
-            db: config.db,
+        // 4. Mount the Braid protocol handler on the iroh router (only when proxy feature is enabled)
+        #[cfg(feature = "proxy")]
+        let router = {
+            let app_state = BraidAppState {
+                subscriptions: subscription_mgr.clone(),
+                resources: resources.clone(),
+            };
+            let braid_handler = protocol::build_protocol_handler(app_state);
+            Router::builder(endpoint.clone())
+                .accept(BRAID_H3_ALPN.to_vec(), braid_handler)
+                .accept(iroh_gossip::net::GOSSIP_ALPN.to_vec(), gossip.clone())
+                .spawn()
         };
-
-        // Initialize SQLite payload history if active
-        app_state.init_db().await;
-
-        // 4. Mount the Braid protocol handler on the iroh router
-        let braid_handler = protocol::build_protocol_handler(app_state, config.app_router);
-
+        #[cfg(not(feature = "proxy"))]
         let router = Router::builder(endpoint.clone())
-            .accept(BRAID_H3_ALPN.to_vec(), braid_handler)
             .accept(iroh_gossip::net::GOSSIP_ALPN.to_vec(), gossip.clone())
             .spawn();
 
@@ -167,11 +169,7 @@ impl BraidIrohNode {
         url: &str,
         bootstrap: Vec<EndpointId>,
     ) -> anyhow::Result<GossipReceiver> {
-        println!(
-            "[NODE] Subscribing to {} with {} bootstrap peers",
-            url,
-            bootstrap.len()
-        );
+        println!("[NODE] Subscribing to {} with {} bootstrap peers", url, bootstrap.len());
         for peer in &bootstrap {
             println!("[NODE]   bootstrap: {}", peer);
         }
@@ -185,7 +183,7 @@ impl BraidIrohNode {
     pub async fn put(&self, url: &str, update: Update) -> anyhow::Result<()> {
         // Normalize the URL for consistent storage (using same logic as SubscriptionManager)
         let normalized = crate::subscription::SubscriptionManager::normalize_url(url);
-
+        
         // Debug logging for Braid format
         println!("\nOUTGOING BRAID PUT:");
         println!("PUT {} HTTP/3", normalized);
@@ -206,9 +204,7 @@ impl BraidIrohNode {
             .entry(normalized.clone())
             .or_insert_with(Vec::new)
             .push(update.clone());
-        self.subscription_mgr
-            .broadcast(&normalized, &update)
-            .await?;
+        self.subscription_mgr.broadcast(&normalized, &update).await?;
         Ok(())
     }
 
@@ -285,15 +281,5 @@ impl BraidIrohNode {
             println!("[NODE]   joining: {}", peer);
         }
         self.subscription_mgr.join_peers(url, peers).await
-    }
-
-    /// Create a BraidAppState from the node's internal state
-    /// This allows external services to use the gossip protocol for broadcasting
-    pub fn app_state(&self) -> BraidAppState {
-        BraidAppState {
-            subscriptions: self.subscription_mgr.clone(),
-            resources: self.resources.clone(),
-            db: None, // DB is owned by the node, not exposed here
-        }
     }
 }
