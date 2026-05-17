@@ -14,6 +14,8 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
+use alloc::string::String;
+#[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 #[cfg(not(feature = "std"))]
 use alloc::sync::Arc;
@@ -185,7 +187,7 @@ impl CompactBoard {
                     empty_count += 1;
                 } else {
                     if empty_count > 0 {
-                        fen.push_str(&empty_count.to_string());
+                        fen.push(char::from_digit(empty_count as u32, 10).unwrap_or('1'));
                         empty_count = 0;
                     }
                     fen.push(match piece {
@@ -196,7 +198,7 @@ impl CompactBoard {
                 }
             }
             if empty_count > 0 {
-                fen.push_str(&empty_count.to_string());
+                fen.push(char::from_digit(empty_count as u32, 10).unwrap_or('1'));
             }
             if rank > 0 { fen.push('/'); }
         }

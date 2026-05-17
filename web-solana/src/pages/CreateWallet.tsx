@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 
 interface CreateWalletProps {
   onWalletCreated?: (address: string) => void;
@@ -22,7 +22,7 @@ export default function CreateWallet({ onWalletCreated, onCancel }: CreateWallet
     },
     solflare: {
       name: 'Solflare',
-      logo: '️',
+      logo: '?',
       description: 'Secure wallet with built-in DEX and staking features',
       downloadUrl: 'https://solflare.com',
       deepLink: 'https://solflare.com/ul/browse/https://xfchess.com',
@@ -229,7 +229,7 @@ export default function CreateWallet({ onWalletCreated, onCancel }: CreateWallet
                     onClick={() => handleRemoveWord(index)}
                     className="px-4 py-2 bg-purple-100 border border-purple-300 rounded-lg hover:bg-purple-200 transition-all"
                   >
-                    {word} ×
+                    {word} �
                   </button>
                 ))}
               </div>

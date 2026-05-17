@@ -1,4 +1,4 @@
-﻿//! In-game UI for chess game display
+//! In-game UI for chess game display
 use crate::core::GameMode;
 use crate::game::components::GamePhase;
 use crate::game::resources::system_params::GameStateParams;
@@ -436,7 +436,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     );
                     ui.add_space(4.0);
                     for (mv, sig) in txs.entries.iter().rev() {
-                        let short = format!("{}  …{}", mv, &sig[sig.len().saturating_sub(8)..]);
+                        let short = format!("{}  �{}", mv, &sig[sig.len().saturating_sub(8)..]);
                         let url = format!(
                             "https://explorer.solana.com/tx/{}?cluster=custom&customUrl=https://devnet-eu.magicblock.app",
                             sig
@@ -717,7 +717,7 @@ fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.label(
-                    egui::RichText::new("️ CHECKMATE!")
+                    egui::RichText::new("? CHECKMATE!")
                         .size(40.0)
                         .color(egui::Color32::WHITE)
                         .strong(),

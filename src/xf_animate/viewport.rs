@@ -1,4 +1,4 @@
-﻿//! LEARN-box viewport bridge.
+//! LEARN-box viewport bridge.
 //!
 //! Holds the resource written by the egui `render_learn_section` every frame
 //! and syncs the mini-showcase camera's viewport to that rect.

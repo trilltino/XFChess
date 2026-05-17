@@ -1,4 +1,4 @@
-﻿#![allow(dead_code)]
+#![allow(dead_code)]
 //! Profile Creation UI - Username selection screen
 //!
 //! the design document at logs/profile-creation-option2-090cd2.md
@@ -188,7 +188,7 @@ pub fn profile_creation_ui_system(
                         
                         let tax_id_hint = match state.country_code.as_str() {
                             "GB" => "National Insurance Number (NI)",
-                            "BR" => "CPF (Cadastro de Pessoas Físicas)",
+                            "BR" => "CPF (Cadastro de Pessoas F�sicas)",
                             "CA" => "Social Insurance Number (SIN)",
                             "DE" => "Tax ID (Steueridentifikationsnummer)",
                             "US" => "Social Security Number (SSN) - Optional",
@@ -272,7 +272,7 @@ pub fn profile_creation_ui_system(
                                 crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                             }
                             ui.add_space(8.0);
-                            if ui.button(egui::RichText::new("️ Solflare").strong()).clicked() {
+                            if ui.button(egui::RichText::new("? Solflare").strong()).clicked() {
                                 crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                             }
                         });
@@ -285,7 +285,7 @@ pub fn profile_creation_ui_system(
                     ui.add_space(12.0);
                     let status_text = match state.availability_status {
                         UsernameAvailability::Unknown => ("", egui::Color32::GRAY),
-                        UsernameAvailability::Checking => ("⏳ Checking availability...", egui::Color32::YELLOW),
+                        UsernameAvailability::Checking => ("? Checking availability...", egui::Color32::YELLOW),
                         UsernameAvailability::Available => (" Username available!", egui::Color32::from_rgb(34, 197, 94)),
                         UsernameAvailability::Taken => (" Username already taken", egui::Color32::from_rgb(239, 68, 68)),
                         UsernameAvailability::Invalid => (" Invalid username format", egui::Color32::from_rgb(239, 68, 68)),
@@ -302,7 +302,7 @@ pub fn profile_creation_ui_system(
                     
                     // Rules reminder
                     ui.add_space(16.0);
-                    ui.label(egui::RichText::new("3-20 chars • A-Z, a-z, 0-9, _, -")
+                    ui.label(egui::RichText::new("3-20 chars � A-Z, a-z, 0-9, _, -")
                         .color(egui::Color32::from_rgb(80, 80, 90))
                         .size(11.0));
                     

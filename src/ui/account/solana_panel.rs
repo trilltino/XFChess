@@ -1,4 +1,4 @@
-﻿//! Solana-specific UI components for competitive mode
+//! Solana-specific UI components for competitive mode
 //!
 //! Includes wallet connection status, ELO stats, and wagering UI.
 
@@ -60,7 +60,7 @@ pub fn render_solana_panel(
                         info!("[WALLET] User selected Phantom - opening Tauri popup...");
                     }
                     ui.add_space(5.0);
-                    if ui.button(egui::RichText::new("️ Solflare").strong()).on_hover_text("Connect via Solflare Extension").clicked() {
+                    if ui.button(egui::RichText::new("? Solflare").strong()).on_hover_text("Connect via Solflare Extension").clicked() {
                         crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                         info!("[WALLET] User selected Solflare - opening Tauri popup...");
                     }
@@ -90,13 +90,13 @@ pub fn render_solana_panel(
                 });
                 ui.horizontal(|ui| {
                     ui.label(if has_kyc { "" } else { "" });
-                    ui.colored_label(if has_kyc { UiColors::SUCCESS } else { UiColors::DANGER }, "KYC — required for wagered play");
+                    ui.colored_label(if has_kyc { UiColors::SUCCESS } else { UiColors::DANGER }, "KYC � required for wagered play");
                 });
 
                 ui.add_space(5.0);
                 let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
                 let profile_url = format!("{}/profile", backend_url);
-                if ui.button("Complete at xfchess.gg/profile →").clicked() {
+                if ui.button("Complete at xfchess.gg/profile ?").clicked() {
                     let _ = webbrowser::open(&profile_url);
                 }
             });
@@ -136,12 +136,12 @@ pub fn render_solana_panel(
                 if lamports > 0 {
                     ui.label(format!("Amount: {} SOL", lamports as f64 / 1_000_000_000.0));
                 } else {
-                    ui.label("Amount: —");
+                    ui.label("Amount: �");
                 }
                 if let Some(id) = competitive.game_id.or(sync.game_id) {
                     ui.label(format!("Game ID: {}", id));
                 } else {
-                    ui.label("Game ID: —");
+                    ui.label("Game ID: �");
                 }
             });
         } else {

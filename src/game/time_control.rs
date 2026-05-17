@@ -1,4 +1,4 @@
-﻿//! Named time control presets for chess games.
+//! Named time control presets for chess games.
 //!
 //! Covers the full range from ultra-bullet to correspondence,
 //! plus a custom variant for arbitrary base + increment values.
@@ -29,7 +29,7 @@ pub enum TimeControl {
     RapidPlus,
     /// 1800 + 0
     Classical,
-    /// 0 — no clock (correspondence / AI casual)
+    /// 0 � no clock (correspondence / AI casual)
     Unlimited,
     /// Arbitrary base + increment (seconds)
     Custom {
@@ -89,7 +89,7 @@ impl TimeControl {
             TimeCategory::Blitz => format!(" Blitz {}", label),
             TimeCategory::Rapid => format!(" Rapid {}", label),
             TimeCategory::Classical => format!(" Classical {}", label),
-            TimeCategory::Unlimited => "∞ Unlimited".to_string(),
+            TimeCategory::Unlimited => "8 Unlimited".to_string(),
         }
     }
 
@@ -142,7 +142,7 @@ impl TimeCategory {
             TimeCategory::Blitz => " Blitz",
             TimeCategory::Rapid => " Rapid",
             TimeCategory::Classical => " Classical",
-            TimeCategory::Unlimited => "∞ Unlimited",
+            TimeCategory::Unlimited => "8 Unlimited",
         }
     }
 }

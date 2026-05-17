@@ -1,4 +1,4 @@
-﻿#![cfg(feature = "solana")]
+#![cfg(feature = "solana")]
 //! Tournament Test - Real On-Chain Tournament Execution
 //! 
 //! Executes a complete tournament on Solana devnet with real transactions
@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Load deployer keypair - this funds everything
     let deployer_keypair = load_keypair("keys/fee-payer.json")?;
-    println!("� Deployer: {}", deployer_keypair.pubkey());
+    println!("? Deployer: {}", deployer_keypair.pubkey());
     
     // Setup RPC client
     let rpc_client = RpcClient::new_with_commitment(DEVNET_RPC, CommitmentConfig::confirmed());
@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" Deployer balance: {} SOL", deployer_balance as f64 / 1_000_000_000.0);
     
     if deployer_balance < 2_000_000_000 {
-        println!("️  Deployer needs at least 2 SOL to fund tournament");
+        println!("?  Deployer needs at least 2 SOL to fund tournament");
         return Ok(());
     }
 
@@ -182,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         step: "Start".to_string(),
         player: "Admin".to_string(),
         severity: "ok".to_string(),
-        text: "bracket seeded by ELO — SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
+        text: "bracket seeded by ELO � SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
     });
     println!("   Tournament started: {}", start_sig);
 
@@ -273,7 +273,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         step: "Final".to_string(),
         player: final_result.winner.clone(),
         severity: "ok".to_string(),
-        text: "CHAMPION — 1-0 (real moves on Solana devnet)".to_string(),
+        text: "CHAMPION � 1-0 (real moves on Solana devnet)".to_string(),
     });
 
     // Generate output files
@@ -286,7 +286,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// ── Helper Functions ─────────────────────────────────────────────────────
+// -- Helper Functions -----------------------------------------------------
 
 #[derive(Debug, Clone)]
 struct PlayerWithKeypair {

@@ -1,4 +1,4 @@
-﻿use backend::signing::{AppState, SigningConfig};
+use backend::signing::{AppState, SigningConfig};
 use backend::signing::storage::tournament::TournamentStore;
 use backend::infrastructure::{initialize_pools, run_migrations, build_app_router, spawn_background_tasks};
 
@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SigningConfig::from_env();
     let port = config.port;
 
-    // ── Initialize database pools ────────────────────────────────────────
+    // -- Initialize database pools ----------------------------------------
     let session_db = std::env::var("SESSION_DB_URL")
         .unwrap_or_else(|_| "sqlite://sessions.db?mode=rwc".into());
     let vault_db = std::env::var("VAULT_DB_URL")
@@ -28,11 +28,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pools = initialize_pools(&session_db, &vault_db).await?;
     info!("[signing-server] Database pools initialized");
 
-    // ── Run database migrations ───────────────────────────────────────────
+    // -- Run database migrations -------------------------------------------
     run_migrations(&pools).await?;
     info!("[signing-server] Database migrations completed");
 
-    // ── Initialize application state ─────────────────────────────────────
+    // -- Initialize application state -------------------------------------
     let session_store = backend::signing::storage::SessionStore::new(pools.session_pool.clone());
     session_store.init().await?;
     info!("[signing-server] Session store initialized");
@@ -42,15 +42,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone(), Arc::new(tournament_store.clone()));
 
-    // ── Spawn background tasks (must be before building router to get trigger sender) ───────────────────────────────────────────────
+    // -- Spawn background tasks (must be before building router to get trigger sender) -----------------------------------------------
     let tournament_trigger = spawn_background_tasks(state.clone(), config);
     state.tournament_trigger = Some(tournament_trigger);
     info!("[signing-server] Background tasks spawned with tournament scheduler");
 
-    // ── Build application router ───────────────────────────────────────────
+    // -- Build application router -------------------------------------------
     let app = build_app_router(state.clone());
     
-    // Add CORS layer — restrict to configured origins in production
+    // Add CORS layer � restrict to configured origins in production
     let allowed_origins: Vec<HeaderValue> = std::env::var("ALLOWED_ORIGINS")
         .unwrap_or_else(|_| "http://localhost:5173,http://localhost:3000".into())
         .split(',')
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     info!("[signing-server] Application router built");
 
-    // ── Bind and serve via HTTP ───────────────────────────────────────────
+    // -- Bind and serve via HTTP -------------------------------------------
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     info!("============================================================");
     info!(" XFCHESS BACKEND IS NOW ONLINE");
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(" Admin Key: Configured in .env");
     info!("============================================================");
 
-    // ── Serve HTTP ───────────────────────────────────────────────────────
+    // -- Serve HTTP -------------------------------------------------------
     axum::serve(listener, app).await?;
 
     Ok(())

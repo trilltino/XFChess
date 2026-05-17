@@ -2,7 +2,7 @@
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
-const PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
+const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
 fn main() {
     let wallet_arg = std::env::args()

@@ -1,4 +1,4 @@
-﻿use bevy::prelude::*;
+use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use super::state::WagerState;
 
@@ -113,7 +113,7 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                 if wager_state.has_wager() {
                     ui.separator();
                     ui.label(
-                        egui::RichText::new("️ This is a real money game!")
+                        egui::RichText::new("? This is a real money game!")
                             .color(egui::Color32::YELLOW)
                             .small(),
                     );

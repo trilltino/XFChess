@@ -5,7 +5,7 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
-const PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
+const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 const RPC_URL: &str = "https://api.devnet.solana.com";
 const ER_RPC_URL: &str = "https://devnet-eu.magicblock.app/";
 /// MagicBlock Delegation Program — owns delegated accounts on L1

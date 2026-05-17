@@ -1,4 +1,4 @@
-﻿//! End-to-end Swiss pairing integration test
+//! End-to-end Swiss pairing integration test
 //!
 //! Tests the full tournament lifecycle:
 //! 1. Create Swiss tournament (5 rounds, 8 players)

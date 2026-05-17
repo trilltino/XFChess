@@ -27,7 +27,7 @@ use ephemeral_rollups_sdk::pda::{
 };
 
 /// The XFChess program ID on Solana
-pub const XFCHESS_PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
+pub const XFCHESS_PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
 /// Magic Block ER validator endpoint (default)
 pub const MAGIC_BLOCK_ER_ENDPOINT: &str = "https://devnet-eu.magicblock.app";

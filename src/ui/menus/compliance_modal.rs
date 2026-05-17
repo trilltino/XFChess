@@ -1,4 +1,4 @@
-﻿#![allow(dead_code)]
+#![allow(dead_code)]
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -151,7 +151,7 @@ fn draw_compliance_modal(
 
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.button("⬅ Back").clicked() {
+                    if ui.button("? Back").clicked() {
                         state.step = 1;
                         state.error_msg = None;
                     }

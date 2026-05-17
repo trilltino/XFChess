@@ -2,7 +2,7 @@
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 
 // Program ID for our Solana program
-pub const SOLANA_PROGRAM_ID: &str = "C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf";
+pub const SOLANA_PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
 // Seeds for PDAs
 pub const GAME_SEED: &[u8] = b"game";

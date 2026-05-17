@@ -92,7 +92,7 @@ function DisputeModal({ game, walletPubkey, onClose }: DisputeModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [caseId, setCaseId] = useState<string | null>(null);
 
-  const PROGRAM_ID = import.meta.env.VITE_PROGRAM_ID ?? 'C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf';
+  const PROGRAM_ID = import.meta.env.VITE_PROGRAM_ID ?? '8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

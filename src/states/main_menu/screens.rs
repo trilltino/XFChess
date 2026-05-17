@@ -1,4 +1,4 @@
-﻿//! Main menu screen and popup rendering helpers.
+//! Main menu screen and popup rendering helpers.
 //!
 //! This module contains the UI that was split out of `src/states/main_menu.rs`
 //! so the main menu state stays focused on plugin setup and high-level flow.
@@ -38,7 +38,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ui.vertical_centered(|ui| {
         Layout::section_space(ui);
 
-        if ui.button("⬅ Back").clicked() {
+        if ui.button("? Back").clicked() {
             ctx.menu_state.set(crate::core::MenuState::ModeSelect);
             lobby.status = LobbyStatus::Idle;
         }
@@ -106,7 +106,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::item_space(ui);
 
-        // Auto-transition: Success + Create mode → WaitingForOpponent + start poll.
+        // Auto-transition: Success + Create mode ? WaitingForOpponent + start poll.
         if let LobbyStatus::Success(game_id) = lobby.status {
             if lobby.mode == LobbyMode::Create && lobby.opponent_poll_rx.is_none() {
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -126,7 +126,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             LobbyStatus::Pending => {
                 ui.spinner();
                 ui.label(
-                    egui::RichText::new("⏳ Submitting transaction...")
+                    egui::RichText::new("? Submitting transaction...")
                         .color(egui::Color32::from_rgb(200, 200, 50)),
                 );
             }
@@ -134,7 +134,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             LobbyStatus::WaitingForOpponent { game_id: _ } => {
                 ui.spinner();
                 ui.label(
-                    egui::RichText::new("⏳ Waiting for opponent to join...")
+                    egui::RichText::new("? Waiting for opponent to join...")
                         .color(egui::Color32::from_rgb(255, 200, 80)),
                 );
                 Layout::small_space(ui);
@@ -208,7 +208,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
             LobbyStatus::Error(msg) => {
                 ui.colored_label(egui::Color32::RED, format!(" {}", msg));
-                if ui.small_button("↩ Try Again").clicked() {
+                if ui.small_button("? Try Again").clicked() {
                     lobby.status = LobbyStatus::Idle;
                 }
             }
@@ -282,7 +282,7 @@ pub(super) fn render_spectator_popup(
                                         _ => " Free",
                                     };
                                     let stake_str = if game.stake_amount > 0.0 {
-                                        format!("{} — {:.3} SOL", type_badge, game.stake_amount)
+                                        format!("{} � {:.3} SOL", type_badge, game.stake_amount)
                                     } else {
                                         type_badge.to_string()
                                     };
@@ -290,9 +290,9 @@ pub(super) fn render_spectator_popup(
                                     let tc_label = if game.base_time_seconds > 0 {
                                         let m = game.base_time_seconds / 60;
                                         let s = game.base_time_seconds % 60;
-                                        if s == 0 { format!("⏱ {}+{}", m, game.increment_seconds) }
-                                        else { format!("⏱ {}s+{}", game.base_time_seconds, game.increment_seconds) }
-                                    } else { "⏱ ∞".to_string() };
+                                        if s == 0 { format!("? {}+{}", m, game.increment_seconds) }
+                                        else { format!("? {}s+{}", game.base_time_seconds, game.increment_seconds) }
+                                    } else { "? 8".to_string() };
                                     ui.label(egui::RichText::new(tc_label).size(10.0).color(egui::Color32::GRAY));
                                 });
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -555,7 +555,7 @@ fn render_create_tab(
     }
 
     let label_text = if lobby.wager_sol == 0.0 {
-        "Free casual game — no SOL at stake".to_string()
+        "Free casual game � no SOL at stake".to_string()
     } else {
         format!("Escrow: {:.4} SOL  |  Pot: {:.4} SOL",
             lobby.wager_sol, lobby.wager_sol * 2.0)
@@ -660,7 +660,7 @@ fn render_create_tab(
     }
 
     if !can_create && wallet_connected && balance < 0.003 {
-        ui.colored_label(egui::Color32::RED, "Insufficient balance (need ≥ 0.003 SOL)");
+        ui.colored_label(egui::Color32::RED, "Insufficient balance (need = 0.003 SOL)");
     }
 }
 
@@ -810,7 +810,7 @@ pub(super) fn render_lobby_selection_popup(
                     if sol_btn.clicked() {
                         if let Some(state) = solana_state.as_ref() {
                             if state.wallet_pubkey.is_none() {
-                                info!("[MENU] Solana wager blocked — wallet not connected. Opening wallet popup.");
+                                info!("[MENU] Solana wager blocked � wallet not connected. Opening wallet popup.");
                                 tauri_signer::open_wallet_browser();
                             } else if state.profile_status != crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername {
                                 info!("[MENU] Profile missing or incomplete. Redirecting to Profile Creation.");
@@ -844,14 +844,14 @@ pub(super) fn render_lobby_selection_popup(
         });
 }
 
-/// Part 2F — P2P Braid Lobby screen shown when MenuState::BraidLobby is active.
+/// Part 2F � P2P Braid Lobby screen shown when MenuState::BraidLobby is active.
 pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ctx.learn_viewport.rect_px = None;
     ui.vertical_centered(|ui| {
         ui.heading(egui::RichText::new("P2P LOBBY").size(24.0).color(egui::Color32::from_rgb(100, 200, 255)).strong());
         ui.add_space(8.0);
 
-        if ui.button("⬅ Back").clicked() {
+        if ui.button("? Back").clicked() {
             ctx.menu_state.set(crate::core::MenuState::Main);
         }
 
@@ -929,14 +929,14 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
     });
 }
 
-/// Part 4B — Tournament browser screen shown when MenuState::Tournaments is active.
+/// Part 4B � Tournament browser screen shown when MenuState::Tournaments is active.
 pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ctx.learn_viewport.rect_px = None;
     ui.vertical_centered(|ui| {
         ui.heading(egui::RichText::new("TOURNAMENTS").size(24.0).color(egui::Color32::from_rgb(255, 200, 50)).strong());
         ui.add_space(8.0);
 
-        if ui.button("⬅ Back").clicked() {
+        if ui.button("? Back").clicked() {
             ctx.menu_state.set(crate::core::MenuState::Main);
         }
 
@@ -1150,7 +1150,7 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
             }
             
             if !node_id_ready {
-                ui.label(egui::RichText::new("Wait for P2P initialization…").size(11.0).color(egui::Color32::RED));
+                ui.label(egui::RichText::new("Wait for P2P initialization�").size(11.0).color(egui::Color32::RED));
             }
         });
     });
@@ -1171,7 +1171,7 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
         ui.add_space(30.0);
         
         // Simple animated dots
-        ui.label(egui::RichText::new("• • •").size(32.0).color(egui::Color32::GOLD));
+        ui.label(egui::RichText::new("� � �").size(32.0).color(egui::Color32::GOLD));
         
         ui.add_space(40.0);
 

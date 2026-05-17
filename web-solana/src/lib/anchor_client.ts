@@ -2,7 +2,7 @@ import { AnchorProvider, Program, type Idl, web3 } from '@coral-xyz/anchor';
 import { Connection, PublicKey } from '@solana/web3.js';
 import idl from './xfchess_game.json';
 
-export const PROGRAM_ID = new PublicKey('C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf');
+export const PROGRAM_ID = new PublicKey('8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU');
 
 export function getAnchorProgram(connection: Connection, wallet: any) {
   const provider = new AnchorProvider(connection, wallet as any, {

@@ -1,4 +1,4 @@
-﻿[changelog]
+[changelog]
 # changelog header
 header = """
 # Changelog\n
@@ -47,7 +47,7 @@ postprocessors = [
 [git]
 # regex for parsing and grouping commits
 commit_parsers = [
-  { message = "^feat", group = "<!-- 0 -->️  Features" },
+  { message = "^feat", group = "<!-- 0 -->?  Features" },
   { message = "^fix", group = "<!-- 1 --> Bug Fixes" },
   { message = "^doc", group = "<!-- 3 --> Documentation" },
   { message = "^perf", group = "<!-- 4 --> Performance" },
@@ -58,8 +58,8 @@ commit_parsers = [
   { message = "^chore\\(deps\\)", skip = true },
   { message = "^chore\\(pr\\)", skip = true },
   { message = "^chore\\(pull\\)", skip = true },
-  { message = "^chore|ci", group = "<!-- 7 -->️ Miscellaneous Tasks" },
-  { body = ".*security", group = "<!-- 8 -->️ Security" },
-  { message = "^revert", group = "<!-- 9 -->◀️ Revert" },
+  { message = "^chore|ci", group = "<!-- 7 -->? Miscellaneous Tasks" },
+  { body = ".*security", group = "<!-- 8 -->? Security" },
+  { message = "^revert", group = "<!-- 9 -->?? Revert" },
 ]
 

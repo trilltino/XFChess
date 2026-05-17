@@ -1,4 +1,4 @@
-﻿//! Pawn Promotion UI
+//! Pawn Promotion UI
 //!
 //! Displays a dialog when a pawn reaches the end of the board,
 //! allowing the player to choose which piece to promote to.

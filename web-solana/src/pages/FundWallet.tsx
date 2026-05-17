@@ -1,4 +1,4 @@
-ï»¿import { useState } from 'react';
+import { useState } from 'react';
 
 interface FundWalletProps {
   walletAddress?: string;
@@ -123,8 +123,8 @@ export default function FundWallet({
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
           >
             <option value="USD">USD ($)</option>
-            <option value="EUR">EUR (â‚¬)</option>
-            <option value="GBP">GBP (Â£)</option>
+            <option value="EUR">EUR (€)</option>
+            <option value="GBP">GBP (£)</option>
             <option value="BRL">BRL (R$)</option>
           </select>
         </div>

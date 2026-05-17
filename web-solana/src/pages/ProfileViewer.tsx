@@ -1,4 +1,4 @@
-ï»¿import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { Link } from 'react-router-dom';
@@ -100,7 +100,7 @@ function SignupForm({
         .then(({ taken }) => {
           setUsernameError(taken ? 'Username already taken' : null);
         })
-        .catch(() => { /* network error â€” don't block UX */ })
+        .catch(() => { /* network error — don't block UX */ })
         .finally(() => setCheckingUsername(false));
     }, 500);
     return () => clearTimeout(timer);
@@ -146,7 +146,7 @@ function SignupForm({
         {!usernameError && newUsername && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#14F195', justifyContent: 'center' }}>
             {checkingUsername
-              ? <><Loader2 size={14} className="spinner" /> Checking availabilityâ€¦</>
+              ? <><Loader2 size={14} className="spinner" /> Checking availability…</>
               : <><CheckCircle2 size={14} /> Username available</>
             }
           </div>
@@ -161,7 +161,7 @@ function SignupForm({
           required
           style={{ ...inputStyle, width: '100%', textAlign: 'center', cursor: 'pointer' }}
         >
-          <option value="">Select your countryâ€¦</option>
+          <option value="">Select your country…</option>
           {COUNTRIES.map(c => (
             <option key={c.code} value={c.code}>{c.label}</option>
           ))}
@@ -354,20 +354,20 @@ export function ProfileViewer() {
           username: newUsername,
           email: email || null,
         });
-        // Fresh registration â€” store token and username
+        // Fresh registration — store token and username
         token = auth.token;
         localStorage.setItem('xfchess_token', auth.token);
         localStorage.setItem('xfchess_username', auth.username);
         localStorage.setItem('xfchess_wallet', wallet.publicKey.toBase58());
       } catch (regErr: any) {
-        // 409 = wallet already registered â€” existing token is still valid
+        // 409 = wallet already registered — existing token is still valid
         if (!regErr.message?.includes('409') && !regErr.message?.includes('already')) {
           console.warn('Backend registration call failed:', regErr);
         }
       }
 
-      // 4. Sync on-chain username â†’ SQLite (canonical source of truth).
-      // Runs for both new and existing wallets â€” idempotent.
+      // 4. Sync on-chain username ? SQLite (canonical source of truth).
+      // Runs for both new and existing wallets — idempotent.
       if (token) {
         try {
           const { username: synced } = await syncProfile(token);
@@ -484,7 +484,7 @@ export function ProfileViewer() {
                         onKeyDown={e => { if (e.key === 'Enter') handleAddEmail(); }}
                       />
                       <button className="btn-small" onClick={handleAddEmail} disabled={emailAddLoading}>
-                        {emailAddLoading ? 'â€¦' : 'Save'}
+                        {emailAddLoading ? '…' : 'Save'}
                       </button>
                       <button className="btn-small" style={{ background: 'transparent', opacity: 0.6 }} onClick={() => { setEmailAddOpen(false); setEmailAddError(null); }}></button>
                       {emailAddError && <span style={{ color: '#ff8080', fontSize: 11 }}>{emailAddError}</span>}

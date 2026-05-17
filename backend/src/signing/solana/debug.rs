@@ -1,4 +1,4 @@
-﻿//! Debug utilities for Solana transactions
+//! Debug utilities for Solana transactions
 //!
 //! Provides detailed transaction inspection and error analysis.
 
@@ -124,7 +124,7 @@ pub fn format_debug_info(info: &TransactionDebugInfo) -> String {
             let change_sol = change.change as f64 / 1_000_000_000.0;
             let sign = if change.change >= 0 { "+" } else { "" };
             output.push_str(&format!(
-                "  {}: {} → {} ({}{} SOL)\n",
+                "  {}: {} ? {} ({}{} SOL)\n",
                 &change.pubkey[..8],
                 change.pre_balance,
                 change.post_balance,

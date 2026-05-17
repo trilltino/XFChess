@@ -1,4 +1,4 @@
-﻿//! Transaction Debugger - Terminal-based rollup transaction monitoring
+//! Transaction Debugger - Terminal-based rollup transaction monitoring
 //!
 //! This module provides real-time logging of ephemeral rollup transactions
 //! to stdout (with colors) and optionally to a file.
@@ -261,7 +261,7 @@ impl TransactionDebugger {
 
         if self.pretty_print {
             println!(
-                "\x1b[36m[→]\x1b[0m Submitted to Solana | Sig: {}... | Game: {}",
+                "\x1b[36m[?]\x1b[0m Submitted to Solana | Sig: {}... | Game: {}",
                 &signature[..16.min(signature.len())],
                 game_id
             );
@@ -296,7 +296,7 @@ impl TransactionDebugger {
             }
             (TransactionStatus::Pending, TransactionType::BatchProposed) => {
                 format!(
-                    "\x1b[33m[⟳ PROPOSED]\x1b[0m Game {} | Batch: {}... | Moves: {}",
+                    "\x1b[33m[? PROPOSED]\x1b[0m Game {} | Batch: {}... | Moves: {}",
                     tx.game_id,
                     &tx.batch_hash[..8.min(tx.batch_hash.len())],
                     tx.moves.len()
@@ -304,7 +304,7 @@ impl TransactionDebugger {
             }
             (TransactionStatus::Pending, TransactionType::SolanaSubmitted) => {
                 format!(
-                    "\x1b[36m[→ SUBMITTED]\x1b[0m Game {} | Sig: {}...",
+                    "\x1b[36m[? SUBMITTED]\x1b[0m Game {} | Sig: {}...",
                     tx.game_id,
                     tx.solana_signature
                         .as_ref()
@@ -315,7 +315,7 @@ impl TransactionDebugger {
             }
             _ => {
                 format!(
-                    "\x1b[90m[•]\x1b[0m Game {} | {:?} | {:?}",
+                    "\x1b[90m[�]\x1b[0m Game {} | {:?} | {:?}",
                     tx.game_id, tx.tx_type, tx.status
                 )
             }

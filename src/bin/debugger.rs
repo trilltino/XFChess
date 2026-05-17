@@ -1,4 +1,4 @@
-﻿//! Standalone Transaction Debugger Binary
+//! Standalone Transaction Debugger Binary
 //!
 //! This binary runs as a sidecar process to monitor rollup transactions
 //! from the XFChess game client.
@@ -109,10 +109,10 @@ fn main() {
 }
 
 fn print_banner() {
-    println!("╔════════════════════════════════════════════════════════╗");
-    println!("║          XFChess Transaction Debugger                  ║");
-    println!("║          Rollup Monitor v0.1.0                         ║");
-    println!("╚════════════════════════════════════════════════════════╝");
+    println!("+--------------------------------------------------------+");
+    println!("�          XFChess Transaction Debugger                  �");
+    println!("�          Rollup Monitor v0.1.0                         �");
+    println!("+--------------------------------------------------------+");
     println!();
 }
 
@@ -142,7 +142,7 @@ fn process_stdin(
 
                 // Print to stdout
                 if pretty_print {
-                    println!("\x1b[36m[→]\x1b[0m {}", line);
+                    println!("\x1b[36m[?]\x1b[0m {}", line);
                 } else {
                     println!("{}", line);
                 }
@@ -174,9 +174,9 @@ fn monitor_simulation(
     use std::io::Write;
 
     let event_types = vec![
-        ("BatchProposed", "\x1b[33m[⟳ PROPOSED]\x1b[0m"),
+        ("BatchProposed", "\x1b[33m[? PROPOSED]\x1b[0m"),
         ("BatchAccepted", "\x1b[32m[ ACCEPTED]\x1b[0m"),
-        ("SolanaSubmitted", "\x1b[36m[→ SUBMITTED]\x1b[0m"),
+        ("SolanaSubmitted", "\x1b[36m[? SUBMITTED]\x1b[0m"),
         ("SolanaConfirmed", "\x1b[32m[ CONFIRMED]\x1b[0m"),
     ];
 

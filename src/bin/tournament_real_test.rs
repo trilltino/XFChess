@@ -1,4 +1,4 @@
-﻿#![cfg(feature = "solana")]
+#![cfg(feature = "solana")]
 #![allow(dead_code)]
 #![allow(unused_imports)]
 #![allow(unused_variables)]
@@ -112,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" Admin balance: {} SOL", admin_balance as f64 / 1_000_000_000.0);
     
     if admin_balance < 10_000_000_000 {
-        println!("️  Admin balance low - please fund with devnet SOL");
+        println!("?  Admin balance low - please fund with devnet SOL");
         return Ok(());
     }
 
@@ -225,7 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         step: "Start".to_string(),
         player: "Admin".to_string(),
         severity: "ok".to_string(),
-        text: "bracket seeded by ELO — SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
+        text: "bracket seeded by ELO � SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
     });
     println!("   Tournament started: {}", start_sig);
 
@@ -395,7 +395,7 @@ async fn play_final(
         step: "Final".to_string(),
         player: winner.name.clone(),
         severity: "ok".to_string(),
-        text: "CHAMPION — 1-0 (10 moves on ER)".to_string(),
+        text: "CHAMPION � 1-0 (10 moves on ER)".to_string(),
     });
 
     notes.push(SessionNote {

@@ -1,4 +1,4 @@
-﻿//! Piece Viewer plugin - 3D model viewer for chess pieces
+//! Piece Viewer plugin - 3D model viewer for chess pieces
 //!
 //! Provides a viewer interface for inspecting chess pieces in 3D, similar to viewing
 //! a weapon in an FPS game. Click a piece to open the viewer, then rotate it with the mouse.
@@ -468,9 +468,9 @@ fn spawn_viewer_model(
     // Helper function for knight rotation - knights face across the board
     fn knight_rotation(color: PieceColor) -> Quat {
         match color {
-            // White: Face +Z (toward black's side) - rotate +90° from default
+            // White: Face +Z (toward black's side) - rotate +90� from default
             PieceColor::White => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            // Black: Face -Z (toward white's side) - rotate -90° from default
+            // Black: Face -Z (toward white's side) - rotate -90� from default
             PieceColor::Black => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
         }
     }
@@ -882,15 +882,15 @@ fn piece_viewer_ui(
                 // Rotation instructions
                 ui.heading(TextStyle::heading("Controls", TextSize::MD));
                 Layout::small_space(ui);
-                ui.label(TextStyle::caption("️ Drag to rotate"));
-                ui.label(TextStyle::caption("️ Scroll to zoom"));
-                ui.label(TextStyle::caption("⌨️ WASD to pan"));
+                ui.label(TextStyle::caption("? Drag to rotate"));
+                ui.label(TextStyle::caption("? Scroll to zoom"));
+                ui.label(TextStyle::caption("?? WASD to pan"));
                 Layout::item_space(ui);
 
                 Layout::section_space(ui);
 
                 // Back button
-                if StyledButton::secondary(ui, "← Back to Menu").clicked() {
+                if StyledButton::secondary(ui, "? Back to Menu").clicked() {
                     next_state.set(MenuState::Main);
                 }
 

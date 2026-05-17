@@ -1,4 +1,4 @@
-﻿//! Spectator mode UI for watching live games
+//! Spectator mode UI for watching live games
 //!
 //! Provides a read-only view of ongoing games using egui (following project patterns)
 
@@ -40,7 +40,7 @@ pub struct SpectatorModePlugin;
 impl Plugin for SpectatorModePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpectatorMode>()
-            // Must run in EguiPrimaryContextPass — EguiContexts is only valid there.
+            // Must run in EguiPrimaryContextPass � EguiContexts is only valid there.
             // The run condition avoids touching the egui context every frame when
             // spectator mode is inactive, which previously blocked the main menu UI.
             .add_systems(
@@ -82,9 +82,9 @@ fn spectator_ui_system(
                 ui.heading(format!("Game: {}", spectator.game_id));
 
                 if spectator.connected {
-                    ui.colored_label(egui::Color32::GREEN, "● Live");
+                    ui.colored_label(egui::Color32::GREEN, "? Live");
                 } else {
-                    ui.colored_label(egui::Color32::RED, "○ Disconnected");
+                    ui.colored_label(egui::Color32::RED, "? Disconnected");
                 }
             });
 
@@ -163,25 +163,25 @@ fn render_simple_board(ui: &mut egui::Ui, fen: &str) {
     // Parse FEN and render basic board
     let board_part = fen.split_whitespace().next().unwrap_or("");
     
-    ui.monospace("┌───┬───┬───┬───┬───┬───┬───┬───┐");
+    ui.monospace("+-------------------------------+");
     
     for rank in (0..8).rev() {
-        let mut row_str = String::from("│");
+        let mut row_str = String::from("�");
         
         for file in 0..8 {
             // Find piece at this position
             let square = get_square_from_fen(board_part, file, rank);
-            row_str.push_str(&format!(" {} │", square));
+            row_str.push_str(&format!(" {} �", square));
         }
         
         ui.monospace(&row_str);
         
         if rank > 0 {
-            ui.monospace("├───┼───┼───┼───┼───┼───┼───┼───┤");
+            ui.monospace("+---+---+---+---+---+---+---+---�");
         }
     }
     
-    ui.monospace("└───┴───┴───┴───┴───┴───┴───┴───┘");
+    ui.monospace("+-------------------------------+");
     ui.monospace("  a   b   c   d   e   f   g   h");
 }
 

@@ -1,4 +1,4 @@
-﻿//! Mini 8x8 board (green/white) rendered on [`MINI_LAYER`].
+//! Mini 8x8 board (green/white) rendered on [`MINI_LAYER`].
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
