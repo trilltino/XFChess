@@ -47,14 +47,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(port),
         None,
         braid_iroh::DiscoveryConfig::Real,
-        Some(pools.session_pool.clone()),
-        Some(app),
     ).await.map_err(|e| anyhow::anyhow!("failed to spawn braid-iroh node: {}", e))?;
 
     // ── Spawn background tasks ───────────────────────────────────────────────
     let tournament_trigger = spawn_background_tasks(state.clone(), config);
     state.tournament_trigger = Some(tournament_trigger);
     info!("[signing-server] Background tasks spawned with tournament scheduler");
+
+    // ── Start HTTP Server ──────────────────────────────────────────────────
+    let http_port = port;
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", http_port)).await.map_err(|e| anyhow::anyhow!("Failed to bind TCP listener on port {}: {}", http_port, e))?;
+    info!("[signing-server] Listening for HTTP traffic on port {}", http_port);
+    
+    // Spawn the Axum server
+    // Note: axum::serve requires Router<()> — .with_state() bakes AppState into handlers.
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, app.with_state(state.clone())).await {
+            tracing::error!("HTTP server error: {}", e);
+        }
+    });
 
     // ── Wait for shutdown signal ───────────────────────────────────────────
     tokio::signal::ctrl_c().await.map_err(|e| anyhow::anyhow!("failed to wait for sigint: {}", e))?;

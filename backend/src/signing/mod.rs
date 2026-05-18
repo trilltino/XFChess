@@ -102,6 +102,14 @@ pub struct AppState {
     pub metrics: Arc<crate::telemetry::metrics::Metrics>,
 }
 
+// Compile-time check: AppState must be Clone + Send + Sync + 'static for axum::serve
+#[allow(dead_code)]
+const _: () = {
+    fn assert_bounds<T: Clone + Send + Sync + 'static>() {}
+    // If AppState violates any bound, this line will produce a clear error.
+    let _ = assert_bounds::<AppState>;
+};
+
 impl AppState {
     pub fn new(config: SigningConfig, pool: sqlx::SqlitePool, vault_pool: sqlx::SqlitePool, tournament_store: Arc<TournamentStore>) -> Self {
         let store = Arc::new(storage::SessionStore::new(pool.clone()));
@@ -222,8 +230,9 @@ impl AppState {
 ///
 /// Uses per-feature router functions merged together for clear separation of concerns.
 /// Note: tournament routes are mounted in build_app_router to avoid duplication.
-pub fn build_router(state: AppState) -> Router {
-    Router::new()
+pub fn build_router(state: AppState) -> Router<AppState> {
+    let base = Router::new().with_state(state.clone());
+    base
         // Debug and health routes
         .merge(crate::signing::routes::debug::debug_routes())
         
@@ -235,8 +244,7 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/actions", blinks::blinks_routes())
         .nest(
             "/api/rates",
-            crate::signing::routes::rates::rates_routes()
-                .with_state(state.rate_cache.clone()),
+            crate::signing::routes::rates::rates_routes(),
         )
         .merge(p2p_relay::p2p_routes())
         .nest("/identity", crate::signing::routes::identity::identity_routes())
@@ -247,7 +255,4 @@ pub fn build_router(state: AppState) -> Router {
         
         // WebSocket route for authentication sync
         .route("/ws/auth", get(handle_auth_websocket))
-        
-        // State injection
-        .with_state(state)
 }
