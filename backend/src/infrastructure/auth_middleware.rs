@@ -47,7 +47,7 @@ pub async fn require_api_key(
     
     // Validate key using constant-time comparison
     if !constant_time_eq(&provided_key, &expected_key) {
-        tracing::warn!("[auth] Invalid API key provided");
+        tracing::debug!("[auth] Invalid API key provided");
         return Err(StatusCode::UNAUTHORIZED);
     }
     

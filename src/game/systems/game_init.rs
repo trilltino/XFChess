@@ -144,8 +144,9 @@ pub fn reset_game_resources(
 /// System that initializes players based on game mode
 ///
 /// Creates player resources based on:
-/// - Multiplayer: Two human players (White = Host/Player 1, Black = Joiner/Player 2)
-/// - VsAI: One human, one AI (based on ai_color)
+/// - BraidMultiplayer: local player is human, remote player is not (color from P2PConnectionState)
+/// - MultiplayerLocal: both players human
+/// - VsAI: one human, one AI (based on ai_color)
 ///
 /// This system runs when entering InGame state to set up players.
 pub fn initialize_players(
@@ -153,24 +154,31 @@ pub fn initialize_players(
     mut players: ResMut<Players>,
     ai_config: Res<ChessAIResource>,
     core_mode: Res<crate::core::states::GameMode>,
+    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
 ) {
-    // Multiplayer color detection disabled - will be re-enabled when multiplayer is refactored
-    let multiplayer_color: Option<PieceColor> = None;
-
-    // If core_mode is MultiplayerLocal, set both players as human without network dependency
     if let crate::core::states::GameMode::MultiplayerLocal = *core_mode {
         *players = Players {
             player_1: Player::new(1, "Player 1".to_string(), PieceColor::White, true),
             player_2: Player::new(2, "Player 2".to_string(), PieceColor::Black, true),
         };
         info!("[GAME_INIT] Local PvP players initialized (both human)");
-    } else if let Some(_my_color) = multiplayer_color {
-        // Multiplayer mode: Both players are human
-        *players = Players {
-            player_1: Player::new(1, "Host".to_string(), PieceColor::White, true),
-            player_2: Player::new(2, "Joiner".to_string(), PieceColor::Black, true),
+    } else if let crate::core::states::GameMode::BraidMultiplayer = *core_mode {
+        // Each instance only controls its assigned color; the other color is driven by the network.
+        let my_color = p2p_conn
+            .as_ref()
+            .and_then(|s| s.player_color)
+            .unwrap_or(PieceColor::White);
+        *players = match my_color {
+            PieceColor::White => Players {
+                player_1: Player::new(1, "You (Host)".to_string(), PieceColor::White, true),
+                player_2: Player::new(2, "Opponent".to_string(), PieceColor::Black, false),
+            },
+            PieceColor::Black => Players {
+                player_1: Player::new(1, "Opponent".to_string(), PieceColor::White, false),
+                player_2: Player::new(2, "You".to_string(), PieceColor::Black, true),
+            },
         };
-        info!("[GAME_INIT] Multiplayer players initialized (both human)");
+        info!("[GAME_INIT] BraidMultiplayer players initialized: local={:?}", my_color);
     } else {
         // VsAI mode: One human, one AI
         let ai_color = ai_config.mode.ai_color();

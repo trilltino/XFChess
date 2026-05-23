@@ -27,7 +27,7 @@ pub enum WindowCommands {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IpcCommands {
   GetWindowInfo,
-  ShowNotification { message: String, level: String },
+  ShowNotification { title: String, body: String },
   OpenUrl { url: String },
   CopyToClipboard { text: String },
 }
@@ -98,12 +98,12 @@ pub fn close_tournament_admin(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn show_notification(message: String, level: String, app: AppHandle) {
+pub fn show_notification(title: String, body: String, app: AppHandle) {
   app
     .notification()
     .builder()
-    .title(format!("XFChess Tournament Admin - {}", level))
-    .body(message)
+    .title(title)
+    .body(body)
     .show()
     .unwrap();
 }

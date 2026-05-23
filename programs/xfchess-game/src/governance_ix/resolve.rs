@@ -77,19 +77,17 @@ pub fn handler(
     // Transfer wager if applicable
     if game.wager_amount > 0 {
         let wager_total = game.wager_amount * 2;
-        if winner.is_some() {
-            // Winner takes all minus platform fee
-            let platform_fee = (wager_total * PLATFORM_FEE_PERCENT) / 100;
-            let winner_amount = wager_total - platform_fee;
+        // Flat infrastructure fee — not a percentage rake on the pot.
+        let platform_fee = DISPUTE_RESOLUTION_COST_LAMPORTS.min(wager_total);
+        let distributable = wager_total - platform_fee;
 
+        if winner.is_some() {
             **ctx.accounts.escrow_pda.lamports.borrow_mut() -= wager_total;
-            **ctx.accounts.winner_account.lamports.borrow_mut() += winner_amount;
+            **ctx.accounts.winner_account.lamports.borrow_mut() += distributable;
             **ctx.accounts.platform_treasury.lamports.borrow_mut() += platform_fee;
         } else {
-            // Split wager back to players minus platform fee
-            let platform_fee = (wager_total * PLATFORM_FEE_PERCENT) / 100;
-            let split_amount = (wager_total - platform_fee) / 2;
-
+            // Draw: split distributable equally between players
+            let split_amount = distributable / 2;
             **ctx.accounts.escrow_pda.lamports.borrow_mut() -= wager_total;
             **ctx.accounts.white_account.lamports.borrow_mut() += split_amount;
             **ctx.accounts.black_account.lamports.borrow_mut() += split_amount;

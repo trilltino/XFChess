@@ -10,6 +10,8 @@ import GameExplorer from "./components/GameExplorer";
 import PlayerList from "./components/PlayerList";
 import MatchManagement from "./components/MatchManagement";
 import KycStatus from "./components/KycStatus";
+import Dashboard from "./components/Dashboard";
+import DeploymentManager from "./components/DeploymentManager";
  
 type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc";
 

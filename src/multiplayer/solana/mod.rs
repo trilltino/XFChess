@@ -7,3 +7,4 @@ pub mod session_key_manager;
 pub mod tournament;
 pub mod tournament_session;
 pub mod tauri_signer;
+pub mod global_session_manager;

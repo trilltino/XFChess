@@ -25,6 +25,8 @@ pub enum ChessPath {
     Clock,
     /// Engine analysis hint stream (Stockfish depth/score lines).
     Engine,
+    /// In-game peer chat messages.
+    Chat,
 }
 
 impl ChessPath {
@@ -33,6 +35,7 @@ impl ChessPath {
             ChessPath::Moves => "moves",
             ChessPath::Clock => "clock",
             ChessPath::Engine => "engine",
+            ChessPath::Chat => "chat",
         }
     }
 }
@@ -80,6 +83,14 @@ impl ChessUri {
         }
     }
 
+    /// Construct a chat stream URI.
+    pub fn chat(game_id: impl Into<String>) -> Self {
+        Self {
+            game_id: game_id.into(),
+            path: ChessPath::Chat,
+        }
+    }
+
     /// Convert to the HTTP path that the Axum backend exposes.
     pub fn to_http_path(&self) -> String {
         format!("/game/{}/{}", self.game_id, self.path.as_str())
@@ -96,6 +107,7 @@ impl ChessUri {
                     "moves" => ChessPath::Moves,
                     "clock" => ChessPath::Clock,
                     "engine" => ChessPath::Engine,
+                    "chat" => ChessPath::Chat,
                     other => return Err(BraidUriError::UnknownResource(other.to_string())),
                 };
                 Ok(ChessUri {

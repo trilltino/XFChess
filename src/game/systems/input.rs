@@ -631,6 +631,7 @@ pub fn confirm_exit_game(
                         if let Err(error) = sender.send(NetworkMessage::Resign {
                             game_id: game_state.game_id,
                             winner: winner_label.to_string(),
+                            nonce: 0, // resign doesn't need strict nonce ordering
                         }) {
                             warn!("[INPUT] Failed to send resign message: {}", error);
                         }

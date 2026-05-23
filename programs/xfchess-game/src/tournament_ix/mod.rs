@@ -8,7 +8,8 @@ pub mod prizes;
 
 // Re-export all types from subdirectories for easier access
 pub use lifecycle::{
-    CancelTournament, CloseTournament, InitializeTournament, StartTournament,
+    CancelTournament, CloseTournament, InitializeTournament, InitializeTournamentEscrow,
+    InitializeTournamentShards, InitializeShardsSmall, InitializeShardsMedium, StartTournament,
 };
 pub use registration::{RegisterPlayer, LeaveTournament};
 pub use matches::{

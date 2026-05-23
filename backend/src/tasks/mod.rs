@@ -15,6 +15,7 @@ use tracing::error;
 /// Channel buffer size for orchestrator events.
 pub const ORCHESTRATOR_CHANNEL_SIZE: usize = 100;
 
+pub mod anticheat_worker;
 pub mod matchmaking;
 pub mod fee_claimer;
 pub mod tournament_scheduler;

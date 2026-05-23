@@ -84,7 +84,7 @@ impl WagerState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::PlayerColor;
+    use crate::PlayerColor;
 
     #[test]
     fn test_wager_state_from_config() {

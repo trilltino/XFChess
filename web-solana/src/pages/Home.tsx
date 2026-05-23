@@ -4,6 +4,7 @@ import chessWageringUI from '../assets/chess-wagering-ui.png';
 import highFidelityChess from '../assets/high-fidelity-chess.png';
 import xfchessLogo from '../assets/xfchess-logo.png';
 import learnTheGame from '../assets/learn-the-game.png';
+import WagerPriceWidget from '../components/WagerPriceWidget';
 
 export function Home() {
 
@@ -91,6 +92,7 @@ export function Home() {
                         <p className="feature-desc">
                             Challenge opponents with clear stakes. Winner takes all in these PvP encounters. Put your money where your mind is - Wager on your chess skills in secure, transparent matches. Financial transactions settle in real-time to your wallet allowing you to access your gains. Weekly Tournaments attract larger prize pools.
                         </p>
+                        <WagerPriceWidget />
                     </div>
                 </div>
             </section>

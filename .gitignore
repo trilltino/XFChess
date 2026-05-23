@@ -1,3 +1,7 @@
+# dev2 generated launcher scripts
+.dev2-*.ps1
+dev2-*.ps1
+
 # Rust
 target/
 Cargo.lock

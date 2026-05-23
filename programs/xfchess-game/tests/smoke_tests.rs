@@ -10,6 +10,7 @@ fn init_profile_instruction_serializes() {
     let data = InitProfile {
         username: "tester123".to_string(),
         country: "US".to_string(),
+        date_of_birth: 0i64 - 567_648_001, // 18+ years ago
     }
     .data();
 

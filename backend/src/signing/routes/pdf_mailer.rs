@@ -3,7 +3,7 @@
 //! Uses SendGrid API to deliver PDF attachments via email.
 //! Requires SENDGRID_API_KEY environment variable.
 
-use axum::{http::StatusCode, Json, Router, routing::post};
+use axum::{extract::State, http::StatusCode, Json, Router, routing::post};
 use base64::Engine;
 use printpdf::*;
 use serde::{Deserialize, Serialize};
@@ -176,7 +176,10 @@ fn draw_text(layer: &PdfLayerReference, font: &IndirectFontRef, text: &str, y: f
 }
 
 /// Send welcome email with PDF via SendGrid
-pub async fn send_welcome_email(Json(req): Json<SignUpRequest>) -> Result<StatusCode, StatusCode> {
+pub async fn send_welcome_email(
+    State(_app_state): State<crate::signing::AppState>,
+    Json(req): Json<SignUpRequest>,
+) -> Result<StatusCode, StatusCode> {
     // Persist to subscribers list first so we never lose the signup even if SendGrid fails.
     append_subscriber(&req);
 
@@ -251,7 +254,7 @@ pub async fn send_welcome_email(Json(req): Json<SignUpRequest>) -> Result<Status
 }
 
 /// Create router for PDF mailer endpoints
-pub fn pdf_mailer_routes() -> Router {
+pub fn pdf_mailer_routes() -> Router<crate::signing::AppState> {
     Router::new()
         .route("/signup", post(send_welcome_email))
 }

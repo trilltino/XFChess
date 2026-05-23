@@ -90,7 +90,7 @@ pub fn render_solana_panel(
                 });
                 ui.horizontal(|ui| {
                     ui.label(if has_kyc { "" } else { "" });
-                    ui.colored_label(if has_kyc { UiColors::SUCCESS } else { UiColors::DANGER }, "KYC — required for wagered play");
+                    ui.colored_label(if has_kyc { UiColors::SUCCESS } else { UiColors::DANGER }, "KYC â€” required for wagered play");
                 });
 
                 ui.add_space(5.0);
@@ -136,12 +136,12 @@ pub fn render_solana_panel(
                 if lamports > 0 {
                     ui.label(format!("Amount: {} SOL", lamports as f64 / 1_000_000_000.0));
                 } else {
-                    ui.label("Amount: —");
+                    ui.label("Amount: â€”");
                 }
                 if let Some(id) = competitive.game_id.or(sync.game_id) {
                     ui.label(format!("Game ID: {}", id));
                 } else {
-                    ui.label("Game ID: —");
+                    ui.label("Game ID: â€”");
                 }
             });
         } else {

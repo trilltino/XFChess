@@ -118,54 +118,6 @@ pub struct TournamentSummary {
     pub status: String,
 }
 
-/// Creates player-facing tournament routes.
-pub fn tournament_routes() -> Router<AppState> {
-    Router::new()
-        .route("/{id}", get(get_tournament))
-        .route("/{id}/register-node", post(register_node))
-        .route("/{id}/my-match", get(get_my_match))
-        .route("/{id}/bracket", get(get_bracket))
-        .route("/{id}/schedule-status", get(get_schedule_status))
-}
-
-/// Creates player-facing routes that require full AppState (KYC vault access).
-pub fn tournament_player_app_state_routes() -> Router<AppState> {
-    Router::new()
-        .route("/{id}/join", post(join_tournament))
-        .route("/{id}/build-leave-tx", post(build_leave_transaction))
-        .route("/{id}/leave", post(leave_tournament))
-}
-
-/// Creates admin tournament routes.
-pub fn admin_tournament_routes() -> Router<AppState> {
-    Router::new()
-        .route("/create", post(create_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/record-result", post(record_result).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/set-match-game-id", post(set_match_game_id).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/initialize-swiss", post(initialize_swiss_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
-}
-
-/// Creates admin tournament routes requiring AppState (for USDC operations).
-pub fn admin_tournament_app_state_routes() -> Router<AppState> {
-    Router::new()
-        .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/cancel", post(build_cancel_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
-}
-
-/// Creates tournament listing routes.
-pub fn tournaments_routes() -> Router<AppState> {
-    Router::new()
-        .route("/", get(list_tournaments))
-        .route("/my", get(list_my_tournaments))
-}
-
-/// Creates gossip-enabled tournament routes (requires AppState).
-pub fn tournament_gossip_routes() -> Router<AppState> {
-    Router::new()
-        .route("/{id}/subscribe-node", post(subscribe_node))
-        .route("/{id}/bootstrap-peers", get(get_bootstrap_peers))
-}
-
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 /// POST /tournament/{id}/subscribe-node - Subscribe to tournament gossip updates
@@ -506,6 +458,9 @@ async fn initialize_swiss_tournament(
 
     store.create(seeded_tournament).await;
 
+    // Ensure gossip topic is registered for real-time updates
+    state.tournament_gossip.ensure_topic_registered(id).await;
+
     if let Err(err) = state.swiss_service.start_round(id).await {
         error!("[tournament] Failed to start Swiss round 1 for {}: {:?}", id, err);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -779,6 +734,61 @@ async fn build_cancel_transaction(
         "tournament_id": id,
         "players_to_refund": tournament.players.len(),
     })))
+}
+
+/// GET /admin/tournament/:id/gossip-status - Check if gossip topic is registered.
+async fn get_gossip_status(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let has_topic = state.tournament_gossip.has_topic(id).await;
+    let subscriber_count = state.tournament_gossip.get_subscriber_count(id).await;
+
+    Ok(Json(serde_json::json!({
+        "tournament_id": id,
+        "has_topic": has_topic,
+        "subscriber_count": subscriber_count,
+    })))
+}
+
+/// Player-facing tournament routes (no admin auth required).
+pub fn tournaments_routes() -> Router<AppState> {
+    Router::new()
+        .route("/", get(list_tournaments))
+        .route("/my", get(list_my_tournaments))
+}
+
+/// Creates gossip-enabled tournament routes (requires AppState).
+pub fn tournament_gossip_routes() -> Router<AppState> {
+    Router::new()
+        .route("/{id}/subscribe-node", post(subscribe_node))
+        .route("/{id}/bootstrap-peers", get(get_bootstrap_peers))
+}
+
+/// Core tournament interaction routes.
+pub fn tournament_routes() -> Router<AppState> {
+    Router::new()
+        .route("/{id}", get(get_tournament))
+        .route("/{id}/join", post(join_tournament))
+        .route("/{id}/register-node", post(register_node))
+        .route("/{id}/my-match", get(get_my_match))
+        .route("/{id}/bracket", get(get_bracket))
+        .route("/{id}/build-leave-tx", post(build_leave_transaction))
+        .route("/{id}/leave", post(leave_tournament))
+        .route("/{id}/schedule-status", get(get_schedule_status))
+        .merge(tournament_gossip_routes())
+}
+
+/// Admin-only tournament management routes.
+pub fn admin_tournament_routes() -> Router<AppState> {
+    Router::new()
+        .route("/create", post(create_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/record-result", post(record_result).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/set-match-game-id", post(set_match_game_id).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/initialize-swiss", post(initialize_swiss_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/cancel", post(build_cancel_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/gossip-status", get(get_gossip_status).layer(axum::middleware::from_fn(admin_auth_middleware)))
 }
 
 #[cfg(test)]

@@ -40,7 +40,7 @@ pub struct SpectatorModePlugin;
 impl Plugin for SpectatorModePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpectatorMode>()
-            // Must run in EguiPrimaryContextPass — EguiContexts is only valid there.
+            // Must run in EguiPrimaryContextPass â€” EguiContexts is only valid there.
             // The run condition avoids touching the egui context every frame when
             // spectator mode is inactive, which previously blocked the main menu UI.
             .add_systems(
@@ -166,18 +166,18 @@ fn render_simple_board(ui: &mut egui::Ui, fen: &str) {
     ui.monospace("+-------------------------------+");
     
     for rank in (0..8).rev() {
-        let mut row_str = String::from("¦");
+        let mut row_str = String::from("Â¦");
         
         for file in 0..8 {
             // Find piece at this position
             let square = get_square_from_fen(board_part, file, rank);
-            row_str.push_str(&format!(" {} ¦", square));
+            row_str.push_str(&format!(" {} Â¦", square));
         }
         
         ui.monospace(&row_str);
         
         if rank > 0 {
-            ui.monospace("+---+---+---+---+---+---+---+---¦");
+            ui.monospace("+---+---+---+---+---+---+---+---Â¦");
         }
     }
     

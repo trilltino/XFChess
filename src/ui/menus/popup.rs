@@ -28,7 +28,7 @@ pub struct GamePopup {
     /// How many seconds the popup stays visible before auto-dismissing.
     /// Set to `f32::INFINITY` to keep it until manually dismissed.
     pub lifetime:  f32,
-    /// Remaining time (decremented each frame; private — set by the queue).
+    /// Remaining time (decremented each frame; private â€” set by the queue).
     pub(crate) remaining: f32,
     /// Whether the user clicked the  to dismiss early.
     pub(crate) dismissed:  bool,
@@ -75,7 +75,7 @@ impl GamePopup {
 // Queue resource
 // ---------------------------------------------------------------------------
 
-/// Global queue — push popups here from any system.
+/// Global queue â€” push popups here from any system.
 #[derive(Resource, Default)]
 pub struct GamePopupQueue {
     pub entries: Vec<GamePopup>,
@@ -171,7 +171,7 @@ fn render_popups(
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new(format!(
-                                "{}…{}",
+                                "{}â€¦{}",
                                 &ct[..ct.len().min(6)],
                                 &ct[ct.len().saturating_sub(4)..]
                             ))

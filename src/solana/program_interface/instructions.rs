@@ -33,6 +33,8 @@ pub const TOURNAMENT_SEED: &[u8] = b"tournament";
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 #[allow(dead_code)]
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
+#[allow(dead_code)]
+pub const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
 /// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
@@ -368,12 +370,13 @@ pub fn init_profile_ix(
     player: Pubkey,
     username: String,
     country: String,
+    date_of_birth: i64,
 ) -> Result<Instruction> {
     let player_profile_pda = Pubkey::find_program_address(
         &[PROFILE_SEED, player.as_ref()],
         &program_id,
     ).0;
-    
+
     let username_record_pda = Pubkey::find_program_address(
         &[USERNAME_SEED, username.as_bytes()],
         &program_id,
@@ -382,6 +385,7 @@ pub fn init_profile_ix(
     let mut data = anchor_discriminator("init_profile").to_vec();
     data.extend(borsh_string(&username));
     data.extend(borsh_string(&country));
+    data.extend(date_of_birth.to_le_bytes());
 
     Ok(Instruction {
         program_id,
@@ -496,6 +500,27 @@ pub fn initialize_tournament_ix(
     )
     .0;
 
+    let tournament_players_shard_0 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_1 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_2 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_3 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
     let mut data = anchor_discriminator("initialize_tournament").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend(borsh_string(name));
@@ -510,6 +535,10 @@ pub fn initialize_tournament_ix(
             AccountMeta::new(tournament_pda, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(authority, true),
+            AccountMeta::new(tournament_players_shard_0, false),
+            AccountMeta::new(tournament_players_shard_1, false),
+            AccountMeta::new(tournament_players_shard_2, false),
+            AccountMeta::new(tournament_players_shard_3, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -539,6 +568,27 @@ pub fn register_player_ix(
     )
     .0;
 
+    let tournament_players_shard_0 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_1 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_2 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_3 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
     let mut data = anchor_discriminator("register_player").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
 
@@ -546,9 +596,13 @@ pub fn register_player_ix(
         program_id,
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(escrow_pda, false),
             AccountMeta::new_readonly(player_profile_pda, false),
             AccountMeta::new(player, true),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(tournament_players_shard_0, false),
+            AccountMeta::new(tournament_players_shard_1, false),
+            AccountMeta::new(tournament_players_shard_2, false),
+            AccountMeta::new(tournament_players_shard_3, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -568,6 +622,27 @@ pub fn start_tournament_ix(
     )
     .0;
 
+    let tournament_players_shard_0 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_1 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_2 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_3 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
     let mut data = anchor_discriminator("start_tournament").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
 
@@ -575,6 +650,10 @@ pub fn start_tournament_ix(
         program_id,
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(tournament_players_shard_0, false),
+            AccountMeta::new(tournament_players_shard_1, false),
+            AccountMeta::new(tournament_players_shard_2, false),
+            AccountMeta::new(tournament_players_shard_3, false),
             AccountMeta::new(authority, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
@@ -614,6 +693,61 @@ pub fn record_match_result_ix(
     })
 }
 
+/// Build a `record_swiss_result` instruction.
+#[allow(dead_code)]
+pub fn record_swiss_result_ix(
+    program_id: Pubkey,
+    tournament_id: u64,
+    round: u8,
+    board: u16,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let tournament_players_shard_0 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_1 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_2 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_3 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("record_swiss_result").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&round.to_le_bytes());
+    data.extend_from_slice(&board.to_le_bytes());
+    data.extend_from_slice(&0u8.to_le_bytes()); // result = Draw for now
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(tournament_players_shard_0, false),
+            AccountMeta::new(tournament_players_shard_1, false),
+            AccountMeta::new(tournament_players_shard_2, false),
+            AccountMeta::new(tournament_players_shard_3, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
 /// Build an `advance_final` instruction.
 #[allow(dead_code)]
 pub fn advance_final_ix(
@@ -635,6 +769,60 @@ pub fn advance_final_ix(
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
             AccountMeta::new(authority, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+/// Build a `leave_tournament` instruction.
+#[allow(dead_code)]
+pub fn leave_tournament_ix(
+    program_id: Pubkey,
+    player: Pubkey,
+    tournament_id: u64,
+    host_treasury: Pubkey,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let tournament_players_shard_0 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_1 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_2 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let tournament_players_shard_3 = Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("leave_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(tournament_players_shard_0, false),
+            AccountMeta::new(tournament_players_shard_1, false),
+            AccountMeta::new(tournament_players_shard_2, false),
+            AccountMeta::new(tournament_players_shard_3, false),
+            AccountMeta::new(player, true),
+            AccountMeta::new(host_treasury, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,

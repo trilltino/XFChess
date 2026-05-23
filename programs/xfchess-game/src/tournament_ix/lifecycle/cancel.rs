@@ -18,6 +18,30 @@ pub struct CancelTournament<'info> {
         constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
     pub tournament: Account<'info, Tournament>,
+    /// TournamentPlayersShard 0 (players 0-63)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 1 (players 64-127)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_1: Box<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 2 (players 128-191)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_2: Box<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 3 (players 192-255)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_3: Box<Account<'info, TournamentPlayersShard>>,
     /// CHECK: USDC prize escrow PDA — the authority of the token account.
     #[account(
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
@@ -58,7 +82,23 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
 
     let tournament = &ctx.accounts.tournament;
     let refund_amount = tournament.entry_fee;
-    let registered = tournament.players.len();
+
+    // Collect all players from all shards
+    let mut all_players: Vec<Pubkey> = Vec::new();
+    let shards = [
+        &ctx.accounts.tournament_players_shard_0,
+        &ctx.accounts.tournament_players_shard_1,
+        &ctx.accounts.tournament_players_shard_2,
+        &ctx.accounts.tournament_players_shard_3,
+    ];
+
+    for shard in shards.iter() {
+        for player in shard.players.iter() {
+            all_players.push(*player);
+        }
+    }
+
+    let registered = all_players.len();
 
     // Step 1: Return USDC prize pool to operator (if funded)
     if tournament.usdc_prize_mint.is_some() && tournament.usdc_prize_funded {
@@ -93,7 +133,7 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
 
     // Check for duplicate player accounts to prevent double-refunds
     let mut seen_players = std::collections::HashSet::new();
-    for player_key in tournament.players.iter() {
+    for player_key in all_players.iter() {
         require!(
             seen_players.insert(player_key),
             GameErrorCode::DuplicatePlayerAccount
@@ -117,7 +157,7 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
         );
 
         for i in 0..registered {
-            let player_key = ctx.accounts.tournament.players[i];
+            let player_key = all_players[i];
             let player_wallet = &ctx.remaining_accounts[i];
             require!(
                 player_wallet.key() == player_key,

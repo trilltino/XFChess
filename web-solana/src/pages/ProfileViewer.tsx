@@ -100,7 +100,7 @@ function SignupForm({
         .then(({ taken }) => {
           setUsernameError(taken ? 'Username already taken' : null);
         })
-        .catch(() => { /* network error — don't block UX */ })
+        .catch(() => { /* network error ï¿½ don't block UX */ })
         .finally(() => setCheckingUsername(false));
     }, 500);
     return () => clearTimeout(timer);
@@ -146,7 +146,7 @@ function SignupForm({
         {!usernameError && newUsername && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#14F195', justifyContent: 'center' }}>
             {checkingUsername
-              ? <><Loader2 size={14} className="spinner" /> Checking availability…</>
+              ? <><Loader2 size={14} className="spinner" /> Checking availabilityï¿½</>
               : <><CheckCircle2 size={14} /> Username available</>
             }
           </div>
@@ -161,7 +161,7 @@ function SignupForm({
           required
           style={{ ...inputStyle, width: '100%', textAlign: 'center', cursor: 'pointer' }}
         >
-          <option value="">Select your country…</option>
+          <option value="">Select your countryï¿½</option>
           {COUNTRIES.map(c => (
             <option key={c.code} value={c.code}>{c.label}</option>
           ))}
@@ -354,20 +354,20 @@ export function ProfileViewer() {
           username: newUsername,
           email: email || null,
         });
-        // Fresh registration — store token and username
+        // Fresh registration ï¿½ store token and username
         token = auth.token;
         localStorage.setItem('xfchess_token', auth.token);
         localStorage.setItem('xfchess_username', auth.username);
         localStorage.setItem('xfchess_wallet', wallet.publicKey.toBase58());
       } catch (regErr: any) {
-        // 409 = wallet already registered — existing token is still valid
+        // 409 = wallet already registered ï¿½ existing token is still valid
         if (!regErr.message?.includes('409') && !regErr.message?.includes('already')) {
           console.warn('Backend registration call failed:', regErr);
         }
       }
 
       // 4. Sync on-chain username ? SQLite (canonical source of truth).
-      // Runs for both new and existing wallets — idempotent.
+      // Runs for both new and existing wallets ï¿½ idempotent.
       if (token) {
         try {
           const { username: synced } = await syncProfile(token);
@@ -484,7 +484,7 @@ export function ProfileViewer() {
                         onKeyDown={e => { if (e.key === 'Enter') handleAddEmail(); }}
                       />
                       <button className="btn-small" onClick={handleAddEmail} disabled={emailAddLoading}>
-                        {emailAddLoading ? '…' : 'Save'}
+                        {emailAddLoading ? 'ï¿½' : 'Save'}
                       </button>
                       <button className="btn-small" style={{ background: 'transparent', opacity: 0.6 }} onClick={() => { setEmailAddOpen(false); setEmailAddError(null); }}></button>
                       {emailAddError && <span style={{ color: '#ff8080', fontSize: 11 }}>{emailAddError}</span>}
@@ -561,6 +561,29 @@ export function ProfileViewer() {
                       <div className="v">{profile.data.winStreak || 0}</div>
                       <div className="l">Streak</div>
                     </div>
+                  </div>
+
+                  {/* Link Lichess OAuth */}
+                  <div style={{ marginTop: 16, textAlign: 'center' }}>
+                    <button
+                      onClick={async () => {
+                        if (!wallet.publicKey) return;
+                        try {
+                          const { initLichessLink } = await import('../lib/api/lichess');
+                          const { authUrl } = await initLichessLink(wallet.publicKey.toBase58());
+                          window.open(authUrl, 'lichess_oauth', 'width=600,height=700');
+                        } catch (err) {
+                          alert(err instanceof Error ? err.message : 'Failed to start Lichess link');
+                        }
+                      }}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.9rem', padding: '8px 16px' }}
+                    >
+                      Link Lichess Account
+                    </button>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+                      Seed your ELO from your verified Lichess rating
+                    </p>
                   </div>
 
                   <div style={{ marginTop: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>

@@ -855,15 +855,10 @@ pub fn setup_game_camera(
 
             let board_center = Vec3::new(3.5, 0.0, 3.5);
 
-            // Position camera along the Z-axis for standard chess board orientation
-            // White view: camera on -Z side looking toward +Z (rank 0 at bottom, rank 7 at top)
-            // Black view: camera on +Z side looking toward -Z (rank 7 at bottom, rank 0 at top)
-            // This ensures h1 (file 7, rank 0) is at bottom-right for both players
-            let camera_pos = if is_black_view {
-                Vec3::new(3.5, initial_height, 7.0 + distance_behind)
-            } else {
-                Vec3::new(3.5, initial_height, -distance_behind)
-            };
+            // Always start at the white-side reference position (yaw = 0).
+            // CameraRotationState handles rotating to the black side when needed,
+            // so the two systems stay in sync and don't fight each other.
+            let camera_pos = Vec3::new(3.5, initial_height, -distance_behind);
 
             if is_2d {
                 // Top-down 2D View
@@ -901,7 +896,7 @@ pub fn setup_game_camera(
             });
 
             info!(
-                "[CAMERA] Configured Persistent Camera for Standard Perspective. Black View: {}, Pos: {:?}",
+                "[CAMERA] Configured Persistent Camera. is_black_view: {} (rotation system will handle flip). Pos: {:?}",
                 is_black_view, camera_pos
             );
         }

@@ -95,68 +95,69 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
     );
     tournament.prizes_claimed |= place_bit;
 
-    // USDC prize path
-    if tournament.usdc_prize_mint.is_some() {
+    // ── USDC prize path (host-funded guaranteed pool) ─────────────────────────
+    // Pays winner's % share of the USDC that the operator locked before registration.
+    if tournament.usdc_prize_mint.is_some() && tournament.usdc_prize_pool > 0 {
         let usdc_prize_escrow = ctx.accounts.usdc_prize_escrow.as_ref()
             .ok_or(GameErrorCode::MissingTokenAccounts)?;
         let claimant_usdc_ata = ctx.accounts.claimant_usdc_ata.as_ref()
             .ok_or(GameErrorCode::MissingTokenAccounts)?;
 
-        // Verify claimant owns the USDC ATA
         require!(
             claimant_usdc_ata.owner == claimant_key,
             GameErrorCode::UnauthorizedAccess
         );
 
-        // Calculate prize amount from USDC prize pool
-        let prize = (tournament.usdc_prize_pool as u128)
+        let usdc_prize = (tournament.usdc_prize_pool as u128)
             .checked_mul(prize_share_bps as u128)
             .and_then(|v| v.checked_div(10000))
             .map(|v| v as u64)
-            .ok_or(GameErrorCode::NoPrizeToClaim)?;
+            .unwrap_or(0);
 
-        require!(prize > 0, GameErrorCode::NoPrizeToClaim);
-
-        // Transfer USDC from escrow to claimant
-        let tournament_id_bytes = tournament_id.to_le_bytes();
-        let bump = ctx.bumps.usdc_prize_escrow_authority;
-        let escrow_seeds: &[&[&[u8]]] = &[&[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump]]];
-
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: usdc_prize_escrow.to_account_info(),
-                    to: claimant_usdc_ata.to_account_info(),
-                    authority: ctx.accounts.usdc_prize_escrow_authority.to_account_info(),
-                },
-                escrow_seeds,
-            ),
-            prize,
-        )?;
-
-    } else {
-        // SOL fallback path (legacy)
-        let prize = (tournament.prize_pool as u128)
-            .checked_mul(prize_share_bps as u128)
-            .and_then(|v| v.checked_div(10000))
-            .map(|v| v as u64)
-            .ok_or(GameErrorCode::NoPrizeToClaim)?;
-
-        require!(prize > 0, GameErrorCode::NoPrizeToClaim);
-
-        let tournament_id_bytes = tournament_id.to_le_bytes();
-        let bump = ctx.bumps.escrow_pda;
-        let escrow_seeds: &[&[&[u8]]] = &[&[TOURNAMENT_ESCROW_SEED, &tournament_id_bytes, &[bump]]];
-        let _ = escrow_seeds; // Suppress unused variable warning
-
-        let escrow_lamports = ctx.accounts.escrow_pda.lamports();
-        require!(escrow_lamports >= prize, GameErrorCode::InsufficientPrizeFunds);
-
-        **ctx.accounts.escrow_pda.lamports.borrow_mut() -= prize;
-        **ctx.accounts.claimant_wallet.lamports.borrow_mut() += prize;
-
+        if usdc_prize > 0 {
+            let tournament_id_bytes = tournament_id.to_le_bytes();
+            let bump = ctx.bumps.usdc_prize_escrow_authority;
+            let escrow_seeds: &[&[&[u8]]] = &[&[
+                TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump],
+            ]];
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: usdc_prize_escrow.to_account_info(),
+                        to: claimant_usdc_ata.to_account_info(),
+                        authority: ctx.accounts.usdc_prize_escrow_authority.to_account_info(),
+                    },
+                    escrow_seeds,
+                ),
+                usdc_prize,
+            )?;
+        }
     }
+
+    // ── SOL prize path (collective wager pool from entry fees) ────────────────
+    // Pays winner's % share of the SOL wager contributions (£2.50 per player).
+    // Runs whether or not there is a USDC pool — both can pay out simultaneously.
+    if tournament.prize_pool > 0 {
+        let sol_prize = (tournament.prize_pool as u128)
+            .checked_mul(prize_share_bps as u128)
+            .and_then(|v| v.checked_div(10000))
+            .map(|v| v as u64)
+            .unwrap_or(0);
+
+        if sol_prize > 0 {
+            let escrow_lamports = ctx.accounts.escrow_pda.lamports();
+            require!(escrow_lamports >= sol_prize, GameErrorCode::InsufficientPrizeFunds);
+            **ctx.accounts.escrow_pda.lamports.borrow_mut() -= sol_prize;
+            **ctx.accounts.claimant_wallet.lamports.borrow_mut() += sol_prize;
+        }
+    }
+
+    // Require at least one pool paid something
+    require!(
+        tournament.usdc_prize_pool > 0 || tournament.prize_pool > 0,
+        GameErrorCode::NoPrizeToClaim
+    );
 
     Ok(())
 }

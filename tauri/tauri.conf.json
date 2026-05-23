@@ -5,23 +5,30 @@
   "identifier": "com.xfchess.app",
   "build": {
     "frontendDist": "./wallet-ui/dist",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5174",
     "beforeBuildCommand": "",
     "beforeDevCommand": "cd wallet-ui && npm run dev"
   },
   "app": {
     "withGlobalTauri": true,
+    "trayIcon": {
+      "id": "main-tray",
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": true,
+      "menuOnLeftClick": true,
+      "title": "XFChess"
+    },
     "security": {
       "csp": {
         "default-src": "'self'",
-        "connect-src": "'self' ws: http://localhost:8090 https://api.xfchess.com",
-        "script-src": "'self' 'unsafe-inline'",
+        "connect-src": "'self' ws: wss: http://localhost:7454 http://127.0.0.1:7454 http://localhost:8090 https://api.xfchess.com https://auth.privy.io https://*.privy.io https://*.privy.systems wss://*.privy.io https://api.mainnet-beta.solana.com",
+        "script-src": "'self' 'unsafe-inline' https://auth.privy.io",
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: https:",
-        "font-src": "'self' data:",
+        "font-src": "'self' data: https://fonts.gstatic.com",
         "object-src": "'none'",
         "media-src": "'self'",
-        "frame-src": "'none'"
+        "frame-src": "https://auth.privy.io https://*.privy.io"
       }
     },
     "windows": [
@@ -38,21 +45,6 @@
         "center": true,
         "dragDropEnabled": false
               },
-      {
-        "title": "XFChess Wallet",
-        "label": "wallet-popup",
-        "url": "http://localhost:7455/wallet-popup/",
-        "width": 420,
-        "height": 500,
-        "resizable": false,
-        "visible": false,
-        "decorations": false,
-        "transparent": false,
-        "alwaysOnTop": true,
-        "center": true,
-        "skipTaskbar": false,
-        "dragDropEnabled": false
-      },
       {
         "title": "XFChess Tournament Admin",
         "label": "tournament-admin",

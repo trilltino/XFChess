@@ -9,6 +9,8 @@
 //! - `history`: Game history queries
 //! - `dispute`: Dispute resolution
 
+pub mod anticheat;
+pub mod chat;
 pub mod main;
 pub mod auth;
 pub mod identity;
@@ -23,3 +25,7 @@ pub mod relayer;
 pub mod debug;
 pub mod archive;
 pub mod admin;
+pub mod global_session;
+pub mod wallet;
+pub mod external_elo;
+pub mod lichess_oauth;

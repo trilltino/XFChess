@@ -436,7 +436,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     );
                     ui.add_space(4.0);
                     for (mv, sig) in txs.entries.iter().rev() {
-                        let short = format!("{}  �{}", mv, &sig[sig.len().saturating_sub(8)..]);
+                        let short = format!("{}  …{}", mv, &sig[sig.len().saturating_sub(8)..]);
                         let url = format!(
                             "https://explorer.solana.com/tx/{}?cluster=custom&customUrl=https://devnet-eu.magicblock.app",
                             sig
@@ -760,5 +760,326 @@ fn country_to_flag(country_code: &str) -> String {
         }
     }
     flag
+}
+
+/// Overlay system: shows an Accept/Decline banner when the opponent has offered a draw.
+/// Fires [`DrawResponseEvent`] (remote=false) on click so the network layer forwards it.
+pub fn draw_offer_ui(
+    mut contexts: bevy_egui::EguiContexts,
+    pending: Res<crate::game::systems::network_move::PendingDrawOffer>,
+    mut draw_response: bevy::prelude::MessageWriter<crate::game::events::DrawResponseEvent>,
+    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+) {
+    let Some(from) = pending.from_player.as_ref() else { return };
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+
+    egui::Window::new("draw_offer_banner")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 80.0])
+        .fixed_size([340.0, 120.0])
+        .frame(
+            egui::Frame::default()
+                .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 30, 230))
+                .corner_radius(10.0)
+                .inner_margin(16.0)
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80))),
+        )
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{} offers a draw", from))
+                        .size(15.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+                ui.add_space(12.0);
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+
+                    let local_player = p2p_conn
+                        .as_ref()
+                        .and_then(|c| c.player_color)
+                        .map(|col| match col {
+                            crate::rendering::pieces::PieceColor::White => "white",
+                            crate::rendering::pieces::PieceColor::Black => "black",
+                        })
+                        .unwrap_or("white")
+                        .to_string();
+
+                    if ui
+                        .add_sized(
+                            [120.0, 34.0],
+                            egui::Button::new(egui::RichText::new("Accept").color(egui::Color32::WHITE))
+                                .fill(egui::Color32::from_rgb(34, 139, 34)),
+                        )
+                        .clicked()
+                    {
+                        draw_response.write(crate::game::events::DrawResponseEvent {
+                            player: local_player.clone(),
+                            accepted: true,
+                            remote: false,
+                        });
+                    }
+
+                    if ui
+                        .add_sized(
+                            [120.0, 34.0],
+                            egui::Button::new(egui::RichText::new("Decline").color(egui::Color32::WHITE))
+                                .fill(egui::Color32::from_rgb(180, 40, 40)),
+                        )
+                        .clicked()
+                    {
+                        draw_response.write(crate::game::events::DrawResponseEvent {
+                            player: local_player,
+                            accepted: false,
+                            remote: false,
+                        });
+                    }
+                });
+            });
+        });
+}
+
+/// Pause/resume button for online multiplayer: pauses/resumes both clocks.
+/// Shown only in BraidMultiplayer mode and only when the game is active.
+pub fn pause_resume_ui(
+    mut contexts: bevy_egui::EguiContexts,
+    mut game_timer: ResMut<crate::game::resources::GameTimer>,
+    game_over: Res<crate::game::resources::GameOverState>,
+    game_mode: Res<crate::core::GameMode>,
+    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
+    session: Option<Res<crate::multiplayer::network::braid_pvp::BraidPvpSession>>,
+    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+) {
+    use crate::core::GameMode;
+    use crate::multiplayer::network::protocol::NetworkMessage;
+
+    if !matches!(*game_mode, GameMode::BraidMultiplayer | GameMode::MultiplayerCompetitive) { return; }
+    if game_over.is_game_over() { return; }
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+
+    let is_paused = !game_timer.is_running;
+    let label = if is_paused { "▶ Resume" } else { "⏸ Pause" };
+    let color = if is_paused {
+        egui::Color32::from_rgb(40, 160, 80)
+    } else {
+        egui::Color32::from_rgb(160, 120, 40)
+    };
+
+    egui::Window::new("pause_resume_btn")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::RIGHT_BOTTOM, [-20.0, -60.0])
+        .fixed_size([100.0, 36.0])
+        .frame(egui::Frame::none())
+        .show(ctx, |ui| {
+            if ui.add_sized([100.0, 34.0],
+                egui::Button::new(egui::RichText::new(label).size(13.0).color(egui::Color32::WHITE).strong())
+                    .fill(color).corner_radius(6.0),
+            ).clicked() {
+                let game_id = session.as_ref()
+                    .and_then(|s| s.game_id.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let player = p2p_conn.as_ref()
+                    .and_then(|c| c.player_color)
+                    .map(|col| match col {
+                        PieceColor::White => "white",
+                        PieceColor::Black => "black",
+                    })
+                    .unwrap_or("white")
+                    .to_string();
+
+                if is_paused {
+                    game_timer.is_running = true;
+                    if let Some(ref ns) = network_state {
+                        if let Some(ref tx) = ns.message_sender {
+                            let _ = tx.send(NetworkMessage::ResumeRequest { game_id, player });
+                        }
+                    }
+                } else {
+                    game_timer.is_running = false;
+                    if let Some(ref ns) = network_state {
+                        if let Some(ref tx) = ns.message_sender {
+                            let _ = tx.send(NetworkMessage::PauseRequest { game_id, player });
+                        }
+                    }
+                }
+            }
+        });
+}
+
+/// Overlay system: shows an Accept/Decline banner when the opponent has offered a rematch.
+pub fn rematch_offer_ui(
+    mut contexts: bevy_egui::EguiContexts,
+    mut pending: ResMut<crate::game::systems::network_move::PendingRematchOffer>,
+    mut rematch_response: bevy::prelude::MessageWriter<crate::game::events::RematchResponseEvent>,
+    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+) {
+    let Some(from) = pending.from_player.clone() else { return };
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+
+    let local_player = p2p_conn
+        .as_ref()
+        .and_then(|c| c.player_color)
+        .map(|col| match col {
+            crate::rendering::pieces::PieceColor::White => "white",
+            crate::rendering::pieces::PieceColor::Black => "black",
+        })
+        .unwrap_or("white")
+        .to_string();
+
+    egui::Window::new("rematch_offer_banner")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 80.0])
+        .fixed_size([340.0, 120.0])
+        .frame(
+            egui::Frame::default()
+                .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 30, 230))
+                .corner_radius(10.0)
+                .inner_margin(16.0)
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80))),
+        )
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{} offers a rematch", from))
+                        .size(15.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+                ui.add_space(12.0);
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+
+                    if ui.add_sized([120.0, 34.0],
+                        egui::Button::new(egui::RichText::new("Accept").color(egui::Color32::WHITE))
+                            .fill(egui::Color32::from_rgb(34, 139, 34)),
+                    ).clicked() {
+                        rematch_response.write(crate::game::events::RematchResponseEvent {
+                            player: local_player.clone(),
+                            accepted: true,
+                            remote: false,
+                        });
+                        pending.from_player = None;
+                    }
+
+                    if ui.add_sized([120.0, 34.0],
+                        egui::Button::new(egui::RichText::new("Decline").color(egui::Color32::WHITE))
+                            .fill(egui::Color32::from_rgb(180, 40, 40)),
+                    ).clicked() {
+                        rematch_response.write(crate::game::events::RematchResponseEvent {
+                            player: local_player,
+                            accepted: false,
+                            remote: false,
+                        });
+                        pending.from_player = None;
+                    }
+                });
+            });
+        });
+}
+
+/// Post-game evaluation overlay: shown when the game is over with result, reason, and rematch button.
+pub fn post_game_overlay(
+    mut contexts: bevy_egui::EguiContexts,
+    game_over: Res<crate::game::resources::GameOverState>,
+    game_mode: Res<crate::core::GameMode>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+    mut rematch_offer: bevy::prelude::MessageWriter<crate::game::events::RematchOfferEvent>,
+    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    move_history: Res<crate::game::resources::MoveHistory>,
+) {
+    if !game_over.is_game_over() { return; }
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+
+    let is_online = matches!(*game_mode, crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive);
+
+    let result_line = game_over.message();
+    let reason_line = match *game_over {
+        crate::game::resources::GameOverState::WhiteWon => "by Checkmate",
+        crate::game::resources::GameOverState::BlackWon => "by Checkmate",
+        crate::game::resources::GameOverState::WhiteWonByResignation => "by Resignation",
+        crate::game::resources::GameOverState::BlackWonByResignation => "by Resignation",
+        crate::game::resources::GameOverState::WhiteWonByTime => "on Time",
+        crate::game::resources::GameOverState::BlackWonByTime => "on Time",
+        crate::game::resources::GameOverState::Stalemate => "Stalemate / Draw",
+        _ => "",
+    };
+
+    let total_moves = move_history.moves.len();
+
+    egui::Window::new("post_game_overlay")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .fixed_size([360.0, 260.0])
+        .frame(
+            egui::Frame::default()
+                .fill(egui::Color32::from_rgba_unmultiplied(12, 12, 20, 240))
+                .corner_radius(12.0)
+                .inner_margin(24.0)
+                .stroke(egui::Stroke::new(1.5, egui::Color32::from_gray(70))),
+        )
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                // Result header
+                let (result_color, icon) = match game_over.winner() {
+                    Some(PieceColor::White) => (egui::Color32::from_rgb(220, 220, 220), "♔"),
+                    Some(PieceColor::Black) => (egui::Color32::from_rgb(180, 140, 255), "♚"),
+                    None => (egui::Color32::GOLD, "="),
+                };
+                ui.label(egui::RichText::new(icon).size(36.0).color(result_color));
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(result_line).size(22.0).color(result_color).strong());
+                if !reason_line.is_empty() {
+                    ui.label(egui::RichText::new(reason_line).size(14.0).color(egui::Color32::GRAY));
+                }
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(format!("{} moves played", total_moves)).size(12.0).color(egui::Color32::GRAY));
+
+                ui.add_space(20.0);
+                ui.separator();
+                ui.add_space(12.0);
+
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+
+                    // Rematch button (online only)
+                    if is_online {
+                        let local_player = p2p_conn.as_ref()
+                            .and_then(|c| c.player_color)
+                            .map(|col| match col {
+                                PieceColor::White => "white",
+                                PieceColor::Black => "black",
+                            })
+                            .unwrap_or("white")
+                            .to_string();
+
+                        if ui.add_sized([120.0, 36.0],
+                            egui::Button::new(egui::RichText::new("Rematch").size(14.0).color(egui::Color32::WHITE).strong())
+                                .fill(egui::Color32::from_rgb(40, 100, 180)),
+                        ).clicked() {
+                            rematch_offer.write(crate::game::events::RematchOfferEvent {
+                                player: local_player,
+                                remote: false,
+                            });
+                        }
+                    }
+
+                    if ui.add_sized([120.0, 36.0],
+                        egui::Button::new(egui::RichText::new("Main Menu").size(14.0).color(egui::Color32::WHITE).strong())
+                            .fill(egui::Color32::from_rgb(80, 40, 40)),
+                    ).clicked() {
+                        next_state.set(crate::core::GameState::MainMenu);
+                    }
+                });
+            });
+        });
 }
 

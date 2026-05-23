@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 #![allow(unused_variables)]
-//! tournament_test — Full 4-player tournament simulation
+//! tournament_test â€” Full 4-player tournament simulation
 //! 
 //! Simulates a complete single-elimination tournament on Solana devnet,
 //! including profile creation, registration, match play, and result recording.

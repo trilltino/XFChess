@@ -20,21 +20,25 @@ pub mod tournament_ix;
 // Re-export account structs at crate root so Anchor's generated __private::__global handlers
 // can find them via their `use super::*` chain.
 pub use account_ix::{InitProfile, VerifyProfile, SetUsername, WithdrawExpiredWager,
-    InitializeFeeVault, CollectFee, ClaimFees, CreateSession, RevokeSession, UpdateElo};
+    InitializeFeeVault, CollectFee, ClaimFees, CreateSession, RevokeSession, UpdateElo,
+    AuthorizeGlobalSessionCtx, RevokeGlobalSessionCtx, AuthorizeGlobalSessionArgs,
+    LinkExternalElo};
 #[cfg(feature = "cranks")]
 pub use crank_ix::{ScheduleTimeCheck, CrankTimeCheck, ScheduleTimeCheckArgs, crank_time_check, schedule_time_check_crank, crank_time_check::CrankTimeCheckData};
 pub use delegation_ix::{
     AuthorizeSessionCtx, DelegateGameCtx, InitializeAfterUndelegation, RevokeSessionCtx,
     UndelegateGameCtx,
 };
-pub use game_ix::{CancelGame, CreateGame, EndGame, JoinGame, ResignGame, ClaimTimeout};
+pub use game_ix::{CancelGame, CreateGame, EndGame, JoinGame, ResignGame, ClaimTimeout,
+    GlobalCreateGame, GlobalJoinGame};
 pub use governance_ix::{ClaimStaleDispute, DisputeGame, ResolveDispute};
 pub use moves_ix::RecordMove;
 pub use tournament_ix::{
     AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
     CancelTournament, ClaimTournamentPrize, FundUsdcPrize, InitializeMatch, InitializeTournament,
-    RecordMatchResult, RecordSwissResult, RegisterPlayer, LeaveTournament, RevokeTournamentSessionCtx,
-    SessionCreateGame, SessionJoinGame, StartTournament, SwissMatchResult,
+    InitializeTournamentEscrow, InitializeTournamentShards, InitializeShardsSmall, InitializeShardsMedium,
+    RecordMatchResult, RecordSwissResult, RegisterPlayer, LeaveTournament,
+    RevokeTournamentSessionCtx, SessionCreateGame, SessionJoinGame, StartTournament, SwissMatchResult,
 };
 
 // Anchor 0.32 #[program] generates `pub use crate::__client_accounts_<snake>::*` at the crate
@@ -52,6 +56,9 @@ pub mod __client_accounts_set_username {
 }
 pub mod __client_accounts_withdraw_expired_wager {
     pub use crate::account_ix::withdraw::__client_accounts_withdraw_expired_wager::*;
+}
+pub mod __client_accounts_link_external_elo {
+    pub use crate::account_ix::link_external_elo::__client_accounts_link_external_elo::*;
 }
 pub mod __client_accounts_delegate_game_ctx {
     pub use crate::delegation_ix::delegate::__client_accounts_delegate_game_ctx::*;
@@ -97,6 +104,18 @@ pub mod __client_accounts_record_move {
 }
 pub mod __client_accounts_initialize_tournament {
     pub use crate::tournament_ix::lifecycle::initialize::__client_accounts_initialize_tournament::*;
+}
+pub mod __client_accounts_initialize_tournament_shards {
+    pub use crate::tournament_ix::lifecycle::initialize_shards::__client_accounts_initialize_tournament_shards::*;
+}
+pub mod __client_accounts_initialize_shards_small {
+    pub use crate::tournament_ix::lifecycle::initialize_shards::__client_accounts_initialize_shards_small::*;
+}
+pub mod __client_accounts_initialize_shards_medium {
+    pub use crate::tournament_ix::lifecycle::initialize_shards::__client_accounts_initialize_shards_medium::*;
+}
+pub mod __client_accounts_initialize_tournament_escrow {
+    pub use crate::tournament_ix::lifecycle::initialize_escrow::__client_accounts_initialize_tournament_escrow::*;
 }
 pub mod __client_accounts_register_player {
     pub use crate::tournament_ix::registration::register::__client_accounts_register_player::*;
@@ -169,6 +188,18 @@ pub mod __client_accounts_crank_time_check {
 pub mod __client_accounts_claim_stale_dispute {
     pub use crate::governance_ix::claim_stale_dispute::__client_accounts_claim_stale_dispute::*;
 }
+pub mod __client_accounts_authorize_global_session_ctx {
+    pub use crate::account_ix::global_session_ix::__client_accounts_authorize_global_session_ctx::*;
+}
+pub mod __client_accounts_revoke_global_session_ctx {
+    pub use crate::account_ix::global_session_ix::__client_accounts_revoke_global_session_ctx::*;
+}
+pub mod __client_accounts_global_create_game {
+    pub use crate::game_ix::global_create::__client_accounts_global_create_game::*;
+}
+pub mod __client_accounts_global_join_game {
+    pub use crate::game_ix::global_join::__client_accounts_global_join_game::*;
+}
 
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
@@ -179,8 +210,8 @@ declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
 pub mod xfchess_game {
     use super::*;
 
-    pub fn init_profile(ctx: Context<InitProfile>, username: String, country: String) -> Result<()> {
-        crate::account_ix::profile::handler(ctx, username, country)
+    pub fn init_profile(ctx: Context<InitProfile>, username: String, country: String, date_of_birth: i64) -> Result<()> {
+        crate::account_ix::profile::handler(ctx, username, country, date_of_birth)
     }
 
     pub fn verify_profile(ctx: Context<VerifyProfile>) -> Result<()> {
@@ -189,6 +220,16 @@ pub mod xfchess_game {
 
     pub fn set_username(ctx: Context<SetUsername>, username: String) -> Result<()> {
         crate::account_ix::set_username::handler(ctx, username)
+    }
+
+    pub fn link_external_elo(
+        ctx: Context<LinkExternalElo>,
+        username: String,
+        blitz_rating: u32,
+        rapid_rating: u32,
+        bullet_rating: u32,
+    ) -> Result<()> {
+        crate::account_ix::link_external_elo::handler(ctx, username, blitz_rating, rapid_rating, bullet_rating)
     }
 
     pub fn create_game(
@@ -368,6 +409,36 @@ pub mod xfchess_game {
         )
     }
 
+    pub fn initialize_tournament_shards(
+        ctx: Context<InitializeTournamentShards>,
+        tournament_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::lifecycle::initialize_shards::handler(ctx, tournament_id)
+    }
+
+    /// Initialize shards for tournaments with ≤ 64 players (1 shard, ~0.034 SOL).
+    pub fn initialize_shards_small(
+        ctx: Context<InitializeShardsSmall>,
+        tournament_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::lifecycle::initialize_shards::handler_small(ctx, tournament_id)
+    }
+
+    /// Initialize shards for tournaments with ≤ 128 players (2 shards, ~0.068 SOL).
+    pub fn initialize_shards_medium(
+        ctx: Context<InitializeShardsMedium>,
+        tournament_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::lifecycle::initialize_shards::handler_medium(ctx, tournament_id)
+    }
+
+    pub fn initialize_tournament_escrow(
+        ctx: Context<InitializeTournamentEscrow>,
+        tournament_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::lifecycle::initialize_escrow::handler(ctx, tournament_id)
+    }
+
     pub fn initialize_match(
         ctx: Context<InitializeMatch>,
         tournament_id: u64,
@@ -509,6 +580,46 @@ pub mod xfchess_game {
         game_id: u64,
     ) -> Result<()> {
         crate::tournament_ix::session::session_join_game::handler(ctx, tournament_id, game_id)
+    }
+
+    // ── Global persistent session delegation ──────────────────────────────────
+
+    /// Create (or refresh) a global persistent session key for `player`.
+    /// After this call the session key can co-sign `global_create_game` and
+    /// `global_join_game` without a wallet popup — for the configured number
+    /// of games and spending budget.
+    pub fn authorize_global_session(
+        ctx: Context<AuthorizeGlobalSessionCtx>,
+        args: AuthorizeGlobalSessionArgs,
+    ) -> Result<()> {
+        crate::account_ix::global_session_ix::handler_authorize_global_session(ctx, args)
+    }
+
+    /// Immediately disable a global session key.
+    pub fn revoke_global_session(ctx: Context<RevokeGlobalSessionCtx>) -> Result<()> {
+        crate::account_ix::global_session_ix::handler_revoke_global_session(ctx)
+    }
+
+    /// Session-signed `create_game`. The session key co-signs; wager and rent
+    /// are drawn from the [`GlobalSessionDelegation`] vault — zero wallet popup.
+    pub fn global_create_game(
+        ctx: Context<GlobalCreateGame>,
+        game_id: u64,
+        wager_amount: u64,
+        match_type: state::MatchType,
+        country: String,
+        base_time_seconds: u64,
+        increment_seconds: u16,
+    ) -> Result<()> {
+        crate::game_ix::global_create::handler(
+            ctx, game_id, wager_amount, match_type, country, base_time_seconds, increment_seconds,
+        )
+    }
+
+    /// Session-signed `join_game`. The session key co-signs; wager is drawn
+    /// from the [`GlobalSessionDelegation`] vault — zero wallet popup.
+    pub fn global_join_game(ctx: Context<GlobalJoinGame>, game_id: u64) -> Result<()> {
+        crate::game_ix::global_join::handler(ctx, game_id)
     }
 
     // ── Fee Vault ──────────────────────────────────────────────────────────────

@@ -11,7 +11,6 @@ This module organizes:
 - **Game State**: Active gameplay with board and piece interaction
 - **Pause Menu**: In-game menu for settings and exit options
 - **Game Over**: Match end screen with results and rematch options
-- **Piece Viewer**: 3D model inspection mode
 - **Multiplayer Menu**: Lobby and connection interface
 
 ## Architecture/Key Components
@@ -24,7 +23,6 @@ This module organizes:
 | [`MainMenuShowcase`](main_menu_showcase.rs) | `main_menu_showcase.rs` | Visual showcase in main menu |
 | [`GameOverPlugin`](game_over.rs) | `game_over.rs` | End-game screen and results |
 | [`PausePlugin`](pause.rs) | `pause.rs` | Pause menu overlay |
-| [`PieceViewerPlugin`](piece_viewer.rs) | `piece_viewer.rs` | 3D piece inspection mode |
 | [`MultiplayerMenuPlugin`](multiplayer_menu.rs) | `multiplayer_menu.rs` | Multiplayer lobby UI |
 
 ### State Lifecycle
@@ -49,13 +47,13 @@ app.add_systems(OnExit(AppState::Game), cleanup_game);
                     │   Main Menu     │
                     └────────┬────────┘
                              │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-┌───────────────┐   ┌─────────────────┐   ┌──────────────┐
-│ Piece Viewer  │   │  Multiplayer    │   │ Singleplayer │
-│   (Showcase)  │   │     Menu        │   │    Game      │
-└───────────────┘   └────────┬────────┘   └──────┬───────┘
+                             │
+                             │
+                             ▼
+                      ┌─────────────────┐   ┌──────────────┐
+                      │  Multiplayer    │   │ Singleplayer │
+                      │     Menu        │   │    Game      │
+                      └────────┬────────┘   └──────┬───────┘
                              │                    │
                              └────────┬───────────┘
                                       ▼

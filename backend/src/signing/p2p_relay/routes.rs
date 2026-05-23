@@ -12,7 +12,7 @@ use crate::signing::AppState;
 
 use super::types::{
     ActiveGame, AnnounceGameRequest, AnnounceGameResponse, GameListing, GameStatus,
-    JoinGameRequest, JoinGameResponse, LeaveGameRequest, PollMessagesRequest,
+    HeartbeatRequest, JoinGameRequest, JoinGameResponse, LeaveGameRequest, PollMessagesRequest,
     PollMessagesResponse, SendMessageRequest,
 };
 
@@ -24,6 +24,7 @@ pub fn p2p_routes() -> Router<AppState> {
         .route("/p2p/join", post(join_game))
         .route("/p2p/accept", post(accept_join))
         .route("/p2p/leave", post(leave_game))
+        .route("/p2p/heartbeat", post(heartbeat_game))
         .route("/p2p/message", post(send_message))
         .route("/p2p/poll", post(poll_messages))
 }
@@ -242,4 +243,22 @@ pub async fn poll_messages(
         messages,
         next_index,
     }))
+}
+
+/// Host heartbeat — refreshes last_activity so the 5-min cleanup doesn't evict a live lobby.
+pub async fn heartbeat_game(
+    State(state): State<AppState>,
+    Json(req): Json<HeartbeatRequest>,
+) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
+    let relay_state = state.p2p_relay.clone();
+    let mut games = relay_state.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if let Some(game) = games.get_mut(&req.game_id) {
+        if game.announcement.host_node_id == req.host_node_id {
+            game.last_activity = chrono::Utc::now();
+            return Ok(AxumJson(AnnounceGameResponse { success: true }));
+        }
+    }
+
+    Ok(AxumJson(AnnounceGameResponse { success: false }))
 }

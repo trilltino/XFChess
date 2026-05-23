@@ -203,6 +203,10 @@ class ApiClient {
     return this.request<any>("/admin/anti-cheat/reports");
   }
  
+  async getKycStatus(wallet: string) {
+    return this.request<any>(`/admin/kyc/status/${wallet}`);
+  }
+
   // Health check
   async healthCheck() {
     return this.request<any>("/health");
@@ -227,10 +231,31 @@ export interface TournamentSummary {
   tournament_id: number;
   name: string;
   entry_fee_lamports: number;
+  platform_fee_lamports?: number;
   prize_pool: number;
   max_players: number;
   registered: number;
   status: string;
+}
+
+export interface SwissStandingsEntry {
+  player_id: string;
+  score: number;
+  buchholz: number;
+  sonneborn: number;
+  rating: number;
+  rank: number;
+}
+
+export interface SwissDataDetail {
+  current_round: number;
+  total_rounds: number;
+  standings: SwissStandingsEntry[];
+  rounds: {
+    round: number;
+    pairings: { white: string; black: string; board: number }[];
+    byes: string[];
+  }[];
 }
 
 export interface TournamentDetail {
@@ -239,6 +264,7 @@ export interface TournamentDetail {
   status: string;
   max_players: number;
   entry_fee_lamports: number;
+  platform_fee_lamports?: number;
   players: string[];
   player_elos?: number[];
   prize_pool?: number;
@@ -254,6 +280,7 @@ export interface TournamentDetail {
   format: string;
   current_round?: number;
   total_rounds?: number;
+  swiss_data?: SwissDataDetail;
 }
 
 export interface CreateTournamentRequest {

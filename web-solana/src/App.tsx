@@ -27,7 +27,12 @@ import TournamentDetail from './pages/TournamentDetail';
 import TournamentStandings from './pages/TournamentStandings';
 import TournamentPlay from './pages/TournamentPlay';
 import { ProfileViewer } from './pages/ProfileViewer';
+import { LichessCallback } from './pages/LichessCallback';
+import { Friends } from './pages/Friends';
+import { Puzzles } from './pages/Puzzles';
+import { Learn } from './pages/Learn';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
+import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { Footer } from './components/Footer';
 import { WalletSelectionModal } from './components/WalletSelectionModal';
@@ -118,6 +123,11 @@ function AppContent() {
     const [navVisible, setNavVisible] = useState(true);
     const lastScrollY = useRef(0);
     const closeDropdowns = () => { setIsLegalOpen(false); setIsCommunityOpen(false); setIsGameTypesOpen(false); };
+
+    const { totalUsdValue, loading: balanceLoading } = useWalletUsdBalance(
+        connected ? connection : null,
+        publicKey
+    );
 
     // Check authentication status on mount
     useEffect(() => {
@@ -286,9 +296,14 @@ function AppContent() {
                         </button>
                     )}
                     {connected && (
-                        <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
-                            {username || "Set Name"}
-                        </Link>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
+                                {username || "Set Name"}
+                            </Link>
+                            <span style={{ color: 'var(--text-dim)', fontSize: '12px', fontWeight: 600 }}>
+                                {balanceLoading ? '...' : totalUsdValue !== null ? `$${totalUsdValue.toFixed(2)}` : ''}
+                            </span>
+                        </div>
                     )}
 
                     <div className="nav-wallet-wrap">
@@ -305,6 +320,24 @@ function AppContent() {
                 </div>
             </nav>
 
+            <AnimatePresence>
+                {connected && (
+                    <motion.div
+                        className="connected-subnav"
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.2 }}
+                    >
+                        <Link to="/tournaments" className="subnav-link" onClick={closeDropdowns}>Tournaments</Link>
+                        <Link to="/players" className="subnav-link" onClick={closeDropdowns}>Player Search</Link>
+                        <Link to="/friends" className="subnav-link" onClick={closeDropdowns}>Friends</Link>
+                        <Link to="/puzzles" className="subnav-link" onClick={closeDropdowns}>Puzzles</Link>
+                        <Link to="/learn" className="subnav-link" onClick={closeDropdowns}>Learn</Link>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             <div style={{ flex: 1 }}>
                 <AnimatePresence mode="wait">
                     <Routes location={location} key={location.pathname}>
@@ -319,6 +352,7 @@ function AppContent() {
                         <Route path="/legal" element={<LegalPage />} />
                         <Route path="/anti-cheat" element={<AntiCheatPage />} />
                         <Route path="/profile" element={<ProfileViewer />} />
+                        <Route path="/auth/lichess/callback" element={<LichessCallback />} />
                         <Route path="/kyc" element={<KycPage />} />
                         <Route path="/news/release" element={<NewsRelease />} />
                         <Route path="/login" element={<SignIn defaultMode="login" />} />
@@ -330,6 +364,9 @@ function AppContent() {
                         <Route path="/tournament/:id/play" element={<TournamentPlay />} />
                         <Route path="/spectate/:game_id" element={<Spectate />} />
                         <Route path="/computer" element={<ChessComputer />} />
+                        <Route path="/friends" element={<Friends />} />
+                        <Route path="/puzzles" element={<Puzzles />} />
+                        <Route path="/learn" element={<Learn />} />
                     </Routes>
                 </AnimatePresence>
             </div>

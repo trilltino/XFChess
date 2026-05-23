@@ -19,7 +19,7 @@ This module is essential for:
 
 | Component | Purpose |
 |-----------|---------|
-| [`AppState`](states.rs:1) | Enum defining all application states: `Splash`, `MainMenu`, `Game`, `Pause`, `PieceViewer` |
+| [`AppState`](states.rs:1) | Enum defining all application states: `Splash`, `MainMenu`, `Game`, `Pause` |
 | [`GameState`](states.rs:1) | In-game state machine: `None`, `Setup`, `Playing`, `GameOver` |
 | [`state_lifecycle.rs`](state_lifecycle.rs) | Handles state entry/exit transitions and cleanup |
 
@@ -37,8 +37,8 @@ This module is essential for:
 
 ```
 [Splash] → [MainMenu] → [Game] ↔ [Pause]
-              ↓              ↓
-        [PieceViewer]   [GameOver]
+                             ↓
+                          [GameOver]
 ```
 
 ## Usage

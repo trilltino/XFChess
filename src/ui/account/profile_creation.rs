@@ -188,7 +188,7 @@ pub fn profile_creation_ui_system(
                         
                         let tax_id_hint = match state.country_code.as_str() {
                             "GB" => "National Insurance Number (NI)",
-                            "BR" => "CPF (Cadastro de Pessoas Físicas)",
+                            "BR" => "CPF (Cadastro de Pessoas FÃ­sicas)",
                             "CA" => "Social Insurance Number (SIN)",
                             "DE" => "Tax ID (Steueridentifikationsnummer)",
                             "US" => "Social Security Number (SSN) - Optional",
@@ -302,7 +302,7 @@ pub fn profile_creation_ui_system(
                     
                     // Rules reminder
                     ui.add_space(16.0);
-                    ui.label(egui::RichText::new("3-20 chars • A-Z, a-z, 0-9, _, -")
+                    ui.label(egui::RichText::new("3-20 chars â€¢ A-Z, a-z, 0-9, _, -")
                         .color(egui::Color32::from_rgb(80, 80, 90))
                         .size(11.0));
                     
@@ -528,7 +528,26 @@ pub fn handle_profile_submission(
                     return;
                 }
             };
-            let ix = match init_profile_ix(program_id, wallet_pubkey, username.clone(), country.clone()) {
+            // Parse DOB string "YYYY-MM-DD" to Unix timestamp for on-chain age gate.
+            let dob_unix: i64 = dob.split('-')
+                .collect::<Vec<_>>()
+                .as_slice()
+                .chunks_exact(3)
+                .next()
+                .and_then(|parts| {
+                    let y: i64 = parts[0].parse().ok()?;
+                    let m: i64 = parts[1].parse().ok()?;
+                    let d: i64 = parts[2].parse().ok()?;
+                    // Simplified Gregorian â†’ Unix (accurate enough for 18+ check)
+                    let days = (y - 1970) * 365 + (y - 1969) / 4 - (y - 1901) / 100 + (y - 1601) / 400
+                        + [0i64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+                            [(m as usize).saturating_sub(1)]
+                        + d - 1;
+                    Some(days * 86400)
+                })
+                .unwrap_or(0);
+
+            let ix = match init_profile_ix(program_id, wallet_pubkey, username.clone(), country.clone(), dob_unix) {
                 Ok(ix) => ix,
                 Err(e) => {
                     error!("[PROFILE] Failed to build IX: {}", e);

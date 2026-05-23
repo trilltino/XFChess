@@ -6,6 +6,9 @@ use crate::game::resources::{
     Selection,
 };
 use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
+use crate::multiplayer::BraidNetworkState;
+use crate::multiplayer::network::braid_pvp::BraidPvpSession;
+use crate::multiplayer::network::protocol::NetworkMessage;
 use bevy::prelude::*;
 
 /// Handle network move events by executing them on the local board
@@ -21,6 +24,8 @@ pub fn handle_network_moves(
     game_sounds: Option<Res<GameSounds>>,
     current_turn: Res<CurrentTurn>,
     mut remote_applied: MessageWriter<RemoteMoveApplied>,
+    network_state: Option<Res<BraidNetworkState>>,
+    session: Option<Res<BraidPvpSession>>,
 ) {
     for event in events.read() {
         info!(
@@ -35,7 +40,26 @@ pub fn handle_network_moves(
             .map(|(e, p, _)| (e, *p));
 
         if let Some((entity, piece)) = source_data {
-            // 2. Find Potential Capture
+            // 2. Validate turn: remote player must be the side to move
+            if piece.color != engine.current_turn {
+                warn!(
+                    "[NETWORK_MOVE] Rejected move: it's {:?}'s turn but {:?} tried to move",
+                    engine.current_turn, piece.color
+                );
+                continue;
+            }
+
+            // 3. Validate move legality using the engine
+            let legal_dests = engine.get_legal_moves_for_square(event.from, piece.color);
+            if !legal_dests.iter().any(|d| *d == event.to) {
+                warn!(
+                    "[NETWORK_MOVE] Rejected illegal move {:?} -> {:?} for {:?}",
+                    event.from, event.to, piece.color
+                );
+                continue;
+            }
+
+            // 4. Find Potential Capture
             let capture_data = pieces_query
                 .iter()
                 .find(|(_, p, _)| p.x == event.to.0 && p.y == event.to.1)
@@ -56,17 +80,17 @@ pub fn handle_network_moves(
                 None
             };
 
-            // 3. Determine first-move status before execute_move borrows the query
+            // 5. Determine first-move status before execute_move borrows the query
             let was_first_move = if let Ok((_, _, has_moved)) = pieces_query.get(entity) {
                 !has_moved.moved
             } else {
                 false
             };
 
-            // 4. Map Promotion Piece
+            // 6. Map Promotion Piece
             let promotion_type = event.promotion.and_then(PieceType::from_char);
 
-            // 5. Execute Move
+            // 7. Execute Move
             let ctx = MoveContext {
                 origin: "network_move",
                 entity,
@@ -113,6 +137,24 @@ pub fn handle_network_moves(
                     uci.push(promo_char);
                 }
                 let fen_after = engine.current_fen().to_string();
+
+                // FEN desync check: compare local result against what the remote reported.
+                if let Some(ref expected) = event.expected_fen {
+                    if fen_after != *expected {
+                        warn!(
+                            "[NET] FEN desync after move {} — local: {} | remote: {}",
+                            uci, fen_after, expected
+                        );
+                        // Ask the opponent to resend the authoritative FEN.
+                        if let (Some(ns), Some(sess)) = (&network_state, &session) {
+                            let game_id = sess.game_id.parse::<u64>().unwrap_or(0);
+                            if let Some(tx) = &ns.message_sender {
+                                let _ = tx.send(NetworkMessage::ResyncRequest { game_id });
+                            }
+                        }
+                    }
+                }
+
                 remote_applied.write(RemoteMoveApplied { uci, next_fen: fen_after });
             }
 
@@ -127,6 +169,64 @@ pub fn handle_network_moves(
             }
         } else {
             warn!("[NETWORK_MOVE] Source piece not found at {:?}", event.from);
+        }
+    }
+}
+
+/// Tracks whether there is a pending incoming draw offer waiting for the local player to respond.
+#[derive(Resource, Default)]
+pub struct PendingDrawOffer {
+    /// Set to the offering player's name when a draw offer is received over the network.
+    pub from_player: Option<String>,
+}
+
+/// Tracks whether there is a pending incoming rematch offer waiting for the local player to respond.
+#[derive(Resource, Default)]
+pub struct PendingRematchOffer {
+    /// Set to the offering player's name when a rematch offer is received over the network.
+    pub from_player: Option<String>,
+}
+
+/// Watch for remote [`DrawOfferEvent`]s and store them so the UI can display a banner.
+pub fn watch_draw_offers(
+    mut events: MessageReader<crate::game::events::DrawOfferEvent>,
+    mut pending: ResMut<PendingDrawOffer>,
+) {
+    for ev in events.read() {
+        if ev.remote {
+            info!("[DRAW] Received draw offer from {}", ev.player);
+            pending.from_player = Some(ev.player.clone());
+        }
+    }
+}
+
+/// Apply an accepted draw by setting game-over state; clear state on decline.
+pub fn handle_draw_response_events(
+    mut events: MessageReader<crate::game::events::DrawResponseEvent>,
+    mut pending: ResMut<PendingDrawOffer>,
+    mut game_over: ResMut<GameOverState>,
+) {
+    for ev in events.read() {
+        if ev.accepted {
+            info!("[DRAW] Draw accepted by {} (remote={})", ev.player, ev.remote);
+            *game_over = GameOverState::Stalemate; // Stalemate is the closest "draw" variant
+        } else {
+            info!("[DRAW] Draw declined by {} (remote={})", ev.player, ev.remote);
+        }
+        // Either way, clear the pending offer.
+        pending.from_player = None;
+    }
+}
+
+/// Watch for remote [`RematchOfferEvent`]s and store them so the UI can display a banner.
+pub fn watch_rematch_offers(
+    mut events: MessageReader<crate::game::events::RematchOfferEvent>,
+    mut pending: ResMut<PendingRematchOffer>,
+) {
+    for ev in events.read() {
+        if ev.remote {
+            info!("[REMATCH] Received rematch offer from {}", ev.player);
+            pending.from_player = Some(ev.player.clone());
         }
     }
 }

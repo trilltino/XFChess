@@ -360,8 +360,9 @@ pub async fn finalize_game(
     let black = req.black_pubkey.clone();
     let winner = req.winner.clone();
     let sig_str = sig.to_string();
+    let anticheat_queue = state.anticheat_queue.clone();
     tokio::spawn(async move {
-        let repo = GameRepository::new(pool);
+        let repo = GameRepository::new(pool.clone());
         // Look up usernames from users_v2
         let white_username = repo.get_username(&white).await.ok();
         let black_username = repo.get_username(&black).await.ok();
@@ -411,6 +412,63 @@ pub async fn finalize_game(
 
         elo_cache.invalidate(&white);
         elo_cache.invalidate(&black);
+
+        // Enqueue post-game anti-cheat analysis (PvP and tournament games only)
+        if let Some(queue) = anticheat_queue {
+            let white_elo = elo_cache.get_elo(&white).await
+                .map(|e| (e.elo_rating / 100.0) as u32).unwrap_or(1200);
+            let black_elo = elo_cache.get_elo(&black).await
+                .map(|e| (e.elo_rating / 100.0) as u32).unwrap_or(1200);
+
+            // Fetch raw moves from DB for analysis
+            let raw_moves: Vec<(i64, String, Option<String>, String, i64)> = sqlx::query_as(
+                "SELECT move_number, move_uci, fen_after, player, timestamp
+                 FROM moves WHERE game_id = ? ORDER BY move_number ASC"
+            )
+            .bind(&game_id_str)
+            .fetch_all(&pool)
+            .await
+            .unwrap_or_default();
+
+            let move_records: Vec<xfchess_anticheat::types::MoveRecord> = raw_moves
+                .iter()
+                .enumerate()
+                .map(|(i, (num, uci, fen, _player, ts))| {
+                    let prev_ts = if i == 0 { *ts } else { raw_moves[i - 1].4 };
+                    xfchess_anticheat::types::MoveRecord {
+                        ply: *num as u32,
+                        move_uci: uci.clone(),
+                        fen_after: fen.clone().unwrap_or_default(),
+                        signed_at_ms: (*ts * 1000) as u64,
+                        latency_ms: ((*ts - prev_ts).max(0) * 1000) as u32,
+                    }
+                })
+                .collect();
+
+            if move_records.len() >= 10 {
+                let game_record = xfchess_anticheat::types::GameRecord {
+                    game_id: game_id_str.clone(),
+                    context: xfchess_anticheat::types::GameContext::Pvp { wager_sol: 0.0 },
+                    white: xfchess_anticheat::types::PlayerRef { pubkey: white.clone(), elo: white_elo },
+                    black: xfchess_anticheat::types::PlayerRef { pubkey: black.clone(), elo: black_elo },
+                    time_control: xfchess_anticheat::types::TimeControl { base_sec: 600, inc_sec: 0 },
+                    start_fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".into(),
+                    moves: move_records,
+                    result: match winner.as_deref() {
+                        Some("white") => xfchess_anticheat::types::GameResult::WhiteWin,
+                        Some("black") => xfchess_anticheat::types::GameResult::BlackWin,
+                        _ => xfchess_anticheat::types::GameResult::Draw,
+                    },
+                    ended_at_ms: 0,
+                };
+
+                if let Err(e) = queue.enqueue(game_record).await {
+                    error!("[anticheat] failed to enqueue game {game_id_str}: {e}");
+                } else {
+                    info!("[anticheat] game {game_id_str} queued for analysis");
+                }
+            }
+        }
     });
 
     Ok(Json(SigResp { sig: sig.to_string() }))

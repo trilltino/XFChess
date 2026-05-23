@@ -79,9 +79,6 @@ pub enum MenuState {
     /// Credits/about screen
     About,
 
-    /// Piece viewer screen
-    PieceViewer,
-    
     /// Tournament browser
     Tournaments,
     

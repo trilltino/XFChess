@@ -8,7 +8,6 @@ interface TournamentListProps {
 export default function TournamentList({ onTournamentSelect }: TournamentListProps) {
   const [tournaments, setTournaments] = useState<TournamentSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -23,10 +22,10 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
       if (response.ok && response.data) {
         setTournaments(response.data);
       } else {
-        setError(response.error?.message || "Failed to load tournaments");
+        console.error(response.error?.message || "Failed to load tournaments");
       }
     } catch (err) {
-      setError("Network error loading tournaments");
+      console.error("Network error loading tournaments", err);
     } finally {
       setLoading(false);
     }
@@ -230,10 +229,10 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
                   <div style={{ fontSize: "10px", color: "var(--text-dim)", marginBottom: "4px" }}>ENTRY FEE</div>
                   <div style={{ fontSize: "14px", fontWeight: "700", color: "#fff" }}>{formatEntryFee(tournament.entry_fee_lamports)}</div>
                 </div>
-                {tournament.platform_fee_lamports > 0 && (
+                {(tournament.platform_fee_lamports ?? 0) > 0 && (
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: "10px", color: "var(--text-dim)", marginBottom: "4px" }}>PLATFORM FEE</div>
-                    <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-dim)" }}>{formatEntryFee(tournament.platform_fee_lamports)}</div>
+                    <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-dim)" }}>{formatEntryFee(tournament.platform_fee_lamports!)}</div>
                   </div>
                 )}
               </div>

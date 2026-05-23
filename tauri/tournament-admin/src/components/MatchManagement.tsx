@@ -4,7 +4,6 @@ import { apiClient } from "../services/api";
 export default function MatchManagement() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     loadSessions();

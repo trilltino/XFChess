@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useWallet } from '@solana/wallet-adapter-react';
-import TournamentFeeInfo from '../components/TournamentFeeInfo';
+import WagerPriceWidget from '../components/WagerPriceWidget';
 import { getSwissCurrentRound, getSwissPairings, getTournamentMatch } from '../lib/api';
 
 interface ScheduleStatus {
@@ -188,7 +188,7 @@ export default function TournamentDetail() {
             </div>
 
             <div style={{ marginTop: '2rem' }}>
-                <TournamentFeeInfo />
+                <WagerPriceWidget />
             </div>
         </div>
     );

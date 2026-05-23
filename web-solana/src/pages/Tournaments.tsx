@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import chessboardSpace from '../assets/chessboard-space.png';
-import TournamentFeeInfo from '../components/TournamentFeeInfo';
+import WagerPriceWidget from '../components/WagerPriceWidget';
 
 export function Tournaments() {
     const [showNotice, setShowNotice] = useState(true);
@@ -259,7 +259,7 @@ export function Tournaments() {
                     </div>
                 </div>
 
-                <TournamentFeeInfo />
+                <WagerPriceWidget />
             </div>
         </main>
     );

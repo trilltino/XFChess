@@ -45,6 +45,6 @@ pub use identity::{
 };
 pub use tournament::{join_tournament, list_tournaments, TournamentSummary};
 pub use p2p::{
-    p2p_announce_game, p2p_join_game, p2p_leave_game, p2p_list_games, p2p_poll_messages,
-    p2p_send_message, P2PGameListing,
+    p2p_announce_game, p2p_heartbeat, p2p_join_game, p2p_leave_game, p2p_list_games,
+    p2p_poll_messages, p2p_send_message, P2PGameListing,
 };

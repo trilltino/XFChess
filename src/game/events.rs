@@ -42,6 +42,9 @@ pub struct NetworkMoveEvent {
     pub from: (u8, u8),
     pub to: (u8, u8),
     pub promotion: Option<char>,
+    /// FEN the remote reported after applying this move; compared against local
+    /// computation to detect board desync.
+    pub expected_fen: Option<String>,
 }
 
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
@@ -53,10 +56,32 @@ pub struct ResignEvent {
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
 pub struct DrawOfferEvent {
     pub player: String,
+    /// true = this offer was received from the remote opponent over the network
+    pub remote: bool,
 }
 
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
 pub struct DrawResponseEvent {
     pub player: String,
     pub accepted: bool,
+    pub remote: bool,
+}
+
+#[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
+pub struct RematchOfferEvent {
+    pub player: String,
+    pub remote: bool,
+}
+
+#[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
+pub struct RematchResponseEvent {
+    pub player: String,
+    pub accepted: bool,
+    pub remote: bool,
+}
+
+#[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
+pub struct FlagTimeoutEvent {
+    pub flagged_player: String,
+    pub remote: bool,
 }

@@ -23,10 +23,19 @@ pub struct SolanaIntegrationState {
     pub wallet_pubkey: Option<Pubkey>,
     /// Local ephemeral session keypair (for ER session-key flows, NOT the main wallet)
     pub session_keypair: Option<Keypair>,
+    /// Global persistent session keypair (loaded from disk, valid for 30 days).
+    /// Used by `global_create_game` / `global_join_game` — no popup per game.
+    pub global_session_keypair: Option<Keypair>,
+    /// Whether the global session is active and loaded.
+    pub global_session_active: bool,
     /// Direct RPC client for Solana
     pub rpc_client: Option<RpcClient>,
-    /// Current balance of the wallet
+    /// Current balance of the wallet (SOL)
     pub balance: f64,
+    /// Cached USD value of the wallet balance
+    pub cached_usd_balance: Option<f64>,
+    /// Latest SOL/USD exchange rate
+    pub sol_usd_rate: Option<f64>,
     /// Whether the handshake with opponent is completed
     pub handshake_completed: bool,
     /// Pending transaction task
@@ -56,6 +65,7 @@ impl std::fmt::Debug for SolanaIntegrationState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SolanaIntegrationState")
             .field("session_keypair_pubkey", &self.session_keypair.as_ref().map(|k| k.pubkey()))
+            .field("global_session_active", &self.global_session_active)
             .field("balance", &self.balance)
             .field("handshake_completed", &self.handshake_completed)
             .field("opponent_pubkey", &self.opponent_pubkey)
@@ -68,8 +78,12 @@ impl Default for SolanaIntegrationState {
         Self {
             wallet_pubkey: None,
             session_keypair: None,
+            global_session_keypair: None,
+            global_session_active: false,
             rpc_client: None,
             balance: 0.0,
+            cached_usd_balance: None,
+            sol_usd_rate: None,
             handshake_completed: false,
             pending_task: None,
             opponent_pubkey: None,
@@ -114,6 +128,30 @@ impl SolanaIntegrationState {
             &game_id.to_le_bytes(),
             player.as_ref(),
         ])
+    }
+
+    /// Get the global session delegation PDA for `player`.
+    pub fn get_global_session_pda(&self, player: &Pubkey) -> Pubkey {
+        self.derive_pda(&[b"global_session", player.as_ref()])
+    }
+
+    /// Try to load the global session keypair from disk for `wallet`.
+    /// Sets `global_session_keypair` and `global_session_active` accordingly.
+    pub fn try_load_global_session(&mut self, wallet: &Pubkey) {
+        use crate::multiplayer::solana::global_session_manager::GlobalSessionKeyManager;
+        match GlobalSessionKeyManager::load(wallet) {
+            Ok(mgr) => {
+                let arc_kp = mgr.signer();
+                if let Ok(kp) = Keypair::from_bytes(&arc_kp.to_bytes()) {
+                    self.global_session_keypair = Some(kp);
+                    self.global_session_active = true;
+                }
+            }
+            Err(_) => {
+                self.global_session_keypair = None;
+                self.global_session_active = false;
+            }
+        }
     }
 
     /// Create a new RPC client

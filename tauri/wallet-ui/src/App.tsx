@@ -2,9 +2,10 @@ import { useState, useEffect, type CSSProperties } from "react";
 import bs58 from "bs58";
 
 // ---------------------------------------------------------------------------
-// REST API bridge ó works in Chrome AND Tauri webview
+// REST API bridge ÔøΩ works in Chrome AND Tauri webview
 // ---------------------------------------------------------------------------
-const API_BASE = "http://localhost:7454";
+const BRIDGE_PORT = import.meta.env.VITE_BRIDGE_PORT ?? "7454";
+const API_BASE = `http://localhost:${BRIDGE_PORT}`;
 
 async function apiGet<T = unknown>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`);
@@ -44,7 +45,7 @@ interface AuthResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Design tokens ó matches web-solana color scheme
+// Design tokens ÔøΩ matches web-solana color scheme
 // ---------------------------------------------------------------------------
 const PRIMARY    = "#ad5c2f";
 const PRIMARY_DIM    = "rgba(173,92,47,0.15)";
@@ -104,7 +105,7 @@ const page: CSSProperties = {
 };
 
 // ---------------------------------------------------------------------------
-// Navbar ó matches web-solana pill style; links back to /
+// Navbar ÔøΩ matches web-solana pill style; links back to /
 // ---------------------------------------------------------------------------
 function SiteNav() {
   const HOME = window.location.origin + "/";
@@ -147,7 +148,7 @@ function SiteNav() {
 function GridBg() {
   return (
     <>
-      {/* Deep green radial glow ó matches web-solana bg */}
+      {/* Deep green radial glow ÔøΩ matches web-solana bg */}
       <div style={{
         position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none",
         background: `radial-gradient(ellipse 80% 60% at 50% 0%, rgba(173,92,47,0.12) 0%, transparent 70%),
@@ -183,7 +184,7 @@ function Card({ children, style, showClose = true, onClose }: { children: React.
     }
     try {
       if ((window as any).__TAURI__) {
-         await fetch("http://localhost:7454/hide", { method: "POST" });
+         await fetch(`${API_BASE}/hide`, { method: "POST" });
       } else {
          window.close();
       }
@@ -213,7 +214,7 @@ function Card({ children, style, showClose = true, onClose }: { children: React.
           }}
           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(173,92,47,0.8)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.1)"; }}
-        >◊</button>
+        >ÔøΩ</button>
       )}
       {children}
     </div>
@@ -295,7 +296,7 @@ function StepDots({ step }: { step: Step }) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 0.5 ó Entry Path Selection
+// Step 0.5 ÔøΩ Entry Path Selection
 // ---------------------------------------------------------------------------
 function EntryStep({
   onChoice,
@@ -347,7 +348,7 @@ function EntryStep({
           <div style={{ ...iconCircle, background: "rgba(244,187,68,0.12)" }}></div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 15, color: ACCENT }}>Play Now (Offline)</div>
-            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Local play ó no wallet or account needed</div>
+            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Local play ÔøΩ no wallet or account needed</div>
           </div>
           {launching && <div style={{ width: 16, height: 16, border: `2px solid rgba(244,187,68,0.3)`, borderTop: `2px solid ${ACCENT}`, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
         </button>
@@ -360,10 +361,10 @@ function EntryStep({
           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
         >
-          <div style={{ ...iconCircle, background: "rgba(173,92,47,0.1)" }}></div>
+          <div style={{ ...iconCircle, background: "rgba(173,92,47,0.1)" }}>üîê</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 15 }}>Login with Wallet</div>
-            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Instant sign-in for existing users</div>
+            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Phantom / Solflare ‚Äî for existing users</div>
           </div>
         </button>
 
@@ -373,10 +374,10 @@ function EntryStep({
           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
         >
-          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.1)" }}>?</div>
+          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.1)" }}>‚úâ</div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: 15 }}>Create Account</div>
-            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Use Email + Password</div>
+            <div style={{ fontWeight: 800, fontSize: 15 }}>Email + Password</div>
+            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Classic account ‚Äî bring your own wallet</div>
           </div>
         </button>
 
@@ -397,7 +398,7 @@ const iconCircle: CSSProperties = {
 };
 
 // ---------------------------------------------------------------------------
-// Step 0 ó Legal / GDPR Consent
+// Step 0 ÔøΩ Legal / GDPR Consent
 // ---------------------------------------------------------------------------
 function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: () => void }) {
   const [checkedTos, setTos] = useState(false);
@@ -430,7 +431,7 @@ function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: ()
         <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}> Privacy &amp; GDPR Notice</p>
         <p style={{ marginBottom: 8 }}>We collect and store the following data securely:</p>
         <ul style={{ paddingLeft: 18, marginBottom: 12 }}>
-          <li>Account credentials (email + bcrypt-hashed password ó plaintext never stored)</li>
+          <li>Account credentials (email + bcrypt-hashed password ÔøΩ plaintext never stored)</li>
           <li>Solana wallet public key (public by nature on-chain)</li>
           <li>Game history &amp; move records (used for anti-cheat and tournament verification)</li>
           <li>Session tokens (short-lived JWTs, stored only in memory)</li>
@@ -484,10 +485,10 @@ function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: ()
 }
 
 // ---------------------------------------------------------------------------
-// Step 1 ó Login / Register
+// Step 1 ÔøΩ Login / Register
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// Step 1 ó Login / Register (Email Path)
+// Step 1 ÔøΩ Login / Register (Email Path)
 // ---------------------------------------------------------------------------
 function AuthStep({ onAuth, onBack, onClose }: { onAuth: (token: string, username: string) => void; onBack: () => void; onClose?: () => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -532,7 +533,7 @@ function AuthStep({ onAuth, onBack, onClose }: { onAuth: (token: string, usernam
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
           {mode === "login"
             ? "Sign in to your XFChess account"
-            : "Quick account setup ó no handle needed yet"}
+            : "Quick account setup ÔøΩ no handle needed yet"}
         </p>
       </div>
 
@@ -540,7 +541,7 @@ function AuthStep({ onAuth, onBack, onClose }: { onAuth: (token: string, usernam
 
       <div onKeyDown={handleKey}>
         <InputField label="Email Address" value={email} onChange={setEmail} type="email" placeholder="you@example.com" />
-        <InputField label="Password" value={password} onChange={setPassword} type="password" placeholder="ïïïïïïïï" />
+        <InputField label="Password" value={password} onChange={setPassword} type="password" placeholder="ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ" />
       </div>
 
       <div style={{ marginTop: 20, marginBottom: 20 }}>
@@ -565,10 +566,10 @@ function AuthStep({ onAuth, onBack, onClose }: { onAuth: (token: string, usernam
 }
 
 // ---------------------------------------------------------------------------
-// Step 2 ó Wallet Connection (direct, no adapter library)
+// Step 2 ÔøΩ Wallet Connection (direct, no adapter library)
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// Step 2 ó Wallet Connection (Tauri Embedded)
+// Step 2 ÔøΩ Wallet Connection (Tauri Embedded)
 // ---------------------------------------------------------------------------
 import * as web3 from "@solana/web3.js";
 
@@ -619,20 +620,21 @@ function WalletStep({
 
       if (!pubkey) throw new Error("No public key returned from wallet");
       localStorage.setItem("xfchess_wallet", pubkey);
-      await apiPost("/wallet", { pubkey });
+      const _walletUsername = localStorage.getItem("xfchess_username") ?? "";
+      await apiPost("/wallet", { pubkey, username: _walletUsername });
 
       if (walletName === "hot") {
-        // Hot wallet is device-only ó no backend auth needed for local play
+        // Hot wallet is device-only ÔøΩ no backend auth needed for local play
         onAuth("offline", "LocalPlayer", pubkey);
       } else {
-        // Signs raw bytes ó no "utf8" arg to avoid Phantom>=0.16 off-chain prefix.
+        // Signs raw bytes ÔøΩ no "utf8" arg to avoid Phantom>=0.16 off-chain prefix.
         const signRaw = async (msg: string): Promise<string> => {
           const bytes = new TextEncoder().encode(msg);
           const { signature: sig } = await provider.signMessage(bytes);
           return bs58.encode(sig);
         };
 
-        // Check registration status first ó avoids redundant signing requests.
+        // Check registration status first ÔøΩ avoids redundant signing requests.
         const checkResp = await fetch(`${API_BASE}/api/auth/check-wallet/${pubkey}`);
         const isRegistered = checkResp.ok;
 
@@ -683,7 +685,7 @@ function WalletStep({
       {error && <ErrorMsg msg={error} />}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Hot Wallet Option ó Primary for Tauri */}
+        {/* Hot Wallet Option ÔøΩ Primary for Tauri */}
         {isTauri && (
           <button
             style={{ ...walletBtnStyle, borderColor: PRIMARY_BORDER, background: PRIMARY_DIM }}
@@ -710,7 +712,7 @@ function WalletStep({
                 onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = BORDER; (e.currentTarget as HTMLAnchorElement).style.opacity = "0.75"; }}
               >
                 <span style={{ fontSize: 20 }}>{meta.icon}</span>
-                <span style={{ flex: 1, color: TEXT_DIM }}>{meta.label} ó not installed</span>
+                <span style={{ flex: 1, color: TEXT_DIM }}>{meta.label} ÔøΩ not installed</span>
                 <span style={{ fontSize: 11, color: PRIMARY, fontWeight: 700 }}>Install ?</span>
               </a>
             );
@@ -740,7 +742,7 @@ function WalletStep({
 }
 
 // ---------------------------------------------------------------------------
-// Step 3 ó Entering Splash
+// Step 3 ÔøΩ Entering Splash
 // ---------------------------------------------------------------------------
 function SplashStep({ username, onComplete }: { username: string; onComplete: () => void }) {
   return (
@@ -779,6 +781,7 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
   );
 }
 
+
 // ---------------------------------------------------------------------------
 // Background Transaction Signer
 // ---------------------------------------------------------------------------
@@ -787,6 +790,45 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const resolveAndHide = async (signedB64: string) => {
+    await fetch("http://localhost:7454/resolved", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signed: signedB64 }),
+    });
+    setPendingTx(null);
+    if (isTauri) {
+      await fetch("http://localhost:7454/hide", { method: "POST" });
+    } else {
+      window.close();
+    }
+  };
+
+  const signTxBytes = async (txB64: string, kp: web3.Keypair): Promise<string> => {
+    const txBytes = Buffer.from(txB64, "base64");
+    try {
+      const tx = web3.VersionedTransaction.deserialize(txBytes);
+      tx.sign([kp]);
+      return Buffer.from(tx.serialize()).toString("base64");
+    } catch {
+      const tx = web3.Transaction.from(txBytes);
+      tx.partialSign(kp);
+      return tx.serialize().toString("base64");
+    }
+  };
+
+  const handleAutoSign = async (txB64: string, secret: string) => {
+    setSigning(true);
+    try {
+      const kp = web3.Keypair.fromSecretKey(new Uint8Array(JSON.parse(secret)));
+      await resolveAndHide(await signTxBytes(txB64, kp));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSigning(false);
+    }
+  };
+
   useEffect(() => {
     const poll = async () => {
       try {
@@ -794,7 +836,6 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
         const data = await resp.json();
         if (data.tx && data.tx !== pendingTx) {
           setPendingTx(data.tx);
-          // Auto-sign if it's a software wallet (ephemeral session key)
           const secret = sessionStorage.getItem("xfchess_session_key");
           if (secret) {
             handleAutoSign(data.tx, secret);
@@ -811,45 +852,6 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
     return () => clearInterval(interval);
   }, [pendingTx]);
 
-  const handleAutoSign = async (txB64: string, secret: string) => {
-    setSigning(true);
-    try {
-      const arr = JSON.parse(secret);
-      const kp = web3.Keypair.fromSecretKey(new Uint8Array(arr));
-      const txBytes = Buffer.from(txB64, "base64");
-      
-      // Try VersionedTransaction first (Solana standard for ER)
-      let signedB64: string;
-      try {
-        const tx = web3.VersionedTransaction.deserialize(txBytes);
-        tx.sign([kp]);
-        signedB64 = Buffer.from(tx.serialize()).toString("base64");
-      } catch {
-        // Fallback to legacy Transaction
-        const tx = web3.Transaction.from(txBytes);
-        tx.partialSign(kp);
-        signedB64 = tx.serialize().toString("base64");
-      }
-
-      await fetch("http://localhost:7454/resolved", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signed: signedB64 }),
-      });
-      setPendingTx(null);
-      // Close window/hide in Tauri, close tab in browser
-      if (isTauri) {
-        await fetch("http://localhost:7454/hide", { method: "POST" });
-      } else {
-        window.close();
-      }
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setSigning(false);
-    }
-  };
-
   if (!pendingTx) return null;
 
   return (
@@ -863,29 +865,18 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
         <span style={{ fontWeight: 800, fontSize: 13, color: TEXT }}>PENDING TRANSACTION</span>
       </div>
       <p style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 16 }}>
-        {signing ? "Signing with embedded wallet..." : "Action required to sign transaction."}
+        {signing ? "Signing‚Ä¶" : "Awaiting signature."}
       </p>
       {error && <ErrorMsg msg={error} />}
-      {!sessionStorage.getItem("xfchess_session_key") && (
+      {/* Fallback: extension signing when no session key stored */}
+      {!signing && !sessionStorage.getItem("xfchess_session_key") && (
         <PrimaryBtn onClick={async () => {
-          // Extension signing fallback
           const provider = (window as any).phantom?.solana || (window as any).solflare;
-          if (provider) {
-             const txBytes = Buffer.from(pendingTx, "base64");
-             const tx = web3.VersionedTransaction.deserialize(txBytes);
-             const signed = await provider.signTransaction(tx);
-             const signedB64 = Buffer.from(signed.serialize()).toString("base64");
-             await fetch("http://localhost:7454/resolved", {
-               method: "POST",
-               headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({ signed: signedB64 }),
-             });
-             if (isTauri) {
-               await fetch("http://localhost:7454/hide", { method: "POST" });
-             } else {
-               window.close();
-             }
-          }
+          if (!provider) return;
+          const txBytes = Buffer.from(pendingTx, "base64");
+          const tx = web3.VersionedTransaction.deserialize(txBytes);
+          const signed = await provider.signTransaction(tx);
+          await resolveAndHide(Buffer.from(signed.serialize()).toString("base64"));
         }}>Sign with Extension</PrimaryBtn>
       )}
     </div>
@@ -930,7 +921,7 @@ function ProfileStep({
           setLoading(false);
           return;
         }
-      } catch { /* no on-chain profile yet ó show form */ }
+      } catch { /* no on-chain profile yet ÔøΩ show form */ }
       setLoading(false);
     };
     trySync();
@@ -967,13 +958,13 @@ function ProfileStep({
       <Card showClose={true} onClose={onClose}>
         <div style={{ textAlign: "center", padding: "40px 0" }}>
           <div style={{ width: 24, height: 24, border: `2px solid ${RED_BORDER}`, borderTop: `2px solid ${RED}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
-          <p style={{ color: TEXT_DIM, fontSize: 13 }}>Loading profileÖ</p>
+          <p style={{ color: TEXT_DIM, fontSize: 13 }}>Loading profileÔøΩ</p>
         </div>
       </Card>
     );
   }
 
-  // On-chain username found ó confirm and proceed
+  // On-chain username found ÔøΩ confirm and proceed
   if (synced) {
     return (
       <Card showClose={true} onClose={onClose}>
@@ -1000,7 +991,7 @@ function ProfileStep({
           Choose Your Handle
         </h2>
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
-          Pick a display name for the arena (3ñ20 chars)
+          Pick a display name for the arena (3ÔøΩ20 chars)
         </p>
       </div>
       {error && <ErrorMsg msg={error} />}
@@ -1034,42 +1025,18 @@ function Onboarding() {
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [path, setPath] = useState<"wallet" | "email" | "hot" | null>(null);
 
-  // Force exact window size ó Chrome ignores --window-size when already running
+  // Force exact window size ÔøΩ Chrome ignores --window-size when already running
   useEffect(() => {
     window.resizeTo(420, 500);
   }, []);
 
   useEffect(() => {
-    const resumeSession = async () => {
-      const token = localStorage.getItem("xfchess_token");
-      const wallet = localStorage.getItem("xfchess_wallet");
-      if (token && wallet) {
-        try {
-          const r = await fetch(`${API_BASE}/api/auth/me`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (r.ok) {
-            const user = await r.json();
-            localStorage.setItem("xfchess_username", user.username);
-            setUsername(user.username);
-            setPubkey(wallet);
-            setStep("splash");
-            handleGameLaunch(wallet, false, user.username);
-            setReady(true);
-            return;
-          }
-        } catch { /* network down ó fall through to normal flow */ }
-        // Token invalid/expired ó clear and re-auth
-        localStorage.removeItem("xfchess_token");
+    // Always start disconnected ‚Äî wallet must be connected each session.
+    apiGet<ConsentRecord | null>("/api/consent").then(record => {
+      if (record && record.version >= CONSENT_VERSION) {
+        setStep("entry");
       }
-      // Normal consent check
-      apiGet<ConsentRecord | null>("/api/consent").then(record => {
-        if (record && record.version >= CONSENT_VERSION) {
-          setStep("entry");
-        }
-      }).catch(() => { /* no consent yet */ }).finally(() => setReady(true));
-    };
-    resumeSession();
+    }).catch(() => {}).finally(() => setReady(true));
   }, []);
 
   const handleConsent = async () => {
@@ -1139,21 +1106,21 @@ function Onboarding() {
       <SiteNav />
       {step === "consent" && <ConsentStep onAccept={handleConsent} onClose={() => window.close()} />}
       {step === "entry"   && <EntryStep onChoice={onChoice} onClose={() => window.close()} />}
-      
-      {step === "auth"    && <AuthStep 
-        onAuth={handleAuth} 
+
+      {step === "auth"    && <AuthStep
+        onAuth={handleAuth}
         onBack={() => setStep("entry")}
         onClose={() => window.close()}
       />}
-      
-      {step === "wallet"  && <WalletStep 
+
+      {step === "wallet"  && <WalletStep
         mode={path === "wallet" ? "login" : "link"}
         onContinue={handleWalletContinue}
         onAuth={handleAuth}
         onBack={() => setStep("entry")}
         onClose={() => window.close()}
       />}
-      
+
       {step === "profile" && (
         <ProfileStep
           onComplete={handleProfileComplete}
@@ -1162,7 +1129,7 @@ function Onboarding() {
           onClose={() => window.close()}
         />
       )}
-      
+
       {step === "splash"  && <SplashStep username={username} onComplete={() => console.log("Done")} />}
 
       {pubkey && <TransactionSigner pubkey={pubkey} />}
@@ -1171,7 +1138,7 @@ function Onboarding() {
 }
 
 // ---------------------------------------------------------------------------
-// App root (no wallet adapter library ó direct connections only)
+// App root (no wallet adapter library ÔøΩ direct connections only)
 // ---------------------------------------------------------------------------
 export default function App() {
   return (

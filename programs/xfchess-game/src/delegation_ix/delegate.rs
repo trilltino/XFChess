@@ -43,9 +43,10 @@ mod inner {
             system_program: &ctx.accounts.system_program.to_account_info(),
         };
 
-        delegate_account(delegate_accounts, seeds, config)?;
+        // Manually deserialize, modify, and serialize game PDA state BEFORE the owner is changed by delegate_account CPI.
+        let mut game_data = ctx.accounts.game.try_borrow_mut_data()?;
+        let mut game = Game::try_deserialize(&mut &game_data[..])?;
 
-        let game = &mut ctx.accounts.game;
         let fee_payer = &ctx.accounts.fee_payer;
 
         require!(game.status == GameStatus::Active, GameErrorCode::GameNotActive);
@@ -53,6 +54,14 @@ mod inner {
 
         game.fees_advanced = game.fees_advanced.checked_add(DELEGATE_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
         game.is_delegated = true;
+
+        let mut writer = &mut game_data[..];
+        game.try_serialize(&mut writer)?;
+        drop(game_data);
+
+        // Delegate the game PDA — must happen AFTER all game mutations because
+        // the CPI changes the account owner to the delegation program.
+        delegate_account(delegate_accounts, seeds, config)?;
 
         Ok(())
     }
@@ -62,6 +71,21 @@ mod inner {
     /// No payer identity check — the VPS session key may trigger this so no
     /// extra wallet popup is needed at game end.
     pub fn handler_undelegate_game(ctx: Context<UndelegateGameCtx>, _game_id: u64) -> Result<()> {
+        // 1. Manually deserialize the Game account
+        let mut data = ctx.accounts.game.try_borrow_mut_data()?;
+        let mut game_struct = Game::try_deserialize(&mut &data[..])?;
+
+        // 2. Modify is_delegated
+        game_struct.is_delegated = false;
+
+        // 3. Manually serialize it back
+        let mut writer = &mut data[..];
+        game_struct.try_serialize(&mut writer)?;
+
+        // 4. Drop the data borrow before calling CPI to avoid borrow conflicts
+        drop(data);
+
+        // 5. Call delegation CPI
         commit_and_undelegate_accounts(
             &ctx.accounts.payer.to_account_info(),
             vec![
@@ -71,20 +95,19 @@ mod inner {
             &ctx.accounts.magic_program.to_account_info(),
         )?;
 
-        ctx.accounts.game.is_delegated = false;
-
         Ok(())
     }
 
     #[derive(Accounts)]
     #[instruction(_game_id: u64)]
     pub struct DelegateGameCtx<'info> {
+        /// CHECK: Manual serialization is used to modify the account and serialize it back before its owner transitions.
         #[account(
             mut,
             seeds = [b"game", _game_id.to_le_bytes().as_ref()],
-            bump = game.bump,
+            bump,
         )]
-        pub game: Account<'info, Game>,
+        pub game: AccountInfo<'info>,
 
         #[account(mut)]
         pub payer: Signer<'info>,
@@ -117,12 +140,13 @@ mod inner {
     #[derive(Accounts)]
     #[instruction(_game_id: u64)]
     pub struct UndelegateGameCtx<'info> {
+        /// CHECK: Manual serialization to avoid Anchor exit serialization conflicts with delegation CPI.
         #[account(
             mut,
             seeds = [b"game", _game_id.to_le_bytes().as_ref()],
-            bump = game.bump,
+            bump,
         )]
-        pub game: Account<'info, Game>,
+        pub game: AccountInfo<'info>,
 
         #[account(mut)]
         pub payer: Signer<'info>,

@@ -54,6 +54,7 @@ impl Plugin for MultiplayerPlugin {
         // 1. Register shared types and events
         app.init_resource::<BraidNetworkState>()
             .init_resource::<BraidGameSync>()
+            .init_resource::<HeartbeatState>()
             .init_resource::<NetworkConfig>()
             .init_resource::<network::braid::BraidP2PConfig>()
             .add_message::<NetworkEvent>()
@@ -83,7 +84,16 @@ impl Plugin for MultiplayerPlugin {
 
         // 3. Register core orchestration systems
         app.add_systems(Startup, systems::initialize_braid_network)
-            .add_systems(Update, systems::handle_network_events);
+            .add_systems(Update, (
+                systems::handle_network_events,
+                systems::dispatch_remote_moves,
+                systems::handle_resync_response,
+                systems::handle_resync_request,
+                systems::handle_game_control_messages,
+                systems::send_local_draw_events,
+                systems::tick_heartbeat,
+                systems::handle_pong,
+            ));
 
         // 4. Register feature-specific cross-cutting systems
         #[cfg(feature = "solana")]

@@ -26,7 +26,6 @@ sha2 = "0.10"
 
 # Local deps
 xfchess-game = { path = "../../programs/xfchess-game" }
-chess-logic-shared = { path = "../chess-logic-shared" }
 solana-chess-client = { path = "../solana-chess-client" }
 
 [[bin]]

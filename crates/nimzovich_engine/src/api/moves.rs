@@ -120,6 +120,7 @@ pub fn is_legal_move(game: &mut Game, src: i8, dst: i8, color: Color) -> bool {
             let board_before = game.board;
             let ep_before = game.en_passant_target;
             let halfmove_before = game.halfmove_clock;
+            let move_counter_before = game.move_counter;
 
             do_move(game, src, dst, false);
             let legal = !is_in_check(game, color);
@@ -128,6 +129,7 @@ pub fn is_legal_move(game: &mut Game, src: i8, dst: i8, color: Color) -> bool {
             game.board = board_before;
             game.en_passant_target = ep_before;
             game.halfmove_clock = halfmove_before;
+            game.move_counter = move_counter_before;
             
             return legal;
         }

@@ -5,7 +5,7 @@
 //! peer discovery, and message persistence for late joiners.
 
 use anyhow::Result;
-use braid_iroh::protocol::SwissMessage;
+use braid_iroh::SwissMessage;
 // Note: iroh crate not directly available, using String for node IDs
 pub type EndpointId = String;
 use rand::seq::IteratorRandom;
@@ -20,8 +20,8 @@ use crate::signing::storage::tournament::TournamentStore;
 
 /// Handle to an active tournament gossip topic
 pub struct TopicHandle {
-    /// Gossip sender for broadcasting messages
-    pub sender: iroh_gossip::api::GossipSender,
+    /// Gossip sender for broadcasting messages (None if topic is pre-registered without a live sender)
+    pub sender: Option<iroh_gossip::api::GossipSender>,
     /// Tournament ID
     pub tournament_id: u64,
     /// Number of active subscribers
@@ -73,14 +73,14 @@ impl TournamentGossipService {
         info!("[gossip] Message persistence initialized");
     }
 
-    /// Register a topic for a tournament
+    /// Register a topic for a tournament with a live gossip sender
     pub async fn register_topic(
         &self,
         tournament_id: u64,
         sender: iroh_gossip::api::GossipSender,
     ) {
         let handle = TopicHandle {
-            sender,
+            sender: Some(sender),
             tournament_id,
             subscriber_count: AtomicUsize::new(0),
         };
@@ -89,6 +89,20 @@ impl TournamentGossipService {
             .await
             .insert(tournament_id, handle);
         info!("[gossip] Registered topic for tournament {}", tournament_id);
+    }
+
+    /// Ensure a topic placeholder exists for a tournament (used at init time before a sender is available).
+    pub async fn ensure_topic_registered(&self, tournament_id: u64) {
+        let mut topics = self.tournament_topics.write().await;
+        if !topics.contains_key(&tournament_id) {
+            let handle = TopicHandle {
+                sender: None,
+                tournament_id,
+                subscriber_count: AtomicUsize::new(0),
+            };
+            topics.insert(tournament_id, handle);
+            info!("[gossip] Ensured placeholder topic for tournament {}", tournament_id);
+        }
     }
 
     /// Get bootstrap peers for a player joining a tournament
@@ -213,7 +227,7 @@ impl TournamentGossipService {
             .read()
             .await
             .get(&tournament_id)
-            .map(|h| h.sender.clone())
+            .and_then(|h| h.sender.clone())
     }
 
     /// Check if a topic exists for a tournament

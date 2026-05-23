@@ -191,9 +191,99 @@ pub fn update_wallet_balance(
         return;
     };
     match rpc_client.get_balance(*pubkey) {
-        Ok(lamports) => solana_state.balance = lamports as f64 / 1_000_000_000.0,
+        Ok(lamports) => {
+            let sol = lamports as f64 / 1_000_000_000.0;
+            solana_state.balance = sol;
+            if let Some(rate) = solana_state.sol_usd_rate {
+                solana_state.cached_usd_balance = Some(sol * rate);
+            }
+        }
         Err(e) => warn!("[SOLANA] Balance fetch failed: {}", e),
     }
+}
+
+/// Background-fetch SOL/USD rate from CoinGecko and cache it in [`SolanaIntegrationState`].
+pub fn update_wallet_usd_rate(
+    mut solana_state: ResMut<SolanaIntegrationState>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+    mut rx: Local<Option<crossbeam_channel::Receiver<Result<f64, String>>>>,
+) {
+    *timer -= time.delta_secs();
+
+    if let Some(ref receiver) = *rx {
+        match receiver.try_recv() {
+            Ok(Ok(rate)) => {
+                solana_state.sol_usd_rate = Some(rate);
+                solana_state.cached_usd_balance = Some(solana_state.balance * rate);
+                info!("[SOLANA] SOL/USD rate updated: ${:.2}", rate);
+                *rx = None;
+            }
+            Ok(Err(e)) => {
+                warn!("[SOLANA] USD rate fetch failed: {}", e);
+                *rx = None;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => {
+                *rx = None;
+            }
+        }
+        return;
+    }
+
+    if *timer > 0.0 {
+        return;
+    }
+    *timer = 60.0;
+
+    if solana_state.wallet_pubkey.is_none() {
+        return;
+    }
+
+    let (tx, receiver) = crossbeam_channel::bounded(1);
+    *rx = Some(receiver);
+
+    bevy::tasks::IoTaskPool::get().spawn(async move {
+        let _ = tx.send(fetch_sol_usd_rate().await);
+    }).detach();
+}
+
+const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
+
+async fn fetch_sol_usd_rate() -> Result<f64, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| format!("HTTP client build error: {}", e))?;
+
+    // Jupiter price API — no key required, returns derived price from on-chain liquidity
+    let url = format!("https://api.jup.ag/price/v2?ids={}", SOL_MINT);
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Jupiter fetch error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Jupiter HTTP {}", resp.status()));
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Jupiter JSON parse error: {}", e))?;
+
+    let price = json
+        .get("data")
+        .and_then(|d| d.get(SOL_MINT))
+        .and_then(|token| token.get("price"))
+        .and_then(|p| p.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .ok_or("Missing price in Jupiter response")?;
+
+    info!("[SOLANA] SOL/USD: ${:.2}", price);
+    Ok(price)
 }
 
 pub fn monitor_network_handshakes(
@@ -252,6 +342,24 @@ pub fn monitor_network_handshakes(
             task.detach();
             solana_state.handshake_completed = false;
         }
+    }
+}
+
+/// Sync the on-chain session signing key into the P2P network state so that
+/// all outgoing gossip messages are cryptographically signed.
+pub fn sync_session_key_to_network(
+    solana_state: Res<SolanaIntegrationState>,
+    mut network_state: ResMut<BraidNetworkState>,
+) {
+    if network_state.session_signing_key.is_some() {
+        return;
+    }
+    if let Some(ref kp) = solana_state.session_keypair {
+        let bytes = kp.to_bytes();
+        let mut sk = [0u8; 32];
+        sk.copy_from_slice(&bytes[..32]);
+        network_state.session_signing_key = Some(sk);
+        info!("[SESSION] Copied session signing key to P2P network state");
     }
 }
 

@@ -56,7 +56,7 @@ async fn test_init_profile() {
             AccountMeta::new(player.pubkey(), true),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
-        data: InitProfile { username: username.clone(), country: "US".to_string() }.data(),
+        data: InitProfile { username: username.clone(), country: "US".to_string(), date_of_birth: -600_000_000 }.data(),
     };
 
     let tx = Transaction::new_signed_with_payer(
@@ -203,7 +203,7 @@ async fn test_finalize_game_elo() {
             AccountMeta::new(white, true),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
-        data: InitProfile { username: "white_p".to_string(), country: "US".to_string() }.data(),
+        data: InitProfile { username: "white_p".to_string(), country: "US".to_string(), date_of_birth: -600_000_000 }.data(),
     };
     let init_black = Instruction {
         program_id,
@@ -213,7 +213,7 @@ async fn test_finalize_game_elo() {
             AccountMeta::new(black.pubkey(), true),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
-        data: InitProfile { username: "black_p".to_string(), country: "US".to_string() }.data(),
+        data: InitProfile { username: "black_p".to_string(), country: "US".to_string(), date_of_birth: -600_000_000 }.data(),
     };
 
     // 2. Create and Join Game (payer acts as fee_payer in tests)

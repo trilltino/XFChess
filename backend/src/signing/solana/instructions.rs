@@ -150,6 +150,37 @@ pub fn finalize_game_ix(
     }
 }
 
+/// Builds a `link_external_elo` instruction for devnet.
+///
+/// Links a verified Lichess account to a player profile.
+pub fn link_external_elo_ix(
+    program_id: &Pubkey,
+    link_authority: &Pubkey,
+    player: &Pubkey,
+    username: &str,
+    blitz_rating: u32,
+    rapid_rating: u32,
+    bullet_rating: u32,
+) -> Instruction {
+    let player_profile_pda = Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
+
+    let mut data = anchor_discriminator("link_external_elo").to_vec();
+    data.extend(borsh_string(username));
+    data.extend_from_slice(&blitz_rating.to_le_bytes());
+    data.extend_from_slice(&rapid_rating.to_le_bytes());
+    data.extend_from_slice(&bullet_rating.to_le_bytes());
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(player_profile_pda, false),
+            AccountMeta::new_readonly(*player, false),
+            AccountMeta::new(*link_authority, true),
+        ],
+        data,
+    }
+}
+
 /// Builds a `verify_profile` instruction for devnet.
 ///
 /// Marks a player as KYC-verified on-chain.

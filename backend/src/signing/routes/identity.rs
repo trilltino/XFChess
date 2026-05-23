@@ -167,18 +167,47 @@ async fn register_identity(
     let admin_keypair = &state.kyc_authority;
     let program_id = Pubkey::from_str(&state.config.program_id)
         .unwrap_or_else(|_| "A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W".parse().expect("Default program ID should be valid"));
-    
+
     let ix = crate::signing::solana::verify_profile_ix(&program_id, &admin_keypair.pubkey(), &pk);
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
-    
+
     match crate::signing::solana::sign_and_submit(&rpc, admin_keypair, &[ix]) {
         Ok(sig) => tracing::info!("[Identity] On-chain verification tx confirmed: {}", sig),
         Err(e) => tracing::error!("[Identity] Failed to submit verification tx on-chain: {}", e),
     }
-    
+
+    // 5. Write-through to kyc_records (unified vault table) so user_status and
+    //    can_wager checks see the record regardless of which path was used.
+    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
+    if let Err(e) = vault.insert_kyc(crate::signing::storage::vault::KycInput {
+        wallet_pubkey: &payload.pubkey,
+        country: &payload.country,
+        full_name: &payload.full_name,
+        dob: &payload.dob,
+        residence: &payload.address,
+        tax_id_raw: &payload.tax_id,
+        data_source: "identity_verified",
+    }).await {
+        warn!("[Identity] kyc_records write-through failed for {}: {}", payload.pubkey, e);
+    }
+
+    // 6. Mark kyc_status = 'approved' in users_v2 (on-chain verification succeeded).
+    let _ = state.store.set_kyc_status(&payload.pubkey, "approved").await;
+
+    // 7. Persist CACF compliance: identity verification → fully_compliant for their country.
+    if let Err(e) = vault.save_cacf(
+        &payload.pubkey,
+        &payload.country,
+        "fully_compliant",
+        true,
+        None,
+    ).await {
+        warn!("[Identity] CACF persist failed for {}: {}", payload.pubkey, e);
+    }
+
     info!("[Identity] Successfully registered and vaulted user {} securely", payload.pubkey);
 
-    // 5. Log audit event for GDPR compliance
+    // 8. Log audit event for GDPR compliance
     log_audit_event(&payload.pubkey, "KYC_REGISTERED", &state.vault_pool).await;
 
     Ok(Json(()))

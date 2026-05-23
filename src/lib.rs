@@ -281,7 +281,6 @@ pub fn build_app(game_config: GameConfig) -> App {
         states::main_menu::MainMenuPlugin,
         states::game_over::GameOverPlugin,
         states::pause::PausePlugin,
-        states::piece_viewer::PieceViewerPlugin,
         xf_animate::XfAnimatePlugin,
     ))
     .add_plugins(multiplayer::MultiplayerPlugin);

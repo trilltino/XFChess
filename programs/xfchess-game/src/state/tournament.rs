@@ -63,15 +63,6 @@ pub struct Tournament {
     /// 256 players (top 10): [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300] = 40/20/12/8/6/4/3/2/2/3%
     /// Winner-takes-all: [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     pub prize_shares: [u16; 10],
-    /// Registered players (up to 256).
-    #[max_len(256)]
-    pub players: Vec<Pubkey>,
-    /// ELO ratings mirrored at registration time for bracket seeding.
-    #[max_len(256)]
-    pub player_elos: Vec<u32>,
-    /// Swiss tournament standings (only used for Swiss tournaments).
-    #[max_len(256)]
-    pub swiss_standings: Vec<SwissStanding>,
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
@@ -153,9 +144,32 @@ pub struct SwissStanding {
 }
 
 impl Tournament {
-    /// Bytes needed for a tournament with exactly `max_players` capacity.
-    pub fn space_for(max_players: u16) -> usize {
-        Self::INIT_SPACE + (max_players as usize) * 74
+    /// Bytes needed for tournament metadata only (player data lives in TournamentPlayersShard PDAs).
+    pub fn space_for(_max_players: u16) -> usize {
+        Self::INIT_SPACE
+    }
+}
+
+/// Separate PDA account holding player lists and Swiss standings for a single shard.
+/// Keeps Tournament metadata small so initialization fits CPI realloc limit.
+/// Space is calculated manually to avoid InitSpace over-allocation.
+/// Each shard holds up to 64 players; 4 shards support 256-player tournaments.
+#[account]
+pub struct TournamentPlayersShard {
+    pub tournament_id: u64,
+    pub shard_id: u8,
+    pub players: Vec<Pubkey>,
+    pub player_elos: Vec<u32>,
+    pub swiss_standings: Vec<SwissStanding>,
+}
+
+impl TournamentPlayersShard {
+    /// Bytes needed for a single TournamentPlayersShard PDA with 64-player capacity.
+    /// Anchor `init` adds 8 for discriminator automatically, so we exclude it here.
+    /// Layout: 8 (tournament_id) + 1 (shard_id) + 4 + 64*32 (players) + 4 + 64*4 (elos) + 4 + 64*38 (standings)
+    pub const SHARD_CAPACITY: u16 = 64;
+    pub fn space_for() -> usize {
+        8 + 1 + 4 + (Self::SHARD_CAPACITY as usize) * 32 + 4 + (Self::SHARD_CAPACITY as usize) * 4 + 4 + (Self::SHARD_CAPACITY as usize) * 38
     }
 }
 

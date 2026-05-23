@@ -38,6 +38,31 @@ pub struct SessionCreateGame<'info> {
     )]
     pub tournament: Box<Account<'info, Tournament>>,
 
+    /// TournamentPlayersShard 0 (players 0-63)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 1 (players 64-127)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_1: Box<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 2 (players 128-191)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_2: Box<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 3 (players 192-255)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_3: Box<Account<'info, TournamentPlayersShard>>,
+
     #[account(
         mut,
         seeds = [
@@ -55,7 +80,12 @@ pub struct SessionCreateGame<'info> {
     pub session_signer: Signer<'info>,
 
     #[account(
-        constraint = tournament.players.iter().any(|p| *p == player.key()) @ XfchessGameError::UnauthorizedAccess,
+        constraint = {
+            tournament_players_shard_0.players.iter().any(|p| *p == player.key())
+                || tournament_players_shard_1.players.iter().any(|p| *p == player.key())
+                || tournament_players_shard_2.players.iter().any(|p| *p == player.key())
+                || tournament_players_shard_3.players.iter().any(|p| *p == player.key())
+        } @ XfchessGameError::UnauthorizedAccess,
     )]
     /// CHECK: Verified against tournament player list and delegation PDA.
     pub player: UncheckedAccount<'info>,

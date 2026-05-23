@@ -156,7 +156,7 @@ pub fn update_piece_state(
     commands.entity(entity).insert(PieceMoveAnimation::new(
         Vec3::new(from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
         Vec3::new(target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),
-        0.25,
+        0.4,
     ));
 
     has_moved.moved = true;

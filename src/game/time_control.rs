@@ -29,7 +29,7 @@ pub enum TimeControl {
     RapidPlus,
     /// 1800 + 0
     Classical,
-    /// 0 — no clock (correspondence / AI casual)
+    /// 0 â€” no clock (correspondence / AI casual)
     Unlimited,
     /// Arbitrary base + increment (seconds)
     Custom {

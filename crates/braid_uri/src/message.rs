@@ -25,6 +25,19 @@ pub enum ChessMessage {
     Clock(ClockState),
     /// Stockfish analysis hint (streamed per depth increment).
     EngineAnalysis(EngineHint),
+    /// In-game pre-game or mid-game chat message.
+    Chat(ChatPayload),
+}
+
+/// A single chat message from a player.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatPayload {
+    /// Display name or peer ID of the sender.
+    pub player: String,
+    /// UTF-8 chat text (max 500 chars enforced by the backend relay).
+    pub text: String,
+    /// Unix timestamp in milliseconds when the message was sent.
+    pub timestamp_ms: u64,
 }
 
 /// Payload for a chess move event.

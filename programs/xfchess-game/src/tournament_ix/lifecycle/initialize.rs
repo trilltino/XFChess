@@ -1,5 +1,6 @@
 //! Instruction to bootstrap a new bracket-based tournament.
 //! Supports 8, 16, 32, 64, 128, 256 player single-elimination and Swiss tournaments.
+//! Player data is sharded across 4 TournamentPlayersShard PDAs (64 players each).
 
 use crate::constants::*;
 use crate::errors::GameErrorCode;
@@ -106,6 +107,9 @@ pub fn handler(
         prize_shares
     };
 
+    msg!("Tournament space: {}", 8 + Tournament::space_for(max_players));
+    msg!("TournamentPlayersShard space per shard: {}", 8 + TournamentPlayersShard::space_for());
+
     let t = &mut ctx.accounts.tournament;
     let total_matches = max_players - 1;
 
@@ -140,9 +144,6 @@ pub fn handler(
     t.ninth_place = None;
     t.tenth_place = None;
     t.prize_shares = final_prize_shares;
-    t.players = Vec::with_capacity(max_players as usize);
-    t.player_elos = Vec::with_capacity(max_players as usize);
-    t.swiss_standings = Vec::with_capacity(max_players as usize);
     t.created_at = Clock::get()?.unix_timestamp;
     t.started_at = None;
     t.completed_at = None;
@@ -158,9 +159,5 @@ pub fn handler(
     t.base_time_seconds = base_time_seconds;
     t.increment_seconds = increment_seconds;
 
-    
-    if usdc_mint.is_some() {
-    }
-    
     Ok(())
 }

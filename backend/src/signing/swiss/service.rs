@@ -15,7 +15,7 @@
 use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
 use crate::signing::tournament_gossip::TournamentGossipService;
 use xfchess_braid_server::{bridge, ResourceHub};
-use braid_iroh::protocol::{MatchResult as SwissMessageResult, SwissMessage, SwissPairing, SwissStandingsEntry};
+use braid_iroh::{MatchResult as SwissMessageResult, SwissMessage, SwissPairing, SwissStandingsEntry};
 // Note: bytes crate not available, using Vec<u8> instead
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

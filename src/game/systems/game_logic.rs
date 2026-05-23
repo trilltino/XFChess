@@ -136,6 +136,8 @@ pub fn update_game_timer(
     game_phase: Res<CurrentGamePhase>,
     active_tc: Res<crate::game::resources::active_time_control::ActiveTimeControl>,
     ai_config: Res<crate::game::ai::resource::ChessAIResource>,
+    game_mode: Res<crate::core::GameMode>,
+    mut flag_timeout: MessageWriter<crate::game::events::FlagTimeoutEvent>,
 ) {
     if !timer.is_running || game_phase.0 != GamePhase::Playing {
         return;
@@ -177,6 +179,13 @@ pub fn update_game_timer(
                     "[TIMER] Move #{} | Black WINS by timeout!",
                     current_turn.move_number
                 );
+                // Notify opponent in multiplayer
+                if matches!(*game_mode, crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive) {
+                    flag_timeout.write(crate::game::events::FlagTimeoutEvent {
+                        flagged_player: "white".to_string(),
+                        remote: false,
+                    });
+                }
             }
         }
         PieceColor::Black => {
@@ -204,6 +213,13 @@ pub fn update_game_timer(
                     "[TIMER] Move #{} | White WINS by timeout!",
                     current_turn.move_number
                 );
+                // Notify opponent in multiplayer
+                if matches!(*game_mode, crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive) {
+                    flag_timeout.write(crate::game::events::FlagTimeoutEvent {
+                        flagged_player: "black".to_string(),
+                        remote: false,
+                    });
+                }
             }
         }
     }

@@ -41,10 +41,14 @@ fn cleanup_stale_games(state: &P2PRelayState) {
         let is_stale = elapsed > stale_threshold;
         let is_finished = game.announcement.status == GameStatus::Finished;
 
-        if is_stale && !is_finished {
-            tracing::info!("Cleaning up stale game {}", game.announcement.game_id);
+        if is_stale || is_finished {
+            tracing::info!(
+                "Removing game {} (stale={}, finished={})",
+                game.announcement.game_id, is_stale, is_finished
+            );
         }
 
-        !is_stale || is_finished
+        // Keep only active games that still have a live host
+        !is_stale && !is_finished
     });
 }

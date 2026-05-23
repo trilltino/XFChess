@@ -9,7 +9,7 @@ use anchor_lang::solana_program::system_instruction;
 use anchor_lang::Discriminator;
 
 #[derive(Accounts)]
-#[instruction(username: String, country: String)]
+#[instruction(username: String, country: String, date_of_birth: i64)]
 pub struct InitProfile<'info> {
     /// CHECK: Seeds and ownership are verified manually in the handler to allow re-initialization.
     #[account(mut)]
@@ -30,9 +30,19 @@ pub struct InitProfile<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<InitProfile>, username: String, country: String) -> Result<()> {
+/// Seconds in 18 years (18 * 365.25 days).
+const EIGHTEEN_YEARS_SECS: i64 = 567_648_000;
+
+pub fn handler(ctx: Context<InitProfile>, username: String, country: String, date_of_birth: i64) -> Result<()> {
     // Validate username format
     validate_username(&username)?;
+
+    // Enforce 18+ age gate: DOB must be at least 18 years before now.
+    let now = Clock::get()?.unix_timestamp;
+    require!(
+        date_of_birth > 0 && now - date_of_birth >= EIGHTEEN_YEARS_SECS,
+        crate::errors::GameErrorCode::UnderagePlayer
+    );
     
     let profile_info = &ctx.accounts.player_profile;
     let player = &ctx.accounts.player;
@@ -104,7 +114,8 @@ pub fn handler(ctx: Context<InitProfile>, username: String, country: String) -> 
     profile.elo_rating = 120000.0;
     profile.rd = 0.0;
     profile.volatility = 0.0;
-    profile.created_at = Clock::get()?.unix_timestamp;
+    profile.created_at = now;
+    profile.date_of_birth = date_of_birth;
     profile.is_verified = false;
     profile.username = username.clone();
     profile.username_set = true;

@@ -102,6 +102,13 @@ pub struct LeaveGameRequest {
     pub node_id: String,
 }
 
+/// Host heartbeat to keep the lobby alive
+#[derive(Serialize, Deserialize)]
+pub struct HeartbeatRequest {
+    pub game_id: String,
+    pub host_node_id: String,
+}
+
 /// Request to send a message in a game
 #[derive(Serialize, Deserialize)]
 pub struct SendMessageRequest {

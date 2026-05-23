@@ -117,13 +117,13 @@ impl FromWorld for SquareMaterials {
             black_color: materials.add(light_color), // Light squares
             white_color: materials.add(dark_color),  // Dark squares
             hover_matl: materials.add(StandardMaterial {
-                base_color: Color::srgba(0.5, 0.5, 0.5, 0.4), // Semi-transparent light grey
+                base_color: Color::srgba(0.18, 0.78, 0.35, 0.82), // Vivid green (Lichess-style move dots)
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
             }),
             selected_border_matl: materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.0, 0.0, 0.5), // Soft black border
+                base_color: Color::srgba(0.95, 0.85, 0.1, 0.75), // Bright gold for selected square
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
@@ -132,10 +132,10 @@ impl FromWorld for SquareMaterials {
             templeos_white: materials.add(white_material), // Bright white for TempleOS (unlit)
             hint_mesh: world
                 .resource_mut::<Assets<Mesh>>()
-                .add(Circle::new(0.15)),
+                .add(Circle::new(0.28)),
             highlight_mesh: world
                 .resource_mut::<Assets<Mesh>>()
-                .add(Plane3d::default().mesh().size(0.95, 0.95)),
+                .add(Plane3d::default().mesh().size(0.92, 0.92)),
         }
     }
 }

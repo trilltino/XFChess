@@ -34,7 +34,9 @@ set IDENTITY_SALT=abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567
 
 :: Solana / Authority Keys
 set SOLANA_RPC_URL=https://api.devnet.solana.com
-set PROGRAM_ID=C624Z53FYEVDYVkMWSQ1KPQm4o1Jmdhpc5movSSBnezf
+set MAGIC_BLOCK_RPC_URL=https://devnet.magicblock.app
+set ER_RPC_URL=https://devnet.magicblock.app
+set PROGRAM_ID=8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU
 set FEE_PAYER_KEYS=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
 set VPS_AUTHORITY_KEY=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
 set KYC_AUTHORITY_KEY=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
@@ -46,18 +48,18 @@ echo [BUILD] Starting parallel builds...
 :: 1. UI Builds (Only if dist is missing)
 cd /d "%ROOT%"
 if not exist "tauri\wallet-ui\dist" (
-    echo [BUILD] Building Wallet UI (First time)...
+    echo [BUILD] Building Wallet UI - First time...
     wt -w 0 nt --title "Build: Wallet UI" cmd /c "cd tauri\wallet-ui && npm install && npm run build"
 )
 if not exist "tauri\tournament-admin\dist" (
-    echo [BUILD] Building Tournament Admin UI (First time)...
+    echo [BUILD] Building Tournament Admin UI - First time...
     wt -w 0 nt --title "Build: Admin UI" cmd /c "cd tauri\tournament-admin && npm install && npm run build"
 )
 
 :: 2. Signing Server
 echo [BUILD] Building XFChess Signing Server...
 cd /d "%ROOT%\backend"
-cargo build --bin signing-server-http
+cargo build --bin signing-server
 if errorlevel 1 exit /b 1
 
 :: 3. Game
@@ -75,41 +77,39 @@ if errorlevel 1 exit /b 1
 echo.
 set RELEASE_DIR=%ROOT%\target\debug
 if "!LAUNCH_CMD!"=="start" (
-    start "XFChess Backend" /D "%ROOT%\backend" cmd /c "%RELEASE_DIR%\signing-server-http.exe 2>&1 || pause"
+    start "XFChess Backend" /D "%ROOT%\backend" cmd /k "%RELEASE_DIR%\signing-server.exe 2>&1"
 ) else (
-    wt -w 0 nt --title "XFChess Backend" -d "%ROOT%\backend" cmd /c "%RELEASE_DIR%\signing-server-http.exe 2>&1 || pause"
+    wt -w 0 nt --title "XFChess Backend" -d "%ROOT%\backend" cmd /k "%RELEASE_DIR%\signing-server.exe 2>&1"
 )
 
 timeout /t 3 /nobreak >nul
 
 set XFCHESS_WALLET_PORT=7454
-set XFCHESS_USERNAME=Player1
 set XFCHESS_WALLET_MODE=tauri
 if "!LAUNCH_CMD!"=="start" (
-    start "XFChess Tauri 1" /D "%ROOT%" /MIN cmd /c "set XFCHESS_WALLET_PORT=7454 && %RELEASE_DIR%\xfchess-tauri.exe || pause"
+    start "XFChess Tauri 1" /D "%ROOT%" /MIN cmd /k "set XFCHESS_WALLET_PORT=7454 && %RELEASE_DIR%\xfchess-tauri.exe"
 ) else (
-    wt -w 0 nt --title "Tauri 1 (7454)" -d "%ROOT%" cmd /c "set XFCHESS_WALLET_PORT=7454 && %RELEASE_DIR%\xfchess-tauri.exe || pause"
+    wt -w 0 nt --title "Tauri 1 (7454)" -d "%ROOT%" cmd /k "set XFCHESS_WALLET_PORT=7454 && %RELEASE_DIR%\xfchess-tauri.exe"
 )
 timeout /t 1 /nobreak >nul
-start "XFChess Game 1" /D "%ROOT%" cmd /c "set XFCHESS_WALLET_PORT=7454 && set XFCHESS_USERNAME=Player1 && ^"%RELEASE_DIR%\xfchess.exe^" || pause"
+start "XFChess Game 1" /D "%ROOT%" cmd /k "set XFCHESS_WALLET_PORT=7454 && ^"%RELEASE_DIR%\xfchess.exe^""
 
 set XFCHESS_WALLET_PORT=7464
-set XFCHESS_USERNAME=Player2
 set XFCHESS_WALLET_MODE=tauri
 if "!LAUNCH_CMD!"=="start" (
-    start "XFChess Tauri 2" /D "%ROOT%" /MIN cmd /c "set XFCHESS_WALLET_PORT=7464 && %RELEASE_DIR%\xfchess-tauri.exe || pause"
+    start "XFChess Tauri 2" /D "%ROOT%" /MIN cmd /k "set XFCHESS_WALLET_PORT=7464 && %RELEASE_DIR%\xfchess-tauri.exe"
 ) else (
-    wt -w 0 nt --title "Tauri 2 (7464)" -d "%ROOT%" cmd /c "set XFCHESS_WALLET_PORT=7464 && %RELEASE_DIR%\xfchess-tauri.exe || pause"
+    wt -w 0 nt --title "Tauri 2 (7464)" -d "%ROOT%" cmd /k "set XFCHESS_WALLET_PORT=7464 && %RELEASE_DIR%\xfchess-tauri.exe"
 )
 timeout /t 1 /nobreak >nul
-start "XFChess Game 2" /D "%ROOT%" cmd /c "set XFCHESS_WALLET_PORT=7464 && set XFCHESS_USERNAME=Player2 && ^"%RELEASE_DIR%\xfchess.exe^" || pause"
+start "XFChess Game 2" /D "%ROOT%" cmd /k "set XFCHESS_WALLET_PORT=7464 && ^"%RELEASE_DIR%\xfchess.exe^""
 
 if "!LAUNCH_CMD!"=="start" (
-    start "XFChess Web" /D "%ROOT%\web-solana" cmd /c "npm run dev"
-    start "Tournament Admin" /D "%ROOT%\tauri\tournament-admin" cmd /c "npm run dev -- --port 7454"
+    start "XFChess Web" /D "%ROOT%\web-solana" cmd /k "npm run dev"
+    start "Tournament Admin" /D "%ROOT%\tauri\tournament-admin" cmd /k "npm run dev -- --port 7454"
 ) else (
-    wt -w 0 nt --title "XFChess Web" -d "%ROOT%\web-solana" cmd /c "npm run dev"
-    wt -w 0 nt --title "Tourney Admin" -d "%ROOT%\tauri\tournament-admin" cmd /c "npm run dev -- --port 7454"
+    wt -w 0 nt --title "XFChess Web" -d "%ROOT%\web-solana" cmd /k "npm run dev"
+    wt -w 0 nt --title "Tourney Admin" -d "%ROOT%\tauri\tournament-admin" cmd /k "npm run dev -- --port 7454"
 )
 
 echo [5/5] Instances are ready.

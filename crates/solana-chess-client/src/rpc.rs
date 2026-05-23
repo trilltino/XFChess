@@ -104,7 +104,7 @@ impl ChessRpcClient {
     }
 
     /// Creates an instruction to initialize a player profile.
-    pub fn create_init_profile_ix(&self, player: Pubkey, username: String, country: String) -> Instruction {
+    pub fn create_init_profile_ix(&self, player: Pubkey, username: String, country: String, date_of_birth: i64) -> Instruction {
         let profile_pda = self.get_profile_pda(&player);
         // Derive the username record PDA (needed by the Anchor accounts struct).
         let username_record_pda = self.derive_pda(&[b"username", username.as_bytes()]);
@@ -117,7 +117,7 @@ impl ChessRpcClient {
                 AccountMeta::new(player, true),
                 AccountMeta::new_readonly(system_program_id(), false),
             ],
-            data: xfchess_game::instruction::InitProfile { username, country }.data(),
+            data: xfchess_game::instruction::InitProfile { username, country, date_of_birth }.data(),
         }
     }
 
@@ -307,4 +307,127 @@ impl ChessRpcClient {
 
     // create_commit_move_batch_ix removed: CommitMoveBatch instruction was deleted from the contract.
     // All move batching now happens via the Ephemeral Rollup (ER) using record_move.
+
+    // ── Global persistent session delegation ──────────────────────────────────
+
+    /// Derive the `GlobalSessionDelegation` PDA for `player`.
+    pub fn get_global_session_pda(&self, player: &Pubkey) -> Pubkey {
+        self.derive_pda(&[b"global_session", player.as_ref()])
+    }
+
+    /// Build an `authorize_global_session` instruction.
+    ///
+    /// `session_key` is the hot key pubkey; `deposit_lamports` is the SOL to
+    /// pre-fund the delegation vault.
+    pub fn create_authorize_global_session_ix(
+        &self,
+        player: Pubkey,
+        session_key: Pubkey,
+        deposit_lamports: u64,
+        spending_limit: Option<u64>,
+        max_wager: Option<u64>,
+        games: Option<u16>,
+    ) -> Instruction {
+        let session_pda = self.get_global_session_pda(&player);
+        Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                AccountMeta::new(session_pda, false),
+                AccountMeta::new(player, true),
+                AccountMeta::new_readonly(system_program_id(), false),
+            ],
+            data: xfchess_game::instruction::AuthorizeGlobalSession {
+                args: xfchess_game::AuthorizeGlobalSessionArgs {
+                    session_key,
+                    duration_secs: None,
+                    spending_limit,
+                    max_wager,
+                    games,
+                    deposit_lamports,
+                },
+            }
+            .data(),
+        }
+    }
+
+    /// Build a `revoke_global_session` instruction.
+    pub fn create_revoke_global_session_ix(&self, player: Pubkey) -> Instruction {
+        let session_pda = self.get_global_session_pda(&player);
+        Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                AccountMeta::new(session_pda, false),
+                AccountMeta::new(player, true),
+            ],
+            data: xfchess_game::instruction::RevokeGlobalSession {}.data(),
+        }
+    }
+
+    /// Build a `global_create_game` instruction (session-signed, no player popup).
+    pub fn create_global_create_game_ix(
+        &self,
+        player: Pubkey,
+        session_signer: Pubkey,
+        game_id: u64,
+        wager_amount: u64,
+        match_type: MatchType,
+        country: String,
+        base_time_seconds: u64,
+        increment_seconds: u16,
+    ) -> Instruction {
+        let session_pda = self.get_global_session_pda(&player);
+        let game_pda = self.get_game_pda(game_id);
+        let escrow_pda = self.get_escrow_pda(game_id);
+
+        Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                AccountMeta::new(session_pda, false),
+                AccountMeta::new_readonly(session_signer, true),
+                AccountMeta::new_readonly(player, false),
+                AccountMeta::new(game_pda, false),
+                AccountMeta::new(escrow_pda, false),
+                AccountMeta::new_readonly(system_program_id(), false),
+            ],
+            data: xfchess_game::instruction::GlobalCreateGame {
+                game_id,
+                wager_amount,
+                match_type,
+                country,
+                base_time_seconds,
+                increment_seconds,
+            }
+            .data(),
+        }
+    }
+
+    /// Build a `global_join_game` instruction (session-signed, no player popup).
+    pub fn create_global_join_game_ix(
+        &self,
+        player: Pubkey,
+        white_player: Pubkey,
+        session_signer: Pubkey,
+        game_id: u64,
+    ) -> Instruction {
+        let session_pda = self.get_global_session_pda(&player);
+        let game_pda = self.get_game_pda(game_id);
+        let escrow_pda = self.get_escrow_pda(game_id);
+        let player_profile = self.get_profile_pda(&player);
+        let white_profile = self.get_profile_pda(&white_player);
+
+        Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                AccountMeta::new(session_pda, false),
+                AccountMeta::new_readonly(session_signer, true),
+                AccountMeta::new_readonly(player, false),
+                AccountMeta::new(game_pda, false),
+                AccountMeta::new(player_profile, false),
+                AccountMeta::new_readonly(white_profile, false),
+                AccountMeta::new(escrow_pda, false),
+                AccountMeta::new_readonly(system_program_id(), false),
+            ],
+            data: xfchess_game::instruction::GlobalJoinGame { game_id }.data(),
+        }
+    }
 }

@@ -31,12 +31,16 @@ pub struct SigningConfig {
     pub vps_authority_key: Option<String>,
     /// Base58 encoded KYC authority private key
     pub kyc_authority_key: Option<String>,
+    /// Base58 encoded external-elo linking authority private key
+    pub link_authority_key: Option<String>,
     /// Admin token for protected endpoints (POST /admin/dispute/resolve, etc.)
     pub admin_token: Option<String>,
     /// Host treasury pubkey - receives entry fees directly
     pub host_treasury_pubkey: String,
     /// USDC mint address (devnet or mainnet)
     pub usdc_mint_pubkey: String,
+    /// Lichess OAuth client ID (from lichess.org/account/oauth/app)
+    pub lichess_client_id: String,
 }
 
 impl SigningConfig {
@@ -53,8 +57,10 @@ impl SigningConfig {
     /// - `FEE_PAYER_KEYS` - Comma-separated base58 keys or file paths
     /// - `VPS_AUTHORITY_KEY` - Base58 VPS authority key
     /// - `KYC_AUTHORITY_KEY` - Base58 KYC authority key
+    /// - `LINK_AUTHORITY_KEY` - Base58 external-elo linking authority key
     /// - `HOST_TREASURY_PUBKEY` - Host treasury pubkey for entry fees
     /// - `USDC_MINT` - USDC mint address (devnet or mainnet)
+    /// - `LICHESS_CLIENT_ID` - Lichess OAuth client ID
     ///
     /// # Returns
     /// A fully configured `SigningConfig` struct
@@ -84,11 +90,14 @@ impl SigningConfig {
                 .collect(),
             vps_authority_key: env::var("VPS_AUTHORITY_KEY").ok(),
             kyc_authority_key: env::var("KYC_AUTHORITY_KEY").ok(),
+            link_authority_key: env::var("LINK_AUTHORITY_KEY").ok(),
             admin_token: env::var("ADMIN_TOKEN").ok(),
             host_treasury_pubkey: env::var("HOST_TREASURY_PUBKEY")
                 .unwrap_or_else(|_| "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string()),
             usdc_mint_pubkey: env::var("USDC_MINT")
                 .unwrap_or_else(|_| "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".to_string()),
+            lichess_client_id: env::var("LICHESS_CLIENT_ID")
+                .unwrap_or_default(),
         }
     }
 }

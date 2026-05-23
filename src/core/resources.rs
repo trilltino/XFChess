@@ -24,7 +24,7 @@ pub struct GameSettings {
     pub highlight_last_move: bool,
 
     /// Whether to use VPS relay for P2P connections
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub use_vps_relay: bool,
 }
 
@@ -39,6 +39,8 @@ impl Default for GameSettings {
         }
     }
 }
+
+fn default_true() -> bool { true }
 
 /// Resource for tracking game statistics
 #[derive(Resource, Debug, Clone, Default, Reflect)]

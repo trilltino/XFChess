@@ -110,7 +110,7 @@ export default function Dashboard() {
     addLog("Initiating production rollout...");
     try {
       const command = Command.sidecar("../deploy/scripts/deploy.bat");
-      const child = await command.spawn();
+      await command.spawn();
       command.stdout.on('data', line => addLog(line));
       command.stderr.on('data', line => addLog(`ERROR: ${line}`));
       command.on('close', data => {

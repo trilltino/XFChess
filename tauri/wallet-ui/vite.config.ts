@@ -14,8 +14,14 @@ export default defineConfig({
   ],
   clearScreen: false,
   server: {
-    port: 5173,
+    port: 5174,
     strictPort: true,
+  },
+  optimizeDeps: {
+    include: [
+      "@solana/spl-token",
+      "@solana/web3.js",
+    ],
   },
   base: "./",
   build: {
@@ -25,7 +31,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ["react", "react-dom"],
-          solana: ["@solana/web3.js", "@solana/wallet-adapter-react"],
+          solana: ["@solana/web3.js"],
         },
       },
     },

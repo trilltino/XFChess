@@ -67,6 +67,12 @@ pub struct TournamentClientState {
     pub bracket_ready: bool,
     pub password_input: String,
     pub password_error: Option<String>,
+    /// Last error from tournament list poll (cleared on success).
+    pub last_poll_error: Option<String>,
+    /// Set when the player finished a match and is waiting for the next round assignment.
+    pub waiting_for_next_match: bool,
+    /// Result of the last completed match (e.g. "1-0", "0-1", "½-½").
+    pub last_match_result: Option<String>,
 }
 
 impl Default for TournamentClientState {
@@ -85,6 +91,9 @@ impl Default for TournamentClientState {
             bracket_ready: false,
             password_input: String::new(),
             password_error: None,
+            last_poll_error: None,
+            waiting_for_next_match: false,
+            last_match_result: None,
         }
     }
 }
@@ -317,13 +326,25 @@ fn poll_tournament_tasks(
 
 fn poll_tournament_list(
     mut tournament: ResMut<TournamentClientState>,
+    menu_state: Option<Res<State<crate::core::MenuState>>>,
 ) {
-    const POLL_INTERVAL_SECS: f64 = 30.0;
+    let is_tournaments_active = menu_state
+        .map(|s| *s.get() == crate::core::MenuState::Tournaments)
+        .unwrap_or(false);
+    let poll_interval_secs: f64 = if is_tournaments_active { 10.0 } else { 30.0 };
 
     if let Some(ref rx) = tournament.list_rx {
-        if let Ok(list) = rx.try_recv() {
-            tournament.available_tournaments = list;
-            tournament.list_rx = None;
+        match rx.try_recv() {
+            Ok(list) => {
+                tournament.available_tournaments = list;
+                tournament.last_poll_error = None;
+                tournament.list_rx = None;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => {
+                tournament.last_poll_error = Some("List poll channel closed".to_string());
+                tournament.list_rx = None;
+            }
         }
     }
 
@@ -332,7 +353,7 @@ fn poll_tournament_list(
     }
 
     let should_poll = tournament.last_list_poll
-        .map(|t| t.elapsed().as_secs_f64() >= POLL_INTERVAL_SECS)
+        .map(|t| t.elapsed().as_secs_f64() >= poll_interval_secs)
         .unwrap_or(true);
 
     if !should_poll {

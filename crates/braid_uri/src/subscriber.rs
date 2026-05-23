@@ -91,6 +91,13 @@ impl ChessSubscriber {
         self.subscribe_inner(ChessUri::clock(&self.game_id)).await
     }
 
+    /// Subscribe to the chat stream (`/game/{id}/chat`).
+    pub async fn subscribe_chat(
+        &self,
+    ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidUriError> {
+        self.subscribe_inner(ChessUri::chat(&self.game_id)).await
+    }
+
     // ─── Internal ────────────────────────────────────────────────────────────
 
     async fn subscribe_inner(

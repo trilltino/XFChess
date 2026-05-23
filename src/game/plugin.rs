@@ -75,6 +75,9 @@ impl Plugin for GamePlugin {
             .init_resource::<super::camera_modes::CinematicFadeOverlay>()
             .init_resource::<InGameHudVisibility>()
             .init_resource::<super::systems::input::InGameExitConfirmation>()
+            .init_resource::<super::systems::network_move::PendingDrawOffer>()
+            .init_resource::<super::systems::network_move::PendingRematchOffer>()
+            .init_resource::<crate::ui::game::ChatState>()
             .init_resource::<super::replay::PgnReplayState>();
 
         // Register types for reflection (needed for inspector)
@@ -107,7 +110,10 @@ impl Plugin for GamePlugin {
             .add_message::<crate::game::events::RemoteMoveApplied>()
             .add_message::<crate::game::events::ResignEvent>()
             .add_message::<crate::game::events::DrawOfferEvent>()
-            .add_message::<crate::game::events::DrawResponseEvent>();
+            .add_message::<crate::game::events::DrawResponseEvent>()
+            .add_message::<crate::game::events::RematchOfferEvent>()
+            .add_message::<crate::game::events::RematchResponseEvent>()
+            .add_message::<crate::game::events::FlagTimeoutEvent>();
 
         // Add AI plugin
         app.add_plugins(AIPlugin);
@@ -264,9 +270,22 @@ impl Plugin for GamePlugin {
             bevy_egui::EguiPrimaryContextPass,
             (
                 crate::ui::game::game_ui::game_status_ui,
+                crate::ui::game::game_ui::draw_offer_ui,
+                crate::ui::game::game_ui::rematch_offer_ui,
+                crate::ui::game::game_ui::post_game_overlay,
+                crate::ui::game::game_ui::pause_resume_ui,
                 crate::ui::game_2d::render_2d_board,
             )
                 .chain()
+                .run_if(in_state(GameState::InGame))
+                .run_if(not(in_mode(GameMode::PgnReplay))),
+        );
+        // Chat panel runs separately (shares EguiContexts with the chain above;
+        // Bevy allows multiple systems in the same pass to use EguiContexts as long
+        // as they are not chained with conflicting system-params).
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            crate::ui::game::chat_panel_ui
                 .run_if(in_state(GameState::InGame))
                 .run_if(not(in_mode(GameMode::PgnReplay))),
         );
@@ -277,6 +296,19 @@ impl Plugin for GamePlugin {
             super::replay::replay_ui_system
                 .run_if(in_state(GameState::InGame))
                 .run_if(in_mode(GameMode::PgnReplay)),
+        );
+
+        // Draw offer / rematch / chat network handlers
+        app.add_systems(
+            Update,
+            (
+                crate::game::systems::network_move::watch_draw_offers,
+                crate::game::systems::network_move::handle_draw_response_events,
+                crate::game::systems::network_move::watch_rematch_offers,
+                crate::ui::game::drain_chat_messages,
+            )
+                .in_set(GameSystems::Execution)
+                .run_if(in_state(GameState::InGame)),
         );
 
         // Conditional 3D visibility system

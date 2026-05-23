@@ -98,4 +98,7 @@ pub struct MainMenuUIContext<'w, 's> {
     pub p2p_host: ResMut<'w, crate::states::main_menu::P2PHostState>,
     pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
     pub active_time_control: ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
+    pub menu_style: ResMut<'w, crate::states::main_menu::MenuStyle>,
+    pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
+    pub solana_logos: ResMut<'w, crate::states::main_menu::SolanaLogoState>,
 }

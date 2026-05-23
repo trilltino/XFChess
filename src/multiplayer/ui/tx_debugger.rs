@@ -315,7 +315,7 @@ impl TransactionDebugger {
             }
             _ => {
                 format!(
-                    "\x1b[90m[•]\x1b[0m Game {} | {:?} | {:?}",
+                    "\x1b[90m[â€¢]\x1b[0m Game {} | {:?} | {:?}",
                     tx.game_id, tx.tx_type, tx.status
                 )
             }

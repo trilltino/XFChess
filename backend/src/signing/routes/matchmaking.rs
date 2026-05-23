@@ -26,17 +26,14 @@ pub use handlers::{JoinRequest, LeaveRequest, join, leave, status};
 
 /// Creates the matchmaking routes router.
 ///
-/// # Arguments
-/// * `state` - Shared matchmaking state
-///
 /// # Returns
 /// An Axum Router with matchmaking endpoints.
-pub fn matchmaking_routes(state: SharedMatchmakingState) -> Router {
+/// State is provided by the parent router's `.with_state(AppState)`.
+pub fn matchmaking_routes() -> Router<crate::signing::AppState> {
     Router::new()
         .route("/join", post(join))
         .route("/status/{pubkey}", get(status))
         .route("/leave", post(leave))
-        .with_state(state)
 }
 
 #[cfg(test)]
@@ -69,8 +66,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_matchmaking_routes_creation() {
-        let state = SharedMatchmakingState::default();
-        let _router = matchmaking_routes(state);
+        let _router = matchmaking_routes();
     }
 
     #[test]

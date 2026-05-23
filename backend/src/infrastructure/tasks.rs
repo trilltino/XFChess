@@ -3,7 +3,8 @@
 //! This module handles spawning and managing background tasks
 //! such as matchmaking and fee claiming.
 
-use crate::signing::{AppState, SigningConfig, TournamentTrigger};
+use crate::signing::{AnalysisQueue, AppState, SigningConfig, TournamentTrigger};
+use crate::tasks::anticheat_worker;
 use crate::tasks::matchmaking;
 use crate::tasks::fee_claimer;
 use crate::tasks::tournament_scheduler::spawn_tournament_scheduler;
@@ -22,8 +23,8 @@ use tracing::info;
 /// * `config` - The signing configuration
 ///
 /// # Returns
-/// Tournament trigger sender for route handlers
-pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> tokio::sync::mpsc::Sender<TournamentTrigger> {
+/// `(tournament_trigger, anticheat_queue)` — callers set these on `AppState`.
+pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> (tokio::sync::mpsc::Sender<TournamentTrigger>, AnalysisQueue) {
     // Spawn matchmaking service
     let matchmaking_state = state.matchmaking.clone();
     tokio::spawn(async move {
@@ -51,8 +52,13 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> tokio::
     });
     info!("[Tasks] Game archiver service spawned");
 
+    // Spawn anti-cheat Stockfish analysis workers
+    let ac_pool = state.store.pool();
+    let ac_queue = anticheat_worker::spawn_anticheat_workers(ac_pool);
+    info!("[Tasks] Anti-cheat analysis workers spawned");
+
     info!("[Tasks] All background tasks spawned successfully");
-    trigger_tx
+    (trigger_tx, ac_queue)
 }
 
 #[cfg(test)]

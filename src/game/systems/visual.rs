@@ -54,11 +54,11 @@ pub fn highlight_possible_moves(
         let is_valid_move = selection.is_selected() && selection.possible_moves.contains(&pos);
 
         if is_selected {
-            // Add soft black border for selected piece
+            // Gold highlight on selected piece square
             commands.spawn((
                 Mesh3d(square_materials.highlight_mesh.clone()),
                 MeshMaterial3d(square_materials.selected_border_matl.clone()),
-                Transform::from_translation(Vec3::new(square.x as f32, 0.02, square.y as f32)),
+                Transform::from_translation(Vec3::new(square.x as f32, 0.03, square.y as f32)),
                 SelectedBorder,
                 Name::new("Selected Border"),
                 crate::core::DespawnOnExit(crate::core::GameState::InGame),
@@ -66,11 +66,11 @@ pub fn highlight_possible_moves(
         }
 
         if is_valid_move {
-            // Add small grey circle for legal move (matching 2D style)
+            // Green circle on valid destination squares
             commands.spawn((
                 Mesh3d(square_materials.hint_mesh.clone()),
                 MeshMaterial3d(square_materials.hover_matl.clone()),
-                Transform::from_translation(Vec3::new(square.x as f32, 0.02, square.y as f32))
+                Transform::from_translation(Vec3::new(square.x as f32, 0.04, square.y as f32))
                     .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                 MoveHint,
                 Name::new("Move Hint"),
@@ -125,7 +125,8 @@ pub fn animate_piece_movement(
         if let Some(mut animation) = animation {
             animation.elapsed = (animation.elapsed + time.delta_secs()).min(animation.duration);
             let progress = animation.progress();
-            transform.translation = animation.start.lerp(animation.end, progress);
+            let arc = (std::f32::consts::PI * progress).sin() * 0.35;
+            transform.translation = animation.start.lerp(animation.end, progress) + Vec3::new(0.0, arc, 0.0);
 
             if progress >= 1.0 {
                 transform.translation = animation.end;

@@ -13,8 +13,9 @@
 //! Reference: anchor-lang error construction —
 //! <https://docs.rs/anchor-lang/latest/anchor_lang/error/index.html>.
 
+use crate::constants::*;
 use crate::errors::XfchessGameError;
-use crate::state::{Tournament, TournamentSessionDelegation, TournamentStatus};
+use crate::state::{Tournament, TournamentPlayersShard, TournamentSessionDelegation, TournamentStatus};
 use anchor_lang::prelude::*;
 
 /// Arguments for `authorize_tournament_session`.
@@ -75,10 +76,22 @@ pub fn handler_authorize_tournament_session(
         XfchessGameError::UnauthorizedAccess
     );
 
-    require!(
-        tournament.players.iter().any(|p| *p == *player.key),
-        XfchessGameError::UnauthorizedAccess
-    );
+    // Check player registration across all shards
+    let shards = [
+        &ctx.accounts.tournament_players_shard_0,
+        &ctx.accounts.tournament_players_shard_1,
+        &ctx.accounts.tournament_players_shard_2,
+        &ctx.accounts.tournament_players_shard_3,
+    ];
+
+    let mut is_registered = false;
+    for shard in shards.iter() {
+        if shard.players.iter().any(|p| *p == *player.key) {
+            is_registered = true;
+            break;
+        }
+    }
+    require!(is_registered, XfchessGameError::UnauthorizedAccess);
 
     let now = Clock::get()?.unix_timestamp;
     let duration = args
@@ -133,6 +146,31 @@ pub struct AuthorizeTournamentSessionCtx<'info> {
         bump = tournament.bump,
     )]
     pub tournament: Account<'info, Tournament>,
+
+    /// TournamentPlayersShard 0 (players 0-63)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
+    /// TournamentPlayersShard 1 (players 64-127)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_1: Account<'info, TournamentPlayersShard>,
+    /// TournamentPlayersShard 2 (players 128-191)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_2: Account<'info, TournamentPlayersShard>,
+    /// TournamentPlayersShard 3 (players 192-255)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_3: Account<'info, TournamentPlayersShard>,
 
     #[account(
         init,

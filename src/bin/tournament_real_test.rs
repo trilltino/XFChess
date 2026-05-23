@@ -225,7 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         step: "Start".to_string(),
         player: "Admin".to_string(),
         severity: "ok".to_string(),
-        text: "bracket seeded by ELO — SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
+        text: "bracket seeded by ELO â€” SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
     });
     println!("   Tournament started: {}", start_sig);
 
@@ -395,7 +395,7 @@ async fn play_final(
         step: "Final".to_string(),
         player: winner.name.clone(),
         severity: "ok".to_string(),
-        text: "CHAMPION — 1-0 (10 moves on ER)".to_string(),
+        text: "CHAMPION â€” 1-0 (10 moves on ER)".to_string(),
     });
 
     notes.push(SessionNote {

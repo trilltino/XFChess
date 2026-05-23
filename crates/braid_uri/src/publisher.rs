@@ -17,7 +17,7 @@
 //! ```
 
 use crate::error::BraidUriError;
-use crate::message::{ChessMessage, EngineHint, MovePayload};
+use crate::message::{ChatPayload, ChessMessage, EngineHint, MovePayload};
 use crate::patch::version_hash;
 use crate::uri::ChessUri;
 use braid_http::types::{BraidRequest, Version};
@@ -88,6 +88,23 @@ impl ChessPublisher {
         };
         self.put(ChessUri::moves(&self.game_id), msg, new_version)
             .await
+    }
+
+    /// PUT a chat message onto the chat sub-resource.
+    pub async fn publish_chat(
+        &mut self,
+        player: &str,
+        text: &str,
+        timestamp_ms: u64,
+    ) -> Result<(), BraidUriError> {
+        let seed = format!("chat:{}:{}", player, timestamp_ms);
+        let new_version = Version::new(version_hash(&seed, 0));
+        let msg = ChessMessage::Chat(ChatPayload {
+            player: player.to_string(),
+            text: text.to_string(),
+            timestamp_ms,
+        });
+        self.put(ChessUri::chat(&self.game_id), msg, new_version).await
     }
 
     /// PUT a Stockfish engine hint onto the engine sub-resource.

@@ -7,12 +7,20 @@
 
 use serde::Deserialize;
 
-const VPS_DEFAULT_URL: &str = "http://178.104.55.19";
+const VPS_PROD_URL: &str = "http://178.104.55.19";
+const VPS_LOCAL_URL: &str = "http://127.0.0.1:8090";
 
 pub fn vps_base() -> String {
     std::env::var("SIGNING_SERVICE_URL")
         .or_else(|_| std::env::var("BACKEND_URL"))
-        .unwrap_or_else(|_| VPS_DEFAULT_URL.to_string())
+        .unwrap_or_else(|_| {
+            // Debug builds default to local backend; release builds hit production.
+            if cfg!(debug_assertions) {
+                VPS_LOCAL_URL.to_string()
+            } else {
+                VPS_PROD_URL.to_string()
+            }
+        })
 }
 
 pub(crate) fn client() -> Result<reqwest::blocking::Client, String> {

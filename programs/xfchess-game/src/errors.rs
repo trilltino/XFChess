@@ -209,6 +209,27 @@ pub enum GameErrorCode {
     WagerLimitExceeded,
     #[msg("Invalid tournament status")]
     InvalidTournamentStatus,
+
+    #[msg("Invalid username format or length.")]
+    InvalidUsername,
+
+    // ── Age verification ──────────────────────────────────────────────────────
+    #[msg("Player must be 18 or older to participate in wagered games.")]
+    UnderagePlayer,           // date_of_birth indicates player is under 18
+
+    // ── Global session ────────────────────────────────────────────────────────
+    #[msg("A valid global session already exists for this player.")]
+    GlobalSessionAlreadyActive,  // authorize_global_session called when one is still live
+    #[msg("Global session has no games remaining; please re-authorize.")]
+    GlobalSessionNoGamesRemaining, // games_remaining == 0
+    #[msg("Global session spending limit would be exceeded.")]
+    GlobalSessionSpendingLimitExceeded, // total_spent + cost > spending_limit
+
+    // ── Result integrity ──────────────────────────────────────────────────────
+    #[msg("Claimed result does not match the on-chain game result.")]
+    ResultMismatch,              // Caller supplied a winner/draw that contradicts on-chain state
+    #[msg("Game result has not been committed on-chain; cannot finalize a game with no result yet.")]
+    GameStillInProgress,         // finalize called but game.result is still None
 }
 
 // Alias so the rest of the codebase can use either name.

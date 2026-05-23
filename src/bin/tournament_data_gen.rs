@@ -182,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         step: "Start".to_string(),
         player: "Admin".to_string(),
         severity: "ok".to_string(),
-        text: "bracket seeded by ELO — SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
+        text: "bracket seeded by ELO â€” SF1: Magnus vs Vidit, SF2: Fabiano vs Anish".to_string(),
     });
     println!("   Tournament started: {}", start_sig);
 
@@ -273,7 +273,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         step: "Final".to_string(),
         player: final_result.winner.clone(),
         severity: "ok".to_string(),
-        text: "CHAMPION — 1-0 (real moves on Solana devnet)".to_string(),
+        text: "CHAMPION â€” 1-0 (real moves on Solana devnet)".to_string(),
     });
 
     // Generate output files
@@ -376,6 +376,7 @@ async fn create_player_profile_on_chain(
         player_keypair.pubkey(),
         player_keypair.pubkey().to_string(),
         "US".to_string(),
+        -630_720_000, // benchmark bot â€” 20 years before epoch
     )?;
     let tx = Transaction::new_signed_with_payer(
         &[ix],

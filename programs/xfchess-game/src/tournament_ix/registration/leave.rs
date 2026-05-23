@@ -1,5 +1,5 @@
 //! Instruction allowing players to voluntarily leave a tournament before it starts and receive a refund.
-//! The entry fee is refunded from the host_treasury (operator's wallet), which must co-sign.
+//! The entry fee is refunded from the tournament escrow PDA — the operator's wallet is not involved.
 
 use crate::constants::*;
 use crate::errors::GameErrorCode;
@@ -15,15 +15,39 @@ pub struct LeaveTournament<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
+    /// TournamentPlayersShard 0 (players 0-63)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
+    /// TournamentPlayersShard 1 (players 64-127)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_1: Account<'info, TournamentPlayersShard>,
+    /// TournamentPlayersShard 2 (players 128-191)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_2: Account<'info, TournamentPlayersShard>,
+    /// TournamentPlayersShard 3 (players 192-255)
+    #[account(
+        seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub tournament_players_shard_3: Account<'info, TournamentPlayersShard>,
     #[account(mut)]
     pub player: Signer<'info>,
-    /// Host treasury wallet — must sign to authorize the SOL refund.
-    /// This is the operator's wallet that received the entry fee.
+    /// CHECK: Tournament escrow PDA — entry fees are held here, not in the operator's wallet.
     #[account(
         mut,
-        constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess
+        seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        bump
     )]
-    pub host_treasury: Signer<'info>,
+    pub escrow_pda: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -37,49 +61,68 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
         GameErrorCode::InvalidTournamentStatus
     );
 
-    // Find the player's index
-    let mut player_index = None;
-    for i in 0..tournament.num_registered_players as usize {
-        if tournament.players[i] == player_key {
-            player_index = Some(i);
+    // Find the player's shard and index
+    let mut found_shard_id: Option<u8> = None;
+    let mut player_index_in_shard: Option<usize> = None;
+
+    let shards = [
+        (&mut ctx.accounts.tournament_players_shard_0, 0u8),
+        (&mut ctx.accounts.tournament_players_shard_1, 1u8),
+        (&mut ctx.accounts.tournament_players_shard_2, 2u8),
+        (&mut ctx.accounts.tournament_players_shard_3, 3u8),
+    ];
+
+    for (shard, shard_id) in shards.iter() {
+        for (i, player) in shard.players.iter().enumerate() {
+            if *player == player_key {
+                found_shard_id = Some(*shard_id);
+                player_index_in_shard = Some(i);
+                break;
+            }
+        }
+        if found_shard_id.is_some() {
             break;
         }
     }
 
-    let index = player_index.ok_or(GameErrorCode::PlayerNotFound)?;
+    let (shard_id, index) = match (found_shard_id, player_index_in_shard) {
+        (Some(sid), Some(idx)) => (sid, idx),
+        _ => return Err(GameErrorCode::PlayerNotFound.into()),
+    };
+
+    // Get mutable reference to the correct shard
+    let target_shard = match shard_id {
+        0 => &mut ctx.accounts.tournament_players_shard_0,
+        1 => &mut ctx.accounts.tournament_players_shard_1,
+        2 => &mut ctx.accounts.tournament_players_shard_2,
+        3 => &mut ctx.accounts.tournament_players_shard_3,
+        _ => return Err(GameErrorCode::PlayerNotFound.into()),
+    };
 
     // Remove player and their ELO by shifting the array left
-    let num_players = tournament.num_registered_players as usize;
-    for i in index..(num_players - 1) {
-        tournament.players[i] = tournament.players[i + 1];
-        tournament.player_elos[i] = tournament.player_elos[i + 1];
+    let num_in_shard = target_shard.players.len();
+    for i in index..(num_in_shard - 1) {
+        target_shard.players[i] = target_shard.players[i + 1];
+        target_shard.player_elos[i] = target_shard.player_elos[i + 1];
     }
-    
+
     // Clear the last element (optional but clean)
-    tournament.players[num_players - 1] = Pubkey::default();
-    tournament.player_elos[num_players - 1] = 0;
+    target_shard.players[num_in_shard - 1] = Pubkey::default();
+    target_shard.player_elos[num_in_shard - 1] = 0;
 
     // Decrement the player count
     tournament.num_registered_players -= 1;
 
-    // Refund entry fee from host_treasury
+    // Refund entry fee from the tournament escrow PDA (direct lamport manipulation,
+    // same pattern as the wager escrow in finalize.rs).
     let refund_amount = tournament.entry_fee;
     if refund_amount > 0 {
         require!(
-            ctx.accounts.host_treasury.lamports() >= refund_amount,
+            ctx.accounts.escrow_pda.lamports() >= refund_amount,
             GameErrorCode::InsufficientTreasuryForRefund
         );
-
-        anchor_lang::system_program::transfer(
-            CpiContext::new(
-                ctx.accounts.system_program.to_account_info(),
-                anchor_lang::system_program::Transfer {
-                    from: ctx.accounts.host_treasury.to_account_info(),
-                    to: ctx.accounts.player.to_account_info(),
-                },
-            ),
-            refund_amount,
-        )?;
+        **ctx.accounts.escrow_pda.lamports.borrow_mut() -= refund_amount;
+        **ctx.accounts.player.lamports.borrow_mut() += refund_amount;
     }
 
     // Update prize pool

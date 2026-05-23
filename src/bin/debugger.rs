@@ -110,8 +110,8 @@ fn main() {
 
 fn print_banner() {
     println!("+--------------------------------------------------------+");
-    println!("¦          XFChess Transaction Debugger                  ¦");
-    println!("¦          Rollup Monitor v0.1.0                         ¦");
+    println!("Â¦          XFChess Transaction Debugger                  Â¦");
+    println!("Â¦          Rollup Monitor v0.1.0                         Â¦");
     println!("+--------------------------------------------------------+");
     println!();
 }

@@ -216,4 +216,73 @@ impl VaultStore {
             warn!("[vault] audit log write failed for {}/{}: {}", pubkey, action, e);
         }
     }
+
+    // ── CACF compliance persistence ────────────────────────────────────────────
+
+    /// Upserts a CACF compliance record for a (wallet, country) pair.
+    ///
+    /// `status` is the string form of `CacfComplianceStatus` (e.g. `"fully_compliant"`).
+    /// `kyc_completed` mirrors whether KYC has been accepted for this user.
+    /// `details_json` carries country-specific flags as a JSON object (may be `None`).
+    pub async fn save_cacf(
+        &self,
+        wallet: &str,
+        country: &str,
+        status: &str,
+        kyc_completed: bool,
+        details_json: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            r#"
+            INSERT INTO cacf_compliance (wallet, country, status, kyc_completed, details_json, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(wallet, country) DO UPDATE SET
+                status        = excluded.status,
+                kyc_completed = excluded.kyc_completed,
+                details_json  = excluded.details_json,
+                updated_at    = excluded.updated_at
+            "#,
+        )
+        .bind(wallet)
+        .bind(country)
+        .bind(status)
+        .bind(kyc_completed as i32)
+        .bind(details_json)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Returns the persisted CACF status string for a (wallet, country) pair,
+    /// or `None` if no record exists yet.
+    pub async fn load_cacf_status(&self, wallet: &str, country: &str) -> Option<String> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT status FROM cacf_compliance WHERE wallet = ?1 AND country = ?2",
+        )
+        .bind(wallet)
+        .bind(country)
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten();
+        row.map(|(s,)| s)
+    }
+
+    /// Returns true if the wallet has a persisted CACF record that permits wagering
+    /// (status is `fully_compliant` or `partially_compliant`) for the given country.
+    /// Falls back to `true` for countries not covered by CACF (everything outside
+    /// GB / BR / DE / CA).
+    pub async fn cacf_can_wager(&self, wallet: &str, country: &str) -> bool {
+        match country {
+            "GB" | "BR" | "DE" | "CA" => {
+                match self.load_cacf_status(wallet, country).await.as_deref() {
+                    Some("fully_compliant") | Some("partially_compliant") => true,
+                    _ => false,
+                }
+            }
+            _ => true,
+        }
+    }
 }

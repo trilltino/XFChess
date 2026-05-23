@@ -44,7 +44,7 @@ pub mod subscriber;
 pub mod uri;
 
 pub use error::BraidUriError;
-pub use message::{ChessMessage, ClockState, EngineHint, MovePayload};
+pub use message::{ChatPayload, ChessMessage, ClockState, EngineHint, MovePayload};
 pub use patch::{version_hash, BraidPatch};
 pub use publisher::ChessPublisher;
 pub use subscriber::ChessSubscriber;

@@ -24,7 +24,7 @@
 
 use crate::signing::storage::tournament::{TournamentStore, TournamentStatus};
 use crate::signing::tournament_gossip::TournamentGossipService;
-use braid_iroh::protocol::SwissMessage;
+use braid_iroh::SwissMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

@@ -503,65 +503,32 @@ pub fn san_to_move(game: &mut Game, san: &str) -> Result<(i8, i8, i8), PgnParseE
     let mut dst_rank: Option<i8> = None;
     let mut src_file: Option<i8> = None;
     let mut src_rank: Option<i8> = None;
-    let mut has_capture = false;
 
-    // Work through the remaining characters
-    let bytes = rest.as_bytes();
-    let mut i = 0;
+    // Destination is always the last file+rank in `rest` (ignoring 'x').
+    // Everything before the destination (and before 'x') is disambiguation.
+    // This handles: "d4", "f3", "exd5", "bd2", "1d4", "a1d4", "xd5", etc.
+    let has_capture = rest.contains('x');
+    let rest_no_x: String = rest.chars().filter(|&c| c != 'x').collect();
+    let rbytes = rest_no_x.as_bytes();
 
-    while i < bytes.len() {
-        let c = bytes[i] as char;
-        if c == 'x' {
-            has_capture = true;
-            i += 1;
-            continue;
-        }
-        if c.is_ascii_digit() {
-            // Could be rank (disambiguation or destination)
-            let rank = (c as u8 - b'1') as i8;
-            if dst_file.is_some() {
-                dst_rank = Some(rank);
-            } else if src_file.is_some() {
-                src_rank = Some(rank);
-            } else {
-                // Ambiguous — assume source rank if no source file yet
-                src_rank = Some(rank);
-            }
-            i += 1;
-        } else if ('a'..='h').contains(&c) {
-            let file = (c as u8 - b'a') as i8;
-            if dst_file.is_some() && dst_rank.is_some() {
-                // Already have destination — this is extra (shouldn't happen)
-            } else if dst_file.is_some() {
-                // We have a destination file but not rank — this file char is the rank char? No, it's a file.
-                // Actually if we have "exd5", after 'e' and 'x', we get 'd' then '5'
-                // So: 'd' is dst_file, '5' will be dst_rank
-                dst_file = Some(file);
-            } else if src_file.is_none() {
-                src_file = Some(file);
-            } else {
-                // We already have src_file — this must be dst_file
-                dst_file = Some(file);
-            }
-            i += 1;
-        } else {
-            i += 1;
-        }
-    }
-
-    // If we still don't have dst_file, try the last two chars of the original SAN
-    if dst_file.is_none() || dst_rank.is_none() {
-        // Fallback: look for a file+rank pattern at the end of san_body
-        let san_bytes = san_body.as_bytes();
-        if san_bytes.len() >= 2 {
-            let last = san_bytes[san_bytes.len() - 1] as char;
-            let second_last = san_bytes[san_bytes.len() - 2] as char;
-            if ('a'..='h').contains(&second_last) && ('1'..='8').contains(&last) {
-                dst_file = Some((second_last as u8 - b'a') as i8);
-                dst_rank = Some((last as u8 - b'1') as i8);
+    if rbytes.len() >= 2 {
+        let last = rbytes[rbytes.len() - 1] as char;
+        let second_last = rbytes[rbytes.len() - 2] as char;
+        if ('a'..='h').contains(&second_last) && ('1'..='8').contains(&last) {
+            dst_file = Some((second_last as u8 - b'a') as i8);
+            dst_rank = Some((last as u8 - b'1') as i8);
+            let disambig = &rest_no_x[..rest_no_x.len() - 2];
+            for c in disambig.chars() {
+                if ('a'..='h').contains(&c) {
+                    src_file = Some((c as u8 - b'a') as i8);
+                } else if ('1'..='8').contains(&c) {
+                    src_rank = Some((c as u8 - b'1') as i8);
+                }
             }
         }
     }
+
+    let _ = has_capture; // used for clarity, not needed in candidate filter
 
     let dst_file = dst_file.ok_or_else(|| PgnParseError::InvalidSan(san.to_string()))?;
     let dst_rank = dst_rank.ok_or_else(|| PgnParseError::InvalidSan(san.to_string()))?;

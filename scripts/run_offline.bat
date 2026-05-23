@@ -2,8 +2,9 @@
 setlocal EnableDelayedExpansion
 
 echo XFChess Local Fullstack Launcher
-echo -------------------------------
-echo This script launches the XFChess game with the local signing backend and Solana features.
+echo --------------------------------------------------
+echo Starts the new 3D-board main menu + all backend services.
+echo In-game: press K to toggle between the new menu and the classic layout.
 echo.
 
 set SCRIPT_DIR=%~dp0
@@ -42,17 +43,35 @@ set IDENTITY_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123
 set IDENTITY_SALT=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
 
 :: Solana / Authority Keys (UPDATED to new Program ID)
-set SOLANA_RPC_URL=https://api.devnet.solana.com
+set SOLANA_RPC_URL=https://beta.helius-rpc.com/?api-key=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5
+set HELIUS_API_KEY=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5
+set MAGIC_BLOCK_RPC_URL=https://devnet.magicblock.app
+set ER_RPC_URL=https://devnet.magicblock.app
 set PROGRAM_ID=8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU
 set FEE_PAYER_KEYS=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
 set VPS_AUTHORITY_KEY=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
 set KYC_AUTHORITY_KEY=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
 set HOST_TREASURY_PUBKEY=uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C
 
+:: --- Kill stale processes from previous run ---
+echo [CLEANUP] Killing stale XFChess processes...
+:: Kill backend by PID file first (precise), then fall back to port owner
+if exist "%ROOT%\backend\.backend.pid" (
+    set /p OLD_PID=<"%ROOT%\backend\.backend.pid"
+    taskkill /F /PID !OLD_PID! >nul 2>&1
+    del "%ROOT%\backend\.backend.pid" >nul 2>&1
+)
+:: Kill anything still holding port 8090
+for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr " :8090 "') do taskkill /F /PID %%a >nul 2>&1
+:: Kill game and tauri by port 8091 (tauri IPC) and by name as last resort
+taskkill /F /IM xfchess.exe >nul 2>&1
+taskkill /F /IM xfchess-tauri.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+
 :: --- Build Services ---
 echo [BUILD] 1/3 Building Backend Server...
 cd /d "%ROOT%\backend"
-cargo build --bin signing-server-http
+cargo build --bin signing-server
 if !errorlevel! neq 0 exit /b 1
 
 echo [BUILD] 2/3 Checking UI Assets...
@@ -100,9 +119,9 @@ cd /d "%ROOT%"
 
 echo [LAUNCH] 2/5 Signing Server...
 if "!LAUNCH_CMD!"=="start" (
-    start "XFChess Backend" /D "%ROOT%\backend" cmd /c "^"%RELEASE_DIR%\signing-server-http.exe^" 2>&1 || pause"
+    start "XFChess Backend" /D "%ROOT%\backend" cmd /k "^"%RELEASE_DIR%\signing-server.exe^" 2>&1"
 ) else (
-    wt -w 0 nt --title "XFChess Backend" -d "%ROOT%\backend" cmd /c "^"%RELEASE_DIR%\signing-server-http.exe^" 2>&1 || pause"
+    wt -w 0 nt --title "XFChess Backend" -d "%ROOT%\backend" cmd /k "^"%RELEASE_DIR%\signing-server.exe^" 2>&1"
 )
 
 timeout /t 2 /nobreak >nul
@@ -110,23 +129,23 @@ timeout /t 2 /nobreak >nul
 echo [LAUNCH] 3/5 Tauri Host (Wallet Bridge)...
 set XFCHESS_WALLET_MODE=tauri
 if "!LAUNCH_CMD!"=="start" (
-    start "XFChess Tauri" /D "%ROOT%" /MIN cmd /c "^"%RELEASE_DIR%\xfchess-tauri.exe^" || pause"
+    start "XFChess Tauri" /D "%ROOT%" /MIN cmd /k "^"%RELEASE_DIR%\xfchess-tauri.exe^""
 ) else (
-    wt -w 0 nt --title "XFChess Tauri" -d "%ROOT%" cmd /c "^"%RELEASE_DIR%\xfchess-tauri.exe^" || pause"
+    wt -w 0 nt --title "XFChess Tauri" -d "%ROOT%" cmd /k "^"%RELEASE_DIR%\xfchess-tauri.exe^""
 )
 
 timeout /t 2 /nobreak >nul
 
 echo [LAUNCH] 4/5 XFChess Game...
-start "XFChess Game" /D "%ROOT%" cmd /c "^"%RELEASE_DIR%\xfchess.exe^" || pause"
+start "XFChess Game" /D "%ROOT%" cmd /k "^"%RELEASE_DIR%\xfchess.exe^""
 
 echo [LAUNCH] 5/5 Frontends (Web ^& Admin)...
 if "!LAUNCH_CMD!"=="start" (
-    start "XFChess Web" /D "%ROOT%\web-solana" cmd /c "npm run dev"
-    start "Tournament Admin" /D "%ROOT%\tauri\tournament-admin" cmd /c "npm run dev -- --port 7454"
+    start "XFChess Web" /D "%ROOT%\web-solana" cmd /k "npm run dev"
+    start "Tournament Admin" /D "%ROOT%\tauri\tournament-admin" cmd /k "npm run dev -- --port 7454"
 ) else (
-    wt -w 0 nt --title "XFChess Web" -d "%ROOT%\web-solana" cmd /c "npm run dev"
-    wt -w 0 nt --title "Tournament Admin" -d "%ROOT%\tauri\tournament-admin" cmd /c "npm run dev -- --port 7454"
+    wt -w 0 nt --title "XFChess Web" -d "%ROOT%\web-solana" cmd /k "npm run dev"
+    wt -w 0 nt --title "Tournament Admin" -d "%ROOT%\tauri\tournament-admin" cmd /k "npm run dev -- --port 7454"
 )
 
 echo.

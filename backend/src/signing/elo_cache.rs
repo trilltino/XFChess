@@ -29,6 +29,14 @@ pub struct CachedElo {
     pub country: String,
     /// Player's username
     pub username: String,
+    /// Lichess account verified on-chain
+    pub lichess_verified: bool,
+    /// Lichess last sync timestamp
+    pub lichess_last_sync: i64,
+    /// Whether ELO was seeded from external rating
+    pub seeded_from_external: bool,
+    /// External ELO source (0=none, 1=lichess)
+    pub external_elo_source: u8,
     /// When this cache entry was last updated
     pub cached_at: Instant,
 }
@@ -121,22 +129,49 @@ impl EloCache {
         // Deserialize PlayerProfile
         // Offsets based on PlayerProfile struct (disc 8 + authority 32 = 40):
         // 40: country (4+2)
-        // 46: tax_id (4+50)
-        // 100: wins (4), 104: losses (4), 108: draws (4), 112: games_played (4)
-        // 116: elo_rating (8)
-        // 124: rd (8)
+        // 46: wins (4), 50: losses (4), 54: draws (4), 58: games_played (4)
+        // 62: elo_rating (8)
+        // 70: rd (8)
         // ...
-        // 229: username (4+20)
-        let country = self.deserialize_string(&account.data, 40, 2)?;
-        let elo_rating = self.deserialize_f64(&account.data, 116)?;
-        let rd = self.deserialize_f64(&account.data, 124)?;
-        let username = self.deserialize_string(&account.data, 229, 20)?;
+        // username at variable offset after earlier fields
+        // lichess fields are at the very end of the account data
+        let country = self.deserialize_string(&account.data, 40, 2).unwrap_or_default();
+        let elo_rating = self.deserialize_f64(&account.data, 62).unwrap_or(120000.0);
+        let rd = self.deserialize_f64(&account.data, 70).unwrap_or(0.0);
+        let username = self.deserialize_string(&account.data, 183, 20).unwrap_or_default();
+
+        // Read lichess fields from the tail of the account data if present
+        let data_len = account.data.len();
+        let lichess_verified = if data_len >= 243 {
+            account.data[242] != 0
+        } else {
+            false
+        };
+        let lichess_last_sync = if data_len >= 263 {
+            self.deserialize_i64(&account.data, 255).unwrap_or(0)
+        } else {
+            0
+        };
+        let external_elo_source = if data_len >= 264 {
+            account.data[263]
+        } else {
+            0
+        };
+        let seeded_from_external = if data_len >= 265 {
+            account.data[264] != 0
+        } else {
+            false
+        };
 
         let cached = CachedElo {
             elo_rating,
             rd,
             country: country.clone(),
             username: username.clone(),
+            lichess_verified,
+            lichess_last_sync,
+            external_elo_source,
+            seeded_from_external,
             cached_at: Instant::now(),
         };
 
@@ -197,6 +232,16 @@ impl EloCache {
         let bytes: [u8; 8] = data[offset..offset+8].try_into()
             .map_err(|_| "Failed to read bytes: slice length mismatch".to_string())?;
         Ok(f64::from_le_bytes(bytes))
+    }
+
+    /// Deserializes an i64 from account data at the given offset.
+    fn deserialize_i64(&self, data: &[u8], offset: usize) -> Result<i64, String> {
+        if offset + 8 > data.len() {
+            return Err("Offset out of bounds".to_string());
+        }
+        let bytes: [u8; 8] = data[offset..offset+8].try_into()
+            .map_err(|_| "Failed to read bytes: slice length mismatch".to_string())?;
+        Ok(i64::from_le_bytes(bytes))
     }
 
     /// Deserializes a String from account data at the given offset.

@@ -39,6 +39,15 @@ pub fn handler(ctx: Context<EndGame>, _game_id: u64) -> Result<()> {
         game.status == GameStatus::Finished,
         GameErrorCode::GameNotFinished
     );
+
+    // Enforce that the result was committed on-chain by resign / claim_timeout /
+    // auto-checkmate detection before any payout is released. The VPS is a
+    // transaction relay only — it cannot inject an arbitrary winner here.
+    require!(
+        game.result != GameResult::None,
+        GameErrorCode::GameStillInProgress
+    );
+
     game.status = GameStatus::Settled;
 
     // Result was already set on-chain by resign / claim_timeout / auto-checkmate detection.

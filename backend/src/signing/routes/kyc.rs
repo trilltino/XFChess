@@ -48,8 +48,13 @@ pub struct OkResponse {
 #[derive(Serialize)]
 pub struct UserStatus {
     pub has_profile: bool,
+    /// True if an email address is stored against this wallet account.
     pub has_email: bool,
     pub has_kyc: bool,
+    /// Current KYC status string: "none" | "pending" | "approved".
+    pub kyc_status: String,
+    /// True if CACF compliance is satisfied for the user's country.
+    pub cacf_compliant: bool,
     pub can_wager: bool,
 }
 
@@ -90,11 +95,17 @@ pub async fn submit_kyc(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    // Update kyc_status in users table
-    let _ = state
-        .store
-        .set_kyc_status(&req.wallet_pubkey, "pending")
-        .await;
+    // Mark as pending in users_v2 (self-submitted; no on-chain verification yet).
+    let _ = state.store.set_kyc_status(&req.wallet_pubkey, "pending").await;
+
+    // Persist CACF as under_review until an admin approves.
+    let _ = vault.save_cacf(
+        &req.wallet_pubkey,
+        &req.country,
+        "under_review",
+        false,
+        None,
+    ).await;
 
     Ok(Json(OkResponse { ok: true }))
 }
@@ -108,17 +119,39 @@ pub async fn user_status(
     }
 
     let vault = VaultStore::new((*state.vault_pool).clone());
-    let has_kyc = vault.has_kyc(&pubkey).await;
-    let has_email = state.store.find_user_by_wallet(&pubkey).await.is_some();
 
-    // on-chain profile presence is confirmed by the frontend independently
-    let has_profile = has_kyc || has_email;
-    let can_wager = has_profile && has_email && has_kyc;
+    // has_kyc: active record exists in kyc_records (written by both submit_kyc
+    // and identity.rs write-through, so both paths are covered).
+    let has_kyc = vault.has_kyc(&pubkey).await;
+
+    // has_wallet_account: a users_v2 row exists with this wallet as its primary key.
+    // Email-only registrations use wallet='' so they correctly return false here
+    // until the user links a wallet via /auth/link-wallet.
+    let user_row = state.store.find_user_by_wallet(&pubkey).await;
+    let has_wallet_account = user_row.is_some();
+
+    // kyc_status from users_v2 ('none' | 'pending' | 'approved')
+    let kyc_status = user_row.as_ref().map(|r| r.3.as_str()).unwrap_or("none").to_string();
+
+    // CACF: check persisted record for the user's country (derive from kyc_records).
+    let kyc_country = vault.get_kyc(&pubkey).await.map(|r| r.country);
+    let cacf_ok = match &kyc_country {
+        Some(c) => vault.cacf_can_wager(&pubkey, c).await,
+        None => true, // no country on record yet — don't block; CACF check is deferred
+    };
+
+    // can_wager requires:
+    //   1. A wallet-linked account in users_v2 (proves wallet ownership was verified).
+    //   2. An active KYC record in the vault (full_name, dob, tax_id stored).
+    //   3. CACF compliance for their jurisdiction (or not a CACF-covered country).
+    let can_wager = has_wallet_account && has_kyc && cacf_ok;
 
     Json(UserStatus {
-        has_profile,
-        has_email,
+        has_profile: has_wallet_account || has_kyc,
+        has_email: user_row.as_ref().and_then(|r| r.2.as_ref()).is_some(),
         has_kyc,
+        kyc_status,
+        cacf_compliant: cacf_ok,
         can_wager,
     })
 }

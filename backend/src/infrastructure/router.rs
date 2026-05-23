@@ -14,6 +14,7 @@ use crate::signing::routes::history::history_routes;
 use crate::signing::routes::dispute::{dispute_routes, admin_dispute_routes};
 use crate::signing::routes::archive::archive_routes;
 use crate::signing::routes::admin::admin_routes;
+use crate::signing::routes::chat::routes as chat_routes;
 use crate::infrastructure::auth_middleware::require_api_key;
 
 /// Builds the complete application router by merging all sub-routers.
@@ -85,6 +86,7 @@ pub fn build_app_router(
         .merge(metrics_router)
         .merge(archive_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
         .merge(admin_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
+        .merge(chat_routes().with_state(signing_state.clone()))
         .layer(
             tower_http::cors::CorsLayer::permissive()
         )

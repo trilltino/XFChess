@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.solana.new)",
+      "Bash(wsl --status)",
+      "Bash(npm run *)"
+    ]
+  }
+}

@@ -46,9 +46,9 @@ impl Default for RateCache {
 }
 
 impl RateCache {
-    /// Get the current rates, fetching from CoinGecko if stale/missing.
+    /// Get the current rates. Returns stale cache on fetch failure rather than erroring.
     pub async fn get(&self) -> Result<HashMap<String, f64>, String> {
-        // Fast path: read lock
+        // Fast path: fresh cache
         {
             let read = self.inner.read().await;
             if let Some(ref cached) = *read {
@@ -58,57 +58,122 @@ impl RateCache {
             }
         }
 
-        // Slow path: fetch and write
-        let rates = fetch_sol_rates_from_coingecko().await?;
-        let cached = CachedRates {
-            rates: rates.clone(),
-            fetched_at: Instant::now(),
-        };
-        *self.inner.write().await = Some(cached);
-        Ok(rates)
+        // Slow path: attempt fetch
+        match fetch_sol_rates_from_coingecko().await {
+            Ok(rates) => {
+                let cached = CachedRates { rates: rates.clone(), fetched_at: Instant::now() };
+                *self.inner.write().await = Some(cached);
+                Ok(rates)
+            }
+            Err(e) => {
+                // Return stale data rather than 503 — clients degrade gracefully on stale rates
+                let read = self.inner.read().await;
+                if let Some(ref stale) = *read {
+                    error!("[RATES] Fetch failed ({}), serving stale rates", e);
+                    return Ok(stale.rates.clone());
+                }
+                Err(e)
+            }
+        }
     }
 }
 
-/// Fetch SOL rates from CoinGecko public API (no API key required for simple price).
+/// Fetch SOL/USD from Helius, then convert via frankfurter.app FX rates.
 async fn fetch_sol_rates_from_coingecko() -> Result<HashMap<String, f64>, String> {
-    const URL: &str = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=gbp,brl,eur,cad,usd";
-
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| format!("http client: {e}"))?;
 
+    let sol_usd = fetch_sol_usd_helius(&client).await?;
+    let fx = fetch_usd_fx_rates(&client).await?;
+
+    let mut rates = HashMap::new();
+    rates.insert("usd".to_string(), sol_usd);
+    for (currency, usd_per_unit) in &fx {
+        // fx gives units-per-USD (e.g. GBP per 1 USD), so SOL/currency = SOL_USD * usd_per_unit
+        rates.insert(currency.to_lowercase(), sol_usd * usd_per_unit);
+    }
+
+    info!("[RATES] Fetched SOL rates via Helius+Frankfurter: {:?}", rates);
+    Ok(rates)
+}
+
+/// Fetch SOL/USD spot price from Helius token-price API.
+async fn fetch_sol_usd_helius(client: &reqwest::Client) -> Result<f64, String> {
+    let api_key = std::env::var("HELIUS_API_KEY")
+        .unwrap_or_else(|_| "5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5".to_string());
+    // Use Helius DAS getAsset-style price endpoint (v1)
+    let url = format!(
+        "https://mainnet.helius-rpc.com/?api-key={}",
+        api_key
+    );
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": "sol-price",
+        "method": "getAsset",
+        "params": { "id": "So11111111111111111111111111111111111111112" }
+    });
+
+    // Try Helius RPC first; fall back to CoinGecko public API if it fails
+    let helius_result: Result<f64, String> = async {
+        let resp = client.post(&url).json(&body).send().await
+            .map_err(|e| format!("Helius RPC: {e}"))?;
+        let json: serde_json::Value = resp.json().await
+            .map_err(|e| format!("Helius json: {e}"))?;
+        json.pointer("/result/token_info/price_info/price_per_token")
+            .and_then(|p| p.as_f64())
+            .ok_or_else(|| "Helius RPC: no price_per_token".to_string())
+    }.await;
+
+    if let Ok(price) = helius_result {
+        return Ok(price);
+    }
+
+    // Fallback: CoinGecko public (no key, rate-limited but always available)
+    let cg_resp = client
+        .get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
+        .send()
+        .await
+        .map_err(|e| format!("CoinGecko: {e}"))?;
+    let cg_json: serde_json::Value = cg_resp.json().await
+        .map_err(|e| format!("CoinGecko json: {e}"))?;
+    cg_json.pointer("/solana/usd")
+        .and_then(|p| p.as_f64())
+        .ok_or_else(|| "CoinGecko: missing solana/usd".to_string())
+}
+
+/// Fetch USD FX rates from frankfurter.app (free, no key).
+/// Returns a map of currency code (uppercase) → amount of that currency per 1 USD.
+async fn fetch_usd_fx_rates(client: &reqwest::Client) -> Result<HashMap<String, f64>, String> {
+    const URL: &str = "https://api.frankfurter.app/latest?from=USD&to=GBP,EUR,CAD,BRL";
+
     let resp = client
         .get(URL)
         .send()
         .await
-        .map_err(|e| format!("http send: {e}"))?;
+        .map_err(|e| format!("Frankfurter request: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("CoinGecko error {status}: {body}"));
+        return Err(format!("Frankfurter error {status}: {body}"));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("json parse: {e}"))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| format!("Frankfurter json: {e}"))?;
 
-    let solana_rates = json
-        .get("solana")
+    let rates_obj = json
+        .get("rates")
         .and_then(|v| v.as_object())
-        .ok_or_else(|| "missing solana object in CoinGecko response".to_string())?;
+        .ok_or_else(|| "Frankfurter: missing rates object".to_string())?;
 
-    let mut rates = HashMap::new();
-    for (currency, value) in solana_rates {
-        if let Some(rate) = value.as_f64() {
-            rates.insert(currency.to_string(), rate);
+    let mut out = HashMap::new();
+    for (k, v) in rates_obj {
+        if let Some(rate) = v.as_f64() {
+            out.insert(k.clone(), rate);
         }
     }
-
-    info!("[RATES] Fetched SOL rates: {:?}", rates);
-    Ok(rates)
+    Ok(out)
 }
 
 /// Response payload for /api/rates/all.
@@ -124,9 +189,9 @@ pub struct ExchangeRatesResponse {
 
 /// GET /api/rates/all — cached SOL exchange rates for multiple currencies.
 async fn get_all_rates(
-    State(cache): State<RateCache>,
+    State(app_state): State<crate::signing::AppState>,
 ) -> Result<Json<ExchangeRatesResponse>, StatusCode> {
-    match cache.get().await {
+    match app_state.rate_cache.get().await {
         Ok(rates) => {
             let mut sol_per_fiat = HashMap::new();
             for (currency, rate) in &rates {
@@ -158,9 +223,9 @@ pub struct SolGbpResponse {
 }
 
 async fn get_sol_gbp_rate(
-    State(cache): State<RateCache>,
+    State(app_state): State<crate::signing::AppState>,
 ) -> Result<Json<SolGbpResponse>, StatusCode> {
-    match cache.get().await {
+    match app_state.rate_cache.get().await {
         Ok(rates) => {
             if let Some(&rate) = rates.get("gbp") {
                 let sol_per_gbp = 1.0 / rate;
@@ -181,7 +246,8 @@ async fn get_sol_gbp_rate(
 }
 
 /// Builds the rates router (no auth required — public rate feed).
-pub fn rates_routes() -> Router<RateCache> {
+/// State is provided by the parent router's `.with_state(AppState)`.
+pub fn rates_routes() -> Router<crate::signing::AppState> {
     Router::new()
         .route("/all", get(get_all_rates))
         .route("/sol-gbp", get(get_sol_gbp_rate))

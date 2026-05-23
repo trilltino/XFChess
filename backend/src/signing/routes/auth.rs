@@ -260,6 +260,11 @@ struct MeResp {
     username: String,
     email: Option<String>,
     kyc_status: String,
+    /// True when a real Solana wallet pubkey is linked (not an email-only account).
+    wallet_linked: bool,
+    /// True when the account has a linked wallet, an approved KYC record in the
+    /// vault, and CACF compliance for their jurisdiction.
+    can_wager: bool,
 }
 
 /// GET /auth/me — validates Bearer JWT and returns caller profile.
@@ -279,7 +284,26 @@ async fn me(
     let user = state.store.find_user_by_wallet(&claims.sub).await
         .ok_or((StatusCode::UNAUTHORIZED, "Account not found".to_string()))?;
 
-    Ok(Json(MeResp { wallet: user.0, username: user.1, email: user.2, kyc_status: user.3 }))
+    let wallet_linked = !user.0.is_empty();
+
+    // Compute can_wager: wallet linked + vault KYC record + CACF ok.
+    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
+    let has_kyc = vault.has_kyc(&user.0).await;
+    let kyc_country = vault.get_kyc(&user.0).await.map(|r| r.country);
+    let cacf_ok = match &kyc_country {
+        Some(c) => vault.cacf_can_wager(&user.0, c).await,
+        None => true,
+    };
+    let can_wager = wallet_linked && has_kyc && cacf_ok;
+
+    Ok(Json(MeResp {
+        wallet: user.0,
+        username: user.1,
+        email: user.2,
+        kyc_status: user.3,
+        wallet_linked,
+        can_wager,
+    }))
 }
 
 // ── POST /auth/add-email ────────────────────────────────────────────────────────

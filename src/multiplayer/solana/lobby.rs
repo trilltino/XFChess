@@ -50,6 +50,8 @@ pub struct SolanaLobbyState {
     pub mode: LobbyMode,
     /// SOL amount chosen by creator (default 0.05).
     pub wager_sol: f32,
+    /// Match type: 0=Free Casual, 1=Free Rated (ELO), 2=Wagered.
+    pub match_type: u8,
     /// Raw game-id text typed by the joiner.
     pub game_id_input: String,
     pub status: LobbyStatus,
@@ -74,6 +76,7 @@ impl Default for SolanaLobbyState {
         Self {
             mode: LobbyMode::default(),
             wager_sol: 0.05,
+            match_type: 0,
             game_id_input: String::new(),
             status: LobbyStatus::default(),
             tx_rx: None,
@@ -116,6 +119,7 @@ pub fn spawn_create_game(
     rpc_url: String,
     wallet_pubkey: Pubkey,
     wager_lamports: u64,
+    match_type: u8,
     tx: oneshot::Sender<Result<u64, String>>,
 ) {
     let program_id: solana_sdk::pubkey::Pubkey =
@@ -123,7 +127,7 @@ pub fn spawn_create_game(
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            let result = async_create_game(rpc_url, wallet_pubkey, program_id, wager_lamports).await;
+            let result = async_create_game(rpc_url, wallet_pubkey, program_id, wager_lamports, match_type).await;
             let _ = tx.send(result);
         })
         .detach();
@@ -236,6 +240,7 @@ async fn async_create_game(
     wallet_pubkey: Pubkey,
     program_id: solana_sdk::pubkey::Pubkey,
     wager_lamports: u64,
+    match_type: u8,
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::tauri_signer::sign_via_tauri_only;
     use crate::multiplayer::vps_client;
@@ -255,8 +260,6 @@ async fn async_create_game(
         .parse()
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
 
-    // match_type: Free=0, Ranked=1, Wager=2
-    let match_type: u8 = if wager_lamports > 0 { 2 } else { 0 };
     let create_ix = create_game_ix(
         program_id,
         wallet_pubkey,

@@ -24,6 +24,7 @@ pub const WAGER_ESCROW_SEED: &[u8] = b"escrow"; // Derives the SOL escrow vault 
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation"; // Derives a per-game session-key authorisation record
 
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";       // Derives the TournamentState PDA
+pub const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players"; // Derives the TournamentPlayersShard PDAs (4 shards with 64 players each, seeded with shard_id)
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";  // Derives the prize-pool escrow vault for a tournament
 pub const TOURNAMENT_PRIZE_ESCROW_SEED: &[u8] = b"tournament_prize_escrow";  // Derives the prize escrow vault (85% of fees)
 pub const TOURNAMENT_OPS_ESCROW_SEED: &[u8] = b"t_ops";      // Derives the ops escrow vault (10% of fees)
@@ -36,23 +37,45 @@ pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";  // Derives the S
 // ---------------------------------------------------------------------------
 
 /// The KYC/identity verification authority (VPS backend signer).
-/// Called by `verify_profile` to mark a player as CARF-compliant on-chain.
-/// TODO: Replace with a real keypair before mainnet deploy.
+/// Called by `verify_profile` to mark a player as KYC-verified on-chain.
+/// Public key: 2mh7zXgZHaeDnroJQQdHnLNiierWXdn43VnATbGdATZK
+/// Private key stored in backend/.env as KYC_AUTHORITY_KEY and keys/kyc_authority.json
 pub mod kyc_authority {
     use super::*;
     pub const ID: Pubkey = Pubkey::new_from_array([
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2
+        0x1a, 0x4e, 0x9b, 0x62, 0xc3, 0x6f, 0x3f, 0xda,
+        0x95, 0x75, 0x85, 0xdd, 0x99, 0xd3, 0x5e, 0x0d,
+        0x9f, 0x24, 0x6d, 0x4d, 0x17, 0x54, 0x6c, 0xb5,
+        0x01, 0x27, 0xaa, 0xbf, 0x15, 0x75, 0xb3, 0x82,
     ]);
 }
 
 /// The platform dispute-resolution authority — the only signer allowed to
-/// call `resolve_dispute`. Set to a secure offline keypair before mainnet.
-/// TODO: Replace with a real keypair before mainnet deploy.
+/// call `resolve_dispute`.
+/// Public key: HAHgvXf6uYxTqEuUnkkzTS1EQD8sYd342zgxM2wdqpa2
+/// Private key stored in backend/.env as DISPUTE_AUTHORITY_KEY and keys/dispute_authority.json
 pub mod dispute_authority {
     use super::*;
     pub const ID: Pubkey = Pubkey::new_from_array([
-        // Replace with actual pubkey for dispute authority
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+        0xf0, 0x1c, 0x16, 0x70, 0x78, 0x28, 0x62, 0x5a,
+        0xb2, 0x0b, 0xe0, 0x22, 0x42, 0x43, 0xd1, 0x7c,
+        0xd7, 0x70, 0x4d, 0xd2, 0xbb, 0xd6, 0x3f, 0x03,
+        0x4f, 0xbb, 0x98, 0xd4, 0xca, 0x2f, 0x3f, 0xd7,
+    ]);
+}
+
+/// The external-elo linking authority — the only signer allowed to call
+/// `link_external_elo` to mark a Lichess account as verified on-chain.
+/// Public key will be set when the backend deploys; placeholder for now.
+/// Private key stored in backend/.env as LINK_AUTHORITY_KEY.
+pub mod link_authority {
+    use super::*;
+    /// Placeholder — replace with actual keypair before deployment.
+    pub const ID: Pubkey = Pubkey::new_from_array([
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ]);
 }
 
@@ -61,9 +84,13 @@ pub mod dispute_authority {
 /// Solflare wallet - user's main wallet for signing operations.
 pub mod vps_authority {
     use super::*;
+    /// Benchmark master / tournament authority on devnet
+    /// Matches keys/program-authority.json (C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw)
     pub const ID: Pubkey = Pubkey::new_from_array([
-        // Replace with actual pubkey for VPS authority
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        0xa3, 0xad, 0x5c, 0x77, 0xf8, 0x52, 0xda, 0x8b,
+        0x75, 0x7c, 0x96, 0x7a, 0x26, 0xf5, 0xfa, 0x0b,
+        0x37, 0x57, 0xd5, 0xdc, 0xe0, 0xa9, 0xea, 0x9a,
+        0x53, 0xb0, 0x60, 0xe4, 0x74, 0x1a, 0x37, 0x68,
     ]);
 }
 
@@ -102,13 +129,19 @@ pub const GERMANY_FEE_LAMPORTS: u64 = 30_000_000; // 0.03 SOL (~30c EUR)
 
 /// Platform fee per player in lamports (approximately £0.50, assuming 1 SOL ≈ £125, so £0.50 ≈ 0.004 SOL = 4,000,000 lamports)
 pub const PLATFORM_FEE_LAMPORTS: u64 = 4_000_000;
-pub const PLATFORM_FEE_PERCENT: u64 = 5; // 5% fee on wagers
+
+/// Flat infrastructure fee charged when the dispute authority resolves a contested game.
+/// This is a fixed cost for the resolution service — not a percentage rake on the pot.
+pub const DISPUTE_RESOLUTION_COST_LAMPORTS: u64 = 10_000;
 
 /// ELO update fee per player
 pub const ELO_FEE_LAMPORTS: u64 = 5_000; // 0.000005 SOL per ELO update
 
 /// Treasury vault seed
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
+
+/// Global persistent session delegation seed
+pub const GLOBAL_SESSION_SEED: &[u8] = b"global_session";
 
 /// Time-to-live for an unresolved dispute (7 days in seconds).
 /// After this window any party may call claim_stale_dispute for an automatic 50/50 split.

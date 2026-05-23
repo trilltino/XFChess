@@ -58,8 +58,10 @@ use axum::routing::get;
 use crate::signing::auth_ws::handle_auth_websocket;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::str::FromStr;
+use tokio::sync::Mutex;
 use tracing::warn;
 
 pub use auth::JwtIssuer;
@@ -74,6 +76,7 @@ pub use swiss::{SwissService, OrchestratorEvent};
 pub use tournament_gossip::TournamentGossipService;
 pub use crate::tasks::tournament_scheduler::TournamentTrigger;
 pub use xfchess_braid_server::ResourceHub;
+pub use xfchess_anticheat::engine::job_queue::AnalysisQueue;
 
 /// Shared state injected into every route handler.
 #[derive(Clone)]
@@ -89,6 +92,7 @@ pub struct AppState {
     pub elo_cache: Arc<EloCache>,
     pub vps_authority: Arc<Keypair>,
     pub kyc_authority: Arc<Keypair>,
+    pub link_authority: Arc<Keypair>,
     pub tournament_store: Arc<TournamentStore>,
     pub swiss_service: Arc<SwissService>,
     pub tournament_gossip: Arc<TournamentGossipService>,
@@ -99,7 +103,23 @@ pub struct AppState {
     pub tournament_trigger: Option<tokio::sync::mpsc::Sender<TournamentTrigger>>,
     pub orchestrator_tx: Option<tokio::sync::mpsc::Sender<OrchestratorEvent>>,
     pub braid_hub: Arc<ResourceHub>,
+    pub chat_relay: routes::chat::ChatRelayState,
     pub metrics: Arc<crate::telemetry::metrics::Metrics>,
+
+    // ── Global session management ──────────────────────────────────────────────
+    /// Session keypairs freshly generated but not yet confirmed on-chain.
+    pub pending_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
+    /// Active global session keypairs keyed by player wallet pubkey.
+    pub active_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
+
+    /// Convenience shortcut — avoids reaching into `config` for the RPC URL.
+    pub solana_rpc_url: String,
+    /// Convenience shortcut — avoids reaching into `config` for the program ID.
+    pub program_id: Pubkey,
+
+    // ── Anti-cheat ─────────────────────────────────────────────────────────────
+    /// Queue for post-game Stockfish analysis. None until workers are spawned.
+    pub anticheat_queue: Option<AnalysisQueue>,
 }
 
 // Compile-time check: AppState must be Clone + Send + Sync + 'static for axum::serve
@@ -161,6 +181,13 @@ impl AppState {
                 Keypair::new()
             }));
 
+        let link_authority = Arc::new(config.link_authority_key.as_deref()
+            .map(load_keypair)
+            .unwrap_or_else(|| {
+                warn!("[VPS] No link_authority_key provided, using random fallback — external ELO linking will fail on-chain");
+                Keypair::new()
+            }));
+
         // Initialize Swiss service and attach Braid hub
         let braid_hub = Arc::new(ResourceHub::new());
         let mut _swiss = swiss::SwissService::new((*tournament_store).clone());
@@ -184,6 +211,8 @@ impl AppState {
         let rate_cache = routes::rates::RateCache::default();
         let metrics = Arc::new(crate::telemetry::metrics::Metrics::new());
 
+        let solana_rpc_url = config.solana_rpc_url.clone();
+
         Self {
             config: Arc::new(config),
             store,
@@ -196,6 +225,7 @@ impl AppState {
             elo_cache,
             vps_authority,
             kyc_authority,
+            link_authority,
             tournament_store,
             swiss_service,
             tournament_gossip,
@@ -206,7 +236,13 @@ impl AppState {
             tournament_trigger: None,
             orchestrator_tx: None,
             braid_hub,
+            chat_relay: routes::chat::new_chat_relay(),
             metrics,
+            pending_global_sessions: Arc::new(Mutex::new(HashMap::new())),
+            active_global_sessions: Arc::new(Mutex::new(HashMap::new())),
+            solana_rpc_url,
+            program_id,
+            anticheat_queue: None,
         }
     }
 
@@ -255,4 +291,19 @@ pub fn build_router(state: AppState) -> Router<AppState> {
         
         // WebSocket route for authentication sync
         .route("/ws/auth", get(handle_auth_websocket))
+
+        // Global persistent session delegation
+        .nest("/api/global-session", crate::signing::routes::global_session::global_session_routes())
+
+        // Anti-cheat verdict + player stats queries
+        .nest("/api", crate::signing::routes::anticheat::anticheat_routes())
+
+        // Wallet balance (SOL + stablecoins via Helius, converted to local currency)
+        .nest("/api/wallet", crate::signing::routes::wallet::wallet_routes())
+
+        // External ELO linking (Lichess)
+        .nest("/api", crate::signing::routes::external_elo::external_elo_routes())
+
+        // Lichess OAuth 2.0 + PKCE flow (primary)
+        .nest("/api", crate::signing::routes::lichess_oauth::lichess_oauth_routes())
 }

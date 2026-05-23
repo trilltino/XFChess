@@ -80,8 +80,10 @@ pub fn p2p_announce_game(
     elo: Option<u16>,
     region: Option<String>,
 ) -> Result<(), String> {
+    let base = vps_base();
+    tracing::info!("[P2P] announcing game to {}", base);
     let resp = client()?
-        .post(format!("{}/p2p/announce", vps_base()))
+        .post(format!("{}/p2p/announce", base))
         .json(&P2PAnnounceReq {
             game_id,
             host_node_id,
@@ -108,8 +110,10 @@ pub fn p2p_announce_game(
 
 /// List available P2P games from VPS relay.
 pub fn p2p_list_games() -> Result<Vec<P2PGameListing>, String> {
+    let base = vps_base();
+    tracing::trace!("[P2P] polling games from {}", base);
     let resp = client()?
-        .get(format!("{}/p2p/games", vps_base()))
+        .get(format!("{}/p2p/games", base))
         .send()
         .map_err(|e| format!("vps p2p_list_games: {e}"))?;
 
@@ -199,6 +203,21 @@ pub fn p2p_poll_messages(
         .map_err(|e| format!("vps p2p_poll parse: {e}"))?;
 
     Ok((result.messages, result.next_index))
+}
+
+/// Send a heartbeat so the lobby doesn't expire on the backend while the host is waiting.
+pub fn p2p_heartbeat(game_id: String, host_node_id: &str) -> Result<(), String> {
+    let base = vps_base();
+    let resp = client()?
+        .post(format!("{}/p2p/heartbeat", base))
+        .json(&serde_json::json!({ "game_id": game_id, "host_node_id": host_node_id }))
+        .send()
+        .map_err(|e| format!("vps p2p_heartbeat: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("vps p2p_heartbeat: HTTP {}", resp.status()));
+    }
+    Ok(())
 }
 
 /// Leave or cancel a P2P game on the VPS relay.

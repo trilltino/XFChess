@@ -86,6 +86,13 @@ pub struct BraidNetworkState {
     pub message_sender: Option<tokio::sync::mpsc::UnboundedSender<NetworkMessage>>,
     pub bootstrap_sender: Option<tokio::sync::mpsc::UnboundedSender<EndpointId>>,
     pub subscription_sender: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// Raw 32-byte Ed25519 signing key for the on-chain session.
+    /// When present, all outgoing [`NetworkMessage`]s are signed before broadcast.
+    pub session_signing_key: Option<[u8; 32]>,
+    /// Per-game expected nonce for P2P-layer replay protection.
+    /// Moves with nonce < expected are dropped; nonce >= expected are accepted
+    /// and the map is updated to nonce + 1.
+    pub expected_nonces: std::collections::HashMap<u64, u64>,
 }
 
 impl Default for BraidNetworkState {
@@ -102,6 +109,8 @@ impl Default for BraidNetworkState {
             message_sender: None,
             bootstrap_sender: None,
             subscription_sender: None,
+            session_signing_key: None,
+            expected_nonces: std::collections::HashMap::new(),
         }
     }
 }
@@ -109,6 +118,33 @@ impl Default for BraidNetworkState {
 #[derive(Resource, Default)]
 pub struct BraidGameSync {
     pub pending_patches: Vec<Vec<u8>>,
+}
+
+/// Tracks heartbeat timing for the active P2P game session.
+#[derive(Resource)]
+pub struct HeartbeatState {
+    /// Elapsed seconds since the last Ping was sent.
+    pub since_last_ping: f32,
+    /// Elapsed seconds since the last Pong was received from the opponent.
+    pub since_last_pong: f32,
+    /// How often (seconds) to send a Ping.
+    pub ping_interval: f32,
+    /// How long (seconds) without a Pong before declaring the opponent disconnected.
+    pub timeout_secs: f32,
+    /// Whether the opponent has been declared disconnected this session.
+    pub timed_out: bool,
+}
+
+impl Default for HeartbeatState {
+    fn default() -> Self {
+        Self {
+            since_last_ping: 0.0,
+            since_last_pong: 0.0,
+            ping_interval: 5.0,
+            timeout_secs: 15.0,
+            timed_out: false,
+        }
+    }
 }
 
 #[derive(Event, Message, Debug, Clone)]
@@ -128,6 +164,12 @@ pub enum NetworkEvent {
     GameEnded(String),
     PeerConnected(String),
     PeerDisconnected(String),
+    /// A move was rejected because signature verification failed, nonce was invalid,
+    /// or the move failed engine validation.
+    InvalidMoveRejected {
+        game_id: u64,
+        reason: String,
+    },
 }
 
 /// Central configuration for multiplayer backend URLs.
