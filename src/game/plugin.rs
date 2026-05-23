@@ -290,6 +290,14 @@ impl Plugin for GamePlugin {
                 .run_if(not(in_mode(GameMode::PgnReplay))),
         );
 
+        // Item 3: session key expiry banner
+        #[cfg(feature = "solana")]
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            crate::ui::game::game_ui::session_expiry_banner
+                .run_if(in_state(GameState::InGame)),
+        );
+
         // Replay UI overlay
         app.add_systems(
             bevy_egui::EguiPrimaryContextPass,

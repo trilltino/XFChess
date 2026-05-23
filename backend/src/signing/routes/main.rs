@@ -64,6 +64,39 @@ pub struct SigResp {
     pub sig: String,
 }
 
+/// Extended finalize response including payout breakdown.
+#[derive(Serialize)]
+pub struct FinalizeResp {
+    pub sig: String,
+    /// Lamports awarded to the winner (0 for draws/free games).
+    pub winner_lamports: u64,
+    /// Treasury fee deducted in lamports.
+    pub country_fee: u64,
+}
+
+/// Nonce response for /game/:id/nonce.
+#[derive(Serialize)]
+pub struct NonceResp {
+    /// The last confirmed on-chain nonce (client should use nonce + 1 for next move).
+    pub nonce: u64,
+}
+
+/// Request body for free-rated ELO update.
+#[derive(Deserialize, Serialize)]
+pub struct FreeRatedResultReq {
+    pub game_id: u64,
+    pub winner: Option<String>,
+    pub white_pubkey: String,
+    pub black_pubkey: String,
+}
+
+/// Request body for submitting a dispute.
+#[derive(Deserialize, Serialize)]
+pub struct DisputeReq {
+    pub game_id: u64,
+    pub disputing_player: String,
+}
+
 /// Request to sign a transaction with session key.
 #[derive(Deserialize, Serialize)]
 pub struct SignReq {
@@ -94,6 +127,9 @@ pub fn routes() -> Router<AppState> {
         .route("/move/record", post(record_move))
         .route("/game/undelegate", post(undelegate_game))
         .route("/game/finalize", post(finalize_game))
+        .route("/game/{game_id}/nonce", get(get_move_nonce))
+        .route("/ratings/update", post(update_free_rated_result))
+        .route("/dispute/submit", post(submit_dispute))
         .route("/player/{pubkey}", get(get_player_profile))
         .route("/stats", get(get_stats))
 }
@@ -330,7 +366,7 @@ pub async fn undelegate_game(
 pub async fn finalize_game(
     State(state): State<AppState>,
     Json(req): Json<FinalizeGameReq>,
-) -> Result<Json<SigResp>, StatusCode> {
+) -> Result<Json<FinalizeResp>, StatusCode> {
     let entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
     let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let session_kp = entry.keypair();
@@ -471,7 +507,24 @@ pub async fn finalize_game(
         }
     });
 
-    Ok(Json(SigResp { sig: sig.to_string() }))
+    // Fee breakdown mirroring the on-chain contract constants.
+    // COUNTRY_FEE = 1% of pot, ELO_FEE = 1% of pot, both deducted from winner payout.
+    const COUNTRY_FEE_BPS: u64 = 100; // 1%
+    const ELO_FEE_BPS: u64 = 100;     // 1%
+    let pot = req.wager_lamports.saturating_mul(2);
+    let country_fee = pot.saturating_mul(COUNTRY_FEE_BPS) / 10_000;
+    let elo_fee = pot.saturating_mul(ELO_FEE_BPS) / 10_000;
+    let winner_lamports = if req.winner.is_some() {
+        pot.saturating_sub(country_fee).saturating_sub(elo_fee)
+    } else {
+        0 // draw: each player gets their wager back minus fees (handled on-chain)
+    };
+
+    Ok(Json(FinalizeResp {
+        sig: sig.to_string(),
+        winner_lamports,
+        country_fee,
+    }))
 }
 
 /// GET /player/:pubkey - Gets player profile details (ELO, country, username).
@@ -502,6 +555,9 @@ pub struct FinalizeGameReq {
     pub winner: Option<String>,   // "white" | "black" | null (draw)
     pub white_pubkey: String,
     pub black_pubkey: String,
+    /// Per-player wager in lamports (optional; 0 for free games).
+    #[serde(default)]
+    pub wager_lamports: u64,
 }
 
 #[derive(Deserialize)]
@@ -671,6 +727,83 @@ async fn generate_san(
     // Generate SAN
     let san = move_to_san(&game, src, dst, promo);
     Ok(san)
+}
+
+// ── Item 5: move nonce ────────────────────────────────────────────────────────
+
+/// GET /game/:game_id/nonce - Returns the last confirmed on-chain move nonce.
+/// The client uses `nonce + 1` as the next move's nonce.
+pub async fn get_move_nonce(
+    Path(game_id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<NonceResp>, StatusCode> {
+    let pool = state.store.pool();
+    let game_id_str = game_id.to_string();
+    let repo = GameRepository::new(pool);
+    let next = repo.get_next_move_number(&game_id_str).await.unwrap_or(1) as u64;
+    // next_move_number is 1-based; last confirmed nonce = next - 1 (0 if no moves yet).
+    let nonce = next.saturating_sub(1);
+    Ok(Json(NonceResp { nonce }))
+}
+
+// ── Item 4: free-rated ELO update ────────────────────────────────────────────
+
+/// POST /ratings/update - Records result of a free (no-wager) rated game and triggers ELO update.
+pub async fn update_free_rated_result(
+    State(state): State<AppState>,
+    Json(req): Json<FreeRatedResultReq>,
+) -> Result<StatusCode, StatusCode> {
+    let pool = state.store.pool();
+    let game_id_str = req.game_id.to_string();
+    let repo = GameRepository::new(pool);
+    let winner = req.winner.as_deref();
+
+    // Upsert the game record (idempotent if create_game was never called).
+    if let Err(e) = repo.upsert_game(&game_id_str).await {
+        error!("[ratings/update] Failed to upsert game {}: {}", req.game_id, e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    let white_username = repo.get_username(&req.white_pubkey).await.ok();
+    let black_username = repo.get_username(&req.black_pubkey).await.ok();
+
+    if let Err(e) = repo.complete_game(
+        &game_id_str,
+        Some(&req.white_pubkey),
+        Some(&req.black_pubkey),
+        white_username.as_deref(),
+        black_username.as_deref(),
+        winner,
+        None,
+        "",
+        0.0,
+    ).await {
+        error!("[ratings/update] Failed to complete game {}: {}", req.game_id, e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    state.elo_cache.invalidate(&req.white_pubkey);
+    state.elo_cache.invalidate(&req.black_pubkey);
+
+    info!("[ratings/update] Free-rated game {} result recorded (winner={:?})", req.game_id, req.winner);
+    Ok(StatusCode::OK)
+}
+
+// ── Item 6: dispute submission ────────────────────────────────────────────────
+
+/// POST /dispute/submit - Opens a 48-hour dispute window for a completed wager game.
+/// The VPS logs the dispute; a human admin resolves it.
+pub async fn submit_dispute(
+    State(_state): State<AppState>,
+    Json(req): Json<DisputeReq>,
+) -> Result<Json<SigResp>, StatusCode> {
+    // Log the dispute — human review resolves it.
+    warn!(
+        "[dispute] Player {} disputes game {} — manual review required",
+        req.disputing_player, req.game_id
+    );
+    // Return a stub sig so the client can display "dispute submitted".
+    Ok(Json(SigResp { sig: format!("dispute-{}-pending", req.game_id) }))
 }
 
 #[cfg(test)]

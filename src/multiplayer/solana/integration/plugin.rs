@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy::app::App;
 
 use super::profile_check::{check_profile_on_connect, handle_profile_check_tasks};
 use super::state::{SolanaIntegrationState, BalanceRefreshTimer};
@@ -26,6 +25,11 @@ impl Plugin for SolanaIntegrationPlugin {
         app.add_systems(Update, monitor_network_handshakes);
         app.add_systems(Update, sync_session_key_to_network);
         app.add_systems(Update, authorize_session_key_on_game_start);
+        app.add_systems(Update, check_session_expiry_on_game_start);
+        app.add_systems(
+            OnEnter(crate::core::states::MenuState::Main),
+            verify_global_session_on_menu_enter,
+        );
         app.add_systems(Update, check_profile_on_connect);
         app.add_systems(Update, handle_profile_check_tasks);
         app.add_systems(Update, fetch_user_status_async);

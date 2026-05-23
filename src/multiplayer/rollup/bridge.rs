@@ -16,6 +16,18 @@ use crate::multiplayer::{
 use crate::multiplayer::rollup::magicblock::DelegationStatus;
 use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
 use crate::solana::instructions::PROGRAM_ID as SOLANA_PROGRAM_ID;
+use crate::ui::menus::game_over_popup::GameOverPayoutInfo;
+
+/// Result sent back from the async finalization task to the Bevy world.
+#[derive(Debug, Default)]
+struct FinalizationResult {
+    sig: String,
+    winner_lamports: u64,
+    country_fee: u64,
+}
+
+/// Maximum seconds to wait for the Game PDA to return to devnet after undelegation.
+const MAX_UNDELEGATE_WAIT_SECS: u64 = 60;
 
 /// Stores the last few on-chain move transaction signatures so the UI can display them.
 #[derive(Resource, Default, Clone)]
@@ -54,6 +66,10 @@ pub struct RollupNetworkBridge {
     /// Finalization deferred because opponent pubkey was not yet available at game end.
     /// Retried each frame up to MAX_FINALIZATION_WAIT_FRAMES.
     pending_finalization: Option<PendingFinalization>,
+    /// Channel receiving the finalization result (sig + payout amounts) from the async task.
+    finalization_rx: Option<oneshot::Receiver<FinalizationResult>>,
+    /// Channel receiving the resynced move nonce from the async RPC fetch.
+    nonce_rx: Option<oneshot::Receiver<u64>>,
 }
 
 /// Maximum frames to wait for opponent pubkey before giving up on deferred finalization.
@@ -70,6 +86,7 @@ struct PendingFinalization {
     local_pk: Pubkey,
     is_creator: bool,
     frames_waited: u32,
+    wager_lamports: u64,
 }
 
 impl RollupNetworkBridge {
@@ -109,6 +126,11 @@ impl Plugin for RollupNetworkBridgePlugin {
 
         app.add_systems(Update, poll_delegation_tasks);
         app.add_systems(Update, retry_pending_finalization);
+
+        // Post-finalization: apply payout result to game-over popup resource.
+        app.add_systems(Update, apply_finalization_result);
+        // Nonce resync: apply on-chain nonce once the async fetch completes.
+        app.add_systems(Update, apply_nonce_resync);
 
         info!("RollupNetworkBridgePlugin initialized with Magic Block ER support");
     }
@@ -502,6 +524,24 @@ fn handle_game_start_delegation(
                 let _ = tx.send(result);
             })
             .detach();
+
+        // Item 5: fetch on-chain nonce so we never start with a stale local nonce.
+        let (nonce_tx, nonce_rx) = oneshot::channel::<u64>();
+        bridge.nonce_rx = Some(nonce_rx);
+        bevy::tasks::IoTaskPool::get()
+            .spawn(async move {
+                use crate::multiplayer::vps_client;
+                match vps_client::vps_fetch_move_nonce(game_id) {
+                    Ok(next_nonce) => {
+                        info!("[NONCE] Resynced nonce for game {} → {}", game_id, next_nonce);
+                        let _ = nonce_tx.send(next_nonce);
+                    }
+                    Err(e) => {
+                        warn!("[NONCE] Failed to fetch nonce for game {}: {} — keeping local nonce", game_id, e);
+                    }
+                }
+            })
+            .detach();
     }
 }
 
@@ -649,6 +689,7 @@ fn handle_game_end_undelegation(
     magicblock_resolver: Res<MagicBlockResolver>,
     solana_state: Option<Res<SolanaIntegrationState>>,
     rollup_manager: Res<EphemeralRollupManager>,
+    competitive: Option<Res<crate::multiplayer::solana::addon::CompetitiveMatchState>>,
     mut magicblock_events: MessageWriter<MagicBlockEvent>,
     mut bridge: ResMut<RollupNetworkBridge>,
 ) {
@@ -702,6 +743,7 @@ fn handle_game_end_undelegation(
         if white_pk == Pubkey::default() || black_pk == Pubkey::default() {
             warn!("[FINALIZE] Opponent pubkey unavailable for game {} — deferring finalization", game_id);
             let local_pk = solana_state.as_ref().and_then(|s| s.wallet_pubkey).unwrap_or_default();
+            let wager = competitive.as_ref().map(|c| c.stake_amount).unwrap_or(0);
             bridge.pending_finalization = Some(PendingFinalization {
                 game_id,
                 winner: event.winner.clone(),
@@ -709,48 +751,108 @@ fn handle_game_end_undelegation(
                 local_pk,
                 is_creator: rollup_manager.is_creator,
                 frames_waited: 0,
+                wager_lamports: wager,
             });
             continue;
         }
 
         let winner = event.winner.clone();
-        spawn_finalization_task(game_id, winner, white_pk, black_pk, is_delegated);
+
+        // Item 4: Free Rated path — game was never delegated, so just update ELO.
+        if !is_delegated {
+            let w = white_pk.to_string();
+            let b = black_pk.to_string();
+            let win = winner.clone();
+            bevy::tasks::IoTaskPool::get()
+                .spawn(async move {
+                    use crate::multiplayer::vps_client;
+                    if let Err(e) = vps_client::vps_submit_free_rated_result(game_id, win.as_deref(), &w, &b) {
+                        error!("[FREE_RATED] ELO update failed for game {}: {e}", game_id);
+                    } else {
+                        info!("[FREE_RATED] ELO updated for game {}", game_id);
+                    }
+                })
+                .detach();
+            continue;
+        }
+
+        let wager = competitive.as_ref().map(|c| c.stake_amount).unwrap_or(0);
+        let (fin_tx, fin_rx) = oneshot::channel::<FinalizationResult>();
+        bridge.finalization_rx = Some(fin_rx);
+        spawn_finalization_task(game_id, winner, white_pk, black_pk, wager, fin_tx);
     }
 }
 
 /// Spawns the async undelegate + finalize flow off the Bevy main thread.
-/// Shared by the immediate path in `handle_game_end_undelegation` and the
-/// deferred path in `retry_pending_finalization`.
+/// Item 2: Polls the Game PDA owner on devnet instead of a fixed sleep.
+/// Item 1: Sends the finalization result back to Bevy via `result_tx`.
 fn spawn_finalization_task(
     game_id: u64,
     winner: Option<String>,
     white_pk: Pubkey,
     black_pk: Pubkey,
-    is_delegated: bool,
+    wager_lamports: u64,
+    result_tx: oneshot::Sender<FinalizationResult>,
 ) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
             use crate::multiplayer::vps_client;
+            use solana_client::rpc_client::RpcClient;
+            use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
+            use crate::solana::instructions::PROGRAM_ID as SOLANA_PROGRAM_ID;
 
-            if !is_delegated {
-                info!("[FINALIZE] Game {} — not delegator, skipping undelegate+finalize", game_id);
-                return;
-            }
-
+            // Brief pause before undelegation so the final move batch lands first.
             std::thread::sleep(std::time::Duration::from_secs(2));
+
             match vps_client::vps_undelegate_game(game_id) {
                 Ok(sig) => info!("[UNDELEGATE] ER committed for game {} sig {}", game_id, sig),
                 Err(e) => error!("[UNDELEGATE] Failed for game {}: {e} — continuing to finalize", game_id),
             }
-            std::thread::sleep(std::time::Duration::from_secs(15));
+
+            // Item 2: Poll devnet until game PDA owner returns to the program (not ER).
+            let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+            let game_pda = Pubkey::find_program_address(
+                &[b"game", &game_id.to_le_bytes()], &program_id,
+            ).0;
+            let rpc = RpcClient::new(DEVNET_RPC_URL.to_string());
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_secs(MAX_UNDELEGATE_WAIT_SECS);
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                match rpc.get_account(&game_pda) {
+                    Ok(acc) if acc.owner == program_id => {
+                        info!("[UNDELEGATE] Game {} PDA returned to devnet — proceeding to finalize", game_id);
+                        break;
+                    }
+                    Ok(_) => {} // still owned by ER
+                    Err(_) => {} // transient RPC error — keep polling
+                }
+                if std::time::Instant::now() >= deadline {
+                    warn!("[UNDELEGATE] Game {} PDA did not return after {}s — finalizing anyway",
+                          game_id, MAX_UNDELEGATE_WAIT_SECS);
+                    break;
+                }
+            }
 
             let w_str = white_pk.to_string();
             let b_str = black_pk.to_string();
             let win_ref = winner.as_deref();
 
-            match vps_client::vps_finalize_game(game_id, win_ref, &w_str, &b_str) {
-                Ok(sig) => info!("[FINALIZE] Game {} finalized on-chain sig {}", game_id, sig),
-                Err(e) => error!("[FINALIZE] Game {} finalization failed: {e}", game_id),
+            match vps_client::vps_finalize_game(game_id, win_ref, &w_str, &b_str, wager_lamports) {
+                Ok(result) => {
+                    info!("[FINALIZE] Game {} finalized on-chain sig {} prize {} lam",
+                          game_id, result.sig, result.winner_lamports);
+                    let _ = result_tx.send(FinalizationResult {
+                        sig: result.sig,
+                        winner_lamports: result.winner_lamports,
+                        country_fee: result.country_fee,
+                    });
+                }
+                Err(e) => {
+                    error!("[FINALIZE] Game {} finalization failed: {e}", game_id);
+                    // Send a zero-prize result so the UI still shows the popup correctly.
+                    let _ = result_tx.send(FinalizationResult::default());
+                }
             }
         })
         .detach();
@@ -803,7 +905,55 @@ fn retry_pending_finalization(
         "[FINALIZE] Opponent pubkey arrived after {} frames for game {} — finalizing",
         pending.frames_waited, pending.game_id
     );
-    spawn_finalization_task(pending.game_id, pending.winner, white_pk, black_pk, pending.is_delegated);
+    let (fin_tx, fin_rx) = oneshot::channel::<FinalizationResult>();
+    bridge.finalization_rx = Some(fin_rx);
+    spawn_finalization_task(pending.game_id, pending.winner, white_pk, black_pk, pending.wager_lamports, fin_tx);
+}
+
+/// Item 1: Reads the finalization result channel and updates GameOverPayoutInfo.
+fn apply_finalization_result(
+    mut bridge: ResMut<RollupNetworkBridge>,
+    mut payout_info: Option<ResMut<GameOverPayoutInfo>>,
+) {
+    let rx = match bridge.finalization_rx.as_mut() {
+        Some(rx) => rx,
+        None => return,
+    };
+    match rx.try_recv() {
+        Ok(result) => {
+            bridge.finalization_rx = None;
+            if let Some(ref mut info) = payout_info {
+                info.payout_confirmed = true;
+                info.finalize_sig = Some(result.sig);
+                if result.winner_lamports > 0 {
+                    info.winning_prize = result.winner_lamports;
+                }
+                if result.country_fee > 0 {
+                    info.country_fee = result.country_fee;
+                }
+                info.game_ended_at = Some(std::time::Instant::now());
+            }
+        }
+        Err(oneshot::error::TryRecvError::Empty) => {}
+        Err(_) => { bridge.finalization_rx = None; }
+    }
+}
+
+/// Item 5: Applies the resynced on-chain nonce once the async fetch completes.
+fn apply_nonce_resync(mut bridge: ResMut<RollupNetworkBridge>) {
+    let rx = match bridge.nonce_rx.as_mut() {
+        Some(rx) => rx,
+        None => return,
+    };
+    match rx.try_recv() {
+        Ok(next_nonce) => {
+            bridge.move_nonce = next_nonce;
+            bridge.nonce_rx = None;
+            info!("[NONCE] Local move_nonce set to {}", next_nonce);
+        }
+        Err(oneshot::error::TryRecvError::Empty) => {}
+        Err(_) => { bridge.nonce_rx = None; }
+    }
 }
 
 /// Handles Magic Block events for logging and error handling

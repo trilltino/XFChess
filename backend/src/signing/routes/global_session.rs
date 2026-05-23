@@ -39,6 +39,7 @@ pub fn global_session_routes() -> Router<AppState> {
     Router::new()
         .route("/prepare", post(prepare))
         .route("/activate", post(activate))
+        .route("/{wallet}/verify", axum::routing::get(verify))
         .route("/{wallet}", delete(revoke))
 }
 
@@ -194,6 +195,29 @@ async fn activate(
 
     info!("global_session activated: wallet={wallet} sig={sig}");
     Ok(Json(ActivateResp { sig: sig.to_string(), session_pubkey }))
+}
+
+/// GET /global-session/:wallet/verify
+/// Returns whether the VPS holds an active global session for this wallet,
+/// along with the session pubkey if it does. The client calls this at MainMenu
+/// entry to decide whether to show the "Authorize session" banner.
+async fn verify(
+    State(state): State<AppState>,
+    Path(wallet_str): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let wallet = Pubkey::from_str(&wallet_str).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let active = state.active_global_sessions.lock().await;
+    if let Some(kp) = active.get(&wallet) {
+        Ok(Json(serde_json::json!({
+            "active": true,
+            "session_pubkey": kp.pubkey().to_string(),
+        })))
+    } else {
+        Ok(Json(serde_json::json!({
+            "active": false,
+        })))
+    }
 }
 
 /// Broadcast `revoke_global_session` and remove the session from memory.

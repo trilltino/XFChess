@@ -776,6 +776,8 @@ pub fn tournament_routes() -> Router<AppState> {
         .route("/{id}/build-leave-tx", post(build_leave_transaction))
         .route("/{id}/leave", post(leave_tournament))
         .route("/{id}/schedule-status", get(get_schedule_status))
+        .route("/{id}/session-create-game", post(tournament_session_create_game))
+        .route("/{id}/session-join-game", post(tournament_session_join_game))
         .merge(tournament_gossip_routes())
 }
 
@@ -789,6 +791,74 @@ pub fn admin_tournament_routes() -> Router<AppState> {
         .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
         .route("/{id}/cancel", post(build_cancel_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
         .route("/{id}/gossip-status", get(get_gossip_status).layer(axum::middleware::from_fn(admin_auth_middleware)))
+}
+
+// ── Item 7: Tournament session routing ───────────────────────────────────────
+
+#[derive(Deserialize)]
+struct TournamentSessionReq {
+    /// The game_id assigned to this tournament match.
+    game_id: u64,
+    /// The creating player's wallet pubkey.
+    wallet_pubkey: String,
+}
+
+#[derive(Serialize)]
+struct TournamentSessionResp {
+    /// The ephemeral session public key that was created for this game.
+    session_pubkey: String,
+}
+
+/// POST /tournament/:id/session-create-game
+/// Creates a VPS session for the white (creator) side of a tournament match game.
+/// Idempotent: returns the existing session pubkey if already created.
+async fn tournament_session_create_game(
+    Path(tournament_id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<TournamentSessionReq>,
+) -> Result<Json<TournamentSessionResp>, StatusCode> {
+    let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // Verify the player has a match in this tournament.
+    let store = &state.tournament_store;
+    let t = store.get(tournament_id).await.ok_or(StatusCode::NOT_FOUND)?;
+    if t.match_for_player(&req.wallet_pubkey).is_none() {
+        warn!("[TOURNAMENT] session-create-game: player {} has no match in tournament {}", req.wallet_pubkey, tournament_id);
+        return Err(StatusCode::PRECONDITION_FAILED);
+    }
+
+    let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
+        error!("[TOURNAMENT] create session for game {}: {}", req.game_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    info!("[TOURNAMENT] session-create-game: tournament {} game {} session {}", tournament_id, req.game_id, session_pubkey);
+    Ok(Json(TournamentSessionResp { session_pubkey: session_pubkey.to_string() }))
+}
+
+/// POST /tournament/:id/session-join-game
+/// Creates/retrieves the VPS session for the black (joiner) side of a tournament match.
+/// The session keypair was created by white's call to session-create-game;
+/// this call returns the same session pubkey so the joiner can include it in join_game.
+async fn tournament_session_join_game(
+    Path(tournament_id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<TournamentSessionReq>,
+) -> Result<Json<TournamentSessionResp>, StatusCode> {
+    let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let t = state.tournament_store.get(tournament_id).await.ok_or(StatusCode::NOT_FOUND)?;
+    if t.match_for_player(&req.wallet_pubkey).is_none() {
+        warn!("[TOURNAMENT] session-join-game: player {} has no match in tournament {}", req.wallet_pubkey, tournament_id);
+        return Err(StatusCode::PRECONDITION_FAILED);
+    }
+
+    // get-or-create: the session key is shared between both players.
+    let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
+        error!("[TOURNAMENT] join session for game {}: {}", req.game_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    info!("[TOURNAMENT] session-join-game: tournament {} game {} session {}", tournament_id, req.game_id, session_pubkey);
+    Ok(Json(TournamentSessionResp { session_pubkey: session_pubkey.to_string() }))
 }
 
 #[cfg(test)]

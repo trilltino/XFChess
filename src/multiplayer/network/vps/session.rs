@@ -154,3 +154,30 @@ pub fn tee_authenticate(game_id: u64, wallet_pubkey: &str) -> Result<String, Str
     info!("[TEE-AUTH] SUCCESS for game {} (TEE: {})", game_id, TEE_DEVNET_ADDR);
     Ok(resp.sig)
 }
+
+// ── Item 8: Global session verify ─────────────────────────────────────────────
+
+/// Check whether the VPS holds an active global session for `wallet_pubkey`.
+/// Returns `Ok(Some(session_pubkey))` if active, `Ok(None)` if not, `Err` on network failure.
+pub fn verify_global_session(wallet_pubkey: &str) -> Result<Option<String>, String> {
+    let resp = client()?
+        .get(format!("{}/global-session/{}/verify", vps_base(), wallet_pubkey))
+        .send()
+        .map_err(|e| format!("verify_global_session: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("verify_global_session: HTTP {}", resp.status()));
+    }
+    let data = resp
+        .json::<serde_json::Value>()
+        .map_err(|e| format!("verify_global_session parse: {e}"))?;
+    let active = data.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
+    if active {
+        let session_pubkey = data
+            .get("session_pubkey")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        Ok(session_pubkey)
+    } else {
+        Ok(None)
+    }
+}

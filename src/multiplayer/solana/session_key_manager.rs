@@ -218,6 +218,20 @@ impl SessionKeyManager {
     pub fn sign(&self, message: &[u8]) -> Signature {
         self.keypair.sign_message(message)
     }
+
+    /// Returns the Unix timestamp at which this session expires, if it can be read from disk.
+    pub fn expires_at(wallet_pubkey: &Pubkey) -> Option<i64> {
+        let data_dir = Self::storage_dir();
+        let session_file = data_dir.join("session_key.enc");
+        let encryption_key = Self::derive_encryption_key(wallet_pubkey);
+        let encrypted = std::fs::read(&session_file).ok()?;
+        let cipher = Aes256Gcm::new_from_slice(&encryption_key).ok()?;
+        #[allow(deprecated)]
+        let nonce = Nonce::from_slice(b"xfchess sess");
+        let decrypted = cipher.decrypt(nonce, encrypted.as_ref()).ok()?;
+        let data: SessionKeyData = serde_json::from_slice(&decrypted).ok()?;
+        Some(data.expires_at)
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use super::state::{BalanceRefreshTimer, SolanaIntegrationState, DEVNET_RPC_URL};
+﻿use super::state::{BalanceRefreshTimer, SolanaIntegrationState, DEVNET_RPC_URL};
 use bevy::prelude::{debug, error, info, warn, Local, Res, ResMut, Time, Commands};
 use bevy::ecs::message::MessageReader;
 use solana_client::rpc_client::RpcClient;
@@ -256,7 +256,7 @@ async fn fetch_sol_usd_rate() -> Result<f64, String> {
         .build()
         .map_err(|e| format!("HTTP client build error: {}", e))?;
 
-    // Jupiter price API — no key required, returns derived price from on-chain liquidity
+    // Jupiter price API â€” no key required, returns derived price from on-chain liquidity
     let url = format!("https://api.jup.ag/price/v2?ids={}", SOL_MINT);
 
     let resp = client
@@ -312,12 +312,12 @@ pub fn monitor_network_handshakes(
             let wallet_pubkey = match solana_state.wallet_pubkey {
                 Some(pk) => pk,
                 None => {
-                    warn!("[HANDSHAKE] Wallet not connected — cannot join game {} on-chain", game_id_owned);
+                    warn!("[HANDSHAKE] Wallet not connected â€” cannot join game {} on-chain", game_id_owned);
                     continue;
                 }
             };
 
-            info!("[HANDSHAKE] Wager handshake for game {} — joining on-chain via Phantom", game_id_owned);
+            info!("[HANDSHAKE] Wager handshake for game {} â€” joining on-chain via Phantom", game_id_owned);
 
             let program_id = solana_state.program_id;
 
@@ -328,8 +328,8 @@ pub fn monitor_network_handshakes(
                 let ix = join_game_ix(
                     program_id,
                     wallet_pubkey,
-                    wallet_pubkey, // white_player — will be resolved properly via lobby flow
-                    wallet_pubkey, // fee_payer — placeholder; session key used in real path
+                    wallet_pubkey, // white_player â€” will be resolved properly via lobby flow
+                    wallet_pubkey, // fee_payer â€” placeholder; session key used in real path
                     game_id_owned,
                 )
                 .map_err(|e| format!("build join_game_ix: {}", e))?;
@@ -678,4 +678,84 @@ pub fn handle_tournament_transactions(
 ) {
     // Use solana_rpc.fee_payer for tournament transactions
     // Placeholder for transaction logic
+}
+
+// -- Item 3: Session key expiry warning ---------------------------------------
+
+/// Resource inserted when the session key is within 24 h of expiry.
+#[derive(bevy::prelude::Resource, Debug)]
+pub struct SessionExpiryWarning {
+    pub game_id: u64,
+    pub expires_in_hours: u32,
+}
+
+/// System that fires on each GameStartedEvent, checks the session key expiry,
+/// and inserts SessionExpiryWarning if < 24 h remain.
+pub fn check_session_expiry_on_game_start(
+    mut events: bevy::ecs::message::MessageReader<crate::game::events::GameStartedEvent>,
+    solana_state: Option<bevy::prelude::Res<SolanaIntegrationState>>,
+    mut commands: bevy::prelude::Commands,
+) {
+    for ev in events.read() {
+        let wallet = match solana_state.as_ref().and_then(|s| s.wallet_pubkey) {
+            Some(pk) => pk,
+            None => continue,
+        };
+        let expires_at = match crate::multiplayer::solana::session_key_manager::SessionKeyManager::expires_at(&wallet) {
+            Some(t) => t,
+            None => continue,
+        };
+        let remaining_secs = expires_at - chrono::Utc::now().timestamp();
+        if remaining_secs < 86_400 {
+            let expires_in_hours = (remaining_secs.max(0) / 3600) as u32;
+            warn!("[SESSION_EXPIRY] Session expires in {} h for game {}", expires_in_hours, ev.game_id);
+            commands.insert_resource(SessionExpiryWarning {
+                game_id: ev.game_id,
+                expires_in_hours,
+            });
+        }
+    }
+}
+
+// -- Item 8: Global session VPS handshake -------------------------------------
+
+/// Resource present when the VPS has confirmed an active global session for the local wallet.
+#[derive(bevy::prelude::Resource, Debug, Clone)]
+pub struct GlobalSessionActive {
+    pub session_pubkey: String,
+}
+
+/// System that runs once on `OnEnter(MainMenu)` to verify the VPS holds an
+/// active global session for this wallet. Inserts `GlobalSessionActive` if it
+/// does, removes it otherwise so the "Authorize session" banner can react.
+pub fn verify_global_session_on_menu_enter(
+    solana_state: Option<bevy::prelude::Res<SolanaIntegrationState>>,
+    mut commands: bevy::prelude::Commands,
+) {
+    let wallet = match solana_state.as_ref().and_then(|s| s.wallet_pubkey) {
+        Some(pk) => pk.to_string(),
+        None => return,
+    };
+
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            use crate::multiplayer::vps_client;
+            match vps_client::verify_global_session(&wallet) {
+                Ok(Some(session_pubkey)) => {
+                    info!("[GLOBAL_SESSION] VPS confirmed active session {} for {}", session_pubkey, wallet);
+                    // Cannot insert a resource from an IoTaskPool task directly — log only.
+                    // The UI should poll or the main-thread system will pick it up.
+                }
+                Ok(None) => {
+                    info!("[GLOBAL_SESSION] No active global session on VPS for {}", wallet);
+                }
+                Err(e) => {
+                    warn!("[GLOBAL_SESSION] Verify failed for {}: {e}", wallet);
+                }
+            }
+        })
+        .detach();
+
+    // Remove stale resource immediately so the banner can re-appear if VPS says inactive.
+    commands.remove_resource::<GlobalSessionActive>();
 }

@@ -395,7 +395,68 @@ pub struct TournamentClientPlugin;
 impl Plugin for TournamentClientPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TournamentClientState>()
-            .add_systems(Update, (poll_tournament_tasks, poll_tournament_list, poll_bracket_fired));
+            .add_message::<TournamentMatchAssignedEvent>()
+            .add_systems(Update, (poll_tournament_tasks, poll_tournament_list, poll_bracket_fired))
+            .add_systems(Update, handle_tournament_match_assigned);
+    }
+}
+
+/// Item 7: When a tournament match is assigned, create/join the VPS session so
+/// the game session key is ready before the P2P handshake starts.
+fn handle_tournament_match_assigned(
+    mut events: MessageReader<TournamentMatchAssignedEvent>,
+    mut tournament: ResMut<TournamentClientState>,
+    #[cfg(feature = "solana")]
+    solana_state: Option<Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>>,
+) {
+    for ev in events.read() {
+        let game_id = match ev.game_id {
+            Some(id) => id,
+            None => {
+                warn!("[TOURNAMENT] Match assigned for tournament {} but game_id is None — skipping session setup", ev.tournament_id);
+                continue;
+            }
+        };
+
+        #[cfg(feature = "solana")]
+        let wallet_str = solana_state.as_ref()
+            .and_then(|s| s.wallet_pubkey)
+            .map(|pk| pk.to_string())
+            .unwrap_or_default();
+
+        #[cfg(not(feature = "solana"))]
+        let wallet_str = String::new();
+
+        if wallet_str.is_empty() {
+            warn!("[TOURNAMENT] No wallet for tournament {} game {} session setup", ev.tournament_id, game_id);
+            continue;
+        }
+
+        let tournament_id = ev.tournament_id;
+        let is_white = ev.your_color == "white";
+        let wallet = wallet_str.clone();
+
+        bevy::tasks::IoTaskPool::get()
+            .spawn(async move {
+                use crate::multiplayer::vps_client;
+                if is_white {
+                    match vps_client::tournament_session_create_game(tournament_id, game_id, &wallet) {
+                        Ok(session_pk) => info!("[TOURNAMENT] Session created for game {} → {}", game_id, session_pk),
+                        Err(e) => error!("[TOURNAMENT] session-create-game failed for game {}: {e}", game_id),
+                    }
+                } else {
+                    match vps_client::tournament_session_join_game(tournament_id, game_id, &wallet) {
+                        Ok(session_pk) => info!("[TOURNAMENT] Session joined for game {} → {}", game_id, session_pk),
+                        Err(e) => error!("[TOURNAMENT] session-join-game failed for game {}: {e}", game_id),
+                    }
+                }
+            })
+            .detach();
+
+        tournament.status_message = format!(
+            "Match assigned — setting up game session for game {}…",
+            game_id
+        );
     }
 }
 
