@@ -297,9 +297,28 @@ function AppContent() {
                     )}
                     {connected && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
-                                {username || "Set Name"}
-                            </Link>
+                            {username ? (
+                                <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
+                                    {username}
+                                </Link>
+                            ) : (
+                                <Link
+                                    to="/profile"
+                                    className="nav-link"
+                                    style={{
+                                        color: '#fff',
+                                        fontWeight: 700,
+                                        fontSize: '12px',
+                                        background: 'linear-gradient(135deg, #ad5c2f, #8c4a26)',
+                                        padding: '5px 12px',
+                                        borderRadius: '6px',
+                                        letterSpacing: '0.02em',
+                                    }}
+                                    onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}
+                                >
+                                    Create Profile
+                                </Link>
+                            )}
                             <span style={{ color: 'var(--text-dim)', fontSize: '12px', fontWeight: 600 }}>
                                 {balanceLoading ? '...' : totalUsdValue !== null ? `$${totalUsdValue.toFixed(2)}` : ''}
                             </span>
@@ -352,6 +371,7 @@ function AppContent() {
                         <Route path="/legal" element={<LegalPage />} />
                         <Route path="/anti-cheat" element={<AntiCheatPage />} />
                         <Route path="/profile" element={<ProfileViewer />} />
+                        <Route path="/create-profile" element={<ProfileViewer />} />
                         <Route path="/auth/lichess/callback" element={<LichessCallback />} />
                         <Route path="/kyc" element={<KycPage />} />
                         <Route path="/news/release" element={<NewsRelease />} />

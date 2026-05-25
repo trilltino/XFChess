@@ -18,7 +18,7 @@ pub struct RegisterPlayer<'info> {
         seeds = [TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
         bump = tournament.bump
     )]
-    pub tournament: Account<'info, Tournament>,
+    pub tournament: Box<Account<'info, Tournament>>,
     #[account(
         seeds = [PROFILE_SEED, player.key().as_ref()],
         bump
@@ -39,28 +39,28 @@ pub struct RegisterPlayer<'info> {
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
+    pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
     /// Shard 1 — present for ≥128-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
+    pub tournament_players_shard_1: Option<Box<Account<'info, TournamentPlayersShard>>>,
     /// Shard 2 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
+    pub tournament_players_shard_2: Option<Box<Account<'info, TournamentPlayersShard>>>,
     /// Shard 3 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
+    pub tournament_players_shard_3: Option<Box<Account<'info, TournamentPlayersShard>>>,
     /// CHECK: Operator treasury — receives the platform fee cut (£0.50 equivalent per entry).
     /// Must match tournament.host_treasury set at initialize.
     #[account(

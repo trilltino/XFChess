@@ -99,6 +99,15 @@ build-wallet-ui:
         Write-Host "[BUILD] Wallet UI dist exists, skipping (run 'just build-wallet-ui-force' to rebuild)" \
     }
 
+# Install tournament admin dependencies (only if node_modules is missing)
+build-admin-ui:
+    @if (-not (Test-Path "tauri/tournament-admin/node_modules/.bin/vite")) { \
+        Write-Host "[BUILD] Installing Tournament Admin dependencies..." -ForegroundColor Cyan; \
+        Set-Location tauri/tournament-admin; npm install; Set-Location ../.. \
+    } else { \
+        Write-Host "[BUILD] Tournament Admin node_modules exists, skipping" \
+    }
+
 # Force-rebuild wallet UI
 build-wallet-ui-force:
     Set-Location tauri/wallet-ui && npm install && npm run build && Set-Location ../..
@@ -130,7 +139,7 @@ admin:
 # ── Full dev stack ────────────────────────────────────────────────────────────
 
 # Build everything then launch full local stack (uses Windows Terminal tabs if available)
-dev: kill build build-wallet-ui
+dev: kill build build-wallet-ui build-admin-ui
     @Write-Host "" -ForegroundColor White
     @Write-Host "========================================" -ForegroundColor Cyan
     @Write-Host " XFChess Local Dev Stack" -ForegroundColor Cyan
@@ -171,7 +180,7 @@ dev: kill build build-wallet-ui
     @Write-Host "========================================" -ForegroundColor Cyan
 
 # Launch two game instances sharing one backend — P1 window and P2 window, each with tabs
-dev2: kill build build-wallet-ui
+dev2: kill build build-wallet-ui build-admin-ui
     @$root = (Get-Location).Path; \
      $bin = ("{{bin}}" -replace '/', '\'); \
      $env_common = "`$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:BACKEND_URL='{{BACKEND_URL}}'; `$env:RUST_LOG='{{RUST_LOG}}'; `$env:HELIUS_API_KEY='{{HELIUS_API_KEY}}'"; \
@@ -185,7 +194,7 @@ dev2: kill build build-wallet-ui
      $hasWT = Get-Command wt -ErrorAction SilentlyContinue; \
      if ($hasWT) { \
          Write-Host "[ P1 ] Opening Player 1 window..." -ForegroundColor Cyan; \
-         cmd /c "wt -w new nt --title Backend powershell -NoProfile -File `"$root\dev2-backend.ps1`" ; nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\dev2-wallet-p1.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\dev2-tauri-p1.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\dev2-game-p1.ps1`""; \
+         cmd /c "wt -w new nt --title Backend powershell -NoProfile -File `"$root\dev2-backend.ps1`" ; nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\dev2-wallet-p1.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\dev2-tauri-p1.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\dev2-game-p1.ps1`" ; nt --title `"Tournament Admin`" -d `"$root\tauri\tournament-admin`" powershell -NoProfile -Command `"npm run dev -- --port 7455`""; \
          Start-Sleep -Seconds 2; \
          Write-Host "[ P2 ] Opening Player 2 window..." -ForegroundColor Yellow; \
          cmd /c "wt -w new nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\dev2-wallet-p2.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\dev2-tauri-p2.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\dev2-game-p2.ps1`"" \
@@ -198,10 +207,12 @@ dev2: kill build build-wallet-ui
          Start-Sleep -Seconds 1; \
          Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-wallet-p2.ps1'" -WindowStyle Normal; \
          Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-tauri-p2.ps1'" -WindowStyle Minimized; \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-game-p2.ps1'" -WindowStyle Normal \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-game-p2.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -Command Set-Location '$root\tauri\tournament-admin'; npm run dev -- --port 7455" -WindowStyle Normal \
      }
     @Write-Host "  [P1] Backend :8090  Wallet UI :5174  Bridge :7454  (window: XFChess P1)" -ForegroundColor Cyan
     @Write-Host "  [P2] Wallet UI :5175  Bridge :7464  (window: XFChess P2)" -ForegroundColor Yellow
+    @Write-Host "  Tournament Admin: http://localhost:7455" -ForegroundColor Green
 
 # ── Solana program ────────────────────────────────────────────────────────────
 

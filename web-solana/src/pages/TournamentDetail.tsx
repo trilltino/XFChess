@@ -18,6 +18,25 @@ interface MatchInfo {
     opponent: string;
 }
 
+interface TournamentInfo {
+    prize_pool: number;
+    entry_fee_lamports: number;
+    platform_fee_lamports: number;
+    max_players: number;
+    players: string[];
+    prize_shares: number[];
+}
+
+function formatLamports(lamports: number): string {
+    return (lamports / 1_000_000_000).toFixed(4) + ' SOL';
+}
+
+function describePrizeType(shares: number[]): string {
+    if (shares[0] === 10000) return 'Winner Takes All';
+    const positions = shares.filter(s => s > 0).length;
+    return `Top ${positions}`;
+}
+
 /**
  * Tournament detail page — live countdown, register button, standings link.
  * Gated: requires connected wallet for registration.
@@ -31,10 +50,31 @@ export default function TournamentDetail() {
     const [totalRounds, setTotalRounds] = useState<number>(0);
     const [myMatch, setMyMatch] = useState<MatchInfo | null>(null);
     const [pairingPreview, setPairingPreview] = useState<string>('');
+    const [tournamentInfo, setTournamentInfo] = useState<TournamentInfo | null>(null);
 
     useEffect(() => {
         if (!id) return;
         let mounted = true;
+
+        const fetchTournamentInfo = async () => {
+            try {
+                const resp = await fetch(`/tournament/${id}`);
+                if (resp.ok && mounted) {
+                    const data = await resp.json();
+                    setTournamentInfo({
+                        prize_pool: data.prize_pool ?? 0,
+                        entry_fee_lamports: data.entry_fee_lamports ?? 0,
+                        platform_fee_lamports: data.platform_fee_lamports ?? 0,
+                        max_players: data.max_players ?? 0,
+                        players: data.players ?? [],
+                        prize_shares: data.prize_shares ?? [],
+                    });
+                }
+            } catch {
+                // backend not reachable
+            }
+        };
+
         const fetchStatus = async () => {
             try {
                 const resp = await fetch(`/tournament/${id}/schedule-status`);
@@ -73,12 +113,15 @@ export default function TournamentDetail() {
                 // ignore if Swiss endpoints are unavailable yet
             }
         };
+        fetchTournamentInfo();
         fetchStatus();
         fetchSwissState();
+        const tournamentInfoInterval = setInterval(fetchTournamentInfo, 30_000);
         const interval = setInterval(fetchStatus, 30_000);
         const swissInterval = setInterval(fetchSwissState, 10_000);
         return () => {
             mounted = false;
+            clearInterval(tournamentInfoInterval);
             clearInterval(interval);
             clearInterval(swissInterval);
         };
@@ -119,6 +162,62 @@ export default function TournamentDetail() {
     return (
         <div style={{ maxWidth: 720, margin: '2rem auto', padding: '0 1rem', color: '#eee' }}>
             <h2>Tournament #{id}</h2>
+
+            {tournamentInfo && (
+                <div style={{
+                    background: 'linear-gradient(135deg, #1e1b4b, #312e81)',
+                    borderRadius: 8,
+                    padding: '1.25rem',
+                    marginBottom: '1rem',
+                    border: '1px solid #4338ca',
+                }}>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.75rem', color: '#a5b4fc' }}>
+                        Prize Pot
+                    </div>
+                    <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+                        <div>
+                            <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#fbbf24' }}>
+                                {formatLamports(tournamentInfo.prize_pool)}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 2 }}>Total Pot</div>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#eee' }}>
+                                {tournamentInfo.players.length}<span style={{ color: '#9ca3af', fontSize: '1rem' }}>/{tournamentInfo.max_players}</span>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 2 }}>Players</div>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#34d399' }}>
+                                {describePrizeType(tournamentInfo.prize_shares)}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 2 }}>Prize Type</div>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: '1rem', fontWeight: 600, color: '#eee' }}>
+                                {formatLamports(tournamentInfo.entry_fee_lamports)}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 2 }}>Entry Fee</div>
+                        </div>
+                    </div>
+                    {tournamentInfo.prize_shares[0] < 10000 && (
+                        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            {tournamentInfo.prize_shares.filter(s => s > 0).map((share, i) => (
+                                <span key={i} style={{
+                                    background: '#1e1b4b',
+                                    border: '1px solid #4338ca',
+                                    borderRadius: 4,
+                                    padding: '2px 8px',
+                                    fontSize: '0.75rem',
+                                    color: '#a5b4fc',
+                                }}>
+                                    {i + 1}{['st','nd','rd'][i] ?? 'th'}: {(share / 100).toFixed(0)}%
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {status && (
                 <div style={{ background: '#1a1a2e', borderRadius: 8, padding: '1.5rem', marginBottom: '1rem' }}>

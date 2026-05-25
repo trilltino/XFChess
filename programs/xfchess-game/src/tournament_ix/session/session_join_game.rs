@@ -8,31 +8,6 @@ use crate::errors::*;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-fn get_country_fee(country: &str, match_type: MatchType) -> u64 {
-    if match_type == MatchType::Free {
-        return 0;
-    }
-    match country {
-        "GB" => UK_FEE_LAMPORTS,
-        "BR" => BRAZIL_FEE_LAMPORTS,
-        "CA" => CANADA_FEE_LAMPORTS,
-        "DE" => GERMANY_FEE_LAMPORTS,
-        _ => 0,
-    }
-}
-
-fn apply_cross_border_fee_logic(
-    white_country: &str,
-    black_country: &str,
-    white_fee: u64,
-    black_fee: u64,
-) -> u64 {
-    if white_country != black_country {
-        white_fee.min(black_fee)
-    } else {
-        white_fee
-    }
-}
 
 #[derive(Accounts)]
 #[instruction(tournament_id: u64, game_id: u64)]
@@ -139,12 +114,8 @@ pub fn handler(
     );
     require!(game.white != player_key, GameErrorCode::CannotPlaySelf);
 
-    let white_country = &ctx.accounts.white_profile.country;
-    let player_country = &ctx.accounts.player_profile.country;
-
-    let white_fee = get_country_fee(white_country, game.match_type.clone());
-    let black_fee = get_country_fee(player_country, game.match_type.clone());
-    let final_fee = apply_cross_border_fee_logic(white_country, player_country, white_fee, black_fee);
+    // Platform fee was set at game creation time (universal, live-price-based).
+    let final_fee = game.country_fee;
 
     let total_cost = game.wager_amount.saturating_add(final_fee);
 

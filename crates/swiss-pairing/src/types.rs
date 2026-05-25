@@ -13,10 +13,16 @@ pub struct SwissPlayer {
     pub color_history: Vec<Color>,
     /// IDs of previously played opponents
     pub opponents: Vec<String>,
-    /// Number of byes received
-    pub bye_count: u8,
-    /// Float status (up/down in scoregroups)
-    pub float_status: FloatStatus,
+    /// Rounds in which this player received a bye
+    pub bye_rounds: Vec<u8>,
+    /// Float history per round (one entry per round played)
+    pub float_history: Vec<FloatStatus>,
+    /// True = skip from pairing this round; still counts for Buchholz
+    pub absent: bool,
+    /// Permanently removed; excluded from future rounds AND Buchholz
+    pub withdrawn: bool,
+    /// Round in which this player forfeited (for reporting)
+    pub forfeit_round: Option<u8>,
 }
 
 impl SwissPlayer {
@@ -28,9 +34,37 @@ impl SwissPlayer {
             score: 0.0,
             color_history: Vec::new(),
             opponents: Vec::new(),
-            bye_count: 0,
-            float_status: FloatStatus::None,
+            bye_rounds: Vec::new(),
+            float_history: Vec::new(),
+            absent: false,
+            withdrawn: false,
+            forfeit_round: None,
         }
+    }
+
+    /// Number of byes received
+    pub fn bye_count(&self) -> usize {
+        self.bye_rounds.len()
+    }
+
+    /// Whether this player received a bye in the given round
+    pub fn had_bye_in(&self, round: u8) -> bool {
+        self.bye_rounds.contains(&round)
+    }
+
+    /// Most recent float status (None if no rounds played)
+    pub fn last_float(&self) -> FloatStatus {
+        self.float_history.last().copied().unwrap_or(FloatStatus::None)
+    }
+
+    /// True if the player was floated down in the immediately preceding round
+    pub fn floated_down_last_round(&self) -> bool {
+        matches!(self.last_float(), FloatStatus::Down)
+    }
+
+    /// True if the player was floated up in the immediately preceding round
+    pub fn floated_up_last_round(&self) -> bool {
+        matches!(self.last_float(), FloatStatus::Up)
     }
 
     /// Calculate color balance (positive = needs white, negative = needs black)
@@ -123,25 +157,33 @@ pub enum MatchResult {
     BlackWin,
     Draw,
     Bye,
+    /// Black player no-showed; white wins by forfeit
+    ForfeitWhiteWin,
+    /// White player no-showed; black wins by forfeit
+    ForfeitBlackWin,
 }
 
 impl MatchResult {
     /// Get score for white player
     pub fn white_score(&self) -> f64 {
         match self {
-            MatchResult::WhiteWin => 1.0,
+            MatchResult::WhiteWin | MatchResult::ForfeitWhiteWin | MatchResult::Bye => 1.0,
             MatchResult::Draw => 0.5,
-            _ => 0.0,
+            MatchResult::BlackWin | MatchResult::ForfeitBlackWin => 0.0,
         }
     }
 
     /// Get score for black player
     pub fn black_score(&self) -> f64 {
         match self {
-            MatchResult::BlackWin => 1.0,
+            MatchResult::BlackWin | MatchResult::ForfeitBlackWin => 1.0,
             MatchResult::Draw => 0.5,
-            _ => 0.0,
+            MatchResult::WhiteWin | MatchResult::ForfeitWhiteWin | MatchResult::Bye => 0.0,
         }
+    }
+
+    pub fn is_forfeit(&self) -> bool {
+        matches!(self, MatchResult::ForfeitWhiteWin | MatchResult::ForfeitBlackWin)
     }
 }
 
@@ -168,4 +210,28 @@ pub struct StandingsEntry {
     pub sonneborn: f64,
     pub rating: u32,
     pub rank: u16,
+}
+
+/// Configuration for a pairing round
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PairingConfig {
+    /// Player ID pairs that must never be matched against each other
+    pub forbidden: Vec<(String, String)>,
+    /// Manually forced pairings applied before the Dutch algorithm runs
+    pub manual_overrides: Vec<ManualPairing>,
+}
+
+/// A manually forced pairing
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManualPairing {
+    pub white: String,
+    pub black: String,
+}
+
+impl PairingConfig {
+    pub fn is_forbidden(&self, a: &str, b: &str) -> bool {
+        self.forbidden.iter().any(|(x, y)| {
+            (x.as_str() == a && y.as_str() == b) || (x.as_str() == b && y.as_str() == a)
+        })
+    }
 }

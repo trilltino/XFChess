@@ -50,6 +50,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone(), Arc::new(tournament_store.clone()));
 
+    // ── Initialize social tables (friends, contacts) ─────────────────────────
+    if let Err(e) = state.friends.init().await {
+        tracing::warn!("[signing-server] Failed to init friends tables: {}", e);
+    }
+    info!("[signing-server] Social tables initialized");
+
     // ── Build application router ───────────────────────────────────────────
     let app = backend::infrastructure::build_app_router(state.clone());
     info!("[signing-server] Application router built");

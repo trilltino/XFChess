@@ -74,13 +74,14 @@ fn calculate_buchholz(
     let mut sum = 0.0;
 
     for opponent_id in &player.opponents {
-        if let Some(opponent) = all_players.iter().find(|p| &p.id == opponent_id) {
+        // Withdrawn opponents are excluded from Buchholz (gap 2)
+        if let Some(opponent) = all_players.iter().find(|p| &p.id == opponent_id && !p.withdrawn) {
             sum += opponent.score;
         }
     }
 
     // Adjust for byes (count as draw = 0.5)
-    sum += player.bye_count as f64 * 0.5;
+    sum += player.bye_count() as f64 * 0.5;
 
     sum
 }
@@ -174,7 +175,7 @@ use crate::Color;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Color, FloatStatus, SwissPlayer};
+    use crate::{Color, SwissPlayer};
 
     fn test_player(id: &str, rating: u32, score: f64) -> SwissPlayer {
         SwissPlayer {
@@ -183,8 +184,11 @@ mod tests {
             score,
             color_history: Vec::new(),
             opponents: Vec::new(),
-            bye_count: 0,
-            float_status: FloatStatus::None,
+            bye_rounds: Vec::new(),
+            float_history: Vec::new(),
+            absent: false,
+            withdrawn: false,
+            forfeit_round: None,
         }
     }
 

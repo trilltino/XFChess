@@ -2,6 +2,28 @@ use sqlx::SqlitePool;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 
+const PGN_ZSTD_PREFIX: &str = "zstd:";
+
+fn compress_pgn(pgn: &str) -> String {
+    match zstd::encode_all(pgn.as_bytes(), 3) {
+        Ok(compressed) => format!("{}{}", PGN_ZSTD_PREFIX, base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &compressed)),
+        Err(_) => pgn.to_owned(),
+    }
+}
+
+fn decompress_pgn(raw: &str) -> String {
+    if let Some(encoded) = raw.strip_prefix(PGN_ZSTD_PREFIX) {
+        if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) {
+            if let Ok(decompressed) = zstd::decode_all(bytes.as_slice()) {
+                if let Ok(s) = String::from_utf8(decompressed) {
+                    return s;
+                }
+            }
+        }
+    }
+    raw.to_owned()
+}
+
 /// Database record for a game
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct GameRecord {
@@ -433,17 +455,18 @@ impl GameRepository {
         Ok(games)
     }
  
-    /// Store pre-assembled PGN text for a game
+    /// Store pre-assembled PGN text for a game (zstd-compressed, ~3-5× smaller).
     pub async fn set_pgn_text(&self, game_id: &str, pgn: &str) -> Result<()> {
+        let stored = compress_pgn(pgn);
         sqlx::query("UPDATE games SET pgn_text = ? WHERE id = ?")
-            .bind(pgn)
+            .bind(stored)
             .bind(game_id)
             .execute(&self.pool)
             .await?;
         Ok(())
     }
 
-    /// Retrieve stored PGN text for a game
+    /// Retrieve stored PGN text for a game (decompresses zstd if needed).
     pub async fn get_pgn_text(&self, game_id: &str) -> Result<Option<String>> {
         let result: Option<(String,)> = sqlx::query_as(
             "SELECT pgn_text FROM games WHERE id = ?"
@@ -451,7 +474,7 @@ impl GameRepository {
         .bind(game_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(result.map(|(pgn,)| pgn))
+        Ok(result.map(|(raw,)| decompress_pgn(&raw)))
     }
 
     /// Marks a game as archived at the given timestamp

@@ -145,8 +145,11 @@ mod tests {
                 score: 0.0,
                 color_history: vec![Color::White, Color::Black, Color::White],
                 opponents: vec![],
-                bye_count: 0,
-                float_status: crate::FloatStatus::None,
+                bye_rounds: Vec::new(),
+                float_history: Vec::new(),
+                absent: false,
+                withdrawn: false,
+                forfeit_round: None,
             },
         ];
         assert!(validate_color_assignment(&players));
@@ -159,8 +162,11 @@ mod tests {
                 score: 0.0,
                 color_history: vec![Color::White, Color::White, Color::White],
                 opponents: vec![],
-                bye_count: 0,
-                float_status: crate::FloatStatus::None,
+                bye_rounds: Vec::new(),
+                float_history: Vec::new(),
+                absent: false,
+                withdrawn: false,
+                forfeit_round: None,
             },
         ];
         assert!(!validate_color_assignment(&players));

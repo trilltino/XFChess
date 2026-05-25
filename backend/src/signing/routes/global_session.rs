@@ -35,11 +35,17 @@ use crate::signing::AppState;
 
 // ── Route registration ────────────────────────────────────────────────────────
 
-pub fn global_session_routes() -> Router<AppState> {
+/// Public: game client calls this to check whether a session exists.
+pub fn global_session_public_routes() -> Router<AppState> {
+    Router::new()
+        .route("/{wallet}/verify", axum::routing::get(verify))
+}
+
+/// Protected: require admin API key — prepare/activate/revoke mutate server-held keypairs.
+pub fn global_session_protected_routes() -> Router<AppState> {
     Router::new()
         .route("/prepare", post(prepare))
         .route("/activate", post(activate))
-        .route("/{wallet}/verify", axum::routing::get(verify))
         .route("/{wallet}", delete(revoke))
 }
 
@@ -119,10 +125,9 @@ async fn prepare(
         data,
     };
 
-    let rpc_url = state.solana_rpc_url.clone();
+    let rpc = std::sync::Arc::clone(&state.solana_rpc);
     let (recent_blockhash, _) = tokio::task::spawn_blocking(move || {
-        let client = solana_client::rpc_client::RpcClient::new(rpc_url);
-        client.get_latest_blockhash_with_commitment(
+        rpc.get_latest_blockhash_with_commitment(
             solana_sdk::commitment_config::CommitmentConfig::confirmed(),
         )
     })
@@ -165,10 +170,9 @@ async fn activate(
     let tx: Transaction = bincode::deserialize(&tx_bytes)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("deserialize tx: {e}")))?;
 
-    let rpc_url = state.solana_rpc_url.clone();
+    let rpc = std::sync::Arc::clone(&state.solana_rpc);
     let sig = tokio::task::spawn_blocking(move || {
-        let client = solana_client::rpc_client::RpcClient::new(rpc_url);
-        client.send_and_confirm_transaction(&tx)
+        rpc.send_and_confirm_transaction(&tx)
     })
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?

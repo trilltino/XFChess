@@ -31,6 +31,7 @@
 
 pub mod auth;
 pub mod blinks;
+pub mod social;
 pub mod blinks_onboarding;
 pub mod blinks_funding;
 pub mod ws_subscriber;
@@ -77,6 +78,7 @@ pub use tournament_gossip::TournamentGossipService;
 pub use crate::tasks::tournament_scheduler::TournamentTrigger;
 pub use xfchess_braid_server::ResourceHub;
 pub use xfchess_anticheat::engine::job_queue::AnalysisQueue;
+pub use social::{FriendManager, PresenceStore};
 
 /// Shared state injected into every route handler.
 #[derive(Clone)]
@@ -107,19 +109,22 @@ pub struct AppState {
     pub metrics: Arc<crate::telemetry::metrics::Metrics>,
 
     // ── Global session management ──────────────────────────────────────────────
-    /// Session keypairs freshly generated but not yet confirmed on-chain.
     pub pending_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
-    /// Active global session keypairs keyed by player wallet pubkey.
     pub active_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
 
-    /// Convenience shortcut — avoids reaching into `config` for the RPC URL.
     pub solana_rpc_url: String,
-    /// Convenience shortcut — avoids reaching into `config` for the program ID.
     pub program_id: Pubkey,
+    /// Shared blocking RPC client — avoids a new TCP connection per route call.
+    pub solana_rpc: Arc<solana_client::rpc_client::RpcClient>,
 
     // ── Anti-cheat ─────────────────────────────────────────────────────────────
-    /// Queue for post-game Stockfish analysis. None until workers are spawned.
     pub anticheat_queue: Option<AnalysisQueue>,
+
+    // ── Social (friends + presence) ────────────────────────────────────────────
+    pub friends: Arc<FriendManager>,
+    pub presence: Arc<PresenceStore>,
+    /// Pending lobby invites keyed by recipient node_id
+    pub invite_store: Arc<std::sync::RwLock<HashMap<String, Vec<social::routes::LobbyInvite>>>>,
 }
 
 // Compile-time check: AppState must be Clone + Send + Sync + 'static for axum::serve
@@ -212,6 +217,10 @@ impl AppState {
         let metrics = Arc::new(crate::telemetry::metrics::Metrics::new());
 
         let solana_rpc_url = config.solana_rpc_url.clone();
+        let solana_rpc = Arc::new(solana::rpc::make_rpc(&solana_rpc_url));
+
+        let friends = Arc::new(FriendManager::new(pool.clone()));
+        let presence = Arc::new(PresenceStore::new());
 
         Self {
             config: Arc::new(config),
@@ -242,7 +251,11 @@ impl AppState {
             active_global_sessions: Arc::new(Mutex::new(HashMap::new())),
             solana_rpc_url,
             program_id,
+            solana_rpc,
             anticheat_queue: None,
+            friends,
+            presence,
+            invite_store: Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
     }
 
@@ -292,8 +305,13 @@ pub fn build_router(state: AppState) -> Router<AppState> {
         // WebSocket route for authentication sync
         .route("/ws/auth", get(handle_auth_websocket))
 
-        // Global persistent session delegation
-        .nest("/api/global-session", crate::signing::routes::global_session::global_session_routes())
+        // Global persistent session delegation — verify is public, mutations require admin key
+        .nest("/api/global-session", crate::signing::routes::global_session::global_session_public_routes())
+        .nest(
+            "/api/global-session",
+            crate::signing::routes::global_session::global_session_protected_routes()
+                .layer(axum::middleware::from_fn(crate::infrastructure::auth_middleware::require_api_key)),
+        )
 
         // Anti-cheat verdict + player stats queries
         .nest("/api", crate::signing::routes::anticheat::anticheat_routes())

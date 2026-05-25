@@ -43,7 +43,9 @@ pub fn new_game() -> Game {
         black_pawn: utils::create_empty_move_table_array(),
 
         #[cfg(feature = "search")]
-        tt: Arc::new(Mutex::new(utils::create_boxed_array::<TTE, { TTE_SIZE }>())),
+        tt: Arc::new(Mutex::new(vec![TTE::default(); TTE_SIZE])),
+        #[cfg(feature = "search")]
+        tt_capacity: TTE_SIZE,
 
         #[cfg(feature = "search")]
         zobrist_table: [[[0; BIT_BUFFER_SIZE]; 64]; 12],
@@ -101,6 +103,29 @@ pub fn new_game() -> Game {
     init_bitboards(&mut game);
 
     game
+}
+
+/// Resize the transposition table to `mb` megabytes (rounded to next power of two bucket count).
+///
+/// Call before starting a search. Does NOT preserve existing TT entries.
+#[cfg(feature = "std")]
+pub fn set_tt_size_mb(game: &mut Game, mb: usize) {
+    let entry_size = core::mem::size_of::<TTE>().max(1);
+    let bytes = mb * 1024 * 1024;
+    // Round down to power-of-two bucket count for cheap modulo in hash_to_index
+    let raw = (bytes / entry_size).max(1);
+    let capacity = raw.next_power_of_two() / 2;  // floor to previous power of two
+    let capacity = capacity.max(1);
+
+    let mut tt_guard = game.tt.lock().unwrap();
+    tt_guard.resize_with(capacity, TTE::default);
+    tt_guard.shrink_to_fit();
+    drop(tt_guard);
+
+    game.tt_capacity = capacity;
+    game.cache_size_bytes = entry_size * capacity;
+    #[cfg(feature = "std")]
+    eprintln!("[TT] Resized to {} entries ({} MB)", capacity, capacity * entry_size / (1024 * 1024));
 }
 
 /// Reset the game to starting position

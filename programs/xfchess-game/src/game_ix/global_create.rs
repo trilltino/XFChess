@@ -9,21 +9,8 @@ use crate::errors::GameErrorCode;
 use crate::state::{Game, GameResult, GameStatus, GameType, GlobalSessionDelegation, MatchType};
 use anchor_lang::prelude::*;
 
-fn get_country_fee(country: &str, match_type: MatchType) -> u64 {
-    if match_type == MatchType::Free {
-        return 0;
-    }
-    match country {
-        "GB" => crate::constants::UK_FEE_LAMPORTS,
-        "BR" => crate::constants::BRAZIL_FEE_LAMPORTS,
-        "CA" => crate::constants::CANADA_FEE_LAMPORTS,
-        "DE" => crate::constants::GERMANY_FEE_LAMPORTS,
-        _ => 0,
-    }
-}
-
 #[derive(Accounts)]
-#[instruction(game_id: u64, wager_amount: u64, match_type: MatchType, country: String, base_time_seconds: u64, increment_seconds: u16)]
+#[instruction(game_id: u64, wager_amount: u64, match_type: MatchType, platform_fee: u64, base_time_seconds: u64, increment_seconds: u16)]
 pub struct GlobalCreateGame<'info> {
     #[account(
         mut,
@@ -61,7 +48,7 @@ pub fn handler(
     game_id: u64,
     wager_amount: u64,
     match_type: MatchType,
-    country: String,
+    platform_fee: u64,
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> Result<()> {
@@ -132,7 +119,7 @@ pub fn handler(
     game.wager_token = None;
     game.game_type = GameType::PvP;
     game.match_type = match_type.clone();
-    game.country_fee = get_country_fee(&country, match_type);
+    game.country_fee = if match_type == MatchType::Free { 0 } else { platform_fee };
     game.base_time_seconds = base_time_seconds;
     game.increment_seconds = increment_seconds;
     game.bump = ctx.bumps.game;

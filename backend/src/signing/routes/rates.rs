@@ -46,6 +46,16 @@ impl Default for RateCache {
 }
 
 impl RateCache {
+    /// Convert a GBP amount to lamports using the live SOL/GBP rate.
+    /// Returns `None` if the rate is unavailable.
+    pub async fn gbp_to_lamports(&self, gbp: f64) -> Option<u64> {
+        let rates = self.get().await.ok()?;
+        let gbp_per_sol = rates.get("gbp")?;
+        if *gbp_per_sol <= 0.0 { return None; }
+        let sol_amount = gbp / gbp_per_sol;
+        Some((sol_amount * 1_000_000_000.0).round() as u64)
+    }
+
     /// Get the current rates. Returns stale cache on fetch failure rather than erroring.
     pub async fn get(&self) -> Result<HashMap<String, f64>, String> {
         // Fast path: fresh cache

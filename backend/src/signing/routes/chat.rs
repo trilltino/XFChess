@@ -47,13 +47,15 @@ pub struct ChatMessageReq {
     pub player: String,
     pub text: String,
     pub timestamp_ms: u64,
+    /// Session pubkey returned by global-session/activate — proves the caller owns this wallet.
+    pub session_token: String,
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/game/:game_id/chat", get(get_chat).put(put_chat))
+        .route("/game/{game_id}/chat", get(get_chat).put(put_chat))
 }
 
 // ── GET /game/:game_id/chat ───────────────────────────────────────────────────
@@ -143,6 +145,20 @@ async fn put_chat(
     Path(game_id): Path<String>,
     Json(req): Json<ChatMessageReq>,
 ) -> StatusCode {
+    // Verify the claimed player holds an active session on this backend.
+    {
+        use std::str::FromStr;
+        use solana_sdk::signer::Signer as _;
+        let Ok(wallet) = solana_sdk::pubkey::Pubkey::from_str(&req.player) else {
+            return StatusCode::BAD_REQUEST;
+        };
+        let active = state.active_global_sessions.lock().await;
+        match active.get(&wallet) {
+            Some(kp) if kp.pubkey().to_string() == req.session_token => {}
+            _ => return StatusCode::UNAUTHORIZED,
+        }
+    }
+
     let text = req.text.trim().to_string();
     if text.is_empty() || text.len() > MAX_MESSAGE_LEN {
         return StatusCode::UNPROCESSABLE_ENTITY;

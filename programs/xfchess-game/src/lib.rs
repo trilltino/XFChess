@@ -237,7 +237,7 @@ pub mod xfchess_game {
         game_id: u64,
         wager_amount: u64,
         match_type: state::MatchType,
-        country: String,
+        platform_fee: u64,
         base_time_seconds: u64,
         increment_seconds: u16,
     ) -> Result<()> {
@@ -246,7 +246,7 @@ pub mod xfchess_game {
             game_id,
             wager_amount,
             match_type,
-            country,
+            platform_fee,
             base_time_seconds,
             increment_seconds,
         )
@@ -555,7 +555,7 @@ pub mod xfchess_game {
         game_id: u64,
         wager_amount: u64,
         match_type: state::MatchType,
-        country: String,
+        platform_fee: u64,
         base_time_seconds: u64,
         increment_seconds: u16,
     ) -> Result<()> {
@@ -565,7 +565,7 @@ pub mod xfchess_game {
             game_id,
             wager_amount,
             match_type,
-            country,
+            platform_fee,
             base_time_seconds,
             increment_seconds,
         )
@@ -607,12 +607,12 @@ pub mod xfchess_game {
         game_id: u64,
         wager_amount: u64,
         match_type: state::MatchType,
-        country: String,
+        platform_fee: u64,
         base_time_seconds: u64,
         increment_seconds: u16,
     ) -> Result<()> {
         crate::game_ix::global_create::handler(
-            ctx, game_id, wager_amount, match_type, country, base_time_seconds, increment_seconds,
+            ctx, game_id, wager_amount, match_type, platform_fee, base_time_seconds, increment_seconds,
         )
     }
 

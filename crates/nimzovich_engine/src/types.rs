@@ -227,7 +227,10 @@ pub struct Game {
     pub black_pawn: [KKS; 64],
 
     #[cfg(feature = "search")]
-    pub tt: Arc<std::sync::Mutex<Box<[TTE; TTE_SIZE]>>>,
+    pub tt: Arc<std::sync::Mutex<Vec<TTE>>>,
+    /// Number of TT buckets (always a power of two for fast modulo).
+    #[cfg(feature = "search")]
+    pub tt_capacity: usize,
 
     /// Zobrist random bitstrings for O(1) incremental hashing.
     #[cfg(feature = "search")]

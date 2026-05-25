@@ -20,8 +20,10 @@ pub struct DatabasePools {
 
 async fn make_pool(url: &str) -> Result<SqlitePool, sqlx::Error> {
     let pool = SqlitePoolOptions::new()
-        .max_connections(8)
-        .min_connections(1)
+        .max_connections(16)
+        .min_connections(2)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .idle_timeout(std::time::Duration::from_secs(300))
         .after_connect(|conn, _meta| {
             Box::pin(async move {
                 // WAL mode: concurrent reads + single writer, no contention
@@ -130,6 +132,26 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     // ── Migration 007: add password_hash ──────────────────────────────────────
     let migration_007 = include_str!("../../migrations/007_add_password_hash.sql");
     run_script(&pools.session_pool, migration_007, "007").await?;
+
+    // ── Migration 008: anti-cheat tables ──────────────────────────────────────
+    let migration_008 = include_str!("../../migrations/008_anticheat.sql");
+    run_script(&pools.session_pool, migration_008, "008").await?;
+
+    // ── Migration 009: external ELO ───────────────────────────────────────────
+    let migration_009 = include_str!("../../migrations/009_external_elo.sql");
+    run_script(&pools.session_pool, migration_009, "009").await?;
+
+    // ── Migration 010: CACF compliance ────────────────────────────────────────
+    let migration_010 = include_str!("../../migrations/010_cacf_compliance.sql");
+    run_script(&pools.session_pool, migration_010, "010").await?;
+
+    // ── Migration 011: friends/social ─────────────────────────────────────────
+    let migration_011 = include_str!("../../migrations/011_friends.sql");
+    run_script(&pools.session_pool, migration_011, "011").await?;
+
+    // ── Migration 012: performance indexes ────────────────────────────────────
+    let migration_012 = include_str!("../../migrations/012_perf_indexes.sql");
+    run_script(&pools.session_pool, migration_012, "012").await?;
 
     info!("[Database] All migrations completed successfully");
     Ok(())

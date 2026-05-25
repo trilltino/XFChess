@@ -3,27 +3,11 @@
 //! The session key co-signs the join; wager funds come from the
 //! [`GlobalSessionDelegation`] vault — no wallet popup for the joiner.
 
-use crate::constants::{GAME_SEED, PROFILE_SEED, WAGER_ESCROW_SEED, CREATE_GAME_COST, UK_FEE_LAMPORTS, BRAZIL_FEE_LAMPORTS, CANADA_FEE_LAMPORTS, GERMANY_FEE_LAMPORTS};
+use crate::constants::{GAME_SEED, PROFILE_SEED, WAGER_ESCROW_SEED, CREATE_GAME_COST};
 use crate::errors::GameErrorCode;
-use crate::state::{Game, GameStatus, GameType, GlobalSessionDelegation, MatchType, PlayerProfile};
+use crate::state::{Game, GameStatus, GameType, GlobalSessionDelegation, PlayerProfile};
 use anchor_lang::prelude::*;
 
-fn get_country_fee(country: &str, match_type: MatchType) -> u64 {
-    if match_type == MatchType::Free {
-        return 0;
-    }
-    match country {
-        "GB" => UK_FEE_LAMPORTS,
-        "BR" => BRAZIL_FEE_LAMPORTS,
-        "CA" => CANADA_FEE_LAMPORTS,
-        "DE" => GERMANY_FEE_LAMPORTS,
-        _ => 0,
-    }
-}
-
-fn apply_cross_border_fee(white_fee: u64, black_fee: u64, same_country: bool) -> u64 {
-    if same_country { white_fee } else { white_fee.min(black_fee) }
-}
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
@@ -117,17 +101,11 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
     session.total_spent = session.total_spent.saturating_add(wager);
     session.games_remaining = session.games_remaining.saturating_sub(1);
 
-    // Cross-border fee logic
-    let white_fee = get_country_fee(&ctx.accounts.white_profile.country, ctx.accounts.game.match_type.clone());
-    let black_fee = get_country_fee(&ctx.accounts.player_profile.country, ctx.accounts.game.match_type.clone());
-    let same = ctx.accounts.white_profile.country == ctx.accounts.player_profile.country;
-    let final_fee = apply_cross_border_fee(white_fee, black_fee, same);
-
     // Update game
     let game = &mut ctx.accounts.game;
     game.black = ctx.accounts.player.key();
     game.status = GameStatus::Active;
-    game.country_fee = final_fee;
+    // country_fee was set at creation time from live SOL/GBP rate — no recalculation needed.
     game.fees_advanced = game.fees_advanced.checked_add(CREATE_GAME_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
     game.updated_at = now;
 

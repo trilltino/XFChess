@@ -124,6 +124,7 @@ impl ChessRpcClient {
     /// Creates an instruction to create a new game.
     ///
     /// `fee_payer` is the VPS session key pubkey — must co-sign the transaction.
+    /// `platform_fee` is the universal platform fee in lamports (10p per player, from live SOL/GBP rate).
     pub fn create_create_game_ix(
         &self,
         player: Pubkey,
@@ -131,7 +132,7 @@ impl ChessRpcClient {
         game_id: u64,
         wager_amount: u64,
         match_type: MatchType,
-        country: String,
+        platform_fee: u64,
         base_time_seconds: u64,
         increment_seconds: u16,
     ) -> Instruction {
@@ -153,7 +154,7 @@ impl ChessRpcClient {
                 game_id,
                 wager_amount,
                 match_type,
-                country,
+                platform_fee,
                 base_time_seconds,
                 increment_seconds,
             }
@@ -364,6 +365,7 @@ impl ChessRpcClient {
     }
 
     /// Build a `global_create_game` instruction (session-signed, no player popup).
+    /// `platform_fee` is the universal platform fee in lamports (10p per player, from live SOL/GBP rate).
     pub fn create_global_create_game_ix(
         &self,
         player: Pubkey,
@@ -371,7 +373,7 @@ impl ChessRpcClient {
         game_id: u64,
         wager_amount: u64,
         match_type: MatchType,
-        country: String,
+        platform_fee: u64,
         base_time_seconds: u64,
         increment_seconds: u16,
     ) -> Instruction {
@@ -393,7 +395,7 @@ impl ChessRpcClient {
                 game_id,
                 wager_amount,
                 match_type,
-                country,
+                platform_fee,
                 base_time_seconds,
                 increment_seconds,
             }

@@ -36,8 +36,10 @@ use crate::signing::{AppState, TournamentTrigger};
 pub struct CreateTournamentReq {
     pub tournament_id: u64,
     pub name: String,
-    pub entry_fee_lamports: u64,
-    pub platform_fee_lamports: u64,
+    /// Total entry fee in lamports. If omitted, auto-calculated from live SOL/GBP rate (£3.00 = 50p platform + £2.50 prize).
+    pub entry_fee_lamports: Option<u64>,
+    /// Platform fee portion in lamports. If omitted, auto-calculated as 50p from live rate.
+    pub platform_fee_lamports: Option<u64>,
     /// Max players: 8, 16, 32, 64, 128, or 256
     pub max_players: u16,
     /// Tournament format: "SingleElimination" or "Swiss"
@@ -97,6 +99,16 @@ pub struct RecordResultReq {
     pub match_index: usize,
     pub winner: String,
     pub loser: String,
+    /// Optional: "forfeit" | "no_show" — stored for audit; normal win/loss rules apply
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Request to reseed players in a tournament (pre-start only).
+#[derive(Deserialize, Serialize)]
+pub struct ReseedReq {
+    /// Ordered player list (wallet pubkeys) after reseeding.
+    pub players: Vec<String>,
 }
 
 /// Request to set the game ID for a match.
@@ -206,6 +218,17 @@ async fn create_tournament(
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
+    // Auto-calculate fees from live SOL/GBP rate if not explicitly provided.
+    // Standard: 50p platform fee + £2.50 prize contribution = £3.00 total entry.
+    let platform_fee_lamports = match req.platform_fee_lamports {
+        Some(v) => v,
+        None => state.rate_cache.gbp_to_lamports(0.50).await.unwrap_or(0),
+    };
+    let entry_fee_lamports = match req.entry_fee_lamports {
+        Some(v) => v,
+        None => state.rate_cache.gbp_to_lamports(3.00).await.unwrap_or(0),
+    };
+
     // Default competitive prize shares based on tournament size
     let default_shares = if req.winner_takes_all {
         [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -223,8 +246,8 @@ async fn create_tournament(
     let record = TournamentRecord::with_config(
         req.tournament_id,
         req.name.clone(),
-        req.entry_fee_lamports,
-        req.platform_fee_lamports,
+        entry_fee_lamports,
+        platform_fee_lamports,
         req.max_players,
         prize_shares,
         format.clone(),
@@ -235,17 +258,18 @@ async fn create_tournament(
         req.kyc_required,
     );
     store.create(record).await;
-    
-    info!("[tournament] Created tournament {} '{}' ({} players, format: {:?})", 
-        req.tournament_id, req.name, req.max_players, format.clone());
-    
+
+    info!("[tournament] Created tournament {} '{}' ({} players, format: {:?}, entry: {} lamports, platform_fee: {} lamports)",
+        req.tournament_id, req.name, req.max_players, format.clone(), entry_fee_lamports, platform_fee_lamports);
+
     Ok(Json(serde_json::json!({
         "ok": true,
         "tournament_id": req.tournament_id,
         "max_players": req.max_players,
         "format": format.clone(),
         "prize_shares": prize_shares,
-        "platform_fee": req.platform_fee_lamports,
+        "entry_fee_lamports": entry_fee_lamports,
+        "platform_fee_lamports": platform_fee_lamports,
         "scheduled_at": req.scheduled_at,
         "kyc_required": req.kyc_required,
     })))
@@ -365,6 +389,8 @@ async fn get_bracket(
         0u8
     };
 
+    let round_deadline_at = t.swiss_data.as_ref().and_then(|s| s.round_deadline_at);
+
     Ok(Json(serde_json::json!({
         "tournament_id": t.tournament_id,
         "status": format!("{:?}", t.status),
@@ -383,6 +409,7 @@ async fn get_bracket(
         "tenth_place": t.tenth_place,
         "prize_shares": t.prize_shares,
         "current_round": current_round,
+        "round_deadline_at": round_deadline_at,
     })))
 }
 
@@ -399,8 +426,66 @@ async fn record_result(
     }
     let ok = store.record_result(id, req.match_index, req.winner.clone(), req.loser.clone()).await;
     if !ok { return Err(StatusCode::NOT_FOUND); }
-    info!("[tournament] Match {} of tournament {} won by {}", req.match_index, id, req.winner);
+    if let Some(ref reason) = req.reason {
+        info!("[tournament] Match {} of tournament {} won by {} (reason: {})", req.match_index, id, req.winner, reason);
+    } else {
+        info!("[tournament] Match {} of tournament {} won by {}", req.match_index, id, req.winner);
+    }
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// POST /admin/tournament/:id/advance-round — manually advance stuck Swiss round.
+/// Should only be called when all matches in the current round are Completed but
+/// the scheduler hasn't auto-advanced (e.g., backend restart cleared in-memory state).
+async fn advance_round(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let store = &state.tournament_store;
+    let tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    // Verify all current-round matches are completed before forcing advance
+    let current_round = tournament.swiss_data.as_ref().map(|s| s.current_round).unwrap_or(0);
+    let all_done = tournament.matches.iter().flatten()
+        .filter(|m| m.round == current_round as u8)
+        .all(|m| m.status == crate::signing::storage::tournament::MatchStatus::Completed);
+
+    if !all_done {
+        warn!("[tournament] advance-round blocked — not all round-{} matches are complete for tournament {}", current_round, id);
+        return Err(StatusCode::CONFLICT);
+    }
+
+    // Ask the SwissService to pair the next round
+    match state.swiss_service.start_round(id).await {
+        Ok(round) => {
+            info!("[tournament] Admin advanced tournament {} to round {}", id, round.round);
+            Ok(Json(serde_json::json!({ "ok": true, "new_round": round.round })))
+        }
+        Err(e) => {
+            warn!("[tournament] advance-round failed for {}: {:?}", id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// POST /admin/tournament/:id/reseed — reorder player list before tournament starts.
+async fn reseed_players(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<ReseedReq>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let store = &state.tournament_store;
+    let updated = store.update(id, |t| {
+        if t.status != crate::signing::storage::tournament::TournamentStatus::Registration {
+            return; // only allowed pre-start
+        }
+        t.players = req.players.clone();
+    }).await;
+    if !updated {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    info!("[tournament] Players reseeded for tournament {}", id);
+    Ok(Json(serde_json::json!({ "ok": true, "player_count": req.players.len() })))
 }
 
 /// POST /admin/tournament/:id/set-match-game-id - Sets the game ID for a match.
@@ -454,6 +539,11 @@ async fn initialize_swiss_tournament(
         rounds: Vec::new(),
         results: Vec::new(),
         standings: Vec::new(),
+        round_deadline_at: None,
+        absent_players: Vec::new(),
+        withdrawn_players: Vec::new(),
+        forbidden_pairs: Vec::new(),
+        manual_pairings_next_round: Vec::new(),
     });
 
     store.create(seeded_tournament).await;
@@ -539,7 +629,8 @@ async fn join_tournament(
         slot = Some(t.players.len());
         t.players.push(player.to_string());
         t.player_elos.push(elo);
-        t.prize_pool += t.entry_fee_lamports;
+        // Prize contribution = entry_fee minus platform_fee (50p goes to treasury, £2.50 to pot)
+        t.prize_pool += t.entry_fee_lamports.saturating_sub(t.platform_fee_lamports);
         // Check if tournament just filled
         if t.players.len() == t.max_players as usize {
             just_full = true;
@@ -782,6 +873,63 @@ pub fn tournament_routes() -> Router<AppState> {
 }
 
 /// Admin-only tournament management routes.
+/// POST /admin/tournament/:id/set-round-deadline — set deadline Unix timestamp for the current round.
+#[derive(Deserialize)]
+struct SetRoundDeadlineReq {
+    /// Unix timestamp (seconds) when the round must end. Pass null to clear.
+    deadline_at: Option<i64>,
+}
+
+async fn set_round_deadline(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<SetRoundDeadlineReq>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let updated = state.tournament_store.update(id, |t| {
+        if let Some(ref mut swiss) = t.swiss_data {
+            swiss.round_deadline_at = req.deadline_at;
+        }
+    }).await;
+    if !updated { return Err(StatusCode::NOT_FOUND); }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// POST /admin/tournament/:id/import-players-csv — bulk-import players from CSV body.
+/// CSV format: one wallet address per line (or comma-separated), skips empty lines.
+async fn import_players_csv(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let csv_text = std::str::from_utf8(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let players: Vec<String> = csv_text
+        .lines()
+        .flat_map(|line| line.split(','))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if players.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    let updated = state.tournament_store.update(id, |t| {
+        for p in &players {
+            if !t.players.contains(p) {
+                t.players.push(p.clone());
+                results.push(serde_json::json!({ "player": p, "status": "added" }));
+            } else {
+                results.push(serde_json::json!({ "player": p, "status": "already_registered" }));
+            }
+        }
+    }).await;
+
+    if !updated { return Err(StatusCode::NOT_FOUND); }
+    info!("[tournament] Bulk CSV import: {} players processed for tournament {}", players.len(), id);
+    Ok(Json(serde_json::json!({ "ok": true, "results": results })))
+}
+
 pub fn admin_tournament_routes() -> Router<AppState> {
     Router::new()
         .route("/create", post(create_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
@@ -791,6 +939,10 @@ pub fn admin_tournament_routes() -> Router<AppState> {
         .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
         .route("/{id}/cancel", post(build_cancel_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
         .route("/{id}/gossip-status", get(get_gossip_status).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/advance-round", post(advance_round).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/reseed", post(reseed_players).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/set-round-deadline", post(set_round_deadline).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/{id}/import-players-csv", post(import_players_csv).layer(axum::middleware::from_fn(admin_auth_middleware)))
 }
 
 // ── Item 7: Tournament session routing ───────────────────────────────────────
@@ -870,7 +1022,8 @@ mod tests {
         let req = CreateTournamentReq {
             tournament_id: 1,
             name: "Test Tournament".to_string(),
-            entry_fee_lamports: 1000000,
+            entry_fee_lamports: Some(1000000),
+            platform_fee_lamports: None,
             max_players: 16,
             format: "SingleElimination".to_string(),
             swiss_rounds: None,
@@ -994,7 +1147,8 @@ mod tests {
             let req = CreateTournamentReq {
                 tournament_id: 1,
                 name: "Test Tournament".to_string(),
-                entry_fee_lamports: 1000000,
+                entry_fee_lamports: Some(1000000),
+                platform_fee_lamports: None,
                 max_players: count,
                 format: "SingleElimination".to_string(),
                 swiss_rounds: None,
@@ -1016,7 +1170,8 @@ mod tests {
         let req_large = CreateTournamentReq {
             tournament_id: 1,
             name: "Test Tournament".to_string(),
-            entry_fee_lamports: 1000000,
+            entry_fee_lamports: Some(1000000),
+            platform_fee_lamports: None,
             max_players: 16,
             format: "SingleElimination".to_string(),
             swiss_rounds: None,
@@ -1051,7 +1206,8 @@ mod tests {
         let req_small = CreateTournamentReq {
             tournament_id: 1,
             name: "Test Tournament".to_string(),
-            entry_fee_lamports: 1000000,
+            entry_fee_lamports: Some(1000000),
+            platform_fee_lamports: None,
             max_players: 8,
             format: "SingleElimination".to_string(),
             swiss_rounds: None,
@@ -1083,12 +1239,13 @@ mod tests {
     #[test]
     fn test_entry_fee_lamports_validation() {
         // Test reasonable entry fee ranges
-        let valid_fees = vec![0, 1000000, 5000000, 10000000];
+        let valid_fees = vec![0u64, 1000000, 5000000, 10000000];
         for fee in valid_fees {
             let req = CreateTournamentReq {
                 tournament_id: 1,
                 name: "Test Tournament".to_string(),
-                entry_fee_lamports: fee,
+                entry_fee_lamports: Some(fee),
+                platform_fee_lamports: None,
                 max_players: 16,
                 format: "SingleElimination".to_string(),
                 swiss_rounds: None,
@@ -1100,7 +1257,7 @@ mod tests {
                 scheduled_at: None,
                 kyc_required: false,
             };
-            assert_eq!(req.entry_fee_lamports, fee);
+            assert_eq!(req.entry_fee_lamports, Some(fee));
         }
     }
 
@@ -1112,7 +1269,8 @@ mod tests {
             let req = CreateTournamentReq {
                 tournament_id: id,
                 name: "Test Tournament".to_string(),
-                entry_fee_lamports: 1000000,
+                entry_fee_lamports: Some(1000000),
+                platform_fee_lamports: None,
                 max_players: 16,
                 format: "SingleElimination".to_string(),
                 swiss_rounds: None,

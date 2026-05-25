@@ -25,43 +25,9 @@ pub struct JoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Get country fee based on country code and match type.
-/// Returns 0 for Free games, otherwise returns the country-specific fee.
-fn get_country_fee(country: &str, match_type: MatchType) -> u64 {
-    if match_type == MatchType::Free {
-        return 0;
-    }
-    
-    match country {
-        "GB" => UK_FEE_LAMPORTS,
-        "BR" => BRAZIL_FEE_LAMPORTS,
-        "CA" => CANADA_FEE_LAMPORTS,
-        "DE" => GERMANY_FEE_LAMPORTS,
-        _ => 0, // Default to 0 for unsupported countries
-    }
-}
-
-/// Apply cross-border fee logic: if players are from different countries, use the lower fee.
-fn apply_cross_border_fee_logic(
-    white_country: &str,
-    black_country: &str,
-    white_fee: u64,
-    black_fee: u64,
-) -> u64 {
-    if white_country != black_country {
-        // Different countries - use the lower fee
-        white_fee.min(black_fee)
-    } else {
-        // Same country - use the standard fee
-        white_fee
-    }
-}
-
 pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();
-    let player_country = &ctx.accounts.player_profile.country;
-    let white_country = &ctx.accounts.white_profile.country;
     let fee_payer = ctx.accounts.fee_payer.key();
 
     require!(
@@ -81,17 +47,7 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
         GameErrorCode::FeePayerMismatch
     );
 
-    // --- Cross-Border Fee Logic ---
-    // Calculate fee for both countries
-    let white_fee = get_country_fee(white_country, game.match_type.clone());
-    let black_fee = get_country_fee(player_country, game.match_type.clone());
-    
-    // Apply cross-border logic: lower fee if countries differ
-    let final_fee = apply_cross_border_fee_logic(white_country, player_country, white_fee, black_fee);
-    
-    // Update game's country fee to the cross-border adjusted fee
-    game.country_fee = final_fee;
-
+    // Platform fee was set at creation time from live SOL/GBP rate — no recalculation needed.
     game.black = player;
     game.status = GameStatus::Active;
     game.fees_advanced = game.fees_advanced.checked_add(CREATE_GAME_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;

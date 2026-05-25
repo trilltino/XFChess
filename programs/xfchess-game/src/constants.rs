@@ -111,24 +111,15 @@ pub const CLAIM_PRIZE_COST: u64 = 5_000;
 pub const MARGIN_BPS: u16 = 25; // 0.25% of wager pool, priority-fee spike insurance
 
 // ---------------------------------------------------------------------------
-// Regional treasury fees (in lamports)
+// Platform fees
 // ---------------------------------------------------------------------------
-// Backend handles local currency conversion, contract uses lamports for on-chain validation
+// All fees are universal (no regional differentiation).
+// The backend calculates live lamport amounts from the SOL/GBP rate and passes
+// them as instruction parameters — the program stores and enforces them but
+// never hardcodes a currency-specific value.
 
-/// UK: 50p GBP per wager/tournament game (backend converts to lamports)
-pub const UK_FEE_LAMPORTS: u64 = 50_000_000; // 0.05 SOL (~50p GBP)
-
-/// Brazil: 20p BRL per wager/tournament game (backend converts to lamports)
-pub const BRAZIL_FEE_LAMPORTS: u64 = 10_000_000; // 0.01 SOL (~20p BRL)
-
-/// Canada: 40 cents CAD per wager/tournament game (backend converts to lamports)
-pub const CANADA_FEE_LAMPORTS: u64 = 40_000_000; // 0.04 SOL (~40c CAD)
-
-/// Germany: 30 cents EUR per wager/tournament game (backend converts to lamports)
-pub const GERMANY_FEE_LAMPORTS: u64 = 30_000_000; // 0.03 SOL (~30c EUR)
-
-/// Platform fee per player in lamports (approximately £0.50, assuming 1 SOL ≈ £125, so £0.50 ≈ 0.004 SOL = 4,000,000 lamports)
-pub const PLATFORM_FEE_LAMPORTS: u64 = 4_000_000;
+/// Flat infrastructure fee charged when the dispute authority resolves a contested game.
+/// This is a fixed cost for the resolution service — not a percentage rake on the pot.
 
 /// Flat infrastructure fee charged when the dispute authority resolves a contested game.
 /// This is a fixed cost for the resolution service — not a percentage rake on the pot.

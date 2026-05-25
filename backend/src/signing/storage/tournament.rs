@@ -23,6 +23,21 @@ pub struct SwissStorageData {
     pub rounds: Vec<swiss_pairing::SwissRound>,
     pub results: Vec<(u8, u16, swiss_pairing::MatchResult)>,
     pub standings: Vec<swiss_pairing::StandingsEntry>,
+    /// Unix timestamp (seconds) when the current round must end. None = no deadline set.
+    #[serde(default)]
+    pub round_deadline_at: Option<i64>,
+    /// Player IDs marked absent for the current round
+    #[serde(default)]
+    pub absent_players: Vec<String>,
+    /// Player IDs permanently withdrawn from the tournament
+    #[serde(default)]
+    pub withdrawn_players: Vec<String>,
+    /// Player pairs that must not be matched
+    #[serde(default)]
+    pub forbidden_pairs: Vec<(String, String)>,
+    /// Manual pairings to apply in the next round (cleared after start_round)
+    #[serde(default)]
+    pub manual_pairings_next_round: Vec<swiss_pairing::ManualPairing>,
 }
 
 /// Tournament lifecycle status.

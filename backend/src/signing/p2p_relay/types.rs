@@ -18,6 +18,8 @@ pub struct P2PGameAnnouncement {
     pub username: Option<String>,
     pub elo: Option<u16>,
     pub region: Option<String>,
+    /// bcrypt hash of the room password; None = public room
+    pub password_hash: Option<String>,
 }
 
 /// Game status in the relay system
@@ -46,6 +48,14 @@ pub struct GameListing {
     pub username: Option<String>,
     pub elo: Option<u16>,
     pub region: Option<String>,
+    /// Always 2 for 1v1; reserved for future variants
+    pub capacity: u8,
+    /// 1 = waiting for opponent, 2 = full
+    pub players_joined: u8,
+    /// Seconds until the lobby expires if no heartbeat arrives (~300 total)
+    pub ttl_seconds: i64,
+    /// True when the room has a password
+    pub is_private: bool,
 }
 
 /// Internal active game state
@@ -56,6 +66,8 @@ pub struct ActiveGame {
     pub host_messages: Vec<String>, // JSON-serialized moves
     pub joiner_messages: Vec<String>,
     pub last_activity: DateTime<Utc>,
+    /// Pending friend-lobby invites (node IDs that were invited)
+    pub pending_invites: Vec<String>,
 }
 
 // Request/Response Types
@@ -73,6 +85,8 @@ pub struct AnnounceGameRequest {
     pub username: Option<String>,
     pub elo: Option<u16>,
     pub region: Option<String>,
+    /// Optional plaintext password; hashed server-side with bcrypt
+    pub password: Option<String>,
 }
 
 /// Response to game announcement
@@ -86,6 +100,16 @@ pub struct AnnounceGameResponse {
 pub struct JoinGameRequest {
     pub game_id: String,
     pub joiner_node_id: String,
+    /// Must match room password for private games
+    pub password: Option<String>,
+}
+
+/// Request sent by the host to accept an incoming join — separate from JoinGameRequest
+/// so the host_node_id field is semantically unambiguous and cannot be confused with a joiner ID.
+#[derive(Debug, Deserialize)]
+pub struct AcceptJoinReq {
+    pub game_id: String,
+    pub host_node_id: String,
 }
 
 /// Response to join request

@@ -17,3 +17,4 @@ pub use types::*;
 /// Re-export core functions for convenience
 pub use pairing::generate_pairings;
 pub use standings::calculate_standings;
+pub use types::{ManualPairing, PairingConfig};

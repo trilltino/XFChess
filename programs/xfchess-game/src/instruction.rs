@@ -7,7 +7,7 @@ pub struct CreateGame {
     pub game_id: u64,
     pub wager_amount: u64,
     pub match_type: crate::state::game::MatchType,
-    pub country: String,
+    pub platform_fee: u64,
     pub base_time_seconds: u64,
     pub increment_seconds: u16,
 }
@@ -178,7 +178,7 @@ pub struct SessionCreateGame {
     pub game_id: u64,
     pub wager_amount: u64,
     pub match_type: crate::state::game::MatchType,
-    pub country: String,
+    pub platform_fee: u64,
     pub base_time_seconds: u64,
     pub increment_seconds: u16,
 }

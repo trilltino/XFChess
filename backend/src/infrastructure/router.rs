@@ -15,6 +15,7 @@ use crate::signing::routes::dispute::{dispute_routes, admin_dispute_routes};
 use crate::signing::routes::archive::archive_routes;
 use crate::signing::routes::admin::admin_routes;
 use crate::signing::routes::chat::routes as chat_routes;
+use crate::signing::social::routes::social_routes;
 use crate::infrastructure::auth_middleware::require_api_key;
 
 /// Builds the complete application router by merging all sub-routers.
@@ -75,6 +76,10 @@ pub fn build_app_router(
             app_state.metrics.export_prometheus_format()
         }));
 
+    // Social (friends, presence, lobby invites)
+    let social_router = social_routes(signing_state.invite_store.clone())
+        .with_state(signing_state.clone());
+
     // Merge all routers and add CORS
     signing_router
         .merge(tournament_router)
@@ -87,6 +92,7 @@ pub fn build_app_router(
         .merge(archive_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
         .merge(admin_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
         .merge(chat_routes().with_state(signing_state.clone()))
+        .merge(social_router)
         .layer(
             tower_http::cors::CorsLayer::permissive()
         )

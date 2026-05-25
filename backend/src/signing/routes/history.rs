@@ -20,6 +20,7 @@ pub fn history_routes() -> Router<AppState> {
         .route("/games/history/username/{username}", get(get_game_history_by_username))
         .route("/games/moves/{game_id}", get(get_game_moves))
         .route("/games/{game_id}/pgn", get(get_game_pgn))
+        .route("/ratings/history/{wallet}", get(get_ratings_history))
 }
  
 pub async fn get_game_history(
@@ -65,6 +66,45 @@ pub async fn get_game_moves(
     })?;
 
     Ok(Json(serde_json::json!({ "moves": moves })))
+}
+
+/// GET /ratings/history/{wallet} — Returns the last 50 game results for ELO chart.
+/// Each entry: {game_id, result: "win"|"loss"|"draw"|"unknown", opponent, timestamp, stake_amount}
+pub async fn get_ratings_history(
+    State(state): State<AppState>,
+    Path(wallet): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let pool = state.store.pool();
+    let repo = GameRepository::new(pool);
+
+    let games = repo.get_games_by_player(&wallet, 50).await.map_err(|e| {
+        error!("[ratings/history] DB query failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let history: Vec<serde_json::Value> = games.iter().map(|g| {
+        let result = match g.winner.as_deref() {
+            Some(w) if w == wallet => "win",
+            Some(_) => "loss",
+            None if g.status == "draw" => "draw",
+            None => "unknown",
+            _ => "unknown",
+        };
+        let opponent = if g.player_white.as_deref() == Some(wallet.as_str()) {
+            g.player_black.clone()
+        } else {
+            g.player_white.clone()
+        };
+        serde_json::json!({
+            "game_id": g.id,
+            "result": result,
+            "opponent": opponent,
+            "timestamp": g.start_time,
+            "stake_amount": g.stake_amount,
+        })
+    }).collect();
+
+    Ok(Json(serde_json::json!({ "history": history })))
 }
 
 /// GET /games/{game_id}/pgn — Returns the PGN text for a game.

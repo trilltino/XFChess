@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use swiss_pairing::{
-    calculate_standings, generate_pairings, Color, MatchResult, SwissPlayer, SwissRound,
-    StandingsEntry,
+    calculate_standings, generate_pairings, Color, ManualPairing, MatchResult, PairingConfig,
+    SwissPlayer, SwissRound, StandingsEntry,
 };
 use tracing::{info, warn};
 
@@ -39,6 +39,14 @@ pub struct SwissData {
     pub results: Vec<(u8, u16, MatchResult)>,
     /// Current standings
     pub standings: Vec<StandingsEntry>,
+    /// Player IDs absent for the current round (rejoins allowed)
+    pub absent_players: Vec<String>,
+    /// Player IDs permanently withdrawn (never paired again, excluded from Buchholz)
+    pub withdrawn_players: Vec<String>,
+    /// Pairs that must never be matched
+    pub forbidden_pairs: Vec<(String, String)>,
+    /// Manual pairings applied in the next start_round call (then cleared)
+    pub manual_pairings_next_round: Vec<ManualPairing>,
 }
 
 /// Swiss tournament service
@@ -86,6 +94,11 @@ impl SwissService {
                     rounds: Vec::new(),
                     results: Vec::new(),
                     standings: Vec::new(),
+                    round_deadline_at: None,
+                    absent_players: Vec::new(),
+                    withdrawn_players: Vec::new(),
+                    forbidden_pairs: Vec::new(),
+                    manual_pairings_next_round: Vec::new(),
                 });
                 t.status = TournamentStatus::Active;
                 t.started_at = Some(chrono::Utc::now().timestamp());
@@ -118,16 +131,23 @@ impl SwissService {
         // Build player list with current scores
         let players = self.build_swiss_players(&tournament).await?;
 
-        // Generate pairings
-        let round = generate_pairings(next_round, &players, swiss_data.total_rounds)
+        // Build pairing config from stored forbidden pairs and manual overrides
+        let config = PairingConfig {
+            forbidden: swiss_data.forbidden_pairs.clone(),
+            manual_overrides: swiss_data.manual_pairings_next_round.clone(),
+        };
+
+        // Generate pairings (absent/withdrawn flags already set on SwissPlayer)
+        let round = generate_pairings(next_round, &players, swiss_data.total_rounds, &config)
             .map_err(|e| SwissServiceError::PairingError(e.to_string()))?;
 
-        // Update tournament state
+        // Update tournament state — clear manual pairings after use
         self.store
             .update(tournament_id, |t| {
                 if let Some(ref mut sd) = t.swiss_data {
                     sd.current_round = next_round;
                     sd.rounds.push(round.clone());
+                    sd.manual_pairings_next_round.clear();
                 }
                 // status and started_at are already set by start_tournament().
             })
@@ -214,6 +234,11 @@ impl SwissService {
                     rounds: swiss_data.rounds.clone(),
                     results: swiss_data.results.clone(),
                     standings: standings.clone(),
+                    round_deadline_at: None,
+                    absent_players: swiss_data.absent_players.clone(),
+                    withdrawn_players: swiss_data.withdrawn_players.clone(),
+                    forbidden_pairs: swiss_data.forbidden_pairs.clone(),
+                    manual_pairings_next_round: swiss_data.manual_pairings_next_round.clone(),
                 });
 
                 // If last round, mark complete
@@ -306,15 +331,15 @@ impl SwissService {
         };
 
         let msg_result = match result {
-            MatchResult::WhiteWin => SwissMessageResult::Win {
+            MatchResult::WhiteWin | MatchResult::ForfeitWhiteWin => SwissMessageResult::Win {
                 winner: "white".to_string(),
             },
-            MatchResult::BlackWin => SwissMessageResult::Win {
+            MatchResult::BlackWin | MatchResult::ForfeitBlackWin => SwissMessageResult::Win {
                 winner: "black".to_string(),
             },
             MatchResult::Draw => SwissMessageResult::Draw,
-            _ => {
-                warn!("[swiss] Unknown match result variant");
+            MatchResult::Bye => {
+                warn!("[swiss] Bye result in broadcast_result_recorded — skipping");
                 return;
             }
         };
@@ -478,8 +503,11 @@ impl SwissService {
                         score: 0.0,
                         color_history: Vec::new(),
                         opponents: Vec::new(),
-                        bye_count: 0,
-                        float_status: swiss_pairing::FloatStatus::None,
+                        bye_rounds: Vec::new(),
+                        float_history: Vec::new(),
+                        absent: swiss_data.absent_players.contains(id),
+                        withdrawn: swiss_data.withdrawn_players.contains(id),
+                        forfeit_round: None,
                     },
                 )
             })
@@ -514,27 +542,316 @@ impl SwissService {
             }
         }
 
-        // Handle byes
+        // Handle byes — record which round each bye occurred in
         for round in &swiss_data.rounds {
             for bye_player_id in &round.byes {
                 if let Some(player) = players.get_mut(bye_player_id) {
                     player.score += 1.0; // Bye = full point
-                    player.bye_count += 1;
+                    player.bye_rounds.push(round.round);
                 }
             }
         }
 
-        // Rebuild float_status from the most recent completed round so the
-        // pairing engine can avoid floating the same player down twice.
-        if let Some(last_round) = swiss_data.rounds.last() {
-            for float_down_id in &last_round.float_downs {
-                if let Some(player) = players.get_mut(float_down_id) {
-                    player.float_status = swiss_pairing::FloatStatus::Down;
-                }
+        // Rebuild float_history per round so consecutive float prevention works
+        for round in &swiss_data.rounds {
+            for (id, player) in players.iter_mut() {
+                let float = if round.float_downs.contains(id) {
+                    swiss_pairing::FloatStatus::Down
+                } else if round.float_ups.contains(id) {
+                    swiss_pairing::FloatStatus::Up
+                } else {
+                    swiss_pairing::FloatStatus::None
+                };
+                player.float_history.push(float);
             }
         }
 
         Ok(players.into_values().collect())
+    }
+
+    // ── Gap 1: Absent flag + forfeit ──────────────────────────────────────────
+
+    /// Mark a player absent for the current round and forfeit their pairing if
+    /// one already exists.
+    pub async fn mark_absent(
+        &self,
+        tournament_id: u64,
+        player_id: &str,
+        round: u8,
+    ) -> Result<(), SwissServiceError> {
+        let tournament = self
+            .store
+            .get(tournament_id)
+            .await
+            .ok_or(SwissServiceError::TournamentNotFound)?;
+
+        let swiss_data = tournament
+            .swiss_data
+            .clone()
+            .ok_or(SwissServiceError::NotSwissFormat)?;
+
+        // Find any existing pairing for this player in the given round
+        let forfeit_result: Option<(u16, MatchResult)> = swiss_data
+            .rounds
+            .iter()
+            .find(|r| r.round == round)
+            .and_then(|r| {
+                r.pairings.iter().find(|p| p.white == player_id || p.black == player_id)
+            })
+            .map(|p| {
+                let result = if p.white == player_id {
+                    MatchResult::ForfeitBlackWin // absent player was white → black wins
+                } else {
+                    MatchResult::ForfeitWhiteWin // absent player was black → white wins
+                };
+                (p.board, result)
+            });
+
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(ref mut sd) = t.swiss_data {
+                    if !sd.absent_players.contains(&player_id.to_string()) {
+                        sd.absent_players.push(player_id.to_string());
+                    }
+                    if let Some((board, result)) = forfeit_result {
+                        sd.results.push((round, board, result));
+                    }
+                }
+            })
+            .await;
+
+        Ok(())
+    }
+
+    // ── Gap 2: Withdrawal timing distinction ──────────────────────────────────
+
+    /// Permanently withdraw a player.
+    ///
+    /// If the player is already paired in the current round they become absent
+    /// (mid-round withdrawal) and gap 1 handles the forfeit. If they are not
+    /// yet paired they are fully removed from the pool and excluded from
+    /// future Buchholz calculations.
+    pub async fn withdraw_player(
+        &self,
+        tournament_id: u64,
+        player_id: &str,
+    ) -> Result<(), SwissServiceError> {
+        let tournament = self
+            .store
+            .get(tournament_id)
+            .await
+            .ok_or(SwissServiceError::TournamentNotFound)?;
+
+        let swiss_data = tournament
+            .swiss_data
+            .clone()
+            .ok_or(SwissServiceError::NotSwissFormat)?;
+
+        let current_round = swiss_data.current_round;
+
+        // Check if player is already paired in the current round
+        let is_paired_this_round = swiss_data
+            .rounds
+            .iter()
+            .find(|r| r.round == current_round)
+            .map(|r| r.pairings.iter().any(|p| p.white == player_id || p.black == player_id))
+            .unwrap_or(false);
+
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(ref mut sd) = t.swiss_data {
+                    if is_paired_this_round {
+                        // Mid-round: mark absent (gap 1 handles the forfeit separately)
+                        if !sd.absent_players.contains(&player_id.to_string()) {
+                            sd.absent_players.push(player_id.to_string());
+                        }
+                    }
+                    // Always mark withdrawn so they're excluded from future rounds
+                    if !sd.withdrawn_players.contains(&player_id.to_string()) {
+                        sd.withdrawn_players.push(player_id.to_string());
+                    }
+                }
+            })
+            .await;
+
+        Ok(())
+    }
+
+    // ── Gap 3: Late rejoin ────────────────────────────────────────────────────
+
+    /// Allow an absent (but not withdrawn) player to rejoin. The player is
+    /// eligible for the next start_round call. Cannot be used by withdrawn
+    /// players.
+    pub async fn rejoin_player(
+        &self,
+        tournament_id: u64,
+        player_id: &str,
+    ) -> Result<(), SwissServiceError> {
+        let tournament = self
+            .store
+            .get(tournament_id)
+            .await
+            .ok_or(SwissServiceError::TournamentNotFound)?;
+
+        let swiss_data = tournament
+            .swiss_data
+            .clone()
+            .ok_or(SwissServiceError::NotSwissFormat)?;
+
+        if swiss_data.withdrawn_players.contains(&player_id.to_string()) {
+            return Err(SwissServiceError::PlayerWithdrawn);
+        }
+        if !tournament.players.contains(&player_id.to_string()) {
+            return Err(SwissServiceError::PlayerNotFound(player_id.to_string()));
+        }
+
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(ref mut sd) = t.swiss_data {
+                    sd.absent_players.retain(|id| id != player_id);
+                }
+            })
+            .await;
+
+        Ok(())
+    }
+
+    // ── Gap 6: Forbidden pairings ─────────────────────────────────────────────
+
+    /// Add a forbidden pair — these two players will never be matched.
+    pub async fn add_forbidden_pair(
+        &self,
+        tournament_id: u64,
+        player_a: &str,
+        player_b: &str,
+    ) -> Result<(), SwissServiceError> {
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(ref mut sd) = t.swiss_data {
+                    let pair = (player_a.to_string(), player_b.to_string());
+                    if !sd.forbidden_pairs.contains(&pair) {
+                        sd.forbidden_pairs.push(pair);
+                    }
+                }
+            })
+            .await;
+        Ok(())
+    }
+
+    /// Remove a previously added forbidden pair.
+    pub async fn remove_forbidden_pair(
+        &self,
+        tournament_id: u64,
+        player_a: &str,
+        player_b: &str,
+    ) -> Result<(), SwissServiceError> {
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(ref mut sd) = t.swiss_data {
+                    sd.forbidden_pairs.retain(|(a, b)| {
+                        !((a == player_a && b == player_b) || (a == player_b && b == player_a))
+                    });
+                }
+            })
+            .await;
+        Ok(())
+    }
+
+    /// Queue a manual pairing to be applied in the next start_round call.
+    pub async fn add_manual_pairing(
+        &self,
+        tournament_id: u64,
+        white: &str,
+        black: &str,
+    ) -> Result<(), SwissServiceError> {
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(ref mut sd) = t.swiss_data {
+                    sd.manual_pairings_next_round.push(ManualPairing {
+                        white: white.to_string(),
+                        black: black.to_string(),
+                    });
+                }
+            })
+            .await;
+        Ok(())
+    }
+
+    /// Remove a queued manual pairing.
+    pub async fn remove_manual_pairing(
+        &self,
+        tournament_id: u64,
+        white: &str,
+        black: &str,
+    ) -> Result<(), SwissServiceError> {
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(ref mut sd) = t.swiss_data {
+                    sd.manual_pairings_next_round
+                        .retain(|mp| !(mp.white == white && mp.black == black));
+                }
+            })
+            .await;
+        Ok(())
+    }
+
+    // ── Gap 7: Manual result override ─────────────────────────────────────────
+
+    /// Override an existing result for a given (round, board). Recomputes all
+    /// standings from scratch after the change.
+    pub async fn override_result(
+        &self,
+        tournament_id: u64,
+        round: u8,
+        board: u16,
+        new_result: MatchResult,
+    ) -> Result<Vec<StandingsEntry>, SwissServiceError> {
+        let tournament = self
+            .store
+            .get(tournament_id)
+            .await
+            .ok_or(SwissServiceError::TournamentNotFound)?;
+
+        let mut swiss_data = tournament
+            .swiss_data
+            .clone()
+            .ok_or(SwissServiceError::NotSwissFormat)?;
+
+        // Replace the existing result or push if not present
+        let existing = swiss_data
+            .results
+            .iter_mut()
+            .find(|(r, b, _)| *r == round && *b == board);
+
+        if let Some(entry) = existing {
+            entry.2 = new_result;
+        } else {
+            swiss_data.results.push((round, board, new_result));
+        }
+
+        // Recompute standings from scratch
+        let players = self.build_swiss_players_with_results(&tournament, &swiss_data).await?;
+        let standings = calculate_standings(&players, &swiss_data.rounds, &swiss_data.results);
+        swiss_data.standings = standings.clone();
+
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(ref mut sd) = t.swiss_data {
+                    sd.results = swiss_data.results.clone();
+                    sd.standings = standings.clone();
+                }
+            })
+            .await;
+
+        // Broadcast updated standings
+        self.broadcast_standings_updated(tournament_id, &standings).await;
+
+        if let Some(hub) = &self.braid_hub {
+            let standings_json = serde_json::to_value(&standings).unwrap_or_default();
+            bridge::push_standings(hub, tournament_id, standings_json);
+        }
+
+        Ok(standings)
     }
 }
 
@@ -579,4 +896,7 @@ pub enum SwissServiceError {
 
     #[error("Invalid result format")]
     InvalidResult,
+
+    #[error("Player has permanently withdrawn and cannot rejoin")]
+    PlayerWithdrawn,
 }

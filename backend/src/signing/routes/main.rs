@@ -38,6 +38,9 @@ pub struct CreateSessionReq {
 #[derive(Serialize)]
 pub struct CreateSessionResp {
     pub session_pubkey: String,
+    /// Platform fee per game in lamports (20p GBP total = 10p per player × 2),
+    /// calculated from the live SOL/GBP rate at session creation time.
+    pub platform_fee_lamports: u64,
 }
 
 /// Request to activate a session with wallet-signed transaction.
@@ -166,8 +169,10 @@ pub async fn create_session(
         error!("[VPS] Failed to create session for game {}: {}", req.game_id, e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    info!("[VPS] Created session for game {} → {}", req.game_id, session_pubkey);
-    Ok(Json(CreateSessionResp { session_pubkey: session_pubkey.to_string() }))
+    // 10p per player × 2 players = 20p GBP total platform fee per game
+    let platform_fee_lamports = state.rate_cache.gbp_to_lamports(0.20).await.unwrap_or(0);
+    info!("[VPS] Created session for game {} → {} (fee: {} lamports)", req.game_id, session_pubkey, platform_fee_lamports);
+    Ok(Json(CreateSessionResp { session_pubkey: session_pubkey.to_string(), platform_fee_lamports }))
 }
 
 /// POST /session/activate - Activates a session with wallet-signed setup TX.
@@ -532,15 +537,31 @@ pub async fn get_player_profile(
     Path(pubkey): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<PlayerProfileResp>, StatusCode> {
-    let elo_data = state.elo_cache.get_elo(&pubkey).await.map_err(|e| {
-        warn!("Failed to fetch profile for {}: {}", pubkey, e);
+    // Try on-chain profile first (Solana PlayerProfile PDA)
+    match state.elo_cache.get_elo(&pubkey).await {
+        Ok(elo_data) => {
+            return Ok(Json(PlayerProfileResp {
+                elo: (elo_data.elo_rating / 100.0) as u32,
+                country: elo_data.country,
+                username: elo_data.username,
+            }));
+        }
+        Err(e) => {
+            warn!("[profile] On-chain lookup failed for {}: {} — falling back to DB", pubkey, e);
+        }
+    }
+
+    // Fall back to users_v2 (wallet registered via auth flow but no on-chain profile yet)
+    let repo = crate::db::repository::GameRepository::new(state.store.pool());
+    let username = repo.get_username(&pubkey).await.map_err(|_| {
+        warn!("[profile] No DB record for {}", pubkey);
         StatusCode::NOT_FOUND
     })?;
 
     Ok(Json(PlayerProfileResp {
-        elo: (elo_data.elo_rating / 100.0) as u32,
-        country: elo_data.country,
-        username: elo_data.username,
+        elo: 1200,
+        country: String::new(),
+        username,
     }))
 }
 
@@ -826,6 +847,7 @@ mod tests {
     fn test_create_session_resp_serialization() {
         let resp = CreateSessionResp {
             session_pubkey: "test_session_pubkey".to_string(),
+            platform_fee_lamports: 0,
         };
 
         let json = serde_json::to_string(&resp);

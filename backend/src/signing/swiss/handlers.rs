@@ -1,7 +1,8 @@
 //! HTTP handlers for Swiss-format tournaments.
 //!
 //! Exposes round management endpoints — start/current round, pairings,
-//! result recording, and standings — mounted under `/tournament/{id}/...`
+//! result recording, standings, absence/withdrawal, forbidden pairings,
+//! manual pairings, and result overrides — mounted under `/tournament/{id}/...`
 //! by the signing service router. Handlers delegate to [`SwissService`]
 //! for pairing generation, scoring, and state persistence, and translate
 //! service errors into appropriate HTTP status codes.
@@ -10,7 +11,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Json,
-    routing::{get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -19,22 +20,59 @@ use swiss_pairing::{MatchResult, SwissRound, StandingsEntry};
 use crate::signing::AppState;
 use super::service::SwissServiceError;
 
-/// Request to record a match result
+// ── Request / response types ──────────────────────────────────────────────────
+
 #[derive(Deserialize)]
 pub struct RecordResultReq {
     pub round: u8,
     pub board: u16,
-    /// Result: "1-0", "0-1", "0.5-0.5"
+    /// Result: "1-0", "0-1", "0.5-0.5", "forfeit-white", "forfeit-black"
     pub result: String,
 }
 
-/// Response with current round
+#[derive(Deserialize)]
+pub struct AbsentReq {
+    pub player_id: String,
+    pub round: u8,
+}
+
+#[derive(Deserialize)]
+pub struct WithdrawReq {
+    pub player_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct RejoinReq {
+    pub player_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct ForbiddenPairReq {
+    pub player_a: String,
+    pub player_b: String,
+}
+
+#[derive(Deserialize)]
+pub struct ManualPairReq {
+    pub white: String,
+    pub black: String,
+}
+
+#[derive(Deserialize)]
+pub struct OverrideResultReq {
+    pub round: u8,
+    pub board: u16,
+    pub result: String,
+}
+
 #[derive(Serialize)]
 pub struct CurrentRoundRes {
     pub round: u8,
     pub total_rounds: u8,
     pub is_active: bool,
 }
+
+// ── Router ───────────────────────────────────────────────────────────────────
 
 /// Create Swiss tournament routes
 pub fn swiss_routes() -> Router<AppState> {
@@ -43,69 +81,85 @@ pub fn swiss_routes() -> Router<AppState> {
         .route("/{id}/current-round", get(get_current_round))
         .route("/{id}/pairings/{round}", get(get_pairings))
         .route("/{id}/result", post(record_result))
+        .route("/{id}/result", put(override_result))
         .route("/{id}/standings", get(get_standings))
+        // Gap 1: absent + forfeit
+        .route("/{id}/absent", post(mark_absent))
+        // Gap 2: withdrawal
+        .route("/{id}/withdraw", post(withdraw_player))
+        // Gap 3: late rejoin
+        .route("/{id}/rejoin", post(rejoin_player))
+        // Gap 6: forbidden pairings and manual overrides
+        .route("/{id}/forbidden-pair", post(add_forbidden_pair))
+        .route("/{id}/forbidden-pair", delete(remove_forbidden_pair))
+        .route("/{id}/manual-pair", post(add_manual_pairing))
+        .route("/{id}/manual-pair", delete(remove_manual_pairing))
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn parse_result(s: &str) -> Option<MatchResult> {
+    match s {
+        "1-0" | "1-0 " => Some(MatchResult::WhiteWin),
+        "0-1" | "0-1 " => Some(MatchResult::BlackWin),
+        "0.5-0.5" | "1/2-1/2" | "draw" => Some(MatchResult::Draw),
+        "bye" | "BYE" => Some(MatchResult::Bye),
+        "forfeit-white" | "forfeit_white" => Some(MatchResult::ForfeitWhiteWin),
+        "forfeit-black" | "forfeit_black" => Some(MatchResult::ForfeitBlackWin),
+        _ => None,
+    }
+}
+
+fn swiss_err(e: SwissServiceError) -> StatusCode {
+    match e {
+        SwissServiceError::TournamentNotFound => StatusCode::NOT_FOUND,
+        SwissServiceError::NotSwissFormat => StatusCode::BAD_REQUEST,
+        SwissServiceError::TournamentComplete => StatusCode::CONFLICT,
+        SwissServiceError::InvalidRound(_) => StatusCode::BAD_REQUEST,
+        SwissServiceError::InvalidBoard(_) => StatusCode::BAD_REQUEST,
+        SwissServiceError::PlayerNotFound(_) => StatusCode::NOT_FOUND,
+        SwissServiceError::PlayerWithdrawn => StatusCode::CONFLICT,
+        e => {
+            tracing::error!("Swiss service error: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
 
 /// POST /tournament/{id}/round - Start next round
 async fn start_round(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<SwissRound>, StatusCode> {
-    let service = &state.swiss_service;
-    match service.start_round(id).await {
-        Ok(round) => {
-            tracing::info!("Started round {} for tournament {}", round.round, id);
-            Ok(Json(round))
-        }
-        Err(SwissServiceError::TournamentNotFound) => Err(StatusCode::NOT_FOUND),
-        Err(SwissServiceError::NotSwissFormat) => Err(StatusCode::BAD_REQUEST),
-        Err(SwissServiceError::TournamentComplete) => Err(StatusCode::CONFLICT),
-        Err(e) => {
-            tracing::error!("Error starting round: {:?}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
+    state.swiss_service.start_round(id).await.map(Json).map_err(swiss_err)
 }
 
-/// GET /tournament/{id}/current-round - Get current round info
+/// GET /tournament/{id}/current-round
 async fn get_current_round(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<CurrentRoundRes>, StatusCode> {
     let service = &state.swiss_service;
-    match service.get_current_round(id).await {
-        Ok(round) => {
-            let total_rounds = service.get_total_rounds(id).await.unwrap_or(0);
-            Ok(Json(CurrentRoundRes {
-                round,
-                total_rounds,
-                is_active: round > 0,
-            }))
-        }
-        Err(SwissServiceError::TournamentNotFound) => Err(StatusCode::NOT_FOUND),
-        Err(SwissServiceError::NotSwissFormat) => Err(StatusCode::BAD_REQUEST),
-        Err(e) => {
-            tracing::error!("Error getting current round: {:?}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
+    let round = service.get_current_round(id).await.map_err(swiss_err)?;
+    let total_rounds = service.get_total_rounds(id).await.unwrap_or(0);
+    Ok(Json(CurrentRoundRes {
+        round,
+        total_rounds,
+        is_active: round > 0,
+    }))
 }
 
-/// GET /tournament/{id}/pairings/{round} - Get pairings for a round
+/// GET /tournament/{id}/pairings/{round}
 async fn get_pairings(
     Path((id, round)): Path<(u64, u8)>,
     State(state): State<AppState>,
 ) -> Result<Json<SwissRound>, StatusCode> {
-    let service = &state.swiss_service;
-    match service.get_pairings(id, round).await {
-        Ok(Some(round_data)) => Ok(Json(round_data)),
+    match state.swiss_service.get_pairings(id, round).await {
+        Ok(Some(r)) => Ok(Json(r)),
         Ok(None) => Err(StatusCode::NOT_FOUND),
-        Err(SwissServiceError::TournamentNotFound) => Err(StatusCode::NOT_FOUND),
-        Err(SwissServiceError::NotSwissFormat) => Err(StatusCode::BAD_REQUEST),
-        Err(e) => {
-            tracing::error!("Error getting pairings: {:?}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
+        Err(e) => Err(swiss_err(e)),
     }
 }
 
@@ -115,45 +169,138 @@ async fn record_result(
     State(state): State<AppState>,
     Json(req): Json<RecordResultReq>,
 ) -> Result<Json<Vec<StandingsEntry>>, StatusCode> {
-    let service = &state.swiss_service;
-    // Parse result string
-    let result = match req.result.as_str() {
-        "1-0" | "1-0 " => MatchResult::WhiteWin,
-        "0-1" | "0-1 " => MatchResult::BlackWin,
-        "0.5-0.5" | "1/2-1/2" | "draw" => MatchResult::Draw,
-        "bye" | "BYE" => MatchResult::Bye,
-        _ => {
-            tracing::warn!("Invalid result format: {}", req.result);
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    };
-
-    match service.record_result(id, req.round, req.board, result).await {
-        Ok(standings) => Ok(Json(standings)),
-        Err(SwissServiceError::TournamentNotFound) => Err(StatusCode::NOT_FOUND),
-        Err(SwissServiceError::NotSwissFormat) => Err(StatusCode::BAD_REQUEST),
-        Err(SwissServiceError::InvalidRound(_)) => Err(StatusCode::BAD_REQUEST),
-        Err(SwissServiceError::InvalidBoard(_)) => Err(StatusCode::BAD_REQUEST),
-        Err(e) => {
-            tracing::error!("Error recording result: {:?}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
+    let result = parse_result(&req.result).ok_or_else(|| {
+        tracing::warn!("Invalid result format: {}", req.result);
+        StatusCode::BAD_REQUEST
+    })?;
+    state
+        .swiss_service
+        .record_result(id, req.round, req.board, result)
+        .await
+        .map(Json)
+        .map_err(swiss_err)
 }
 
-/// GET /tournament/{id}/standings - Get current standings
+/// GET /tournament/{id}/standings
 async fn get_standings(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<StandingsEntry>>, StatusCode> {
-    let service = &state.swiss_service;
-    match service.get_standings(id).await {
-        Ok(standings) => Ok(Json(standings)),
-        Err(SwissServiceError::TournamentNotFound) => Err(StatusCode::NOT_FOUND),
-        Err(SwissServiceError::NotSwissFormat) => Err(StatusCode::BAD_REQUEST),
-        Err(e) => {
-            tracing::error!("Error getting standings: {:?}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
+    state.swiss_service.get_standings(id).await.map(Json).map_err(swiss_err)
+}
+
+/// POST /tournament/{id}/absent  — Gap 1
+async fn mark_absent(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<AbsentReq>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .swiss_service
+        .mark_absent(id, &req.player_id, req.round)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(swiss_err)
+}
+
+/// POST /tournament/{id}/withdraw  — Gap 2
+async fn withdraw_player(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<WithdrawReq>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .swiss_service
+        .withdraw_player(id, &req.player_id)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(swiss_err)
+}
+
+/// POST /tournament/{id}/rejoin  — Gap 3
+async fn rejoin_player(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<RejoinReq>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .swiss_service
+        .rejoin_player(id, &req.player_id)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(swiss_err)
+}
+
+/// POST /tournament/{id}/forbidden-pair  — Gap 6
+async fn add_forbidden_pair(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<ForbiddenPairReq>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .swiss_service
+        .add_forbidden_pair(id, &req.player_a, &req.player_b)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(swiss_err)
+}
+
+/// DELETE /tournament/{id}/forbidden-pair  — Gap 6
+async fn remove_forbidden_pair(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<ForbiddenPairReq>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .swiss_service
+        .remove_forbidden_pair(id, &req.player_a, &req.player_b)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(swiss_err)
+}
+
+/// POST /tournament/{id}/manual-pair  — Gap 6
+async fn add_manual_pairing(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<ManualPairReq>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .swiss_service
+        .add_manual_pairing(id, &req.white, &req.black)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(swiss_err)
+}
+
+/// DELETE /tournament/{id}/manual-pair  — Gap 6
+async fn remove_manual_pairing(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<ManualPairReq>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .swiss_service
+        .remove_manual_pairing(id, &req.white, &req.black)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(swiss_err)
+}
+
+/// PUT /tournament/{id}/result  — Gap 7 (admin-gated result override)
+async fn override_result(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<OverrideResultReq>,
+) -> Result<Json<Vec<StandingsEntry>>, StatusCode> {
+    let result = parse_result(&req.result).ok_or_else(|| {
+        tracing::warn!("Invalid result format: {}", req.result);
+        StatusCode::BAD_REQUEST
+    })?;
+    state
+        .swiss_service
+        .override_result(id, req.round, req.board, result)
+        .await
+        .map(Json)
+        .map_err(swiss_err)
 }

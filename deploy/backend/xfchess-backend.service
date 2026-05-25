@@ -3,13 +3,14 @@ Description=XFChess Backend API
 After=network.target
 
 [Service]
-Type=simple
+Type=notify
 User=xfchess
 WorkingDirectory=/opt/xfchess
 ExecStart=/opt/xfchess/signing-server-http
 EnvironmentFile=/opt/xfchess/.env
-Restart=always
+Restart=on-failure
 RestartSec=5
+WatchdogSec=30
 
 # Harden: no privilege escalation, read-only filesystem except data dir
 NoNewPrivileges=true

@@ -276,7 +276,7 @@ function CredentialsStep({
                 </h2>
                 <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 6 }}>
                     {m === 'login'
-                        ? 'Sign in — then connect your wallet to play'
+                        ? 'Sign in â€” then connect your wallet to play'
                         : 'Create your on-chain identity'}
                 </p>
             </div>
@@ -310,7 +310,7 @@ function CredentialsStep({
                     type="password"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                     onKeyDown={e => e.key === 'Enter' && submit()}
                     onFocus={e => (e.target.style.borderColor = '#ad5c2f')}
                     onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
@@ -377,7 +377,7 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                     Connect Your Wallet
                 </h2>
                 <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 6 }}>
-                    Hey <strong style={{ color: '#fff' }}>{username}</strong> — connect your Solana wallet to retrieve your player profile and play wagered games.
+                    Hey <strong style={{ color: '#fff' }}>{username}</strong> â€” connect your Solana wallet to retrieve your player profile and play wagered games.
                 </p>
             </div>
 
@@ -440,7 +440,7 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                                 }}
                             >
                                 <img src={w.adapter.icon} alt={w.adapter.name} width={28} height={28} style={{ borderRadius: 6, opacity: 0.6 }} />
-                                <span style={{ flex: 1, color: 'rgba(255,255,255,0.45)' }}>{w.adapter.name} — not installed</span>
+                                <span style={{ flex: 1, color: 'rgba(255,255,255,0.45)' }}>{w.adapter.name} â€” not installed</span>
                                 <span style={{ fontSize: 11, color: '#ad5c2f', fontWeight: 700 }}>Install ?</span>
                             </a>
                         );
@@ -675,7 +675,7 @@ function ProfileStep() {
                     }
                 }
             } catch {
-                // Not fatal — fall through to on-chain lookup.
+                // Not fatal â€” fall through to on-chain lookup.
             }
 
             const program = getAnchorProgram(connection, wallet);
@@ -717,7 +717,7 @@ function ProfileStep() {
                 localStorage.setItem('xfchess_username', auth.username);
                 localStorage.setItem('xfchess_wallet', wallet.publicKey.toBase58());
             } catch (e: any) {
-                // 409 = already registered — existing token still valid
+                // 409 = already registered â€” existing token still valid
                 if (!e.message?.includes('409') && !e.message?.includes('already')) {
                     console.warn("Backend registration skipped/failed:", e);
                 }
@@ -752,7 +752,7 @@ function ProfileStep() {
     };
 
     const pk = wallet.publicKey?.toBase58() ?? '';
-    const short = pk ? `${pk.slice(0, 6)}…${pk.slice(-4)}` : '';
+    const short = pk ? `${pk.slice(0, 6)}â€¦${pk.slice(-4)}` : '';
 
     return (
         <div style={{ ...card, maxWidth: 520 }}>
@@ -761,7 +761,7 @@ function ProfileStep() {
             {loading && (
                 <div style={{ textAlign: 'center', padding: '40px 0' }}>
                     <Loader2 size={32} style={{ color: '#ad5c2f', animation: 'spin 0.8s linear infinite' }} />
-                    <p style={{ color: 'rgba(255,255,255,0.4)', marginTop: 12, fontSize: 13 }}>Loading on-chain profile…</p>
+                    <p style={{ color: 'rgba(255,255,255,0.4)', marginTop: 12, fontSize: 13 }}>Loading on-chain profileâ€¦</p>
                 </div>
             )}
 

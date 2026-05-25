@@ -78,18 +78,18 @@ fn piece_to_zobrist_idx(piece: i8) -> usize {
     piece_type + color_offset
 }
 
-/// Convert hash to TT index
-pub fn hash_to_index(hash: &BitBuffer192) -> usize {
+/// Convert hash to TT index using the game's runtime capacity.
+pub fn hash_to_index(hash: &BitBuffer192, capacity: usize) -> usize {
     let mut index = 0usize;
     for (i, &byte) in hash.iter().take(4).enumerate() {
         index |= (byte as usize) << (i * 8);
     }
-    index % TTE_SIZE
+    index % capacity
 }
 
 /// Probe transposition table (returns copy to avoid borrow issues)
 pub fn tt_probe(game: &Game, hash: &BitBuffer192) -> Option<HashResult> {
-    let index = hash_to_index(hash);
+    let index = hash_to_index(hash, game.tt_capacity);
     // Lock the transposition table
     // In a single-threaded WASM context, this is cheap.
     // In multi-threaded native, this ensures safety.
@@ -107,7 +107,7 @@ pub fn tt_probe(game: &Game, hash: &BitBuffer192) -> Option<HashResult> {
 
 /// Store position in transposition table
 pub fn tt_store(game: &mut Game, hash: BitBuffer192, result: HashResult, priority: i64) {
-    let index = hash_to_index(&hash);
+    let index = hash_to_index(&hash, game.tt_capacity);
     // Lock the transposition table
     let mut tt_guard = game.tt.lock().unwrap();
     let tte = &mut tt_guard[index];

@@ -246,10 +246,12 @@ mod pgn;
 
 // Re-export public API
 #[cfg(feature = "std")]
-pub use api::{game_from_fen, game_to_fen, new_game, reset_game};
+pub use api::{game_from_fen, game_to_fen, new_game, reset_game, set_tt_size_mb};
 pub use api::{do_move, do_move_with_promo, get_game_state, is_legal_move};
 #[cfg(feature = "search")]
 pub use api::reply;
+#[cfg(feature = "std")]
+pub use evaluation::evaluate_position;
 #[cfg(feature = "std")]
 pub use pgn::{move_to_san, PgnAssembler, PgnResult, parse_pgn, san_to_move, ParsedPgnGame, PgnParseError};
 pub use error::{ChessEngineError, ChessEngineResult};

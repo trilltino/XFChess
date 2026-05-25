@@ -87,6 +87,9 @@ xfchess-braid-server = { path = "../crates/xfchess-braid-server" }
 # Global state for anti-cheat
 once_cell = "1.19"
 
+# PGN compression
+zstd = "0.13"
+
 # Error handling
 thiserror = "2.0.18"
 
