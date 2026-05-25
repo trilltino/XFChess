@@ -5,7 +5,7 @@
 
 use axum::{extract::State, middleware, Router};
 use crate::signing::{AppState, build_router};
-use crate::signing::swiss::handlers::swiss_routes;
+use crate::signing::swiss::handlers::{swiss_admin_routes, swiss_read_routes};
 use crate::signing::routes::tournament as tournament_routes;
 use crate::signing::routes::matchmaking::matchmaking_routes;
 use crate::signing::routes::pdf_mailer::pdf_mailer_routes;
@@ -40,7 +40,10 @@ pub fn build_app_router(
         .clone()
         .nest("/tournaments", tournament_routes::tournaments_routes())
         .nest("/tournament", tournament_routes::tournament_routes())
-        .nest("/tournament", swiss_routes())
+        .nest("/tournament", swiss_read_routes())
+        .nest("/admin/tournament", swiss_admin_routes()
+            .layer(middleware::from_fn(require_api_key))
+        )
         .nest("/admin/tournament",
             tournament_routes::admin_tournament_routes()
                 .layer(middleware::from_fn(require_api_key))

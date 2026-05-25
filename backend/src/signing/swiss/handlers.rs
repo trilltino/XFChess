@@ -74,22 +74,23 @@ pub struct CurrentRoundRes {
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
-/// Create Swiss tournament routes
-pub fn swiss_routes() -> Router<AppState> {
+/// Read-only Swiss routes — no authentication required
+pub fn swiss_read_routes() -> Router<AppState> {
     Router::new()
-        .route("/{id}/round", post(start_round))
         .route("/{id}/current-round", get(get_current_round))
         .route("/{id}/pairings/{round}", get(get_pairings))
+        .route("/{id}/standings", get(get_standings))
+}
+
+/// State-mutating Swiss routes — must be wrapped with require_api_key by the caller
+pub fn swiss_admin_routes() -> Router<AppState> {
+    Router::new()
+        .route("/{id}/round", post(start_round))
         .route("/{id}/result", post(record_result))
         .route("/{id}/result", put(override_result))
-        .route("/{id}/standings", get(get_standings))
-        // Gap 1: absent + forfeit
         .route("/{id}/absent", post(mark_absent))
-        // Gap 2: withdrawal
         .route("/{id}/withdraw", post(withdraw_player))
-        // Gap 3: late rejoin
         .route("/{id}/rejoin", post(rejoin_player))
-        // Gap 6: forbidden pairings and manual overrides
         .route("/{id}/forbidden-pair", post(add_forbidden_pair))
         .route("/{id}/forbidden-pair", delete(remove_forbidden_pair))
         .route("/{id}/manual-pair", post(add_manual_pairing))

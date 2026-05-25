@@ -81,7 +81,7 @@ impl SigningConfig {
             identity_encryption_key: env::var("IDENTITY_ENCRYPTION_KEY")
                 .expect("IDENTITY_ENCRYPTION_KEY must be set — generate with: openssl rand -hex 32"),
             identity_salt: env::var("IDENTITY_SALT")
-                .unwrap_or_else(|_| "1111111111111111111111111111111111111111111111111111111111111111".to_string()),
+                .expect("IDENTITY_SALT must be set — generate with: openssl rand -hex 32"),
             fee_payer_keys: env::var("FEE_PAYER_KEYS")
                 .unwrap_or_default()
                 .split(',')
