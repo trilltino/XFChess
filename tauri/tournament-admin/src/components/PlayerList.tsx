@@ -1,83 +1,238 @@
 import { useState, useEffect } from "react";
 import { apiClient } from "../services/api";
 
-export default function PlayerList() {
-  const [players, setPlayers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+interface Player {
+  wallet: string;
+  username: string;
+  kyc_status: string;
+  elo: number;
+  banned: boolean;
+  ban_reason?: string;
+}
+
+interface PlayerDetailProps {
+  wallet: string;
+  onClose: () => void;
+}
+
+function PlayerDetail({ wallet, onClose }: PlayerDetailProps) {
+  const [history, setHistory] = useState<{ game_number: number; elo: number }[]>([]);
+  const [newElo, setNewElo] = useState("");
+  const [eloReason, setEloReason] = useState("");
+  const [banReason, setBanReason] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    loadPlayers();
-  }, []);
+    apiClient.getPlayerHistory(wallet).then(r => { if (r.ok) setHistory(r.data.history ?? []); });
+  }, [wallet]);
+
+  const handleEloOverride = async () => {
+    const n = parseInt(newElo);
+    if (isNaN(n) || !eloReason) return;
+    const r = await apiClient.eloOverride(wallet, n, eloReason);
+    setMsg(r.ok ? `ELO set to ${n}.` : `Error: ${r.error?.message}`);
+  };
+
+  const handleBan = async () => {
+    if (!banReason) return;
+    const r = await apiClient.banPlayer(wallet, banReason);
+    setMsg(r.ok ? "Player banned." : `Error: ${r.error?.message}`);
+  };
+
+  const handleWhitelist = async () => {
+    const r = await apiClient.whitelistPlayer(wallet);
+    setMsg(r.ok ? "Added to rate-limit whitelist." : `Error: ${r.error?.message}`);
+  };
+
+  const minElo = history.length ? Math.min(...history.map(h => h.elo)) : 1200;
+  const maxElo = history.length ? Math.max(...history.map(h => h.elo)) : 1200;
+  const range = maxElo - minElo || 1;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
+      <div style={{ backgroundColor: "var(--bg)", border: "1px solid var(--border)", borderRadius: "24px", padding: "2rem", width: "600px", maxHeight: "80vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+          <h3 style={{ color: "#fff", margin: 0, fontSize: "16px" }}>Player Detail</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", fontSize: "18px" }}>✕</button>
+        </div>
+        <div style={{ fontFamily: "monospace", fontSize: "12px", color: "var(--text-dim)", marginBottom: "1.5rem", wordBreak: "break-all" }}>{wallet}</div>
+
+        {/* ELO sparkline */}
+        <div style={{ marginBottom: "1.5rem" }}>
+          <div style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "8px" }}>ELO HISTORY</div>
+          {history.length === 0
+            ? <div style={{ color: "var(--text-dim)", fontStyle: "italic", fontSize: "12px" }}>No game history.</div>
+            : <svg width="100%" height="60" viewBox={`0 0 ${history.length * 20} 60`} preserveAspectRatio="none" style={{ display: "block" }}>
+                <polyline
+                  points={history.map((h, i) => `${i * 20},${60 - ((h.elo - minElo) / range) * 50 - 5}`).join(" ")}
+                  fill="none" stroke="var(--primary)" strokeWidth="2" />
+                {history.map((h, i) => (
+                  <circle key={i} cx={i * 20} cy={60 - ((h.elo - minElo) / range) * 50 - 5} r="2" fill="var(--primary)" />
+                ))}
+              </svg>
+          }
+          {history.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--text-dim)", marginTop: "4px" }}>
+              <span>Game 1 — ELO {history[0]?.elo}</span>
+              <span>Latest — ELO {history[history.length - 1]?.elo}</span>
+            </div>
+          )}
+        </div>
+
+        {/* ELO override */}
+        <div style={{ marginBottom: "1.5rem", padding: "1rem", background: "rgba(255,255,255,0.04)", borderRadius: "12px", border: "1px solid var(--border)" }}>
+          <div style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "10px" }}>MANUAL ELO OVERRIDE</div>
+          <div style={{ display: "flex", gap: "8px", marginBottom: "6px" }}>
+            <input value={newElo} onChange={e => setNewElo(e.target.value)} type="number" placeholder="New ELO…"
+              style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "6px 10px", fontSize: "12px" }} />
+            <input value={eloReason} onChange={e => setEloReason(e.target.value)} placeholder="Reason…"
+              style={{ flex: 2, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "6px 10px", fontSize: "12px" }} />
+            <button onClick={handleEloOverride} style={{ padding: "6px 14px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>SET</button>
+          </div>
+        </div>
+
+        {/* Ban */}
+        <div style={{ marginBottom: "1.5rem", padding: "1rem", background: "rgba(239,68,68,0.08)", borderRadius: "12px", border: "1px solid rgba(239,68,68,0.3)" }}>
+          <div style={{ fontSize: "11px", color: "#f87171", letterSpacing: "1px", marginBottom: "10px" }}>BAN / SUSPEND</div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input value={banReason} onChange={e => setBanReason(e.target.value)} placeholder="Ban reason…"
+              style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "6px 10px", fontSize: "12px" }} />
+            <button onClick={handleBan} style={{ padding: "6px 14px", borderRadius: "8px", backgroundColor: "#ef4444", color: "#fff", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>BAN</button>
+          </div>
+        </div>
+
+        <button onClick={handleWhitelist} style={{ padding: "8px 18px", borderRadius: "8px", background: "rgba(255,255,255,0.06)", color: "var(--text-dim)", border: "1px solid var(--border)", fontSize: "12px", cursor: "pointer" }}>
+          Whitelist (remove rate limit)
+        </button>
+
+        {msg && <div style={{ marginTop: "12px", fontSize: "12px", color: msg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
+export default function PlayerList() {
+  const [allPlayers, setAllPlayers] = useState<Player[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [filterKyc, setFilterKyc] = useState<string>("all");
+  const [filterBanned, setFilterBanned] = useState<string>("all");
+  const [eloMin, setEloMin] = useState("");
+  const [eloMax, setEloMax] = useState("");
+  const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
+
+  useEffect(() => { loadPlayers(); }, []);
 
   const loadPlayers = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.getPlayers();
-      if (response.ok) {
-        setPlayers(response.data.players || []);
-      } else {
-        setError("Failed to load players");
-      }
-    } catch (err) {
-      setError("Network error loading players");
-    } finally {
-      setLoading(false);
-    }
+      const r = await apiClient.getPlayers(200);
+      if (r.ok) setAllPlayers(r.data.players ?? []);
+      else setError("Failed to load players");
+    } catch { setError("Network error"); }
+    finally { setLoading(false); }
+  };
+
+  const filtered = allPlayers.filter(p => {
+    if (search && !p.wallet.toLowerCase().includes(search.toLowerCase()) && !p.username?.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterKyc !== "all" && p.kyc_status !== filterKyc) return false;
+    if (filterBanned === "banned" && !p.banned) return false;
+    if (filterBanned === "active" && p.banned) return false;
+    if (eloMin && p.elo < parseInt(eloMin)) return false;
+    if (eloMax && p.elo > parseInt(eloMax)) return false;
+    return true;
+  });
+
+  const exportCsv = () => {
+    const rows = [["wallet", "username", "elo", "kyc_status", "banned"].join(",")];
+    filtered.forEach(p => rows.push([p.wallet, p.username || "", p.elo, p.kyc_status, String(p.banned)].join(",")));
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "players.csv"; a.click();
   };
 
   return (
     <div style={{ padding: "1.5rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
+      {selectedWallet && <PlayerDetail wallet={selectedWallet} onClose={() => setSelectedWallet(null)} />}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
         <div>
           <h1 style={{ margin: 0, color: "white", fontSize: "1.5rem" }}>PLAYER <span style={{ color: "var(--primary)" }}>DIRECTORY</span></h1>
-          <p style={{ color: "var(--text-dim)", margin: "0.25rem 0 0 0" }}>Manage registered users and KYC statuses</p>
+          <p style={{ color: "var(--text-dim)", margin: "0.25rem 0 0" }}>{filtered.length} of {allPlayers.length} players</p>
         </div>
-        <button onClick={loadPlayers} className="primary" style={{ padding: "0.6rem 1.5rem", borderRadius: "100px" }}>REFRESH</button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={exportCsv} style={{ padding: "0.6rem 1.5rem", borderRadius: "100px", background: "rgba(255,255,255,0.06)", color: "var(--text-dim)", border: "1px solid var(--border)", fontSize: "12px", cursor: "pointer" }}>
+            EXPORT CSV
+          </button>
+          <button onClick={loadPlayers} className="primary" style={{ padding: "0.6rem 1.5rem", borderRadius: "100px" }}>REFRESH</button>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div style={{ display: "flex", gap: "10px", marginBottom: "1.5rem", flexWrap: "wrap" }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search wallet or username…"
+          style={{ flex: "1 1 200px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
+        <select value={filterKyc} onChange={e => setFilterKyc(e.target.value)}
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }}>
+          <option value="all">All KYC</option>
+          <option value="verified">Verified</option>
+          <option value="pending">Pending</option>
+          <option value="none">None</option>
+        </select>
+        <select value={filterBanned} onChange={e => setFilterBanned(e.target.value)}
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }}>
+          <option value="all">All Players</option>
+          <option value="active">Active only</option>
+          <option value="banned">Banned only</option>
+        </select>
+        <input value={eloMin} onChange={e => setEloMin(e.target.value)} type="number" placeholder="ELO min"
+          style={{ width: "90px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 10px", fontSize: "12px" }} />
+        <input value={eloMax} onChange={e => setEloMax(e.target.value)} type="number" placeholder="ELO max"
+          style={{ width: "90px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 10px", fontSize: "12px" }} />
       </div>
 
       {error && <div style={{ color: "#ef4444", marginBottom: "1rem" }}>{error}</div>}
 
-      <div style={{ 
-        backgroundColor: "var(--surface)", 
-        borderRadius: "24px", 
-        border: "1px solid var(--border)",
-        overflow: "hidden"
-      }}>
+      <div style={{ backgroundColor: "var(--surface)", borderRadius: "24px", border: "1px solid var(--border)", overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ textAlign: "left", backgroundColor: "rgba(255,255,255,0.02)", borderBottom: "1px solid var(--border)" }}>
-              <th style={{ padding: "1rem", color: "var(--text-dim)", fontSize: "12px" }}>USERNAME</th>
-              <th style={{ padding: "1rem", color: "var(--text-dim)", fontSize: "12px" }}>WALLET ADDRESS</th>
-              <th style={{ padding: "1rem", color: "var(--text-dim)", fontSize: "12px" }}>KYC STATUS</th>
-              <th style={{ padding: "1rem", color: "var(--text-dim)", fontSize: "12px" }}>ACTIONS</th>
+              {["USERNAME", "WALLET", "ELO", "KYC", "STATUS", "ACTIONS"].map(h => (
+                <th key={h} style={{ padding: "1rem", color: "var(--text-dim)", fontSize: "11px", letterSpacing: "1px" }}>{h}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={4} style={{ padding: "3rem", textAlign: "center", color: "var(--text-dim)" }}>Loading players...</td></tr>
-            ) : players.length === 0 ? (
-              <tr><td colSpan={4} style={{ padding: "3rem", textAlign: "center", color: "var(--text-dim)" }}>No players registered.</td></tr>
+              <tr><td colSpan={6} style={{ padding: "3rem", textAlign: "center", color: "var(--text-dim)" }}>Loading…</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={6} style={{ padding: "3rem", textAlign: "center", color: "var(--text-dim)" }}>No players match.</td></tr>
             ) : (
-              players.map(player => (
-                <tr key={player.wallet} style={{ borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
-                  <td style={{ padding: "1rem", color: "white", fontWeight: "bold" }}>{player.username}</td>
-                  <td style={{ padding: "1rem", color: "var(--text-dim)", fontFamily: "monospace", fontSize: "13px" }}>{player.wallet}</td>
-                  <td style={{ padding: "1rem" }}>
-                    <span style={{ 
-                      fontSize: "10px", 
-                      padding: "2px 8px", 
-                      borderRadius: "100px", 
-                      backgroundColor: player.kyc_status === "verified" ? "rgba(34, 197, 94, 0.1)" : "rgba(234, 179, 8, 0.1)",
-                      color: player.kyc_status === "verified" ? "#22c55e" : "#eab308",
-                      border: `1px solid ${player.kyc_status === "verified" ? "#22c55e" : "#eab308"}44`
-                    }}>
-                      {player.kyc_status.toUpperCase()}
+              filtered.map(p => (
+                <tr key={p.wallet} style={{ borderBottom: "1px solid rgba(255,255,255,0.02)" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <td style={{ padding: "0.9rem 1rem", color: "#fff", fontWeight: "bold" }}>{p.username || "—"}</td>
+                  <td style={{ padding: "0.9rem 1rem", color: "var(--text-dim)", fontFamily: "monospace", fontSize: "12px" }}>{p.wallet.slice(0, 12)}…</td>
+                  <td style={{ padding: "0.9rem 1rem", color: "var(--accent)", fontWeight: "700" }}>{p.elo}</td>
+                  <td style={{ padding: "0.9rem 1rem" }}>
+                    <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "100px",
+                      backgroundColor: p.kyc_status === "verified" ? "rgba(34,197,94,0.1)" : "rgba(234,179,8,0.1)",
+                      color: p.kyc_status === "verified" ? "#22c55e" : "#eab308",
+                      border: `1px solid ${p.kyc_status === "verified" ? "#22c55e44" : "#eab30844"}` }}>
+                      {p.kyc_status?.toUpperCase() || "UNKNOWN"}
                     </span>
                   </td>
-                  <td style={{ padding: "1rem" }}>
-                    <button style={{ backgroundColor: "transparent", border: "1px solid var(--border)", color: "white", padding: "4px 12px", borderRadius: "4px", fontSize: "11px", cursor: "pointer" }}>
-                      VIEW HISTORY
+                  <td style={{ padding: "0.9rem 1rem" }}>
+                    {p.banned
+                      ? <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "100px", backgroundColor: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)" }}>BANNED</span>
+                      : <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "100px", backgroundColor: "rgba(74,222,128,0.1)", color: "#4ade80", border: "1px solid rgba(74,222,128,0.2)" }}>ACTIVE</span>
+                    }
+                  </td>
+                  <td style={{ padding: "0.9rem 1rem" }}>
+                    <button onClick={() => setSelectedWallet(p.wallet)}
+                      style={{ backgroundColor: "transparent", border: "1px solid var(--border)", color: "#fff", padding: "4px 12px", borderRadius: "4px", fontSize: "11px", cursor: "pointer" }}>
+                      DETAILS
                     </button>
                   </td>
                 </tr>

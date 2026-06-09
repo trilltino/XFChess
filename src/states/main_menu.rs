@@ -38,16 +38,16 @@ mod screens;
 #[path = "main_menu/modals.rs"]
 mod modals;
 #[path = "main_menu/new_menu.rs"]
-mod new_menu;
+pub mod new_menu;
 #[path = "main_menu/board_animation.rs"]
 mod board_animation;
 
 use screens::*;
-use modals::{render_ai_setup_modal, render_controls_popup};
+use modals::{render_ai_setup_modal, render_controls_popup, render_pgn_input_modal};
 use new_menu::{
-    orbit_camera_system, render_new_style_panel, render_solana_splash,
-    render_wallet_hud, setup_menu_fog, spawn_menu_bg_board, spawn_menu_bg_lights,
-    spawn_menu_bg_pieces,
+    menu_escape_system, orbit_camera_system, purge_stale_lights, render_new_style_panel,
+    render_solana_splash, render_wallet_hud, setup_menu_fog, spawn_menu_bg_board,
+    spawn_menu_bg_lights, spawn_menu_bg_pieces,
 };
 pub use new_menu::NewMenuPanel;
 
@@ -67,36 +67,45 @@ impl Plugin for MainMenuPlugin {
             .init_resource::<new_menu::MenuCameraOrbit>()
             .init_resource::<new_menu::MenuBgPiecesSpawned>()
             .init_resource::<new_menu::NewMenuPanel>()
+            .init_resource::<new_menu::MenuExitConfirm>()
             .init_resource::<board_animation::BoardAnimator>()
             .init_resource::<WalletBridgePoller>()
             .init_resource::<FontsLoaded>()
             .add_systems(
                 OnEnter(GameState::MainMenu),
                 (
+                    // Reset panel to Main every time we enter the menu (e.g. returning from a game)
+                    |mut panel: ResMut<new_menu::NewMenuPanel>, mut exit_confirm: ResMut<new_menu::MenuExitConfirm>| {
+                        *panel = new_menu::NewMenuPanel::default();
+                        exit_confirm.visible = false;
+                    },
+                    purge_stale_lights,
                     setup_menu_camera,
                     start_asset_loading,
                     spawn_menu_bg_board,
                     spawn_menu_bg_lights,
                     setup_menu_fog,
-                ),
+                ).chain(),
             )
             .add_systems(
                 OnExit(GameState::MainMenu),
                 |mut spawned: ResMut<new_menu::MenuBgPiecesSpawned>,
                  mut fl: ResMut<FontsLoaded>,
                  mut anim: ResMut<board_animation::BoardAnimator>,
-                 mut panel: ResMut<new_menu::NewMenuPanel>| {
+                 mut panel: ResMut<new_menu::NewMenuPanel>,
+                 mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>| {
                     spawned.0 = false;
                     fl.0 = false;
                     *anim = board_animation::BoardAnimator::default();
                     *panel = new_menu::NewMenuPanel::default();
+                    *global_ambient = bevy::light::GlobalAmbientLight::default();
                 },
             )
             .init_resource::<BrandLogoState>()
             .init_resource::<SolanaLogoState>()
             .init_resource::<PlayerColorChoice>()
             .init_resource::<NewsBannerState>()
-            .insert_resource(PlayerIdentity::from_env())
+            .init_resource::<PlayerIdentity>()
             .init_resource::<crate::assets::GameAssets>()
             .init_resource::<crate::assets::LoadingProgress>()
             .init_resource::<crate::assets::AssetLoadingTimer>()
@@ -110,6 +119,9 @@ impl Plugin for MainMenuPlugin {
                     render_lobby_selection_popup
                         .run_if(in_state(crate::core::MenuState::LobbySelection))
                         .run_if(in_state(GameState::MainMenu)),
+                    // Wallet overlay runs in both menu and in-game so users can connect at any time
+                    wallet_connect_overlay_system
+                        .run_if(in_state(GameState::MainMenu).or(in_state(GameState::InGame))),
                 ),
             )
             .add_systems(
@@ -120,16 +132,114 @@ impl Plugin for MainMenuPlugin {
                     handle_untyped_asset_loading_errors,
                     ensure_menu_camera_setup,
                     sync_player_identity_from_wallet,
-                    poll_wallet_bridge,
                     orbit_camera_system,
                     spawn_menu_bg_pieces,
                     try_setup_fonts,
                     board_animation::init_board_animator,
                     board_animation::animate_board_system,
                     board_animation::animate_menu_pieces,
+                    menu_escape_system,
                 )
                     .run_if(in_state(GameState::MainMenu)),
+            )
+            .add_systems(
+                Update,
+                // Wallet bridge polling needs to run in both states so the overlay
+                // dismisses correctly when the wallet connects during gameplay.
+                poll_wallet_bridge
+                    .run_if(in_state(GameState::MainMenu).or(in_state(GameState::InGame))),
             );
+
+        // Sync Tauri-bridge pubkey into SolanaIntegrationState so the Solana
+        // Wager Lobby sees the wallet as connected immediately after bridge connect.
+        #[cfg(feature = "solana")]
+        app.add_systems(Update, sync_bridge_pubkey_to_solana);
+    }
+}
+
+/// Renders the "waiting for wallet connection" overlay on top of whatever state is active.
+/// Runs in both MainMenu and InGame so the user can connect wallet at any time.
+pub fn wallet_connect_overlay_system(
+    mut contexts: EguiContexts,
+    mut poller: ResMut<WalletBridgePoller>,
+) {
+    if !poller.show_connect_overlay {
+        return;
+    }
+    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    let ctx = ctx.clone();
+
+    let screen_rect = ctx.screen_rect();
+
+    egui::Area::new("wallet_dim_backdrop".into())
+        .fixed_pos(egui::Pos2::ZERO)
+        .order(egui::Order::Foreground)
+        .show(&ctx, |ui| {
+            ui.painter().rect_filled(
+                screen_rect,
+                egui::CornerRadius::ZERO,
+                egui::Color32::from_black_alpha(190),
+            );
+            ui.allocate_rect(screen_rect, egui::Sense::click_and_drag());
+        });
+
+    let overlay_frame = egui::Frame {
+        fill: egui::Color32::from_rgba_unmultiplied(18, 18, 24, 255),
+        inner_margin: egui::Margin::same(32),
+        corner_radius: egui::CornerRadius::same(12),
+        stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(100, 140, 255, 80)),
+        shadow: egui::Shadow { blur: 40, spread: 8, color: egui::Color32::from_black_alpha(200), offset: [0, 6] },
+        ..egui::Frame::NONE
+    };
+
+    let mut cancelled = false;
+    egui::Window::new("##wallet_connect_overlay")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .fixed_size([340.0, 200.0])
+        .order(egui::Order::Foreground)
+        .frame(overlay_frame)
+        .show(&ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("Connect Wallet")
+                        .size(20.0)
+                        .color(egui::Color32::WHITE)
+                        .strong()
+                        .family(egui::FontFamily::Proportional),
+                );
+                ui.add_space(12.0);
+                ui.spinner();
+                ui.add_space(12.0);
+                ui.label(
+                    egui::RichText::new("Approve the connection in your\nbrowser wallet extension")
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(160, 170, 200))
+                        .family(egui::FontFamily::Proportional),
+                );
+                ui.add_space(20.0);
+                if ui.add_sized(
+                    [120.0, 34.0],
+                    egui::Button::new(
+                        egui::RichText::new("Cancel")
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(180, 180, 200)),
+                    )
+                    .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
+                    .corner_radius(6.0)
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
+                ).clicked() {
+                    cancelled = true;
+                }
+            });
+        });
+
+    if cancelled {
+        poller.show_connect_overlay = false;
+        poller.enabled = false;
     }
 }
 
@@ -191,6 +301,18 @@ pub struct CompetitiveMenuState {
     pub join_game_id: String,
     /// Selected AI engine (Stockfish or XFChessEngine).
     pub ai_engine: crate::game::ai::resource::AIEngine,
+    /// Sort order for the P2P lobby browser.
+    pub lobby_sort: crate::multiplayer::social::LobbySort,
+    /// Min time-control filter (seconds), None = no min.
+    pub lobby_tc_min: Option<u32>,
+    /// Max time-control filter (seconds), None = no max.
+    pub lobby_tc_max: Option<u32>,
+    /// Whether the PGN input modal is currently open.
+    pub show_pgn_input: bool,
+    /// Raw PGN text typed by the user.
+    pub pgn_input_text: String,
+    /// Last PGN parse error, shown inline in the modal.
+    pub pgn_input_error: Option<String>,
 }
 
 impl Default for CompetitiveMenuState {
@@ -206,6 +328,12 @@ impl Default for CompetitiveMenuState {
             show_join_popup: false,
             join_game_id: String::new(),
             ai_engine: crate::game::ai::resource::AIEngine::Stockfish,
+            lobby_sort: crate::multiplayer::social::LobbySort::default(),
+            lobby_tc_min: None,
+            lobby_tc_max: None,
+            show_pgn_input: false,
+            pgn_input_text: String::new(),
+            pgn_input_error: None,
         }
     }
 }
@@ -232,13 +360,17 @@ pub struct P2PHostState {
     pub base_time_minutes: u32,
     /// Increment in seconds.
     pub increment_seconds: u16,
-    /// Stake amount (for P2P, usually 0 unless linked to Solana).
+    /// Stake amount in SOL (derived from wager_fiat / live rate).
     pub stake_amount: f64,
+    /// Wager amount entered by the user in fiat (GBP or USD).
+    pub wager_fiat: f64,
+    /// Whether the fiat input is in USD (true) or GBP (false).
+    pub wager_in_usd: bool,
     /// The generated game ID.
     pub game_id: Option<String>,
     /// Tracks when we last sent a heartbeat to keep the lobby alive.
     pub last_heartbeat: Option<std::time::Instant>,
-    /// Optional room name displayed in the lobby browser.
+    /// Room name displayed in the lobby browser.
     pub lobby_name: String,
 }
 
@@ -248,6 +380,8 @@ impl Default for P2PHostState {
             base_time_minutes: 10,
             increment_seconds: 5,
             stake_amount: 0.0,
+            wager_fiat: 0.0,
+            wager_in_usd: false,
             game_id: None,
             last_heartbeat: None,
             lobby_name: String::new(),
@@ -264,6 +398,21 @@ impl Default for P2PHostState {
 pub struct WalletBridgeData {
     pub sol_balance: f64,
     pub usd_balance: Option<f64>,
+    /// USD per 1 SOL (0.0 if unknown).
+    pub sol_usd_rate: f64,
+    /// GBP per 1 SOL (0.0 if unknown).
+    pub sol_gbp_rate: f64,
+}
+
+/// Subset of `/auth/me` relevant to the game client.
+#[derive(Debug, Default, Clone)]
+pub struct BridgeMeResp {
+    pub username: String,
+    pub elo: u32,
+    pub country: String,
+    pub can_wager: bool,
+    pub has_onchain_profile: bool,
+    pub jwt_token: String,
 }
 
 /// Polling resource for the Tauri wallet bridge at http://localhost:7454/status.
@@ -271,14 +420,22 @@ pub struct WalletBridgeData {
 pub struct WalletBridgePoller {
     /// Channel for incoming (pubkey, username) from a `/status` poll.
     pub status_rx: Option<crossbeam_channel::Receiver<(Option<String>, Option<String>)>>,
-    /// Channel for incoming (sol, usd) balance.
-    pub balance_rx: Option<crossbeam_channel::Receiver<(f64, f64)>>,
+    /// Channel for incoming (sol_balance, usd_per_sol, gbp_per_sol).
+    pub balance_rx: Option<crossbeam_channel::Receiver<(f64, f64, f64)>>,
+    /// Channel for an in-flight `GET /token` + `GET /auth/me` call.
+    pub me_rx: Option<crossbeam_channel::Receiver<Result<BridgeMeResp, String>>>,
     /// Seconds since last poll trigger.
     pub timer: f32,
+    /// Seconds since last failed profile fetch — used to retry until profile is found.
+    pub profile_retry_timer: f32,
     /// Last known pubkey — used to detect new connections.
     pub known_pubkey: Option<String>,
     /// Shared balance data exposed to the UI via `MainMenuUIContext`.
     pub data: std::sync::Arc<std::sync::Mutex<WalletBridgeData>>,
+    /// Only poll after the user explicitly clicks Connect Wallet.
+    pub enabled: bool,
+    /// Show the in-game "waiting for wallet" overlay.
+    pub show_connect_overlay: bool,
 }
 
 fn poll_wallet_bridge(
@@ -286,44 +443,142 @@ fn poll_wallet_bridge(
     mut player_identity: ResMut<PlayerIdentity>,
     time: Res<Time>,
 ) {
+    if !poller.enabled {
+        return;
+    }
+
+    // --- drain /auth/me response (JWT-authenticated full profile) ---
+    if let Some(ref rx) = poller.me_rx {
+        match rx.try_recv() {
+            Ok(Ok(me)) => {
+                poller.me_rx = None;
+                if !me.username.is_empty() {
+                    player_identity.username = Some(me.username);
+                }
+                if me.elo > 0 {
+                    player_identity.elo = Some(me.elo);
+                }
+                if !me.country.is_empty() {
+                    player_identity.country = Some(me.country);
+                }
+                if !me.jwt_token.is_empty() {
+                    player_identity.jwt_token = Some(me.jwt_token);
+                }
+                player_identity.can_wager = me.can_wager;
+                player_identity.has_onchain_profile = me.has_onchain_profile;
+                info!("[WalletBridge] /auth/me: {} ELO {} can_wager={} onchain={}",
+                    player_identity.username.as_deref().unwrap_or("?"),
+                    player_identity.elo.unwrap_or(0),
+                    player_identity.can_wager,
+                    player_identity.has_onchain_profile);
+            }
+            Ok(Err(e)) => {
+                // JWT unavailable — fall back to raw VPS profile endpoint
+                info!("[WalletBridge] /auth/me unavailable ({}), falling back to VPS", e);
+                poller.me_rx = None;
+                poller.profile_retry_timer = 0.0;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => { poller.me_rx = None; }
+        }
+    }
+
+    // --- drain fallback VPS profile fetch (no JWT path) ---
+    if let Some(ref rx) = player_identity.pending_profile_rx {
+        match rx.try_recv() {
+            Ok(Ok(profile)) => {
+                if !profile.username.is_empty() {
+                    player_identity.username = Some(profile.username.clone());
+                }
+                if profile.elo > 0 {
+                    player_identity.elo = Some(profile.elo);
+                }
+                if !profile.country.is_empty() {
+                    player_identity.country = Some(profile.country);
+                }
+                info!("[WalletBridge] VPS profile fallback: {} ELO {}", profile.username, profile.elo);
+                player_identity.pending_profile_rx = None;
+            }
+            Ok(Err(e)) => {
+                info!("[WalletBridge] VPS profile unavailable ({}), will retry", e);
+                player_identity.pending_profile_rx = None;
+                poller.profile_retry_timer = 0.0;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => { player_identity.pending_profile_rx = None; }
+        }
+    }
+
     // --- receive status response ---
     if let Some(ref rx) = poller.status_rx {
         if let Ok((pubkey_opt, username_opt)) = rx.try_recv() {
             poller.status_rx = None;
             if let Some(pk) = pubkey_opt {
+                poller.show_connect_overlay = false;
                 // Always update username from bridge if we have one
                 if let Some(ref uname) = username_opt {
-                    if player_identity.username.as_deref() != Some(uname.as_str()) {
+                    if !uname.is_empty() && player_identity.username.as_deref() != Some(uname.as_str()) {
                         info!("[WalletBridge] Username from bridge: {}", uname);
                         player_identity.username = Some(uname.clone());
                     }
                 }
 
-                if poller.known_pubkey.as_deref() != Some(&pk) {
+                let is_new_pubkey = poller.known_pubkey.as_deref() != Some(&pk);
+                if is_new_pubkey {
                     info!("[WalletBridge] New pubkey detected: {}", pk);
-                    poller.known_pubkey = Some(pk.clone());
-
-                    // If bridge didn't supply a username, fall back to VPS profile fetch
-                    if username_opt.is_none() || username_opt.as_deref() == Some("") {
-                        let (tx, rx) = crossbeam_channel::bounded(1);
-                        player_identity.pending_profile_rx = Some(rx);
-                        let pk2 = pk.clone();
-                        bevy::tasks::IoTaskPool::get().spawn(async move {
-                            let res = crate::multiplayer::network::vps::identity::fetch_player_profile(&pk2);
-                            let _ = tx.send(res);
-                        }).detach();
+                    // Reset identity so we don't show stale data from previous wallet
+                    if poller.known_pubkey.is_some() {
+                        player_identity.username = None;
+                        player_identity.elo = None;
+                        player_identity.country = None;
+                        player_identity.jwt_token = None;
+                        player_identity.can_wager = false;
+                        player_identity.has_onchain_profile = false;
                     }
+                    poller.known_pubkey = Some(pk.clone());
+                    player_identity.pubkey_str = Some(pk.clone());
+                }
 
-                    // Trigger balance fetch
+                // Primary: fetch JWT from bridge then call /auth/me
+                if poller.me_rx.is_none() && player_identity.jwt_token.is_none() {
+                    let (tx, rx) = crossbeam_channel::bounded(1);
+                    poller.me_rx = Some(rx);
+                    bevy::tasks::IoTaskPool::get().spawn(async move {
+                        let res = fetch_bridge_me();
+                        let _ = tx.send(res);
+                    }).detach();
+                }
+
+                // Fallback: kick off raw VPS profile fetch if JWT path is unavailable
+                if poller.me_rx.is_none()
+                    && player_identity.pending_profile_rx.is_none()
+                    && player_identity.jwt_token.is_none()
+                    && (player_identity.username.is_none()
+                        || username_opt.is_none()
+                        || username_opt.as_deref() == Some(""))
+                {
+                    let (tx, rx) = crossbeam_channel::bounded(1);
+                    player_identity.pending_profile_rx = Some(rx);
+                    let pk2 = pk.clone();
+                    bevy::tasks::IoTaskPool::get().spawn(async move {
+                        let res = crate::multiplayer::network::vps::identity::fetch_player_profile(&pk2);
+                        let _ = tx.send(res);
+                    }).detach();
+                }
+
+                // Trigger balance fetch on new pubkey or when Refresh was clicked (balance_rx is None)
+                if is_new_pubkey || poller.balance_rx.is_none() {
                     let (btx, brx) = crossbeam_channel::bounded(1);
                     poller.balance_rx = Some(brx);
                     let data_arc = poller.data.clone();
                     bevy::tasks::IoTaskPool::get().spawn(async move {
-                        let (sol, usd) = fetch_sol_balance_usd(&pk);
-                        let _ = btx.send((sol, usd));
+                        let (sol, usd_per_sol, gbp_per_sol) = fetch_sol_rates(&pk);
+                        let _ = btx.send((sol, usd_per_sol, gbp_per_sol));
                         let mut d = data_arc.lock().unwrap();
                         d.sol_balance = sol;
-                        d.usd_balance = Some(usd);
+                        d.usd_balance = if usd_per_sol > 0.0 { Some(sol * usd_per_sol) } else { None };
+                        d.sol_usd_rate = usd_per_sol;
+                        d.sol_gbp_rate = gbp_per_sol;
                     }).detach();
                 }
             }
@@ -332,11 +587,13 @@ fn poll_wallet_bridge(
 
     // --- receive balance response ---
     if let Some(ref rx) = poller.balance_rx {
-        if let Ok((sol, usd)) = rx.try_recv() {
+        if let Ok((sol, usd_per_sol, gbp_per_sol)) = rx.try_recv() {
             poller.balance_rx = None;
             let mut d = poller.data.lock().unwrap();
             d.sol_balance = sol;
-            d.usd_balance = Some(usd);
+            d.usd_balance = if usd_per_sol > 0.0 { Some(sol * usd_per_sol) } else { None };
+            d.sol_usd_rate = usd_per_sol;
+            d.sol_gbp_rate = gbp_per_sol;
         }
     }
 
@@ -350,6 +607,75 @@ fn poll_wallet_bridge(
             let result = fetch_bridge_status();
             let _ = tx.send(result);
         }).detach();
+    }
+
+    // --- retry /auth/me every 10s while connected but profile incomplete ---
+    const PROFILE_RETRY_SECS: f32 = 10.0;
+    if player_identity.username.is_none()
+        && player_identity.pending_profile_rx.is_none()
+        && poller.me_rx.is_none()
+        && poller.known_pubkey.is_some()
+    {
+        poller.profile_retry_timer += time.delta_secs();
+        if poller.profile_retry_timer >= PROFILE_RETRY_SECS {
+            poller.profile_retry_timer = 0.0;
+            // Try JWT path first; fall through to VPS if JWT still absent
+            if player_identity.jwt_token.is_none() {
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                poller.me_rx = Some(rx);
+                bevy::tasks::IoTaskPool::get().spawn(async move {
+                    let _ = tx.send(fetch_bridge_me());
+                }).detach();
+            } else {
+                let pk = poller.known_pubkey.clone().unwrap();
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                player_identity.pending_profile_rx = Some(rx);
+                bevy::tasks::IoTaskPool::get().spawn(async move {
+                    let res = crate::multiplayer::network::vps::identity::fetch_player_profile(&pk);
+                    let _ = tx.send(res);
+                }).detach();
+            }
+        }
+    } else {
+        poller.profile_retry_timer = 0.0;
+    }
+}
+
+/// Syncs the pubkey and balance from `WalletBridgePoller` into `SolanaIntegrationState`
+/// so the Solana Wager Lobby sees the wallet as connected whenever the Tauri bridge is used.
+#[cfg(feature = "solana")]
+fn sync_bridge_pubkey_to_solana(
+    poller: Res<WalletBridgePoller>,
+    mut solana_state: Option<ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>>,
+) {
+    use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
+
+    let Some(ref mut state) = solana_state else { return };
+
+    // Always keep balance in sync from the bridge poller (it has fresher data).
+    let bridge_data = poller.data.lock().ok();
+    if let Some(ref data) = bridge_data {
+        if data.sol_balance > 0.0 {
+            state.balance = data.sol_balance;
+        }
+        if let Some(usd) = data.usd_balance {
+            state.cached_usd_balance = Some(usd);
+        }
+    }
+    drop(bridge_data);
+
+    // Only set pubkey once — avoid overwriting if already set by other path.
+    if state.wallet_pubkey.is_some() { return; }
+    let Some(ref pubkey_str) = poller.known_pubkey else { return };
+
+    if let Ok(pubkey) = pubkey_str.parse::<solana_sdk::pubkey::Pubkey>() {
+        info!("[WalletBridge] Syncing pubkey {} → SolanaIntegrationState", pubkey);
+        state.wallet_pubkey = Some(pubkey);
+        if state.rpc_client.is_none() {
+            state.rpc_client = Some(solana_client::rpc_client::RpcClient::new(
+                DEVNET_RPC_URL.to_string(),
+            ));
+        }
     }
 }
 
@@ -379,28 +705,72 @@ fn fetch_bridge_status() -> (Option<String>, Option<String>) {
     (pubkey, username)
 }
 
+/// Fetch JWT from bridge `GET /token`, then call backend `GET /auth/me`.
+/// Returns a `BridgeMeResp` populated from the unified `/auth/me` response.
+fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(4))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let port = std::env::var("XFCHESS_WALLET_PORT").ok()
+        .and_then(|v| v.parse::<u16>().ok()).unwrap_or(7454);
+
+    // Step 1: fetch JWT from local bridge
+    let token_resp = client
+        .get(format!("http://127.0.0.1:{port}/token"))
+        .send()
+        .map_err(|e| format!("bridge /token: {e}"))?;
+    let token_json: serde_json::Value = token_resp.json()
+        .map_err(|e| format!("bridge /token parse: {e}"))?;
+    let jwt = token_json["token"].as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "no JWT in bridge /token".to_string())?
+        .to_string();
+
+    // Step 2: call backend /auth/me
+    let base = crate::multiplayer::network::vps::vps_base();
+    let me_resp = client
+        .get(format!("{base}/api/auth/me"))
+        .header("Authorization", format!("Bearer {}", jwt))
+        .send()
+        .map_err(|e| format!("/auth/me: {e}"))?;
+    if !me_resp.status().is_success() {
+        return Err(format!("/auth/me HTTP {}", me_resp.status()));
+    }
+    let me: serde_json::Value = me_resp.json()
+        .map_err(|e| format!("/auth/me parse: {e}"))?;
+
+    Ok(BridgeMeResp {
+        username: me["username"].as_str().unwrap_or_default().to_string(),
+        elo: me["elo"].as_u64().unwrap_or(0) as u32,
+        country: me["country"].as_str().unwrap_or_default().to_string(),
+        can_wager: me["can_wager"].as_bool().unwrap_or(false),
+        has_onchain_profile: me["has_onchain_profile"].as_bool().unwrap_or(false),
+        jwt_token: jwt,
+    })
+}
+
 /// Fetch SOL balance via Helius RPC getBalance, then convert to USD via
-/// the backend rate endpoint. Returns (sol, usd) — both 0.0 on any error.
-fn fetch_sol_balance_usd(pubkey: &str) -> (f64, f64) {
-    let rpc_url = format!(
-        "https://beta.helius-rpc.com/?api-key=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5"
-    );
+/// Fetches the wallet SOL balance and live exchange rates.
+/// Returns (sol_balance, usd_per_sol, gbp_per_sol) — all 0.0 on error.
+fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
+    let rpc_url = "https://beta.helius-rpc.com/?api-key=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5";
 
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
     {
         Ok(c) => c,
-        Err(_) => return (0.0, 0.0),
+        Err(_) => return (0.0, 0.0, 0.0),
     };
 
-    // getBalance RPC call
     let body = serde_json::json!({
         "jsonrpc": "2.0", "id": 1,
         "method": "getBalance",
         "params": [pubkey, { "commitment": "confirmed" }]
     });
-    let sol = client.post(&rpc_url).json(&body).send()
+    let sol = client.post(rpc_url).json(&body).send()
         .ok()
         .and_then(|r| r.json::<serde_json::Value>().ok())
         .and_then(|j| j["result"]["value"].as_u64())
@@ -408,15 +778,17 @@ fn fetch_sol_balance_usd(pubkey: &str) -> (f64, f64) {
         .unwrap_or(0.0);
 
     if sol == 0.0 {
-        return (0.0, 0.0);
+        return (0.0, 0.0, 0.0);
     }
 
-    // Fetch SOL/USD rate from local backend or CoinGecko fallback
-    let usd_per_sol = client
+    // Fetch both USD and GBP rates from the local backend in one call
+    let rates_json = client
         .get("http://127.0.0.1:8090/api/rates/all")
         .send()
         .ok()
-        .and_then(|r| r.json::<serde_json::Value>().ok())
+        .and_then(|r| r.json::<serde_json::Value>().ok());
+
+    let usd_per_sol = rates_json.as_ref()
         .and_then(|j| j["rates"]["usd"].as_f64())
         .or_else(|| {
             client.get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
@@ -426,7 +798,11 @@ fn fetch_sol_balance_usd(pubkey: &str) -> (f64, f64) {
         })
         .unwrap_or(0.0);
 
-    (sol, sol * usd_per_sol)
+    let gbp_per_sol = rates_json
+        .and_then(|j| j["rates"]["gbp"].as_f64())
+        .unwrap_or_else(|| if usd_per_sol > 0.0 { usd_per_sol * 0.787 } else { 0.0 });
+
+    (sol, usd_per_sol, gbp_per_sol)
 }
 
 /// Logged-in player identity passed to the game by the Tauri wallet UI or
@@ -434,10 +810,18 @@ fn fetch_sol_balance_usd(pubkey: &str) -> (f64, f64) {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct PlayerIdentity {
     pub username: Option<String>,
-    /// Cached ELO rating from VPS backend
+    /// Cached ELO rating from VPS backend / on-chain profile
     pub elo: Option<u32>,
-    /// Cached country code from VPS backend
+    /// ISO 3166-1 alpha-2 country from VPS KYC record
     pub country: Option<String>,
+    /// JWT issued by the backend — used for authenticated API calls
+    pub jwt_token: Option<String>,
+    /// Whether this account is cleared to enter wager games
+    pub can_wager: bool,
+    /// Base58 wallet pubkey string (empty when not connected)
+    pub pubkey_str: Option<String>,
+    /// True once backend confirms an on-chain PlayerProfile PDA exists
+    pub has_onchain_profile: bool,
     /// Receiver for an in-flight profile fetch from VPS
     pub pending_profile_rx: Option<crossbeam_channel::Receiver<Result<crate::multiplayer::network::vps::identity::PlayerProfile, String>>>,
 }
@@ -528,7 +912,7 @@ pub struct BrandLogoState {
     pub loaded: bool,
 }
 
-const BRAND_LOGO_PATH: &str = r"C:\Users\isich\Pictures\Camera Roll\Screenshots\Screenshot 2026-04-22 232508.png";
+const BRAND_LOGO_PATH: &str = "assets/xfchess-title.png";
 
 /// Grey bezel border color shared by popups and modals.
 const BEZEL_GREY: egui::Color32 = egui::Color32::from_rgb(100, 100, 100);
@@ -560,7 +944,7 @@ fn ensure_news_banner_texture(ctx: &egui::Context, banner: &mut NewsBannerState)
     Some(texture_id)
 }
 
-fn ensure_brand_logo_texture(ctx: &egui::Context, logo: &mut BrandLogoState) -> Option<egui::TextureId> {
+pub(super) fn ensure_brand_logo_texture(ctx: &egui::Context, logo: &mut BrandLogoState) -> Option<egui::TextureId> {
     if let Some(texture) = logo.texture.as_ref() {
         return Some(texture.id());
     }
@@ -578,10 +962,22 @@ fn ensure_brand_logo_texture(ctx: &egui::Context, logo: &mut BrandLogoState) -> 
         return None;
     };
 
+    const MAX_DIM: u32 = 2048;
+    let decoded = if decoded.width() > MAX_DIM || decoded.height() > MAX_DIM {
+        let scale = (MAX_DIM as f32 / decoded.width().max(decoded.height()) as f32).min(1.0);
+        let w = (decoded.width() as f32 * scale) as u32;
+        let h = (decoded.height() as f32 * scale) as u32;
+        decoded.resize(w, h, image::imageops::FilterType::Triangle)
+    } else {
+        decoded
+    };
     let rgba = decoded.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-    let texture = ctx.load_texture("brand_logo_screenshot", color_image, egui::TextureOptions::LINEAR);
+    let texture = ctx.load_texture("brand_logo_screenshot", color_image, egui::TextureOptions {
+        mipmap_mode: Some(egui::TextureFilter::Linear),
+        ..egui::TextureOptions::LINEAR
+    });
     let texture_id = texture.id();
     logo.texture = Some(texture);
     Some(texture_id)
@@ -873,6 +1269,16 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
 
     if ctx_menu.competitive_menu.show_controls_popup {
         render_controls_popup(ctx, &mut ctx_menu.competitive_menu);
+    }
+
+    if ctx_menu.competitive_menu.show_pgn_input {
+        render_pgn_input_modal(
+            ctx,
+            &mut ctx_menu.competitive_menu,
+            &mut ctx_menu.core_mode,
+            &mut ctx_menu.next_state,
+            &mut ctx_menu.commands,
+        );
     }
 
 }

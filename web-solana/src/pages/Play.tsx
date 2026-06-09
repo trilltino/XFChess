@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+﻿import { motion } from 'framer-motion';
 import { ArrowLeft, X, Rocket, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
@@ -102,7 +102,7 @@ const PlayPage = () => {
         <p style={{ color: 'var(--text-dim)', marginBottom: '32px' }}>Launch the desktop application to play wagering and tournament games.</p>
 
         {launchStatus && (
-          <div style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '10px', background: 'rgba(173, 92, 47, 0.12)', border: '1px solid rgba(173, 92, 47, 0.3)', color: '#f3d4c4' }}>
+          <div style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.06)', border: '1px solid rgba(255, 255, 255, 0.15)', color: '#ffffff' }}>
             {launchStatus}
           </div>
         )}
@@ -118,7 +118,7 @@ const PlayPage = () => {
             onClick={launchGame}
             style={{
               padding: '18px 36px',
-              background: 'linear-gradient(135deg, #ad5c2f, #8c4a26)',
+              background: 'rgba(255,255,255,0.12)',
               color: '#fff',
               borderRadius: '10px',
               fontWeight: 800,
@@ -130,7 +130,7 @@ const PlayPage = () => {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '12px',
-              boxShadow: '0 10px 30px rgba(173, 92, 47, 0.3)'
+              boxShadow: '0 10px 30px rgba(255, 255, 255, 0.15)'
             }}
           >
             <Rocket size={20} />
@@ -192,8 +192,8 @@ const PlayPage = () => {
             transform: 'translateY(-50%)',
             width: '280px',
             padding: '20px',
-            background: 'rgba(8, 26, 20, 0.95)',
-            border: '1px solid rgba(173, 92, 47, 0.3)',
+            background: 'rgba(0, 0, 0, 0.95)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
             borderRadius: '12px',
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
             backdropFilter: 'blur(16px)',
@@ -218,8 +218,8 @@ const PlayPage = () => {
               <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> PvP wagering requires a Solana wallet and KYC verification.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <Link to="/kyc" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
-              <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
+              <Link to="/kyc" style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
+              <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
             </div>
           </div>
         )}
@@ -229,3 +229,5 @@ const PlayPage = () => {
 };
 
 export default PlayPage;
+
+

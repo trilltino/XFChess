@@ -59,7 +59,7 @@ class ApiClient {
     }
 
     if (this.token) {
-      headers.set("Authorization", `Bearer ${this.token}`);
+      headers.set("X-API-Key", this.token);
     }
 
     try {
@@ -155,6 +155,81 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({}),
     });
+  }
+
+  async advanceRound(tournamentId: number) {
+    return this.request<any>(`/admin/tournament/${tournamentId}/advance-round`, { method: "POST", body: JSON.stringify({}) });
+  }
+
+  async reseedPlayers(tournamentId: number, players: string[]) {
+    return this.request<any>(`/admin/tournament/${tournamentId}/reseed`, { method: "POST", body: JSON.stringify({ players }) });
+  }
+
+  async getEscrowBalance(tournamentId: number) {
+    return this.request<any>(`/admin/tournament/${tournamentId}/escrow-balance`);
+  }
+
+  // Player management
+  async getPlayerHistory(wallet: string) {
+    return this.request<any>(`/admin/players/${wallet}/history`);
+  }
+
+  async banPlayer(wallet: string, reason: string, durationDays?: number) {
+    return this.request<any>(`/admin/players/${wallet}/ban`, { method: "POST", body: JSON.stringify({ reason, duration_days: durationDays ?? null }) });
+  }
+
+  async eloOverride(wallet: string, newElo: number, reason: string) {
+    return this.request<any>(`/admin/players/${wallet}/elo-override`, { method: "POST", body: JSON.stringify({ new_elo: newElo, reason }) });
+  }
+
+  // Game admin
+  async forceResign(gameId: number, winner: string) {
+    return this.request<any>(`/admin/games/${gameId}/force-resign`, { method: "POST", body: JSON.stringify({ winner }) });
+  }
+
+  async flagGame(gameId: number, reason: string) {
+    return this.request<any>(`/admin/games/${gameId}/flag`, { method: "POST", body: JSON.stringify({ reason }) });
+  }
+
+  async getGameEval(gameId: number) {
+    return this.request<any>(`/admin/anti-cheat/game/${gameId}/eval`);
+  }
+
+  // Audit + logs
+  async getAuditLog(limit = 100) {
+    return this.request<any>(`/admin/audit-log?limit=${limit}`);
+  }
+
+  async getLogsStream() {
+    return this.request<any>("/admin/logs/stream");
+  }
+
+  // Treasury
+  async getTreasuryPayouts() { return this.request<any>("/admin/treasury/payouts"); }
+  async getFeeReport(period = "week") { return this.request<any>(`/admin/treasury/fee-report?period=${period}`); }
+  async manualRefund(wallet: string, lamports: number, reason: string) {
+    return this.request<any>("/admin/treasury/refund", { method: "POST", body: JSON.stringify({ wallet, lamports, reason }) });
+  }
+
+  // Infrastructure
+  async getTasksStatus() { return this.request<any>("/admin/tasks/status"); }
+  async getDbStats() { return this.request<any>("/admin/db/stats"); }
+  async getTlsExpiry() { return this.request<any>("/admin/tls/expiry"); }
+  async rotateAuthority(newKeyBase58: string) {
+    return this.request<any>("/admin/keys/rotate-authority", { method: "POST", body: JSON.stringify({ new_key_base58: newKeyBase58 }) });
+  }
+  async rotateToken() { return this.request<any>("/admin/auth/rotate-token", { method: "POST", body: JSON.stringify({}) }); }
+
+  // Moderation
+  async ipBan(ip: string, reason: string) {
+    return this.request<any>("/admin/moderation/ip-ban", { method: "POST", body: JSON.stringify({ ip, reason }) });
+  }
+  async getIpBans() { return this.request<any>("/admin/moderation/ip-bans"); }
+  async whitelistPlayer(wallet: string) {
+    return this.request<any>("/admin/moderation/whitelist", { method: "POST", body: JSON.stringify({ wallet }) });
+  }
+  async assignDispute(gameId: number, reviewer: string) {
+    return this.request<any>(`/admin/disputes/${gameId}/assign`, { method: "POST", body: JSON.stringify({ reviewer }) });
   }
 
   // Game history endpoints

@@ -23,7 +23,7 @@ pub fn vps_base() -> String {
         })
 }
 
-pub(crate) fn client() -> Result<reqwest::blocking::Client, String> {
+pub fn client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .default_headers({
             let mut h = reqwest::header::HeaderMap::new();

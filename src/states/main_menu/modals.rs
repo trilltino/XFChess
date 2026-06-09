@@ -9,6 +9,7 @@
 use super::*;
 use crate::core::{GameMode as CoreGameMode, GameState};
 use crate::game::ai::GameMode;
+use crate::ui::styles::*;
 use bevy::prelude::NextState;
 use bevy_egui::egui;
 use tracing::info;
@@ -30,33 +31,27 @@ pub(super) fn render_ai_setup_modal(
     egui::Window::new("Game Setup")
         .collapsible(false)
         .resizable(false)
-        .fixed_size(egui::Vec2::new(380.0, 400.0))
+        .fixed_size(egui::Vec2::new(380.0, 420.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .frame(egui::Frame {
-            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
-            corner_radius: egui::CornerRadius::same(4),
-            stroke: egui::Stroke::new(2.0, BEZEL_GREY),
-            inner_margin: egui::Margin::same(16),
-            ..Default::default()
-        })
+        .frame(StyledPanel::popup())
         .show(ctx, |ui| {
-            // Close button only (window title already shows "Game Setup")
             ui.horizontal(|ui| {
+                ui.label(TextStyle::popup_title("GAME SETUP"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("X").clicked() {
+                    if ui.add(egui::Button::new(egui::RichText::new("✕").size(12.0).color(UiColors::TEXT_POPUP_BODY))
+                        .fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)).clicked() {
                         competitive.show_ai_setup = false;
                     }
                 });
             });
 
-            ui.add_space(12.0);
+            ui.add_space(14.0);
 
             // Strength section
             ui.label(
                 egui::RichText::new("Strength")
-                    .size(14.0)
-                    .color(egui::Color32::WHITE)
-                    .strong(),
+                    .size(13.0)
+                    .color(UiColors::TEXT_POPUP_BODY),
             );
             ui.add_space(6.0);
 
@@ -112,9 +107,8 @@ pub(super) fn render_ai_setup_modal(
             // ── Time Control ─────────────────────────────────────────────────
             ui.label(
                 egui::RichText::new("Time Control")
-                    .size(14.0)
-                    .color(egui::Color32::WHITE)
-                    .strong(),
+                    .size(13.0)
+                    .color(UiColors::TEXT_POPUP_BODY),
             );
             ui.add_space(6.0);
 
@@ -150,9 +144,8 @@ pub(super) fn render_ai_setup_modal(
             // ── Engine Selection ─────────────────────────────────────────────
             ui.label(
                 egui::RichText::new("Engine")
-                    .size(14.0)
-                    .color(egui::Color32::WHITE)
-                    .strong(),
+                    .size(13.0)
+                    .color(UiColors::TEXT_POPUP_BODY),
             );
             ui.add_space(6.0);
 
@@ -268,39 +261,22 @@ pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut Compe
     egui::Window::new("Controls")
         .collapsible(false)
         .resizable(false)
-        .fixed_size(egui::Vec2::new(420.0, 360.0))
+        .fixed_size(egui::Vec2::new(420.0, 380.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .title_bar(false)
-        .frame(egui::Frame {
-            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
-            corner_radius: egui::CornerRadius::same(4),
-            stroke: egui::Stroke::new(2.0, BEZEL_GREY),
-            inner_margin: egui::Margin::same(16),
-            ..Default::default()
-        })
+        .frame(StyledPanel::popup())
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Controls")
-                        .size(18.0)
-                        .color(egui::Color32::WHITE)
-                        .strong(),
-                );
+                ui.label(TextStyle::popup_title("CONTROLS"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("X").clicked() {
+                    if ui.add(egui::Button::new(egui::RichText::new("✕").size(12.0).color(UiColors::TEXT_POPUP_BODY))
+                        .fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)).clicked() {
                         competitive.show_controls_popup = false;
                     }
                 });
             });
 
-            ui.add_space(12.0);
-
-            ui.label(
-                egui::RichText::new("Controls")
-                    .size(14.0)
-                    .color(egui::Color32::WHITE)
-                    .strong(),
-            );
+            ui.add_space(14.0);
             ui.add_space(6.0);
 
             let rows: [(&str, &str); 8] = [
@@ -333,5 +309,114 @@ pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut Compe
                 });
                 ui.add_space(4.0);
             }
+        });
+}
+
+/// PGN input modal — paste a PGN string and load it into the replay player.
+pub(super) fn render_pgn_input_modal(
+    ctx: &egui::Context,
+    competitive: &mut CompetitiveMenuState,
+    core_mode: &mut CoreGameMode,
+    next_state: &mut NextState<GameState>,
+    commands: &mut bevy::ecs::system::Commands,
+) {
+    egui::Window::new("PGN Player")
+        .collapsible(false)
+        .resizable(false)
+        .fixed_size(egui::Vec2::new(480.0, 380.0))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .title_bar(false)
+        .frame(StyledPanel::popup())
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(TextStyle::popup_title("PGN PLAYER"));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new("✕").size(12.0).color(UiColors::TEXT_POPUP_BODY))
+                        .fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)).clicked() {
+                        competitive.show_pgn_input = false;
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+            ui.label(
+                egui::RichText::new("Paste PGN below and click Load to replay the game.")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(160, 170, 190)),
+            );
+            ui.add_space(8.0);
+
+            egui::ScrollArea::vertical()
+                .max_height(200.0)
+                .show(ui, |ui| {
+                    ui.add_sized(
+                        [440.0, 190.0],
+                        egui::TextEdit::multiline(&mut competitive.pgn_input_text)
+                            .font(egui::TextStyle::Monospace)
+                            .hint_text("[Event \"?\"]\n[White \"Player1\"]\n[Black \"Player2\"]\n\n1. e4 e5 2. Nf3 ..."),
+                    );
+                });
+
+            if let Some(ref err) = competitive.pgn_input_error.clone() {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(format!("Error: {}", err))
+                        .size(10.5)
+                        .color(egui::Color32::from_rgb(230, 100, 80)),
+                );
+            }
+
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                let can_load = !competitive.pgn_input_text.trim().is_empty();
+                let load_btn = ui.add_enabled(
+                    can_load,
+                    egui::Button::new(
+                        egui::RichText::new("Load & Play")
+                            .size(13.0)
+                            .color(egui::Color32::WHITE)
+                            .strong(),
+                    )
+                    .fill(egui::Color32::from_rgb(50, 120, 60))
+                    .corner_radius(4.0)
+                    .min_size(egui::Vec2::new(120.0, 32.0)),
+                );
+
+                if load_btn.clicked() {
+                    match nimzovich_engine::parse_pgn(&competitive.pgn_input_text) {
+                        Ok(pgn) => {
+                            info!("[PGN] Loaded game: {} moves", pgn.moves.len());
+                            commands.insert_resource(
+                                crate::game::replay::ParsedPgnGameResource {
+                                    inner: pgn,
+                                    show_eval_graph: false,
+                                    puzzle_mode: false,
+                                    puzzle_revealed: false,
+                                },
+                            );
+                            *core_mode = CoreGameMode::PgnReplay;
+                            next_state.set(GameState::InGame);
+                            competitive.show_pgn_input = false;
+                            competitive.pgn_input_error = None;
+                        }
+                        Err(e) => {
+                            competitive.pgn_input_error = Some(format!("{:?}", e));
+                        }
+                    }
+                }
+
+                ui.add_space(8.0);
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("Cancel").size(13.0))
+                            .fill(egui::Color32::from_rgba_unmultiplied(80, 80, 80, 200))
+                            .corner_radius(4.0)
+                            .min_size(egui::Vec2::new(80.0, 32.0)),
+                    )
+                    .clicked()
+                {
+                    competitive.show_pgn_input = false;
+                }
+            });
         });
 }

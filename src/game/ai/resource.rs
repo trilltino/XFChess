@@ -104,7 +104,7 @@ impl Default for ChessAIResource {
                 ai_color: PieceColor::Black,
             },
             difficulty: AIDifficulty::Level4,
-            engine: AIEngine::Stockfish,
+            engine: AIEngine::XFChessEngine,
         }
     }
 }
@@ -112,10 +112,10 @@ impl Default for ChessAIResource {
 /// AI engine selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Default)]
 pub enum AIEngine {
-    /// External Stockfish process (High strength)
-    #[default]
+    /// External Stockfish process (High strength, requires stockfish.exe)
     Stockfish,
-    /// Internal XFChessEngine (Lightweight, native Rust)
+    /// Internal XFChessEngine (Lightweight, native Rust, no external process)
+    #[default]
     XFChessEngine,
 }
 

@@ -76,6 +76,10 @@ pub struct SquareMaterials {
     pub templeos_white: Handle<StandardMaterial>,
     /// Shared mesh for move hints (prevent per-frame allocation)
     pub hint_mesh: Handle<Mesh>,
+    /// Annular ring mesh used for capture-target hints
+    pub capture_hint_mesh: Handle<Mesh>,
+    /// Material for capture-target hints (red/orange ring)
+    pub capture_hint_matl: Handle<StandardMaterial>,
     /// Shared mesh for last move highlights (prevent per-frame allocation)
     pub highlight_mesh: Handle<Mesh>,
 }
@@ -130,9 +134,18 @@ impl FromWorld for SquareMaterials {
             }),
             grey_color: materials.add(grey_material), // Dull grey for TempleOS (unlit)
             templeos_white: materials.add(white_material), // Bright white for TempleOS (unlit)
+            capture_hint_matl: materials.add(StandardMaterial {
+                base_color: Color::srgba(0.90, 0.25, 0.08, 0.85),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            }),
             hint_mesh: world
                 .resource_mut::<Assets<Mesh>>()
                 .add(Circle::new(0.28)),
+            capture_hint_mesh: world
+                .resource_mut::<Assets<Mesh>>()
+                .add(Annulus::new(0.38, 0.48)),
             highlight_mesh: world
                 .resource_mut::<Assets<Mesh>>()
                 .add(Plane3d::default().mesh().size(0.92, 0.92)),

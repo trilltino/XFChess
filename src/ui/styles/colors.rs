@@ -57,4 +57,15 @@ impl UiColors {
 
     /// Border color for UI elements
     pub const BORDER: egui::Color32 = egui::Color32::from_rgb(60, 60, 65);
+
+    // === Popup / Modal tokens ===
+
+    /// Deep near-black background used by all modal popups
+    pub const BG_POPUP: egui::Color32 = egui::Color32::from_rgba_premultiplied(8, 10, 18, 252);
+
+    /// Muted blue-gray body/subtitle text inside popups
+    pub const TEXT_POPUP_BODY: egui::Color32 = egui::Color32::from_rgb(155, 158, 175);
+
+    /// Dark charcoal fill for secondary/cancel buttons inside popups
+    pub const BTN_POPUP_DARK: egui::Color32 = egui::Color32::from_rgb(32, 34, 46);
 }

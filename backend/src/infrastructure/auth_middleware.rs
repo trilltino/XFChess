@@ -24,15 +24,22 @@ pub async fn require_api_key(
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Get expected API key from environment with explicit error handling
     let expected_key = match env::var("ADMIN_API_KEY") {
         Ok(key) => key,
         Err(env::VarError::NotPresent) => {
-            tracing::warn!("[auth] ADMIN_API_KEY not configured, rejecting request");
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
+            #[cfg(debug_assertions)]
+            {
+                tracing::warn!("[auth] ADMIN_API_KEY not set — defaulting to 'dev' in debug build");
+                "dev".to_string()
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                tracing::error!("[auth] ADMIN_API_KEY not configured in production build");
+                return Err(StatusCode::SERVICE_UNAVAILABLE);
+            }
         }
         Err(env::VarError::NotUnicode(_)) => {
-            tracing::error!("[auth] ADMIN_API_KEY contains invalid UTF-8, rejecting request");
+            tracing::error!("[auth] ADMIN_API_KEY contains invalid UTF-8");
             return Err(StatusCode::SERVICE_UNAVAILABLE);
         }
     };

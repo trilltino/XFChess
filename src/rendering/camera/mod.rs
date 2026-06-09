@@ -2,6 +2,7 @@
 //!
 //! Manages camera setup and configuration.
 
+pub mod camera_director;
 pub mod camera_templeos;
 
 use bevy::prelude::*;

@@ -327,8 +327,25 @@ pub fn execute_move(
         }
     }
 
-    // 7. Sync ECS to Engine BEFORE getting FEN for event
+    // 7. Sync ECS → engine once so the FEN for the event is correct.
+    //    Flag prevents update_game_phase from syncing a second time this frame.
+    //
+    //    Before syncing, mark the captured piece as off-board by clearing its
+    //    logical coordinates.  FadingCapture is inserted via deferred Commands
+    //    and won't be applied until after this frame, so the captured entity
+    //    still appears in pieces_query with its original (now-occupied) square.
+    //    Without this, both the capturing piece and the captured piece share the
+    //    same square in the board array — whichever is iterated last "wins" and
+    //    the engine can silently drop the capturing piece from its bitboards,
+    //    making subsequent captures appear blocked.
+    if let Some(cap) = ctx.capture {
+        if let Ok((_, mut p, _)) = pieces_query.get_mut(cap.entity) {
+            p.x = u8::MAX;
+            p.y = u8::MAX;
+        }
+    }
     engine.sync_ecs_to_engine_mut(pieces_query);
+    engine.synced_this_move = true;
 
     // 8. Trigger Event with correct FEN
     if let Some(writer) = move_events {

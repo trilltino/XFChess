@@ -436,59 +436,51 @@ pub fn perform_wallet_connect(auth_state: &mut ResMut<AuthState>, commands: &mut
     let thread_pool = bevy::tasks::AsyncComputeTaskPool::get();
     let base_url = auth_base_url();
 
-    let task = thread_pool.spawn(async move {
-        // Poll for wallet pubkey with retries (give user time to connect)
-        let mut pubkey = None;
+    // Use a plain thread so the blocking wallet poll doesn't occupy an async executor slot.
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    std::thread::spawn(move || {
+        // Poll for wallet pubkey (up to 15 s, 500 ms steps)
+        #[cfg_attr(not(feature = "solana"), allow(unused_mut))]
+        let mut pubkey: Option<String> = None;
         for _attempt in 0..30 {
             std::thread::sleep(std::time::Duration::from_millis(500));
             #[cfg(feature = "solana")]
             {
                 pubkey = crate::multiplayer::solana::integration::systems::query_wallet_pubkey_from_tauri();
             }
-            #[cfg(not(feature = "solana"))]
-            {
-                pubkey = None;
-            }
-            if pubkey.is_some() {
-                break;
-            }
+            if pubkey.is_some() { break; }
         }
 
         let pubkey = match pubkey {
             Some(pk) => pk,
-            None => return Err("Wallet not connected. Please connect your wallet in the popup window.".to_string()),
-        };
-
-        let client = reqwest::blocking::Client::new();
-
-        // Check if wallet is registered
-        let url = format!("{}/api/auth/check-wallet/{}", base_url, pubkey);
-        let res = client.get(&url).send();
-
-        let is_registered = match res {
-            Ok(response) => response.status().is_success(),
-            Err(e) => return Err(e.to_string()),
-        };
-
-        // Check KYC status
-        let kyc_url = format!("{}/api/user/status/{}", base_url, pubkey);
-        let kyc_res = client.get(&kyc_url).send();
-        let has_kyc = match kyc_res {
-            Ok(response) => {
-                if response.status().is_success() {
-                    if let Ok(status) = response.json::<serde_json::Value>() {
-                        status.get("has_kyc").and_then(|v| v.as_bool()).unwrap_or(false)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
+            None => {
+                let _ = tx.send(Err("Wallet not connected. Please connect your wallet in the popup window.".to_string()));
+                return;
             }
-            Err(_) => false,
         };
 
-        Ok(AuthTaskResult::WalletCheck { pubkey, registered: is_registered, has_kyc })
+        // Check registration status (5 s timeout)
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_default();
+        let is_registered = http
+            .get(format!("{}/api/auth/check-wallet/{}", base_url, pubkey))
+            .send()
+            .map(|r| r.status().is_success())
+            .unwrap_or(false);
+
+        // Use the shared helper — checks can_wager (the authoritative gate) with a proper timeout
+        let can_wager = crate::multiplayer::network::vps::identity::get_user_status(&pubkey)
+            .map(|s| s.can_wager)
+            .unwrap_or(false);
+
+        let _ = tx.send(Ok(AuthTaskResult::WalletCheck { pubkey, registered: is_registered, has_kyc: can_wager }));
+    });
+
+    // Wrap the channel in an async task so the rest of the auth pipeline (AuthTask polling) still works
+    let task = thread_pool.spawn(async move {
+        rx.recv().unwrap_or_else(|_| Err("Wallet check thread dropped unexpectedly".to_string()))
     });
 
     commands.insert_resource(AuthTask(task));
@@ -801,8 +793,13 @@ pub fn render_profile_consent_modal(
                         egui::RichText::new("Yes").strong().size(16.0)
                     ).fill(egui::Color32::from_rgb(220, 140, 60)).corner_radius(8.0)).clicked() {
                         consent_state.show = false;
-                        next_state.set(GameState::MainMenu); // Ensure we are in MainMenu before showing sub-menus
-                        menu_state.set(crate::core::states::MenuState::ProfileCreation);
+                        next_state.set(GameState::MainMenu);
+                        // Open Tauri profile step instead of in-game modal
+                        std::thread::spawn(|| {
+                            let _ = reqwest::blocking::Client::new()
+                                .post("http://127.0.0.1:7454/api/open-profile-step")
+                                .send();
+                        });
                     }
                     
                     ui.add_space(20.0);

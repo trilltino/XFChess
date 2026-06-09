@@ -36,7 +36,7 @@ impl Default for WindowConfig {
             height: 768,
             resizable: true,
             maximized: false,
-            fullscreen: false,
+            fullscreen: true,
         }
     }
 }

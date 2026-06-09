@@ -172,6 +172,51 @@ pub fn vps_fetch_move_nonce(game_id: u64) -> Result<u64, String> {
     Ok(resp.nonce + 1)
 }
 
+/// Check if the wallet has an active (in-progress) game on the backend.
+/// Returns `Some(game_id)` if found, `None` if not or on error.
+pub fn get_active_game_for_wallet(wallet_pubkey: &str) -> Result<Option<u64>, String> {
+    #[derive(Deserialize)]
+    struct ActiveGameResp {
+        game_id: Option<u64>,
+    }
+    let response = client()?
+        .get(format!("{}/games/active/{}", vps_base(), wallet_pubkey))
+        .send()
+        .map_err(|e| format!("get_active_game: {e}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let resp = response
+        .json::<ActiveGameResp>()
+        .map_err(|e| format!("get_active_game parse: {e}"))?;
+    Ok(resp.game_id)
+}
+
+/// Fetch the full move list for a game (used by spectator mode).
+/// Returns a list of UCI strings in order.
+pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String> {
+    #[derive(Deserialize)]
+    struct MoveEntry { move_uci: String }
+    #[derive(Deserialize)]
+    struct MovesResp { moves: Vec<MoveEntry> }
+
+    let response = client()?
+        .get(format!("{}/games/{}/moves", vps_base(), game_id))
+        .send()
+        .map_err(|e| format!("spectator get_moves: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        return Err(format!("spectator get_moves: HTTP {status}"));
+    }
+    let resp = response
+        .json::<MovesResp>()
+        .map_err(|e| format!("spectator get_moves parse: {e}"))?;
+    Ok(resp.moves.into_iter().map(|m| m.move_uci).collect())
+}
+
 /// Submit a dispute for a completed wager game. The VPS builds and submits the
 /// `dispute` on-chain instruction and opens a 48-hour arbitration window.
 pub fn vps_submit_dispute(game_id: u64, disputing_player: &str) -> Result<String, String> {

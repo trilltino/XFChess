@@ -10,30 +10,6 @@ export default function TokenAuth({ onAuth }: TokenAuthProps) {
   const [backendUrl, setBackendUrl] = useState("http://127.0.0.1:8090");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [connectionStatus, setConnectionStatus] = useState<"checking" | "connected" | "disconnected">("checking");
-
-  useEffect(() => {
-    const checkConnection = async () => {
-      setConnectionStatus("checking");
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        
-        const response = await fetch(`${backendUrl}/health`, {
-          method: "GET",
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        setConnectionStatus(response.ok ? "connected" : "disconnected");
-      } catch {
-        setConnectionStatus("disconnected");
-      }
-    };
-
-    checkConnection();
-    const interval = setInterval(checkConnection, 30000);
-    return () => clearInterval(interval);
-  }, [backendUrl]);
 
   useEffect(() => {
     const savedToken = localStorage.getItem("admin_token");
@@ -53,9 +29,9 @@ export default function TokenAuth({ onAuth }: TokenAuthProps) {
     setError("");
 
     try {
-      const response = await fetch(`${backendUrl}/admin/tournament/list`, {
+      const response = await fetch(`${backendUrl}/admin/players`, {
         headers: {
-          "Authorization": `Bearer ${token}`,
+          "X-API-Key": token,
           "Content-Type": "application/json",
         },
       });
@@ -88,7 +64,7 @@ export default function TokenAuth({ onAuth }: TokenAuthProps) {
       overflow: "hidden"
     }}>
       <div className="onboarding-bg" />
-      
+
       <div style={{
         backgroundColor: "rgba(10, 33, 26, 0.4)",
         backdropFilter: "blur(40px)",
@@ -107,34 +83,7 @@ export default function TokenAuth({ onAuth }: TokenAuthProps) {
           <div style={{ color: "var(--text-dim)", fontSize: "12px", letterSpacing: "2px", fontWeight: "700" }}>TOURNAMENT ORCHESTRATOR</div>
         </div>
 
-        <div style={{ 
-          display: "flex", 
-          alignItems: "center", 
-          justifyContent: "center", 
-          gap: "8px",
-          marginBottom: "2rem",
-          padding: "8px 16px",
-          backgroundColor: "rgba(255,255,255,0.03)",
-          borderRadius: "100px",
-          width: "fit-content",
-          margin: "0 auto 2.5rem auto",
-          border: "1px solid var(--border)"
-        }}>
-          <div style={{
-            width: "8px",
-            height: "8px",
-            borderRadius: "50%",
-            backgroundColor: connectionStatus === "connected" ? "#4ade80" : 
-                            connectionStatus === "checking" ? "#fbbf24" : "#ef4444",
-            boxShadow: connectionStatus === "connected" ? "0 0 10px #4ade80" : "none"
-          }} />
-          <span style={{ fontSize: "10px", color: "var(--text-dim)", fontWeight: "800", letterSpacing: "1px" }}>
-            {connectionStatus === "connected" ? "UPLINK ESTABLISHED" : 
-             connectionStatus === "checking" ? "SCANNING FOR BACKEND..." : "UPLINK OFFLINE"}
-          </span>
-        </div>
-        
-        <form onSubmit={handleSubmit} style={{ textAlign: "left" }}>
+        <form onSubmit={handleSubmit} style={{ textAlign: "left", marginTop: "1rem" }}>
           <div style={{ marginBottom: "1.5rem" }}>
             <label style={labelStyle}>UPLINK ENDPOINT</label>
             <input
@@ -189,7 +138,7 @@ export default function TokenAuth({ onAuth }: TokenAuthProps) {
             {loading ? "ESTABLISHING SECURE SESSION..." : "INITIATE TERMINAL"}
           </button>
         </form>
-        
+
         <div style={{ marginTop: "2rem", fontSize: "10px", color: "rgba(255,255,255,0.15)", letterSpacing: "1px" }}>
           SECURE CHANNEL 256-BIT ENCRYPTION ACTIVE
         </div>

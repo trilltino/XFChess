@@ -13,5 +13,7 @@ pub mod types;
 pub mod view_mode;
 pub mod view_mode_systems;
 pub mod replay;
+pub mod replay_shorts;
+pub mod shorts_state;
 
 pub use plugin::GamePlugin;

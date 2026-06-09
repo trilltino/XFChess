@@ -17,7 +17,6 @@ use solana_sdk::{
 use solana_sdk::system_program;
 use std::path::PathBuf;
 use std::sync::Arc;
-use directories::ProjectDirs;
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -236,7 +235,7 @@ pub fn build_global_create_game_ix(
     game_id: u64,
     wager_amount: u64,
     match_type: u8,
-    country: &str,
+    platform_fee: u64,
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> solana_sdk::instruction::Instruction {
@@ -247,10 +246,8 @@ pub fn build_global_create_game_ix(
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&wager_amount.to_le_bytes());
     data.push(match_type);
-    // String (Borsh: u32 len + bytes)
-    let country_bytes = country.as_bytes();
-    data.extend_from_slice(&(country_bytes.len() as u32).to_le_bytes());
-    data.extend_from_slice(country_bytes);
+    // platform_fee: u64 LE (universal fee from live SOL/GBP rate, replaces country String)
+    data.extend_from_slice(&platform_fee.to_le_bytes());
     data.extend_from_slice(&base_time_seconds.to_le_bytes());
     data.extend_from_slice(&increment_seconds.to_le_bytes());
 

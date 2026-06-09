@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_shell::ShellExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_notification::NotificationExt;
 
@@ -109,8 +108,8 @@ pub fn show_notification(title: String, body: String, app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn open_url(url: String, app: AppHandle) {
-  app.shell().open(&url, None).unwrap();
+pub fn open_url(url: String, _app: AppHandle) {
+  open::that(&url).ok();
 }
 
 #[tauri::command]

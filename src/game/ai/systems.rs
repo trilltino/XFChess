@@ -11,39 +11,51 @@ use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use std::env;
 use std::process::{Command, Stdio};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Resource holding the async AI computation task
 #[derive(Resource)]
 pub struct PendingAIMove(pub Task<Result<AIMove, String>>);
 
-/// Persistent Stockfish process resource
-#[derive(Resource)]
-pub struct StockfishProcess {
-    pub stdin: std::process::ChildStdin,
-    pub reader: std::io::BufReader<std::process::ChildStdout>,
-    pub child: std::process::Child,
+/// Persistent, pre-warmed nimzovich engine game.
+///
+/// Avoids the 2.2 GB TT zero-write that `game_from_fen` / `new_game` triggers on
+/// every AI call.  The async task takes the game out (`Option` becomes `None`),
+/// calls `set_game_from_fen` (reuses the existing TT allocation), runs the search,
+/// then puts the game back.  A background warm-up task fills the pool on game entry
+/// so it is ready before the player's first move.
+#[derive(Resource, Clone)]
+pub struct XFChessGamePool(pub std::sync::Arc<std::sync::Mutex<Option<nimzovich_engine::Game>>>);
+
+struct StockfishInner {
+    stdin: std::process::ChildStdin,
+    reader: std::io::BufReader<std::process::ChildStdout>,
+    initialized: bool,
 }
 
-impl StockfishProcess {
-    pub fn new() -> Result<Self, String> {
+impl StockfishInner {
+    fn new() -> Result<Self, String> {
         let stockfish_path = resolve_stockfish_path()?;
         let mut child = Command::new(&stockfish_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("Failed to spawn Stockfish: {}", e))?;
-        
-        let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
-        let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+            .map_err(|e| format!("Failed to spawn Stockfish at '{}': {}", stockfish_path.display(), e))?;
+
+        let stdin = child.stdin.take().ok_or("Failed to get Stockfish stdin")?;
+        let stdout = child.stdout.take().ok_or("Failed to get Stockfish stdout")?;
         let reader = std::io::BufReader::new(stdout);
-        
-        Ok(Self { stdin, reader, child })
+        drop(child);
+        Ok(Self { stdin, reader, initialized: false })
     }
 }
+
+/// Persistent Stockfish process, shared via Arc<Mutex<>> so async tasks can reuse it.
+#[derive(Resource, Clone)]
+pub struct StockfishProcess(std::sync::Arc<std::sync::Mutex<StockfishInner>>);
 
 /// AI move representation with Stockfish statistics
 #[derive(Debug, Clone)]
@@ -119,12 +131,36 @@ impl Plugin for AIPlugin {
                 (spawn_ai_task_system, poll_ai_task_system)
                     .chain()
                     .in_set(GameSystems::Execution),
+            )
+            .add_systems(
+                OnEnter(crate::core::GameState::InGame),
+                warmup_xf_engine_pool,
             );
 
-        // Spawn the Stockfish process at startup (if we can)
-        // Wrapped in a task to avoid blocking startup
         let _pool = AsyncComputeTaskPool::get_or_init(Default::default);
     }
+}
+
+/// Pre-allocate the XFChess engine game on game entry to avoid the 2.2 GB TT
+/// zero-write during the first AI move. Runs immediately after transitioning to
+/// InGame while the board and assets are loading, so it finishes before the player
+/// can make their first move.
+fn warmup_xf_engine_pool(mut commands: Commands, ai_config: Res<ChessAIResource>) {
+    if ai_config.engine != crate::game::ai::resource::AIEngine::XFChessEngine { return; }
+    if matches!(ai_config.mode, crate::game::ai::resource::GameMode::Multiplayer | crate::game::ai::resource::GameMode::MultiplayerCompetitive) { return; }
+
+    let pool_arc = std::sync::Arc::new(std::sync::Mutex::new(None::<nimzovich_engine::Game>));
+    let fill = pool_arc.clone();
+
+    AsyncComputeTaskPool::get().spawn(async move {
+        let game = nimzovich_engine::game_from_fen(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        );
+        *fill.lock().unwrap() = Some(game);
+    }).detach();
+
+    commands.insert_resource(XFChessGamePool(pool_arc));
+    info!("[AI] XFChess engine warm-up started");
 }
 
 /// System params for spawning AI task
@@ -139,6 +175,42 @@ pub struct AiSpawnParams<'w, 's> {
     pub pending_turn_advance: Option<Res<'w, crate::game::resources::PendingTurnAdvance>>,
     pub players: Res<'w, crate::game::resources::player::Players>,
     pub sf_process: Option<ResMut<'w, StockfishProcess>>,
+    pub move_history: Res<'w, crate::game::resources::MoveHistory>,
+    pub active_tc: Option<Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>>,
+    pub game_pool: Option<Res<'w, XFChessGamePool>>,
+}
+
+/// Compute think_time and an optional depth cap from time control context.
+///
+/// - Caps think_time to `base_seconds / 40` so the AI can't flag in short games.
+/// - Sets `max_depth = Some(6)` for fast games with no increment (< 60 s + 0).
+fn compute_think_params(
+    base_think: f32,
+    half_moves_played: usize,
+    active_tc: Option<&crate::game::resources::active_time_control::ActiveTimeControl>,
+) -> (f32, Option<u8>) {
+    let Some(tc) = active_tc.map(|a| a.control) else {
+        return (base_think, None);
+    };
+    let base_secs = tc.base_seconds();
+    let inc_secs = tc.increment_seconds();
+
+    // Remaining-time budget: base / estimated_moves_left (never less than 5)
+    let think_time = if base_secs > 0 {
+        let est_moves_left = (40.0 - half_moves_played as f32 / 2.0).max(5.0);
+        base_think.min(base_secs as f32 / est_moves_left)
+    } else {
+        base_think
+    };
+
+    // Hard depth cap for fast games with no increment (ultra-bullet / bullet)
+    let max_depth = if base_secs > 0 && base_secs < 60 && inc_secs == 0 {
+        Some(6u8)
+    } else {
+        None
+    };
+
+    (think_time, max_depth)
 }
 
 /// System params for polling AI task
@@ -164,7 +236,7 @@ pub struct AiPollParams<'w, 's> {
 
 fn spawn_ai_task_system(
     mut commands: Commands,
-    mut params: AiSpawnParams,
+    params: AiSpawnParams,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     let _start_time = std::time::Instant::now();
@@ -180,11 +252,7 @@ fn spawn_ai_task_system(
         return;
     }
 
-    // Sync ECS → engine FEN so Stockfish sees the latest position
-    params
-        .engine
-        .sync_ecs_to_engine(&params.pieces_query);
-
+    // FEN is already current — game_logic.rs synced the engine and built the move cache.
     let fen = params.engine.current_fen().to_string();
     let depth = params.ai_config.difficulty.stockfish_depth();
     let movetime_ms = params.ai_config.difficulty.stockfish_movetime_ms();
@@ -192,54 +260,102 @@ fn spawn_ai_task_system(
 
     match params.ai_config.engine {
         crate::game::ai::resource::AIEngine::Stockfish => {
-            info!("[AI] Spawning Stockfish task (persistent if available)");
+            info!("[AI] Spawning Stockfish task (persistent process)");
             let depth = depth.unwrap_or(12);
             let movetime = movetime_ms.unwrap_or(1500);
-            
-            // If we don't have a persistent process yet, try to create one
-            if params.sf_process.is_none() {
-                match StockfishProcess::new() {
-                    Ok(p) => commands.insert_resource(p),
+
+            // Get or create the persistent process Arc, then clone it for the task.
+            let sf_arc = if let Some(sf) = params.sf_process.as_ref() {
+                sf.0.clone()
+            } else {
+                match StockfishInner::new() {
+                    Ok(inner) => {
+                        let arc = std::sync::Arc::new(std::sync::Mutex::new(inner));
+                        commands.insert_resource(StockfishProcess(arc.clone()));
+                        arc
+                    }
                     Err(e) => {
                         error!("[AI] Failed to start persistent Stockfish: {}", e);
-                        // Fallback to one-off task if needed, but for now just error
                         return;
                     }
                 }
-            }
+            };
 
-            let task = spawn_stockfish_task(fen, depth, movetime);
+            let task = spawn_stockfish_task_persistent(fen, depth, movetime, sf_arc);
             commands.insert_resource(PendingAIMove(task));
         }
         crate::game::ai::resource::AIEngine::XFChessEngine => {
-            info!("[AI] Spawning internal XFChessEngine task");
-            let task = spawn_xf_engine_task(fen, params.ai_config.difficulty.seconds_per_move(), ai_color);
+            let base_think = params.ai_config.difficulty.seconds_per_move();
+            let (think_time, max_depth) = compute_think_params(
+                base_think,
+                params.move_history.len(),
+                params.active_tc.as_deref(),
+            );
+            info!(
+                "[AI] Spawning XFChessEngine task — think_time={:.2}s max_depth={:?}",
+                think_time, max_depth
+            );
+            // Try to take the pre-warmed game from the pool to avoid re-allocating the
+            // 2.2 GB transposition table on every move. Pass the pool Arc into the
+            // task so it can put the game back when the search finishes.
+            let pool_arc = params.game_pool.as_ref().map(|p| p.0.clone());
+            let preloaded = pool_arc.as_ref().and_then(|arc| arc.lock().ok()?.take());
+            let task = spawn_xf_engine_task(fen, think_time, max_depth, ai_color, preloaded, pool_arc);
             commands.insert_resource(PendingAIMove(task));
         }
     }
 }
 
-fn spawn_xf_engine_task(fen: String, think_time: f32, color: crate::rendering::pieces::PieceColor) -> Task<Result<AIMove, String>> {
+fn spawn_xf_engine_task(
+    fen: String,
+    think_time: f32,
+    max_depth: Option<u8>,
+    color: crate::rendering::pieces::PieceColor,
+    preloaded_game: Option<nimzovich_engine::Game>,
+    pool: Option<std::sync::Arc<std::sync::Mutex<Option<nimzovich_engine::Game>>>>,
+) -> Task<Result<AIMove, String>> {
     AsyncComputeTaskPool::get().spawn(async move {
         let start_time = Instant::now();
-        let mut game = nimzovich_engine::game_from_fen(&fen);
+
+        // Reuse the pre-warmed game to skip the 2.2 GB TT zero-write.
+        // If the warm-up hasn't finished yet, fall back to allocating a new game.
+        let mut game = match preloaded_game {
+            Some(mut g) => {
+                nimzovich_engine::set_game_from_fen(&mut g, &fen);
+                g
+            }
+            None => nimzovich_engine::game_from_fen(&fen),
+        };
+
         game.secs_per_move = think_time;
-        
+        if let Some(d) = max_depth {
+            game.abs_max_depth = d as i64;
+        }
+
         let engine_color = match color {
             crate::rendering::pieces::PieceColor::White => 1,
             crate::rendering::pieces::PieceColor::Black => -1,
         };
-        
+
         let mv = nimzovich_engine::reply(&mut game, engine_color).await;
-        
+
+        let depth_reached = game.max_depth_so_far as u8;
+
+        // Return game to the pool for reuse on the next AI move.
+        if let Some(arc) = pool {
+            if let Ok(mut guard) = arc.lock() {
+                *guard = Some(game);
+            }
+        }
+
         let from_file = mv.src as u8 % 8;
         let from_rank = mv.src as u8 / 8;
         let to_file = mv.dst as u8 % 8;
         let to_rank = mv.dst as u8 / 8;
-        
+
         let from_uci = ChessEngine::coords_to_uci(from_file, from_rank);
         let to_uci = ChessEngine::coords_to_uci(to_file, to_rank);
-        
+
         let promo_char = match mv.promo {
             5 => "q",
             4 => "r",
@@ -247,142 +363,109 @@ fn spawn_xf_engine_task(fen: String, think_time: f32, color: crate::rendering::p
             2 => "n",
             _ => "",
         };
-        
+
         let uci = format!("{}{}{}", from_uci, to_uci, promo_char);
-        
+
         Ok(AIMove {
             from: (from_file, from_rank),
             to: (to_file, to_rank),
             uci,
             score: mv.score as i32,
-            depth: game.max_depth_so_far as u8,
+            depth: depth_reached,
             thinking_time: start_time.elapsed().as_secs_f32(),
         })
     })
 }
 
-/// Spawn a task that runs Stockfish process and returns the best move
-fn spawn_stockfish_task(fen: String, depth: u8, movetime_ms: u64) -> Task<Result<AIMove, String>> {
+/// Spawn a task that queries the persistent Stockfish process and returns the best move.
+/// No cold-start overhead — the process stays alive between moves.
+fn spawn_stockfish_task_persistent(
+    fen: String,
+    depth: u8,
+    movetime_ms: u64,
+    sf: std::sync::Arc<std::sync::Mutex<StockfishInner>>,
+) -> Task<Result<AIMove, String>> {
     AsyncComputeTaskPool::get().spawn(async move {
         let start_time = Instant::now();
 
-        let stockfish_path = resolve_stockfish_path()?;
-        
-        info!("[AI] Starting Stockfish process at: {}", stockfish_path.display());
+        let mut guard = sf.lock().map_err(|e| format!("Stockfish mutex poisoned: {}", e))?;
 
-        let mut child = Command::new(&stockfish_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn Stockfish at '{}': {}", stockfish_path.display(), e))?;
-        
-        let mut stdin = child.stdin.take().ok_or("Failed to get stdin")?;
-        let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
-        let mut reader = BufReader::new(stdout);
-        
-        // Send UCI commands to Stockfish
-        writeln!(stdin, "uci").map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())?;
-        std::thread::sleep(Duration::from_millis(100));
-        
-        writeln!(stdin, "isready").map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())?;
-        
-        // Wait for readyok
-        loop {
-            let mut line = String::new();
-            let bytes_read = reader.read_line(&mut line).map_err(|e| e.to_string())?;
-            if bytes_read == 0 {
-                break;
+        // One-time UCI handshake — wait for uciok, then readyok.
+        if !guard.initialized {
+            writeln!(guard.stdin, "uci").map_err(|e| e.to_string())?;
+            guard.stdin.flush().map_err(|e| e.to_string())?;
+            loop {
+                let mut line = String::new();
+                if guard.reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 { break; }
+                if line.trim() == "uciok" { break; }
             }
-            if line.trim() == "readyok" {
-                break;
+            writeln!(guard.stdin, "isready").map_err(|e| e.to_string())?;
+            guard.stdin.flush().map_err(|e| e.to_string())?;
+            loop {
+                let mut line = String::new();
+                if guard.reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 { break; }
+                if line.trim() == "readyok" { break; }
             }
+            guard.initialized = true;
         }
-        
-        // Set position and search
-        writeln!(stdin, "position fen {}", fen).map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())?;
-        
-        // Use go command with movetime or depth
+
+        // Send position and search command.
+        writeln!(guard.stdin, "position fen {}", fen).map_err(|e| e.to_string())?;
+        guard.stdin.flush().map_err(|e| e.to_string())?;
         if movetime_ms > 0 {
-            writeln!(stdin, "go movetime {}", movetime_ms).map_err(|e| e.to_string())?;
+            writeln!(guard.stdin, "go movetime {}", movetime_ms).map_err(|e| e.to_string())?;
         } else {
-            writeln!(stdin, "go depth {}", depth).map_err(|e| e.to_string())?;
+            writeln!(guard.stdin, "go depth {}", depth).map_err(|e| e.to_string())?;
         }
-        stdin.flush().map_err(|e| e.to_string())?;
-        
-        // Wait for best move
+        guard.stdin.flush().map_err(|e| e.to_string())?;
+
+        // Read until bestmove.
         let mut best_move = String::new();
         let mut score = 0i32;
         let mut search_depth = 0u8;
-        
         loop {
             let mut line = String::new();
-            let bytes_read = reader.read_line(&mut line).map_err(|e| e.to_string())?;
-            if bytes_read == 0 {
-                break;
-            }
-            
-            let line = line.trim();
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            
+            if guard.reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 { break; }
+            let trimmed = line.trim();
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 2 && parts[0] == "info" {
-                // Parse score and depth from info lines
-                for (i, part) in parts.iter().enumerate() {
-                    if *part == "depth" && i + 1 < parts.len() {
-                        if let Ok(d) = parts[i + 1].parse::<u8>() {
-                            search_depth = d;
-                        }
+                for (i, &part) in parts.iter().enumerate() {
+                    if part == "depth" && i + 1 < parts.len() {
+                        if let Ok(d) = parts[i + 1].parse::<u8>() { search_depth = d; }
                     }
-                    if *part == "cp" && i + 1 < parts.len() {
-                        if let Ok(s) = parts[i + 1].parse::<i32>() {
-                            score = s;
-                        }
+                    if part == "cp" && i + 1 < parts.len() {
+                        if let Ok(s) = parts[i + 1].parse::<i32>() { score = s; }
                     }
                 }
             }
-            
             if parts.len() >= 2 && parts[0] == "bestmove" {
                 best_move = parts[1].to_string();
                 break;
             }
         }
-        
-        // Quit Stockfish
-        let _ = writeln!(stdin, "quit");
-        let _ = child.wait();
-        
+
         if best_move.is_empty() || best_move == "(none)" {
             return Err("Stockfish did not return a valid move".to_string());
         }
-        
+
         let thinking_time = start_time.elapsed().as_secs_f32();
-        info!("[AI] Stockfish returned: {} (depth: {}, score: {}, time: {:.2}s)", 
-              best_move, search_depth, score, thinking_time);
-        
-        // Parse UCI move (e.g., "e2e4")
+        info!("[AI] Stockfish: {} depth={} score={} time={:.2}s", best_move, search_depth, score, thinking_time);
+
         if best_move.len() >= 4 {
-            let from_str = &best_move[0..2];
-            let to_str = &best_move[2..4];
-            let _promotion_char = best_move.chars().nth(4);
-            
-            let from_coords = ChessEngine::uci_to_coords(from_str)
-                .ok_or_else(|| format!("Invalid from square: {}", from_str))?;
-            let to_coords = ChessEngine::uci_to_coords(to_str)
-                .ok_or_else(|| format!("Invalid to square: {}", to_str))?;
-            
+            let from_coords = ChessEngine::uci_to_coords(&best_move[0..2])
+                .ok_or_else(|| format!("Invalid from square: {}", &best_move[0..2]))?;
+            let to_coords = ChessEngine::uci_to_coords(&best_move[2..4])
+                .ok_or_else(|| format!("Invalid to square: {}", &best_move[2..4]))?;
             return Ok(AIMove {
                 from: from_coords,
                 to: to_coords,
-                uci: best_move.clone(),
+                uci: best_move,
                 score,
                 depth: search_depth,
                 thinking_time,
             });
         }
-        
+
         Err(format!("Invalid move format from Stockfish: {}", best_move))
     })
 }
@@ -511,30 +594,15 @@ fn poll_ai_task_system(
                 (None, None)
             };
 
-            {
-                let pieces = params.pieces_queries.p1();
-                params.engine.sync_ecs_to_engine(&pieces);
-            }
-
             let mut p0 = params.pieces_queries.p0();
 
-            // Validate move is legal before executing
-            let legal_moves = params.engine.legal_moves();
+            // Validate with the cached legal-move table — O(1) lookup, no extra generation.
             let from_uci = ChessEngine::coords_to_uci(from_coords.0, from_coords.1);
             let to_uci = ChessEngine::coords_to_uci(to_coords.0, to_coords.1);
             let move_uci = format!("{}{}", from_uci, to_uci);
-            
-            let is_legal = legal_moves.iter().any(|mv| {
-                let mv_uci = format!("{}{}", mv.from().map(|s| s.to_string()).unwrap_or_default(), 
-                                           mv.to().to_string());
-                mv_uci == move_uci
-            });
-            
-            if !is_legal {
-                warn!(
-                    "[AI] Stockfish suggested illegal move {} - not in legal moves list (engine check: {}, legal moves count: {})",
-                    move_uci, params.engine.is_check(), legal_moves.len()
-                );
+
+            if !params.engine.is_move_legal_by_uci(&move_uci) {
+                warn!("[AI] Stockfish suggested illegal move {}", move_uci);
                 return;
             }
 

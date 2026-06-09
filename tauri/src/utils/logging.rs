@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use tracing::{debug, error, info, warn, Level};
+use tracing::{error, info, warn, Level};
 use tracing_subscriber::EnvFilter;
 
 pub fn init_logging() {

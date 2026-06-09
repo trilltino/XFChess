@@ -27,7 +27,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
-use tauri_plugin_deep_link::DeepLinkExt;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
@@ -43,10 +42,8 @@ mod utils;
 mod windows;
 
 // Import commonly used items
-use error::{AppError, AppResult};
-use services::auth::AuthState;
-use services::config::{get_admin_api_key, get_wallet_port};
 use utils::logging::init_logging;
+#[cfg(feature = "tournament-admin")]
 use windows::tournament_admin::TournamentAdminWindow;
 
 // ---------------------------------------------------------------------------
@@ -61,6 +58,11 @@ struct WalletPubkey(Arc<Mutex<Option<String>>>);
 /// Username associated with the connected wallet.
 #[derive(Default, Clone)]
 struct WalletUsername(Arc<Mutex<Option<String>>>);
+
+/// JWT token issued by the backend on successful auth.
+/// Shared between the bridge HTTP server and the main app handle.
+#[derive(Default, Clone)]
+struct WalletJwt(Arc<Mutex<Option<String>>>);
 
 /// Type alias for in-flight signing request.
 type PendingTxInner = Option<(Vec<u8>, oneshot::Sender<Result<Vec<u8>, String>>)>;
@@ -97,15 +99,6 @@ fn wallet_cache_path() -> PathBuf {
     .join("wallet.json")
 }
 
-/// Load previously persisted wallet from disk. Returns (pubkey, username).
-fn load_persisted_wallet() -> Option<(String, Option<String>)> {
-  let bytes = std::fs::read(wallet_cache_path()).ok()?;
-  let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-  let pubkey = json["pubkey"].as_str()?.to_string();
-  let username = json["username"].as_str().map(|s| s.to_string());
-  Some((pubkey, username))
-}
-
 /// Persist the wallet pubkey (and optional username) to disk so it survives Tauri restarts.
 fn save_persisted_wallet(pubkey: &str, username: Option<&str>) {
   let path = wallet_cache_path();
@@ -131,7 +124,7 @@ async fn redirect_to_onboard() -> impl IntoResponse {
 // The wallet-ui React app polls and posts against http://localhost:7454.
 // ---------------------------------------------------------------------------
 
-async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: WalletPubkey, wallet_username: WalletUsername) {
+async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: WalletPubkey, wallet_username: WalletUsername, wallet_jwt: WalletJwt) {
   use axum::{
     extract::State,
     routing::{get, post},
@@ -145,6 +138,9 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     pending: PendingTx,
     wallet_pubkey: WalletPubkey,
     wallet_username: WalletUsername,
+    wallet_jwt: WalletJwt,
+    dist_path: std::path::PathBuf,
+    needs_profile_step: Arc<std::sync::atomic::AtomicBool>,
   }
 
   // GET /pending — wallet-ui polls; returns {"tx":"<b64>"} or {"tx":null}
@@ -277,18 +273,37 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     }
   }
 
-  // Auth proxy routes
-  async fn api_login(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/login", get_backend_url()), body).await
+  // Auth proxy routes — capture JWT from responses so GET /token can serve it
+  async fn api_login(State(s): State<LocalState>, Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+    let resp = proxy_post(&format!("{}/api/auth/login", get_backend_url()), body).await;
+    resp
   }
-  async fn api_register(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+  async fn api_register(State(s): State<LocalState>, Json(body): Json<serde_json::Value>) -> impl IntoResponse {
     proxy_post(&format!("{}/api/auth/register", get_backend_url()), body).await
   }
-  async fn api_login_email(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+  async fn api_login_email(State(s): State<LocalState>, Json(body): Json<serde_json::Value>) -> impl IntoResponse {
     proxy_post(&format!("{}/api/auth/login-email", get_backend_url()), body).await
   }
-  async fn api_register_email(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+  async fn api_register_email(State(s): State<LocalState>, Json(body): Json<serde_json::Value>) -> impl IntoResponse {
     proxy_post(&format!("{}/api/auth/register-email", get_backend_url()), body).await
+  }
+
+  // POST /token — wallet-ui posts the JWT after successful auth so the game client can pick it up
+  async fn post_token(
+    State(s): State<LocalState>,
+    Json(body): Json<serde_json::Value>,
+  ) -> impl IntoResponse {
+    if let Some(token) = body["token"].as_str() {
+      *s.wallet_jwt.0.lock().unwrap() = Some(token.to_string());
+      tracing::info!("[HTTP] JWT stored via /token");
+    }
+    StatusCode::OK
+  }
+
+  // GET /token — game client polls this to retrieve the JWT after wallet-ui auth
+  async fn get_token(State(s): State<LocalState>) -> impl IntoResponse {
+    let token = s.wallet_jwt.0.lock().unwrap().clone();
+    Json(serde_json::json!({ "token": token }))
   }
   async fn api_link_wallet(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
     proxy_post(&format!("{}/api/auth/link-wallet", get_backend_url()), body).await
@@ -353,6 +368,64 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     }
   }
 
+  // POST /api/auth/init-profile-tx — build unsigned initProfile tx (proxied with JWT)
+  async fn api_init_profile_tx(
+    headers: axum::http::HeaderMap,
+    Json(body): Json<serde_json::Value>,
+  ) -> impl IntoResponse {
+    proxy_post_auth(&format!("{}/api/auth/init-profile-tx", get_backend_url()), body, &headers).await
+  }
+
+  // POST /api/auth/broadcast-tx — broadcast a signed transaction (proxied)
+  async fn api_broadcast_tx(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+    proxy_post(&format!("{}/api/auth/broadcast-tx", get_backend_url()), body).await
+  }
+
+  // POST /api/open-tournament-admin — opens the tournament admin window from within the game
+  async fn api_open_tournament_admin(State(s): State<LocalState>) -> impl IntoResponse {
+    open_tournament_admin(&s.app);
+    StatusCode::OK
+  }
+
+  // POST /api/open-profile-step — game client calls this when user tries to wager without
+  // an on-chain profile. Sets a flag that the wallet-ui polls, and opens the popup.
+  async fn api_open_profile_step(State(s): State<LocalState>) -> impl IntoResponse {
+    s.needs_profile_step.store(true, std::sync::atomic::Ordering::Relaxed);
+    let wallet_url = std::env::var("XFCHESS_WALLET_URL")
+      .unwrap_or_else(|_| "http://localhost:5174".to_string());
+    let profile_url = format!("{wallet_url}?step=profile");
+    tracing::info!("[HTTP] opening profile step: {profile_url}");
+    tokio::task::spawn_blocking(move || {
+      open_in_browser(&profile_url);
+    });
+    StatusCode::OK
+  }
+
+  // GET /api/needs-profile-step — wallet-ui polls this; returns true once then clears the flag.
+  async fn api_needs_profile_step(State(s): State<LocalState>) -> impl IntoResponse {
+    let needs = s.needs_profile_step.swap(false, std::sync::atomic::Ordering::Relaxed);
+    Json(serde_json::json!({ "needs_profile": needs }))
+  }
+
+  // POST /api/game/launch — updates bridge-local username so the game sees it immediately
+  // (the game polls GET /status, not this endpoint directly)
+  async fn api_game_launch(
+    State(s): State<LocalState>,
+    Json(body): Json<serde_json::Value>,
+  ) -> impl IntoResponse {
+    // Update in-memory username so the next /status poll returns the final name.
+    if let Some(username) = body["username"].as_str() {
+      if !username.is_empty() {
+        *s.wallet_username.0.lock().unwrap() = Some(username.to_string());
+        // Persist so it survives bridge restart.
+        if let Some(pk) = body["pubkey"].as_str() {
+          save_persisted_wallet(pk, Some(username));
+        }
+      }
+    }
+    StatusCode::OK
+  }
+
   // Generic passthrough for remaining /api/** calls to backend
   async fn api_check_wallet(
     axum::extract::Path(pubkey): axum::extract::Path<String>,
@@ -371,16 +444,18 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     }
   }
 
-  // Proxy /tournament-admin/* → vite dev server on :7455 (dev) or built dist (prod).
-  // In dev the tournament-admin vite server runs on 7455 to avoid conflicting with
-  // this bridge which owns :7454.
+  // Proxy /tournament-admin/* → vite dev server on :7455 (dev).
+  // Falls back to serving the pre-built dist/ when the dev server isn't running,
+  // so the window loads with `just dev` even without a separate `npm run dev`.
   async fn proxy_tournament_admin(
+    State(s): State<LocalState>,
     uri: axum::http::Uri,
     method: axum::http::Method,
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
   ) -> impl IntoResponse {
     let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/tournament-admin/");
+    // Vite is configured with base: '/tournament-admin/' so it expects the full path.
     let target = format!("http://127.0.0.1:7455{path}");
     let client = reqwest::Client::new();
     let mut req = client.request(
@@ -410,9 +485,52 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
         }
       }
       Err(_) => {
-        // Dev server not running — serve a helpful error
-        (StatusCode::SERVICE_UNAVAILABLE,
-          "Tournament admin vite dev server not running. Run: just admin").into_response()
+        // Dev server not running — fall back to pre-built dist/
+        serve_dist_file(&s.dist_path, path).await
+      }
+    }
+  }
+
+  async fn serve_dist_file(dist: &std::path::Path, url_path: &str) -> axum::response::Response {
+    // Strip /tournament-admin prefix, treat the rest as a relative file path
+    let rel = url_path
+      .strip_prefix("/tournament-admin")
+      .unwrap_or(url_path)
+      .trim_start_matches('/')
+      .split('?').next().unwrap_or(""); // drop query string
+
+    // Route assets directly; everything else → index.html (SPA)
+    let file_path = if rel.contains('.') {
+      dist.join(rel)
+    } else {
+      dist.join("index.html")
+    };
+
+    let mime = match file_path.extension().and_then(|e| e.to_str()) {
+      Some("html") => "text/html; charset=utf-8",
+      Some("js") | Some("mjs") => "application/javascript",
+      Some("css") => "text/css",
+      Some("svg") => "image/svg+xml",
+      Some("png") => "image/png",
+      Some("ico") => "image/x-icon",
+      Some("woff2") => "font/woff2",
+      _ => "application/octet-stream",
+    };
+
+    match tokio::fs::read(&file_path).await {
+      Ok(bytes) => axum::response::Response::builder()
+        .header("Content-Type", mime)
+        .body(axum::body::Body::from(bytes))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+      Err(_) => {
+        // Try index.html as SPA fallback
+        match tokio::fs::read(dist.join("index.html")).await {
+          Ok(bytes) => axum::response::Response::builder()
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(axum::body::Body::from(bytes))
+            .unwrap_or_else(|_| StatusCode::NOT_FOUND.into_response()),
+          Err(_) => (StatusCode::NOT_FOUND, "Tournament admin not found. Build it first: cd tauri/tournament-admin && npm run build").into_response(),
+        }
       }
     }
   }
@@ -422,11 +540,29 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     .allow_methods([Method::GET, Method::POST, axum::http::Method::PATCH, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
     .allow_headers(Any);
 
+  // Resolve the tournament-admin dist dir:
+  // 1. Next to the binary (production bundle copies it there)
+  // 2. CARGO_MANIFEST_DIR-relative (dev: workspace/tauri/tournament-admin/dist)
+  let dist_path = {
+    let dev_path = std::path::PathBuf::from(
+      concat!(env!("CARGO_MANIFEST_DIR"), "/tournament-admin/dist")
+    );
+    if dev_path.exists() { dev_path } else {
+      std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("tournament-admin/dist")))
+        .unwrap_or(dev_path)
+    }
+  };
+
   let state = LocalState {
     app,
     pending,
     wallet_pubkey,
     wallet_username,
+    wallet_jwt,
+    dist_path,
+    needs_profile_step: Arc::new(std::sync::atomic::AtomicBool::new(false)),
   };
 
   let router = Router::new()
@@ -435,6 +571,7 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     .route("/wallet", post(post_wallet))
     .route("/hide", post(post_hide))
     .route("/status", get(get_status))
+    .route("/token", get(get_token).post(post_token))
     .route("/api/consent", get(api_get_consent).post(api_post_consent))
     .route("/api/auth/login", post(api_login))
     .route("/api/auth/register", post(api_register))
@@ -446,6 +583,12 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     .route("/api/auth/me", get(api_me))
     .route("/api/auth/username", axum::routing::patch(api_set_username))
     .route("/api/auth/check-wallet/{pubkey}", get(api_check_wallet))
+    .route("/api/auth/init-profile-tx", post(api_init_profile_tx))
+    .route("/api/auth/broadcast-tx", post(api_broadcast_tx))
+    .route("/api/game/launch", post(api_game_launch))
+    .route("/api/open-tournament-admin", post(api_open_tournament_admin))
+    .route("/api/open-profile-step", post(api_open_profile_step))
+    .route("/api/needs-profile-step", get(api_needs_profile_step))
     // Proxy tournament admin UI (vite dev on :7455, or built dist in prod)
     .route("/tournament-admin", axum::routing::any(proxy_tournament_admin))
     .route("/tournament-admin/", axum::routing::any(proxy_tournament_admin))
@@ -482,7 +625,8 @@ fn open_in_browser(url: &str) {
     .duration_since(std::time::UNIX_EPOCH)
     .unwrap_or_default()
     .as_secs();
-  let url_ts = format!("{url}?_t={ts}");
+  let sep = if url.contains('?') { '&' } else { '?' };
+  let url_ts = format!("{url}{sep}_t={ts}");
 
   #[cfg(windows)]
   {
@@ -515,28 +659,32 @@ fn show_wallet_popup_window(app: tauri::AppHandle) {
 }
 
 fn open_tournament_admin(app: &tauri::AppHandle) {
-  if let Some(win) = app.get_webview_window("tournament-admin") {
-    tracing::info!("[TournamentAdmin] showing existing window");
-    let _ = win.show();
-    let _ = win.set_focus();
-  } else {
-    tracing::info!("[TournamentAdmin] creating new window");
-    let url = tauri::WebviewUrl::External(
-      "http://localhost:7454/tournament-admin/".parse().expect("valid URL"),
-    );
-    match tauri::WebviewWindowBuilder::new(app, "tournament-admin", url)
-      .title("XFChess Tournament Admin")
-      .inner_size(1200.0, 800.0)
-      .min_inner_size(800.0, 600.0)
-      .resizable(true)
-      .decorations(true)
-      .center()
-      .build()
-    {
-      Ok(win) => { let _ = win.set_focus(); }
-      Err(e) => tracing::error!("[TournamentAdmin] failed to create window: {e}"),
+  // Window creation MUST run on the main thread in Tauri v2.
+  let app2 = app.clone();
+  let _ = app.run_on_main_thread(move || {
+    let app = app2;
+    const ADMIN_URL: &str = "http://localhost:7455/tournament-admin/";
+    if let Some(win) = app.get_webview_window("tournament-admin") {
+      tracing::info!("[TournamentAdmin] focusing existing window");
+      let _ = win.show();
+      let _ = win.set_focus();
+    } else {
+      tracing::info!("[TournamentAdmin] creating window → {ADMIN_URL}");
+      let url = tauri::WebviewUrl::External(ADMIN_URL.parse().expect("valid URL"));
+      match tauri::WebviewWindowBuilder::new(&app, "tournament-admin", url)
+        .title("XFChess Tournament Admin")
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(800.0, 600.0)
+        .resizable(true)
+        .decorations(true)
+        .center()
+        .build()
+      {
+        Ok(win) => { let _ = win.show(); let _ = win.set_focus(); }
+        Err(e) => tracing::error!("[TournamentAdmin] failed to create window: {e}"),
+      }
     }
-  }
+  });
 }
 
 #[tauri::command]
@@ -563,33 +711,34 @@ fn main() {
       // Always start disconnected — user must connect a wallet each session.
       let wallet_pubkey = WalletPubkey::default();
       let wallet_username = WalletUsername::default();
+      let wallet_jwt = WalletJwt::default();
       let pending_tx: PendingTx = Arc::new(Mutex::new(None));
       let auth_state = services::auth::AuthState::new();
 
       // Register shared state with Tauri app
       app.manage(wallet_pubkey.clone());
       app.manage(wallet_username.clone());
+      app.manage(wallet_jwt.clone());
       app.manage(pending_tx.clone());
       app.manage(auth_state);
 
-      // ── HTTP wallet bridge — /pending, /resolved, /wallet, /hide ──────────
+      // ── HTTP wallet bridge — /pending, /resolved, /wallet, /hide, /token ──
       // The wallet-ui React app polls http://localhost:7454/pending for unsigned
-      // transactions and posts signed results back. This in-process server is
-      // the glue between the Tauri wallet popup and the game client.
+      // transactions and posts signed results back. GET /token lets the game
+      // client retrieve the JWT issued during wallet-ui auth.
       {
         let h = app.handle().clone();
         let p = pending_tx.clone();
         let w = wallet_pubkey.clone();
         let wu = wallet_username.clone();
-        tauri::async_runtime::spawn(http_server(h, p, w, wu));
+        let wj = wallet_jwt.clone();
+        tauri::async_runtime::spawn(http_server(h, p, w, wu, wj));
       }
 
       // Initialize windows
-      let handle = app.handle();
-
       #[cfg(feature = "tournament-admin")]
       {
-        let _ = TournamentAdminWindow::new(handle);
+        let _ = TournamentAdminWindow::new(app.handle());
       }
 
       // ── Wallet Bridge TCP listener ──────────────────────────────────────────
@@ -658,7 +807,7 @@ fn main() {
         .icon(app.default_window_icon().cloned().expect("no default window icon configured"))
         .tooltip("XFChess")
         .menu(&tray_menu)
-        .menu_on_left_click(true)
+        .show_menu_on_left_click(true)
         .on_menu_event(|app, event| {
           match event.id().as_ref() {
             "show" => {

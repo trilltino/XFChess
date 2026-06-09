@@ -82,7 +82,6 @@ const MAX_FINALIZATION_WAIT_FRAMES: u32 = 600;
 struct PendingFinalization {
     game_id: u64,
     winner: Option<String>,
-    is_delegated: bool,
     local_pk: Pubkey,
     is_creator: bool,
     frames_waited: u32,
@@ -747,7 +746,6 @@ fn handle_game_end_undelegation(
             bridge.pending_finalization = Some(PendingFinalization {
                 game_id,
                 winner: event.winner.clone(),
-                is_delegated,
                 local_pk,
                 is_creator: rollup_manager.is_creator,
                 frames_waited: 0,

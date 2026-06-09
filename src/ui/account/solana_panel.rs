@@ -5,9 +5,32 @@
 use crate::multiplayer::solana::addon::{
     CompetitiveMatchState, SolanaGameSync, SolanaProfile, SolanaWallet,
 };
+use crate::multiplayer::solana::integration::state::{ProfileStatus, SolanaIntegrationState};
+use crate::multiplayer::solana::integration::systems::{
+    GlobalSessionActive,
+};
 use crate::ui::styles::UiColors;
 use bevy::prelude::*;
 use bevy_egui::egui;
+
+/// Profile status chip colours
+fn profile_status_color(status: ProfileStatus) -> egui::Color32 {
+    match status {
+        ProfileStatus::HasProfileWithUsername => egui::Color32::from_rgb(34, 197, 94),
+        ProfileStatus::HasProfileNoUsername   => egui::Color32::from_rgb(251, 191, 36),
+        ProfileStatus::NoProfile              => egui::Color32::from_rgb(239, 68, 68),
+        ProfileStatus::Unknown                => egui::Color32::GRAY,
+    }
+}
+
+fn profile_status_label(status: ProfileStatus) -> &'static str {
+    match status {
+        ProfileStatus::HasProfileWithUsername => "Profile OK",
+        ProfileStatus::HasProfileNoUsername   => "No Username",
+        ProfileStatus::NoProfile              => "No Profile",
+        ProfileStatus::Unknown                => "Checking…",
+    }
+}
 
 /// Renders the Solana sidebar with wallet info and game stats
 pub fn render_solana_panel(
@@ -16,6 +39,10 @@ pub fn render_solana_panel(
     sync: &mut SolanaGameSync,
     competitive: &mut CompetitiveMatchState,
     profile: &SolanaProfile,
+    solana_state: &SolanaIntegrationState,
+    profile_view_open: &mut bool,
+    global_session: Option<&GlobalSessionActive>,
+    global_session_pending: bool,
 ) {
     ui.vertical(|ui| {
         ui.heading(egui::RichText::new("SOLANA COMPETITIVE").color(UiColors::ACCENT_GOLD));
@@ -102,23 +129,74 @@ pub fn render_solana_panel(
             });
         }
 
+        // --- Global Session Status ---
+        if wallet.pubkey.is_some() {
+            ui.add_space(6.0);
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("GLOBAL SESSION").strong());
+                if global_session_pending {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(egui::RichText::new("Verifying…").size(11.0).color(UiColors::TEXT_SECONDARY));
+                    });
+                } else if let Some(gs) = global_session {
+                    let short = if gs.session_pubkey.len() > 12 {
+                        format!("{}…{}", &gs.session_pubkey[..6], &gs.session_pubkey[gs.session_pubkey.len()-4..])
+                    } else {
+                        gs.session_pubkey.clone()
+                    };
+                    ui.horizontal(|ui| {
+                        ui.colored_label(egui::Color32::from_rgb(80, 220, 120), "Active");
+                        ui.label(egui::RichText::new(short).size(10.0).color(UiColors::TEXT_SECONDARY).monospace());
+                    });
+                } else {
+                    ui.colored_label(egui::Color32::from_rgb(255, 200, 50), "No session — authorize to skip wallet popups");
+                }
+            });
+        }
+
         ui.add_space(10.0);
 
         // --- Stats Section ---
         ui.group(|ui| {
             ui.label(egui::RichText::new("ON-CHAIN STATS").strong());
-            ui.label(format!("ELO: {}", profile.elo));
+
+            // Profile status chip
+            let status = solana_state.profile_status;
+            let chip_color = profile_status_color(status);
+            let chip_label = profile_status_label(status);
+            ui.horizontal(|ui| {
+                ui.label("Status:");
+                ui.colored_label(chip_color, chip_label);
+            });
+
+            // Display name if available
+            if let Some(ref name) = solana_state.cached_display_name {
+                ui.label(format!("Username: {}", name));
+            }
+
+            let display_elo = if solana_state.cached_elo > 0 {
+                solana_state.cached_elo as u32
+            } else {
+                profile.elo
+            };
+            ui.label(format!("ELO: {}", display_elo));
             ui.label(format!("Games: {}", profile.games_played()));
             ui.label(format!(
                 "W {}  L {}  D {}",
                 profile.wins, profile.losses, profile.draws
             ));
             ui.add_space(5.0);
-            let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
-            let profile_url = format!("{}/profile", backend_url);
-            if ui.button("Manage Profile (Web)").clicked() {
-                let _ = webbrowser::open(&profile_url);
-            }
+            ui.horizontal(|ui| {
+                if ui.button("View Profile").clicked() {
+                    *profile_view_open = true;
+                }
+                let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
+                let profile_url = format!("{}/profile", backend_url);
+                if ui.small_button("Web ↗").clicked() {
+                    let _ = webbrowser::open(&profile_url);
+                }
+            });
         });
 
 

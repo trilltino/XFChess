@@ -479,15 +479,12 @@ pub fn camera_rotate_on_turn_detection_system(
     game_mode: Res<GameMode>,
     mut rotation_state: ResMut<CameraRotationState>,
 ) {
-    use crate::rendering::pieces::PieceColor;
-
     // Detect turn change or initial setup
     let turn_color = current_turn.color;
-
     if rotation_state.last_turn_color == Some(turn_color) {
         return; // No change in turn
     }
-
+    
     let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
     let is_local_pvp = *game_mode == GameMode::MultiplayerLocal;
 
@@ -833,7 +830,7 @@ pub fn setup_game_camera(
     players: Res<Players>,
     current_turn: Res<CurrentTurn>,
     game_mode: Res<GameMode>,
-    ai_config: Res<crate::game::ai::ChessAIResource>,
+    mut rotation_state: ResMut<CameraRotationState>,
 ) {
     // Only configure for standard views (TempleOS handles its own camera/view)
     if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
@@ -841,63 +838,58 @@ pub fn setup_game_camera(
     }
 
     let is_2d = *view_mode == crate::game::view_mode::ViewMode::Standard2D;
+    let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
+    let board_center = Vec3::new(3.5, 0.0, 3.5);
+
+    // Pre-initialize CameraRotationState to the correct side so the rotation
+    // system doesn't animate from the wrong position on game start.
+    let initial_yaw = if is_black_view { std::f32::consts::PI } else { 0.0 };
+    rotation_state.current_yaw = initial_yaw;
+    rotation_state.target_yaw = initial_yaw;
+    rotation_state.is_rotating = false;
+    rotation_state.last_turn_color = Some(current_turn.color);
 
     if let Some(entity) = persistent_camera.entity {
         if let Ok((mut transform, mut camera)) = query.get_mut(entity) {
-            // Position for gameplay: Standard Chess Perspective
-            // Raised camera angle (55-65° elevation) for better board readability
-            // Higher elevation reduces back-rank compression while keeping silhouettes visible
             let initial_height = 16.0;
-            let distance_behind = 8.0; // Distance behind the board edge
+            let distance_behind = 8.0;
 
-            // Determine if the human player is Black:
-            let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
-
-            let board_center = Vec3::new(3.5, 0.0, 3.5);
-
-            // Always start at the white-side reference position (yaw = 0).
-            // CameraRotationState handles rotating to the black side when needed,
-            // so the two systems stay in sync and don't fight each other.
-            let camera_pos = Vec3::new(3.5, initial_height, -distance_behind);
+            let xz_dist = distance_behind + 3.5;
+            let white_ref = board_center + Vec3::new(0.0, initial_height, -xz_dist);
+            let yaw_rot = Quat::from_rotation_y(initial_yaw);
+            let camera_pos = board_center + yaw_rot * (white_ref - board_center);
 
             if is_2d {
-                // Top-down 2D View
-                // Position directly above center, looking straight down
-                let height = 12.0;
-                let translation = Vec3::new(3.5, height, 3.5);
-                
-                let up_vec = if is_black_view {
-                    Vec3::new(-1.0, 0.0, 0.0)
+                let height = 16.0;
+                // Sit behind the player's back rank (same side as the 3D camera) so
+                // rank 1 stays at the bottom and files a–h run left to right.
+                // A pure top-down camera cannot achieve standard orientation in a
+                // right-handed coordinate system, so we use a steep (~7°) angle instead.
+                let z_behind = 2.0; // units behind the back rank
+                let camera_pos_2d = if is_black_view {
+                    Vec3::new(3.5, height, 7.0 + z_behind) // behind black's rank 8
                 } else {
-                    Vec3::new(1.0, 0.0, 0.0)
+                    Vec3::new(3.5, height, -z_behind)       // behind white's rank 1
                 };
-                
-                *transform = Transform::from_translation(translation).looking_at(board_center, up_vec);
+                *transform = Transform::from_translation(camera_pos_2d).looking_at(board_center, Vec3::Y);
             } else {
-                // Standard 3D Perspective
-                // Camera looks toward board center with correct orientation
                 *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
             }
 
-            // Ensure order is correct (0 is standard for 3D)
             camera.order = 0;
 
-            // Add RTS camera controls
-            // Check if controller already exists to preserve zoom/state if re-running?
-            // Usually setup runs once on Enter.
             commands.entity(entity).insert(CameraController {
                 current_zoom: transform.translation.y,
                 target_zoom: transform.translation.y,
                 min_zoom: if is_2d { 5.0 } else { 3.0 },
                 max_zoom: if is_2d { 20.0 } else { 30.0 },
-                // Let the system calculate pitch/yaw from the Transform we just set
                 initialized: false,
                 ..Default::default()
             });
 
             info!(
-                "[CAMERA] Configured Persistent Camera. is_black_view: {} (rotation system will handle flip). Pos: {:?}",
-                is_black_view, camera_pos
+                "[CAMERA] Positioned for {} view. is_black_view: {}",
+                if is_2d { "2D" } else { "3D" }, is_black_view
             );
         }
     }
@@ -967,30 +959,28 @@ pub fn view_mode_toggle_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut view_preferences: ResMut<crate::game::view_mode::PlayerViewPreferences>,
     mut view_mode: ResMut<crate::game::view_mode::ViewMode>,
-    // We need to trigger camera re-setup
     commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
     query: Query<(&mut Transform, &mut Camera)>,
     players: Res<Players>,
     current_turn: Res<CurrentTurn>,
     game_mode: Res<GameMode>,
-    ai_config: Res<crate::game::ai::ChessAIResource>,
+    rotation_state: ResMut<CameraRotationState>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyV) {
         view_preferences.toggle_view();
         *view_mode = view_preferences.local_view;
         info!("[VIEW] Toggled view mode to {:?}", *view_mode);
-        
-        // Re-run camera setup logic for the new mode
+
         setup_game_camera(
             commands,
             persistent_camera,
-            view_mode.into(), // Convert ResMut to Res
+            view_mode.into(),
             query,
             players,
             current_turn,
             game_mode,
-            ai_config,
+            rotation_state,
         );
     }
 }
@@ -1006,7 +996,6 @@ pub fn camera_mode_cycle_system(
     players: Res<Players>,
     current_turn: Res<CurrentTurn>,
     game_mode: Res<GameMode>,
-    ai_config: Res<crate::game::ai::ChessAIResource>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyR) {
         let next_mode = camera_view_mode.next();
@@ -1025,21 +1014,21 @@ pub fn camera_mode_cycle_system(
 
                 match next_mode {
                     CameraViewMode::TopDownWhite => {
-                        // 90° overhead, white at bottom
-                        let height = 12.0;
-                        let translation = Vec3::new(3.5, height, 3.5);
-                        let up_vec = Vec3::new(1.0, 0.0, 0.0);
-                        *transform = Transform::from_translation(translation).looking_at(board_center, up_vec);
+                        // Nearly overhead from white's side — rank 1 at bottom, a–h left to right
+                        let height = 14.0;
+                        let z_behind = 2.0;
+                        let translation = Vec3::new(3.5, height, -z_behind);
+                        *transform = Transform::from_translation(translation).looking_at(board_center, Vec3::Y);
                         controller.target_zoom = height;
                         controller.current_zoom = height;
                         commands.entity(camera_entity).remove::<CameraControlsDisabled>();
                     }
                     CameraViewMode::TopDownBlack => {
-                        // 90° overhead, black at bottom
-                        let height = 12.0;
-                        let translation = Vec3::new(3.5, height, 3.5);
-                        let up_vec = Vec3::new(-1.0, 0.0, 0.0);
-                        *transform = Transform::from_translation(translation).looking_at(board_center, up_vec);
+                        // Nearly overhead from black's side — rank 8 at bottom, h–a left to right
+                        let height = 14.0;
+                        let z_behind = 2.0;
+                        let translation = Vec3::new(3.5, height, 7.0 + z_behind);
+                        *transform = Transform::from_translation(translation).looking_at(board_center, Vec3::Y);
                         controller.target_zoom = height;
                         controller.current_zoom = height;
                         commands.entity(camera_entity).remove::<CameraControlsDisabled>();

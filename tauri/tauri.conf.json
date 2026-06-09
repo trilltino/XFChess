@@ -44,20 +44,6 @@
         "decorations": true,
         "center": true,
         "dragDropEnabled": false
-              },
-      {
-        "title": "XFChess Tournament Admin",
-        "label": "tournament-admin",
-        "url": "http://localhost:7454/tournament-admin/",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "resizable": true,
-        "visible": false,
-        "decorations": true,
-        "center": true,
-        "dragDropEnabled": false
       }
     ]
   },

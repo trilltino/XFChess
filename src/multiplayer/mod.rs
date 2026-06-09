@@ -10,9 +10,12 @@ pub mod error;
 pub mod traits;
 pub mod types;
 pub mod systems;
+pub mod social;
+pub mod join_link;
 
 // Submodules
 pub mod network;
+pub mod spectator;
 #[cfg(feature = "solana")]
 pub mod solana;
 #[cfg(feature = "solana")]
@@ -69,8 +72,9 @@ impl Plugin for MultiplayerPlugin {
             network::p2p::P2PConnectionPlugin,
             network::p2p_vps::P2PVpsPlugin,
             network::braid_pvp::BraidPvpPlugin,
-            // Comment out auth_ws plugin as the module is not found or linked
-            // auth_ws::AuthWebSocketPlugin,
+            social::SocialPlugin,
+            join_link::JoinLinkPlugin,
+            spectator::SpectatorPlugin,
         ));
 
         #[cfg(feature = "solana")]

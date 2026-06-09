@@ -1,135 +1,147 @@
-import { useState, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Command } from "@tauri-apps/plugin-shell";
+
+interface TerminalLine {
+  type: "cmd" | "out" | "err" | "info";
+  text: string;
+}
 
 export default function HetznerSsh() {
   const [status, setStatus] = useState<"checking" | "online" | "offline">("checking");
+  const [commandInput, setCommandInput] = useState("");
+  const [lines, setLines] = useState<TerminalLine[]>([
+    { type: "info", text: "XFChess Hetzner SSH Terminal — type a command below or click a quick action." }
+  ]);
+  const [running, setRunning] = useState(false);
+  const termRef = useRef<HTMLDivElement>(null);
   const serverIp = "178.104.55.19";
 
   useEffect(() => {
-    const timer = setTimeout(() => setStatus("online"), 1000);
-    return () => clearTimeout(timer);
+    // Ping to check reachability
+    (async () => {
+      try {
+        const cmd = Command.create("ssh", ["-o", "ConnectTimeout=3", "-o", "BatchMode=yes", `root@${serverIp}`, "echo ok"]);
+        const out = await cmd.execute();
+        setStatus(out.stdout.trim() === "ok" ? "online" : "offline");
+      } catch { setStatus("offline"); }
+    })();
   }, []);
 
-  const openSsh = async () => {
+  useEffect(() => {
+    termRef.current?.scrollTo(0, termRef.current.scrollHeight);
+  }, [lines]);
+
+  const push = (type: TerminalLine["type"], text: string) =>
+    setLines(prev => [...prev, { type, text }]);
+
+  const runSshCommand = async (remoteCmd: string) => {
+    if (running) return;
+    setRunning(true);
+    push("cmd", `$ ssh root@${serverIp} "${remoteCmd}"`);
     try {
-      await Command.create("powershell", [
-        "-NoExit",
-        "-Command",
-        `echo 'Establishing secure channel to Hetzner cluster...'; ssh root@${serverIp}`
-      ]).spawn();
-    } catch (error) {
-      console.error("Failed to open SSH:", error);
-      alert("Terminal initialization failed. Verify SSH subsystem.");
+      const child = Command.create("ssh", [`root@${serverIp}`, remoteCmd]);
+      child.stdout.on("data", data => push("out", data));
+      child.stderr.on("data", data => push("err", data));
+      const result = await child.execute();
+      if (result.code !== 0) push("err", `Exit code: ${result.code}`);
+    } catch (err: any) {
+      push("err", `Error: ${err?.message ?? String(err)}`);
+    }
+    setRunning(false);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cmd = commandInput.trim();
+    if (!cmd) return;
+    setCommandInput("");
+    runSshCommand(cmd);
+  };
+
+  const openNativeTerminal = async () => {
+    try {
+      await Command.create("powershell", ["-NoExit", "-Command", `ssh root@${serverIp}`]).spawn();
+    } catch (err: any) {
+      push("err", `Failed to open native terminal: ${err?.message}`);
+    }
+  };
+
+  const quickActions: { label: string; cmd: string }[] = [
+    { label: "UPTIME", cmd: "uptime && free -h" },
+    { label: "JOURNAL ERRORS", cmd: "journalctl -p err -n 30 --no-pager" },
+    { label: "BACKEND STATUS", cmd: "systemctl status xfchess-backend --no-pager -l" },
+    { label: "DISK USAGE", cmd: "df -h" },
+    { label: "ROTATE SESSION KEYS", cmd: "systemctl restart xfchess-signing-server && echo 'signing server restarted'" },
+    { label: "NGINX ERRORS", cmd: "tail -n 50 /var/log/nginx/error.log" },
+  ];
+
+  const lineColor = (type: TerminalLine["type"]) => {
+    switch (type) {
+      case "cmd": return "var(--primary)";
+      case "err": return "#f87171";
+      case "info": return "#a0a0c0";
+      default: return "#e0e0e0";
     }
   };
 
   return (
-    <div style={{
-      backgroundColor: "var(--surface)",
-      borderRadius: "24px",
-      padding: "2.5rem",
-      border: "1px solid var(--border)",
-      backdropFilter: "blur(20px)",
-      boxShadow: "0 20px 60px rgba(0,0,0,0.4)"
-    }}>
-      <h2 style={{ color: "#fff", marginTop: 0, fontWeight: "900", fontSize: "28px" }}>REMOTE TERMINAL</h2>
-      <p style={{ color: "var(--text-dim)", fontSize: "12px", letterSpacing: "1px", marginBottom: "2.5rem" }}>SECURE SHELL ACCESS TO CORE INFRASTRUCTURE</p>
-      
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: "1.5rem",
-      }}>
-        {/* Server Info */}
-        <div style={{
-          backgroundColor: "rgba(0,0,0,0.2)",
-          padding: "2rem",
-          borderRadius: "24px",
-          border: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.5rem"
-        }}>
-          <div>
-            <div style={{ color: "var(--text-dim)", fontSize: "10px", fontWeight: "800", letterSpacing: "2px", marginBottom: "8px" }}>IPv4 TARGET</div>
-            <div style={{ color: "var(--primary)", fontSize: "22px", fontWeight: "900", fontFamily: "'Fira Code', monospace" }}>{serverIp}</div>
-          </div>
-          <div>
-            <div style={{ color: "var(--text-dim)", fontSize: "10px", fontWeight: "800", letterSpacing: "2px", marginBottom: "8px" }}>UPLINK STATUS</div>
-            <div style={{ 
-              color: status === "online" ? "var(--primary)" : "var(--accent)", 
-              fontSize: "12px", 
-              fontWeight: "900",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem",
-              letterSpacing: "1px"
-            }}>
-              <div style={{ 
-                width: "10px", 
-                height: "10px", 
-                borderRadius: "50%", 
-                backgroundColor: status === "online" ? "var(--primary)" : "var(--accent)",
-                boxShadow: `0 0 10px ${status === "online" ? "var(--primary)" : "var(--accent)"}`
-              }} />
-              {status === "online" ? "OPERATIONAL" : "SCANNING..."}
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div style={{
-          backgroundColor: "rgba(255,255,255,0.02)",
-          padding: "2rem",
-          borderRadius: "24px",
-          border: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          gap: "1.5rem",
-          textAlign: "center"
-        }}>
-          <button
-            onClick={openSsh}
-            className="primary"
-            style={{
-              padding: "1.25rem",
-              fontSize: "14px",
-              borderRadius: "100px",
-              boxShadow: "0 10px 30px rgba(173, 92, 47, 0.2)"
-            }}
-          >
-            ️ SPAWN NATIVE CONSOLE
-          </button>
-          <p style={{ color: "var(--text-dim)", fontSize: "10px", lineHeight: "1.6", letterSpacing: "0.5px" }}>
-            This will launch a secure root session via your system's default terminal subsystem.
+    <div style={{ backgroundColor: "var(--surface)", borderRadius: "24px", padding: "2rem", border: "1px solid var(--border)", backdropFilter: "blur(20px)" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+        <div>
+          <h2 style={{ color: "#fff", margin: 0, fontWeight: "900", fontSize: "22px" }}>REMOTE TERMINAL</h2>
+          <p style={{ color: "var(--text-dim)", fontSize: "11px", letterSpacing: "1px", margin: "4px 0 0" }}>
+            root@{serverIp}
+            <span style={{ marginLeft: "12px", color: status === "online" ? "var(--primary)" : status === "offline" ? "#f87171" : "var(--accent)" }}>
+              ● {status === "online" ? "OPERATIONAL" : status === "offline" ? "UNREACHABLE" : "SCANNING…"}
+            </span>
           </p>
         </div>
+        <button onClick={openNativeTerminal}
+          style={{ padding: "8px 18px", borderRadius: "100px", backgroundColor: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid var(--border)", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
+          OPEN NATIVE TERMINAL ↗
+        </button>
       </div>
 
-      {/* Deployment Section */}
-      <div style={{ marginTop: "2.5rem", paddingTop: "2.5rem", borderTop: "1px solid var(--border)" }}>
-        <h4 style={{ color: "rgba(255,255,255,0.2)", margin: "0 0 1.5rem 0", fontSize: "11px", fontWeight: "800", letterSpacing: "2px" }}>ADVANCED DIAGNOSTICS</h4>
-        <div style={{ display: "flex", gap: "1rem" }}>
-          <button style={actionButtonStyle}>SCAN FOR LATENCY SPIKES</button>
-          <button style={actionButtonStyle}>DUMP SECURITY LOGS</button>
-          <button style={actionButtonStyle}>ROTATE SESSION KEYS</button>
-        </div>
+      {/* Quick actions */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "1.25rem" }}>
+        {quickActions.map(qa => (
+          <button key={qa.label} onClick={() => runSshCommand(qa.cmd)} disabled={running}
+            style={{ padding: "6px 14px", borderRadius: "100px", backgroundColor: "rgba(255,255,255,0.05)", color: "var(--text-dim)", border: "1px solid var(--border)", fontSize: "10px", fontWeight: "800", letterSpacing: "1px", cursor: running ? "default" : "pointer", opacity: running ? 0.5 : 1 }}>
+            {qa.label}
+          </button>
+        ))}
       </div>
+
+      {/* Terminal output */}
+      <div ref={termRef} style={{ backgroundColor: "#0a0a12", borderRadius: "12px", padding: "14px 16px", height: "340px", overflowY: "auto", fontFamily: "'Fira Code', 'Cascadia Code', monospace", fontSize: "12px", border: "1px solid var(--border)", marginBottom: "12px" }}>
+        {lines.map((l, i) => (
+          <div key={i} style={{ color: lineColor(l.type), marginBottom: "2px", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+            {l.text}
+          </div>
+        ))}
+        {running && <div style={{ color: "var(--accent)" }}>▌</div>}
+      </div>
+
+      {/* Command input */}
+      <form onSubmit={handleSubmit} style={{ display: "flex", gap: "8px" }}>
+        <span style={{ fontFamily: "monospace", fontSize: "13px", color: "var(--primary)", lineHeight: "36px" }}>$</span>
+        <input
+          value={commandInput} onChange={e => setCommandInput(e.target.value)}
+          disabled={running}
+          placeholder="Enter remote command…"
+          style={{ flex: 1, backgroundColor: "#0a0a12", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px", fontFamily: "monospace" }}
+          autoFocus
+        />
+        <button type="submit" disabled={running || !commandInput.trim()}
+          style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "800", fontSize: "12px", cursor: "pointer", opacity: running ? 0.5 : 1 }}>
+          RUN
+        </button>
+        <button type="button" onClick={() => setLines([{ type: "info", text: "Terminal cleared." }])}
+          style={{ padding: "8px 14px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.05)", color: "var(--text-dim)", border: "1px solid var(--border)", fontSize: "12px", cursor: "pointer" }}>
+          CLR
+        </button>
+      </form>
     </div>
   );
 }
-
-const actionButtonStyle: React.CSSProperties = {
-  flex: 1,
-  backgroundColor: "transparent",
-  color: "var(--text-dim)",
-  border: "1px solid var(--border)",
-  padding: "0.85rem",
-  borderRadius: "100px",
-  fontSize: "10px",
-  fontWeight: "800",
-  letterSpacing: "1px",
-  cursor: "pointer",
-  transition: "all 0.2s ease"
-};

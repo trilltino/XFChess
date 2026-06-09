@@ -73,6 +73,7 @@ pub struct RegisterPlayer<'info> {
 
 pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
+    require!(tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
     let player = ctx.accounts.player.key();
 
     require!(

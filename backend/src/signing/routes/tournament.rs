@@ -932,17 +932,17 @@ async fn import_players_csv(
 
 pub fn admin_tournament_routes() -> Router<AppState> {
     Router::new()
-        .route("/create", post(create_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/record-result", post(record_result).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/set-match-game-id", post(set_match_game_id).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/initialize-swiss", post(initialize_swiss_tournament).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/cancel", post(build_cancel_transaction).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/gossip-status", get(get_gossip_status).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/advance-round", post(advance_round).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/reseed", post(reseed_players).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/set-round-deadline", post(set_round_deadline).layer(axum::middleware::from_fn(admin_auth_middleware)))
-        .route("/{id}/import-players-csv", post(import_players_csv).layer(axum::middleware::from_fn(admin_auth_middleware)))
+        .route("/create", post(create_tournament))
+        .route("/{id}/record-result", post(record_result))
+        .route("/{id}/set-match-game-id", post(set_match_game_id))
+        .route("/{id}/initialize-swiss", post(initialize_swiss_tournament))
+        .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction))
+        .route("/{id}/cancel", post(build_cancel_transaction))
+        .route("/{id}/gossip-status", get(get_gossip_status))
+        .route("/{id}/advance-round", post(advance_round))
+        .route("/{id}/reseed", post(reseed_players))
+        .route("/{id}/set-round-deadline", post(set_round_deadline))
+        .route("/{id}/import-players-csv", post(import_players_csv))
 }
 
 // ── Item 7: Tournament session routing ───────────────────────────────────────
@@ -1400,22 +1400,4 @@ async fn get_schedule_status(
         max_players: tournament.max_players,
         my_session_authorized: None, // populated by client from wallet state
     }))
-}
-
-/// Middleware to enforce admin authentication for privileged routes.
-async fn admin_auth_middleware(
-    req: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> Result<axum::response::Response, StatusCode> {
-    let auth_header = req.headers().get("Authorization");
-    if let Some(auth) = auth_header {
-        if auth.to_str().unwrap_or("").starts_with("Bearer ") {
-            let token = auth.to_str().unwrap_or("").trim_start_matches("Bearer ");
-            // In a real implementation, validate token against an environment variable or database
-            if token == std::env::var("ADMIN_TOKEN").unwrap_or("admin_token".to_string()) {
-                return Ok(next.run(req).await);
-            }
-        }
-    }
-    Err(StatusCode::UNAUTHORIZED)
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { ShieldAlert, ShieldCheck, Loader2 } from 'lucide-react';
 import bs58 from 'bs58';
@@ -88,7 +88,7 @@ export function VerifyProfile() {
         return (
             <main className="section" style={{ minHeight: '100vh', paddingTop: '140px', display: 'flex', justifyContent: 'center' }}>
                 <div className="profile-card" style={{ textAlign: 'center' }}>
-                    <ShieldCheck size={64} style={{ color: '#14F195', margin: '0 auto 20px auto' }} />
+                    <ShieldCheck size={64} style={{ color: '#ffffff', margin: '0 auto 20px auto' }} />
                     <h2 style={{ fontSize: '2rem', marginBottom: '16px' }}>Identity Vaulted Successfully</h2>
                     <p style={{ color: 'var(--text-dim)', marginBottom: '32px' }}>
                         Your details have been securely encrypted and stored entirely off-chain.
@@ -179,3 +179,4 @@ export function VerifyProfile() {
         </main>
     );
 }
+

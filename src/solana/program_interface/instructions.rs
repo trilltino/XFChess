@@ -64,11 +64,12 @@ fn borsh_string(s: &str) -> Vec<u8> {
 ///
 /// On-chain signature:
 /// ```ignore
-/// pub fn create_game(ctx, game_id: u64, wager_amount: u64, match_type: MatchType, country: String, base_time_seconds: u64, increment_seconds: u16)
+/// pub fn create_game(ctx, game_id: u64, wager_amount: u64, match_type: MatchType, platform_fee: u64, base_time_seconds: u64, increment_seconds: u16)
 /// ```
 ///
 /// `match_type` encoding: Free=0, Ranked=1, Wager=2.
 /// `fee_payer` is the VPS session key — must co-sign the transaction.
+/// `platform_fee` is the universal platform fee in lamports (calculated by backend from live SOL/GBP rate).
 pub fn create_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -76,7 +77,7 @@ pub fn create_game_ix(
     game_id: u64,
     wager_amount: u64,
     match_type: u8,
-    country: &str,
+    platform_fee: u64,
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> Result<Instruction> {
@@ -96,9 +97,8 @@ pub fn create_game_ix(
     data.extend_from_slice(&wager_amount.to_le_bytes());
     // MatchType Anchor enum: Free=0, Ranked=1, Wager=2
     data.push(match_type);
-    // country: Borsh String (u32 len prefix + utf-8 bytes)
-    data.extend_from_slice(&(country.len() as u32).to_le_bytes());
-    data.extend_from_slice(country.as_bytes());
+    // platform_fee: u64 LE (replaces country String — universal fee from live price feed)
+    data.extend_from_slice(&platform_fee.to_le_bytes());
     // base_time_seconds: u64 LE, increment_seconds: u16 LE
     data.extend_from_slice(&base_time_seconds.to_le_bytes());
     data.extend_from_slice(&increment_seconds.to_le_bytes());

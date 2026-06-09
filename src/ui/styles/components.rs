@@ -143,4 +143,26 @@ impl StyledPanel {
             outer_margin: egui::Margin::ZERO,
         }
     }
+
+    /// Standard modal/popup frame — matches the Connect Wallet look.
+    pub fn popup() -> egui::Frame {
+        egui::Frame {
+            fill: UiColors::BG_POPUP,
+            corner_radius: egui::CornerRadius::same(14),
+            stroke: egui::Stroke::NONE,
+            inner_margin: egui::Margin::same(26),
+            ..egui::Frame::NONE
+        }
+    }
+
+    /// Popup frame with variable alpha for fade-in animations.
+    pub fn popup_alpha(alpha: u8) -> egui::Frame {
+        egui::Frame {
+            fill: egui::Color32::from_rgba_unmultiplied(8, 10, 18, alpha),
+            corner_radius: egui::CornerRadius::same(14),
+            stroke: egui::Stroke::NONE,
+            inner_margin: egui::Margin::same(24),
+            ..egui::Frame::NONE
+        }
+    }
 }

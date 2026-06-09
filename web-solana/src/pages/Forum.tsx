@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { MessageSquare, ThumbsUp, Search, Plus } from 'lucide-react';
 
 interface Thread {
@@ -14,7 +14,7 @@ interface Thread {
 }
 
 const categories = [
-    { id: 'all', name: 'All Topics', color: '#ad5c2f' },
+    { id: 'all', name: 'All Topics', color: '#ffffff' },
 ];
 
 const mockThreads: Thread[] = [
@@ -118,8 +118,8 @@ function ThreadCard({ thread, isPinned }: { thread: Thread; isPinned?: boolean }
     return (
         <div style={{
             padding: '20px 24px',
-            background: isPinned ? 'rgba(173, 92, 47, 0.08)' : 'var(--glass)',
-            border: `1px solid ${isPinned ? 'rgba(173, 92, 47, 0.3)' : 'var(--border)'}`,
+            background: isPinned ? 'rgba(255, 255, 255, 0.04)' : 'var(--glass)',
+            border: `1px solid ${isPinned ? 'rgba(255, 255, 255, 0.15)' : 'var(--border)'}`,
             borderRadius: '12px',
             display: 'flex',
             alignItems: 'center',
@@ -132,7 +132,7 @@ function ThreadCard({ thread, isPinned }: { thread: Thread; isPinned?: boolean }
                     {isPinned && (
                         <span style={{
                             padding: '2px 8px',
-                            background: '#ad5c2f',
+                            background: '#ffffff',
                             color: '#fff',
                             fontSize: '11px',
                             fontWeight: 700,
@@ -170,3 +170,5 @@ function ThreadCard({ thread, isPinned }: { thread: Thread; isPinned?: boolean }
         </div>
     );
 }
+
+

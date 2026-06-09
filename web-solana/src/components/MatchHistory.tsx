@@ -35,8 +35,8 @@ function DisputeBadge({ gameId }: { gameId: number }) {
   if (!status) return null;
 
   const colour =
-    status.status === 'resolved' ? '#14F195' :
-    status.status === 'pending' ? '#FFB800' : '#aaa';
+    status.status === 'resolved' ? '#ffffff' :
+    status.status === 'pending' ? '#888888' : '#555555';
 
   const label =
     status.status === 'resolved'
@@ -162,16 +162,16 @@ function DisputeModal({ game, walletPubkey, onClose }: DisputeModalProps) {
     >
       <div
         style={{
-          background: 'var(--card-bg, #1a1a2e)', border: '1px solid var(--border)',
+          background: 'var(--card-bg, #111111)', border: '1px solid var(--border)',
           borderRadius: 12, padding: 32, maxWidth: 480, width: '90%',
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {caseId ? (
           <div style={{ textAlign: 'center' }}>
-            <CheckCircle2 size={48} color="#14F195" style={{ margin: '0 auto 16px' }} />
+            <CheckCircle2 size={48} color="#ffffff" style={{ margin: '0 auto 16px' }} />
             <h3 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: 8 }}>Dispute Submitted</h3>
-            <p style={{ color: 'var(--text-dim)', marginBottom: 8 }}>Case ID: <strong style={{ color: '#14F195' }}>{caseId}</strong></p>
+            <p style={{ color: 'var(--text-dim)', marginBottom: 8 }}>Case ID: <strong style={{ color: '#ffffff' }}>{caseId}</strong></p>
             <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem', marginBottom: 24 }}>
               The moderator has been emailed. You will be notified when a decision is made.
             </p>
@@ -270,7 +270,7 @@ export function MatchHistory({ wallet }: MatchHistoryProps) {
 
   const resultColor = (g: GameHistoryRecord) => {
     if (!g.winner) return '#aaa';
-    return g.winner === wallet ? '#14F195' : '#ff8080';
+    return g.winner === wallet ? '#ffffff' : '#ff4444';
   };
 
   const opponentDisplay = (g: GameHistoryRecord) => {

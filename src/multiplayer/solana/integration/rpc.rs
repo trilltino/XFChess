@@ -29,7 +29,7 @@ pub async fn initiate_game_on_chain(
         game_id,
         wager_amount,
         if wager_amount > 0 { 2 } else { 0 }, // match_type: Free=0, Wager=2
-        "US",
+        0u64, // platform_fee: unknown at this call site, set to 0
         300, // base_time_seconds: Blitz 5+0
         0,   // increment_seconds
     )

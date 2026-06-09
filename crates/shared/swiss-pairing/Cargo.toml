@@ -1,0 +1,25 @@
+[package]
+name = "swiss-pairing"
+version.workspace = true
+edition.workspace = true
+description = "FIDE Dutch Swiss pairing engine with color balancing"
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+
+# Optional networking integration
+braid-iroh = { path = "../../networking/braid-iroh", optional = true }
+tokio = { workspace = true, optional = true }
+axum = { version = "0.8", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+
+[features]
+default = ["std"]
+std = []
+network = ["braid-iroh", "axum", "tokio"]

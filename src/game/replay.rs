@@ -11,15 +11,14 @@
 
 use crate::core::{DespawnOnExit, GameMode, GameState};
 use crate::engine::board_state::ChessEngine;
-use crate::game::components::HasMoved;
-use crate::game::resources::{
-    CapturedPieces, CurrentGamePhase, CurrentTurn, GameOverState, GameTimer, MoveHistory,
-    PendingTurnAdvance, Selection, TurnStateContext,
-};
+use crate::game::components::{HasMoved, PieceMoveAnimation};
+use crate::game::replay_shorts::{PuzzleOverlay, ReplayAnnotations, ScreenshotRequested};
+use crate::game::shorts_state::{ContentTier, HookStyle, HookText, ShortsState};
+use crate::multiplayer::traits::MessageWriter;
 use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
 use crate::rendering::pieces::{
-    Piece, PieceColor, PieceMeshes, PieceSpriteHandles, PieceType, PiecesSpawned,
-    PIECE_ON_BOARD_Y,
+    Piece, Piece2DVisual, Piece3DVisual, PieceColor, PieceMeshes, PieceSpriteHandles, PieceType,
+    PiecesSpawned, PIECE_ON_BOARD_Y,
 };
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -33,6 +32,12 @@ use nimzovich_engine::{do_move_with_promo, game_from_fen, game_to_fen, new_game,
 #[derive(Resource, Debug, Clone)]
 pub struct ParsedPgnGameResource {
     pub inner: nimzovich_engine::ParsedPgnGame,
+    /// When true, the replay UI renders the eval sparkline overlay.
+    pub show_eval_graph: bool,
+    /// When true, the move list hides moves after the current ply (puzzle mode).
+    pub puzzle_mode: bool,
+    /// When true, the answer has been revealed in puzzle mode.
+    pub puzzle_revealed: bool,
 }
 
 /// Tracks the playback state of a loaded PGN replay.
@@ -54,6 +59,25 @@ pub struct PgnReplayState {
     pub board_ready: bool,
     /// Whether the position changed this frame (triggers re-sync).
     pub position_dirty: bool,
+
+    // ── Cinematic / shorts ──
+    /// Board state from the previous ply (used to diff and tween the moved piece).
+    pub prev_board: [i8; 64],
+    /// The ply index that the engine was last rebuilt to (for diffing).
+    pub engine_ply: usize,
+    /// True when the next board spawn should inject a PieceMoveAnimation tween.
+    pub animate_next_advance: bool,
+    /// Slow-motion factor for piece tweens: 1.0 = normal, <1.0 = slow.
+    pub slow_factor: f32,
+    /// Remaining seconds of cinematic slow-motion.
+    pub cinematic_timer: f32,
+    /// Ply index for which annotations were last loaded (usize::MAX = never).
+    pub last_annotation_ply: usize,
+
+    // ── In-replayer PGN paste ──
+    pub show_pgn_input: bool,
+    pub pgn_input_text: String,
+    pub pgn_input_error: Option<String>,
 }
 
 impl Default for PgnReplayState {
@@ -67,6 +91,15 @@ impl Default for PgnReplayState {
             timer: Timer::from_seconds(1.0, TimerMode::Once),
             board_ready: false,
             position_dirty: false,
+            prev_board: [0i8; 64],
+            engine_ply: 0,
+            animate_next_advance: false,
+            slow_factor: 1.0,
+            cinematic_timer: 0.0,
+            last_annotation_ply: usize::MAX,
+            show_pgn_input: false,
+            pgn_input_text: String::new(),
+            pgn_input_error: None,
         }
     }
 }
@@ -188,10 +221,18 @@ pub fn replay_apply_move_system(
     // Clamp to valid range
     let target_ply = replay.current_ply.min(pgn.inner.moves.len());
 
+    // Save board state BEFORE rebuilding so we can diff for tween animation
+    replay.prev_board = replay.engine.board;
+    // Single forward step → inject tween; jump or backward → full respawn only
+    replay.animate_next_advance = target_ply == replay.engine_ply + 1;
+    replay.engine_ply = target_ply;
+
     // If we have a FEN snapshot, rebuild from it (handles both forward and backward)
     if target_ply < replay.fen_snapshots.len() {
         let fen = replay.fen_snapshots[target_ply].clone();
         replay.engine = game_from_fen(&fen);
+        // Trigger piece re-spawn so the board visuals update.
+        replay.board_ready = false;
     } else {
         // Shouldn't happen if snapshots were generated correctly
         warn!("[REPLAY] Missing FEN snapshot for ply {}", target_ply);
@@ -246,32 +287,34 @@ pub fn replay_spawn_pieces_system(
         commands.entity(entity).despawn();
     }
 
-    // Spawn pieces from engine board
-    for sq in 0..64 {
-        let piece_id = replay.engine.board[sq];
+    // Copy state we need before mutably borrowing replay later
+    let animate = replay.animate_next_advance;
+    let engine_ply = replay.engine_ply;
+    let slow_factor = replay.slow_factor;
+    let prev_board = replay.prev_board;
+    let curr_board = replay.engine.board;
+
+    // Spawn pieces from engine board; collect entity at each square for tween injection
+    let mut entity_at_sq: std::collections::HashMap<usize, Entity> =
+        std::collections::HashMap::new();
+
+    for sq in 0..64usize {
+        let piece_id = curr_board[sq];
         if piece_id == 0 {
             continue;
         }
         let file = (sq % 8) as u8;
         let rank = (sq / 8) as u8;
-        let color = if piece_id > 0 {
-            PieceColor::White
-        } else {
-            PieceColor::Black
-        };
+        let color = if piece_id > 0 { PieceColor::White } else { PieceColor::Black };
         let piece_type = engine_id_to_piece_type(piece_id.abs());
 
-        let base_color = if color == PieceColor::White {
-            Color::WHITE
+        let piece_material = if color == PieceColor::White {
+            materials.add(crate::rendering::pieces::pieces::white_piece_material())
         } else {
-            Color::BLACK
+            materials.add(crate::rendering::pieces::pieces::black_piece_material())
         };
-        let piece_material = materials.add(StandardMaterial {
-            base_color,
-            ..default()
-        });
 
-        spawn_piece_at_replay(
+        let entity = spawn_piece_at_replay(
             &mut commands,
             &piece_meshes,
             piece_material,
@@ -281,7 +324,40 @@ pub fn replay_spawn_pieces_system(
             Vec3::ZERO,
             &sprite_handles,
         );
+        entity_at_sq.insert(sq, entity);
     }
+
+    // If this was a single forward advance, inject a PieceMoveAnimation tween
+    if animate && engine_ply > 0 {
+        let mut src_sq: Option<usize> = None;
+        let mut dst_sq: Option<usize> = None;
+        for sq in 0..64usize {
+            let p = prev_board[sq];
+            let c = curr_board[sq];
+            if p != 0 && c == 0 && src_sq.is_none() {
+                src_sq = Some(sq);
+            }
+            // Destination: piece arrived (was empty) or captured (colour flipped)
+            if c != 0 && p != c && dst_sq.is_none() {
+                if p == 0 || (p != 0 && p.signum() != c.signum()) {
+                    dst_sq = Some(sq);
+                }
+            }
+        }
+        if let (Some(src), Some(dst)) = (src_sq, dst_sq) {
+            let src_world = Vec3::new(
+                (src % 8) as f32, PIECE_ON_BOARD_Y, (src / 8) as f32,
+            );
+            let dst_world = Vec3::new(
+                (dst % 8) as f32, PIECE_ON_BOARD_Y, (dst / 8) as f32,
+            );
+            if let Some(&ent) = entity_at_sq.get(&dst) {
+                let duration = 0.3 / slow_factor.max(0.05);
+                commands.entity(ent).insert(PieceMoveAnimation::new(src_world, dst_world, duration));
+            }
+        }
+    }
+    replay.animate_next_advance = false;
 
     // Sync engine to ECS
     engine.refresh_position();
@@ -299,20 +375,185 @@ pub fn replay_spawn_pieces_system(
 pub fn replay_ui_system(
     mut contexts: EguiContexts,
     mut replay: ResMut<PgnReplayState>,
-    parsed_pgn: Option<Res<ParsedPgnGameResource>>,
+    mut parsed_pgn: Option<ResMut<ParsedPgnGameResource>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut view_prefs: ResMut<PlayerViewPreferences>,
     game_mode: Res<GameMode>,
+    eval_history: Option<Res<crate::ui::game::game_2d::EvalHistory>>,
+    mut puzzle: ResMut<PuzzleOverlay>,
+    mut annotations: ResMut<ReplayAnnotations>,
+    mut screenshot_writer: MessageWriter<ScreenshotRequested>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut shorts: ResMut<ShortsState>,
+    mut commands: Commands,
 ) {
     if *game_mode != GameMode::PgnReplay {
         return;
     }
 
-    let Some(pgn) = parsed_pgn else { return };
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,
         Err(_) => return,
     };
+
+    // No PGN loaded yet — show the paste dialog centred on screen.
+    if parsed_pgn.is_none() {
+        egui::Window::new("pgn_load_overlay")
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .fixed_size(egui::Vec2::new(480.0, 320.0))
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .frame(egui::Frame {
+                fill: egui::Color32::from_rgba_unmultiplied(22, 22, 22, 245),
+                corner_radius: egui::CornerRadius::same(6),
+                stroke: egui::Stroke::new(1.5, egui::Color32::from_rgb(60, 60, 60)),
+                inner_margin: egui::Margin::same(20),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("PGN Replay").size(18.0).color(egui::Color32::WHITE).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Exit").clicked() {
+                            next_state.set(GameState::MainMenu);
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Paste a PGN game and click Load.").size(11.0).color(egui::Color32::from_rgb(160, 170, 190)));
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical().max_height(170.0).show(ui, |ui| {
+                    ui.add_sized(
+                        [440.0, 160.0],
+                        egui::TextEdit::multiline(&mut replay.pgn_input_text)
+                            .font(egui::TextStyle::Monospace)
+                            .hint_text("[Event \"?\"]\n[White \"Player1\"]\n[Black \"Player2\"]\n\n1. e4 e5 2. Nf3 ..."),
+                    );
+                });
+                if let Some(ref err) = replay.pgn_input_error.clone() {
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(format!("Error: {}", err)).size(10.5).color(egui::Color32::from_rgb(230, 100, 80)));
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    let can_load = !replay.pgn_input_text.trim().is_empty();
+                    if ui.add_enabled(
+                        can_load,
+                        egui::Button::new(egui::RichText::new("Load & Play").size(13.0).color(egui::Color32::WHITE).strong())
+                            .fill(egui::Color32::from_rgb(50, 120, 60))
+                            .corner_radius(4.0)
+                            .min_size(egui::Vec2::new(120.0, 32.0)),
+                    ).clicked() {
+                        match nimzovich_engine::parse_pgn(&replay.pgn_input_text) {
+                            Ok(pgn) => {
+                                // Build FEN snapshots inline
+                                let mut temp = new_game();
+                                let mut snapshots = vec!["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()];
+                                for (i, san) in pgn.moves.iter().enumerate() {
+                                    match san_to_move(&mut temp, san) {
+                                        Ok((src, dst, promo)) => {
+                                            do_move_with_promo(&mut temp, src, dst, true, promo);
+                                            snapshots.push(game_to_fen(&temp));
+                                        }
+                                        Err(e) => {
+                                            warn!("[REPLAY] Failed move {} '{}': {:?}", i + 1, san, e);
+                                            break;
+                                        }
+                                    }
+                                }
+                                replay.fen_snapshots = snapshots;
+                                replay.current_ply = 0;
+                                replay.board_ready = false;
+                                replay.position_dirty = true;
+                                replay.paused = true;
+                                replay.pgn_input_error = None;
+                                replay.pgn_input_text.clear();
+                                commands.insert_resource(ParsedPgnGameResource {
+                                    inner: pgn,
+                                    show_eval_graph: false,
+                                    puzzle_mode: false,
+                                    puzzle_revealed: false,
+                                });
+                            }
+                            Err(e) => {
+                                replay.pgn_input_error = Some(format!("{:?}", e));
+                            }
+                        }
+                    }
+                });
+            });
+        return;
+    }
+
+    let Some(ref pgn) = parsed_pgn else { return };
+
+    // --- Eval sparkline (shown when analyze mode active) ---
+    let show_graph = pgn.show_eval_graph;
+    if show_graph {
+        if let Some(eh) = eval_history.as_ref() {
+            if !eh.scores.is_empty() {
+                egui::TopBottomPanel::bottom("replay_eval_graph")
+                    .exact_height(52.0)
+                    .frame(egui::Frame {
+                        fill: egui::Color32::from_rgba_unmultiplied(20, 20, 20, 230),
+                        inner_margin: egui::Margin::symmetric(8, 4),
+                        ..Default::default()
+                    })
+                    .show(ctx, |ui| {
+                        let scores = &eh.scores;
+                        let n = scores.len();
+                        let avail = ui.available_width();
+                        let bar_w = (avail / n as f32).max(2.0).min(12.0);
+                        let total_w = bar_w * n as f32;
+                        let height = 40.0;
+                        let (rect, _) = ui.allocate_exact_size(egui::Vec2::new(total_w, height), egui::Sense::hover());
+                        let painter = ui.painter();
+                        let mid_y = rect.center().y;
+
+                        painter.line_segment(
+                            [egui::Pos2::new(rect.left(), mid_y), egui::Pos2::new(rect.right(), mid_y)],
+                            egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+                        );
+
+                        for (i, &score) in scores.iter().enumerate() {
+                            let x = rect.left() + i as f32 * bar_w;
+                            let clamped = score.clamp(-800, 800) as f32;
+                            let frac = clamped / 800.0;
+                            let bar_h = (frac.abs() * (height / 2.0 - 2.0)).max(1.0);
+                            let color = if score >= 0 {
+                                egui::Color32::from_rgb(200, 230, 200)
+                            } else {
+                                egui::Color32::from_rgb(80, 80, 80)
+                            };
+                            let top = if score >= 0 { mid_y - bar_h } else { mid_y };
+                            let bot = if score >= 0 { mid_y } else { mid_y + bar_h };
+                            painter.rect_filled(
+                                egui::Rect::from_min_max(
+                                    egui::Pos2::new(x + 1.0, top),
+                                    egui::Pos2::new(x + bar_w - 1.0, bot),
+                                ),
+                                0.0,
+                                color,
+                            );
+                        }
+
+                        // Current ply marker
+                        let cur = replay.current_ply.saturating_sub(1).min(n.saturating_sub(1));
+                        let cx = rect.left() + cur as f32 * bar_w + bar_w / 2.0;
+                        painter.line_segment(
+                            [egui::Pos2::new(cx, rect.top()), egui::Pos2::new(cx, rect.bottom())],
+                            egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255)),
+                        );
+                    });
+            }
+        }
+    }
+
+    // Ctrl+S shortcut for screenshot
+    if keyboard.pressed(KeyCode::ControlLeft) && keyboard.just_pressed(KeyCode::KeyS) {
+        screenshot_writer.write(ScreenshotRequested);
+    }
 
     // --- Bottom control bar ---
     egui::TopBottomPanel::bottom("replay_controls")
@@ -337,6 +578,9 @@ pub fn replay_ui_system(
                     replay.current_ply = 0;
                     replay.position_dirty = true;
                     replay.paused = true;
+                    annotations.arrows.clear();
+                    annotations.highlights.clear();
+                    annotations.dirty = true;
                 }
                 if btn(ui, "<").clicked() {
                     if replay.current_ply > 0 {
@@ -344,6 +588,9 @@ pub fn replay_ui_system(
                         replay.position_dirty = true;
                     }
                     replay.paused = true;
+                    annotations.arrows.clear();
+                    annotations.highlights.clear();
+                    annotations.dirty = true;
                 }
 
                 // Play / Pause
@@ -356,16 +603,32 @@ pub fn replay_ui_system(
                 }
 
                 if btn(ui, ">").clicked() {
-                    if replay.current_ply < pgn.inner.moves.len() {
-                        replay.current_ply += 1;
-                        replay.position_dirty = true;
+                    if let Some(ref pgn_res) = parsed_pgn {
+                        if replay.current_ply < pgn_res.inner.moves.len() {
+                            // In puzzle mode don't advance past puzzle ply unless revealed
+                            let blocked = puzzle.enabled && !puzzle.revealed && replay.current_ply >= puzzle.puzzle_ply;
+                            if !blocked {
+                                replay.current_ply += 1;
+                                replay.position_dirty = true;
+                            }
+                        }
                     }
                     replay.paused = true;
+                    annotations.arrows.clear();
+                    annotations.highlights.clear();
+                    annotations.dirty = true;
                 }
                 if btn(ui, ">>|").clicked() {
-                    replay.current_ply = pgn.inner.moves.len();
-                    replay.position_dirty = true;
+                    if let Some(ref pgn_res) = parsed_pgn {
+                        if !puzzle.enabled || puzzle.revealed {
+                            replay.current_ply = pgn_res.inner.moves.len();
+                            replay.position_dirty = true;
+                        }
+                    }
                     replay.paused = true;
+                    annotations.arrows.clear();
+                    annotations.highlights.clear();
+                    annotations.dirty = true;
                 }
 
                 ui.add_space(12.0);
@@ -407,6 +670,8 @@ pub fn replay_ui_system(
                     .clicked()
                 {
                     view_prefs.toggle_view();
+                    // Rebuild 3D annotations on view switch
+                    annotations.dirty = true;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -423,106 +688,428 @@ pub fn replay_ui_system(
                     {
                         next_state.set(GameState::MainMenu);
                     }
+
+                    ui.add_space(8.0);
+
+                    // Screenshot button (Ctrl+S)
+                    if ui
+                        .add_sized(
+                            [36.0, 28.0],
+                            egui::Button::new(egui::RichText::new("📷").size(14.0))
+                                .fill(egui::Color32::from_rgba_unmultiplied(40, 80, 60, 220))
+                                .corner_radius(4.0),
+                        )
+                        .on_hover_text("Screenshot (Ctrl+S)")
+                        .clicked()
+                    {
+                        screenshot_writer.write(ScreenshotRequested);
+                    }
+
+                    ui.add_space(4.0);
+
+                    // Puzzle mode toggle
+                    let puzzle_col = if puzzle.enabled {
+                        egui::Color32::from_rgb(200, 140, 20)
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(55, 55, 55, 200)
+                    };
+                    if ui
+                        .add_sized(
+                            [36.0, 28.0],
+                            egui::Button::new(egui::RichText::new("🧩").size(14.0))
+                                .fill(puzzle_col)
+                                .corner_radius(4.0),
+                        )
+                        .on_hover_text("Puzzle mode — hide the answer move")
+                        .clicked()
+                    {
+                        puzzle.enabled = !puzzle.enabled;
+                        if puzzle.enabled {
+                            puzzle.revealed = false;
+                            puzzle.puzzle_ply = replay.current_ply;
+                        }
+                    }
+
+                    ui.add_space(4.0);
+
+                    // FEN input toggle
+                    if ui
+                        .add_sized(
+                            [36.0, 28.0],
+                            egui::Button::new(egui::RichText::new("FEN").size(11.0).strong())
+                                .fill(egui::Color32::from_rgba_unmultiplied(55, 55, 55, 200))
+                                .corner_radius(4.0),
+                        )
+                        .on_hover_text("Load position from FEN")
+                        .clicked()
+                    {
+                        puzzle.show_fen_input = !puzzle.show_fen_input;
+                    }
                 });
             });
+
+            // FEN input row (shown when toggled)
+            if puzzle.show_fen_input {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("FEN:").size(11.0).color(egui::Color32::LIGHT_GRAY));
+                    let resp = ui.add_sized(
+                        [ui.available_width() - 70.0, 22.0],
+                        egui::TextEdit::singleline(&mut puzzle.fen_input)
+                            .hint_text("Paste FEN here…")
+                            .font(egui::FontId::monospace(11.0)),
+                    );
+                    if (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        || ui.add_sized([60.0, 22.0], egui::Button::new("Load")).clicked()
+                    {
+                        use nimzovich_engine::game_from_fen;
+                        let fen = puzzle.fen_input.trim().to_string();
+                        if !fen.is_empty() {
+                            replay.engine = game_from_fen(&fen);
+                            replay.fen_snapshots = vec![fen.clone()];
+                            replay.current_ply = 0;
+                            replay.board_ready = false;
+                            replay.position_dirty = true;
+                            replay.paused = true;
+                            puzzle.show_fen_input = false;
+                            annotations.arrows.clear();
+                            annotations.highlights.clear();
+                            annotations.dirty = true;
+                            info!("[SHORTS] Loaded FEN position: {}", fen);
+                        }
+                    }
+                });
+            }
+
+            // Puzzle reveal row
+            if puzzle.enabled && !puzzle.revealed {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("🤔 Puzzle — can you find the move?")
+                            .size(12.0)
+                            .color(egui::Color32::from_rgb(255, 220, 60)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_sized(
+                                [70.0, 22.0],
+                                egui::Button::new(egui::RichText::new("Reveal").size(11.0))
+                                    .fill(egui::Color32::from_rgb(80, 160, 80))
+                                    .corner_radius(4.0),
+                            )
+                            .clicked()
+                        {
+                            puzzle.revealed = true;
+                            if let Some(ref pgn_res) = parsed_pgn {
+                                // Advance to show the answer move
+                                if puzzle.puzzle_ply < pgn_res.inner.moves.len() {
+                                    replay.current_ply = puzzle.puzzle_ply + 1;
+                                    replay.position_dirty = true;
+                                }
+                            }
+                        }
+                    });
+                });
+            }
         });
 
     // --- Move list panel (right side) ---
+    let Some(pgn) = parsed_pgn else { return };
     let total = pgn.inner.moves.len();
     if total == 0 {
         return;
     }
+    // In puzzle mode (unrevealed), only show moves up to the puzzle ply
+    let visible_total = if puzzle.enabled && !puzzle.revealed {
+        puzzle.puzzle_ply.min(total)
+    } else {
+        total
+    };
 
     egui::SidePanel::right("replay_move_list")
-        .max_width(200.0)
+        .min_width(200.0)
+        .max_width(240.0)
         .frame(egui::Frame {
-            fill: egui::Color32::from_rgba_unmultiplied(25, 25, 25, 220),
-            inner_margin: egui::Margin::symmetric(8, 8),
+            fill: egui::Color32::from_rgba_unmultiplied(18, 18, 24, 230),
+            inner_margin: egui::Margin::symmetric(10, 8),
             ..Default::default()
         })
         .show(ctx, |ui| {
-            ui.heading(
-                egui::RichText::new("Moves")
-                    .size(14.0)
-                    .color(egui::Color32::WHITE)
-                    .strong(),
-            );
-            ui.add_space(6.0);
+            // PGN header (Lichess-style: White / Black / Result)
+            if let Some(white) = pgn.inner.tag("White") {
+                ui.label(
+                    egui::RichText::new(format!("♔ {}", white))
+                        .size(12.0)
+                        .color(egui::Color32::from_gray(220)),
+                );
+            }
+            if let Some(black) = pgn.inner.tag("Black") {
+                ui.label(
+                    egui::RichText::new(format!("♚ {}", black))
+                        .size(12.0)
+                        .color(egui::Color32::from_gray(160)),
+                );
+            }
+            if !pgn.inner.result.is_empty() {
+                ui.label(
+                    egui::RichText::new(&pgn.inner.result)
+                        .size(13.0)
+                        .color(egui::Color32::GOLD)
+                        .strong(),
+                );
+            }
+            ui.add(egui::Separator::default().spacing(6.0));
 
+            // Move list — Lichess 3-column grid: index | white | black
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
-                    for move_num in 1..=((total + 1) / 2) {
-                        let white_idx = (move_num - 1) * 2;
-                        let black_idx = white_idx + 1;
+                    egui::Grid::new("replay_move_grid")
+                        .num_columns(3)
+                        .min_col_width(24.0)
+                        .spacing([2.0, 1.0])
+                        .show(ui, |ui| {
+                            for move_num in 1..=((visible_total + 1) / 2) {
+                                let white_idx = (move_num - 1) * 2;
+                                let black_idx = white_idx + 1;
 
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(format!("{}.", move_num))
-                                    .size(11.0)
-                                    .color(egui::Color32::GRAY),
-                            );
+                                // Index column
+                                ui.label(
+                                    egui::RichText::new(format!("{}.", move_num))
+                                        .size(11.0)
+                                        .color(egui::Color32::GRAY),
+                                );
 
-                            // White move
-                            if white_idx < total {
-                                let is_current = replay.current_ply == white_idx + 1;
-                                let text = &pgn.inner.moves[white_idx];
-                                let color = if is_current {
-                                    egui::Color32::from_rgb(100, 200, 255)
+                                // White move
+                                if white_idx < visible_total {
+                                    let is_current = replay.current_ply == white_idx + 1;
+                                    let color = if is_current {
+                                        egui::Color32::from_rgb(100, 200, 255)
+                                    } else {
+                                        egui::Color32::WHITE
+                                    };
+                                    let resp = ui.selectable_label(
+                                        is_current,
+                                        egui::RichText::new(&pgn.inner.moves[white_idx])
+                                            .size(12.0)
+                                            .color(color)
+                                            .strong(),
+                                    );
+                                    if resp.clicked() {
+                                        replay.current_ply = white_idx + 1;
+                                        replay.position_dirty = true;
+                                        replay.paused = true;
+                                    }
                                 } else {
-                                    egui::Color32::WHITE
-                                };
-                                let resp = ui.selectable_label(is_current, egui::RichText::new(text).size(11.0).color(color));
-                                if resp.clicked() {
-                                    replay.current_ply = white_idx + 1;
-                                    replay.position_dirty = true;
-                                    replay.paused = true;
+                                    ui.label("");
+                                }
+
+                                // Black move
+                                if black_idx < visible_total {
+                                    let is_current = replay.current_ply == black_idx + 1;
+                                    let color = if is_current {
+                                        egui::Color32::from_rgb(100, 200, 255)
+                                    } else {
+                                        egui::Color32::from_gray(180)
+                                    };
+                                    let resp = ui.selectable_label(
+                                        is_current,
+                                        egui::RichText::new(&pgn.inner.moves[black_idx])
+                                            .size(12.0)
+                                            .color(color)
+                                            .strong(),
+                                    );
+                                    if resp.clicked() {
+                                        replay.current_ply = black_idx + 1;
+                                        replay.position_dirty = true;
+                                        replay.paused = true;
+                                    }
+                                } else if white_idx < visible_total {
+                                    ui.label(
+                                        egui::RichText::new("…")
+                                            .size(12.0)
+                                            .color(egui::Color32::DARK_GRAY),
+                                    );
+                                } else {
+                                    ui.label("");
+                                }
+
+                                ui.end_row();
+                            }
+                        });
+
+                    ui.add_space(6.0);
+
+                    // Puzzle mode status indicator in move list
+                    if puzzle.enabled {
+                        let status = if puzzle.revealed { "✅ Revealed" } else { "🧩 Puzzle" };
+                        ui.label(egui::RichText::new(status).size(10.0).color(egui::Color32::from_rgb(255, 220, 60)));
+                    }
+
+                    ui.label(
+                        egui::RichText::new(format!("Ply {}/{}", replay.current_ply, total))
+                            .size(10.0)
+                            .color(egui::Color32::DARK_GRAY),
+                    );
+
+                    // ── Shorts panel ──────────────────────────────────────
+                    ui.add_space(8.0);
+                    ui.add(egui::Separator::default().spacing(4.0));
+
+                    // Content tier selector
+                    ui.label(egui::RichText::new("Content Tier").size(10.0).color(egui::Color32::from_gray(160)).strong());
+                    ui.horizontal_wrapped(|ui| {
+                        for tier in [
+                            ContentTier::None,
+                            ContentTier::Puzzle,
+                            ContentTier::Blunder,
+                            ContentTier::Highlight,
+                            ContentTier::OpeningTrap,
+                        ] {
+                            let active = shorts.content_tier == tier;
+                            let col = if active {
+                                egui::Color32::from_rgb(60, 140, 200)
+                            } else {
+                                egui::Color32::from_rgba_unmultiplied(50, 50, 50, 200)
+                            };
+                            if ui.add_sized(
+                                [ui.available_width().min(88.0), 20.0],
+                                egui::Button::new(egui::RichText::new(tier.label()).size(10.0))
+                                    .fill(col)
+                                    .corner_radius(3.0),
+                            ).clicked() {
+                                shorts.content_tier = tier;
+                                // Apply preset hook text if none already set for ply 0
+                                let default_hook = tier.default_hook();
+                                if !default_hook.is_empty() && !shorts.hook_texts.contains_key(&0) {
+                                    shorts.hook_input = default_hook.to_string();
                                 }
                             }
+                        }
+                    });
 
-                            // Black move
-                            if black_idx < total {
-                                let is_current = replay.current_ply == black_idx + 1;
-                                let text = &pgn.inner.moves[black_idx];
-                                let color = if is_current {
-                                    egui::Color32::from_rgb(100, 200, 255)
+                    ui.add_space(4.0);
+
+                    // Hook text editor
+                    let hook_btn_label = if shorts.show_hook_editor { "▲ Hook Text" } else { "▼ Hook Text" };
+                    if ui.add_sized(
+                        [ui.available_width(), 20.0],
+                        egui::Button::new(egui::RichText::new(hook_btn_label).size(10.0))
+                            .fill(egui::Color32::from_rgba_unmultiplied(40, 60, 40, 200))
+                            .corner_radius(3.0),
+                    ).clicked() {
+                        shorts.show_hook_editor = !shorts.show_hook_editor;
+                        if shorts.show_hook_editor {
+                            // Pre-fill with existing hook for this ply
+                            if let Some(h) = shorts.hook_texts.get(&replay.current_ply) {
+                                shorts.hook_input = h.text.clone();
+                            }
+                        }
+                    }
+                    if shorts.show_hook_editor {
+                        ui.add_space(2.0);
+                        ui.add_sized(
+                            [ui.available_width(), 36.0],
+                            egui::TextEdit::multiline(&mut shorts.hook_input)
+                                .hint_text("Hook text for this ply…")
+                                .font(egui::FontId::proportional(10.0)),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui.add_sized([50.0, 18.0], egui::Button::new(egui::RichText::new("Save").size(10.0)).fill(egui::Color32::from_rgb(40, 120, 40)).corner_radius(3.0)).clicked() {
+                                let text = shorts.hook_input.trim().to_string();
+                                if text.is_empty() {
+                                    shorts.hook_texts.remove(&replay.current_ply);
                                 } else {
-                                    egui::Color32::WHITE
-                                };
-                                let resp = ui.selectable_label(is_current, egui::RichText::new(text).size(11.0).color(color));
-                                if resp.clicked() {
-                                    replay.current_ply = black_idx + 1;
-                                    replay.position_dirty = true;
-                                    replay.paused = true;
+                                    shorts.hook_texts.insert(replay.current_ply, HookText {
+                                        text,
+                                        style: HookStyle::TopBold,
+                                    });
                                 }
+                                shorts.show_hook_editor = false;
+                            }
+                            if ui.add_sized([50.0, 18.0], egui::Button::new(egui::RichText::new("Clear").size(10.0)).fill(egui::Color32::from_rgb(100, 40, 40)).corner_radius(3.0)).clicked() {
+                                shorts.hook_texts.remove(&replay.current_ply);
+                                shorts.hook_input.clear();
                             }
                         });
                     }
+
+                    // Beat marker toggle for current ply
+                    ui.add_space(4.0);
+                    let has_beat = shorts.beat_markers.contains_key(&replay.current_ply);
+                    let beat_col = if has_beat { egui::Color32::from_rgb(200, 140, 20) } else { egui::Color32::from_rgba_unmultiplied(50, 50, 50, 200) };
+                    if ui.add_sized(
+                        [ui.available_width(), 18.0],
+                        egui::Button::new(egui::RichText::new(if has_beat { "♩ Beat marked" } else { "♩ Mark beat" }).size(10.0))
+                            .fill(beat_col)
+                            .corner_radius(3.0),
+                    ).clicked() {
+                        if has_beat {
+                            shorts.beat_markers.remove(&replay.current_ply);
+                        } else {
+                            let next_beat = shorts.beat_markers.len() + 1;
+                            shorts.beat_markers.insert(replay.current_ply, format!("beat_{}", next_beat));
+                        }
+                    }
+
+                    // Sequence capture
+                    ui.add_space(4.0);
+                    let capturing = shorts.capture_mode.is_some();
+                    if !capturing {
+                        if ui.add_sized(
+                            [ui.available_width(), 18.0],
+                            egui::Button::new(egui::RichText::new("🎬 Capture Sequence").size(10.0))
+                                .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 80, 220))
+                                .corner_radius(3.0),
+                        ).clicked() {
+                            shorts.show_beat_export = !shorts.show_beat_export;
+                        }
+                        if shorts.show_beat_export {
+                            ui.add_space(2.0);
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("From:").size(9.0).color(egui::Color32::LIGHT_GRAY));
+                                ui.add_sized([36.0, 16.0], egui::TextEdit::singleline(&mut shorts.capture_from_input).font(egui::FontId::monospace(9.0)));
+                                ui.label(egui::RichText::new("To:").size(9.0).color(egui::Color32::LIGHT_GRAY));
+                                ui.add_sized([36.0, 16.0], egui::TextEdit::singleline(&mut shorts.capture_to_input).font(egui::FontId::monospace(9.0)));
+                            });
+                            if ui.add_sized([ui.available_width(), 18.0], egui::Button::new(egui::RichText::new("Start").size(10.0)).fill(egui::Color32::from_rgb(40, 100, 160)).corner_radius(3.0)).clicked() {
+                                let from = shorts.capture_from_input.parse::<usize>().unwrap_or(0);
+                                let to = shorts.capture_to_input.parse::<usize>().unwrap_or(total);
+                                let pictures = std::env::var("USERPROFILE")
+                                    .or_else(|_| std::env::var("HOME"))
+                                    .map(|h| std::path::PathBuf::from(h).join("Pictures"))
+                                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                                let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                                let dir = pictures.join(format!("xfchess_sequence_{}", ts));
+                                replay.current_ply = from;
+                                replay.position_dirty = true;
+                                replay.paused = true;
+                                shorts.capture_mode = Some(crate::game::shorts_state::CaptureSequence {
+                                    from_ply: from, to_ply: to, current: from,
+                                    delay_secs: replay.speed + 0.15,
+                                    timer: 0.0, output_dir: dir,
+                                });
+                                shorts.show_beat_export = false;
+                                info!("[SHORTS] Capture sequence started: ply {}–{}", from, to);
+                            }
+                        }
+                    } else {
+                        let seq = shorts.capture_mode.as_ref().unwrap();
+                        ui.label(egui::RichText::new(format!("📷 Capturing {}/{}", seq.current, seq.to_ply)).size(10.0).color(egui::Color32::from_rgb(100, 200, 255)));
+                    }
+
+                    // Annotation legend in side panel
+                    ui.add_space(8.0);
+                    ui.add(egui::Separator::default().spacing(4.0));
+                    ui.label(egui::RichText::new("Annotations").size(10.0).color(egui::Color32::from_gray(120)).strong());
+                    ui.label(egui::RichText::new("Right-drag = arrow").size(9.0).color(egui::Color32::from_gray(90)));
+                    ui.label(egui::RichText::new("+Shift = orange").size(9.0).color(egui::Color32::from_rgb(200, 110, 0)));
+                    ui.label(egui::RichText::new("+Alt = blue").size(9.0).color(egui::Color32::from_rgb(80, 140, 220)));
+                    ui.label(egui::RichText::new("Right-click = clear").size(9.0).color(egui::Color32::from_gray(90)));
                 });
-
-            // Show current ply info
-            ui.add_space(8.0);
-            ui.separator();
-            ui.label(
-                egui::RichText::new(format!(
-                    "Ply {}/{}",
-                    replay.current_ply,
-                    total
-                ))
-                .size(11.0)
-                .color(egui::Color32::LIGHT_GRAY),
-            );
-
-            // Tags
-            if let Some(white) = pgn.inner.tag("White") {
-                ui.label(egui::RichText::new(format!("White: {}", white)).size(10.0).color(egui::Color32::LIGHT_GRAY));
-            }
-            if let Some(black) = pgn.inner.tag("Black") {
-                ui.label(egui::RichText::new(format!("Black: {}", black)).size(10.0).color(egui::Color32::LIGHT_GRAY));
-            }
-            if !pgn.inner.result.is_empty() {
-                ui.label(egui::RichText::new(format!("Result: {}", pgn.inner.result)).size(10.0).color(egui::Color32::LIGHT_GRAY));
-            }
         });
 }
 
@@ -549,7 +1136,22 @@ fn engine_id_to_piece_type(id: i8) -> PieceType {
     }
 }
 
-/// Spawn a single piece for the replay (simplified version of spawn_piece_at).
+/// Return the rotation for a piece matching the regular game's `piece_rotation` / `knight_rotation`.
+fn replay_piece_rotation(piece_type: PieceType, color: PieceColor) -> Quat {
+    match piece_type {
+        PieceType::Knight => match color {
+            PieceColor::White => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            PieceColor::Black => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+        },
+        _ => match color {
+            PieceColor::White => Quat::IDENTITY,
+            PieceColor::Black => Quat::from_rotation_y(std::f32::consts::PI),
+        },
+    }
+}
+
+/// Spawn a single piece for the replay using the same parent+child structure as the regular game.
+/// Returns the spawned entity so callers can inject `PieceMoveAnimation` on it.
 fn spawn_piece_at_replay(
     commands: &mut Commands,
     meshes: &PieceMeshes,
@@ -559,71 +1161,47 @@ fn spawn_piece_at_replay(
     position: (u8, u8),
     _visual_offset: Vec3,
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
-) {
+) -> Entity {
     let (file, rank) = position;
     let world_pos = Vec3::new(file as f32, PIECE_ON_BOARD_Y, rank as f32);
 
     let mesh = meshes.get(piece_type, color);
+    let rotation = replay_piece_rotation(piece_type, color);
     let name = format!("{:?} {:?} at ({},{})", color, piece_type, file, rank);
 
-    // Determine if this is the piece's first move based on position
-    let has_moved = match (piece_type, color, file, rank) {
-        // Pawns: not on starting rank = has moved
-        (PieceType::Pawn, PieceColor::White, _, r) if r != 1 => true,
-        (PieceType::Pawn, PieceColor::Black, _, r) if r != 6 => true,
-        // Rooks: not on corners = has moved
-        (PieceType::Rook, PieceColor::White, 0, 0) => false,
-        (PieceType::Rook, PieceColor::White, 7, 0) => false,
-        (PieceType::Rook, PieceColor::Black, 0, 7) => false,
-        (PieceType::Rook, PieceColor::Black, 7, 7) => false,
-        // Kings: not on e-file starting rank = has moved
-        (PieceType::King, PieceColor::White, 4, 0) => false,
-        (PieceType::King, PieceColor::Black, 4, 7) => false,
-        // Knights: on b/g file starting rank = not moved
-        (PieceType::Knight, PieceColor::White, f, 0) if f == 1 || f == 6 => false,
-        (PieceType::Knight, PieceColor::Black, f, 7) if f == 1 || f == 6 => false,
-        // Bishops: on c/f file starting rank = not moved
-        (PieceType::Bishop, PieceColor::White, f, 0) if f == 2 || f == 5 => false,
-        (PieceType::Bishop, PieceColor::Black, f, 7) if f == 2 || f == 5 => false,
-        // Queens: on d-file starting rank = not moved
-        (PieceType::Queen, PieceColor::White, 3, 0) => false,
-        (PieceType::Queen, PieceColor::Black, 3, 7) => false,
-        _ => true,
-    };
-
-    commands.spawn((
-        Mesh3d(mesh),
-        MeshMaterial3d(material),
-        Transform::from_translation(world_pos),
-        Piece {
-            piece_type,
-            color,
-            x: file,
-            y: rank,
-        },
-        HasMoved { moved: has_moved, move_count: 0 },
-        Name::new(name),
-        DespawnOnExit(GameState::InGame),
-    ));
-
-    // 2D sprite visual (if handles available)
-    if let Some(handles) = sprite_handles {
-        let sprite = handles.get(piece_type, color);
-        commands.spawn((
-            Sprite {
-                image: sprite,
-                custom_size: Some(Vec2::splat(0.8)),
-                ..default()
-            },
-            Transform::from_translation(world_pos + Vec3::Y * 0.1),
+    commands
+        .spawn((
             Piece {
                 piece_type,
                 color,
                 x: file,
                 y: rank,
             },
-            Name::new(format!("2D {:?} {:?}", color, piece_type)),
+            HasMoved::default(),
+            Transform::from_translation(world_pos).with_rotation(rotation),
+            Visibility::default(),
+            Name::new(name),
             DespawnOnExit(GameState::InGame),
-        ));
-    }
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::default(),
+                Piece3DVisual,
+            ));
+
+            if let Some(handles) = sprite_handles {
+                let sprite = handles.get(piece_type, color);
+                parent.spawn((
+                    Sprite::from_image(sprite),
+                    Transform::from_xyz(0.0, 0.1, 0.0)
+                        .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+                        .with_scale(Vec3::splat(0.002)),
+                    Piece2DVisual,
+                    Visibility::Hidden,
+                ));
+            }
+        })
+        .id()
 }

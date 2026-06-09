@@ -801,8 +801,14 @@ pub fn tick_heartbeat(
     heartbeat.since_last_ping += dt;
     heartbeat.since_last_pong += dt;
 
-    // Send a ping on interval.
+    // Send a ping on interval (±0.5 s jitter to spread VPS load across clients).
     if heartbeat.since_last_ping >= heartbeat.ping_interval {
+        // Jitter: next interval = 4.5 .. 5.5 s based on system-time sub-millis
+        let jitter = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_millis() % 1000) as f32 / 1000.0 - 0.5;
+        heartbeat.ping_interval = 5.0 + jitter;
         heartbeat.since_last_ping = 0.0;
         if let (Some(tx), Some(sess)) = (&network_state.message_sender, session.as_ref()) {
             let game_id = sess.game_id.parse::<u64>().unwrap_or(0);
@@ -853,26 +859,25 @@ pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
         }
     }
 
-    // Fall back to identity file if set.
-    let key_file = if let Ok(env_path) = std::env::var("XFCHESS_IDENTITY") {
-        PathBuf::from(env_path)
-    } else {
+    // Fall back to XFCHESS_IDENTITY env file, then the persistent config-dir key.
+    if let Ok(env_path) = std::env::var("XFCHESS_IDENTITY") {
+        let key_file = PathBuf::from(env_path);
+        if let Ok(bytes) = std::fs::read(&key_file) {
+            if bytes.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                let sk = SecretKey::from_bytes(&arr);
+                return (sk, arr);
+            }
+        }
         let sk = SecretKey::generate(&mut rand::rng());
         let bytes = sk.to_bytes();
+        let _ = std::fs::write(&key_file, bytes);
         return (sk, bytes);
-    };
-
-    if let Ok(bytes) = std::fs::read(&key_file) {
-        if bytes.len() == 32 {
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&bytes);
-            let sk = SecretKey::from_bytes(&arr);
-            return (sk, arr);
-        }
     }
 
-    let sk = SecretKey::generate(&mut rand::rng());
+    // Stable persistent identity: survives restarts and wallet rotations.
+    let sk = crate::multiplayer::network::identity::load_or_create();
     let bytes = sk.to_bytes();
-    let _ = std::fs::write(&key_file, bytes);
     (sk, bytes)
 }

@@ -33,7 +33,7 @@ import { Puzzles } from './pages/Puzzles';
 import { Learn } from './pages/Learn';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
-import { Menu, X, ChevronDown } from 'lucide-react';
+import { Menu, X, ChevronDown, Sun, Moon } from 'lucide-react';
 import { Footer } from './components/Footer';
 import { WalletSelectionModal } from './components/WalletSelectionModal';
 import { LoginModal } from './components/LoginModal';
@@ -121,6 +121,7 @@ function AppContent() {
     const [isCommunityOpen, setIsCommunityOpen] = useState(false);
     const [isGameTypesOpen, setIsGameTypesOpen] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
+    const [isDark, setIsDark] = useState(() => localStorage.getItem('xfchess_theme') !== 'light');
     const lastScrollY = useRef(0);
     const closeDropdowns = () => { setIsLegalOpen(false); setIsCommunityOpen(false); setIsGameTypesOpen(false); };
 
@@ -140,6 +141,11 @@ function AppContent() {
             if (storedUsername) setUsername(storedUsername);
         }
     }, []);
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+        localStorage.setItem('xfchess_theme', isDark ? 'dark' : 'light');
+    }, [isDark]);
 
     // Scroll detection for navbar fade
     useEffect(() => {
@@ -199,9 +205,8 @@ function AppContent() {
             <nav className={`navbar ${isMenuOpen ? 'mobile-open' : ''} ${navVisible ? 'nav-visible' : 'nav-hidden'}`}>
                 <div className="nav-mobile-row">
                     <Link to="/" className="nav-logo" onClick={() => setIsMenuOpen(false)}>
-                        <span style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '-0.04em' }}>
-                            <span style={{ color: 'var(--primary)' }}>XF</span>
-                            <span style={{ color: '#fff' }}>Chess</span>
+                        <span style={{ fontSize: '14px', fontWeight: 700, letterSpacing: '0.06em' }}>
+                            XFCHESS.COM
                         </span>
                     </Link>
                     <button className="mobile-menu-toggle" onClick={() => setIsMenuOpen(!isMenuOpen)}>
@@ -306,10 +311,11 @@ function AppContent() {
                                     to="/profile"
                                     className="nav-link"
                                     style={{
-                                        color: '#fff',
+                                        color: '#ffffff',
                                         fontWeight: 700,
                                         fontSize: '12px',
-                                        background: 'linear-gradient(135deg, #ad5c2f, #8c4a26)',
+                                        background: 'rgba(255,255,255,0.12)',
+                                        border: '1px solid rgba(255,255,255,0.25)',
                                         padding: '5px 12px',
                                         borderRadius: '6px',
                                         letterSpacing: '0.02em',
@@ -336,6 +342,14 @@ function AppContent() {
                             </button>
                         )}
                     </div>
+
+                    <button
+                        className="theme-toggle"
+                        onClick={() => setIsDark(d => !d)}
+                        title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                    >
+                        {isDark ? <Sun size={14} /> : <Moon size={14} />}
+                    </button>
                 </div>
             </nav>
 

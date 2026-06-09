@@ -125,6 +125,10 @@ pub struct AppState {
     pub presence: Arc<PresenceStore>,
     /// Pending lobby invites keyed by recipient node_id
     pub invite_store: Arc<std::sync::RwLock<HashMap<String, Vec<social::routes::LobbyInvite>>>>,
+
+    // ── SIWS nonce store — one-time nonces keyed by nonce string ───────────────
+    /// Maps nonce → (wallet_pubkey, expires_unix_secs)
+    pub siws_nonces: Arc<Mutex<HashMap<String, (String, u64)>>>,
 }
 
 // Compile-time check: AppState must be Clone + Send + Sync + 'static for axum::serve
@@ -256,6 +260,7 @@ impl AppState {
             friends,
             presence,
             invite_store: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            siws_nonces: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

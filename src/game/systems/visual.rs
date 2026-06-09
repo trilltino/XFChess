@@ -1,9 +1,21 @@
 use crate::game::components::{FadingCapture, PieceMoveAnimation};
 use crate::game::resources::{CurrentTurn, GameTimer, PendingTurnAdvance, Selection};
-use crate::rendering::board::board::BoardSquare3DVisual;
 use crate::rendering::pieces::{Piece, PIECE_ON_BOARD_Y};
-use crate::rendering::utils::{ReturnMaterials, Square, SquareMaterials};
+use crate::rendering::utils::{Square, SquareMaterials};
 use bevy::prelude::*;
+
+/// Advance the turn immediately in the Execution set (before AI systems run)
+/// so the AI sees the new turn in the same frame the player moved.
+pub fn flush_pending_turn(
+    mut pending_turn: ResMut<PendingTurnAdvance>,
+    mut current_turn: ResMut<CurrentTurn>,
+    mut game_timer: ResMut<GameTimer>,
+) {
+    if let Some(pending) = pending_turn.take() {
+        game_timer.apply_increment(pending.mover);
+        current_turn.switch();
+    }
+}
 
 /// Marker component for selected piece borders
 #[derive(Component)]
@@ -33,28 +45,22 @@ pub struct MoveHint;
 pub fn highlight_possible_moves(
     selection: Res<Selection>,
     square_materials: Res<SquareMaterials>,
-    return_materials: Res<ReturnMaterials>,
     squares_query: Query<(&Square, &Children)>,
-    mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>, With<BoardSquare3DVisual>>,
     mut commands: Commands,
     marker_query: Query<Entity, Or<(With<SelectedBorder>, With<MoveHint>)>>,
 ) {
-    // Clean up old visual markers
+    // Despawn old marker entities (SelectedBorder + MoveHint overlays).
     for entity in marker_query.iter() {
         commands.entity(entity).despawn();
     }
 
-    for (square, children) in squares_query.iter() {
+    // Spawn new markers based on current selection.
+    for (square, _children) in squares_query.iter() {
         let pos = (square.x, square.y);
-
-        // Check if this is the selected square
         let is_selected = selection.selected_position == Some(pos);
-        
-        // Check if this is a valid move destination
         let is_valid_move = selection.is_selected() && selection.possible_moves.contains(&pos);
 
         if is_selected {
-            // Gold highlight on selected piece square
             commands.spawn((
                 Mesh3d(square_materials.highlight_mesh.clone()),
                 MeshMaterial3d(square_materials.selected_border_matl.clone()),
@@ -66,7 +72,6 @@ pub fn highlight_possible_moves(
         }
 
         if is_valid_move {
-            // Green circle on valid destination squares
             commands.spawn((
                 Mesh3d(square_materials.hint_mesh.clone()),
                 MeshMaterial3d(square_materials.hover_matl.clone()),
@@ -77,94 +82,52 @@ pub fn highlight_possible_moves(
                 crate::core::DespawnOnExit(crate::core::GameState::InGame),
             ));
         }
-
-
-        // Update the 3D visual child's material
-        for child in children.iter() {
-            if let Ok(mut material) = material_query.get_mut(child) {
-                if !is_selected {
-                    material.0 = return_materials.get_original_material(square, &square_materials);
-                }
-            }
-        }
     }
 }
 
-/// System to animate piece movement
+/// System to animate piece movement with a smooth arc.
 ///
-/// Smoothly interpolates piece positions from their current transform
-/// to their target position based on the Piece component.
+/// Each frame, increments `PieceMoveAnimation::elapsed` and interpolates
+/// the piece's world position between `start` and `end`:
+/// - X/Z slide uses smooth-step easing (slow→fast→slow).
+/// - Y uses a parabolic arc peaking at the midpoint for a natural lift.
 ///
-/// # Execution Order
-///
-/// Runs in `GameSystems::Visual` set, after game logic updates piece
-/// positions but before rendering.
-///
-/// # Animation Behavior
-///
-/// - Uses linear interpolation with configurable speed
-/// - Snaps to final position when within 0.1 units
-/// - Handles both movement and capture animations
+/// The component is removed once `elapsed >= duration`, at which point the
+/// piece snaps exactly to `end`.  Pieces without an active animation are
+/// kept in sync with their `Piece` logical position each frame.
 pub fn animate_piece_movement(
     time: Res<Time>,
     mut commands: Commands,
-    mut query: Query<(
-        Entity,
-        &mut Transform,
-        &Piece,
-        Option<&mut PieceMoveAnimation>,
-    )>,
-    mut pending_turn: ResMut<PendingTurnAdvance>,
-    mut current_turn: ResMut<CurrentTurn>,
-    mut game_timer: ResMut<GameTimer>,
+    mut query: Query<(Entity, &mut Transform, &Piece, Option<&mut PieceMoveAnimation>)>,
 ) {
-    let mut animation_active = false;
-    let mut completed = Vec::new();
-
+    let dt = time.delta_secs();
     for (entity, mut transform, piece, animation) in query.iter_mut() {
-        if let Some(mut animation) = animation {
-            animation.elapsed = (animation.elapsed + time.delta_secs()).min(animation.duration);
-            let progress = animation.progress();
-            let arc = (std::f32::consts::PI * progress).sin() * 0.35;
-            transform.translation = animation.start.lerp(animation.end, progress) + Vec3::new(0.0, arc, 0.0);
+        if let Some(mut anim) = animation {
+            anim.elapsed += dt;
 
-            if progress >= 1.0 {
-                transform.translation = animation.end;
-                completed.push(entity);
+            if anim.elapsed >= anim.duration {
+                // Animation complete — snap to exact destination.
+                transform.translation = anim.end;
+                commands.entity(entity).remove::<PieceMoveAnimation>();
             } else {
-                animation_active = true;
+                // Smooth-step t for horizontal slide (ease in-out).
+                let t_smooth = anim.progress();
+                // Linear t for the arc so the peak is always at the midpoint.
+                let t_linear = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
+
+                let base = anim.start.lerp(anim.end, t_smooth);
+                // Arc height scales with board distance so short moves look natural.
+                let dist = (anim.end - anim.start).length();
+                let arc_height = (dist * 0.18).clamp(0.15, 0.55);
+                let arc_y = arc_height * 4.0 * t_linear * (1.0 - t_linear);
+
+                transform.translation = Vec3::new(base.x, base.y + arc_y, base.z);
             }
         } else {
-            // Snap to board surface (y = PIECE_ON_BOARD_Y) when not animating.
-            // Pieces must sit on top of the board cuboid (top face at y=0.05),
-            // not at y=0 which clips them into the board geometry.
-            // Integer coordinates match GLB mesh design and board square positions.
             let target = Vec3::new(piece.x as f32, PIECE_ON_BOARD_Y, piece.y as f32);
             if (transform.translation - target).length() > 0.01 {
                 transform.translation = target;
             }
-        }
-    }
-
-    for entity in completed {
-        commands.entity(entity).remove::<PieceMoveAnimation>();
-    }
-
-    if !animation_active && pending_turn.is_pending() {
-        if let Some(pending) = pending_turn.take() {
-            let mover = pending.mover;
-            game_timer.apply_increment(mover);
-            current_turn.switch();
-
-            // Consolidated log: one line instead of three
-            debug!(
-                "[MOVE] {:?} → {:?} | Move #{} | Times: W={:.1}s B={:.1}s",
-                mover,
-                current_turn.color,
-                current_turn.move_number,
-                game_timer.white_time_left,
-                game_timer.black_time_left
-            );
         }
     }
 }
@@ -238,20 +201,27 @@ pub fn setup_global_scene(
         Name::new("Global Background"),
     ));
 
-    // Global ambient light - set to dim gray to prevent crushing blacks
     commands.spawn(AmbientLight {
-        color: Srgba::gray(0.2).into(), // Dim gray ambient
-        brightness: 200.0,
-        affects_lightmapped_meshes: false,
+        color: Color::srgb(0.9, 0.92, 1.0),
+        brightness: 150.0,
+        ..default()
     });
 }
 
 /// Setup game scene when entering InGame state
 ///
 /// Spawns the game camera, lighting, and chess board.
-pub fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view_mode::ViewMode>) {
+pub fn setup_game_scene(
+    mut commands: Commands,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
+    mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>,
+) {
     use crate::core::DespawnOnExit;
     use crate::core::GameState;
+
+    // Reset global ambient so menu lighting never bleeds into the game.
+    global_ambient.color = Color::WHITE;
+    global_ambient.brightness = 0.0;
 
     // Set background color based on view mode
     if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
@@ -271,15 +241,15 @@ pub fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view
 
     // Skip lights for TempleOS mode (unlit rendering)
     if *view_mode != crate::game::view_mode::ViewMode::TempleOS {
-        // Main directional light (chess tournament lighting)
+        // Main directional light — no shadows to keep framerates smooth
         commands.spawn((
             DirectionalLight {
-                illuminance: 12000.0, // Brighter
-                shadows_enabled: true,
-                color: Color::srgb(1.0, 1.0, 0.98), // Cleaner white
+                illuminance: 8_000.0,
+                shadows_enabled: false,
+                color: Color::srgb(1.0, 0.97, 0.90),
                 ..default()
             },
-            Transform::from_xyz(4.0, 15.0, 4.0).looking_at(Vec3::new(3.5, 0.0, 3.5), Vec3::Y), // Overhead centered
+            Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, -0.4, 0.0)),
             DespawnOnExit(GameState::InGame),
             Name::new("Main Directional Light"),
         ));
@@ -287,13 +257,13 @@ pub fn setup_game_scene(mut commands: Commands, view_mode: Res<crate::game::view
         // Fill light (reduces harsh shadows)
         commands.spawn((
             PointLight {
-                intensity: 1_000_000.0,            // Stronger fill
-                color: Color::srgb(1.0, 1.0, 1.0), // White fill
+                intensity: 120_000.0,
+                color: Color::srgb(1.0, 1.0, 1.0),
                 shadows_enabled: false,
                 range: 100.0,
                 ..default()
             },
-            Transform::from_xyz(3.5, 10.0, 3.5), // Center fill
+            Transform::from_xyz(3.5, 10.0, 3.5),
             DespawnOnExit(GameState::InGame),
             Name::new("Fill Light"),
         ));

@@ -15,6 +15,13 @@ export default defineConfig({
     fs: {
       allow: ['..', './pkg'],
     },
+    proxy: {
+      // Forward /api/** to the local backend in dev so apiPost('') relative URLs resolve.
+      '/api': {
+        target: 'http://localhost:8090',
+        changeOrigin: true,
+      },
+    },
   },
   optimizeDeps: {
     exclude: ['xfchess-wasm'],

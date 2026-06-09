@@ -29,7 +29,7 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 use base64::{Engine as _, engine::general_purpose};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::signing::AppState;
 

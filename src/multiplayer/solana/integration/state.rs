@@ -48,8 +48,12 @@ pub struct SolanaIntegrationState {
     pub profile_status: ProfileStatus,
     /// Whether profile check is in progress
     pub checking_profile: bool,
-    /// Pending async profile check task
-    pub pending_profile_check: Option<tokio::task::JoinHandle<Result<ProfileStatus, String>>>,
+    /// Pending async profile check task — returns (status, elo, display_name)
+    pub pending_profile_check: Option<tokio::task::JoinHandle<Result<(ProfileStatus, Option<u16>, Option<String>), String>>>,
+    /// Cached on-chain ELO (populated after profile lookup; 0 = unknown)
+    pub cached_elo: u16,
+    /// Cached display name from on-chain profile
+    pub cached_display_name: Option<String>,
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
@@ -91,6 +95,8 @@ impl Default for SolanaIntegrationState {
             profile_status: ProfileStatus::Unknown,
             checking_profile: false,
             pending_profile_check: None,
+            cached_elo: 0,
+            cached_display_name: None,
         }
     }
 }
@@ -166,6 +172,7 @@ pub struct BalanceRefreshTimer(pub Timer);
 
 impl Default for BalanceRefreshTimer {
     fn default() -> Self {
-        Self(Timer::from_seconds(5.0, TimerMode::Repeating))
+        // 60 s: on-chain ELO only changes after finalize_game (minutes apart)
+        Self(Timer::from_seconds(60.0, TimerMode::Repeating))
     }
 }

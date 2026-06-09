@@ -37,8 +37,9 @@ use crate::game::components::{
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use crate::ui::game_ui::{
     reset_in_game_hud_visibility, toggle_in_game_hud,
-    InGameHudVisibility,
+    IncrementFlash, InGameHudVisibility,
 };
+use crate::ui::game_2d::Board2DTheme;
 use bevy::input::common_conditions::{input_toggle_active, input_just_pressed};
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
@@ -70,15 +71,20 @@ impl Plugin for GamePlugin {
             .init_resource::<super::view_mode::PlayerViewPreferences>()
             .init_resource::<PendingPromotion>()
             .init_resource::<GameSounds>()
+            .init_resource::<MenuSounds>()
             .init_resource::<super::camera_modes::CameraViewMode>()
             .init_resource::<super::camera_modes::CinematicSequence>()
             .init_resource::<super::camera_modes::CinematicFadeOverlay>()
             .init_resource::<InGameHudVisibility>()
+            .init_resource::<IncrementFlash>()
+            .init_resource::<Board2DTheme>()
             .init_resource::<super::systems::input::InGameExitConfirmation>()
             .init_resource::<super::systems::network_move::PendingDrawOffer>()
             .init_resource::<super::systems::network_move::PendingRematchOffer>()
             .init_resource::<crate::ui::game::ChatState>()
-            .init_resource::<super::replay::PgnReplayState>();
+            .init_resource::<super::replay::PgnReplayState>()
+            .init_resource::<crate::ui::game::game_ui::TimeoutHourglassState>()
+            .init_resource::<crate::ui::game::game_ui::AvatarCache>();
 
         // Register types for reflection (needed for inspector)
         app.register_type::<CurrentTurn>()
@@ -123,6 +129,15 @@ impl Plugin for GamePlugin {
 
         // Add spectator sync plugin
         app.add_plugins(SpectateSyncPlugin);
+
+        // Restore ambient when game ends so the board behind the popup looks neutral.
+        app.add_systems(
+            OnEnter(GameState::GameOver),
+            |mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>| {
+                global_ambient.color = Color::srgb(0.82, 0.87, 1.0);
+                global_ambient.brightness = 800.0;
+            },
+        );
 
         // Setup gameplay camera and board scene when entering InGame
         app.add_systems(
@@ -200,12 +215,22 @@ impl Plugin for GamePlugin {
                 // Validation set: Sync board state before validation (disabled in TempleOS)
 
                 // Execution set: Update game state (disabled in TempleOS)
-                // update_game_phase is gated on CurrentTurn changing so the shakmaty
-                // FEN rebuild and legal-move generation only fire once per move,
-                // not every frame (60x/s savings).
+                // Advance the turn immediately (before AI runs) so the
+                // AI sees the new turn and responds in the same frame the player moved.
+                flush_pending_turn.in_set(GameSystems::Execution),
+                // Run when the turn changes (normal per-move path) OR when the
+                // legal-move cache is still empty but the game is not yet over.
+                // The second condition catches the frame after deferred piece-spawn
+                // commands are flushed: CurrentTurn has not changed, but the cache
+                // is empty and needs to be built for the first time.
                 update_game_phase
                     .in_set(GameSystems::Execution)
-                    .run_if(|ct: Res<CurrentTurn>| ct.is_changed())
+                    .run_if(|ct: Res<CurrentTurn>,
+                             engine: Res<crate::engine::board_state::ChessEngine>,
+                             game_over: Res<super::resources::GameOverState>| {
+                        ct.is_changed()
+                            || (!engine.has_legal_moves() && !game_over.is_game_over())
+                    })
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
                         *view_mode != super::view_mode::ViewMode::TempleOS
                     }),
@@ -275,11 +300,109 @@ impl Plugin for GamePlugin {
                 crate::ui::game::game_ui::post_game_overlay,
                 crate::ui::game::game_ui::pause_resume_ui,
                 crate::ui::game_2d::render_2d_board,
+                crate::ui::game::promotion_ui::promotion_ui_system,
+                crate::ui::game::game_2d::blunder_indicator_ui,
             )
                 .chain()
                 .run_if(in_state(GameState::InGame))
                 .run_if(not(in_mode(GameMode::PgnReplay))),
         );
+        // 2D board arrow overlays, drag-to-move, premove, piece animation
+        app.init_resource::<crate::ui::game::game_2d::BoardArrows>();
+        app.init_resource::<crate::ui::game::game_2d::DragState2D>();
+        app.init_resource::<crate::ui::game::game_2d::PremoveState>();
+        app.init_resource::<crate::ui::game::game_2d::PieceAnim2D>();
+        app.add_systems(
+            Update,
+            crate::ui::game::game_2d::trigger_piece_anim_2d
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Eval bar resources and update system
+        app.init_resource::<crate::ui::game::game_2d::EvalBarState>();
+        app.init_resource::<crate::ui::game::game_2d::EvalHistory>();
+        app.init_resource::<crate::ui::game::game_2d::BlunderIndicatorState>();
+        app.init_resource::<crate::ui::game::game_2d::BoardFocus>();
+        app.init_resource::<crate::ui::game::game_2d::CheckmateFlashState>();
+        app.init_resource::<crate::ui::game::game_2d::BoardFadeState>();
+        app.add_systems(Update, (
+            crate::ui::game::game_2d::trigger_checkmate_flash,
+            crate::ui::game::game_2d::tick_checkmate_flash,
+            crate::ui::game::game_2d::board_fade_system,
+        ).run_if(in_state(GameState::InGame)));
+        app.add_systems(
+            Update,
+            (
+                crate::ui::game::game_2d::update_eval_bar,
+                crate::ui::game::game_2d::detect_blunder_system,
+            )
+                .chain()
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Sync Board2DTheme and eval bar visibility from GameSettings on settings change
+        app.add_systems(Update, crate::ui::game::game_2d::sync_board_theme_from_settings);
+        app.add_systems(Update, crate::ui::game::game_2d::sync_eval_bar_visibility);
+        app.add_systems(Update, crate::rendering::pieces::pieces::reload_piece_sprites);
+
+        // Ping chip (online games only)
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            crate::ui::game::game_ui::ping_chip_ui
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Opponent disconnect popup + countdown
+        app.init_resource::<crate::ui::game::game_ui::OpponentDisconnectState>();
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            crate::ui::game::game_ui::opponent_disconnect_ui
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Timeout hourglass — tracks FlagTimeoutEvent and drives animated ⧖ in timer chip
+        app.add_systems(
+            Update,
+            crate::ui::game::game_ui::timeout_hourglass_system
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Player avatar fetch — background HTTP → Bevy Image asset
+        app.add_systems(
+            Update,
+            crate::ui::game::game_ui::avatar_fetch_system
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Check sound cue
+        app.add_systems(
+            Update,
+            crate::ui::game::game_ui::play_check_sound_system
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Blindfold toggle — Ctrl+B
+        app.add_systems(
+            Update,
+            crate::ui::game::game_ui::toggle_blindfold_system
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Tournament sidebar widget — shown when active_tournament_id is set
+        #[cfg(feature = "solana")]
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            crate::ui::game::game_ui::tournament_sidebar_widget
+                .run_if(in_state(GameState::InGame)),
+        );
+
+        // Increment flash tick — pulses +Xs label after each move
+        app.add_systems(
+            Update,
+            crate::ui::game::game_ui::increment_flash_system
+                .run_if(in_state(GameState::InGame)),
+        );
+
         // Chat panel runs separately (shares EguiContexts with the chain above;
         // Bevy allows multiple systems in the same pass to use EguiContexts as long
         // as they are not chained with conflicting system-params).
@@ -298,10 +421,81 @@ impl Plugin for GamePlugin {
                 .run_if(in_state(GameState::InGame)),
         );
 
+        // Disconnect recovery banner (online modes only)
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            crate::ui::game::game_ui::disconnect_recovery_banner
+                .run_if(in_state(GameState::InGame))
+                .run_if(not(in_mode(GameMode::PgnReplay))),
+        );
+
         // Replay UI overlay
         app.add_systems(
             bevy_egui::EguiPrimaryContextPass,
             super::replay::replay_ui_system
+                .run_if(in_state(GameState::InGame))
+                .run_if(in_mode(GameMode::PgnReplay)),
+        );
+
+        // ── Shorts creation features ──
+        app.init_resource::<super::replay_shorts::ReplayAnnotations>();
+        app.init_resource::<super::replay_shorts::PuzzleOverlay>();
+        app.init_resource::<super::replay_shorts::CinematicEffect>();
+        app.init_resource::<super::replay_shorts::QualityBadgeState>();
+        app.init_resource::<super::shorts_state::ShortsState>();
+        app.init_resource::<crate::rendering::camera::camera_director::CameraDirector>();
+        app.add_message::<super::replay_shorts::ScreenshotRequested>();
+        app.add_message::<super::replay_shorts::BlunderFlash>();
+        app.add_message::<super::replay_shorts::BrilliantGlow>();
+        app.add_message::<super::replay_shorts::CheckmateFlash>();
+
+        // 2D board + annotation overlay (only in PgnReplay + Standard2D)
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            super::replay_shorts::replay_2d_annotation_system
+                .run_if(in_state(GameState::InGame))
+                .run_if(in_mode(GameMode::PgnReplay)),
+        );
+
+        // Cinematic flash + quality badge + hook text overlays
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            (
+                super::replay_shorts::cinematic_effect_system,
+                super::replay_shorts::quality_badge_system,
+                super::replay_shorts::hook_text_system,
+            )
+                .run_if(in_state(GameState::InGame))
+                .run_if(in_mode(GameMode::PgnReplay)),
+        );
+
+        // 3D mesh arrows (rebuild on annotation change in 3D mode)
+        app.add_systems(
+            Update,
+            (
+                super::replay_shorts::replay_3d_annotations_system,
+                super::replay_shorts::clear_annotations_on_ply_change,
+                super::replay_shorts::replay_screenshot_system,
+            )
+                .run_if(in_state(GameState::InGame))
+                .run_if(in_mode(GameMode::PgnReplay)),
+        );
+
+        // Shorts cinematic tick + capture sequence (always run in replay mode)
+        app.add_systems(
+            Update,
+            (
+                super::replay_shorts::cinematic_tick_system,
+                super::replay_shorts::capture_sequence_system,
+            )
+                .run_if(in_state(GameState::InGame))
+                .run_if(in_mode(GameMode::PgnReplay)),
+        );
+
+        // Camera director (always run in replay mode)
+        app.add_systems(
+            Update,
+            crate::rendering::camera::camera_director::camera_director_system
                 .run_if(in_state(GameState::InGame))
                 .run_if(in_mode(GameMode::PgnReplay)),
         );
@@ -349,6 +543,9 @@ impl Plugin for GamePlugin {
             toggle_fullscreen.run_if(input_just_pressed(KeyCode::F11)),
         );
 
+        // F11 hint overlay (bottom-right, visible only when fullscreen)
+        app.add_systems(Update, render_fullscreen_hint);
+
         // ESC key to exit to main menu (forfeit/leave game)
         app.add_systems(
             Update,
@@ -375,6 +572,7 @@ impl Plugin for GamePlugin {
             (
                 super::replay::replay_auto_advance_system,
                 super::replay::replay_apply_move_system,
+                super::replay_shorts::load_pgn_annotations_system,
                 super::replay::replay_sync_engine_system,
                 super::replay::replay_spawn_pieces_system,
             )

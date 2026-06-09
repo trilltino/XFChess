@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useWallet } from '@solana/wallet-adapter-react';
-import WagerPriceWidget from '../components/WagerPriceWidget';
+
 import { getSwissCurrentRound, getSwissPairings, getTournamentMatch } from '../lib/api';
+import type { TournamentMatchResponse } from '../lib/api';
 
 interface ScheduleStatus {
     phase: string;
@@ -12,11 +13,7 @@ interface ScheduleStatus {
     max_players: number;
 }
 
-interface MatchInfo {
-    round: number;
-    board: number;
-    opponent: string;
-}
+type MatchInfo = TournamentMatchResponse;
 
 interface TournamentInfo {
     prize_pool: number;
@@ -287,7 +284,7 @@ export default function TournamentDetail() {
             </div>
 
             <div style={{ marginTop: '2rem' }}>
-                <WagerPriceWidget />
+                
             </div>
         </div>
     );

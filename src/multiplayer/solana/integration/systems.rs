@@ -508,81 +508,51 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
     Some(new_kp)
 }
 
-/// Fetches user verification status from VPS backend and caches it in SolanaWallet
-/// Runs periodically (every 30s) when wallet is connected
-pub fn fetch_user_status(
-    mut solana_wallet: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
-    time: Res<Time>,
-    mut timer: Local<f32>,
-) {
-    *timer -= time.delta_secs();
-    if *timer > 0.0 {
-        return;
-    }
-    *timer = 30.0; // Refresh every 30 seconds
-
-    let wallet = match solana_wallet.as_mut() {
-        Some(w) => w,
-        _ => return,
-    };
-
-    let pubkey = match wallet.pubkey {
-        Some(pk) => pk.to_string(),
-        None => return,
-    };
-
-    let pubkey_clone = pubkey.clone();
-    let pubkey_display = pubkey.clone();
-    // Spawn async task to fetch status
-    bevy::tasks::IoTaskPool::get().spawn(async move {
-        match crate::multiplayer::vps_client::get_user_status_async(pubkey_clone).await {
-            Ok(status) => {
-                info!("[USER_STATUS] Fetched status for {}: profile={}, email={}, kyc={}, can_wager={}",
-                    pubkey_display, status.has_profile, status.has_email, status.has_kyc, status.can_wager);
-                // Note: We can't write to ResMut from async task, so this is a placeholder
-                // In production, use a channel or event to communicate back to main thread
-            }
-            Err(e) => {
-                warn!("[USER_STATUS] Failed to fetch status for {}: {}", pubkey_display, e);
-            }
-        }
-    }).detach();
-}
-
-/// Alternative version that uses a channel-based approach for async-to-main communication
-/// This is the preferred pattern for Bevy
+/// Fetches user verification status from VPS and caches it in SolanaWallet.
+/// Triggers every 30 seconds; result arrives asynchronously via a channel
+/// and is applied on a subsequent frame.
 pub fn fetch_user_status_async(
     mut solana_wallet: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
     time: Res<Time>,
-    mut timer: Local<f32>,
+    mut poll_timer: Local<f32>,
+    mut rx: Local<Option<crossbeam_channel::Receiver<Option<UserStatus>>>>,
     tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
 ) {
-    *timer -= time.delta_secs();
-    if *timer > 0.0 {
+    // Drain any pending result first
+    if let Some(ref receiver) = *rx {
+        match receiver.try_recv() {
+            Ok(Some(status)) => {
+                if let Some(ref mut w) = solana_wallet {
+                    info!("[USER_STATUS] profile={} email={} kyc={} can_wager={}",
+                        status.has_profile, status.has_email, status.has_kyc, status.can_wager);
+                    w.user_status = Some(status);
+                }
+                *rx = None;
+            }
+            Ok(None) => { *rx = None; }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => { *rx = None; }
+        }
+    }
+
+    // Kick off a new fetch every 30 seconds when connected and idle
+    *poll_timer -= time.delta_secs();
+    if *poll_timer > 0.0 || rx.is_some() {
         return;
     }
-    *timer = 30.0; // Refresh every 30 seconds
+    *poll_timer = 30.0;
 
     let pubkey = match solana_wallet.as_ref().and_then(|w| w.pubkey) {
         Some(pk) => pk.to_string(),
         None => return,
     };
 
-    let pubkey_display = pubkey.clone();
-    let (tx, rx) = crossbeam_channel::bounded::<Option<UserStatus>>(1);
-    let pubkey_clone = pubkey.clone();
+    let (tx, new_rx) = crossbeam_channel::bounded::<Option<UserStatus>>(1);
+    *rx = Some(new_rx);
     tokio_runtime.0.spawn(async move {
-        let result = crate::multiplayer::vps_client::get_user_status_async(pubkey_clone).await.ok();
+        let result = crate::multiplayer::vps_client::get_user_status_async(pubkey).await.ok();
         let _ = tx.send(result);
     });
-
-    // Try to receive immediately (non-blocking)
-    if let Ok(Some(status)) = rx.try_recv() {
-        if let Some(ref mut w) = solana_wallet {
-            w.user_status = Some(status);
-            info!("[USER_STATUS] Updated cached status for {}", pubkey_display);
-        }
-    }
 }
 
 /// Syncs own and opponent profiles from VPS when a competitive match starts
@@ -725,9 +695,15 @@ pub struct GlobalSessionActive {
     pub session_pubkey: String,
 }
 
+/// Holds the background receiver for the global session verification result.
+#[derive(bevy::prelude::Resource)]
+pub struct GlobalSessionCheckPending {
+    pub rx: crossbeam_channel::Receiver<Option<String>>,
+}
+
 /// System that runs once on `OnEnter(MainMenu)` to verify the VPS holds an
-/// active global session for this wallet. Inserts `GlobalSessionActive` if it
-/// does, removes it otherwise so the "Authorize session" banner can react.
+/// active global session for this wallet. Spawns a background thread and stores
+/// a receiver so `poll_global_session_result` can pick up the answer next frame.
 pub fn verify_global_session_on_menu_enter(
     solana_state: Option<bevy::prelude::Res<SolanaIntegrationState>>,
     mut commands: bevy::prelude::Commands,
@@ -737,25 +713,48 @@ pub fn verify_global_session_on_menu_enter(
         None => return,
     };
 
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            use crate::multiplayer::vps_client;
-            match vps_client::verify_global_session(&wallet) {
-                Ok(Some(session_pubkey)) => {
-                    info!("[GLOBAL_SESSION] VPS confirmed active session {} for {}", session_pubkey, wallet);
-                    // Cannot insert a resource from an IoTaskPool task directly — log only.
-                    // The UI should poll or the main-thread system will pick it up.
-                }
-                Ok(None) => {
-                    info!("[GLOBAL_SESSION] No active global session on VPS for {}", wallet);
-                }
-                Err(e) => {
-                    warn!("[GLOBAL_SESSION] Verify failed for {}: {e}", wallet);
-                }
-            }
-        })
-        .detach();
-
-    // Remove stale resource immediately so the banner can re-appear if VPS says inactive.
+    // Remove stale resource immediately so the banner shows "checking" state.
     commands.remove_resource::<GlobalSessionActive>();
+
+    let (tx, rx) = crossbeam_channel::bounded::<Option<String>>(1);
+    commands.insert_resource(GlobalSessionCheckPending { rx });
+
+    std::thread::spawn(move || {
+        use crate::multiplayer::vps_client;
+        match vps_client::verify_global_session(&wallet) {
+            Ok(Some(session_pubkey)) => {
+                info!("[GLOBAL_SESSION] VPS confirmed active session {} for {}", session_pubkey, wallet);
+                let _ = tx.send(Some(session_pubkey));
+            }
+            Ok(None) => {
+                info!("[GLOBAL_SESSION] No active global session on VPS for {}", wallet);
+                let _ = tx.send(None);
+            }
+            Err(e) => {
+                warn!("[GLOBAL_SESSION] Verify failed for {}: {e}", wallet);
+                let _ = tx.send(None);
+            }
+        }
+    });
+}
+
+/// Polls the global session check receiver and inserts/removes `GlobalSessionActive`.
+pub fn poll_global_session_result(
+    mut commands: bevy::prelude::Commands,
+    pending: Option<bevy::prelude::ResMut<GlobalSessionCheckPending>>,
+) {
+    let Some(pending) = pending else { return };
+    match pending.rx.try_recv() {
+        Ok(Some(session_pubkey)) => {
+            commands.insert_resource(GlobalSessionActive { session_pubkey });
+            commands.remove_resource::<GlobalSessionCheckPending>();
+        }
+        Ok(None) => {
+            commands.remove_resource::<GlobalSessionCheckPending>();
+        }
+        Err(crossbeam_channel::TryRecvError::Empty) => {}
+        Err(_) => {
+            commands.remove_resource::<GlobalSessionCheckPending>();
+        }
+    }
 }

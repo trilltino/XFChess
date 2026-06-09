@@ -515,7 +515,7 @@ async fn create_game_on_chain(
         game_id,
         1_000_000,
         0,
-        "US",
+        0, // platform_fee: 0 for benchmark/test
         600,
         5,
     )?;

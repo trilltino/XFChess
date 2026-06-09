@@ -5,8 +5,8 @@ import { getTournamentMatch, getSwissCurrentRound, recordSwissResult } from '../
 
 interface MatchState {
     found: boolean;
-    round?: number;
-    board?: number;
+    round?: number | null;
+    board?: number | null;
     opponent?: string;
     is_bye?: boolean;
 }

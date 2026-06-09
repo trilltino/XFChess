@@ -18,6 +18,16 @@ pub struct TournamentSummary {
     pub is_private: bool,
     /// true for Swiss/knockout, false for posted PvP games.
     pub is_tournament: bool,
+    #[serde(default)]
+    pub usdc_mint: Option<String>,
+    #[serde(default)]
+    pub max_players: usize,
+    #[serde(default)]
+    pub min_elo: u32,
+    #[serde(default)]
+    pub max_elo: u32,
+    #[serde(default)]
+    pub round_deadline_at: Option<i64>,
 }
 
 /// Fetch the list of advertised tournaments from the VPS.

@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+﻿import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { ArrowLeft, Shield, FileText, CheckCircle, AlertTriangle, ChevronDown, Gamepad2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -28,7 +28,7 @@ const CompliancePage = () => {
                   </div>
                 </div>
                 <div className="legal-disclaimer">
-                  <AlertTriangle size={20} color="#f59e0b" />
+                  <AlertTriangle size={20} color="#888888" />
                   <p><strong>IMPORTANT NOTICE:</strong> XFChess is a pre-launch platform currently undergoing regulatory and legal review. The positions described represent our current good-faith interpretation of applicable law and our intended compliance roadmap. We are in the process of engaging qualified legal, tax, and regulatory advisors. This page will be updated as those processes conclude.</p>
                 </div>
               </div>
@@ -398,7 +398,7 @@ const CompliancePage = () => {
         <div className="divider" />
 
         <div className="compliance-notice">
-          <AlertTriangle size={24} color="#f59e0b" />
+          <AlertTriangle size={24} color="#888888" />
           <div>
             <h4>Regulatory Updates</h4>
             <p>Our compliance framework is regularly updated to reflect changes in regulatory requirements. Users are responsible for ensuring compliance with their local laws.</p>
@@ -410,3 +410,4 @@ const CompliancePage = () => {
 };
 
 export default CompliancePage;
+

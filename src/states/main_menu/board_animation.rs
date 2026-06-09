@@ -6,11 +6,18 @@
 use bevy::prelude::*;
 use nimzovich_engine::{do_move, new_game, parse_pgn, san_to_move, KING_ID, PAWN_ID};
 
-use crate::core::{DespawnOnExit, GameState};
 
 /// Marks a menu-background piece and records its current board square.
 #[derive(Component, Clone, Copy)]
 pub struct MenuBgPiecePos {
+    pub file: u8,
+    pub rank: u8,
+}
+
+/// Stores the original starting square for a menu background piece.
+/// Used to reset positions when the animation loops back without despawning.
+#[derive(Component, Clone, Copy)]
+pub struct MenuBgPieceHome {
     pub file: u8,
     pub rank: u8,
 }
@@ -192,9 +199,7 @@ pub fn animate_board_system(
     mut commands: Commands,
     time: Res<Time>,
     mut anim: ResMut<BoardAnimator>,
-    transforms: Query<&Transform>,
-    piece_entities: Query<Entity, With<MenuBgPiecePos>>,
-    mut spawned: ResMut<super::new_menu::MenuBgPiecesSpawned>,
+    mut piece_reset_q: Query<(Entity, &MenuBgPieceHome, &mut Transform, &mut Visibility)>,
 ) {
     if !anim.active || !anim.initialized {
         return;
@@ -205,22 +210,24 @@ pub fn animate_board_system(
         return;
     }
 
-    // ── Game over: pause then reset ──────────────────────────────────────────
+    // ── Game over: pause then reset pieces in-place (no despawn/respawn) ─────
     if anim.ply_index >= anim.plies.len() {
-        // Clamp so end_pause is always a visible delay (never flicker on reset).
         if anim.end_pause <= 0.0 {
             anim.end_pause = 4.0;
         }
         anim.end_pause -= time.delta_secs();
         if anim.end_pause <= 0.0 {
-            for entity in piece_entities.iter() {
-                commands.entity(entity).despawn();
-            }
             anim.board = [[None; 8]; 8];
+            for (entity, home, mut transform, mut visibility) in piece_reset_q.iter_mut() {
+                // Cancel any in-flight slide (safety — all animations finish well before reset)
+                commands.entity(entity).remove::<MenuBgPieceAnim>();
+                transform.translation = Vec3::new(home.file as f32, 0.05, home.rank as f32);
+                *visibility = Visibility::Visible;
+                anim.board[home.rank as usize][home.file as usize] = Some(entity);
+            }
             anim.ply_index = 0;
             anim.move_timer = 3.0;
-            anim.active = false;
-            spawned.0 = false;
+            // anim.active stays true — pieces are already placed
         }
         return;
     }
@@ -235,10 +242,10 @@ pub fn animate_board_system(
     let ply = anim.plies[anim.ply_index].clone();
     anim.ply_index += 1;
 
-    // ── En-passant: remove the captured pawn that sits beside the destination ─
+    // ── En-passant: hide the captured pawn beside the destination ─────────────
     if let Some((ep_file, ep_rank)) = ply.ep_capture {
         if let Some(entity) = anim.board[ep_rank as usize][ep_file as usize].take() {
-            commands.entity(entity).despawn();
+            commands.entity(entity).insert(Visibility::Hidden);
         }
     }
 
@@ -246,17 +253,18 @@ pub fn animate_board_system(
     for (from_file, from_rank, to_file, to_rank) in &ply.movements {
         let (ff, fr, tf, tr) = (*from_file, *from_rank, *to_file, *to_rank);
 
-        // Capture: despawn whatever is on the destination square
+        // Capture: hide the piece on the destination square instead of despawning
         if let Some(captured) = anim.board[tr as usize][tf as usize].take() {
-            commands.entity(captured).despawn();
+            commands.entity(captured).insert(Visibility::Hidden);
         }
 
-        // Move the piece entity with a smooth slide animation
+        // Move the piece entity with a smooth slide animation.
+        // Start is computed from grid coords — pieces always settle before the
+        // next move fires (0.55 s animation, 2.0 s interval).
         if let Some(entity) = anim.board[fr as usize][ff as usize].take() {
             anim.board[tr as usize][tf as usize] = Some(entity);
-            let start = transforms.get(entity).map(|t| t.translation)
-                .unwrap_or(Vec3::new(ff as f32, 0.05, fr as f32));
-            let end = Vec3::new(tf as f32, 0.05, tr as f32);
+            let start = Vec3::new(ff as f32, 0.05, fr as f32);
+            let end   = Vec3::new(tf as f32, 0.05, tr as f32);
             commands.entity(entity).insert(MenuBgPieceAnim { start, end, elapsed: 0.0, duration: 0.55 });
         }
     }

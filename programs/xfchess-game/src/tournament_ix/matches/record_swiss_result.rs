@@ -64,6 +64,7 @@ pub fn handler(
     result: SwissMatchResult,
 ) -> Result<()> {
     let t = &mut ctx.accounts.tournament;
+    require!(t.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
     let player = ctx.accounts.player.key();
     let opponent = ctx.accounts.opponent.key();
 

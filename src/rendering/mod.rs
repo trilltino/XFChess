@@ -6,6 +6,7 @@ pub mod effects;
 pub mod pieces;
 
 // Root-level modules
+pub mod graphics_quality;
 pub mod utils;
 
 // Re-export commonly used items
@@ -24,6 +25,15 @@ impl Plugin for RenderingPlugin {
             board::BoardPlugin,
             camera::CameraPlugin,
             pieces::PiecePlugin,
-        ));
+            effects::DynamicLightingPlugin,
+        ))
+        .add_systems(
+            Update,
+            (
+                graphics_quality::apply_graphics_quality_camera_system,
+                graphics_quality::update_graphics_quality_camera_system,
+                graphics_quality::apply_graphics_quality_lights_system,
+            ),
+        );
     }
 }

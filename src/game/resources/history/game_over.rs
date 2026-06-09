@@ -254,6 +254,22 @@ impl GameOverState {
             GameOverState::WhiteWonByResignation | GameOverState::BlackWonByResignation
         )
     }
+
+    pub fn is_draw(&self) -> bool {
+        matches!(self, GameOverState::Stalemate | GameOverState::InsufficientMaterial)
+    }
+
+    /// Short icon + reason string for the popup subtitle.
+    pub fn termination_text(&self) -> &str {
+        match self {
+            GameOverState::WhiteWon | GameOverState::BlackWon => "by checkmate",
+            GameOverState::WhiteWonByResignation | GameOverState::BlackWonByResignation => "by resignation",
+            GameOverState::WhiteWonByTime | GameOverState::BlackWonByTime => "on timeout",
+            GameOverState::Stalemate => "by stalemate",
+            GameOverState::InsufficientMaterial => "insufficient material",
+            GameOverState::Playing => "",
+        }
+    }
 }
 
 #[cfg(test)]

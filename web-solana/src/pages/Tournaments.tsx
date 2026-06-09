@@ -1,8 +1,8 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import chessboardSpace from '../assets/chessboard-space.png';
-import WagerPriceWidget from '../components/WagerPriceWidget';
+
 
 export function Tournaments() {
     const [showNotice, setShowNotice] = useState(true);
@@ -21,8 +21,8 @@ export function Tournaments() {
                     transform: 'translateY(-50%)',
                     width: '280px',
                     padding: '20px',
-                    background: 'rgba(8, 26, 20, 0.95)',
-                    border: '1px solid rgba(173, 92, 47, 0.3)',
+                    background: 'rgba(0, 0, 0, 0.95)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
                     borderRadius: '12px',
                     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
                     backdropFilter: 'blur(16px)',
@@ -47,8 +47,8 @@ export function Tournaments() {
                         <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> Cash Tournaments require a Solana wallet and KYC verification.
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <Link to="/kyc" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
-                        <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
+                        <Link to="/kyc" style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
+                        <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
                     </div>
                 </div>
             )}
@@ -167,19 +167,19 @@ export function Tournaments() {
                     }}>
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '16px' }}>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>KYC Verification:</strong> Complete identity verification to participate in cash tournaments.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Solana Wallet:</strong> Connected wallet with sufficient SOL for entry fee and gas.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Minimum Rating:</strong> Some tournaments require a minimum Elo rating to ensure competitive balance.
                                 </p>
@@ -196,19 +196,19 @@ export function Tournaments() {
                     <div style={{ background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', padding: '32px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '20px' }}>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Instant Payout:</strong> Prize money transfers directly to winners' wallets immediately after tournament completion.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Transparent Distribution:</strong> Prize splits are defined in smart contracts and visible to all participants.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Multiple Tiers:</strong> Grand tournaments offer larger prize pools, while daily tournaments provide frequent opportunities.
                                 </p>
@@ -246,10 +246,10 @@ export function Tournaments() {
                             </p>
                         </div>
                         <div style={{ 
-                            background: 'rgba(173, 92, 47, 0.05)', 
+                            background: 'rgba(255, 255, 255, 0.03)', 
                             borderRadius: '12px', 
                             padding: '24px', 
-                            border: '1px solid rgba(173, 92, 47, 0.2)' 
+                            border: '1px solid rgba(255, 255, 255, 0.10)' 
                         }}>
                             <h4 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '8px', color: '#fff' }}>Grand Tournaments</h4>
                             <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
@@ -259,9 +259,11 @@ export function Tournaments() {
                     </div>
                 </div>
 
-                <WagerPriceWidget />
+                
             </div>
         </main>
     );
 }
+
+
 

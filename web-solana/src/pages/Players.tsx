@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { Search, Shield, Trophy, Loader2 } from 'lucide-react';
@@ -116,7 +116,7 @@ export function Players() {
                           style={{
                             fontSize: '0.8rem',
                             background: 'rgba(20, 241, 149, 0.1)',
-                            color: '#14F195',
+                            color: '#ffffff',
                             padding: '4px 12px',
                             borderRadius: 12,
                             border: '1px solid rgba(20, 241, 149, 0.3)',
@@ -186,3 +186,4 @@ export function Players() {
     </main>
   );
 }
+

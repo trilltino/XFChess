@@ -21,6 +21,8 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
     { id: "kyc", label: "KYC Status", icon: "" },
     { id: "deploy", label: "Deployment", icon: "🚀" },
     { id: "explorer", label: "Game Explorer", icon: "👁️" },
+    { id: "treasury", label: "Treasury", icon: "💎" },
+    { id: "settings", label: "Settings", icon: "⚙️" },
   ];
 
   return (

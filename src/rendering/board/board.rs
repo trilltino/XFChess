@@ -21,6 +21,11 @@ pub struct BoardSquare3DVisual;
 #[derive(Component)]
 pub struct BoardSquare2DVisual;
 
+/// Invisible flat hit plane — sole pick target for a board square in all view modes.
+/// Sits just above the cuboid top (Y=0.06), covers the full 1×1 cell.
+#[derive(Component)]
+pub struct BoardSquareHitPlane;
+
 pub fn create_board(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -32,9 +37,17 @@ pub fn create_board(
 
     let _is_templeos = *view_mode == ViewMode::TempleOS;
 
-    // Use Rectangle (2D quad) for TempleOS mode, Cuboid (3D box) for standard mode
     let boardmesh_3d = meshes.add(Cuboid::new(1.0, 0.1, 1.0));
     let boardmesh_2d = meshes.add(Rectangle::new(1.0, 1.0));
+    let boardmesh_hit = meshes.add(Rectangle::new(1.0, 1.0));
+    // Fully transparent — invisible but present in render world so mesh picking works.
+    let mat_hit = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.0, 0.0, 0.0, 0.0),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        double_sided: true,
+        ..default()
+    });
     
     // Lichess-style colors for 2D board
     // Light: #f0d9b5, Dark: #b58863
@@ -57,62 +70,39 @@ pub fn create_board(
         .flat_map(|rank| {
             let mesh_3d = boardmesh_3d.clone();
             let mesh_2d = boardmesh_2d.clone();
+            let mesh_hit = boardmesh_hit.clone();
             let mat_light_row = mat_light.clone();
             let mat_dark_row = mat_dark.clone();
             let mat_2d_light_row = mat_2d_light.clone();
             let mat_2d_dark_row = mat_2d_dark.clone();
+            let mat_hit_row = mat_hit.clone();
 
             (0..8).map(move |file| {
                 let square = Square::new(file, rank);
                 let is_white_square = square.is_white();
 
-                // 3D Material
-                let base_mat_3d = if is_white_square {
-                    mat_light_row.clone()
-                } else {
-                    mat_dark_row.clone()
-                };
-                
-                // 2D Material
-                let base_mat_2d = if is_white_square {
-                    mat_2d_light_row.clone()
-                } else {
-                    mat_2d_dark_row.clone()
-                };
+                let base_mat_3d = if is_white_square { mat_light_row.clone() } else { mat_dark_row.clone() };
+                let base_mat_2d = if is_white_square { mat_2d_light_row.clone() } else { mat_2d_dark_row.clone() };
 
                 let file_char = (b'a' + file) as char;
-                let rank_num = rank + 1;
-                let square_name = format!("Square {}{}", file_char, rank_num);
-
+                let square_name = format!("Square {}{}", file_char, rank + 1);
                 let world_pos = Vec3::new(file as f32, 0., rank as f32);
 
-                (
-                    Transform::from_translation(world_pos),
-                    Visibility::default(),
-                    InheritedVisibility::default(),
-                    PointerInteraction::default(),
-                    bevy::picking::Pickable::default(),
-                    square,
-                    Board,
-                    Name::new(square_name),
-                    DespawnOnExit(GameState::InGame),
-                    mesh_3d.clone(),
-                    base_mat_3d,
-                    mesh_2d.clone(),
-                    base_mat_2d,
-                )
+                (Transform::from_translation(world_pos), square, Board, Name::new(square_name),
+                 DespawnOnExit(GameState::InGame), mesh_3d.clone(), base_mat_3d, mesh_2d.clone(), base_mat_2d,
+                 mesh_hit.clone(), mat_hit_row.clone())
             })
         })
         .collect();
 
-    for (transform, vis, inher_vis, ptr, pick, square, board, name, exit, m3d, mat3d, m2d, mat2d) in squares {
+    for (transform, square, board, name, exit, m3d, mat3d, m2d, mat2d, m_hit, mat_hit_cell) in squares {
         commands
             .spawn((
                 transform,
-                vis,
-                inher_vis,
-                ptr,
-                pick,
+                Visibility::default(),
+                InheritedVisibility::default(),
+                PointerInteraction::default(),
+                bevy::picking::Pickable::default(),
                 square,
                 board,
                 name,
@@ -122,21 +112,32 @@ pub fn create_board(
             .observe(on_square_hover)
             .observe(on_square_unhover)
             .with_children(|parent| {
-                // 3D Visual
+                // Visual only — not the pick target.
                 parent.spawn((
                     Mesh3d(m3d),
                     MeshMaterial3d(mat3d),
                     BoardSquare3DVisual,
-                    bevy::picking::Pickable::default(),
+                    bevy::picking::Pickable::IGNORE,
                 ));
-                
-                // 2D Visual
+
                 parent.spawn((
                     Mesh3d(m2d),
                     MeshMaterial3d(mat2d),
                     Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                     BoardSquare2DVisual,
                     Visibility::Hidden,
+                    bevy::picking::Pickable::IGNORE,
+                ));
+
+                // Invisible flat plane at Y=0.06 (just above cuboid top).
+                // Full 1×1 surface — sole pick target for this square in all view modes.
+                parent.spawn((
+                    Mesh3d(m_hit),
+                    MeshMaterial3d(mat_hit_cell),
+                    Transform::from_xyz(0.0, 0.06, 0.0)
+                        .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                    BoardSquareHitPlane,
+                    bevy::picking::Pickable::default(),
                 ));
             });
     }
@@ -169,7 +170,9 @@ impl Plugin for BoardPlugin {
         use crate::rendering::setup_templeos_camera;
         use crate::rendering::update_last_move_highlight_system;
         use crate::rendering::update_move_hints_system;
-        app.add_systems(
+        use crate::rendering::effects::{init_arrow_assets, update_check_highlight_system};
+        app.add_systems(Startup, init_arrow_assets)
+        .add_systems(
             OnEnter(GameState::InGame),
             (
                 create_board,
@@ -183,7 +186,10 @@ impl Plugin for BoardPlugin {
             (
                 update_move_hints_system.run_if(in_state(GameState::InGame)),
                 update_last_move_highlight_system.run_if(in_state(GameState::InGame)),
-                board_view_mode_toggle_system.run_if(in_state(GameState::InGame)),
+                update_check_highlight_system.run_if(in_state(GameState::InGame)),
+                board_view_mode_toggle_system.run_if(
+                    in_state(GameState::InGame).and(resource_changed::<crate::game::view_mode::ViewMode>)
+                ),
                 crate::rendering::templeos_camera_movement_system
                     .run_if(in_state(GameState::InGame)),
                 crate::game::systems::debug_transform::debug_log_transforms

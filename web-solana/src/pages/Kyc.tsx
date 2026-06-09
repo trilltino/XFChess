@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -169,7 +169,7 @@ const KycPage = () => {
             <button
               type="submit"
               disabled={submitting}
-              style={{ padding: '14px 20px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #ad5c2f, #8c4a26)', color: '#fff', fontWeight: 800, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}
+              style={{ padding: '14px 20px', borderRadius: '10px', border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontWeight: 800, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}
             >
               {submitting ? <Loader2 size={18} className="spinner" /> : null}
               {submitting ? 'Submitting...' : 'Submit KYC'}
@@ -268,3 +268,4 @@ const KycPage = () => {
 };
 
 export default KycPage;
+

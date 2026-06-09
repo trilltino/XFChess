@@ -48,6 +48,10 @@ pub struct P2PVpsState {
     pub hosting_node_id: Option<String>,
     /// Last time we polled the relay for joiner messages
     pub host_poll_last: Option<std::time::Instant>,
+    /// Stake amount (SOL) set when announcing a wagered game. Carried into
+    /// the JoinerDetected handler so the host can be routed to the Solana
+    /// contract creation flow before entering InGame.
+    pub hosting_stake_amount: f64,
 }
 
 impl Default for P2PVpsState {
@@ -64,6 +68,7 @@ impl Default for P2PVpsState {
             hosting_game_id: None,
             hosting_node_id: None,
             host_poll_last: None,
+            hosting_stake_amount: 0.0,
         }
     }
 }
@@ -96,6 +101,10 @@ pub struct VpsGameListing {
     pub username: Option<String>,
     pub elo: Option<u16>,
     pub region: Option<String>,
+    pub capacity: u8,
+    pub players_joined: u8,
+    pub ttl_seconds: i64,
+    pub is_private: bool,
 }
 
 /// Plugin for P2P VPS relay
@@ -198,7 +207,7 @@ fn handle_vps_responses(
     mut connect_events: MessageWriter<ConnectToPeerEvent>,
     mut core_mode: ResMut<crate::core::GameMode>,
     mut ai_config: ResMut<crate::game::ai::ChessAIResource>,
-    #[allow(unused_mut)] mut menu_state: ResMut<NextState<crate::core::MenuState>>,
+    #[allow(unused_mut, unused_variables)] mut menu_state: ResMut<NextState<crate::core::MenuState>>,
     mut next_game_state: ResMut<NextState<GameState>>,
     mut game_started: MessageWriter<GameStartedEvent>,
     mut p2p_conn: ResMut<P2PConnectionState>,
@@ -223,6 +232,10 @@ fn handle_vps_responses(
                         username: g.username,
                         elo: g.elo,
                         region: g.region,
+                        capacity: g.capacity,
+                        players_joined: g.players_joined,
+                        ttl_seconds: g.ttl_seconds,
+                        is_private: g.is_private,
                     })
                     .collect();
                 trace!("[P2P VPS] Updated cached games: {} found", vps_state.cached_games.len());
@@ -285,18 +298,20 @@ fn handle_vps_responses(
             }
 
             VpsResponse::JoinerDetected { game_id, joiner_node_id } => {
-                info!("[P2P VPS] Joiner {} connected to {}. Starting game as host (White).", joiner_node_id, game_id);
+                let stake = vps_state.hosting_stake_amount;
+                info!("[P2P VPS] Joiner {} connected to {} (stake={:.3} SOL). Starting as host (White).", joiner_node_id, game_id, stake);
 
-                // Stop polling for joiners
+                // Stop polling for joiners and clear stake so it isn't reused.
                 vps_state.hosting_game_id = None;
                 vps_state.hosting_node_id = None;
+                vps_state.hosting_stake_amount = 0.0;
 
-                // Start Braid-HTTP relay session
+                // Start Braid-HTTP relay session with the correct stake amount.
                 crate::multiplayer::network::braid_pvp::start_session(
                     &mut braid_pvp_session,
                     network_config.vps_base_url.clone(),
                     game_id.clone(),
-                    0.0,
+                    stake,
                     &network_state,
                 );
 
@@ -305,17 +320,42 @@ fn handle_vps_responses(
                     peer_node_id: joiner_node_id,
                 });
 
-                // Start game as host (White)
-                ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
-                *core_mode = crate::core::GameMode::BraidMultiplayer;
+                // Mark connection state as host/White now so the game knows sides.
                 p2p_conn.is_host = true;
                 p2p_conn.player_color = Some(crate::rendering::pieces::PieceColor::White);
-                p2p_conn.status = P2PConnectionStatus::InGame;
 
-                let gid = parse_game_id_u64(&game_id);
-                game_started.write(GameStartedEvent { game_id: gid });
-                next_game_state.set(GameState::InGame);
-                info!("[P2P VPS] Game started (host/White) via HTTP relay");
+                if stake > 0.0 {
+                    // Wagered: route host through Solana contract creation before InGame.
+                    #[cfg(feature = "solana")]
+                    {
+                        info!("[P2P VPS] Wagered game — routing host to Solana Lobby to create on-chain game.");
+                        menu_state.set(crate::core::MenuState::SolanaLobby);
+                        if let Some(ref mut lobby) = solana_lobby {
+                            lobby.game_id_input = game_id.clone();
+                            lobby.wager_sol = stake as f32;
+                            lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
+                        }
+                    }
+                    #[cfg(not(feature = "solana"))]
+                    {
+                        warn!("[P2P VPS] Wagered game requested but solana feature not enabled — starting as free game.");
+                        ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+                        *core_mode = crate::core::GameMode::BraidMultiplayer;
+                        p2p_conn.status = P2PConnectionStatus::InGame;
+                        let gid = parse_game_id_u64(&game_id);
+                        game_started.write(GameStartedEvent { game_id: gid });
+                        next_game_state.set(GameState::InGame);
+                    }
+                } else {
+                    // Free game — start immediately.
+                    ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+                    *core_mode = crate::core::GameMode::BraidMultiplayer;
+                    p2p_conn.status = P2PConnectionStatus::InGame;
+                    let gid = parse_game_id_u64(&game_id);
+                    game_started.write(GameStartedEvent { game_id: gid });
+                    next_game_state.set(GameState::InGame);
+                    info!("[P2P VPS] Free game started (host/White) via HTTP relay");
+                }
             }
 
             VpsResponse::Error(e) => {

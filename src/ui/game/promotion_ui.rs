@@ -49,40 +49,41 @@ pub fn promotion_ui_system(
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .frame(
-            egui::Frame::default()
-                .fill(UiColors::BG_MID)
-                .corner_radius(12.0)
-                .inner_margin(20.0)
-                .stroke(egui::Stroke::new(2.0, UiColors::BORDER)),
-        )
+        .frame(StyledPanel::popup())
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.label(
-                    egui::RichText::new("Choose Promotion Piece")
-                        .size(20.0)
-                        .color(UiColors::TEXT_PRIMARY)
-                        .strong(),
-                );
+                ui.label(TextStyle::popup_title("PROMOTE PAWN"));
                 ui.add_space(15.0);
 
                 ui.horizontal(|ui| {
                     // Piece options
-                    let pieces = [
-                        (PieceType::Queen, "", "Queen"),
-                        (PieceType::Rook, "", "Rook"),
-                        (PieceType::Bishop, "", "Bishop"),
-                        (PieceType::Knight, "", "Knight"),
-                    ];
+                    let is_white = pending_promotion.color == Some(crate::rendering::pieces::PieceColor::White);
+                    let pieces = if is_white {
+                        [
+                            (PieceType::Queen,  "\u{2655}", "Queen"),
+                            (PieceType::Rook,   "\u{2656}", "Rook"),
+                            (PieceType::Bishop, "\u{2657}", "Bishop"),
+                            (PieceType::Knight, "\u{2658}", "Knight"),
+                        ]
+                    } else {
+                        [
+                            (PieceType::Queen,  "\u{265B}", "Queen"),
+                            (PieceType::Rook,   "\u{265C}", "Rook"),
+                            (PieceType::Bishop, "\u{265D}", "Bishop"),
+                            (PieceType::Knight, "\u{265E}", "Knight"),
+                        ]
+                    };
 
-                    for (piece_type, symbol, _name) in pieces {
+                    for (piece_type, symbol, _) in pieces {
                         let button = egui::Button::new(
                             egui::RichText::new(symbol)
                                 .size(48.0)
                                 .color(UiColors::TEXT_PRIMARY),
                         )
                         .min_size(egui::vec2(70.0, 70.0))
-                        .fill(UiColors::BG_DARK);
+                        .fill(UiColors::BTN_POPUP_DARK)
+                        .stroke(egui::Stroke::NONE)
+                        .corner_radius(8.0);
 
                         if ui.add(button).clicked() {
                             promotion_messages.write(PromotionSelected {

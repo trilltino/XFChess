@@ -108,7 +108,7 @@ pub fn external_elo_routes() -> Router<AppState> {
 /// POST /api/external-elo/link/start
 /// Generates a nonce and stores a pending link. Player must put nonce in Lichess bio.
 async fn link_start(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Json(req): Json<LinkStartReq>,
 ) -> Result<Json<LinkStartResp>, (StatusCode, String)> {
     // Validate pubkey

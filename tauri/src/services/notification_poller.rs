@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// State tracking for deduplication — only notify once per event.
 #[derive(Default, Clone)]

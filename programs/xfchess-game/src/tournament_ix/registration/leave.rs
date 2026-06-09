@@ -53,6 +53,7 @@ pub struct LeaveTournament<'info> {
 
 pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
+    require!(tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
     let player_key = ctx.accounts.player.key();
 
     // Validate tournament state

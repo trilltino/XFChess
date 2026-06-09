@@ -6,7 +6,7 @@
 //! - Board theme
 //! - Game preferences
 
-use crate::core::{GameSettings, GameState, PreviousState};
+use crate::core::{GameSettings, GameState, GraphicsQuality, PreviousState};
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};

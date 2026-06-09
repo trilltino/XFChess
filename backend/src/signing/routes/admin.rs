@@ -10,7 +10,7 @@ use crate::db::repository::GameRepository;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use once_cell::sync::Lazy;
 use tracing::info;
@@ -170,6 +170,7 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/admin/treasury/refund", post(treasury_refund))
         // Tournament extras
         .route("/admin/tournament/{id}/escrow-balance", get(tournament_escrow_balance))
+        .route("/admin/tournament/{id}/fill-bots", post(fill_tournament_bots))
         // Tasks / infra
         .route("/admin/tasks/status", get(tasks_status))
         .route("/admin/db/stats", get(db_stats))
@@ -478,7 +479,6 @@ async fn tournament_escrow_balance(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    use std::str::FromStr;
     let program_id = state.program_id;
     let seeds = &[b"escrow", &id.to_le_bytes()[..]];
     let (escrow_pda, _bump) = solana_sdk::pubkey::Pubkey::find_program_address(seeds, &program_id);
@@ -599,5 +599,67 @@ async fn assign_dispute(
     }
     add_audit("assign_dispute", &format!("game_{}", game_id), &req.reviewer);
     Ok(Json(json!({ "ok": true, "game_id": game_id, "reviewer": req.reviewer })))
+}
+
+#[derive(Deserialize)]
+struct FillBotsReq {
+    /// How many bot slots to fill (default: fills to max_players)
+    count: Option<u16>,
+    /// Base ELO assigned to bots (default: 1200)
+    elo: Option<u32>,
+}
+
+/// POST /admin/tournament/:id/fill-bots — fills remaining slots with fake wallets and starts the
+/// bracket. Dev/test only; lets you simulate a full tournament without real players.
+async fn fill_tournament_bots(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<FillBotsReq>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let store = &state.tournament_store;
+    let tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    let max = tournament.max_players as usize;
+    let current = tournament.players.len();
+    let bot_elo = req.elo.unwrap_or(1200);
+    let fill_count = req.count
+        .map(|c| (c as usize).min(max.saturating_sub(current)))
+        .unwrap_or(max.saturating_sub(current));
+
+    if fill_count == 0 {
+        return Ok(Json(json!({ "ok": true, "added": 0, "message": "tournament already full" })));
+    }
+
+    let bots: Vec<String> = (0..fill_count)
+        .map(|i| format!("Bot{:04}_{:08x}", i, id))
+        .collect();
+
+    store.update(id, |t| {
+        for bot in &bots {
+            t.players.push(bot.clone());
+            t.player_elos.push(bot_elo);
+            t.prize_pool += t.entry_fee_lamports.saturating_sub(t.platform_fee_lamports);
+        }
+    }).await;
+
+    // Generate bracket and start
+    store.generate_bracket(id).await;
+    match store.start_tournament(id).await {
+        Ok(()) => {
+            add_audit("fill_bots", &format!("tournament_{}", id), &format!("added {} bots", fill_count));
+            info!("[admin] Filled tournament {} with {} bots, started bracket", id, fill_count);
+            Ok(Json(json!({
+                "ok": true,
+                "tournament_id": id,
+                "added": fill_count,
+                "total_players": current + fill_count,
+                "bots": bots,
+            })))
+        }
+        Err(e) => {
+            tracing::error!("[admin] fill-bots: start_tournament failed: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 

@@ -15,7 +15,7 @@
 //!
 //! Based on patterns from `reference/bevy/examples/3d/lighting.rs`
 
-use crate::core::{DespawnOnExit, GameSettings, GameState};
+use crate::core::{DespawnOnExit, DynamicLightingSettings, GameSettings, GameState};
 use bevy::prelude::*;
 
 /// Plugin for dynamic orbital lighting
@@ -49,12 +49,13 @@ fn spawn_orbital_lights(mut commands: Commands, settings: Res<GameSettings>) {
         return;
     }
 
-    let light_count = settings.dynamic_lighting.light_count.clamp(2, 6) as usize;
+    let quality_cap = DynamicLightingSettings::quality_cap(settings.graphics_quality);
+    let light_count = settings.dynamic_lighting.light_count.min(quality_cap).clamp(1, 6) as usize;
     let radius = settings.dynamic_lighting.orbital_radius;
     let height = settings.dynamic_lighting.orbital_height;
     let shadows_enabled = settings.dynamic_lighting.shadows_enabled;
 
-    info!("[DYNAMIC_LIGHTING] Spawning {} orbital lights", light_count);
+    info!("[DYNAMIC_LIGHTING] Spawning {} orbital lights (quality cap: {})", light_count, quality_cap);
 
     for i in 0..light_count {
         // Calculate initial angular position
@@ -137,7 +138,8 @@ fn sync_light_count(
         return;
     }
 
-    let target_count = settings.dynamic_lighting.light_count.clamp(2, 6) as usize;
+    let quality_cap = DynamicLightingSettings::quality_cap(settings.graphics_quality);
+    let target_count = settings.dynamic_lighting.light_count.min(quality_cap).clamp(1, 6) as usize;
     let current_count = query.iter().count();
 
     if current_count == target_count {

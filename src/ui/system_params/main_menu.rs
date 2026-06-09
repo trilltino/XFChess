@@ -1,4 +1,6 @@
 use crate::assets::{GameAssets, LoadingProgress};
+use crate::game::resources::MenuSounds;
+use crate::states::main_menu::new_menu::MenuExitConfirm;
 use crate::core::{GameMode as CoreGameMode, GameSettings, GameState, PreviousState};
 use crate::game::ai::ChessAIResource;
 use crate::game::view_mode::ViewMode;
@@ -18,6 +20,7 @@ use crate::multiplayer::solana::lobby::SolanaLobbyState;
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
 use crate::multiplayer::{BraidNetworkState, BraidP2PConfig};
+use crate::multiplayer::social::FriendsState;
 use crate::states::main_menu::{CompetitiveMenuState, PlayerColorChoice};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -96,9 +99,15 @@ pub struct MainMenuUIContext<'w, 's> {
     pub brand_logo: ResMut<'w, crate::states::main_menu::BrandLogoState>,
     pub news_banner: ResMut<'w, crate::states::main_menu::NewsBannerState>,
     pub p2p_host: ResMut<'w, crate::states::main_menu::P2PHostState>,
+    pub friends: ResMut<'w, FriendsState>,
+    pub lobby_chat: ResMut<'w, crate::multiplayer::social::LobbyChatSession>,
+    pub backend_region: Res<'w, crate::multiplayer::social::BackendRegion>,
     pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
     pub active_time_control: ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
     pub menu_style: ResMut<'w, crate::states::main_menu::MenuStyle>,
     pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
     pub solana_logos: ResMut<'w, crate::states::main_menu::SolanaLogoState>,
+    pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,
+    pub menu_sounds: Option<Res<'w, MenuSounds>>,
+    pub exit_confirm: ResMut<'w, MenuExitConfirm>,
 }

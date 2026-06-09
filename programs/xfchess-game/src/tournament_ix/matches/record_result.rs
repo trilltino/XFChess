@@ -36,6 +36,8 @@ pub fn handler(
     loser: Pubkey,
 ) -> Result<()> {
     let tm = &mut ctx.accounts.tournament_match;
+    require!(ctx.accounts.tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
+    require!(tm.match_index == match_index, GameErrorCode::InvalidMatchStatus);
 
     require!(
         tm.status == MatchStatus::Active || tm.status == MatchStatus::Pending,
@@ -102,10 +104,12 @@ pub struct AdvanceWinner<'info> {
 
 pub fn handler_advance_winner(
     ctx: Context<AdvanceWinner>,
-    _tournament_id: u64,
+    tournament_id: u64,
     source_match_index: u16,
 ) -> Result<()> {
     let source = &ctx.accounts.source_match;
+    require!(ctx.accounts.tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
+    require!(source.match_index == source_match_index, GameErrorCode::InvalidMatchStatus);
 
     require!(
         source.status == MatchStatus::Completed,

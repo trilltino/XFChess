@@ -4,8 +4,11 @@ use super::profile_check::{check_profile_on_connect, handle_profile_check_tasks}
 use super::state::{SolanaIntegrationState, BalanceRefreshTimer};
 use super::systems::*;
 use crate::ui::profile_creation::{
-    despawn_profile_creation_ui, handle_profile_submission, profile_creation_ui_system, 
+    despawn_profile_creation_ui, handle_profile_submission, profile_creation_ui_system,
     spawn_profile_creation_ui, validate_username_system, ProfileCreationState, ProfileSubmissionEvent
+};
+use crate::ui::account::profile_view::{
+    ProfileViewState, fetch_profile_history, poll_profile_history, profile_view_ui,
 };
 use crate::core::states::MenuState;
 
@@ -17,6 +20,7 @@ impl Plugin for SolanaIntegrationPlugin {
         app.init_resource::<SolanaIntegrationState>();
         app.init_resource::<BalanceRefreshTimer>();
         app.init_resource::<ProfileCreationState>();
+        app.init_resource::<ProfileViewState>();
         app.add_message::<ProfileSubmissionEvent>();
         app.add_systems(Update, initialize_solana_integration);
         app.add_systems(Update, update_wallet_balance);
@@ -30,6 +34,7 @@ impl Plugin for SolanaIntegrationPlugin {
             OnEnter(crate::core::states::MenuState::Main),
             verify_global_session_on_menu_enter,
         );
+        app.add_systems(Update, poll_global_session_result);
         app.add_systems(Update, check_profile_on_connect);
         app.add_systems(Update, handle_profile_check_tasks);
         app.add_systems(Update, fetch_user_status_async);
@@ -41,5 +46,8 @@ impl Plugin for SolanaIntegrationPlugin {
         app.add_systems(Update, (validate_username_system).run_if(in_state(MenuState::ProfileCreation)));
         app.add_systems(Update, handle_profile_submission);
         app.add_systems(OnExit(MenuState::ProfileCreation), despawn_profile_creation_ui);
+
+        // Profile view overlay
+        app.add_systems(Update, (fetch_profile_history, poll_profile_history, profile_view_ui));
     }
 }

@@ -21,7 +21,8 @@
 use bevy::prelude::*;
 
 /// Resource to store currently selected piece
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug, Default, Reflect)]
+#[reflect(Resource)]
 pub struct Selection {
     pub selected_entity: Option<Entity>,
     pub selected_position: Option<(u8, u8)>,

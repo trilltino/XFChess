@@ -30,20 +30,25 @@ export async function fetchPlayerProfile(program: Program, walletPubkey: PublicK
   }
 }
 
-export async function createPlayerProfile(program: Program, walletPubkey: PublicKey, username: string, country: string) {
+export async function createPlayerProfile(
+  program: Program,
+  walletPubkey: PublicKey,
+  username: string,
+  country: string,
+  dateOfBirth: number, // Unix timestamp in seconds — must be ≥ 18 years before now
+) {
   const [profilePda] = PublicKey.findProgramAddressSync(
     [Buffer.from("profile"), walletPubkey.toBuffer()],
     program.programId
   );
-  
+
   const [usernameRecord] = PublicKey.findProgramAddressSync(
     [Buffer.from("username"), Buffer.from(username)],
     program.programId
   );
 
-
   return await (program.methods as any)
-    .initProfile(username, country)
+    .initProfile(username, country, dateOfBirth)
     .accounts({
       playerProfile: profilePda,
       usernameRecord: usernameRecord,

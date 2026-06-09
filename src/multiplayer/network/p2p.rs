@@ -23,6 +23,8 @@ pub struct P2PConnectionState {
     pub player_color: Option<PieceColor>,
     /// When we entered Connecting state (for timeout)
     pub connecting_since: Option<std::time::Instant>,
+    /// Latest measured round-trip time to the peer (milliseconds).
+    pub last_rtt_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

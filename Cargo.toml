@@ -41,13 +41,16 @@ path = "src/bin/debugger.rs"
 [workspace]
 resolver = "2"
 members = [
-    "crates/*",
+    "crates/networking/*",
+    "crates/solana/*",
+    "crates/engine/*",
+    "crates/shared/*",
     "programs/*",
     "tauri",
 ]
 exclude = [
     "references/ephemeral-rollups-sdk/rust",
-    "crates/solana-contract-fuzzer",
+    "crates/solana/solana-contract-fuzzer",
 ]
 
 [profile.dev]
@@ -105,19 +108,19 @@ bevy_egui = "=0.39.1"
 
 webbrowser = "=1.0"
 xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
-braid-core = { path = "crates/braid-core" }
-braid-http = { path = "crates/braid-http" }
-braid-iroh = { path = "crates/braid-iroh" }
-braid_uri = { path = "crates/braid_uri" }
-iroh-gossip = { path = "crates/iroh-gossip" }
-shared = { path = "crates/shared" }
-solana-chess-client = { path = "crates/solana-chess-client" }
-nimzovich_engine = { path = "crates/nimzovich_engine" }
-xfchess-anticheat = { path = "crates/xfchess-anticheat" }
+braid-core = { path = "crates/networking/braid-core" }
+braid-http = { path = "crates/networking/braid-http" }
+braid-iroh = { path = "crates/networking/braid-iroh" }
+braid_uri = { path = "crates/networking/braid_uri" }
+iroh-gossip = { path = "crates/networking/iroh-gossip" }
+shared = { path = "crates/shared/shared" }
+solana-chess-client = { path = "crates/solana/solana-chess-client" }
+nimzovich_engine = { path = "crates/engine/nimzovich_engine" }
+xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
 braid_stockfish_ai = { path = "crates/braid_stockfish_ai" }
-chess-logic-on-chain = { path = "crates/chess-logic-on-chain" }
+chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
 magic-resolver = { version = "0.2.0" }
-bevy = { version = "=0.18.1", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf"] }
+bevy = { version = "=0.18.1", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg"] }
 bevy_sprite = "=0.18.1"
 bevy_text = "=0.18.1"
 bevy_ui = "=0.18.1"
@@ -154,6 +157,7 @@ web-time = "=1.1"
 
 [features]
 default = []
+profile = ["bevy/trace_tracy"]
 solana = [
     "anchor-lang",
     "solana-sdk",
@@ -218,7 +222,7 @@ magic-resolver = { workspace = true, optional = true }
 ed25519-dalek = "2"
 ephemeral-rollups-sdk = { version = "0.8.5", features = ["anchor"], optional = true }
 xfchess-game = { workspace = true, optional = true }
-backend-types = { path = "crates/backend-types" }
+backend-types = { path = "crates/shared/backend-types" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "allow" }

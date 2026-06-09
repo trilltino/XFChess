@@ -20,12 +20,27 @@ struct P2PAnnounceReq<'a> {
     username: Option<String>,
     elo: Option<u16>,
     region: Option<String>,
+    password: Option<String>,
 }
 
 #[derive(Serialize)]
 struct P2PJoinReq<'a> {
     game_id: String,
     joiner_node_id: &'a str,
+    password: Option<String>,
+}
+
+/// Optional filter for listing games
+#[derive(Default, Serialize)]
+pub struct P2PListFilter {
+    pub time_min: Option<u32>,
+    pub time_max: Option<u32>,
+    pub stake_min: Option<f64>,
+    pub stake_max: Option<f64>,
+    pub elo_min: Option<u16>,
+    pub elo_max: Option<u16>,
+    /// "elo_asc"|"elo_desc"|"stake_asc"|"stake_desc"|"time_asc"|"newest"
+    pub sort: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -53,7 +68,18 @@ pub struct P2PGameListing {
     pub username: Option<String>,
     pub elo: Option<u16>,
     pub region: Option<String>,
+    #[serde(default = "default_capacity")]
+    pub capacity: u8,
+    #[serde(default = "default_one")]
+    pub players_joined: u8,
+    #[serde(default)]
+    pub ttl_seconds: i64,
+    #[serde(default)]
+    pub is_private: bool,
 }
+
+fn default_capacity() -> u8 { 2 }
+fn default_one() -> u8 { 1 }
 
 #[derive(Deserialize)]
 struct P2PJoinResp {
@@ -80,6 +106,41 @@ pub fn p2p_announce_game(
     elo: Option<u16>,
     region: Option<String>,
 ) -> Result<(), String> {
+    p2p_announce_game_private(game_id, host_node_id, display_name, stake_amount,
+        game_type, base_time_seconds, increment_seconds, username, elo, region, None)
+}
+
+/// Announce a password-protected P2P game.
+pub fn p2p_announce_game_with_password(
+    game_id: String,
+    host_node_id: &str,
+    display_name: &str,
+    stake_amount: f64,
+    game_type: &str,
+    base_time_seconds: u32,
+    increment_seconds: u16,
+    username: Option<String>,
+    elo: Option<u16>,
+    region: Option<String>,
+    password: String,
+) -> Result<(), String> {
+    p2p_announce_game_private(game_id, host_node_id, display_name, stake_amount,
+        game_type, base_time_seconds, increment_seconds, username, elo, region, Some(password))
+}
+
+fn p2p_announce_game_private(
+    game_id: String,
+    host_node_id: &str,
+    display_name: &str,
+    stake_amount: f64,
+    game_type: &str,
+    base_time_seconds: u32,
+    increment_seconds: u16,
+    username: Option<String>,
+    elo: Option<u16>,
+    region: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
     let base = vps_base();
     tracing::info!("[P2P] announcing game to {}", base);
     let resp = client()?
@@ -95,6 +156,7 @@ pub fn p2p_announce_game(
             username,
             elo,
             region,
+            password,
         })
         .send()
         .map_err(|e| format!("vps p2p_announce: {e}"))?;
@@ -108,12 +170,26 @@ pub fn p2p_announce_game(
     Ok(())
 }
 
-/// List available P2P games from VPS relay.
+/// List available P2P games from VPS relay (no filter).
 pub fn p2p_list_games() -> Result<Vec<P2PGameListing>, String> {
+    p2p_list_games_filtered(&P2PListFilter::default())
+}
+
+/// List available P2P games with optional filter / sort.
+pub fn p2p_list_games_filtered(filter: &P2PListFilter) -> Result<Vec<P2PGameListing>, String> {
     let base = vps_base();
     tracing::trace!("[P2P] polling games from {}", base);
+    let mut params: Vec<String> = Vec::new();
+    if let Some(v) = filter.time_min { params.push(format!("time_min={}", v)); }
+    if let Some(v) = filter.time_max { params.push(format!("time_max={}", v)); }
+    if let Some(v) = filter.stake_min { params.push(format!("stake_min={}", v)); }
+    if let Some(v) = filter.stake_max { params.push(format!("stake_max={}", v)); }
+    if let Some(v) = filter.elo_min { params.push(format!("elo_min={}", v)); }
+    if let Some(v) = filter.elo_max { params.push(format!("elo_max={}", v)); }
+    if let Some(ref s) = filter.sort { params.push(format!("sort={}", s)); }
+    let qs = if params.is_empty() { String::new() } else { format!("?{}", params.join("&")) };
     let resp = client()?
-        .get(format!("{}/p2p/games", base))
+        .get(format!("{}/p2p/games{}", base, qs))
         .send()
         .map_err(|e| format!("vps p2p_list_games: {e}"))?;
 
@@ -127,11 +203,17 @@ pub fn p2p_list_games() -> Result<Vec<P2PGameListing>, String> {
 
 /// Join a P2P game via VPS relay. Returns the host node ID on success.
 pub fn p2p_join_game(game_id: String, joiner_node_id: &str) -> Result<Option<String>, String> {
+    p2p_join_game_with_password(game_id, joiner_node_id, None)
+}
+
+/// Join a password-protected P2P game.
+pub fn p2p_join_game_with_password(game_id: String, joiner_node_id: &str, password: Option<String>) -> Result<Option<String>, String> {
     let resp = client()?
         .post(format!("{}/p2p/join", vps_base()))
         .json(&P2PJoinReq {
             game_id,
             joiner_node_id,
+            password,
         })
         .send()
         .map_err(|e| format!("vps p2p_join: {e}"))?;

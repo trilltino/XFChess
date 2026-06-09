@@ -12,11 +12,13 @@ import MatchManagement from "./components/MatchManagement";
 import KycStatus from "./components/KycStatus";
 import Dashboard from "./components/Dashboard";
 import DeploymentManager from "./components/DeploymentManager";
- 
-type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc";
+import Treasury from "./components/Treasury";
+import Settings from "./components/Settings";
+
+type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc" | "treasury" | "settings";
 
 function AppContent() {
-  const { authState, loading } = useAuth();
+  const { authState, loading, login } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>("tournaments");
   const [selectedTournamentId, setSelectedTournamentId] = useState<number | null>(null);
 
@@ -36,8 +38,8 @@ function AppContent() {
   }
 
   if (!authState.authenticated) {
-    return <TokenAuth onAuth={() => {
-      // Auth is handled by the AuthProvider
+    return <TokenAuth onAuth={(state) => {
+      login(state.token!, state.backend_url);
     }} />;
   }
 
@@ -93,6 +95,10 @@ function AppContent() {
         return <MatchManagement />;
       case "kyc":
         return <KycStatus />;
+      case "treasury":
+        return <Treasury />;
+      case "settings":
+        return <Settings />;
       default:
         return null;
     }

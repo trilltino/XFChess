@@ -12,7 +12,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, put},
+    routing::get,
     Json, Router,
 };
 use bytes::Bytes;

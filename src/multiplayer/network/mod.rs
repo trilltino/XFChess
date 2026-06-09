@@ -13,6 +13,7 @@
 
 pub mod braid;
 pub mod braid_pvp;
+pub mod identity;
 pub mod p2p;
 pub mod p2p_vps;
 pub mod protocol;

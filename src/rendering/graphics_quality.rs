@@ -106,8 +106,6 @@ pub fn update_graphics_quality_camera_system(
 }
 
 /// System that applies shadow settings to lights based on graphics quality
-///
-/// Updates all lights' shadows_enabled property based on graphics quality preset.
 pub fn apply_graphics_quality_lights_system(
     settings: Res<GameSettings>,
     mut directional_lights: Query<&mut DirectionalLight>,
@@ -115,27 +113,28 @@ pub fn apply_graphics_quality_lights_system(
     mut spot_lights: Query<&mut SpotLight>,
     mut last_quality: Local<Option<crate::core::GraphicsQuality>>,
 ) {
-    // Check if quality changed
     let current_quality = settings.graphics_quality;
     if let Some(prev_quality) = *last_quality {
         if prev_quality == current_quality {
-            return; // No change
+            return;
         }
     }
     *last_quality = Some(current_quality);
 
     let shadows_enabled = settings.graphics_quality.shadow_enabled();
+    let shadow_size = settings.graphics_quality.shadow_map_size();
 
-    // Update all light types
     for mut light in directional_lights.iter_mut() {
         light.shadows_enabled = shadows_enabled;
     }
     for mut light in point_lights.iter_mut() {
         light.shadows_enabled = shadows_enabled;
+        // Bias scales with map resolution: smaller map → more bias to hide aliasing
+        light.shadow_depth_bias = 4096.0 / shadow_size as f32 * 0.05;
     }
     for mut light in spot_lights.iter_mut() {
         light.shadows_enabled = shadows_enabled;
     }
 
-    info!("[GRAPHICS] Updated light shadows: {}", shadows_enabled);
+    info!("[GRAPHICS] Shadow quality: {:?} (map {}px, enabled: {})", current_quality, shadow_size, shadows_enabled);
 }

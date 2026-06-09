@@ -88,7 +88,6 @@ pub async fn get_ratings_history(
             Some(_) => "loss",
             None if g.status == "draw" => "draw",
             None => "unknown",
-            _ => "unknown",
         };
         let opponent = if g.player_white.as_deref() == Some(wallet.as_str()) {
             g.player_black.clone()

@@ -5,8 +5,7 @@
 use clap::Parser;
 use xfchess::{GameConfig, PlayerColor, build_app};
 
-#[tokio::main]
-async fn main() {
+fn main() {
     // Initialize telemetry / crash reporting
     xfchess::core::crash::setup_enhanced_panic_hook();
 

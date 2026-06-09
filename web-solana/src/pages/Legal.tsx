@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+﻿import { motion } from 'framer-motion';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -18,7 +18,7 @@ const LegalPage = () => {
               </div>
             </div>
             <div className="legal-disclaimer">
-              <AlertTriangle size={20} color="#f59e0b" />
+              <AlertTriangle size={20} color="#888888" />
               <div>
                 <p><strong>NOTE:</strong> XFChess is a pre-launch platform currently undergoing regulatory and legal review. The positions described on this page represent our current good-faith interpretation of applicable law and our intended compliance roadmap. We are in the process of engaging qualified legal, tax, and regulatory advisors. This page will be updated as those processes conclude.</p>
               </div>
@@ -58,3 +58,4 @@ const LegalPage = () => {
 };
 
 export default LegalPage;
+

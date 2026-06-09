@@ -46,6 +46,28 @@ pub struct PiecesSpawned {
     pub spawned: bool,
 }
 
+/// Ivory/cream piece with low roughness — specular highlights define the silhouette.
+pub fn white_piece_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::srgb(0.92, 0.89, 0.82), // warm ivory, not pure white
+        perceptual_roughness: 0.25,
+        metallic: 0.0,
+        reflectance: 0.55,
+        ..default()
+    }
+}
+
+/// Dark charcoal piece — not pure black so light still picks out the edges.
+pub fn black_piece_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::srgb(0.10, 0.08, 0.07), // very dark warm brown-black
+        perceptual_roughness: 0.20,
+        metallic: 0.0,
+        reflectance: 0.50,
+        ..default()
+    }
+}
+
 /// Component marking a 3D visual element of a piece
 #[derive(Component)]
 pub struct Piece3DVisual;
@@ -112,11 +134,7 @@ pub fn create_pieces(
 
     // Spawn white pieces (rank 0 in chess coordinates = rank 1 on board)
     for (file, &piece_type) in BACK_ROW.iter().enumerate() {
-        // Create unique material for each piece to prevent color bleeding during capture
-        let piece_material = materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            ..default()
-        });
+        let piece_material = materials.add(white_piece_material());
         spawn_piece_at(
             &mut commands,
             &piece_meshes,
@@ -131,11 +149,7 @@ pub fn create_pieces(
 
     // Spawn white pawns (rank 1 in chess coordinates = rank 2 on board)
     for file in 0..8 {
-        // Create unique material for each piece to prevent color bleeding during capture
-        let piece_material = materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            ..default()
-        });
+        let piece_material = materials.add(white_piece_material());
         spawn_piece_at(
             &mut commands,
             &piece_meshes,
@@ -150,11 +164,7 @@ pub fn create_pieces(
 
     // Spawn black pieces (rank 7 in chess coordinates = rank 8 on board)
     for (file, &piece_type) in BACK_ROW.iter().enumerate() {
-        // Create unique material for each piece to prevent color bleeding during capture
-        let piece_material = materials.add(StandardMaterial {
-            base_color: Color::BLACK,
-            ..default()
-        });
+        let piece_material = materials.add(black_piece_material());
         spawn_piece_at(
             &mut commands,
             &piece_meshes,
@@ -169,11 +179,7 @@ pub fn create_pieces(
 
     // Spawn black pawns (rank 6 in chess coordinates = rank 7 on board)
     for file in 0..8 {
-        // Create unique material for each piece to prevent color bleeding during capture
-        let piece_material = materials.add(StandardMaterial {
-            base_color: Color::BLACK,
-            ..default()
-        });
+        let piece_material = materials.add(black_piece_material());
         spawn_piece_at(
             &mut commands,
             &piece_meshes,
@@ -274,6 +280,43 @@ impl PieceMeshes {
     }
 }
 
+fn piece_set_folder(piece_set: u8) -> &'static str {
+    match piece_set {
+        1 => "alpha",
+        2 => "merida",
+        _ => "cburnett",
+    }
+}
+
+fn load_sprite_handles_for_set(asset_server: &AssetServer, piece_set: u8) -> PieceSpriteHandles {
+    let folder = piece_set_folder(piece_set);
+    PieceSpriteHandles {
+        white_bishop: asset_server.load(format!("pieces/2d/{}/wb.png", folder)),
+        white_king:   asset_server.load(format!("pieces/2d/{}/wk.png", folder)),
+        white_knight: asset_server.load(format!("pieces/2d/{}/wn.png", folder)),
+        white_pawn:   asset_server.load(format!("pieces/2d/{}/wp.png", folder)),
+        white_queen:  asset_server.load(format!("pieces/2d/{}/wq.png", folder)),
+        white_rook:   asset_server.load(format!("pieces/2d/{}/wr.png", folder)),
+        black_bishop: asset_server.load(format!("pieces/2d/{}/bb.png", folder)),
+        black_king:   asset_server.load(format!("pieces/2d/{}/bk.png", folder)),
+        black_knight: asset_server.load(format!("pieces/2d/{}/bn.png", folder)),
+        black_pawn:   asset_server.load(format!("pieces/2d/{}/bp.png", folder)),
+        black_queen:  asset_server.load(format!("pieces/2d/{}/bq.png", folder)),
+        black_rook:   asset_server.load(format!("pieces/2d/{}/br.png", folder)),
+    }
+}
+
+/// Re-loads piece sprites whenever `GameSettings.piece_set` changes.
+pub fn reload_piece_sprites(
+    settings: Res<crate::core::GameSettings>,
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+) {
+    if !settings.is_changed() { return; }
+    let sprites = load_sprite_handles_for_set(&asset_server, settings.piece_set);
+    commands.insert_resource(sprites);
+}
+
 fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
     info!("[PIECES] Loading piece meshes from wooden_chess_board.glb");
     
@@ -298,20 +341,7 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(meshes);
 
     info!("[PIECES] Loading 2D piece sprites from assets/pieces/2d/");
-    let sprites = PieceSpriteHandles {
-        white_bishop: asset_server.load("pieces/2d/wb.png"),
-        white_king:   asset_server.load("pieces/2d/wk.png"),
-        white_knight: asset_server.load("pieces/2d/wn.png"),
-        white_pawn:   asset_server.load("pieces/2d/wp.png"),
-        white_queen:  asset_server.load("pieces/2d/wq.png"),
-        white_rook:   asset_server.load("pieces/2d/wr.png"),
-        black_bishop: asset_server.load("pieces/2d/bb.png"),
-        black_king:   asset_server.load("pieces/2d/bk.png"),
-        black_knight: asset_server.load("pieces/2d/bn.png"),
-        black_pawn:   asset_server.load("pieces/2d/bp.png"),
-        black_queen:  asset_server.load("pieces/2d/bq.png"),
-        black_rook:   asset_server.load("pieces/2d/br.png"),
-    };
+    let sprites = load_sprite_handles_for_set(&asset_server, 0);
     commands.insert_resource(sprites);
 
     info!("[PIECES] Mesh and Sprite handles created - waiting for assets to load");
@@ -466,9 +496,7 @@ macro_rules! spawn_piece_visual {
             MeshMaterial3d($material),
             piece_mesh_transform($offset),
             Piece3DVisual,
-            // Pickable required for child meshes to generate pointer events
-            // MeshPicking enables the actual mesh raycasting in Bevy 0.18
-            bevy::picking::Pickable::default(),
+            bevy::picking::Pickable::default(), // actual mesh IS the 3D hit target
         ));
     };
 }
@@ -728,41 +756,101 @@ pub fn spawn_pawn(
 /// - Row 4: Queens
 ///
 
+/// Pre-allocated assets for the 2D picking proxy slab (only needed in 2D top-down mode;
+/// 3D mode picks directly on the actual GLB mesh geometry).
+#[derive(Resource)]
+pub struct PiecePickingAssets {
+    pub mesh_2d: Handle<Mesh>,
+    pub matl: Handle<StandardMaterial>,
+}
+
+/// Marker for the 2D picking proxy (flat slab, active only in 2D mode).
+/// In 3D mode the actual Piece3DVisual mesh is used for picking instead.
+#[derive(Component)]
+pub struct PiecePickingProxy2D;
+
+fn init_piece_picking_assets(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+) {
+    // Flat slab covers the full cell, sits at Y=0.06 (just above the board surface at Y=0.05).
+    // In top-down view the slab's top face matches the 2D sprite footprint exactly.
+    let mesh_2d = meshes.add(Cuboid::new(0.98, 0.02, 0.98));
+    let matl = mats.add(StandardMaterial {
+        base_color: Color::srgba(0.0, 0.0, 0.0, 0.0),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    commands.insert_resource(PiecePickingAssets { mesh_2d, matl });
+}
+
+/// Observer: fires whenever a Piece component is added to an entity.
+/// In 2D mode, attaches a flat proxy slab for picking (sprites aren't mesh-pickable).
+/// In 3D mode, picking goes through the Piece3DVisual mesh directly.
+fn on_piece_added(
+    trigger: On<bevy::ecs::lifecycle::Add, Piece>,
+    mut commands: Commands,
+    assets: Option<Res<PiecePickingAssets>>,
+) {
+    let Some(assets) = assets else { return };
+    commands.entity(trigger.event_target()).with_children(|parent| {
+        parent.spawn((
+            Mesh3d(assets.mesh_2d.clone()),
+            MeshMaterial3d(assets.matl.clone()),
+            Transform::from_xyz(0.0, 0.06, 0.0),
+            PiecePickingProxy2D,
+            bevy::picking::Pickable::IGNORE, // activated by view_mode_rendering_toggle_system
+            Name::new("Piece Picking Proxy 2D"),
+        ));
+    });
+}
+
 pub struct PiecePlugin;
 impl Plugin for PiecePlugin {
     fn build(&self, app: &mut App) {
         use crate::core::GameState;
         app.init_resource::<PiecesSpawned>();
-        app.add_systems(Startup, load_piece_meshes);
-        // Run create_pieces continuously during InGame so it can wait for assets
+        app.add_systems(Startup, (load_piece_meshes, init_piece_picking_assets));
         app.add_systems(Update, create_pieces.run_if(in_state(GameState::InGame)));
-        // Reset spawn flag when leaving InGame so pieces can be respawned next game
         app.add_systems(OnExit(GameState::InGame), reset_pieces_spawned);
-        
-        // Add 2D/3D visibility toggle system
-        app.add_systems(Update, view_mode_rendering_toggle_system.run_if(in_state(GameState::InGame)));
+        app.add_systems(Update, view_mode_rendering_toggle_system.run_if(
+            in_state(GameState::InGame).and(
+                resource_changed::<crate::game::view_mode::ViewMode>
+                    .or(resource_changed::<PiecesSpawned>)
+            )
+        ));
+        app.add_observer(on_piece_added);
     }
 }
 
 pub fn view_mode_rendering_toggle_system(
     view_mode: Res<crate::game::view_mode::ViewMode>,
-    mut piece_3d_query: Query<&mut Visibility, (With<Piece3DVisual>, Without<Piece2DVisual>)>,
+    mut piece_3d_query: Query<
+        (&mut Visibility, &mut bevy::picking::Pickable),
+        (With<Piece3DVisual>, Without<Piece2DVisual>),
+    >,
     mut piece_2d_query: Query<&mut Visibility, (With<Piece2DVisual>, Without<Piece3DVisual>)>,
+    mut proxy_2d_query: Query<&mut bevy::picking::Pickable, (With<PiecePickingProxy2D>, Without<Piece3DVisual>)>,
 ) {
     let mode = *view_mode;
-    
     let (show_3d, show_2d) = match mode {
         crate::game::view_mode::ViewMode::Standard3D => (true, false),
         crate::game::view_mode::ViewMode::Standard2D => (false, true),
-        crate::game::view_mode::ViewMode::TempleOS => (true, false), // TempleOS still uses standard 3D pieces
+        crate::game::view_mode::ViewMode::TempleOS => (true, false),
     };
 
-    for mut vis in piece_3d_query.iter_mut() {
+    for (mut vis, mut pick) in piece_3d_query.iter_mut() {
         *vis = if show_3d { Visibility::Visible } else { Visibility::Hidden };
+        // In 2D mode disable 3D mesh picking so only the flat 2D proxy receives clicks.
+        *pick = if show_3d { bevy::picking::Pickable::default() } else { bevy::picking::Pickable::IGNORE };
     }
-    
     for mut vis in piece_2d_query.iter_mut() {
         *vis = if show_2d { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut pick in proxy_2d_query.iter_mut() {
+        *pick = if show_2d { bevy::picking::Pickable::default() } else { bevy::picking::Pickable::IGNORE };
     }
 }
 

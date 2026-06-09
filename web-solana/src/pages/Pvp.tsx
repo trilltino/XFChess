@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import chessWageringUI from '../assets/chess-wagering-ui.png';
@@ -20,8 +20,8 @@ export function Pvp() {
                     transform: 'translateY(-50%)',
                     width: '280px',
                     padding: '20px',
-                    background: 'rgba(8, 26, 20, 0.95)',
-                    border: '1px solid rgba(173, 92, 47, 0.3)',
+                    background: 'rgba(0, 0, 0, 0.95)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
                     borderRadius: '12px',
                     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
                     backdropFilter: 'blur(16px)',
@@ -46,8 +46,8 @@ export function Pvp() {
                         <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> PvP wagering requires a Solana wallet and KYC verification.
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <Link to="/kyc" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
-                        <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ad5c2f', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
+                        <Link to="/kyc" style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
+                        <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
                     </div>
                 </div>
             )}
@@ -194,25 +194,25 @@ export function Pvp() {
                     <div style={{ background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', padding: '32px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '20px' }}>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Instant Settlement:</strong> Winnings transfer directly to your Solana wallet immediately upon game completion.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>No Withdrawal Requests:</strong> Your funds are always in your wallet. We never hold custody of player funds.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Transparent Transactions:</strong> All wager transactions are recorded on-chain and verifiable by anyone.
                                 </p>
                             </li>
                             <li style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                <span style={{ color: '#14F195', fontSize: '1.2rem' }}></span>
+                                <span style={{ color: '#ffffff', fontSize: '1.2rem' }}></span>
                                 <p style={{ color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
                                     <strong style={{ color: '#fff' }}>Zero Fees on Winnings:</strong> You receive 100% of the escrowed amount. Platform fees are paid separately by players.
                                 </p>
@@ -224,4 +224,6 @@ export function Pvp() {
         </main>
     );
 }
+
+
 

@@ -61,23 +61,34 @@ pub fn update_game_phase(
         return;
     }
 
+    // Guard: pieces are spawned via deferred commands, so on the very first
+    // Update frame after entering InGame the query may be empty even though
+    // PiecesSpawned.spawned is already true.  Evaluating an empty board would
+    // produce a false stalemate and immediately end the game.
+    if pieces_query.is_empty() {
+        trace!("[GAME] Skipping game phase check - pieces not yet flushed into world");
+        return;
+    }
+
     let previous_phase = game_phase.0;
-    let piece_count = pieces_query.iter().count();
 
-    // Only log if piece count changed - reduces log spam
-    // We could store the last count in a local request, but for now just trace level is enough
-    trace!(
-        "[GAME] Updating game phase - {} pieces on board",
-        piece_count
-    );
-
-    // Sync ECS → Engine before checking game state
-    engine.sync_ecs_to_engine(&pieces_query);
-
+    // If execute_move already synced ECS→engine this frame, skip the redundant
+    // second sync and only rebuild the legal-move cache.
+    // If the cache is already valid for this turn (no move happened), skip entirely —
+    // this prevents the expensive sync+rebuild from running every single frame.
+    if engine.synced_this_move {
+        engine.synced_this_move = false;
+        engine.rebuild_legal_move_cache();
+    } else if !engine.move_cache_valid {
+        // Initial build: pieces just spawned but no move has been made yet.
+        engine.sync_ecs_to_engine(&pieces_query);
+        engine.rebuild_legal_move_cache();
+    } else {
+        return;
+    }
 
     let in_check = engine.is_check();
-    let legal_moves = engine.legal_moves();
-    let has_legal_moves = !legal_moves.is_empty();
+    let has_legal_moves = engine.has_legal_moves();
 
     if !has_legal_moves && in_check {
         // Checkmate

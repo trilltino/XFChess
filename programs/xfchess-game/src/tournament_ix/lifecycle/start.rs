@@ -49,7 +49,7 @@ pub struct StartTournament<'info> {
 /// Backend uses this to generate matches via separate initialize_match calls.
 pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
-
+    require!(tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
     require!(
         tournament.status == TournamentStatus::Registration,
         GameErrorCode::TournamentNotInRegistration

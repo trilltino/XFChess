@@ -73,6 +73,34 @@ pub struct TournamentClientState {
     pub waiting_for_next_match: bool,
     /// Result of the last completed match (e.g. "1-0", "0-1", "½-½").
     pub last_match_result: Option<String>,
+    /// Filter shown in the tournament browser (None = All).
+    pub status_filter: Option<String>,
+    /// Which tournament card is currently expanded to show details.
+    pub expanded_tournament_id: Option<u64>,
+
+    // Waiting room
+    /// Registered players fetched from GET /api/tournament/{id}/players.
+    pub registered_players: Vec<String>,
+    /// Receiver for the players poll task.
+    pub players_rx: Option<crossbeam_channel::Receiver<Vec<String>>>,
+    /// Timer for polling player list (reset every 5 s).
+    pub players_poll_timer: f32,
+    /// "Enter invite code" text input.
+    pub private_code_input: String,
+    /// Error from private join attempt.
+    pub private_code_error: Option<String>,
+    /// Receiver for private join response.
+    pub private_join_rx: Option<crossbeam_channel::Receiver<Result<(), String>>>,
+
+    // Tournament waiting-room chat
+    /// Chat message history: (display_name, message_text)
+    pub chat_messages: Vec<(String, String)>,
+    /// Receive channel for inbound chat messages from VPS WebSocket.
+    pub chat_rx: Option<crossbeam_channel::Receiver<(String, String)>>,
+    /// Current compose input.
+    pub chat_input: String,
+    /// Send closure for outbound chat (sends to VPS ws endpoint).
+    pub chat_tx: Option<crossbeam_channel::Sender<(String, String)>>,
 }
 
 impl Default for TournamentClientState {
@@ -94,6 +122,18 @@ impl Default for TournamentClientState {
             last_poll_error: None,
             waiting_for_next_match: false,
             last_match_result: None,
+            status_filter: None,
+            expanded_tournament_id: None,
+            registered_players: Vec::new(),
+            players_rx: None,
+            players_poll_timer: 0.0,
+            private_code_input: String::new(),
+            private_code_error: None,
+            private_join_rx: None,
+            chat_messages: Vec::new(),
+            chat_rx: None,
+            chat_input: String::new(),
+            chat_tx: None,
         }
     }
 }
@@ -101,6 +141,63 @@ impl Default for TournamentClientState {
 impl TournamentClientState {
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// Start the background WebSocket chat for `tournament_id`.
+    /// Polls `/api/tournament/{id}/chat` (GET for history, POST to send).
+    /// Uses a simple long-poll pattern so no ws dependency is needed.
+    pub fn start_chat(&mut self, tournament_id: u64, player_name: String) {
+        if self.chat_rx.is_some() { return; }
+        let (inbound_tx, inbound_rx) = crossbeam_channel::bounded::<(String, String)>(64);
+        let (outbound_tx, outbound_rx) = crossbeam_channel::bounded::<(String, String)>(16);
+        self.chat_rx = Some(inbound_rx);
+        self.chat_tx = Some(outbound_tx);
+        let base = crate::multiplayer::network::vps::vps_base();
+        // Background thread: poll for new messages every 3 seconds
+        let base2 = base.clone();
+        let itx = inbound_tx.clone();
+        std::thread::spawn(move || {
+            let client = reqwest::blocking::Client::new();
+            let mut last_id: u64 = 0;
+            loop {
+                let url = format!("{}/api/tournament/{}/chat?after={}", base2, tournament_id, last_id);
+                if let Ok(resp) = client.get(&url).send() {
+                    if let Ok(msgs) = resp.json::<Vec<serde_json::Value>>() {
+                        for msg in msgs {
+                            let id = msg.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let sender = msg.get("player").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+                            let text = msg.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            if id > last_id { last_id = id; }
+                            let _ = itx.send((sender, text));
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+        });
+        // Background thread: send outbound messages
+        std::thread::spawn(move || {
+            let client = reqwest::blocking::Client::new();
+            while let Ok((player, text)) = outbound_rx.recv() {
+                let url = format!("{}/api/tournament/{}/chat", base, tournament_id);
+                let body = serde_json::json!({ "player": player, "text": text });
+                let _ = client.post(&url).json(&body).send();
+                let _ = player; // suppress move warning
+            }
+        });
+        let _ = player_name;
+    }
+
+    /// Drain inbound chat channel into `chat_messages`.
+    pub fn drain_chat(&mut self) {
+        if let Some(ref rx) = self.chat_rx {
+            while let Ok(msg) = rx.try_recv() {
+                self.chat_messages.push(msg);
+                if self.chat_messages.len() > 200 {
+                    self.chat_messages.remove(0);
+                }
+            }
+        }
     }
 
     pub fn is_registered(&self) -> bool {

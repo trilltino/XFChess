@@ -20,6 +20,8 @@ struct CreateSessionReq<'a> {
 #[derive(Deserialize)]
 struct CreateSessionResp {
     session_pubkey: String,
+    #[serde(default)]
+    platform_fee_lamports: u64,
 }
 
 #[derive(Serialize)]
@@ -53,8 +55,9 @@ struct TeeAuthReq<'a> {
 }
 
 /// Ask VPS to create (or return existing) session keypair for `game_id`.
-/// Returns the session pubkey (base58).
-pub fn create_session(game_id: u64, wallet_pubkey: &str) -> Result<String, String> {
+/// Returns `(session_pubkey_base58, platform_fee_lamports)`.
+/// `platform_fee_lamports` is calculated by the backend from the live SOL/GBP rate (10p per player = 20p total).
+pub fn create_session(game_id: u64, wallet_pubkey: &str) -> Result<(String, u64), String> {
     let resp = client()?
         .post(format!("{}/session/create", vps_base()))
         .json(&CreateSessionReq { game_id, wallet_pubkey })
@@ -62,7 +65,7 @@ pub fn create_session(game_id: u64, wallet_pubkey: &str) -> Result<String, Strin
         .map_err(|e| format!("vps create_session: {e}"))?
         .json::<CreateSessionResp>()
         .map_err(|e| format!("vps create_session parse: {e}"))?;
-    Ok(resp.session_pubkey)
+    Ok((resp.session_pubkey, resp.platform_fee_lamports))
 }
 
 /// Submit the wallet-signed setup TX (create_game / join_game + authorize_session_key).

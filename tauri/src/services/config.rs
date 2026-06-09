@@ -13,8 +13,6 @@
 //! - `NODE_ENV`: Environment mode (development/production)
 //! - `RUST_LOG`: Logging level configuration
 
-use std::env;
-
 /// Get the backend URL for API communication.
 ///
 /// This function checks multiple environment variables in order of preference:

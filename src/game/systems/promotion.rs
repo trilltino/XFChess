@@ -74,6 +74,13 @@ pub fn detect_pawn_promotion(
 }
 
 /// Applies the selected promotion.
+///
+/// The promotion UI (promotion_ui_system) sends a PromotionSelected message when the
+/// player picks a piece. This system applies it. If no message arrives this frame,
+/// nothing happens — the UI stays open until the player chooses.
+///
+/// AI promotions are handled inline in MoveContext (promotion field), so they never
+/// reach detect_pawn_promotion and do not require this path.
 pub fn apply_pawn_promotion(
     mut commands: Commands,
     mut promotion_messages: MessageReader<PromotionSelected>,
@@ -82,24 +89,8 @@ pub fn apply_pawn_promotion(
     piece_meshes: Res<crate::rendering::pieces::PieceMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mut handled = false;
-
     for event in promotion_messages.read() {
-        handled = true;
         apply_selected_promotion(&mut commands, &mut pieces, &piece_meshes, &mut materials, event.clone());
-    }
-
-    if !handled && pending_promotion.is_active() {
-        if let (Some(entity), Some(position)) = (pending_promotion.pawn_entity, pending_promotion.position) {
-            let event = PromotionSelected {
-                entity,
-                position,
-                promoted_to: PieceType::Queen,
-            };
-            apply_selected_promotion(&mut commands, &mut pieces, &piece_meshes, &mut materials, event);
-        }
-        pending_promotion.clear();
-    } else if handled {
         pending_promotion.clear();
     }
 }

@@ -28,6 +28,9 @@ pub enum GameState {
 
     /// Matching state (Connecting/Handshake)
     Matching,
+
+    /// Settings screen
+    Settings,
 }
 
 /// Define an enum for game modes

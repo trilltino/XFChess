@@ -54,8 +54,28 @@ pub struct ProfileSubmissionEvent {
     pub address: String,
 }
 
-/// System that renders the profile creation UI
+/// System that renders the profile creation UI.
+/// Profile creation is now handled exclusively in the Tauri wallet popup.
+/// This system is a no-op — it redirects back to the main menu so the
+/// in-game modal never appears.
 pub fn profile_creation_ui_system(
+    mut contexts: EguiContexts,
+    mut state: ResMut<ProfileCreationState>,
+    mut menu_state: ResMut<NextState<MenuState>>,
+    wallet: Res<SolanaWallet>,
+    mut submission_events: MessageWriter<ProfileSubmissionEvent>,
+) {
+    let _ = (&mut contexts, &mut state, &wallet, &mut submission_events);
+    // Open the Tauri profile step and return to main menu.
+    std::thread::spawn(|| {
+        let _ = reqwest::blocking::Client::new()
+            .post("http://127.0.0.1:7454/api/open-profile-step")
+            .send();
+    });
+    menu_state.set(MenuState::Main);
+}
+#[allow(dead_code)]
+fn profile_creation_ui_system_disabled(
     mut contexts: EguiContexts,
     mut state: ResMut<ProfileCreationState>,
     _menu_state: ResMut<NextState<MenuState>>,
@@ -365,35 +385,43 @@ pub fn profile_creation_ui_system(
         });
 }
 
-/// System to validate username input
+/// System to validate username input.
+/// After format passes, waits 0.4 s then marks Available (optimistic; real on-chain check is TODO).
 pub fn validate_username_system(
     mut state: ResMut<ProfileCreationState>,
+    time: Res<Time>,
     mut last_checked: Local<String>,
+    mut check_timer: Local<f32>,
 ) {
     let username = state.username_input.clone();
-    
-    // Skip if unchanged or empty
-    if username.is_empty() || username == *last_checked {
-        if username.is_empty() {
-            state.availability_status = UsernameAvailability::Unknown;
+
+    if username.is_empty() {
+        state.availability_status = UsernameAvailability::Unknown;
+        *last_checked = String::new();
+        *check_timer = 0.0;
+        return;
+    }
+
+    // Username changed — restart
+    if username != *last_checked {
+        *last_checked = username.clone();
+        *check_timer = 0.0;
+        state.availability_status = if is_valid_username_format(&username) {
+            UsernameAvailability::Checking
+        } else {
+            UsernameAvailability::Invalid
+        };
+        return;
+    }
+
+    // Advance timer while Checking
+    if state.availability_status == UsernameAvailability::Checking {
+        *check_timer += time.delta_secs();
+        if *check_timer >= 0.4 {
+            // TODO: query UsernameRecord PDA; optimistically Available for now
+            state.availability_status = UsernameAvailability::Available;
         }
-        return;
     }
-    
-    // Validate format
-    if !is_valid_username_format(&username) {
-        state.availability_status = UsernameAvailability::Invalid;
-        *last_checked = username;
-        return;
-    }
-    
-    // Mark as checking (in real implementation, this would query on-chain)
-    state.availability_status = UsernameAvailability::Checking;
-    *last_checked = username;
-    
-    // TODO: Query on-chain to check if username is taken
-    // For now, simulate availability check
-    // In production, this should query the UsernameRecord PDA
 }
 
 /// Validate username format according to rules
@@ -484,8 +512,13 @@ pub fn handle_profile_submission(
     mut menu_state: ResMut<NextState<MenuState>>,
     mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
     auth_state: Res<crate::ui::account::auth::AuthState>,
+    mut solana_state: ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
 ) {
     for event in events.read() {
+        // Optimistically cache the chosen username so the lobby can use it immediately
+        solana_state.cached_display_name = Some(event.username.clone());
+        solana_state.profile_status = crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername;
+
         // Push "Check Wallet" notification
         popup_queue.push(crate::ui::menus::popup::GamePopup {
             title: "Wallet Signature Needed".to_string(),

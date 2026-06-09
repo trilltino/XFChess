@@ -57,6 +57,7 @@ pub fn handler(ctx: Context<FundUsdcPrize>, tournament_id: u64, amount: u64) -> 
     );
 
     let tournament = &mut ctx.accounts.tournament;
+    require!(tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
 
     // Verify the tournament is still in registration phase
     require!(

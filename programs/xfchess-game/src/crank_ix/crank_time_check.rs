@@ -44,12 +44,6 @@ pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData)
         // turn: 2, 4, 6... = black to move
         let white_to_move = game.turn % 2 == 1;
         
-        let timed_out_player = if white_to_move {
-            game.white
-        } else {
-            game.black
-        };
-        
         let winner = if white_to_move {
             game.black
         } else {

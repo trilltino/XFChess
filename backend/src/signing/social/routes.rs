@@ -15,7 +15,6 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tracing::warn;
 
 use crate::signing::AppState;
 use super::friends::{Contact, FriendRequest};

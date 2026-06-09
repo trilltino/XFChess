@@ -20,8 +20,8 @@ use crate::engine::board_state::ChessEngine;
 use crate::core::states::GameMode;
 use crate::game::components::{HasMoved, SelectedPiece};
 use crate::game::resources::{
-    CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingTurnAdvance,
-    Selection,
+    CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingPromotion,
+    PendingTurnAdvance, Selection,
 };
 use crate::game::resources::player::Players;
 use crate::game::systems::shared::{
@@ -34,6 +34,7 @@ use crate::multiplayer::solana::addon::{CompetitiveMatchState, SolanaGameSync};
 use crate::rendering::pieces::{Piece, PieceColor};
 use crate::rendering::utils::Square;
 use bevy::ecs::system::SystemParam;
+use bevy_egui::egui;
 use bevy::picking::events::{Click, Drag, DragEnd, DragStart, Pointer};
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
@@ -82,6 +83,7 @@ pub struct InputSystemParams<'w, 's> {
     pub move_events: MessageWriter<'w, crate::game::events::MoveMadeEvent>,
     pub players: Res<'w, Players>,
     pub game_mode: Res<'w, crate::core::states::GameMode>,
+    pub pending_promotion: Res<'w, PendingPromotion>,
     #[cfg(feature = "solana")]
     pub game_sync: Option<Res<'w, SolanaGameSync>>,
     // pub connection_state: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
@@ -95,9 +97,7 @@ pub fn is_human_turn(params: &InputSystemParams) -> bool {
     }
 
     let current = params.players.current(params.current_turn.color);
-    let result = current.is_human;
-    info!("[INPUT] is_human_turn: current_color={:?}, is_human={}, player={:?}", params.current_turn.color, result, current);
-    result
+    current.is_human
 }
 
 /// Returns true if the human player is allowed to move pieces of the given color.
@@ -106,7 +106,6 @@ pub fn is_human_turn(params: &InputSystemParams) -> bool {
 pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bool {
     // First check if it's a human turn at all
     if !is_human_turn(params) {
-        warn!("[INPUT] can_move_color: not human turn");
         return false;
     }
     // Default behavior: allow moving any color piece (single-player mode)
@@ -188,15 +187,12 @@ pub fn try_select_piece(
         return;
     }
 
-    // Select new piece
+    // Select new piece — legal moves come from the per-turn cache built by update_game_phase.
     clear_selection_state(
         &mut params.commands,
         &mut params.selection,
         &params.selected_pieces,
     );
-    params
-        .engine
-        .sync_ecs_to_engine_with_transform(&params.pieces.p1());
 
     let legal_moves = params
         .engine
@@ -331,6 +327,10 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
         return;
     }
 
+    if params.pending_promotion.is_active() {
+        return;
+    }
+
     if !is_human_turn(&params) {
         return;
     }
@@ -351,20 +351,17 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
 
     info!("[INPUT] Clicked piece: {:?} {:?} at ({}, {}) | Current turn: {:?}", clicked_piece.color, clicked_piece.piece_type, clicked_piece.x, clicked_piece.y, params.current_turn.color);
 
-    // Validate that the human player can move this color piece
-    if !can_move_color(&params, clicked_piece.color) {
-        warn!("[INPUT] Cannot interact with {:?} piece: you can only move your own color pieces", clicked_piece.color);
-        return;
-    }
-
     // Case 1: Clicked our own piece -> Select
     if clicked_piece.color == params.current_turn.color {
+        if !can_move_color(&params, clicked_piece.color) {
+            warn!("[INPUT] Cannot interact with {:?} piece: you can only move your own color pieces", clicked_piece.color);
+            return;
+        }
         try_select_piece(&mut params, entity, clicked_piece, false);
         return;
     }
 
     // Case 2: Clicked enemy piece -> Capture (only if we have a piece selected)
-    // AND it's our turn (can only capture on our turn)
     if params.selection.is_selected() && clicked_piece.color != params.current_turn.color {
         if let Some(selected) = params.selection.selected_entity {
             // Validate that we have a selected piece and it belongs to us
@@ -524,6 +521,10 @@ pub fn on_square_click(
         return;
     }
 
+    if params.pending_promotion.is_active() {
+        return;
+    }
+
     if !is_human_turn(&params) {
         return;
     }
@@ -577,6 +578,33 @@ pub fn toggle_fullscreen(
             _ => bevy::window::WindowMode::Windowed,
         };
     }
+}
+
+/// System: Render a small "F11 to minimise" hint in the bottom-right corner when fullscreen.
+pub fn render_fullscreen_hint(
+    mut contexts: bevy_egui::EguiContexts,
+    window_query: Query<&Window>,
+) {
+    let is_fullscreen = window_query
+        .single()
+        .map(|w| !matches!(w.mode, bevy::window::WindowMode::Windowed))
+        .unwrap_or(false);
+
+    if !is_fullscreen {
+        return;
+    }
+
+    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    egui::Area::new(egui::Id::new("fullscreen_hint"))
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -10.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new("F11  minimise")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgba_unmultiplied(200, 200, 200, 80)),
+            );
+        });
 }
 
 /// System: Handle ESC key to exit to main menu (forfeit/leave game)

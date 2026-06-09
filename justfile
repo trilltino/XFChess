@@ -24,6 +24,7 @@ export FEE_PAYER_KEYS          := "61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3
 export VPS_AUTHORITY_KEY       := "61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi"
 export KYC_AUTHORITY_KEY       := "61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi"
 export HOST_TREASURY_PUBKEY    := "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"
+export ADMIN_API_KEY           := "dev"
 export RUST_LOG                := "info"
 
 # Debug build dir (fast local iteration)
@@ -108,11 +109,20 @@ build-admin-ui:
         Write-Host "[BUILD] Tournament Admin node_modules exists, skipping" \
     }
 
+# Install web frontend dependencies (only if node_modules is missing)
+build-web-ui:
+    @if (-not (Test-Path "web-solana/node_modules/.bin/vite")) { \
+        Write-Host "[BUILD] Installing Web Frontend dependencies..." -ForegroundColor Cyan; \
+        Set-Location web-solana; npm install; Set-Location .. \
+    } else { \
+        Write-Host "[BUILD] Web Frontend node_modules exists, skipping" \
+    }
+
 # Force-rebuild wallet UI
 build-wallet-ui-force:
     Set-Location tauri/wallet-ui && npm install && npm run build && Set-Location ../..
 
-# Build web frontend
+# Build web frontend (production)
 build-web:
     Set-Location web-solana && npm install && npm run build && Set-Location ..
 
@@ -128,6 +138,20 @@ game: build-game
     @Write-Host "[GAME] Starting XFChess" -ForegroundColor Cyan
     ./{{bin}}/xfchess.exe
 
+# Build game with Tracy profiling instrumentation (debug + trace_tracy)
+build-profile:
+    cargo build --bin xfchess --features profile
+
+# Launch Tracy profiler then the instrumented game (they auto-connect)
+# Tracy download: C:\Users\isich\Downloads\windows-0.13.1\Tracy.exe
+profile: build-profile
+    @Write-Host "[PROFILE] Starting Tracy profiler..." -ForegroundColor Magenta
+    @Start-Process "C:\Users\isich\Downloads\windows-0.13.1\tracy-profiler.exe"
+    @Start-Sleep -Seconds 2
+    @Write-Host "[PROFILE] Starting instrumented game (trace_tracy)..." -ForegroundColor Magenta
+    @Write-Host "[PROFILE] Make a move to reproduce the stutter — watch for the spike in Tracy" -ForegroundColor Yellow
+    ./{{bin}}/xfchess.exe
+
 # Run web frontend dev server
 web:
     Set-Location web-solana && npm run dev
@@ -139,7 +163,7 @@ admin:
 # ── Full dev stack ────────────────────────────────────────────────────────────
 
 # Build everything then launch full local stack (uses Windows Terminal tabs if available)
-dev: kill build build-wallet-ui build-admin-ui
+dev: kill build build-wallet-ui build-admin-ui build-web-ui
     @Write-Host "" -ForegroundColor White
     @Write-Host "========================================" -ForegroundColor Cyan
     @Write-Host " XFChess Local Dev Stack" -ForegroundColor Cyan
@@ -175,26 +199,27 @@ dev: kill build build-wallet-ui build-admin-ui
     @Write-Host "Wallet UI (dev):  http://localhost:5174" -ForegroundColor White
     @Write-Host "Wallet Bridge:    http://localhost:7454" -ForegroundColor White
     @Write-Host "Web Frontend:     http://localhost:5173" -ForegroundColor White
-    @Write-Host "Tournament Admin: http://localhost:7454/tournament-admin/" -ForegroundColor White
+    @Write-Host "Tournament Admin: http://localhost:7455" -ForegroundColor White
     @Write-Host "Program ID:       {{PROGRAM_ID}}" -ForegroundColor White
     @Write-Host "========================================" -ForegroundColor Cyan
 
 # Launch two game instances sharing one backend — P1 window and P2 window, each with tabs
-dev2: kill build build-wallet-ui build-admin-ui
+dev2: kill build build-wallet-ui build-admin-ui build-web-ui
     @$root = (Get-Location).Path; \
      $bin = ("{{bin}}" -replace '/', '\'); \
      $env_common = "`$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:BACKEND_URL='{{BACKEND_URL}}'; `$env:RUST_LOG='{{RUST_LOG}}'; `$env:HELIUS_API_KEY='{{HELIUS_API_KEY}}'"; \
-     Set-Content -Path "$root\dev2-backend.ps1"   -Value "Set-Location '$root\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\dev2-backend.ps1"   -Value "Set-Location '$root\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:HOST_TREASURY_PUBKEY='{{HOST_TREASURY_PUBKEY}}'; `$env:ADMIN_API_KEY='{{ADMIN_API_KEY}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
      Set-Content -Path "$root\dev2-wallet-p1.ps1" -Value "Set-Location '$root\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
      Set-Content -Path "$root\dev2-tauri-p1.ps1"  -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$root\dev2-game-p1.ps1"   -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\dev2-web.ps1"        -Value "Set-Location '$root\web-solana'; npm run dev" -Encoding utf8; \
      Set-Content -Path "$root\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7464'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
      Set-Content -Path "$root\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$root\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
      $hasWT = Get-Command wt -ErrorAction SilentlyContinue; \
      if ($hasWT) { \
          Write-Host "[ P1 ] Opening Player 1 window..." -ForegroundColor Cyan; \
-         cmd /c "wt -w new nt --title Backend powershell -NoProfile -File `"$root\dev2-backend.ps1`" ; nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\dev2-wallet-p1.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\dev2-tauri-p1.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\dev2-game-p1.ps1`" ; nt --title `"Tournament Admin`" -d `"$root\tauri\tournament-admin`" powershell -NoProfile -Command `"npm run dev -- --port 7455`""; \
+         cmd /c "wt -w new nt --title Backend powershell -NoProfile -File `"$root\dev2-backend.ps1`" ; nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\dev2-wallet-p1.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\dev2-tauri-p1.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\dev2-game-p1.ps1`" ; nt --title `"Web Frontend`" powershell -NoProfile -File `"$root\dev2-web.ps1`" ; nt --title `"Tournament Admin`" -d `"$root\tauri\tournament-admin`" powershell -NoProfile -Command `"npm run dev -- --port 7455`""; \
          Start-Sleep -Seconds 2; \
          Write-Host "[ P2 ] Opening Player 2 window..." -ForegroundColor Yellow; \
          cmd /c "wt -w new nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\dev2-wallet-p2.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\dev2-tauri-p2.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\dev2-game-p2.ps1`"" \
@@ -204,6 +229,7 @@ dev2: kill build build-wallet-ui build-admin-ui
          Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-wallet-p1.ps1'" -WindowStyle Normal; \
          Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-tauri-p1.ps1'" -WindowStyle Minimized; \
          Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-game-p1.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-web.ps1'" -WindowStyle Normal; \
          Start-Sleep -Seconds 1; \
          Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-wallet-p2.ps1'" -WindowStyle Normal; \
          Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-tauri-p2.ps1'" -WindowStyle Minimized; \
@@ -212,6 +238,7 @@ dev2: kill build build-wallet-ui build-admin-ui
      }
     @Write-Host "  [P1] Backend :8090  Wallet UI :5174  Bridge :7454  (window: XFChess P1)" -ForegroundColor Cyan
     @Write-Host "  [P2] Wallet UI :5175  Bridge :7464  (window: XFChess P2)" -ForegroundColor Yellow
+    @Write-Host "  Web Frontend: http://localhost:5173" -ForegroundColor White
     @Write-Host "  Tournament Admin: http://localhost:7455" -ForegroundColor Green
 
 # ── Solana program ────────────────────────────────────────────────────────────
@@ -239,7 +266,7 @@ monitoring-down:
 
 # Fast type-check all workspace crates (no codegen — much faster than build)
 check:
-    cargo check --workspace
+    cargo check --workspace --features solana
 
 # Fast type-check backend only
 check-backend:
@@ -295,7 +322,7 @@ watch-backend:
 open:
     @Start-Process "http://127.0.0.1:8090/health"
     @Start-Process "http://localhost:5173"
-    @Start-Process "http://localhost:7454/tournament-admin/"
+    @Start-Process "http://localhost:7455"
     @Start-Process "http://localhost:3000"
     @Write-Host "Opened: backend health, web frontend, tournament admin, Grafana" -ForegroundColor Green
 

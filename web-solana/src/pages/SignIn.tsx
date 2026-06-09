@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+﻿import { useState, useEffect, useCallback, useRef } from 'react';
 import bs58 from 'bs58';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletReadyState } from '@solana/wallet-adapter-base';
@@ -38,7 +38,19 @@ function useSolPrice(): SolPrice & { refresh: () => void } {
 }
 
 // --- API helpers ------------------------------------------------------------
-const API = import.meta.env.VITE_BACKEND_URL || ''; // Relative for proxying via Tauri
+const API = import.meta.env.VITE_BACKEND_URL || ''; // Relative → proxied to localhost:8090 via Vite
+
+// Try to launch the local XFChess game via the Tauri bridge.
+// Falls back silently if the app isn't running.
+async function launchLocalGame(pubkey: string, username: string, token?: string | null) {
+    try {
+        await fetch('http://localhost:7454/api/game/launch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pubkey, username, token }),
+        });
+    } catch { /* game not running locally — ignore */ }
+}
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
     const r = await fetch(`${API}${path}`, {
         method: 'POST',
@@ -64,12 +76,12 @@ const card: React.CSSProperties = {
     width: '92%',
     margin: '0 auto',
     padding: '36px 40px',
-    background: 'rgba(8,26,20,0.85)',
+    background: 'rgba(0,0,0,0.85)',
     border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: 20,
     backdropFilter: 'blur(24px)',
     WebkitBackdropFilter: 'blur(24px)',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.6), 0 0 60px rgba(173,92,47,0.08)',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.6), 0 0 60px rgba(255,255,255,0.04)',
 };
 
 const input: React.CSSProperties = {
@@ -90,7 +102,7 @@ const primaryBtn: React.CSSProperties = {
     padding: '14px 0',
     borderRadius: 10,
     border: 'none',
-    background: 'linear-gradient(135deg, #ad5c2f, #8c4a26)',
+    background: 'rgba(255,255,255,0.12)',
     color: '#fff',
     fontSize: 15,
     fontWeight: 700,
@@ -99,7 +111,7 @@ const primaryBtn: React.CSSProperties = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    boxShadow: '0 4px 20px rgba(173,92,47,0.35)',
+    boxShadow: '0 4px 20px rgba(255,255,255,0.10)',
     transition: 'all 0.2s',
     letterSpacing: '0.02em',
 };
@@ -129,7 +141,7 @@ function StepDots({ current }: { current: 0 | 1 | 2 }) {
             {[0, 1, 2].map(i => (
                 <div key={i} style={{
                     width: i === current ? 20 : 6, height: 6, borderRadius: 3,
-                    background: i <= current ? '#ad5c2f' : 'rgba(255,255,255,0.12)',
+                    background: i <= current ? '#ffffff' : 'rgba(255,255,255,0.12)',
                     transition: 'all 0.3s',
                 }} />
             ))}
@@ -142,8 +154,8 @@ function ErrBox({ msg }: { msg: string }) {
     return (
         <div style={{
             padding: '10px 14px', borderRadius: 10,
-            background: 'rgba(173,92,47,0.1)', border: '1px solid rgba(173,92,47,0.4)',
-            color: '#f4bb44', fontSize: 13, marginBottom: 16
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.20)',
+            color: '#ffffff', fontSize: 13, marginBottom: 16
         }}> {msg}</div>
     );
 }
@@ -160,11 +172,8 @@ function IdentityStep({
             <div style={{ textAlign: 'center', marginBottom: 32 }}>
                 <div style={{ fontSize: 36, marginBottom: 6 }}></div>
                 <h2 style={{ fontSize: 22, fontWeight: 900, margin: '0 0 4px', letterSpacing: '-0.03em' }}>
-                    <span style={{ color: '#ad5c2f' }}>XF</span>Chess
+                    <span style={{ color: '#ffffff' }}>XF</span>Chess
                 </h2>
-                <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '8px 0 0', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                    Choose your identity path
-                </p>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -174,7 +183,7 @@ function IdentityStep({
                     onMouseEnter={e => applyHover(e, true)}
                     onMouseLeave={e => applyHover(e, false)}
                 >
-                    <div style={identityIcon}><Shield size={20} color="#ad5c2f" /></div>
+                    <div style={identityIcon}><Shield size={20} color="#ffffff" /></div>
                     <div style={{ flex: 1, textAlign: 'left' as const }}>
                         <div style={{ fontWeight: 800, fontSize: 14 }}>Login with Wallet</div>
                         <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>Instant sign-in for existing users</div>
@@ -188,7 +197,7 @@ function IdentityStep({
                     onMouseEnter={e => applyHover(e, true)}
                     onMouseLeave={e => applyHover(e, false)}
                 >
-                    <div style={identityIcon}><Zap size={20} color="#ad5c2f" /></div>
+                    <div style={identityIcon}><Zap size={20} color="#ffffff" /></div>
                     <div style={{ flex: 1, textAlign: 'left' as const }}>
                         <div style={{ fontWeight: 800, fontSize: 14 }}>Create Account</div>
                         <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>Use Email + Password</div>
@@ -204,8 +213,8 @@ function IdentityStep({
 
 function applyHover(e: React.MouseEvent<HTMLButtonElement>, on: boolean) {
     const el = e.currentTarget as HTMLButtonElement;
-    el.style.borderColor = on ? '#ad5c2f' : 'rgba(255,255,255,0.08)';
-    el.style.background = on ? 'rgba(173,92,47,0.08)' : 'rgba(255,255,255,0.025)';
+    el.style.borderColor = on ? '#ffffff' : 'rgba(255,255,255,0.08)';
+    el.style.background = on ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.025)';
 }
 
 const identityBtn: React.CSSProperties = {
@@ -226,8 +235,8 @@ const identityIcon: React.CSSProperties = {
     width: 40,
     height: 40,
     borderRadius: 10,
-    background: 'rgba(173,92,47,0.12)',
-    border: '1px solid rgba(173,92,47,0.25)',
+    background: 'rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.12)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -272,7 +281,7 @@ function CredentialsStep({
             <div style={{ textAlign: 'center', marginBottom: 28 }}>
                 <div style={{ fontSize: 36, marginBottom: 4 }}></div>
                 <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0, letterSpacing: '-0.03em' }}>
-                    <span style={{ color: '#ad5c2f' }}>XF</span>Chess
+                    <span style={{ color: '#ffffff' }}>XF</span>Chess
                 </h2>
                 <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 6 }}>
                     {m === 'login'
@@ -296,7 +305,7 @@ function CredentialsStep({
                     onChange={e => setEmail(e.target.value)}
                     placeholder="you@example.com"
                     onKeyDown={e => e.key === 'Enter' && submit()}
-                    onFocus={e => (e.target.style.borderColor = '#ad5c2f')}
+                    onFocus={e => (e.target.style.borderColor = '#ffffff')}
                     onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
                 />
             </div>
@@ -312,7 +321,7 @@ function CredentialsStep({
                     onChange={e => setPassword(e.target.value)}
                     placeholder="••••••••"
                     onKeyDown={e => e.key === 'Enter' && submit()}
-                    onFocus={e => (e.target.style.borderColor = '#ad5c2f')}
+                    onFocus={e => (e.target.style.borderColor = '#ffffff')}
                     onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
                 />
             </div>
@@ -326,7 +335,7 @@ function CredentialsStep({
                 {m === 'login' ? "No account? " : "Already have one? "}
                 <button
                     onClick={() => { setM(m === 'login' ? 'register' : 'login'); setErr(null); }}
-                    style={{ background: 'none', border: 'none', color: '#ad5c2f', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+                    style={{ background: 'none', border: 'none', color: '#ffffff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
                 >
                     {m === 'login' ? 'Create one' : 'Sign in'}
                 </button>
@@ -395,7 +404,7 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                             return (
                                 <button
                                     key={w.adapter.name}
-                                    style={{ ...walletBtn, opacity: 0.9, borderColor: 'rgba(173,92,47,0.3)' }}
+                                    style={{ ...walletBtn, opacity: 0.9, borderColor: 'rgba(255,255,255,0.15)' }}
                                     onClick={() => {
                                         const url = window.location.href.split('?')[0]; // Open clean URL in browser
                                         if ((window as any).__TAURI__) {
@@ -405,17 +414,17 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                                         }
                                     }}
                                     onMouseEnter={e => {
-                                        (e.currentTarget as HTMLButtonElement).style.borderColor = '#ad5c2f';
-                                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(173,92,47,0.12)';
+                                        (e.currentTarget as HTMLButtonElement).style.borderColor = '#ffffff';
+                                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)';
                                     }}
                                     onMouseLeave={e => {
-                                        (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(173,92,47,0.3)';
+                                        (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.15)';
                                         (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
                                     }}
                                 >
                                     <img src={w.adapter.icon} alt={w.adapter.name} width={28} height={28} style={{ borderRadius: 6 }} />
                                     <span style={{ flex: 1 }}>{w.adapter.name}</span>
-                                    <span style={{ fontSize: 11, color: '#ad5c2f', fontWeight: 700 }}>Open in Browser ?</span>
+                                    <span style={{ fontSize: 11, color: '#ffffff', fontWeight: 700 }}>Open in Browser ?</span>
                                 </button>
                             );
                         }
@@ -431,7 +440,7 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                                     border: '1px dashed rgba(255,255,255,0.15)',
                                 }}
                                 onMouseEnter={e => {
-                                    (e.currentTarget as HTMLAnchorElement).style.borderColor = '#ad5c2f';
+                                    (e.currentTarget as HTMLAnchorElement).style.borderColor = '#ffffff';
                                     (e.currentTarget as HTMLAnchorElement).style.opacity = '1';
                                 }}
                                 onMouseLeave={e => {
@@ -441,7 +450,7 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                             >
                                 <img src={w.adapter.icon} alt={w.adapter.name} width={28} height={28} style={{ borderRadius: 6, opacity: 0.6 }} />
                                 <span style={{ flex: 1, color: 'rgba(255,255,255,0.45)' }}>{w.adapter.name} — not installed</span>
-                                <span style={{ fontSize: 11, color: '#ad5c2f', fontWeight: 700 }}>Install ?</span>
+                                <span style={{ fontSize: 11, color: '#ffffff', fontWeight: 700 }}>Install ?</span>
                             </a>
                         );
                     }
@@ -452,8 +461,8 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                             disabled={connecting}
                             onClick={() => handleSelect(w.adapter.name)}
                             onMouseEnter={e => {
-                                (e.currentTarget as HTMLButtonElement).style.borderColor = '#ad5c2f';
-                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(173,92,47,0.12)';
+                                (e.currentTarget as HTMLButtonElement).style.borderColor = '#ffffff';
+                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)';
                             }}
                             onMouseLeave={e => {
                                 (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.1)';
@@ -547,7 +556,7 @@ function WagerTable({ profile }: { profile: any }) {
 
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {priceLoading && <Loader2 size={12} style={{ color: '#ad5c2f', animation: 'spin 0.8s linear infinite' }} />}
+                    {priceLoading && <Loader2 size={12} style={{ color: '#ffffff', animation: 'spin 0.8s linear infinite' }} />}
                     {!priceLoading && usd > 0 && (
                         <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}>
                             1 SOL = ${usd.toFixed(2)} \u00b7 \u00a3{gbp.toFixed(2)} \u00b7 {timeStr}
@@ -582,7 +591,7 @@ function WagerTable({ profile }: { profile: any }) {
                         {rows.map(row => {
                             const isNeg = row.pnl && row.sol < 0;
                             const isPos = row.pnl && row.sol >= 0;
-                            const col = isNeg ? '#f87171' : isPos ? '#14F195' : 'rgba(255,255,255,0.8)';
+                            const col = isNeg ? '#f87171' : isPos ? '#ffffff' : 'rgba(255,255,255,0.8)';
                             const pre = row.pnl ? (row.sol >= 0 ? '+' : '') : '';
                             return (
                                 <tr key={row.label}>
@@ -618,6 +627,7 @@ function ProfileStep() {
     const [createHandle, setCreateHandle] = useState('');
     const [country, setCountry] = useState('GB');
     const [taxId, setTaxId] = useState('');
+    const [dob, setDob] = useState(''); // YYYY-MM-DD
     const [creating, setCreating] = useState(false);
     const [err, setErr] = useState<string | null>(null);
 
@@ -694,9 +704,14 @@ function ProfileStep() {
         setCreating(true);
         setErr(null);
         try {
+            if (!dob) throw new Error('Date of birth is required');
+            const dobTimestamp = Math.floor(new Date(dob).getTime() / 1000);
+            const minDob = Math.floor(Date.now() / 1000) - 567_648_000; // 18 years
+            if (dobTimestamp > minDob) throw new Error('You must be 18 or older to play');
+
             const program = getAnchorProgram(connection, wallet);
-            // 1. On-chain initialization (Username + Country ONLY, no PII)
-            await createPlayerProfile(program, wallet.publicKey, createHandle, country);
+            // 1. On-chain initialization (username, country, DOB for age gate)
+            await createPlayerProfile(program, wallet.publicKey, createHandle, country, dobTimestamp);
             
             // 2. Backend registration (timestamp in seconds for signature verification)
             let authToken = localStorage.getItem('xfchess_token');
@@ -760,7 +775,7 @@ function ProfileStep() {
 
             {loading && (
                 <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                    <Loader2 size={32} style={{ color: '#ad5c2f', animation: 'spin 0.8s linear infinite' }} />
+                    <Loader2 size={32} style={{ color: '#ffffff', animation: 'spin 0.8s linear infinite' }} />
                     <p style={{ color: 'rgba(255,255,255,0.4)', marginTop: 12, fontSize: 13 }}>Loading on-chain profile…</p>
                 </div>
             )}
@@ -778,7 +793,7 @@ function ProfileStep() {
                     }}>
                         <div style={{
                             width: 56, height: 56, borderRadius: '50%',
-                            background: 'linear-gradient(135deg, #ad5c2f, #8c4a26)',
+                            background: 'rgba(255,255,255,0.12)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             flexShrink: 0,
                         }}>
@@ -792,7 +807,7 @@ function ProfileStep() {
                                 {profile.data.isVerified && (
                                     <span style={{
                                         fontSize: 11, background: 'rgba(20,241,149,0.1)',
-                                        color: '#14F195', padding: '3px 10px', borderRadius: 10,
+                                        color: '#ffffff', padding: '3px 10px', borderRadius: 10,
                                         border: '1px solid rgba(20,241,149,0.3)',
                                     }}>
                                         <ShieldCheck size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />
@@ -820,7 +835,7 @@ function ProfileStep() {
                                 borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)',
                                 textAlign: 'center',
                             }}>
-                                <div style={{ fontSize: 22, fontWeight: 900, color: '#ad5c2f' }}>{stat.value}</div>
+                                <div style={{ fontSize: 22, fontWeight: 900, color: '#ffffff' }}>{stat.value}</div>
                                 <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 2, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{stat.label}</div>
                             </div>
                         ))}
@@ -832,7 +847,7 @@ function ProfileStep() {
                     {/* Play Options */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
                         <button
-                            style={{ ...primaryBtn, background: 'linear-gradient(135deg, #ad5c2f, #f4bb44)' }}
+                            style={{ ...primaryBtn, background: '#ffffff' }}
                             onClick={async () => {
                                 const useHot = localStorage.getItem('xfchess_use_hot') === 'true';
                                 const body = {
@@ -840,11 +855,8 @@ function ProfileStep() {
                                     hot: useHot,
                                     username: profile.data.username
                                 };
-                                try {
-                                    await apiPost('/api/game/launch', body);
-                                } catch (e) {
-                                    navigate('/download');
-                                }
+                                await launchLocalGame(body.pubkey, body.username, localStorage.getItem('xfchess_token'));
+                                navigate('/play');
                             }}
                         >
                             <Zap size={16} />
@@ -869,11 +881,8 @@ function ProfileStep() {
                                         hot: useHot,
                                         username: profile.data.username
                                     };
-                                    try {
-                                        await apiPost('/api/game/launch', { ...body, token: localStorage.getItem('xfchess_token') });
-                                    } catch (e) {
-                                        navigate('/play');
-                                    }
+                                    await launchLocalGame(body.pubkey, body.username, localStorage.getItem('xfchess_token'));
+                                    navigate('/play');
                                 }}
                             >
                                 <ChevronRight size={16} />
@@ -912,9 +921,9 @@ function ProfileStep() {
                                                     onClick={() => setAiDifficulty(lvl)}
                                                     style={{
                                                         ...strengthBtn,
-                                                        background: aiDifficulty === lvl ? '#ad5c2f' : 'rgba(255,255,255,0.03)',
+                                                        background: aiDifficulty === lvl ? '#ffffff' : 'rgba(255,255,255,0.03)',
                                                         color: aiDifficulty === lvl ? '#fff' : 'rgba(255,255,255,0.4)',
-                                                        borderColor: aiDifficulty === lvl ? '#ad5c2f' : 'rgba(255,255,255,0.1)',
+                                                        borderColor: aiDifficulty === lvl ? '#ffffff' : 'rgba(255,255,255,0.1)',
                                                     }}
                                                     title={`${elos[lvl]} ELO`}
                                                 >
@@ -923,7 +932,7 @@ function ProfileStep() {
                                             );
                                         })}
                                     </div>
-                                    <div style={{ textAlign: 'center', fontSize: 11, color: '#ad5c2f', marginTop: 8, fontWeight: 700, textTransform: 'uppercase' }}>
+                                    <div style={{ textAlign: 'center', fontSize: 11, color: '#ffffff', marginTop: 8, fontWeight: 700, textTransform: 'uppercase' }}>
                                         {[0, 400, 700, 1000, 1300, 1600, 1900, 2200, 2500][aiDifficulty]} ELO EQUIVALENT
                                     </div>
                                 </div>
@@ -933,21 +942,21 @@ function ProfileStep() {
                                     <div style={sideGrid}>
                                         <button 
                                             onClick={() => setAiSide('black')}
-                                            style={{ ...sideBtn, background: aiSide === 'black' ? '#ad5c2f' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'black' ? '#ad5c2f' : 'rgba(255,255,255,0.1)' }}
+                                            style={{ ...sideBtn, background: aiSide === 'black' ? '#ffffff' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'black' ? '#ffffff' : 'rgba(255,255,255,0.1)' }}
                                         >
                                             <span style={{ fontSize: 24 }}></span>
                                             <div>Black</div>
                                         </button>
                                         <button 
                                             onClick={() => setAiSide('random')}
-                                            style={{ ...sideBtn, background: aiSide === 'random' ? '#ad5c2f' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'random' ? '#ad5c2f' : 'rgba(255,255,255,0.1)' }}
+                                            style={{ ...sideBtn, background: aiSide === 'random' ? '#ffffff' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'random' ? '#ffffff' : 'rgba(255,255,255,0.1)' }}
                                         >
                                             <span style={{ fontSize: 24 }}></span>
                                             <div>Random</div>
                                         </button>
                                         <button 
                                             onClick={() => setAiSide('white')}
-                                            style={{ ...sideBtn, background: aiSide === 'white' ? '#ad5c2f' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'white' ? '#ad5c2f' : 'rgba(255,255,255,0.1)' }}
+                                            style={{ ...sideBtn, background: aiSide === 'white' ? '#ffffff' : 'rgba(255,255,255,0.03)', borderColor: aiSide === 'white' ? '#ffffff' : 'rgba(255,255,255,0.1)' }}
                                         >
                                             <span style={{ fontSize: 24 }}></span>
                                             <div>White</div>
@@ -967,11 +976,8 @@ function ProfileStep() {
                                             ai_difficulty: aiDifficulty,
                                             ai_side: finalSide === 'white' ? 'black' : 'white' // AI plays opposite of player
                                         };
-                                        try {
-                                            await apiPost('/api/game/launch', { ...body, token: localStorage.getItem('xfchess_token') });
-                                        } catch (e) {
-                                            navigate('/play');
-                                        }
+                                        await launchLocalGame(body.pubkey, body.username, localStorage.getItem('xfchess_token'));
+                                        navigate('/play');
                                     }}
                                 >
                                     <Cpu size={18} style={{ marginRight: 10 }} />
@@ -990,7 +996,7 @@ function ProfileStep() {
                         borderRadius: 12, border: '1px dashed rgba(255,255,255,0.1)',
                         marginBottom: 20, textAlign: 'center',
                     }}>
-                        <Trophy size={36} style={{ color: '#ad5c2f', opacity: 0.5, marginBottom: 12 }} />
+                        <Trophy size={36} style={{ color: '#ffffff', opacity: 0.5, marginBottom: 12 }} />
                         <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 800 }}>No On-Chain Profile Found</h3>
                         <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>
                             Create your username on Solana to start your competitive journey.
@@ -1009,7 +1015,7 @@ function ProfileStep() {
                                 placeholder="YourChessHandle"
                                 maxLength={20}
                                 required
-                                onFocus={e => (e.target.style.borderColor = '#ad5c2f')}
+                                onFocus={e => (e.target.style.borderColor = '#ffffff')}
                                 onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
                             />
                         </div>
@@ -1041,8 +1047,21 @@ function ProfileStep() {
                                     required
                                 />
                             </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <label style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                                    Date of Birth
+                                </label>
+                                <input
+                                    type="date"
+                                    style={{ ...input, padding: '10px 12px', colorScheme: 'dark' }}
+                                    value={dob}
+                                    onChange={e => setDob(e.target.value)}
+                                    max={new Date(Date.now() - 567_648_000_000).toISOString().split('T')[0]}
+                                    required
+                                />
+                            </div>
                         </div>
-                        <button type="submit" style={{ ...primaryBtn, opacity: creating || !createHandle || !taxId ? 0.6 : 1, marginTop: 8 }} disabled={creating || !createHandle || !taxId}>
+                        <button type="submit" style={{ ...primaryBtn, opacity: creating || !createHandle || !taxId || !dob ? 0.6 : 1, marginTop: 8 }} disabled={creating || !createHandle || !taxId || !dob}>
                             {creating ? <Loader2 size={16} className="spinner" /> : <Zap size={16} />}
                             Initialize Profile
                         </button>
@@ -1159,6 +1178,8 @@ const sideBtn: React.CSSProperties = {
 };
 
 const launchBtn: React.CSSProperties = {
-    width: '100%', padding: '16px 0', borderRadius: 8, border: 'none', background: '#ad5c2f', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'filter 0.2s'
+    width: '100%', padding: '16px 0', borderRadius: 8, border: 'none', background: '#ffffff', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'filter 0.2s'
 };
+
+
 

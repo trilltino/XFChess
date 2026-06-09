@@ -98,7 +98,7 @@ pub fn chat_panel_ui(
 
     // ── Toggle button (bottom-right) ──────────────────────────────────────────
     egui::Area::new(egui::Id::new("chat_toggle"))
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0))
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-252.0, -12.0))
         .show(ctx, |ui| {
             let label = if chat_state.unread > 0 {
                 format!("💬 Chat ({})", chat_state.unread)
@@ -131,7 +131,7 @@ pub fn chat_panel_ui(
 
     egui::Window::new("Chat")
         .id(egui::Id::new("chat_panel"))
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -50.0))
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-252.0, -50.0))
         .fixed_size([panel_width, panel_height])
         .collapsible(false)
         .title_bar(false)

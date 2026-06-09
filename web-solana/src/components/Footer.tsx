@@ -1,7 +1,7 @@
 export function Footer() {
   return (
     <footer style={{ 
-      background: '#0a0f0d', 
+      background: '#000000',
       borderTop: '1px solid rgba(255, 255, 255, 0.08)', 
       padding: '40px 20px',
       marginTop: 'auto'
@@ -10,7 +10,7 @@ export function Footer() {
         {/* Logo */}
         <div style={{ marginBottom: '24px' }}>
           <span style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '-0.02em' }}>
-            <span style={{ color: '#ad5c2f' }}>XF</span>
+            <span style={{ color: '#ffffff' }}>XF</span>
             <span style={{ color: '#fff' }}>Chess</span>
           </span>
         </div>
@@ -112,7 +112,7 @@ export function Footer() {
         </div>
         
         {/* Copyright */}
-        <div style={{ marginTop: '32px', color: '#a0a0a0', fontSize: '0.85rem' }}>
+        <div style={{ marginTop: '32px', color: 'var(--text-dim)', fontSize: '0.85rem' }}>
           © {new Date().getFullYear()} XFChess. All rights reserved.
         </div>
       </div>

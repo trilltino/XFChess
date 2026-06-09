@@ -1,10 +1,10 @@
-import { Link } from 'react-router-dom';
+﻿import { Link } from 'react-router-dom';
 import chessboardSpace from '../assets/chessboard-space.png';
 import chessWageringUI from '../assets/chess-wagering-ui.png';
 import highFidelityChess from '../assets/high-fidelity-chess.png';
 import xfchessLogo from '../assets/xfchess-logo.png';
 import learnTheGame from '../assets/learn-the-game.png';
-import WagerPriceWidget from '../components/WagerPriceWidget';
+
 
 export function Home() {
 
@@ -47,7 +47,7 @@ export function Home() {
 
             {/* SECTION: SANDBOX WAR TABLE */}
             <section className="fullscreen-section">
-                <div className="section-overlay" style={{ background: 'linear-gradient(to left, rgba(8, 26, 20, 0.95), rgba(8, 26, 20, 0.2))' }}></div>
+                <div className="section-overlay" style={{ background: 'linear-gradient(to left, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.20))' }}></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-start' }}>
                         <img src={chessboardSpace} alt="Chessboard in space" style={{ display: 'block', maxWidth: '300px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
@@ -92,7 +92,6 @@ export function Home() {
                         <p className="feature-desc">
                             Challenge opponents with clear stakes. Winner takes all in these PvP encounters. Put your money where your mind is - Wager on your chess skills in secure, transparent matches. Financial transactions settle in real-time to your wallet allowing you to access your gains. Weekly Tournaments attract larger prize pools.
                         </p>
-                        <WagerPriceWidget />
                     </div>
                 </div>
             </section>
@@ -117,3 +116,4 @@ export function Home() {
         </main>
     );
 }
+

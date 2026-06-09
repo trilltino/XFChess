@@ -215,6 +215,8 @@ pub fn build_app(game_config: GameConfig) -> App {
         });
     }
 
+    app.insert_resource(bevy::winit::WinitSettings::game());
+
     app.insert_resource(game_config.clone())
         .init_resource::<PersistentEguiCamera>()
         .insert_resource(bevy_egui::EguiGlobalSettings {
@@ -281,6 +283,7 @@ pub fn build_app(game_config: GameConfig) -> App {
         states::main_menu::MainMenuPlugin,
         states::game_over::GameOverPlugin,
         states::pause::PausePlugin,
+        states::settings::SettingsPlugin,
         xf_animate::XfAnimatePlugin,
     ))
     .add_plugins(multiplayer::MultiplayerPlugin);

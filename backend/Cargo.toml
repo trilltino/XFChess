@@ -55,10 +55,10 @@ anyhow = "1.0.75"
 borsh = "=1.5.7"
 
 # Braid/Iroh dependencies
-braid-iroh = { path = "../crates/braid-iroh" }
-iroh-gossip = { path = "../crates/iroh-gossip" }
-braid-core = { path = "../crates/braid-core" }
-braid_uri = { path = "../crates/braid_uri" }
+braid-iroh = { path = "../crates/networking/braid-iroh" }
+iroh-gossip = { path = "../crates/networking/iroh-gossip" }
+braid-core = { path = "../crates/networking/braid-core" }
+braid_uri = { path = "../crates/networking/braid_uri" }
 
 # Solana dependencies
 solana-sdk = "=2.2.1"
@@ -73,16 +73,16 @@ urlencoding = "2.1"
 printpdf = "0.7"
 
 # Chess engine for SAN generation
-nimzovich_engine = { path = "../crates/nimzovich_engine", features = ["std", "search"] }
+nimzovich_engine = { path = "../crates/engine/nimzovich_engine", features = ["std", "search"] }
 
 # Anti-cheat analysis engine
-xfchess-anticheat = { path = "../crates/xfchess-anticheat" }
+xfchess-anticheat = { path = "../crates/shared/xfchess-anticheat" }
 
 # Swiss pairing engine
-swiss-pairing = { path = "../crates/swiss-pairing", features = ["network"] }
+swiss-pairing = { path = "../crates/shared/swiss-pairing", features = ["network"] }
 
 # Braid HTTP-209 subscribe server
-xfchess-braid-server = { path = "../crates/xfchess-braid-server" }
+xfchess-braid-server = { path = "../crates/networking/xfchess-braid-server" }
 
 # Global state for anti-cheat
 once_cell = "1.19"

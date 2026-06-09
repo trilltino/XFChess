@@ -47,16 +47,16 @@ interface AuthResponse {
 // ---------------------------------------------------------------------------
 // Design tokens � matches web-solana color scheme
 // ---------------------------------------------------------------------------
-const PRIMARY    = "#ad5c2f";
-const PRIMARY_DIM    = "rgba(173,92,47,0.15)";
-const PRIMARY_BORDER = "rgba(173,92,47,0.4)";
-const ACCENT     = "#f4bb44";
-const BG         = "#081a14";
-const SURFACE    = "#0a211a";
-const CARD_BG    = "rgba(10,33,26,0.85)";
-const BORDER     = "rgba(255,255,255,0.08)";
+const PRIMARY    = "#ffffff";
+const PRIMARY_DIM    = "rgba(255,255,255,0.08)";
+const PRIMARY_BORDER = "rgba(255,255,255,0.30)";
+const ACCENT     = "#ffffff";
+const BG         = "#000000";
+const SURFACE    = "#0d0d0d";
+const CARD_BG    = "#111111";
+const BORDER     = "rgba(255,255,255,0.12)";
 const TEXT       = "#ffffff";
-const TEXT_DIM   = "#a0a0a0";
+const TEXT_DIM   = "#888888";
 const TEXT_MUTED = "rgba(255,255,255,0.25)";
 const INPUT_BG   = "rgba(255,255,255,0.04)";
 // Keep old names as aliases so unchanged code still compiles
@@ -71,23 +71,23 @@ const CONSENT_VERSION = 1;
 // Keyframes
 // ---------------------------------------------------------------------------
 const KEYFRAMES = `
-  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;800;900&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Outfit', 'Inter', -apple-system, sans-serif; background: ${BG}; color: ${TEXT}; overflow: hidden; }
+  body { font-family: 'Cinzel', serif; background: ${BG}; color: ${TEXT}; overflow: hidden; -webkit-font-smoothing: antialiased; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes wave { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-  @keyframes glow { 0%,100% { text-shadow: 0 0 20px rgba(173,92,47,0.5); } 50% { text-shadow: 0 0 40px rgba(173,92,47,0.9), 0 0 80px rgba(244,187,68,0.3); } }
+  @keyframes glow { 0%,100% { text-shadow: 0 0 20px rgba(255,255,255,0.3); } 50% { text-shadow: 0 0 40px rgba(255,255,255,0.6); } }
   @keyframes progress { from { width: 0%; } to { width: 100%; } }
   @keyframes pulse { 0%,100% { opacity:1; transform: scale(1); } 50% { opacity:0.6; transform: scale(0.97); } }
   @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
-  input { outline: none; font-family: 'Outfit', 'Inter', sans-serif; }
+  input { outline: none; font-family: 'Cinzel', serif; }
   input::placeholder { color: ${TEXT_MUTED}; }
-  button { cursor: pointer; font-family: 'Outfit', 'Inter', sans-serif; }
-  a { color: ${PRIMARY}; text-decoration: none; }
+  button { cursor: pointer; font-family: 'Cinzel', serif; }
+  a { color: ${TEXT_DIM}; text-decoration: none; }
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(173,92,47,0.3); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -111,35 +111,36 @@ function SiteNav() {
   const HOME = window.location.origin + "/";
   return (
     <nav style={{
-      position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
-      width: "92%", maxWidth: 520, height: 42, padding: "0 20px",
+      position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)",
+      width: "92%", maxWidth: 520, height: 48, padding: "0 20px",
       display: "flex", alignItems: "center", justifyContent: "space-between",
       zIndex: 100,
-      background: "rgba(8,26,20,0.75)",
+      background: "rgba(0,0,0,0.80)",
       border: `1px solid ${BORDER}`,
       borderRadius: 100,
       backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
-      boxShadow: `0 10px 40px rgba(0,0,0,0.6), 0 0 50px rgba(173,92,47,0.1)`,
+      boxShadow: `0 10px 40px rgba(0,0,0,0.6), 0 0 50px rgba(255,255,255,0.04)`,
+      transition: "all 0.3s ease",
     }}>
       <a href={HOME} style={{
-        display: "flex", alignItems: "center", gap: 8,
+        display: "flex", alignItems: "center", gap: 0,
         textDecoration: "none", userSelect: "none",
+        fontSize: 13, fontWeight: 700, letterSpacing: "0.06em", color: TEXT,
+        padding: "5px 12px", borderRadius: 20,
+        border: `1px solid rgba(255,255,255,0.08)`,
+        background: "rgba(255,255,255,0.05)",
       }}>
-        <span style={{ fontSize: 22, lineHeight: 1 }}></span>
-        <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.04em" }}>
-          <span style={{ color: PRIMARY }}>XF</span>
-          <span style={{ color: TEXT }}>Chess</span>
-        </span>
+        XFCHESS
       </a>
       <a href={HOME} style={{
-        fontSize: 12, fontWeight: 600, color: TEXT_DIM,
+        fontSize: 11, fontWeight: 600, color: TEXT_DIM,
         textDecoration: "none", letterSpacing: "0.04em",
-        padding: "6px 14px", borderRadius: 20,
+        padding: "5px 14px", borderRadius: 20,
         border: `1px solid ${BORDER}`,
         transition: "all 0.2s",
       }}
-        onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLAnchorElement).style.color = TEXT; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = BORDER; (e.currentTarget as HTMLAnchorElement).style.color = TEXT_DIM; }}
+        onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = TEXT; (e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.06)"; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = TEXT_DIM; (e.currentTarget as HTMLAnchorElement).style.background = "transparent"; }}
       >Home</a>
     </nav>
   );
@@ -148,17 +149,11 @@ function SiteNav() {
 function GridBg() {
   return (
     <>
-      {/* Deep green radial glow � matches web-solana bg */}
+      {/* Subtle white radial glow� matches web-solana bg */}
       <div style={{
         position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none",
-        background: `radial-gradient(ellipse 80% 60% at 50% 0%, rgba(173,92,47,0.12) 0%, transparent 70%),
-                     radial-gradient(ellipse 60% 40% at 80% 80%, rgba(244,187,68,0.06) 0%, transparent 60%)`,
-      }} />
-      {/* Subtle chess-board grid */}
-      <div style={{
-        position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none",
-        backgroundImage: `linear-gradient(rgba(173,92,47,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(173,92,47,0.06) 1px, transparent 1px)`,
-        backgroundSize: "56px 56px",
+        background: `radial-gradient(ellipse 80% 60% at 50% 0%, rgba(255,255,255,0.06) 0%, transparent 70%),
+                     radial-gradient(ellipse 60% 40% at 80% 80%, rgba(255,255,255,0.03) 0%, transparent 60%)`,
       }} />
     </>
   );
@@ -166,11 +161,9 @@ function GridBg() {
 
 function LogoMark({ size = 40 }: { size?: number }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, userSelect: "none" }}>
-      <span style={{ fontSize: size * 0.7, lineHeight: 1 }}></span>
-      <span style={{ fontSize: size * 0.55, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 800, letterSpacing: "-0.04em" }}>
-        <span style={{ color: RED }}>XF</span>
-        <span style={{ color: TEXT }}>Chess</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 0, userSelect: "none" }}>
+      <span style={{ fontSize: size * 0.55, fontFamily: "'Cinzel', serif", fontWeight: 800, letterSpacing: "0.08em", color: TEXT }}>
+        XFCHESS
       </span>
     </div>
   );
@@ -198,7 +191,7 @@ function Card({ children, style, showClose = true, onClose }: { children: React.
       width: "92%", maxWidth: 400, padding: "28px 32px", background: CARD_BG,
       border: `1px solid ${BORDER}`, borderRadius: 20,
       backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
-      boxShadow: `0 10px 40px rgba(0,0,0,0.6), 0 0 50px rgba(173,92,47,0.08)`,
+      boxShadow: `0 10px 40px rgba(0,0,0,0.6), 0 0 50px rgba(255,255,255,0.03)`,
       animation: "fadeUp 0.4s ease", position: "relative", zIndex: 1, ...style,
     }}>
       {showClose && (
@@ -212,7 +205,7 @@ function Card({ children, style, showClose = true, onClose }: { children: React.
             transition: "all 0.2s", zIndex: 100, fontWeight: "bold",
             boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
           }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(173,92,47,0.8)"; }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.25)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.1)"; }}
         >�</button>
       )}
@@ -229,9 +222,9 @@ function PrimaryBtn({
   return (
     <button onClick={onClick} disabled={disabled || loading} style={{
       width: "100%", padding: "14px 0", borderRadius: 10, border: "none",
-      background: disabled || loading ? "rgba(173,92,47,0.3)" : `linear-gradient(135deg, ${PRIMARY}, #8c4a26)`,
-      color: "#fff", fontSize: 15, fontWeight: 700, letterSpacing: "0.02em",
-      transition: "all 0.2s", boxShadow: disabled || loading ? "none" : `0 4px 20px rgba(173,92,47,0.35)`,
+      background: disabled || loading ? "rgba(255,255,255,0.12)" : "#ffffff",
+      color: disabled || loading ? TEXT_DIM : "#000000", fontSize: 15, fontWeight: 700, letterSpacing: "0.02em",
+      transition: "all 0.2s", boxShadow: disabled || loading ? "none" : `0 4px 20px rgba(255,255,255,0.15)`,
       display: "flex", alignItems: "center", justifyContent: "center", gap: 8, ...style,
     }}>
       {loading && <div style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTop: "2px solid #fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
@@ -272,8 +265,8 @@ function InputField({
 function ErrorMsg({ msg }: { msg: string }) {
   return (
     <div style={{
-      padding: "10px 14px", borderRadius: 10, background: "rgba(173,92,47,0.1)",
-      border: `1px solid ${PRIMARY_BORDER}`, color: ACCENT, fontSize: 13, marginBottom: 16,
+      padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)",
+      border: `1px solid rgba(255,255,255,0.20)`, color: TEXT, fontSize: 13, marginBottom: 16,
     }}>
        {msg}
     </div>
@@ -327,41 +320,18 @@ function EntryStep({
       <StepDots step="entry" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
         <LogoMark size={44} />
-        <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 16, fontFamily: "'Space Grotesk', sans-serif", color: TEXT }}>
-           Choose your identity path
-        </h2>
-        <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 6 }}>
-          Choose your identity path for XFChess
-        </p>
       </div>
 
       {launchError && <ErrorMsg msg={launchError} />}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <button
-          style={{ ...pathBtn, borderColor: ACCENT, background: "rgba(244,187,68,0.08)" }}
-          onClick={playOffline}
-          disabled={launching}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(244,187,68,0.15)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(244,187,68,0.08)"; }}
-        >
-          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.12)" }}></div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: ACCENT }}>Play Now (Offline)</div>
-            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Local play � no wallet or account needed</div>
-          </div>
-          {launching && <div style={{ width: 16, height: 16, border: `2px solid rgba(244,187,68,0.3)`, borderTop: `2px solid ${ACCENT}`, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
-        </button>
-
-        <div style={{ margin: "4px 0", height: 1, background: "rgba(255,255,255,0.05)" }} />
-
-        <button
           style={pathBtn}
           onClick={() => onChoice("wallet")}
           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
         >
-          <div style={{ ...iconCircle, background: "rgba(173,92,47,0.1)" }}>🔐</div>
+          <div style={{ ...iconCircle, background: "rgba(255,255,255,0.06)" }}>🔐</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 15 }}>Login with Wallet</div>
             <div style={{ fontSize: 12, color: TEXT_MUTED }}>Phantom / Solflare — for existing users</div>
@@ -374,7 +344,7 @@ function EntryStep({
           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
         >
-          <div style={{ ...iconCircle, background: "rgba(244,187,68,0.1)" }}>✉</div>
+          <div style={{ ...iconCircle, background: "rgba(255,255,255,0.06)" }}>✉</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 15 }}>Email + Password</div>
             <div style={{ fontSize: 12, color: TEXT_MUTED }}>Classic account — bring your own wallet</div>
@@ -527,7 +497,7 @@ function AuthStep({ onAuth, onBack, onClose }: { onAuth: (token: string, usernam
     <Card showClose={true} onClose={onClose}>
       <StepDots step="auth" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Space Grotesk', sans-serif", color: TEXT }}>
+        <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Cinzel', serif", color: TEXT }}>
           {mode === "login" ? "Account Login" : "Email Registration"}
         </h2>
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
@@ -577,7 +547,7 @@ function WalletStep({
   mode, onContinue, onAuth, onBack, onClose
 }: {
   mode: "login" | "link";
-  onContinue: (pubkey: string) => void;
+  onContinue: (pubkey: string, provider: any) => void;
   onAuth: (token: string, user: string, pubkey?: string) => void;
   onBack: () => void;
   onClose?: () => void;
@@ -656,7 +626,7 @@ function WalletStep({
         onAuth(auth.token, auth.username, pubkey);
       }
 
-      onContinue(pubkey);
+      onContinue(pubkey, provider ?? null);
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -674,7 +644,7 @@ function WalletStep({
     <Card showClose={true} onClose={onClose}>
       <StepDots step="wallet" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Space Grotesk', sans-serif", color: TEXT }}>
+        <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Cinzel', serif", color: TEXT }}>
           {mode === "login" ? "Wallet Sign-In" : "Link Your Wallet"}
         </h2>
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
@@ -747,18 +717,11 @@ function WalletStep({
 function SplashStep({ username, onComplete }: { username: string; onComplete: () => void }) {
   return (
     <div style={{ textAlign: "center" as const, position: "relative" as const, zIndex: 1, animation: "fadeUp 0.5s ease" }}>
-      <div style={{
-        fontSize: 72, marginBottom: 16,
-        animation: "glow 2s ease-in-out infinite, wave 3s ease-in-out infinite", display: "inline-block",
-      }}></div>
-
       <div style={{ marginBottom: 8 }}>
         <div style={{
-          fontSize: 32, fontWeight: 900, fontFamily: "'Space Grotesk', sans-serif",
-          background: `linear-gradient(135deg, ${PRIMARY}, ${ACCENT}, ${PRIMARY})`, backgroundSize: "200% auto",
-          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-          animation: "shimmer 2s linear infinite",
-        }}>XFChess</div>
+          fontSize: 32, fontWeight: 900, fontFamily: "'Cinzel', serif",
+          color: TEXT, letterSpacing: "0.1em",
+        }}>XFCHESS</div>
       </div>
 
       <p style={{ fontSize: 14, color: TEXT_DIM, marginBottom: 24 }}>
@@ -769,9 +732,9 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
         onClick={onComplete}
         style={{
           padding: "14px 32px", borderRadius: 10, border: "none",
-          background: `linear-gradient(135deg, ${PRIMARY}, #8c4a26)`,
-          color: "#fff", fontSize: 15, fontWeight: 700, letterSpacing: "0.02em",
-          cursor: "pointer", boxShadow: `0 4px 20px rgba(173,92,47,0.35)`,
+          background: "#ffffff",
+          color: "#000000", fontSize: 15, fontWeight: 700, letterSpacing: "0.02em",
+          cursor: "pointer", boxShadow: `0 4px 20px rgba(255,255,255,0.15)`,
           transition: "all 0.2s",
         }}
       >
@@ -890,18 +853,28 @@ function ProfileStep({
   onComplete,
   pubkey,
   isHotWallet = false,
+  walletProvider,
   onClose,
+  defaultHandle = "",
 }: {
   onComplete: (handle: string) => void;
   pubkey?: string | null;
   isHotWallet?: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  walletProvider?: any;
   onClose?: () => void;
+  defaultHandle?: string;
 }) {
-  const [handle, setHandle] = useState("");
+  const [handle, setHandle] = useState(defaultHandle || localStorage.getItem("xfchess_username") || "");
+  const [country, setCountry] = useState("GB");
+  const [dob, setDob] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [synced, setSynced] = useState<string | null>(null);
+
+  const hasProvider = !!walletProvider && !isHotWallet;
+  const MAX_DOB = new Date(Date.now() - 567_648_000_000).toISOString().split("T")[0];
 
   // On mount: try sync-profile (pulls on-chain canonical username into DB).
   // If the user already has an on-chain profile we skip the form entirely.
@@ -933,17 +906,55 @@ function ProfileStep({
     setError(null);
     try {
       const token = localStorage.getItem("xfchess_token");
-      if (token) {
-        const r = await fetch(`${API_BASE}/api/auth/username`, {
-          method: "PATCH",
+
+      if (hasProvider && pubkey) {
+        // ── On-chain profile creation ────────────────────────────────────────
+        if (!dob) throw new Error("Date of birth is required");
+        const dobTs = Math.floor(new Date(dob).getTime() / 1000);
+        const minDob = Math.floor(Date.now() / 1000) - 567_648_000;
+        if (dobTs > minDob) throw new Error("You must be 18 or older");
+        if (!token) throw new Error("Not authenticated");
+
+        // 1. Backend builds unsigned initProfile transaction
+        const buildResp = await fetch(`${API_BASE}/api/auth/init-profile-tx`, {
+          method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ username: handle }),
+          body: JSON.stringify({ username: handle, country, date_of_birth: dobTs }),
         });
-        if (!r.ok) {
-          const msg = await r.text().catch(() => "Failed to save username");
-          throw new Error(msg);
+        if (!buildResp.ok) throw new Error(await buildResp.text().catch(() => "Failed to build tx"));
+        const { tx_b64 } = await buildResp.json();
+
+        // 2. Deserialise (blockhash already set by backend) and sign
+        const txBytes = Uint8Array.from(atob(tx_b64), c => c.charCodeAt(0));
+        const tx = web3.Transaction.from(txBytes);
+        const signed = await walletProvider.signTransaction(tx);
+        const signedB64 = btoa(String.fromCharCode(...signed.serialize()));
+
+        // 3. Broadcast via backend
+        const broadcastResp = await fetch(`${API_BASE}/api/auth/broadcast-tx`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tx_b64: signedB64 }),
+        });
+        if (!broadcastResp.ok) throw new Error(await broadcastResp.text().catch(() => "Broadcast failed"));
+
+        // 4. Sync on-chain username back to SQLite
+        await fetch(`${API_BASE}/api/auth/sync-profile`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      } else {
+        // ── Off-chain only (hot wallet / no provider) ───────────────────────
+        if (token) {
+          const r = await fetch(`${API_BASE}/api/auth/username`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ username: handle }),
+          });
+          if (!r.ok) throw new Error(await r.text().catch(() => "Failed to save username"));
         }
       }
+
       localStorage.setItem("xfchess_username", handle);
       onComplete(handle);
     } catch (e: any) {
@@ -970,8 +981,7 @@ function ProfileStep({
       <Card showClose={true} onClose={onClose}>
         <StepDots step="profile" />
         <div style={{ textAlign: "center" as const, marginBottom: 24 }}>
-          <div style={{ fontSize: 40, marginBottom: 8 }}></div>
-          <h2 style={{ fontSize: 22, fontWeight: 800, color: TEXT }}>Profile Found</h2>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: TEXT, fontFamily: "'Cinzel', serif", letterSpacing: "0.05em" }}>Profile Found</h2>
           <p style={{ fontSize: 14, color: TEXT_DIM, marginTop: 8 }}>
             On-chain username: <strong style={{ color: PRIMARY }}>{synced}</strong>
           </p>
@@ -987,24 +997,63 @@ function ProfileStep({
     <Card showClose={true} onClose={onClose}>
       <StepDots step="profile" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Space Grotesk', sans-serif", color: TEXT }}>
+        <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Cinzel', serif", color: TEXT }}>
           Choose Your Handle
         </h2>
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
-          Pick a display name for the arena (3�20 chars)
+          Pick a display name for the arena
         </p>
       </div>
       {error && <ErrorMsg msg={error} />}
       <InputField label="Chess Handle" value={handle} onChange={setHandle} placeholder="e.g. DragonKnight99" />
-      <p style={{ fontSize: 11, color: TEXT_MUTED, textAlign: "center", marginBottom: 16 }}>
-        Create a full on-chain profile at{" "}
-        <a href="http://localhost:5173/profile" target="_blank" rel="noreferrer" style={{ color: PRIMARY }}>
-          xfchess.io/profile
-        </a>
-        {" "}to lock your username globally.
-      </p>
-      <PrimaryBtn onClick={submit} loading={saving} disabled={!handle || handle.length < 3}>
-        Finalise &amp; Enter Arena
+
+      {hasProvider && (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: TEXT_MUTED, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              Country
+            </label>
+            <select
+              value={country}
+              onChange={e => setCountry(e.target.value)}
+              style={{ background: INPUT_BG, border: `1px solid ${BORDER}`, color: TEXT, borderRadius: 8, padding: "10px 12px", fontSize: 14 }}
+            >
+              {[["GB","United Kingdom"],["BR","Brazil"],["CA","Canada"],["DE","Germany"],["OTHER","Other"]].map(([code, label]) => (
+                <option key={code} value={code} style={{ background: BG }}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: TEXT_MUTED, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              Date of Birth (must be 18+)
+            </label>
+            <input
+              type="date"
+              value={dob}
+              onChange={e => setDob(e.target.value)}
+              max={MAX_DOB}
+              style={{ background: INPUT_BG, border: `1px solid ${BORDER}`, color: TEXT, borderRadius: 8, padding: "10px 12px", fontSize: 14, colorScheme: "dark" }}
+            />
+          </div>
+          <p style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 4 }}>
+            Profile created on Solana Devnet. Country + DOB are required by law for wagered games.
+          </p>
+        </>
+      )}
+
+      {!hasProvider && (
+        <p style={{ fontSize: 11, color: TEXT_MUTED, textAlign: "center", marginBottom: 16 }}>
+          Username saved locally. Connect a wallet to lock your name on-chain.
+        </p>
+      )}
+
+      <PrimaryBtn
+        onClick={submit}
+        loading={saving}
+        disabled={!handle || handle.length < 3 || (hasProvider && !dob)}
+        style={{ marginTop: 12 }}
+      >
+        {hasProvider ? "Create Profile (Devnet)" : "Finalise & Enter Arena"}
       </PrimaryBtn>
     </Card>
   );
@@ -1018,12 +1067,15 @@ function Onboarding() {
     const params = new URLSearchParams(window.location.search);
     const s = params.get("step");
     if (s === "connect_wallet") return "wallet";
+    if (s === "profile") return "profile";
     return "consent";
   });
   const [username, setUsername] = useState("Player");
   const [ready, setReady] = useState(false);
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [path, setPath] = useState<"wallet" | "email" | "hot" | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [walletProvider, setWalletProvider] = useState<any>(null);
 
   // Force exact window size � Chrome ignores --window-size when already running
   useEffect(() => {
@@ -1031,12 +1083,66 @@ function Onboarding() {
   }, []);
 
   useEffect(() => {
-    // Always start disconnected — wallet must be connected each session.
-    apiGet<ConsentRecord | null>("/api/consent").then(record => {
-      if (record && record.version >= CONSENT_VERSION) {
-        setStep("entry");
-      }
-    }).catch(() => {}).finally(() => setReady(true));
+    const init = async () => {
+      // 1. Check if the wallet is already connected from a previous session.
+      try {
+        const status = await apiGet<{ connected: boolean; pubkey: string | null; username: string | null }>("/status");
+        if (status.connected && status.pubkey) {
+          const pk = status.pubkey;
+          setPubkey(pk);
+          setPath("wallet");
+
+          // 2. Try to pull the on-chain / backend profile for this pubkey.
+          const token = localStorage.getItem("xfchess_token");
+          let resolvedUsername: string | null = status.username ?? localStorage.getItem("xfchess_username");
+
+          if (token) {
+            try {
+              const r = await fetch(`${API_BASE}/api/auth/sync-profile`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (r.ok) {
+                const { username: syncedName } = await r.json();
+                resolvedUsername = syncedName;
+                localStorage.setItem("xfchess_username", syncedName);
+              }
+            } catch { /* fall through to stored name */ }
+          }
+
+          const finalName = resolvedUsername || pk.slice(0, 8);
+          setUsername(finalName);
+
+          // 3. If the game explicitly asked for profile creation, stay on profile step.
+          const forcedStep = new URLSearchParams(window.location.search).get("step");
+          if (forcedStep === "profile") {
+            setReady(true);
+            return;
+          }
+
+          // 4. Launch directly — no need to show the wallet flow again.
+          const launchToken = localStorage.getItem("xfchess_token");
+          try {
+            await apiPost("/api/game/launch", { pubkey: pk, hot: false, username: finalName, token: launchToken });
+          } catch (e) { console.error("[API] auto-launch failed:", e); }
+          setStep("splash");
+          setReady(true);
+          return;
+        }
+      } catch { /* bridge not ready yet or no persisted wallet — fall through */ }
+
+      // 4. No persisted wallet: check consent and show normal flow.
+      try {
+        const record = await apiGet<ConsentRecord | null>("/api/consent");
+        if (record && record.version >= CONSENT_VERSION) {
+          setStep("entry");
+        }
+      } catch { /* ignore */ }
+
+      setReady(true);
+    };
+    init();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleConsent = async () => {
@@ -1053,7 +1159,7 @@ function Onboarding() {
     }
   };
 
-  const handleAuth = (token: string, user: string, nextPubkey?: string) => {
+  const handleAuth = async (token: string, user: string, nextPubkey?: string) => {
     localStorage.setItem("xfchess_token", token);
     localStorage.setItem("xfchess_username", user);
     setUsername(user);
@@ -1061,17 +1167,46 @@ function Onboarding() {
       localStorage.setItem("xfchess_wallet_pubkey", nextPubkey);
       setPubkey(nextPubkey);
     }
+    // Push JWT to bridge so the game client can pick it up via GET /token
+    apiPost("/token", { token }).catch(() => {});
+
     if (path === "wallet" && nextPubkey) {
-      setStep("profile");
+      // Check whether this account already has a real username from a previous session.
+      // Skip the ProfileStep if they do — only show it for truly new accounts.
+      let resolvedUser = user;
+      let needsProfile = true;
+      try {
+        const me = await fetch(`${API_BASE}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(r => r.ok ? r.json() : null);
+        if (me && me.username && me.username.length > 8) {
+          // Existing account with a real handle — skip profile creation
+          resolvedUser = me.username;
+          localStorage.setItem("xfchess_username", resolvedUser);
+          setUsername(resolvedUser);
+          needsProfile = false;
+        }
+      } catch { /* non-critical */ }
+
+      if (needsProfile) {
+        setStep("profile");
+      } else {
+        setStep("splash");
+        handleGameLaunch(nextPubkey, path === "hot", resolvedUser);
+      }
       return;
     }
     // After email auth, we MUST connect a wallet to link them
     setStep("wallet");
   };
 
-  const handleWalletContinue = (pk: string) => {
+  const handleWalletContinue = (pk: string, provider: any) => {
     localStorage.setItem("xfchess_wallet", pk);
     setPubkey(pk);
+    setWalletProvider(provider);
+    // handleAuth will have already routed us — this fires after onAuth in WalletStep
+    // so we only reach here when onAuth was NOT called (edge case: provider connected
+    // but auth was skipped). Route to profile as safe default.
     setStep("profile");
   };
 
@@ -1126,11 +1261,20 @@ function Onboarding() {
           onComplete={handleProfileComplete}
           pubkey={pubkey}
           isHotWallet={path === "hot"}
+          walletProvider={walletProvider}
           onClose={() => window.close()}
+          defaultHandle={username !== "Player" ? username : undefined}
         />
       )}
 
-      {step === "splash"  && <SplashStep username={username} onComplete={() => console.log("Done")} />}
+      {step === "splash"  && <SplashStep username={username} onComplete={() => {
+        // Close the popup — game is already running
+        if ((window as any).__TAURI__) {
+          fetch(`${API_BASE}/hide`, { method: "POST" }).catch(() => {});
+        } else {
+          window.close();
+        }
+      }} />}
 
       {pubkey && <TransactionSigner pubkey={pubkey} />}
     </div>

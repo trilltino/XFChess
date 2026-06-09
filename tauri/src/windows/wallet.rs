@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use tauri::{AppHandle, Manager, Result, WebviewWindowBuilder, WebviewUrl};
 
-use crate::services::ipc::{IpcServer, WindowCommands};
+use crate::services::ipc::IpcServer;
 
 pub struct WalletWindow;
 

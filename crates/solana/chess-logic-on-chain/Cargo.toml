@@ -1,0 +1,17 @@
+[package]
+name = "chess-logic-on-chain"
+version = "0.1.0"
+edition = "2021"
+authors = ["trilltino"]
+description = "Shared chess logic and validation for XFChess (On-chain version)"
+
+[dependencies]
+bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
+nimzovich_engine = { path = "../../engine/nimzovich_engine", default-features = false, features = [] }
+serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
+
+[features]
+default = []
+std = ["nimzovich_engine/std"]
+
+[dev-dependencies]

@@ -10,9 +10,10 @@ use crate::game::components::HasMoved;
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
 use nimzovich_engine::{
-    game_from_fen, generate_pseudo_legal_moves, is_legal_move, Color, Game, BISHOP_ID, KING_ID,
-    KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID,
+    game_from_fen, generate_pseudo_legal_moves, is_legal_move, set_game_from_fen, Game,
+    BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID,
 };
+use std::collections::HashMap;
 
 /// The starting position FEN.
 const STARTING_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -34,6 +35,16 @@ pub struct ChessEngine {
     pub castling_rights: String,
     /// En passant target square in UCI notation.
     pub en_passant: Option<String>,
+    /// Legal moves per source square, rebuilt once per turn after sync.
+    /// Keyed by (file, rank). Empty map means cache is stale.
+    move_cache: HashMap<(u8, u8), Vec<(u8, u8)>>,
+    /// Set by execute_move after it syncs ECS→engine so update_game_phase can
+    /// skip the redundant second sync and only rebuild the move cache.
+    pub synced_this_move: bool,
+    /// True once rebuild_legal_move_cache has run for the current turn.
+    /// Prevents update_game_phase from re-syncing and re-building every frame
+    /// when no move has occurred.
+    pub move_cache_valid: bool,
 }
 
 /// A wrapper for a chess move to maintain some compatibility with the previous shakmaty-based API.
@@ -69,6 +80,9 @@ impl Default for ChessEngine {
             current_turn: PieceColor::White,
             castling_rights: "KQkq".to_string(),
             en_passant: None,
+            move_cache: HashMap::new(),
+            synced_this_move: false,
+            move_cache_valid: false,
         }
     }
 }
@@ -155,10 +169,19 @@ impl ChessEngine {
         &mut self,
         pieces: impl Iterator<Item = (Entity, &'a Piece, &'a HasMoved)>,
     ) {
+        self.move_cache.clear();
+        self.move_cache_valid = false;
         let mut board = [0i8; 64];
         let mut castling = CastlingRights::default();
 
         for (_, piece, has_moved) in pieces {
+            // Skip pieces that have been marked off-board (u8::MAX) — this happens
+            // immediately before sync when a piece is captured, because FadingCapture
+            // is applied via deferred Commands and the entity would otherwise appear
+            // at the destination square alongside the capturing piece.
+            if piece.x > 7 || piece.y > 7 {
+                continue;
+            }
             let sq = Self::square_to_index(piece.x, piece.y) as usize;
             let id = Self::piece_type_to_id(piece.piece_type);
             board[sq] = if piece.color == PieceColor::White {
@@ -207,30 +230,57 @@ impl ChessEngine {
     }
 
     pub fn refresh_position(&mut self) {
-        self.game = game_from_fen(&self.fen);
+        set_game_from_fen(&mut self.game, &self.fen);
     }
 
     // ─── Move generation ────────────────────────────────────────────────────
 
-    pub fn get_legal_moves_for_square(
-        &mut self,
-        square: (u8, u8),
-        color: PieceColor,
-    ) -> Vec<(u8, u8)> {
-        let src_idx = Self::square_to_index(square.0, square.1);
-        let sm_color = match color {
-            PieceColor::White => 1,
-            PieceColor::Black => -1,
-        };
+    /// Rebuild the legal-move cache for the current position.
+    /// Call this once per turn after syncing the engine from ECS.
+    /// All downstream per-click lookups read from this cache for free.
+    pub fn rebuild_legal_move_cache(&mut self) {
+        self.move_cache.clear();
+        let side = if self.fen.contains(" w ") { 1 } else { -1 };
+        let moves = generate_pseudo_legal_moves(&self.game, side);
+        for mv in moves {
+            if is_legal_move(&mut self.game, mv.src, mv.dst, side) {
+                let from = Self::index_to_coords(mv.src);
+                let to = Self::index_to_coords(mv.dst);
+                self.move_cache.entry(from).or_default().push(to);
+            }
+        }
+        self.move_cache_valid = true;
+    }
 
-        // Note: is_legal_move simulates the move and checks for check.
-        // We first generate pseudo-legal moves to get candidate destinations.
-        let moves = generate_pseudo_legal_moves(&self.game, sm_color);
-        moves.into_iter()
-            .filter(|mv| mv.src == src_idx)
-            .filter(|mv| is_legal_move(&mut self.game, mv.src, mv.dst, sm_color))
-            .map(|mv| Self::index_to_coords(mv.dst))
-            .collect()
+    /// Returns cached legal destinations for a square. Returns empty if no cache entry.
+    pub fn get_legal_moves_for_square(
+        &self,
+        square: (u8, u8),
+        _color: PieceColor,
+    ) -> Vec<(u8, u8)> {
+        self.move_cache.get(&square).cloned().unwrap_or_default()
+    }
+
+    /// Check if a move expressed as a 4-char UCI string (e.g. "e2e4") is legal.
+    /// Uses the cache when populated, otherwise falls back to a single legality test.
+    pub fn is_move_legal_by_uci(&mut self, uci: &str) -> bool {
+        if uci.len() < 4 {
+            return false;
+        }
+        let from_str = &uci[0..2];
+        let to_str = &uci[2..4];
+        let Some(from) = Self::uci_to_coords(from_str) else { return false; };
+        let Some(to) = Self::uci_to_coords(to_str) else { return false; };
+
+        if !self.move_cache.is_empty() {
+            return self.move_cache.get(&from).map_or(false, |dsts| dsts.contains(&to));
+        }
+
+        // Fallback: single legality check without cache
+        let side = if self.fen.contains(" w ") { 1 } else { -1 };
+        let src = Self::square_to_index(from.0, from.1);
+        let dst = Self::square_to_index(to.0, to.1);
+        is_legal_move(&mut self.game, src, dst, side)
     }
 
     pub fn current_fen(&self) -> &str {
@@ -242,15 +292,14 @@ impl ChessEngine {
         nimzovich_engine::is_in_check(&self.game, side)
     }
 
+    pub fn has_legal_moves(&self) -> bool {
+        !self.move_cache.is_empty()
+    }
+
     pub fn legal_moves(&self) -> Vec<MoveWrapper> {
-        let side = if self.fen.contains(" w ") { 1 } else { -1 };
-        let mut game_copy = self.game.clone();
-        let pseudo = generate_pseudo_legal_moves(&game_copy, side);
-        pseudo.into_iter()
-            .filter(|mv| is_legal_move(&mut game_copy, mv.src, mv.dst, side))
-            .map(|mv| MoveWrapper {
-                from: Self::index_to_coords(mv.src),
-                to: Self::index_to_coords(mv.dst),
+        self.move_cache.iter()
+            .flat_map(|(&from, dsts)| {
+                dsts.iter().map(move |&to| MoveWrapper { from, to })
             })
             .collect()
     }
@@ -280,7 +329,7 @@ impl ChessEngine {
     }
 
     pub fn set_from_fen(&mut self, fen_str: &str) -> Result<(), String> {
-        self.game = game_from_fen(fen_str);
+        set_game_from_fen(&mut self.game, fen_str);
         self.fen = fen_str.to_string();
         
         let parts: Vec<&str> = fen_str.split_whitespace().collect();

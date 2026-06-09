@@ -19,6 +19,34 @@ pub enum LobbyMode {
     #[default]
     Create,
     Join,
+    Browse,
+}
+
+/// ELO range matching preference for matchmaking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EloMatchPref {
+    Strict,   // ±50 ELO
+    #[default]
+    Expanded, // ±150 ELO
+    Any,      // no filter
+}
+
+impl EloMatchPref {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Strict => "Strict ±50",
+            Self::Expanded => "Normal ±150",
+            Self::Any => "Any ELO",
+        }
+    }
+
+    pub fn range(self) -> Option<u16> {
+        match self {
+            Self::Strict => Some(50),
+            Self::Expanded => Some(150),
+            Self::Any => None,
+        }
+    }
 }
 
 /// Async task outcome communicated back to the Bevy system.
@@ -69,6 +97,30 @@ pub struct SolanaLobbyState {
     pub cached_display_name: Option<String>,
     /// Cached node ID used when announcing wagered games to the VPS relay.
     pub cached_node_id: Option<String>,
+    /// Cached ELO from on-chain profile; 0 = unknown.
+    pub cached_elo: u16,
+    /// Cached VPS/backend region tag (e.g. "eu-central").
+    pub cached_region: Option<String>,
+    /// Optional room password (None = public).
+    pub room_password: Option<String>,
+    /// Time control: base seconds (default 300 = 5 min).
+    pub time_control_base: u32,
+    /// Time control: increment seconds per move (default 0).
+    pub time_control_inc: u32,
+    /// ELO matching preference.
+    pub elo_pref: EloMatchPref,
+    /// Session key expires_at Unix timestamp (from on-disk session; populated by sync_from_solana_state).
+    pub session_expires_at: Option<i64>,
+    /// Receiver for the on-chain active-game check (rejoin flow).
+    pub rejoin_rx: Option<oneshot::Receiver<Option<u64>>>,
+    /// Game ID found during rejoin check (displayed until dismissed).
+    pub rejoin_game_id: Option<u64>,
+    /// Cached wagered game listings for the Browse tab.
+    pub browse_games: Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>,
+    /// Last time the browse list was fetched.
+    pub browse_last_fetch: Option<std::time::Instant>,
+    /// Receiver for background browse-list fetch.
+    pub browse_rx: Option<crossbeam_channel::Receiver<Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>>>,
 }
 
 impl Default for SolanaLobbyState {
@@ -87,6 +139,18 @@ impl Default for SolanaLobbyState {
             cached_rpc_url: DEVNET_RPC_URL.to_string(),
             cached_display_name: None,
             cached_node_id: None,
+            cached_elo: 0,
+            cached_region: None,
+            room_password: None,
+            time_control_base: 300,
+            time_control_inc: 0,
+            elo_pref: EloMatchPref::default(),
+            session_expires_at: None,
+            rejoin_rx: None,
+            rejoin_game_id: None,
+            browse_games: Vec::new(),
+            browse_last_fetch: None,
+            browse_rx: None,
         }
     }
 }
@@ -106,7 +170,7 @@ impl Plugin for SolanaLobbyPlugin {
         app.init_resource::<SolanaLobbyState>()
             .init_resource::<crate::multiplayer::solana::addon::SolanaGameSync>()
             .init_resource::<crate::multiplayer::solana::addon::CompetitiveMatchState>()
-            .add_systems(Update, (sync_from_solana_state, poll_lobby_tasks).chain());
+            .add_systems(Update, (sync_from_solana_state, poll_lobby_tasks, poll_rejoin_check, poll_solana_browse).chain());
     }
 }
 
@@ -120,6 +184,8 @@ pub fn spawn_create_game(
     wallet_pubkey: Pubkey,
     wager_lamports: u64,
     match_type: u8,
+    time_base: u32,
+    time_inc: u32,
     tx: oneshot::Sender<Result<u64, String>>,
 ) {
     let program_id: solana_sdk::pubkey::Pubkey =
@@ -127,7 +193,7 @@ pub fn spawn_create_game(
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            let result = async_create_game(rpc_url, wallet_pubkey, program_id, wager_lamports, match_type).await;
+            let result = async_create_game(rpc_url, wallet_pubkey, program_id, wager_lamports, match_type, time_base, time_inc).await;
             let _ = tx.send(result);
         })
         .detach();
@@ -241,6 +307,8 @@ async fn async_create_game(
     program_id: solana_sdk::pubkey::Pubkey,
     wager_lamports: u64,
     match_type: u8,
+    time_base: u32,
+    time_inc: u32,
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::tauri_signer::sign_via_tauri_only;
     use crate::multiplayer::vps_client;
@@ -248,13 +316,13 @@ async fn async_create_game(
 
     // Gate: only wallets with profile + email + KYC may create a wagered match.
     if wager_lamports > 0 {
-        require_wager_eligibility_with_url(&wallet_pubkey.to_string())?;
+        crate::multiplayer::network::vps::identity::require_wager_eligibility(&wallet_pubkey.to_string())?;
     }
 
     let game_id: u64 = rand::random();
 
-    // 1. Ask VPS to generate session keypair → get session_pubkey.
-    let session_pubkey_str = vps_client::create_session(game_id, &wallet_pubkey.to_string())
+    // 1. Ask VPS to generate session keypair → get session_pubkey + platform fee.
+    let (session_pubkey_str, platform_fee_lamports) = vps_client::create_session(game_id, &wallet_pubkey.to_string())
         .map_err(|e| format!("vps create_session: {e}"))?;
     let session_pubkey: Pubkey = session_pubkey_str
         .parse()
@@ -267,9 +335,9 @@ async fn async_create_game(
         game_id,
         wager_lamports,
         match_type,
-        "US",
-        300, // base_time_seconds: Blitz 5+0 default
-        0,   // increment_seconds
+        platform_fee_lamports,
+        time_base as u64,
+        time_inc as u16,
     )
     .map_err(|e| format!("build create_game_ix: {e}"))?;
     let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
@@ -369,28 +437,6 @@ async fn async_lookup_game(
     Ok((wager_lamports, game_id))
 }
 
-/// Gate helper with structured error messages and profile URL.
-/// Fetches current status live and reports exactly which tiers are missing.
-fn require_wager_eligibility_with_url(wallet_pubkey: &str) -> Result<(), String> {
-    use crate::multiplayer::vps_client;
-    let backend_url = vps_client::vps_base();
-    let status = match vps_client::get_user_status(wallet_pubkey) {
-        Ok(s) => s,
-        Err(e) => return Err(format!("Wagered play requires verification. Could not check status: {}. Visit {}/profile", e, backend_url)),
-    };
-    if status.can_wager {
-        return Ok(());
-    }
-    let mut missing = Vec::new();
-    if !status.has_profile { missing.push("Profile"); }
-    if !status.has_email   { missing.push("Email"); }
-    if !status.has_kyc     { missing.push("KYC"); }
-    Err(format!(
-        "Wagered play requires: {} (missing). Visit {}/profile to complete.",
-        missing.join(" + "),
-        backend_url,
-    ))
-}
 
 /// Walk the Borsh-encoded Game account to find the wager_amount offset.
 fn parse_wager_offset(data: &[u8]) -> Result<usize, String> {
@@ -419,12 +465,12 @@ async fn async_join_game(
     use crate::multiplayer::vps_client;
 
     // Gate: joining any on-chain game requires the wager eligibility checks.
-    require_wager_eligibility_with_url(&wallet_pubkey.to_string())?;
+    crate::multiplayer::network::vps::identity::require_wager_eligibility(&wallet_pubkey.to_string())?;
 
     // 1. Ask VPS for a session keypair for this game.
     // The VPS uses get-or-create semantics, so the same session pubkey that was
     // stored in game.fee_payer during create_game is returned here.
-    let session_pubkey_str = vps_client::create_session(game_id, &wallet_pubkey.to_string())
+    let (session_pubkey_str, _) = vps_client::create_session(game_id, &wallet_pubkey.to_string())
         .map_err(|e| format!("vps create_session: {e}"))?;
     let session_pubkey: Pubkey = session_pubkey_str
         .parse()
@@ -505,18 +551,25 @@ fn poll_lobby_tasks(
                         .clone()
                         .unwrap_or_else(|| "unknown_node_id".to_string());
 
-                    if let Err(e) = crate::multiplayer::vps_client::p2p_announce_game(
-                        game_id.to_string(),
-                        &host_node_id,
-                        &display_name,
-                        lobby.wager_sol as f64,
-                        "solana_wager",
-                        300,
-                        0,
-                        Some(display_name.clone()),
-                        None,
-                        None,
-                    ) {
+                    let announce_result = if let Some(ref pwd) = lobby.room_password.clone() {
+                        crate::multiplayer::vps_client::p2p_announce_game_with_password(
+                            game_id.to_string(), &host_node_id, &display_name,
+                            lobby.wager_sol as f64, "solana_wager", 300, 0,
+                            Some(display_name.clone()),
+                            if lobby.cached_elo > 0 { Some(lobby.cached_elo) } else { None },
+                            lobby.cached_region.clone(),
+                            pwd.clone(),
+                        )
+                    } else {
+                        crate::multiplayer::vps_client::p2p_announce_game(
+                            game_id.to_string(), &host_node_id, &display_name,
+                            lobby.wager_sol as f64, "solana_wager", 300, 0,
+                            Some(display_name.clone()),
+                            if lobby.cached_elo > 0 { Some(lobby.cached_elo) } else { None },
+                            lobby.cached_region.clone(),
+                        )
+                    };
+                    if let Err(e) = announce_result {
                         warn!("[LOBBY] Failed to announce wagered game {} to VPS: {}", game_id, e);
                     } else {
                         info!("[LOBBY] Announced wagered game {} to VPS relay", game_id);
@@ -584,13 +637,124 @@ fn poll_lobby_tasks(
 fn sync_from_solana_state(
     solana: Res<crate::multiplayer::solana::integration::SolanaIntegrationState>,
     mut lobby: ResMut<SolanaLobbyState>,
+    region: Res<crate::multiplayer::social::BackendRegion>,
 ) {
     lobby.cached_balance = solana.balance;
     lobby.cached_rpc_url = DEVNET_RPC_URL.to_string();
+    lobby.cached_elo = solana.cached_elo;
+    if !region.tag.is_empty() {
+        lobby.cached_region = Some(region.tag.clone());
+    }
+    if lobby.cached_display_name.is_none() {
+        lobby.cached_display_name = solana.cached_display_name.clone();
+    }
 
     if lobby.cached_keypair_bytes.is_none() {
         if let Some(ref pubkey) = solana.wallet_pubkey {
             lobby.cached_keypair_bytes = Some(pubkey.to_bytes().to_vec());
+
+            // Read session key expiry once per wallet connection.
+            if lobby.session_expires_at.is_none() {
+                lobby.session_expires_at =
+                    crate::multiplayer::solana::session_key_manager::SessionKeyManager::expires_at(pubkey);
+            }
+
+            // Kick off a one-time on-chain active-game check for the rejoin flow.
+            if lobby.rejoin_rx.is_none() && lobby.rejoin_game_id.is_none() {
+                let (tx, rx) = oneshot::channel();
+                spawn_check_active_game(*pubkey, tx);
+                lobby.rejoin_rx = Some(rx);
+            }
         }
     }
+}
+
+/// Spawn a task that looks for an active on-chain game belonging to `wallet`.
+/// Resolves to Some(game_id) if one is found, None otherwise.
+pub fn spawn_check_active_game(
+    wallet_pubkey: Pubkey,
+    tx: oneshot::Sender<Option<u64>>,
+) {
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            // Enumerate up to 20 recent game IDs and check for an Active game owned by wallet.
+            // In practice the backend /games/active/{wallet} endpoint would be faster.
+            let result = crate::multiplayer::vps_client::get_active_game_for_wallet(
+                &wallet_pubkey.to_string(),
+            )
+            .ok()
+            .flatten();
+            let _ = tx.send(result);
+        })
+        .detach();
+}
+
+/// Poll the rejoin check receiver.
+fn poll_rejoin_check(mut lobby: ResMut<SolanaLobbyState>) {
+    if let Some(ref mut rx) = lobby.rejoin_rx {
+        match rx.try_recv() {
+            Ok(maybe_id) => {
+                lobby.rejoin_game_id = maybe_id;
+                lobby.rejoin_rx = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(_) => {
+                lobby.rejoin_rx = None;
+            }
+        }
+    }
+}
+
+/// Poll background browse-list fetch and auto-refresh every 10 seconds.
+pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
+    // Drain result if pending.
+    if let Some(ref rx) = lobby.browse_rx {
+        if let Ok(games) = rx.try_recv() {
+            lobby.browse_games = games;
+            lobby.browse_rx = None;
+        }
+    }
+
+    // Only refresh when Browse tab is active.
+    if lobby.mode != LobbyMode::Browse {
+        return;
+    }
+    let should_refresh = lobby
+        .browse_last_fetch
+        .map(|t| t.elapsed().as_secs() >= 10)
+        .unwrap_or(true);
+    if !should_refresh || lobby.browse_rx.is_some() {
+        return;
+    }
+    lobby.browse_last_fetch = Some(std::time::Instant::now());
+
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    lobby.browse_rx = Some(rx);
+    std::thread::spawn(move || {
+        match crate::multiplayer::vps_client::p2p_list_games() {
+            Ok(games) => {
+                let filtered: Vec<_> = games
+                    .into_iter()
+                    .filter(|g| g.game_type == "solana_wager" || g.game_type == "P2P")
+                    .map(|g| crate::multiplayer::network::p2p_vps::VpsGameListing {
+                        game_id: g.game_id,
+                        display_name: g.display_name,
+                        stake_amount: g.stake_amount,
+                        game_type: g.game_type,
+                        base_time_seconds: g.base_time_seconds,
+                        increment_seconds: g.increment_seconds,
+                        username: g.username,
+                        elo: g.elo,
+                        region: g.region,
+                        capacity: g.capacity,
+                        players_joined: g.players_joined,
+                        ttl_seconds: g.ttl_seconds,
+                        is_private: g.is_private,
+                    })
+                    .collect();
+                let _ = tx.send(filtered);
+            }
+            Err(e) => warn!("[SOLANA_BROWSE] Failed to fetch games: {}", e),
+        }
+    });
 }

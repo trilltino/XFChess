@@ -55,6 +55,7 @@
 pub mod active_time_control;
 pub mod history;
 pub mod player;
+pub mod menu_sounds;
 pub mod sounds;
 pub mod turn;
 
@@ -70,6 +71,7 @@ pub use active_time_control::*;
 pub use debug::*;
 pub use history::*;
 pub use player::*;
+pub use menu_sounds::*;
 pub use sounds::*;
 pub use system_params::*;
 pub use turn::*;

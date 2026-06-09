@@ -207,7 +207,7 @@ impl FriendManager {
             .fetch_one(&self.pool)
             .await?;
 
-        let (_, from_node, from_pk, from_disp, to_node, to_pk, status) = row;
+        let (_, from_node, from_pk, from_disp, _, to_pk, status) = row;
 
         if status != "pending" {
             anyhow::bail!("request already responded to");

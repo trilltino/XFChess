@@ -17,7 +17,7 @@ use std::{
 };
 use tracing::info;
 
-use super::state::{MatchResult, MatchmakingTicket, SharedMatchmakingState};
+use super::state::{MatchResult, MatchmakingTicket};
 
 /// Request to join the matchmaking queue.
 #[derive(Deserialize, Serialize)]

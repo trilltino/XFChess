@@ -18,26 +18,20 @@ pub fn check_profile_on_connect(
     tokio_runtime: Res<TokioRuntime>,
     mut last_wallet: Local<Option<String>>,
 ) {
-    // Get current wallet pubkey as string for comparison
     let current_wallet = solana_state.wallet_pubkey.map(|pk| pk.to_string());
-
-    // Skip if no wallet connected or same wallet as before
     if current_wallet.is_none() || current_wallet == *last_wallet {
         return;
     }
 
     let Some(wallet_pubkey) = solana_state.wallet_pubkey else {
-        warn!("[PROFILE] No wallet pubkey available for check");
         return;
     };
     *last_wallet = Some(wallet_pubkey.to_string());
 
-    // Skip if already checking
     if solana_state.checking_profile || solana_state.pending_profile_check.is_some() {
         return;
     }
 
-    // Mark as checking
     solana_state.checking_profile = true;
     solana_state.profile_status = ProfileStatus::Unknown;
 
@@ -48,48 +42,50 @@ pub fn check_profile_on_connect(
 
     let handle = tokio_runtime.0.spawn(async move {
         let rpc = RpcClient::new(rpc_url);
-
         match rpc.get_account(&profile_pda) {
             Ok(account) => {
                 let mut data: &[u8] = &account.data;
                 match PlayerProfile::try_deserialize(&mut data) {
                     Ok(profile) => {
-                        if profile.username_set {
-                            Ok(ProfileStatus::HasProfileWithUsername)
+                        let status = if profile.username_set {
+                            ProfileStatus::HasProfileWithUsername
                         } else {
-                            Ok(ProfileStatus::HasProfileNoUsername)
-                        }
+                            ProfileStatus::HasProfileNoUsername
+                        };
+                        let elo = Some(profile.elo_rating as u16);
+                        let display_name = if profile.username_set && !profile.username.is_empty() {
+                            Some(profile.username.clone())
+                        } else {
+                            None
+                        };
+                        Ok((status, elo, display_name))
                     }
                     Err(e) => {
-                        // SPECIFIC FIX: If we get AccountDidNotDeserialize (3003), it means the discriminator is wrong/legacy.
-                        // We treat this as "NoProfile" so the game can re-initialize it correctly in CreateGame/JoinGame.
                         let e_str = e.to_string();
                         if e_str.contains("3003") || e_str.contains("AccountDidNotDeserialize") {
-                            warn!("[PROFILE] Legacy profile detected (3003). Treating as NoProfile for re-init.");
-                            Ok(ProfileStatus::NoProfile)
+                            warn!("[PROFILE] Legacy profile detected (3003). Treating as NoProfile.");
+                            Ok((ProfileStatus::NoProfile, None, None))
                         } else {
                             Err(format!("Failed to deserialize profile: {}", e))
                         }
                     }
                 }
             }
-            Err(_) => {
-                // Account not found or network error
-                Ok(ProfileStatus::NoProfile)
-            }
+            Err(_) => Ok((ProfileStatus::NoProfile, None, None)),
         }
     });
 
     solana_state.pending_profile_check = Some(handle);
 }
 
-/// System to handle the results of the async profile check
+/// System to handle the results of the async profile check.
+/// Populates cached_elo and cached_display_name; redirects to ProfileCreation when needed.
 pub fn handle_profile_check_tasks(
     mut solana_state: ResMut<SolanaIntegrationState>,
+    mut menu_state: ResMut<NextState<crate::core::states::MenuState>>,
 ) {
     if let Some(task) = solana_state.pending_profile_check.take() {
         if task.is_finished() {
-            // Task is done, get the result
             let result = futures_lite::future::block_on(async {
                 match task.await {
                     Ok(res) => res,
@@ -100,27 +96,33 @@ pub fn handle_profile_check_tasks(
             solana_state.checking_profile = false;
 
             match result {
-                Ok(status) => {
+                Ok((status, elo, display_name)) => {
                     info!("[PROFILE] Async check complete: {:?}", status);
                     solana_state.profile_status = status;
 
-                    // If profile is missing or incomplete, just log it for now
-                    // We disable mandatory redirection to let the user test on-chain matches 
-                    // even if the profile update isn't deployed yet.
+                    if let Some(e) = elo {
+                        solana_state.cached_elo = e;
+                    }
+                    if display_name.is_some() {
+                        solana_state.cached_display_name = display_name;
+                    }
+
                     if status == ProfileStatus::NoProfile || status == ProfileStatus::HasProfileNoUsername {
-                        info!("[PROFILE] Profile is missing or incomplete, but skipping redirection for testing");
-                        // menu_state.set(MenuState::ProfileCreation);
+                        // Profile creation is handled in the Tauri popup — open it via bridge.
+                        info!("[PROFILE] Profile incomplete — opening Tauri profile step");
+                        std::thread::spawn(|| {
+                            let _ = reqwest::blocking::Client::new()
+                                .post("http://127.0.0.1:7454/api/open-profile-step")
+                                .send();
+                        });
                     }
                 }
                 Err(e) => {
                     error!("[PROFILE] Async check failed: {}", e);
-                    // Fallback: indicate profile issue but don't block
                     solana_state.profile_status = ProfileStatus::NoProfile;
-                    // menu_state.set(MenuState::ProfileCreation);
                 }
             }
         } else {
-            // Task still running, put it back
             solana_state.pending_profile_check = Some(task);
         }
     }
@@ -130,19 +132,7 @@ pub fn handle_profile_check_tasks(
 pub fn auto_init_profile(
     solana_state: ResMut<SolanaIntegrationState>,
 ) {
-    // Only if we have a wallet and no profile
-    if solana_state.wallet_pubkey.is_none() {
-        return;
-    }
-    
-    if solana_state.profile_status != ProfileStatus::NoProfile {
-        return;
-    }
-    
-    // In a real implementation, this would submit init_profile transaction
-    // For now, just update status to indicate profile should be initialized
-    info!("[PROFILE] Auto-init profile called - would submit init_profile tx");
-    
-    // After init_profile succeeds, the status would be updated to HasProfileNoUsername
-    // and user can proceed to set username
+    if solana_state.wallet_pubkey.is_none() { return; }
+    if solana_state.profile_status != ProfileStatus::NoProfile { return; }
+    info!("[PROFILE] Auto-init profile called — would submit init_profile tx");
 }

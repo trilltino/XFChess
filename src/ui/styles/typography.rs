@@ -34,6 +34,21 @@ impl TextStyle {
             .size(TextSize::CAPTION)
             .color(UiColors::TEXT_TERTIARY)
     }
+
+    /// Modal/popup title — CinzelBold, white, 20 px.
+    pub fn popup_title(text: impl Into<String>) -> egui::RichText {
+        egui::RichText::new(text)
+            .size(20.0)
+            .color(egui::Color32::WHITE)
+            .family(egui::FontFamily::Name("CinzelBold".into()))
+    }
+
+    /// Modal/popup subtitle or body — muted blue-gray, 13 px.
+    pub fn popup_body(text: impl Into<String>) -> egui::RichText {
+        egui::RichText::new(text)
+            .size(13.0)
+            .color(UiColors::TEXT_POPUP_BODY)
+    }
 }
 
 /// Text size presets

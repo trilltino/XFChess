@@ -33,6 +33,7 @@ pub struct CloseTournament<'info> {
 
 pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
+    require!(tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
     require!(
         tournament.status == TournamentStatus::Completed ||
         tournament.status == TournamentStatus::Active,

@@ -54,10 +54,14 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/me", get(me))
         .route("/add-email", post(add_email))
         .route("/sync-profile", post(sync_profile))
+        .route("/init-profile-tx", post(init_profile_tx))
+        .route("/broadcast-tx", post(broadcast_tx))
         .route("/username", axum::routing::patch(set_username))
         .route("/check-username/{username}", get(check_username))
         .route("/check-wallet/{wallet}", get(check_wallet))
         .route("/delete", post(delete_account))
+        .route("/siws-challenge", post(siws_challenge))
+        .route("/siws-verify", post(siws_verify))
 }
 
 // ── Shared response ────────────────────────────────────────────────────────────
@@ -265,6 +269,12 @@ struct MeResp {
     /// True when the account has a linked wallet, an approved KYC record in the
     /// vault, and CACF compliance for their jurisdiction.
     can_wager: bool,
+    /// True when the wallet has an initialised on-chain PlayerProfile PDA.
+    has_onchain_profile: bool,
+    /// ELO from the VPS backend (0 = unranked).
+    elo: u32,
+    /// ISO 3166-1 alpha-2 country from VPS record (empty if not set).
+    country: String,
 }
 
 /// GET /auth/me — validates Bearer JWT and returns caller profile.
@@ -296,6 +306,33 @@ async fn me(
     };
     let can_wager = wallet_linked && has_kyc && cacf_ok;
 
+    // Check whether an on-chain PlayerProfile PDA exists for this wallet.
+    let has_onchain_profile = if wallet_linked {
+        let rpc = std::sync::Arc::clone(&state.solana_rpc);
+        let wallet_pk = claims.sub.clone();
+        let program_id = state.program_id;
+        tokio::task::spawn_blocking(move || {
+            use std::str::FromStr;
+            let pubkey = solana_sdk::pubkey::Pubkey::from_str(&wallet_pk).ok()?;
+            let (profile_pda, _) = solana_sdk::pubkey::Pubkey::find_program_address(
+                &[b"profile", pubkey.as_ref()],
+                &program_id,
+            );
+            rpc.get_account(&profile_pda).ok().map(|_| true)
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false)
+    } else {
+        false
+    };
+
+    // Pull ELO from on-chain cache (non-fatal if missing or no profile yet).
+    let cached_elo = state.elo_cache.get_elo(&claims.sub).await.ok();
+    let elo = cached_elo.as_ref().map(|e| e.elo_rating as u32).unwrap_or(0);
+    let country = kyc_country.unwrap_or_default();
+
     Ok(Json(MeResp {
         wallet: user.0,
         username: user.1,
@@ -303,6 +340,9 @@ async fn me(
         kyc_status: user.3,
         wallet_linked,
         can_wager,
+        has_onchain_profile,
+        elo,
+        country,
     }))
 }
 
@@ -431,6 +471,168 @@ async fn sync_profile(
     Ok(Json(serde_json::json!({ "username": profile.username })))
 }
 
+// ── POST /auth/init-profile-tx ────────────────────────────────────────────────
+
+/// Builds an unsigned `initProfile` transaction and returns it as base64.
+/// The client signs with their wallet then broadcasts via Solana RPC.
+///
+/// Anchor instruction discriminator: sha256("global:init_profile")[0..8]
+/// = [0xd2, 0xa2, 0xd4, 0x5f, 0x5f, 0xba, 0x59, 0x77]
+#[derive(Deserialize)]
+struct InitProfileTxReq {
+    username: String,
+    country: String,
+    /// Unix timestamp (seconds). Must be ≥ 18 years before now.
+    date_of_birth: i64,
+}
+
+#[derive(Serialize)]
+struct InitProfileTxResp {
+    tx_b64: String,
+    profile_pda: String,
+}
+
+async fn init_profile_tx(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<InitProfileTxReq>,
+) -> Result<Json<InitProfileTxResp>, (StatusCode, String)> {
+    use solana_sdk::{
+        instruction::{AccountMeta, Instruction},
+        transaction::Transaction,
+        system_program,
+    };
+    use base64::engine::general_purpose;
+    use base64::Engine as _;
+
+    // Validate JWT → wallet pubkey
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(crate::signing::auth::extract_bearer)
+        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
+    let claims = state.jwt.verify(token)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
+    let wallet_pk = Pubkey::from_str(&claims.sub)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet in token".to_string()))?;
+
+    // Validate inputs
+    if req.username.len() < 3 || req.username.len() > 20 {
+        return Err((StatusCode::BAD_REQUEST, "Username must be 3–20 chars".to_string()));
+    }
+    let min_dob = chrono::Utc::now().timestamp() - 567_648_000; // 18 years
+    if req.date_of_birth <= 0 || req.date_of_birth > min_dob {
+        return Err((StatusCode::BAD_REQUEST, "Must be 18+ years old".to_string()));
+    }
+
+    let program_id = state.program_id;
+
+    // Derive PDAs
+    let (profile_pda, _) = Pubkey::find_program_address(
+        &[b"profile", wallet_pk.as_ref()],
+        &program_id,
+    );
+    let (username_record_pda, _) = Pubkey::find_program_address(
+        &[b"username", req.username.as_bytes()],
+        &program_id,
+    );
+
+    // Build instruction data: discriminator + borsh(username, country, date_of_birth)
+    // Borsh string: 4-byte LE length prefix + UTF-8 bytes
+    // Borsh i64: 8-byte LE
+    let discriminator: [u8; 8] = [0xd2, 0xa2, 0xd4, 0x5f, 0x5f, 0xba, 0x59, 0x77];
+    let mut data = Vec::with_capacity(64);
+    data.extend_from_slice(&discriminator);
+    // username
+    let un_bytes = req.username.as_bytes();
+    data.extend_from_slice(&(un_bytes.len() as u32).to_le_bytes());
+    data.extend_from_slice(un_bytes);
+    // country
+    let co_bytes = req.country.as_bytes();
+    data.extend_from_slice(&(co_bytes.len() as u32).to_le_bytes());
+    data.extend_from_slice(co_bytes);
+    // date_of_birth (i64 LE)
+    data.extend_from_slice(&req.date_of_birth.to_le_bytes());
+
+    let accounts = vec![
+        AccountMeta::new(profile_pda, false),
+        AccountMeta::new(username_record_pda, false),
+        AccountMeta::new(wallet_pk, true),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    let ix = Instruction { program_id, accounts, data };
+
+    // Fetch a recent blockhash so the transaction is immediately broadcastable.
+    let rpc = std::sync::Arc::clone(&state.solana_rpc);
+    let recent_blockhash = tokio::task::spawn_blocking(move || {
+        rpc.get_latest_blockhash()
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC blockhash: {e}")))?;
+
+    let tx = Transaction::new_unsigned(
+        solana_sdk::message::Message::new_with_blockhash(&[ix], Some(&wallet_pk), &recent_blockhash)
+    );
+    let tx_bytes = bincode::serialize(&tx)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {e}")))?;
+    let tx_b64 = general_purpose::STANDARD.encode(&tx_bytes);
+
+    info!("[Auth] Built init_profile_tx for {} username={}", wallet_pk, req.username);
+    Ok(Json(InitProfileTxResp {
+        tx_b64,
+        profile_pda: profile_pda.to_string(),
+    }))
+}
+
+// ── POST /auth/broadcast-tx ───────────────────────────────────────────────────
+
+/// Broadcast a signed and serialised transaction (bincode base64) to Solana.
+/// Returns the transaction signature on success.
+#[derive(Deserialize)]
+struct BroadcastTxReq {
+    /// Base64-encoded bincode-serialised signed Transaction.
+    tx_b64: String,
+}
+
+#[derive(Serialize)]
+struct BroadcastTxResp {
+    signature: String,
+}
+
+async fn broadcast_tx(
+    State(state): State<AppState>,
+    Json(req): Json<BroadcastTxReq>,
+) -> Result<Json<BroadcastTxResp>, (StatusCode, String)> {
+    use base64::engine::general_purpose;
+    use base64::Engine as _;
+    use solana_sdk::transaction::Transaction;
+    use solana_client::rpc_config::RpcSendTransactionConfig;
+    use solana_sdk::commitment_config::CommitmentConfig;
+
+    let tx_bytes = general_purpose::STANDARD.decode(&req.tx_b64)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("base64 decode: {e}")))?;
+
+    let tx: Transaction = bincode::deserialize(&tx_bytes)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("deserialize tx: {e}")))?;
+
+    let rpc = std::sync::Arc::clone(&state.solana_rpc);
+    let sig = tokio::task::spawn_blocking(move || {
+        rpc.send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig { skip_preflight: false, ..Default::default() },
+        )
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC broadcast: {e}")))?;
+
+    info!("[Auth] Broadcast tx: {sig}");
+    Ok(Json(BroadcastTxResp { signature: sig.to_string() }))
+}
+
 // ── PATCH /auth/username ──────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -529,6 +731,101 @@ async fn delete_account(
 
     info!("[Auth] GDPR erasure: {}", req.wallet);
     Ok(Json(serde_json::json!({ "ok": true, "message": "Account and KYC data erased." })))
+}
+
+// ── SIWS (Sign-In With Solana) ─────────────────────────────────────────────────
+//
+// Headless wallet auth for the game client — no browser extension required.
+// Flow:
+//   1. POST /auth/siws-challenge  →  { nonce }
+//   2. Client signs `"xfchess:siws:<nonce>"` with their wallet keypair
+//   3. POST /auth/siws-verify { wallet, signature, nonce }  →  AuthResp (JWT)
+//
+// Nonces are one-time-use and expire after 5 minutes.
+
+#[derive(Deserialize)]
+struct SiwsChallengeReq {
+    wallet: String,
+}
+
+#[derive(Deserialize)]
+struct SiwsVerifyReq {
+    wallet: String,
+    signature: String,
+    nonce: String,
+}
+
+/// POST /auth/siws-challenge — issues a one-time nonce for the wallet to sign.
+async fn siws_challenge(
+    State(state): State<AppState>,
+    Json(req): Json<SiwsChallengeReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    Pubkey::from_str(&req.wallet)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet address".to_string()))?;
+
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() + 300; // 5 minutes
+
+    state.siws_nonces
+        .lock()
+        .await
+        .insert(nonce.clone(), (req.wallet.clone(), expires_at));
+
+    info!("[SIWS] challenge issued for {}", req.wallet);
+    Ok(Json(serde_json::json!({ "nonce": nonce })))
+}
+
+/// POST /auth/siws-verify — verifies the signed nonce and returns a JWT.
+async fn siws_verify(
+    State(state): State<AppState>,
+    Json(req): Json<SiwsVerifyReq>,
+) -> Result<Json<AuthResp>, (StatusCode, String)> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Validate and consume the nonce
+    let (nonce_wallet, expires_at) = {
+        let mut map = state.siws_nonces.lock().await;
+        map.remove(&req.nonce)
+            .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unknown or already-used nonce".to_string()))?
+    };
+
+    if now > expires_at {
+        return Err((StatusCode::UNAUTHORIZED, "Nonce expired".to_string()));
+    }
+    if nonce_wallet != req.wallet {
+        return Err((StatusCode::UNAUTHORIZED, "Wallet mismatch for nonce".to_string()));
+    }
+
+    // Verify signature over `xfchess:siws:<nonce>`
+    let pk = Pubkey::from_str(&req.wallet)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet address".to_string()))?;
+    let sig = Signature::from_str(&req.signature)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signature format".to_string()))?;
+    let msg = format!("xfchess:siws:{}", req.nonce);
+    if !sig.verify(pk.as_ref(), msg.as_bytes()) {
+        return Err((StatusCode::UNAUTHORIZED, "Signature verification failed".to_string()));
+    }
+
+    // Ensure account exists (auto-create if first time)
+    let username = if let Some(user) = state.store.find_user_by_wallet(&req.wallet).await {
+        user.1
+    } else {
+        let default_username = req.wallet[..8.min(req.wallet.len())].to_string();
+        let _ = state.store.create_wallet_user(&req.wallet, &default_username, None).await;
+        default_username
+    };
+
+    let token = state.jwt.issue(&req.wallet)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    info!("[SIWS] verified + JWT issued for {}", req.wallet);
+    Ok(Json(AuthResp { token, username, wallet: req.wallet }))
 }
 
 // ── JWT issue (internal) ───────────────────────────────────────────────────────

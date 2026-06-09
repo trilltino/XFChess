@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { Link } from 'react-router-dom';
@@ -132,19 +132,19 @@ function SignupForm({
           maxLength={20}
           style={{
             ...inputStyle,
-            borderColor: usernameError ? '#ff8080' : newUsername ? '#14F195' : 'var(--border)',
+            borderColor: usernameError ? '#ff4444' : newUsername ? '#ffffff' : 'var(--border)',
             width: '100%',
             textAlign: 'center',
           }}
         />
         {usernameError && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ff8080', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ff4444', justifyContent: 'center' }}>
             <AlertCircle size={14} />
             {usernameError}
           </div>
         )}
         {!usernameError && newUsername && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#14F195', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ffffff', justifyContent: 'center' }}>
             {checkingUsername
               ? <><Loader2 size={14} className="spinner" /> Checking availability�</>
               : <><CheckCircle2 size={14} /> Username available</>
@@ -178,19 +178,19 @@ function SignupForm({
           required
           style={{
             ...inputStyle,
-            borderColor: emailError ? '#ff8080' : email ? '#14F195' : 'var(--border)',
+            borderColor: emailError ? '#ff4444' : email ? '#ffffff' : 'var(--border)',
             width: '100%',
             textAlign: 'center',
           }}
         />
         {emailError && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ff8080', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ff4444', justifyContent: 'center' }}>
             <AlertCircle size={14} />
             {emailError}
           </div>
         )}
         {!emailError && email && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#14F195', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ffffff', justifyContent: 'center' }}>
             <CheckCircle2 size={14} />
             Valid email format
           </div>
@@ -200,19 +200,19 @@ function SignupForm({
       {/* GDPR Compliance Notice */}
       <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(20, 241, 149, 0.05)', borderRadius: '8px', border: '1px solid rgba(20, 241, 149, 0.2)', textAlign: 'center' }}>
         <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-dim)', lineHeight: 1.6 }}>
-          <strong style={{ color: '#14F195' }}>Data Protection:</strong> Your email and username are stored securely 
+          <strong style={{ color: '#ffffff' }}>Data Protection:</strong> Your email and username are stored securely 
           for account recovery and wagered game verification. By proceeding, you consent to our{' '}
-          <Link to="/privacy" style={{ color: '#ad5c2f' }}>Privacy Policy</Link> and{' '}
-          <Link to="/kyc" style={{ color: '#ad5c2f' }}>KYC Terms</Link> (UK GDPR & AML compliant).
+          <Link to="/privacy" style={{ color: '#ffffff' }}>Privacy Policy</Link> and{' '}
+          <Link to="/kyc" style={{ color: '#ffffff' }}>KYC Terms</Link> (UK GDPR & AML compliant).
         </p>
       </div>
 
       {/* Wagering & Wallet Notice */}
-      <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(173, 92, 47, 0.05)', borderRadius: '8px', border: '1px solid rgba(173, 92, 47, 0.2)', textAlign: 'center' }}>
+      <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.10)', textAlign: 'center' }}>
         <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-dim)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> PvP wagering and Cash Tournaments require a Solana wallet and KYC verification.
-          <Link to="/kyc" style={{ color: '#ad5c2f', fontWeight: 600, marginLeft: '8px' }}>Complete KYC</Link> or{' '}
-          <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ad5c2f', fontWeight: 600 }}>create a wallet on Solflare</a>.
+          <Link to="/kyc" style={{ color: '#ffffff', fontWeight: 600, marginLeft: '8px' }}>Complete KYC</Link> or{' '}
+          <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ffffff', fontWeight: 600 }}>create a wallet on Solflare</a>.
         </p>
       </div>
 
@@ -337,7 +337,7 @@ export function ProfileViewer() {
 
       // 2. Create on-chain Anchor profile
       const program = getAnchorProgram(connection, wallet);
-      await createPlayerProfile(program, wallet.publicKey, newUsername, country);
+      await createPlayerProfile(program, wallet.publicKey, newUsername, country, 0);
 
       // 3. Register in backend DB (wallet signature proves ownership, no password)
       const timestamp = Math.floor(Date.now() / 1000);
@@ -487,7 +487,7 @@ export function ProfileViewer() {
                         {emailAddLoading ? '�' : 'Save'}
                       </button>
                       <button className="btn-small" style={{ background: 'transparent', opacity: 0.6 }} onClick={() => { setEmailAddOpen(false); setEmailAddError(null); }}></button>
-                      {emailAddError && <span style={{ color: '#ff8080', fontSize: 11 }}>{emailAddError}</span>}
+                      {emailAddError && <span style={{ color: '#ff4444', fontSize: 11 }}>{emailAddError}</span>}
                     </span>
                   ) : (
                     <button className="btn-small" onClick={() => setEmailAddOpen(true)}>Add Email</button>
@@ -669,7 +669,7 @@ function ChecklistRow({
   return (
     <div className="verify-row">
       <span className="label">
-        {ok ? <CheckCircle2 size={18} color="#14F195" /> : <XCircle size={18} color="#ff8080" />}
+        {ok ? <CheckCircle2 size={18} color="#ffffff" /> : <XCircle size={18} color="#ff4444" />}
         {label}
       </span>
       {action ?? <span className={`status ${ok ? 'ok' : 'miss'}`}>{ok ? 'OK' : 'Missing'}</span>}
@@ -685,4 +685,6 @@ const inputStyle: React.CSSProperties = {
   color: '#fff',
   fontSize: '1rem',
 };
+
+
 

@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (token: string, backendUrl: string): Promise<boolean> => {
     try {
       apiClient.setCredentials(token, backendUrl);
-      const response = await apiClient.getTournaments();
+      const response = await apiClient.getAuditLog(1);
       
       if (response.ok) {
         setAuthState({
