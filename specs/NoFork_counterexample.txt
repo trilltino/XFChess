@@ -1,0 +1,91 @@
+Error: Invariant NoFork is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ last_version = ( A :> [agent |-> "gen", seq |-> 0, content |-> 0] @@
+  B :> [agent |-> "gen", seq |-> 0, content |-> 0] )
+/\ own_seq = (A :> 0 @@ B :> 0)
+/\ net = {}
+/\ recv_last_seq = (A :> (A :> 0 @@ B :> 0) @@ B :> (A :> 0 @@ B :> 0))
+/\ accepted = (A :> <<>> @@ B :> <<>>)
+/\ head = ( A :> [agent |-> "gen", seq |-> 0, content |-> 0] @@
+  B :> [agent |-> "gen", seq |-> 0, content |-> 0] )
+
+State 2: <LocalMove(A) line 77, col 5 to line 85, col 50 of module CausalChain>
+/\ last_version = ( A :> [agent |-> A, seq |-> 1, content |-> 1] @@
+  B :> [agent |-> "gen", seq |-> 0, content |-> 0] )
+/\ own_seq = (A :> 1 @@ B :> 0)
+/\ net = { [ seq |-> 1,
+    sender |-> A,
+    parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+    version |-> [agent |-> A, seq |-> 1, content |-> 1] ] }
+/\ recv_last_seq = (A :> (A :> 0 @@ B :> 0) @@ B :> (A :> 0 @@ B :> 0))
+/\ accepted = (A :> <<>> @@ B :> <<>>)
+/\ head = ( A :> [agent |-> "gen", seq |-> 0, content |-> 0] @@
+  B :> [agent |-> "gen", seq |-> 0, content |-> 0] )
+
+State 3: <Equivocate(A) line 91, col 5 to line 97, col 73 of module CausalChain>
+/\ last_version = ( A :> [agent |-> A, seq |-> 1, content |-> 1] @@
+  B :> [agent |-> "gen", seq |-> 0, content |-> 0] )
+/\ own_seq = (A :> 1 @@ B :> 0)
+/\ net = { [ seq |-> 1,
+    sender |-> A,
+    parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+    version |-> [agent |-> A, seq |-> 1, content |-> 1] ],
+  [ seq |-> 2,
+    sender |-> A,
+    parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+    version |-> [agent |-> A, seq |-> 2, content |-> 1] ] }
+/\ recv_last_seq = (A :> (A :> 0 @@ B :> 0) @@ B :> (A :> 0 @@ B :> 0))
+/\ accepted = (A :> <<>> @@ B :> <<>>)
+/\ head = ( A :> [agent |-> "gen", seq |-> 0, content |-> 0] @@
+  B :> [agent |-> "gen", seq |-> 0, content |-> 0] )
+
+State 4: <Next line 131, col 8 to line 131, col 49 of module CausalChain>
+/\ last_version = ( A :> [agent |-> A, seq |-> 1, content |-> 1] @@
+  B :> [agent |-> "gen", seq |-> 0, content |-> 0] )
+/\ own_seq = (A :> 1 @@ B :> 0)
+/\ net = { [ seq |-> 1,
+    sender |-> A,
+    parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+    version |-> [agent |-> A, seq |-> 1, content |-> 1] ],
+  [ seq |-> 2,
+    sender |-> A,
+    parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+    version |-> [agent |-> A, seq |-> 2, content |-> 1] ] }
+/\ recv_last_seq = (A :> (A :> 0 @@ B :> 0) @@ B :> (A :> 1 @@ B :> 0))
+/\ accepted = ( A :> <<>> @@
+  B :>
+      << [ seq |-> 1,
+           sender |-> A,
+           parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+           version |-> [agent |-> A, seq |-> 1, content |-> 1] ] >> )
+/\ head = ( A :> [agent |-> "gen", seq |-> 0, content |-> 0] @@
+  B :> [agent |-> A, seq |-> 1, content |-> 1] )
+
+State 5: <Next line 131, col 8 to line 131, col 49 of module CausalChain>
+/\ last_version = ( A :> [agent |-> A, seq |-> 1, content |-> 1] @@
+  B :> [agent |-> "gen", seq |-> 0, content |-> 0] )
+/\ own_seq = (A :> 1 @@ B :> 0)
+/\ net = { [ seq |-> 1,
+    sender |-> A,
+    parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+    version |-> [agent |-> A, seq |-> 1, content |-> 1] ],
+  [ seq |-> 2,
+    sender |-> A,
+    parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+    version |-> [agent |-> A, seq |-> 2, content |-> 1] ] }
+/\ recv_last_seq = (A :> (A :> 0 @@ B :> 0) @@ B :> (A :> 2 @@ B :> 0))
+/\ accepted = ( A :> <<>> @@
+  B :>
+      << [ seq |-> 1,
+           sender |-> A,
+           parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+           version |-> [agent |-> A, seq |-> 1, content |-> 1] ],
+         [ seq |-> 2,
+           sender |-> A,
+           parent |-> [agent |-> "gen", seq |-> 0, content |-> 0],
+           version |-> [agent |-> A, seq |-> 2, content |-> 1] ] >> )
+/\ head = ( A :> [agent |-> "gen", seq |-> 0, content |-> 0] @@
+  B :> [agent |-> A, seq |-> 2, content |-> 1] )
+
+1283 states generated, 407 distinct states found, 316 states left on queue.
