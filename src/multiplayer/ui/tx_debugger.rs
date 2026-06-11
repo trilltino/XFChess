@@ -219,6 +219,8 @@ impl TransactionDebugger {
                     println!("\x1b[33m[!]\x1b[0m Game {} needs resync", game_id);
                 }
             }
+            // Braid reconnection events — no transaction log entry needed.
+            RollupEvent::ResyncedMove { .. } | RollupEvent::SnapshotReceived { .. } => {}
         }
     }
 

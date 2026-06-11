@@ -84,7 +84,7 @@ fn kind_highlight_egui(kind: u8) -> egui::Color32 {
 /// Board-coordinates → egui offset within the board widget.
 fn b2s(file: u8, rank: u8, sq: f32) -> egui::Vec2 {
     // White perspective: a-file left, rank-1 bottom
-    egui::Vec2::new(file as f32 * sq, (7 - rank) as f32 * sq)
+    egui::Vec2::new(file as f32 * sq, (7.0 - rank as f32) * sq)
 }
 
 /// Screen position → board (file, rank), returns None if outside the board.

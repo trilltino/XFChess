@@ -17,7 +17,7 @@
 //! ```
 
 use crate::error::BraidUriError;
-use crate::message::{ChatPayload, ChessMessage, EngineHint, MovePayload};
+use crate::message::{ChatPayload, ChessMessage, ClockState, EngineHint, MovePayload};
 use crate::patch::version_hash;
 use crate::uri::ChessUri;
 use braid_http::types::{BraidRequest, Version};
@@ -105,6 +105,19 @@ impl ChessPublisher {
             timestamp_ms,
         });
         self.put(ChessUri::chat(&self.game_id), msg, new_version).await
+    }
+
+    /// PUT a clock state snapshot onto the clock sub-resource.
+    ///
+    /// Called after each move so spectators and reconnecting players see live
+    /// time data without waiting for the next move.
+    pub async fn publish_clock(&mut self, state: &ClockState) -> Result<(), BraidUriError> {
+        let new_version = Version::new(version_hash(
+            &format!("clock:{}:{}", state.white_ms, state.black_ms),
+            0,
+        ));
+        let msg = ChessMessage::Clock(state.clone());
+        self.put(ChessUri::clock(&self.game_id), msg, new_version).await
     }
 
     /// PUT a Stockfish engine hint onto the engine sub-resource.

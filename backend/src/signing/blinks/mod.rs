@@ -25,7 +25,8 @@ pub mod routes;
 // Re-export core types for convenience
 pub use core::{
     Action, ActionLinks, ActionMetadata, BalanceResult, RegisterTransactionRequest,
-    TransactionResponse, ValidationResult, build_register_transaction, check_wallet_balance,
+    TransactionResponse, ValidationResult, build_claim_prize_transaction,
+    build_register_transaction, build_start_tournament_transactions, check_wallet_balance,
     get_action_metadata, validate_registration,
 };
 

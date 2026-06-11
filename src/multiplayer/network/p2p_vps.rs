@@ -24,6 +24,14 @@ use crate::core::states::GameState;
 
 use crossbeam_channel::{Receiver, Sender};
 
+/// Identity info about a joiner who has connected but the game hasn't started yet.
+#[derive(Clone, Debug)]
+pub struct PendingJoinerInfo {
+    pub node_id: String,
+    pub display_name: String,
+    pub elo_str: String,
+}
+
 /// Resource for P2P VPS relay state
 #[derive(Resource)]
 pub struct P2PVpsState {
@@ -52,6 +60,9 @@ pub struct P2PVpsState {
     /// the JoinerDetected handler so the host can be routed to the Solana
     /// contract creation flow before entering InGame.
     pub hosting_stake_amount: f64,
+    /// Joiner who has sent JOIN_ACK but the game hasn't yet started.
+    /// Used by the waiting screen to show who is about to join.
+    pub pending_joiner: Option<PendingJoinerInfo>,
 }
 
 impl Default for P2PVpsState {
@@ -69,6 +80,7 @@ impl Default for P2PVpsState {
             hosting_node_id: None,
             host_poll_last: None,
             hosting_stake_amount: 0.0,
+            pending_joiner: None,
         }
     }
 }
@@ -85,6 +97,8 @@ pub enum VpsResponse {
     JoinerDetected {
         game_id: String,
         joiner_node_id: String,
+        joiner_display: String,
+        joiner_elo: String,
     },
     Error(String),
 }
@@ -185,17 +199,25 @@ fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
         match vps_client::p2p_poll_messages(game_id.clone(), &node_id, 0) {
             Ok((messages, _)) => {
                 for msg in &messages {
-                    if let Some(joiner_id) = msg.strip_prefix("JOIN_ACK:") {
-                        info!("[P2P VPS] JOIN_ACK received from {}", joiner_id);
+                    if let Some(payload) = msg.strip_prefix("JOIN_ACK:") {
+                        // Format: "{node_id}|{display_name}|{elo}"
+                        // Older clients send only node_id with no pipes — handle both.
+                        let mut parts = payload.splitn(3, '|');
+                        let joiner_node_id = parts.next().unwrap_or(payload).to_string();
+                        let joiner_display = parts.next().unwrap_or("Guest").to_string();
+                        let joiner_elo = parts.next().unwrap_or("—").to_string();
+                        info!("[P2P VPS] JOIN_ACK received from {} ({} ELO {})", joiner_node_id, joiner_display, joiner_elo);
                         let _ = tx.send(VpsResponse::JoinerDetected {
                             game_id,
-                            joiner_node_id: joiner_id.to_string(),
+                            joiner_node_id,
+                            joiner_display,
+                            joiner_elo,
                         });
                         return;
                     }
                 }
             }
-            Err(e) => tracing::debug!("[P2P VPS] Host relay poll: {}", e),
+            Err(e) => warn!("[P2P VPS] Host relay poll failed: {}", e),
         }
     });
 }
@@ -297,9 +319,16 @@ fn handle_vps_responses(
                 }
             }
 
-            VpsResponse::JoinerDetected { game_id, joiner_node_id } => {
+            VpsResponse::JoinerDetected { game_id, joiner_node_id, joiner_display, joiner_elo } => {
                 let stake = vps_state.hosting_stake_amount;
-                info!("[P2P VPS] Joiner {} connected to {} (stake={:.3} SOL). Starting as host (White).", joiner_node_id, game_id, stake);
+                info!("[P2P VPS] Joiner {} ({} / {}) connected to {} (stake={:.3} SOL). Starting as host (White).", joiner_node_id, joiner_display, joiner_elo, game_id, stake);
+
+                // Store pending joiner info so the waiting screen can display it briefly.
+                vps_state.pending_joiner = Some(PendingJoinerInfo {
+                    node_id: joiner_node_id.clone(),
+                    display_name: joiner_display,
+                    elo_str: joiner_elo,
+                });
 
                 // Stop polling for joiners and clear stake so it isn't reused.
                 vps_state.hosting_game_id = None;

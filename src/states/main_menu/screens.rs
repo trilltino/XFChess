@@ -334,6 +334,7 @@ pub(super) fn render_spectator_popup(
     ctx: &egui::Context,
     competitive: &mut CompetitiveMenuState,
     cached_games: &[crate::multiplayer::network::p2p_vps::VpsGameListing],
+    spectate_writer: &mut Option<crate::multiplayer::traits::MessageWriter<crate::multiplayer::spectator::SpectateViaLinkEvent>>,
 ) {
     let accent_color = egui::Color32::from_rgb(173, 92, 47);
 
@@ -413,7 +414,10 @@ pub(super) fn render_spectator_popup(
                                     if ui.add_sized([60.0, 28.0], egui::Button::new(
                                         egui::RichText::new("Watch").size(11.0).color(egui::Color32::WHITE).strong()
                                     ).fill(egui::Color32::from_rgb(60, 100, 160)).corner_radius(4.0)).clicked() {
-                                        info!("[SPECTATOR] Watch clicked for game {}", game_id);
+                                        if let Some(ref mut w) = spectate_writer {
+                                            w.write(crate::multiplayer::spectator::SpectateViaLinkEvent { game_id: game_id.clone() });
+                                            competitive.show_spectator_popup = false;
+                                        }
                                     }
                                 });
                             });
@@ -587,13 +591,15 @@ fn render_join_lobby_popup(
                                     let local_node_id = ctx_menu.network_state.as_ref()
                                         .and_then(|ns| ns.node_id.as_ref().map(|id| bs58::encode(id.as_bytes()).into_string()))
                                         .unwrap_or_else(|| "unknown".to_string());
+                                    let joiner_display_name = ctx_menu.player_identity.display_name().to_string();
+                                    let joiner_elo_str = ctx_menu.player_identity.display_elo();
                                     let response_tx = ctx_menu.p2p_vps_state.as_ref().map(|vps| vps.response_tx.clone());
 
                                     if let Some(tx) = response_tx {
                                         bevy::tasks::IoTaskPool::get().spawn(async move {
                                             match crate::multiplayer::network::vps::p2p_join_game(game_id.clone(), &local_node_id) {
                                                 Ok(Some(host_id)) => {
-                                                    let ack = format!("JOIN_ACK:{}", local_node_id);
+                                                    let ack = format!("JOIN_ACK:{}|{}|{}", local_node_id, joiner_display_name, joiner_elo_str);
                                                     if let Err(e) = crate::multiplayer::vps_client::p2p_send_message(game_id.clone(), &local_node_id, &ack) {
                                                         warn!("[MENU] JOIN_ACK send failed: {}", e);
                                                     } else {
@@ -645,6 +651,9 @@ fn render_create_tab(
     gbp_per_sol: Option<f64>,
 ) {
     use crate::multiplayer::solana::lobby::EloMatchPref;
+
+    ui.heading(egui::RichText::new("Create Game").size(22.0).color(egui::Color32::from_rgb(100, 200, 255)).strong());
+    ui.add_space(12.0);
 
     let balance = lobby.cached_balance;
     let wallet_connected = lobby.cached_keypair_bytes.is_some();
@@ -739,8 +748,15 @@ fn render_create_tab(
 
     // Time control selector
     ui.label(egui::RichText::new("Time Control").size(13.0));
-    ui.horizontal(|ui| {
-        for (label, base, inc) in [("Bullet 1+0", 60u32, 0u32), ("Blitz 3+2", 180, 2), ("Blitz 5+0", 300, 0), ("Rapid 10+0", 600, 0)] {
+    ui.horizontal_wrapped(|ui| {
+        for (label, base, inc) in [
+            ("Bullet 1+0",  60u32,  0u32),
+            ("Blitz 3+2",   180,    2),
+            ("Blitz 5+0",   300,    0),
+            ("Rapid 10+0",  600,    0),
+            ("Rapid 15+10", 900,    10),
+            ("30 min",      1800,   0),
+        ] {
             let selected = lobby.time_control_base == base && lobby.time_control_inc == inc;
             if ui.selectable_label(selected, label).clicked() {
                 lobby.time_control_base = base;
@@ -1185,13 +1201,15 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
             let local_node_id = ctx.network_state.as_ref()
                 .and_then(|ns| ns.node_id.as_ref().map(|id| bs58::encode(id.as_bytes()).into_string()))
                 .unwrap_or_else(|| "unknown".to_string());
+            let joiner_display_name = ctx.player_identity.display_name().to_string();
+            let joiner_elo_str = ctx.player_identity.display_elo();
             let tx = ctx.p2p_vps_state.as_ref().map(|vps| vps.response_tx.clone());
             if let Some(tx) = tx {
                 let node_id_for_ack = local_node_id.clone();
                 std::thread::spawn(move || {
                     match crate::multiplayer::network::vps::p2p_join_game(game_id.clone(), &local_node_id) {
                         Ok(Some(host_id)) => {
-                            let ack = format!("JOIN_ACK:{}", node_id_for_ack);
+                            let ack = format!("JOIN_ACK:{}|{}|{}", node_id_for_ack, joiner_display_name, joiner_elo_str);
                             if let Err(e) = crate::multiplayer::vps_client::p2p_send_message(game_id.clone(), &node_id_for_ack, &ack) {
                                 warn!("[LOBBY] JOIN_ACK send failed: {}", e);
                             }
@@ -1217,7 +1235,6 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
         for (label, filter) in [
             ("All", crate::states::main_menu::LobbyFilter::All),
             ("Free", crate::states::main_menu::LobbyFilter::Free),
-            ("Wagered", crate::states::main_menu::LobbyFilter::Wagered),
         ] {
             if ui.selectable_label(ctx.competitive_menu.lobby_filter == filter,
                 egui::RichText::new(label).size(12.0)).clicked() {
@@ -1247,8 +1264,8 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     LobbySort::Newest    => "Newest",
                     LobbySort::EloAsc    => "ELO ↑",
                     LobbySort::EloDesc   => "ELO ↓",
-                    LobbySort::StakeAsc  => "Stake ↑",
-                    LobbySort::StakeDesc => "Stake ↓",
+                    LobbySort::StakeAsc  => "Newest",
+                    LobbySort::StakeDesc => "Newest",
                     LobbySort::TimeAsc   => "Time ↑",
                 }).size(12.0))
                 .show_ui(ui, |ui| {
@@ -1256,8 +1273,6 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                         ("Newest", LobbySort::Newest),
                         ("ELO ↑", LobbySort::EloAsc),
                         ("ELO ↓", LobbySort::EloDesc),
-                        ("Stake ↑", LobbySort::StakeAsc),
-                        ("Stake ↓", LobbySort::StakeDesc),
                         ("Time ↑", LobbySort::TimeAsc),
                     ] {
                         ui.selectable_value(&mut ctx.competitive_menu.lobby_sort, val, label);
@@ -1440,13 +1455,15 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                                 let local_node_id = ctx.network_state.as_ref()
                                     .and_then(|ns| ns.node_id.as_ref().map(|id| bs58::encode(id.as_bytes()).into_string()))
                                     .unwrap_or_else(|| "unknown".to_string());
+                                let joiner_display_name = ctx.player_identity.display_name().to_string();
+                                let joiner_elo_str = ctx.player_identity.display_elo();
                                 let tx = ctx.p2p_vps_state.as_ref().map(|vps| vps.response_tx.clone());
 
                                 if let Some(tx) = tx {
                                     std::thread::spawn(move || {
                                         match crate::multiplayer::network::vps::p2p_join_game(game_id.clone(), &local_node_id) {
                                             Ok(Some(host_id)) => {
-                                                let ack = format!("JOIN_ACK:{}", local_node_id);
+                                                let ack = format!("JOIN_ACK:{}|{}|{}", local_node_id, joiner_display_name, joiner_elo_str);
                                                 if let Err(e) = crate::multiplayer::vps_client::p2p_send_message(game_id.clone(), &local_node_id, &ack) {
                                                     warn!("[LOBBY] JOIN_ACK send failed: {}", e);
                                                 } else {
@@ -2056,8 +2073,67 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
 }
 
 pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
+    let welcome_closed_id = egui::Id::new("host_welcome_closed");
+    let welcome_closed = ui.ctx().data(|d| d.get_temp::<bool>(welcome_closed_id).unwrap_or(false));
+
+    if !welcome_closed {
+        let panel_frame = egui::Frame {
+            corner_radius: egui::CornerRadius::same(8),
+            fill: egui::Color32::from_rgba_unmultiplied(8, 8, 12, 240),
+            stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 28)),
+            inner_margin: egui::Margin::symmetric(18, 16),
+            ..egui::Frame::NONE
+        };
+        egui::Window::new("xfchess_welcome_panel")
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(-360.0, 0.0))
+            .fixed_size([280.0, 320.0])
+            .frame(panel_frame)
+            .show(ui.ctx(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Welcome to XFChess")
+                            .size(17.0)
+                            .color(egui::Color32::from_rgb(100, 200, 255))
+                            .strong(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let close = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("✕").size(13.0).color(egui::Color32::from_rgb(180, 180, 180)),
+                            )
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
+                        );
+                        if close.clicked() {
+                            ui.ctx().data_mut(|d| d.insert_temp(welcome_closed_id, true));
+                        }
+                        if close.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                    });
+                });
+
+                ui.add_space(3.0);
+                ui.label(
+                    egui::RichText::new("King_dev")
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(80, 160, 100))
+                        .italics(),
+                );
+
+                ui.add_space(10.0);
+                ui.add(egui::Separator::default().horizontal());
+                ui.add_space(10.0);
+
+                // Space for more text
+            });
+    }
+
     ui.vertical_centered(|ui| {
-        ui.heading(egui::RichText::new("HOST P2P GAME").size(24.0).color(egui::Color32::from_rgb(100, 200, 255)).strong());
+        ui.heading(egui::RichText::new("Create Game").size(24.0).color(egui::Color32::from_rgb(100, 200, 255)).strong());
         ui.add_space(16.0);
 
         ui.group(|ui| {
@@ -2073,101 +2149,44 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
         ui.group(|ui| {
             ui.label(egui::RichText::new("Time Control").size(15.0).color(egui::Color32::WHITE).strong());
             ui.add_space(8.0);
-            
+
+            // Preset mode buttons
+            ui.horizontal_wrapped(|ui| {
+                for (label, base_min, inc_sec) in [
+                    ("Bullet 1+0", 1u32, 0u16),
+                    ("Blitz 3+2",  3,    2),
+                    ("Blitz 5+0",  5,    0),
+                    ("Rapid 10+0", 10,   0),
+                    ("Rapid 15+10",15,   10),
+                    ("30 min",     30,   0),
+                ] {
+                    let selected = ctx.p2p_host.base_time_minutes == base_min
+                        && ctx.p2p_host.increment_seconds == inc_sec;
+                    let btn = egui::Button::new(egui::RichText::new(label).size(13.0))
+                        .fill(if selected {
+                            egui::Color32::from_rgb(40, 120, 200)
+                        } else {
+                            egui::Color32::from_rgb(40, 40, 50)
+                        });
+                    if ui.add(btn).clicked() {
+                        ctx.p2p_host.base_time_minutes = base_min;
+                        ctx.p2p_host.increment_seconds = inc_sec;
+                    }
+                }
+            });
+
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Custom").size(12.0).color(egui::Color32::GRAY));
+            ui.add_space(2.0);
+
             ui.horizontal(|ui| {
                 ui.label("Minutes per side:");
                 ui.add(egui::Slider::new(&mut ctx.p2p_host.base_time_minutes, 1..=60));
             });
-            
             ui.horizontal(|ui| {
                 ui.label("Increment (seconds):");
                 ui.add(egui::Slider::new(&mut ctx.p2p_host.increment_seconds, 0..=60));
             });
-        });
-
-        ui.add_space(12.0);
-
-        ui.group(|ui| {
-            ui.label(egui::RichText::new("Wager").size(15.0).color(egui::Color32::WHITE).strong());
-            ui.add_space(8.0);
-
-            // Currency toggle: GBP / USD
-            ui.horizontal(|ui| {
-                let gbp_selected = !ctx.p2p_host.wager_in_usd;
-                if ui.add(egui::SelectableLabel::new(gbp_selected, "£ GBP")).clicked() {
-                    ctx.p2p_host.wager_in_usd = false;
-                }
-                if ui.add(egui::SelectableLabel::new(!gbp_selected, "$ USD")).clicked() {
-                    ctx.p2p_host.wager_in_usd = true;
-                }
-            });
-
-            ui.add_space(6.0);
-
-            // Fiat amount input
-            let symbol = if ctx.p2p_host.wager_in_usd { "$" } else { "£" };
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(format!("{} per side:", symbol)).size(13.0).color(egui::Color32::LIGHT_GRAY));
-                ui.add_space(4.0);
-
-                let mut fiat_str = if ctx.p2p_host.wager_fiat > 0.0 {
-                    format!("{:.2}", ctx.p2p_host.wager_fiat)
-                } else {
-                    String::new()
-                };
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut fiat_str)
-                        .desired_width(80.0)
-                        .hint_text("0.00")
-                );
-                if resp.changed() {
-                    ctx.p2p_host.wager_fiat = fiat_str.parse::<f64>().unwrap_or(0.0).max(0.0);
-                    // Convert to SOL using live rate from wallet bridge
-                    let data = ctx.wallet_bridge.data.lock().unwrap();
-                    let rate = if ctx.p2p_host.wager_in_usd { data.sol_usd_rate } else { data.sol_gbp_rate };
-                    ctx.p2p_host.stake_amount = if rate > 0.0 { ctx.p2p_host.wager_fiat / rate } else { 0.0 };
-                }
-            });
-
-            // SOL equivalent
-            ui.add_space(4.0);
-            if ctx.p2p_host.wager_fiat > 0.0 {
-                let data = ctx.wallet_bridge.data.lock().unwrap();
-                let rate = if ctx.p2p_host.wager_in_usd { data.sol_usd_rate } else { data.sol_gbp_rate };
-                if rate > 0.0 {
-                    let sol_each = ctx.p2p_host.wager_fiat / rate;
-                    let pot = sol_each * 2.0;
-                    ui.label(
-                        egui::RichText::new(format!("≈ {:.4} SOL per side  •  pot {:.4} SOL", sol_each, pot))
-                            .size(11.5)
-                            .color(egui::Color32::GOLD),
-                    );
-                } else {
-                    ui.label(
-                        egui::RichText::new("Rate unavailable — connect wallet to fetch live price.")
-                            .size(10.5)
-                            .color(egui::Color32::from_rgb(200, 150, 80))
-                            .italics(),
-                    );
-                }
-            }
-
-            ui.add_space(4.0);
-            if ctx.p2p_host.wager_fiat > 0.0 {
-                ui.label(
-                    egui::RichText::new("Both players must have enough SOL in their wallet to join.")
-                        .size(10.5)
-                        .color(egui::Color32::from_rgb(160, 170, 130))
-                        .italics(),
-                );
-            } else {
-                ui.label(
-                    egui::RichText::new("Leave empty for a free game.")
-                        .size(10.5)
-                        .color(egui::Color32::from_rgb(130, 130, 140))
-                        .italics(),
-                );
-            }
         });
 
         ui.add_space(24.0);
@@ -2210,13 +2229,14 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
                     vps.hosting_game_id = Some(game_id.clone());
                     vps.hosting_node_id = Some(host_node_id.clone());
                     vps.host_poll_last = None; // trigger immediately
-                    vps.hosting_stake_amount = ctx.p2p_host.stake_amount;
+                    vps.hosting_stake_amount = 0.0;
+                    vps.pending_joiner = None; // clear any stale joiner from previous session
                 }
                 {
                     let gid = game_id.clone();
                     let nid = host_node_id.clone();
                     let dn = display_name.clone();
-                    let stake = ctx.p2p_host.stake_amount;
+                    let stake = 0.0_f64;
                     let base_secs = (ctx.p2p_host.base_time_minutes * 60) as u32;
                     let inc = ctx.p2p_host.increment_seconds as u16;
                     std::thread::spawn(move || {
@@ -2285,8 +2305,18 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
         }
         ui.add_space(30.0);
 
-        // Simple animated dots
-        ui.label(egui::RichText::new("• • •").size(32.0).color(egui::Color32::GOLD));
+        // Show joiner identity once detected, otherwise animated dots
+        let pending_joiner = ctx.p2p_vps_state.as_ref().and_then(|vps| vps.pending_joiner.clone());
+        if let Some(ref joiner) = pending_joiner {
+            ui.label(egui::RichText::new("Opponent found!").size(16.0).color(egui::Color32::from_rgb(100, 220, 100)).strong());
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new(&joiner.display_name).size(22.0).color(egui::Color32::WHITE).strong());
+            if joiner.elo_str != "—" {
+                ui.label(egui::RichText::new(format!("ELO  {}", joiner.elo_str)).size(14.0).color(egui::Color32::GOLD));
+            }
+        } else {
+            ui.label(egui::RichText::new("• • •").size(32.0).color(egui::Color32::GOLD));
+        }
 
         ui.add_space(40.0);
 
@@ -2352,6 +2382,7 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
             if let Some(ref mut vps) = ctx.p2p_vps_state {
                 vps.hosting_game_id = None;
                 vps.hosting_node_id = None;
+                vps.pending_joiner = None;
             }
             ctx.menu_state.set(crate::core::MenuState::BraidLobby);
         }

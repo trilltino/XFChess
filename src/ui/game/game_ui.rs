@@ -285,10 +285,10 @@ pub fn game_status_ui(mut params: GameUIParams) {
     params.avatar_cache.flush_pending(&ctx);
 
     // === CHECK/CHECKMATE BANNER ===
-    // Removed check banner - only show checkmate
     match params.game_state.game_phase.0 {
         GamePhase::Checkmate => render_checkmate_banner(&ctx, &params.game_state),
-        _ => {} // No banner for Playing, Stalemate, or Check
+        GamePhase::Check => render_check_banner(&ctx),
+        _ => {}
     }
 
     // === OPENING NAME ===
@@ -1178,7 +1178,6 @@ fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
 }
 
 /// Render a sleek "CHECK" indicator at the top of the screen
-#[allow(dead_code)]
 fn render_check_banner(ctx: &egui::Context) {
     egui::Window::new("check_banner")
         .title_bar(false)

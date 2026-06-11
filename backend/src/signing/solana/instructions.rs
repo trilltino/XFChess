@@ -8,6 +8,10 @@ use solana_sdk::{
 
 use super::{GAME_SEED, MAGIC_CONTEXT_PUBKEY, MAGIC_PROGRAM_PUBKEY, MOVE_LOG_SEED, PLATFORM_FEE_VAULT_SEED, PROFILE_SEED, SESSION_DELEGATION_SEED, TOURNAMENT_SEED, WAGER_ESCROW_SEED};
 
+const TOURNAMENT_ESCROW_SEED: &[u8]  = b"t_escrow";
+const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
+const TOURNAMENT_MATCH_SEED: &[u8]   = b"t_match";
+
 /// Computes the Anchor discriminator for a given instruction name.
 fn anchor_discriminator(name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
@@ -308,12 +312,12 @@ pub fn initialize_tournament_ix(
     data.extend_from_slice(host_treasury.as_ref());
     
     // Optional usdc_mint (None = 0)
-    data.push(0); 
-    
+    data.push(0);
+
     // Default time controls
     data.extend_from_slice(&600u64.to_le_bytes()); // 10 mins
     data.extend_from_slice(&0u16.to_le_bytes()); // 0 inc
- 
+
     Instruction {
         program_id: *program_id,
         accounts: vec![
@@ -321,6 +325,284 @@ pub fn initialize_tournament_ix(
             AccountMeta::new(*admin, true),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+        ],
+        data,
+    }
+}
+
+/// Builds an `initialize_tournament_escrow` instruction.
+/// Must be called after `initialize_tournament` and before `register_player`.
+pub fn initialize_escrow_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    authority: &Pubkey,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let mut data = anchor_discriminator("initialize_tournament_escrow").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new_readonly(tournament_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(*authority, true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+        ],
+        data,
+    }
+}
+
+/// Builds the correct `initialize_shards` instruction variant based on `max_players`.
+///
+/// - ≤ 64  → `initialize_shards_small`  (1 shard PDA)
+/// - ≤ 128 → `initialize_shards_medium` (2 shard PDAs)
+/// - 256   → `initialize_shards_large`  (4 shard PDAs)
+pub fn initialize_shards_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+    authority: &Pubkey,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let shard = |idx: u8| {
+        Pubkey::find_program_address(
+            &[TOURNAMENT_PLAYERS_SEED, &[idx], &tournament_id.to_le_bytes()],
+            program_id,
+        ).0
+    };
+
+    let discriminator_name = if max_players <= 64 {
+        "initialize_shards_small"
+    } else if max_players <= 128 {
+        "initialize_shards_medium"
+    } else {
+        "initialize_shards_large"
+    };
+
+    let mut data = anchor_discriminator(discriminator_name).to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Instruction {
+        program_id: *program_id,
+        accounts: if max_players <= 64 {
+            vec![
+                AccountMeta::new_readonly(tournament_pda, false),
+                AccountMeta::new(shard(0), false),
+                AccountMeta::new(*authority, true),
+                AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+            ]
+        } else if max_players <= 128 {
+            vec![
+                AccountMeta::new_readonly(tournament_pda, false),
+                AccountMeta::new(shard(0), false),
+                AccountMeta::new(shard(1), false),
+                AccountMeta::new(*authority, true),
+                AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+            ]
+        } else {
+            vec![
+                AccountMeta::new_readonly(tournament_pda, false),
+                AccountMeta::new(shard(0), false),
+                AccountMeta::new(shard(1), false),
+                AccountMeta::new(shard(2), false),
+                AccountMeta::new(shard(3), false),
+                AccountMeta::new(*authority, true),
+                AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+            ]
+        },
+        data,
+    }
+}
+
+/// Builds a `start_tournament` instruction.
+/// Locks registration and seeds players for bracket generation.
+/// All 4 shard PDAs are always passed; the program ignores extra ones.
+pub fn start_tournament_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    authority: &Pubkey,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let shard = |idx: u8| {
+        Pubkey::find_program_address(
+            &[TOURNAMENT_PLAYERS_SEED, &[idx], &tournament_id.to_le_bytes()],
+            program_id,
+        ).0
+    };
+
+    let mut data = anchor_discriminator("start_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new_readonly(shard(0), false),
+            AccountMeta::new_readonly(shard(1), false),
+            AccountMeta::new_readonly(shard(2), false),
+            AccountMeta::new_readonly(shard(3), false),
+            AccountMeta::new(*authority, true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+        data,
+    }
+}
+
+/// Builds an `initialize_match` instruction for a single bracket slot.
+/// `round`: 0-indexed. `next_match_for_winner`: None for the final.
+/// `next_match_slot`: 0 = white side, 1 = black side in the next match.
+pub fn initialize_match_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    match_index: u16,
+    round: u8,
+    player_white: Option<&Pubkey>,
+    player_black: Option<&Pubkey>,
+    next_match_for_winner: Option<u16>,
+    next_match_slot: u8,
+    authority: &Pubkey,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+    let match_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_MATCH_SEED, &tournament_id.to_le_bytes(), &match_index.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let mut data = anchor_discriminator("initialize_match").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&match_index.to_le_bytes());
+    data.push(round);
+    // Option<Pubkey> Borsh encoding
+    match player_white {
+        Some(pk) => { data.push(1); data.extend_from_slice(pk.as_ref()); }
+        None     => { data.push(0); }
+    }
+    match player_black {
+        Some(pk) => { data.push(1); data.extend_from_slice(pk.as_ref()); }
+        None     => { data.push(0); }
+    }
+    // Option<u16>
+    match next_match_for_winner {
+        Some(n) => { data.push(1); data.extend_from_slice(&n.to_le_bytes()); }
+        None    => { data.push(0); }
+    }
+    data.push(next_match_slot);
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(match_pda, false),
+            AccountMeta::new(*authority, true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+        data,
+    }
+}
+
+/// Builds a `record_match_result` instruction (VPS-signed).
+/// Resolves the on-chain `TournamentMatch` PDA and advances the bracket.
+pub fn record_result_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    match_index: u16,
+    winner: &Pubkey,
+    loser: &Pubkey,
+    game_pda: &Pubkey,
+    authority: &Pubkey,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+    let match_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_MATCH_SEED, &tournament_id.to_le_bytes(), &match_index.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let mut data = anchor_discriminator("record_match_result").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&match_index.to_le_bytes());
+    data.extend_from_slice(winner.as_ref());
+    data.extend_from_slice(loser.as_ref());
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(match_pda, false),
+            AccountMeta::new_readonly(*game_pda, false),
+            AccountMeta::new(*authority, true),
+        ],
+        data,
+    }
+}
+
+/// Builds a `claim_tournament_prize` instruction (player-signed).
+/// Pulls the claimant's share from the SOL escrow PDA. The program validates
+/// that the claimant matches a finishing position and prevents double-claim.
+pub fn claim_prize_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    claimant: &Pubkey,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+    let usdc_prize_authority = Pubkey::find_program_address(
+        &[b"t_usdc_prize", &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let mut data = anchor_discriminator("claim_tournament_prize").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new_readonly(usdc_prize_authority, false),
+            // usdc_prize_escrow — None (SOL-only path), omit optional accounts
+            // claimant_usdc_ata — None
+            // usdc_mint — None
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(*claimant, false),
+            AccountMeta::new(*claimant, true), // claimant signer
+            // SPL Token program (required by the program even on the SOL path)
+            AccountMeta::new_readonly(
+                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".parse().expect("spl token id"),
+                false,
+            ),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ],
         data,
     }

@@ -315,6 +315,7 @@ pub fn spawn_swiss_subscription(
             discovery: DiscoveryConfig::Real,
             secret_key: None,
             proxy_config: None,
+            data_dir: None,
         }).await {
             Ok(node) => node,
             Err(e) => {

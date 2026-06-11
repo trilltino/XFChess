@@ -387,9 +387,8 @@ pub fn spawn_piece_at(
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
     let (file, rank) = position;
-    // World position: X = file, Y = board surface, Z = rank
-    // GLB meshes from wooden_chess_board.glb are designed for integer-coordinate placement
-    let world_pos = Vec3::new(file as f32, PIECE_ON_BOARD_Y, rank as f32);
+    // World position: X = 7-file (mirrored so a-file is left from White camera), Y = board surface, Z = rank
+    let world_pos = Vec3::new(7.0 - file as f32, PIECE_ON_BOARD_Y, rank as f32);
 
     // Reference assets are already centered - no offsets needed
     let offset = Vec3::ZERO;

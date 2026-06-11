@@ -1163,7 +1163,7 @@ fn spawn_piece_at_replay(
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) -> Entity {
     let (file, rank) = position;
-    let world_pos = Vec3::new(file as f32, PIECE_ON_BOARD_Y, rank as f32);
+    let world_pos = Vec3::new(7.0 - file as f32, PIECE_ON_BOARD_Y, rank as f32);
 
     let mesh = meshes.get(piece_type, color);
     let rotation = replay_piece_rotation(piece_type, color);

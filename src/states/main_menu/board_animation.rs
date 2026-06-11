@@ -221,7 +221,7 @@ pub fn animate_board_system(
             for (entity, home, mut transform, mut visibility) in piece_reset_q.iter_mut() {
                 // Cancel any in-flight slide (safety — all animations finish well before reset)
                 commands.entity(entity).remove::<MenuBgPieceAnim>();
-                transform.translation = Vec3::new(home.file as f32, 0.05, home.rank as f32);
+                transform.translation = Vec3::new(7.0 - home.file as f32, 0.05, home.rank as f32);
                 *visibility = Visibility::Visible;
                 anim.board[home.rank as usize][home.file as usize] = Some(entity);
             }
@@ -263,8 +263,8 @@ pub fn animate_board_system(
         // next move fires (0.55 s animation, 2.0 s interval).
         if let Some(entity) = anim.board[fr as usize][ff as usize].take() {
             anim.board[tr as usize][tf as usize] = Some(entity);
-            let start = Vec3::new(ff as f32, 0.05, fr as f32);
-            let end   = Vec3::new(tf as f32, 0.05, tr as f32);
+            let start = Vec3::new(7.0 - ff as f32, 0.05, fr as f32);
+            let end   = Vec3::new(7.0 - tf as f32, 0.05, tr as f32);
             commands.entity(entity).insert(MenuBgPieceAnim { start, end, elapsed: 0.0, duration: 0.55 });
         }
     }

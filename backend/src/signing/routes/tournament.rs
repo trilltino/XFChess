@@ -28,6 +28,7 @@ use std::str::FromStr;
 
 use crate::signing::storage::tournament::{MatchStatus, TournamentRecord, TournamentStatus, TournamentFormat};
 use crate::signing::{AppState, TournamentTrigger};
+use crate::signing::solana::{initialize_escrow_ix, initialize_shards_ix, initialize_tournament_ix, record_result_ix, sign_and_submit};
 
 // ── Request / Response types ──────────────────────────────────────────────────
 
@@ -243,6 +244,52 @@ async fn create_tournament(
 
     let prize_shares = req.prize_shares.unwrap_or(default_shares);
 
+    // ── On-chain setup (3 sequential VPS-signed transactions) ────────────────
+    // All three must confirm before writing to the store. Failure returns 500
+    // without any store mutation so the admin can safely retry.
+    let program_id = Pubkey::from_str(&state.config.program_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let authority = &*state.vps_authority;
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+
+    // 1. initialize_tournament
+    let ix1 = initialize_tournament_ix(
+        &program_id,
+        &authority.pubkey(),
+        req.tournament_id,
+        &req.name,
+        entry_fee_lamports,
+        platform_fee_lamports,
+        req.max_players,
+        match format { TournamentFormat::Swiss { .. } => 1, _ => 0 },
+        match format { TournamentFormat::Swiss { rounds } => rounds, _ => 0 },
+        req.elo_min.unwrap_or(0),
+        req.elo_max.unwrap_or(u32::MAX),
+        req.min_players.unwrap_or(req.max_players),
+        prize_shares,
+        false,
+        &authority.pubkey(),
+    );
+    sign_and_submit(&rpc, authority, &[ix1]).map_err(|e| {
+        error!("[tournament] initialize_tournament tx failed for {}: {}", req.tournament_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // 2. initialize_escrow
+    let ix2 = initialize_escrow_ix(&program_id, req.tournament_id, &authority.pubkey());
+    sign_and_submit(&rpc, authority, &[ix2]).map_err(|e| {
+        error!("[tournament] initialize_escrow tx failed for {}: {}", req.tournament_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // 3. initialize_shards (variant chosen by max_players)
+    let ix3 = initialize_shards_ix(&program_id, req.tournament_id, req.max_players, &authority.pubkey());
+    sign_and_submit(&rpc, authority, &[ix3]).map_err(|e| {
+        error!("[tournament] initialize_shards tx failed for {}: {}", req.tournament_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // ── Store write (only after all 3 txs confirmed) ──────────────────────────
     let record = TournamentRecord::with_config(
         req.tournament_id,
         req.name.clone(),
@@ -259,8 +306,8 @@ async fn create_tournament(
     );
     store.create(record).await;
 
-    info!("[tournament] Created tournament {} '{}' ({} players, format: {:?}, entry: {} lamports, platform_fee: {} lamports)",
-        req.tournament_id, req.name, req.max_players, format.clone(), entry_fee_lamports, platform_fee_lamports);
+    info!("[tournament] Created tournament {} '{}' ({} players, format: {:?}, entry: {} lamports, on-chain PDAs initialized)",
+        req.tournament_id, req.name, req.max_players, format.clone(), entry_fee_lamports);
 
     Ok(Json(serde_json::json!({
         "ok": true,
@@ -431,6 +478,36 @@ async fn record_result(
     } else {
         info!("[tournament] Match {} of tournament {} won by {}", req.match_index, id, req.winner);
     }
+
+    // ── Mirror result on-chain (best-effort — store is already updated) ───────
+    if let (Ok(program_id), Ok(winner_pk), Ok(loser_pk)) = (
+        Pubkey::from_str(&state.config.program_id),
+        Pubkey::from_str(&req.winner),
+        Pubkey::from_str(&req.loser),
+    ) {
+        let authority = &*state.vps_authority;
+        let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+
+        // Use the zero pubkey as game_pda placeholder when no game_id is linked
+        let game_pda = store.get(id).await
+            .and_then(|t| t.matches.get(req.match_index).and_then(|m| m.as_ref()).and_then(|m| m.game_id))
+            .map(|gid| Pubkey::find_program_address(&[b"game", &gid.to_le_bytes()], &program_id).0)
+            .unwrap_or(solana_sdk::pubkey::Pubkey::default());
+
+        let ix = record_result_ix(
+            &program_id,
+            id,
+            req.match_index as u16,
+            &winner_pk,
+            &loser_pk,
+            &game_pda,
+            &authority.pubkey(),
+        );
+        if let Err(e) = sign_and_submit(&rpc, authority, &[ix]) {
+            error!("[tournament] record_result on-chain failed for match {} of tournament {}: {}", req.match_index, id, e);
+        }
+    }
+
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 

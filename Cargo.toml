@@ -158,6 +158,10 @@ web-time = "=1.1"
 [features]
 default = []
 profile = ["bevy/trace_tracy"]
+# Accept unsigned (0x01) P2P gossip messages. DEV/TEST ONLY — the default
+# build rejects unsigned moves so a peer cannot skip authentication by
+# sending plaintext. See docs/plans/causal-authentication.md (Gap A3).
+allow-unsigned-p2p = []
 solana = [
     "anchor-lang",
     "solana-sdk",
@@ -193,7 +197,7 @@ solana-sdk = { workspace = true, optional = true }
 solana-client = { workspace = true, optional = true }
 webbrowser = "1.1.0"
 braid_uri.workspace = true
-braid-iroh.workspace = true
+braid-iroh = { workspace = true, features = ["proxy"] }
 braid-core.workspace = true
 iroh-gossip.workspace = true
 solana-chess-client = { workspace = true, optional = true }

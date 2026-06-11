@@ -42,7 +42,12 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> (tokio:
     // Spawn tournament scheduler (with gossip so it can broadcast BracketFired)
     let tournament_store = (*state.tournament_store).clone();
     let gossip = Some(state.tournament_gossip.clone());
-    let trigger_tx = spawn_tournament_scheduler(tournament_store, gossip);
+    let on_chain = Some((
+        config.program_id.clone(),
+        config.solana_rpc_url.clone(),
+        state.vps_authority.clone(),
+    ));
+    let trigger_tx = spawn_tournament_scheduler(tournament_store, gossip, on_chain);
     info!("[Tasks] Tournament scheduler spawned with async-fill and gossip broadcast");
  
     // Spawn game archiver

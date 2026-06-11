@@ -318,6 +318,12 @@ impl Plugin for GamePlugin {
                 .run_if(in_state(GameState::InGame)),
         );
 
+        app.add_systems(
+            Update,
+            super::systems::camera::update_game_viewport
+                .run_if(in_state(GameState::InGame)),
+        );
+
         // Eval bar resources and update system
         app.init_resource::<crate::ui::game::game_2d::EvalBarState>();
         app.init_resource::<crate::ui::game::game_2d::EvalHistory>();

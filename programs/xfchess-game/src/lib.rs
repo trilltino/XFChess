@@ -269,6 +269,7 @@ pub mod xfchess_game {
         next_board: [u8; 68],
         nonce: u64,
         signature: Option<Vec<u8>>,
+        parent_nonce: Option<u64>,
     ) -> Result<()> {
         crate::moves_ix::record::handler(
             ctx,
@@ -277,6 +278,7 @@ pub mod xfchess_game {
             next_board,
             nonce,
             signature,
+            parent_nonce,
         )
     }
 

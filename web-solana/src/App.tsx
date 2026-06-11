@@ -21,7 +21,6 @@ import NewsRelease from './pages/NewsRelease';
 import { Tournaments } from './pages/Tournaments';
 import { ChessComputer } from './pages/ChessComputer';
 import { Home } from './pages/Home';
-import { Pvp } from './pages/Pvp';
 import Spectate from './pages/Spectate';
 import TournamentDetail from './pages/TournamentDetail';
 import TournamentStandings from './pages/TournamentStandings';
@@ -231,7 +230,6 @@ function AppContent() {
                                     exit="exit"
                                     transition={{ duration: 0.2 }}
                                 >
-                                    <Link to="/pvp" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>PvP</Link>
                                     <Link to="/tournaments" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Tournament</Link>
                                     <Link to="/computer" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Chess Computer</Link>
                                 </motion.div>
@@ -376,7 +374,6 @@ function AppContent() {
                     <Routes location={location} key={location.pathname}>
                         <Route path="/" element={<Navigate to="/home" replace />} />
                         <Route path="/home" element={<Home />} />
-                        <Route path="/pvp" element={<Pvp />} />
                         <Route path="/players" element={<Players />} />
                         <Route path="/verify" element={<VerifyProfile />} />
                         <Route path="/play" element={<PlayPage />} />

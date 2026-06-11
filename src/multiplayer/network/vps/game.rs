@@ -217,6 +217,43 @@ pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String
     Ok(resp.moves.into_iter().map(|m| m.move_uci).collect())
 }
 
+/// Fetch the full move log for a game as typed [`braid_uri::MovePayload`] values.
+///
+/// Used by Braid reconnection recovery: the caller filters the returned list
+/// to find moves that arrived after a given `since_version` hash.
+pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_uri::MovePayload>, String> {
+    #[derive(serde::Deserialize)]
+    struct MoveEntry {
+        move_uci: String,
+        fen_after: String,
+        move_number: u32,
+        player: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct MovesResp { moves: Vec<MoveEntry> }
+
+    let response = client()?
+        .get(format!("{}/games/{}/moves", vps_base(), game_id))
+        .send()
+        .map_err(|e| format!("fetch_move_log: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        return Err(format!("fetch_move_log: HTTP {status}"));
+    }
+    let resp = response
+        .json::<MovesResp>()
+        .map_err(|e| format!("fetch_move_log parse: {e}"))?;
+    Ok(resp.moves
+        .into_iter()
+        .map(|m| braid_uri::MovePayload::from_uci(
+            m.move_uci,
+            m.fen_after,
+            m.move_number,
+            m.player.unwrap_or_default(),
+        ))
+        .collect())
+}
+
 /// Submit a dispute for a completed wager game. The VPS builds and submits the
 /// `dispute` on-chain instruction and opens a 48-hour arbitration window.
 pub fn vps_submit_dispute(game_id: u64, disputing_player: &str) -> Result<String, String> {

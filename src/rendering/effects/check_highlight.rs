@@ -34,7 +34,7 @@ pub fn update_check_highlight_system(
     let king_color = current_turn.color;
     let king_pos = pieces.iter()
         .find(|p| p.piece_type == PieceType::King && p.color == king_color)
-        .map(|p| Vec3::new(p.x as f32, 1.2, p.y as f32));
+        .map(|p| Vec3::new(7.0 - p.x as f32, 1.2, p.y as f32));
 
     let Some(pos) = king_pos else { return };
 

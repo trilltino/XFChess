@@ -3092,6 +3092,8 @@ dependencies = [
  "http 1.4.0",
  "iroh",
  "iroh-gossip",
+ "iroh-h3-axum",
+ "iroh-h3-client",
  "n0-future",
  "parking_lot",
  "rand 0.10.0",

@@ -21,6 +21,7 @@ import bs58 from 'bs58';
 import { submitSignup, getUserStatus, registerWithWallet, checkUsernameAvailable, addEmail, syncProfile, type UserStatus } from '../lib/api';
 import { KycModal } from '../components/KycModal';
 import { MatchHistory } from '../components/MatchHistory';
+import { LichessLinkCard } from '../components/LichessLinkCard';
 
 const COUNTRIES = [
   { code: 'GB', label: 'United Kingdom' },
@@ -514,6 +515,28 @@ export function ProfileViewer() {
               label="Eligible for wagered play"
               ok={status?.can_wager ?? false}
             />
+            <ChecklistRow
+              label="Lichess linked"
+              ok={!!(profile?.data.lichessUsername)}
+              action={
+                !profile?.data.lichessUsername && wallet.publicKey ? (
+                  <button
+                    className="btn-small"
+                    onClick={async () => {
+                      try {
+                        const { initLichessLink } = await import('../lib/api/lichess');
+                        const { authUrl } = await initLichessLink(wallet.publicKey!.toBase58());
+                        window.open(authUrl, 'lichess_oauth', 'width=600,height=700');
+                      } catch (err) {
+                        alert(err instanceof Error ? err.message : 'Failed to start Lichess link');
+                      }
+                    }}
+                  >
+                    Link
+                  </button>
+                ) : undefined
+              }
+            />
           </div>
         )}
 
@@ -563,28 +586,14 @@ export function ProfileViewer() {
                     </div>
                   </div>
 
-                  {/* Link Lichess OAuth */}
-                  <div style={{ marginTop: 16, textAlign: 'center' }}>
-                    <button
-                      onClick={async () => {
-                        if (!wallet.publicKey) return;
-                        try {
-                          const { initLichessLink } = await import('../lib/api/lichess');
-                          const { authUrl } = await initLichessLink(wallet.publicKey.toBase58());
-                          window.open(authUrl, 'lichess_oauth', 'width=600,height=700');
-                        } catch (err) {
-                          alert(err instanceof Error ? err.message : 'Failed to start Lichess link');
-                        }
-                      }}
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.9rem', padding: '8px 16px' }}
-                    >
-                      Link Lichess Account
-                    </button>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-                      Seed your ELO from your verified Lichess rating
-                    </p>
-                  </div>
+                  <LichessLinkCard
+                    walletPubkey={wallet.publicKey?.toBase58() ?? null}
+                    lichessUsername={profile?.data.lichessUsername}
+                    lichessBlitz={profile?.data.lichessBlitz}
+                    lichessRapid={profile?.data.lichessRapid}
+                    lichessBullet={profile?.data.lichessBullet}
+                    lichessVerified={profile?.data.lichessVerified}
+                  />
 
                   <div style={{ marginTop: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
                     <a

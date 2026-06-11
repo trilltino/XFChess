@@ -102,9 +102,11 @@ impl BoardPos {
     }
 
     /// World-space X coordinate (file maps to X).
+    /// Files are mirrored (7 - file) so that from the White-side camera (at -Z looking +Z,
+    /// whose right vector is -X), a-file appears on screen-left and h-file on screen-right.
     #[inline]
     pub fn world_x(self) -> f32 {
-        self.file as f32
+        7.0 - self.file as f32
     }
 
     /// World-space Z coordinate (rank maps to Z).

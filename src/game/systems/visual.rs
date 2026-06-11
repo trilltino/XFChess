@@ -124,7 +124,7 @@ pub fn animate_piece_movement(
                 transform.translation = Vec3::new(base.x, base.y + arc_y, base.z);
             }
         } else {
-            let target = Vec3::new(piece.x as f32, PIECE_ON_BOARD_Y, piece.y as f32);
+            let target = Vec3::new(7.0 - piece.x as f32, PIECE_ON_BOARD_Y, piece.y as f32);
             if (transform.translation - target).length() > 0.01 {
                 transform.translation = target;
             }

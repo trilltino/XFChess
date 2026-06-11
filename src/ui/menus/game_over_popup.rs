@@ -113,6 +113,9 @@ pub struct CachedGamePgn {
     pub pgn: Option<nimzovich_engine::ParsedPgnGame>,
     pub pgn_string: String,
     pub final_fen: String,
+    /// Set to `true` once the authoritative Braid/VPS PGN has replaced the local one.
+    /// While `false`, Review/Save buttons show a subtle loading indicator.
+    pub braid_pgn_ready: bool,
 }
 
 pub fn cache_pgn_on_game_over(
@@ -129,6 +132,7 @@ pub fn cache_pgn_on_game_over(
     cached.pgn_string = pgn_to_string(&pgn);
     cached.final_fen = build_final_fen(&history);
     cached.pgn = Some(pgn);
+    cached.braid_pgn_ready = false; // Braid VPS fetch will set this true when it arrives
 }
 
 // ── PGN helpers ───────────────────────────────────────────────────────────────
@@ -201,7 +205,7 @@ fn chrono_or_unknown() -> String {
 }
 
 /// Render a PGN string from a `ParsedPgnGame`.
-fn pgn_to_string(pgn: &nimzovich_engine::ParsedPgnGame) -> String {
+pub fn pgn_to_string(pgn: &nimzovich_engine::ParsedPgnGame) -> String {
     let mut out = String::new();
     for (k, v) in &pgn.tags {
         out.push_str(&format!("[{} \"{}\"]\n", k, v));
@@ -517,21 +521,30 @@ pub fn game_over_popup_system(
                     ui.horizontal(|ui| {
                         ui.add_space(pad);
                         ui.spacing_mut().item_spacing.x = spacing;
-                        if ui.add_sized([btn_w, 26.0], egui::Button::new(
-                            egui::RichText::new("Review").size(11.0)
-                        ).fill(dark_btn)).clicked() {
-                            trigger_review = true;
-                        }
-                        if ui.add_sized([btn_w, 26.0], egui::Button::new(
+                        let pgn_loading = !cached_pgn.braid_pgn_ready && cached_pgn.pgn.is_some();
+                        let review_label = if pgn_loading { "Review ⟳" } else { "Review" };
+                        let save_label   = if pgn_loading { "Save ⟳" }   else { "Save PGN" };
+                        let dim = if pgn_loading {
+                            egui::Color32::from_rgba_unmultiplied(40, 40, 44, 120)
+                        } else {
+                            dark_btn
+                        };
+                        let resp_review = ui.add_sized([btn_w, 26.0], egui::Button::new(
+                            egui::RichText::new(review_label).size(11.0)
+                        ).fill(dim));
+                        if pgn_loading { resp_review.on_hover_text("Fetching authoritative game record…"); }
+                        else if resp_review.clicked() { trigger_review = true; }
+
+                        let resp_analyze = ui.add_sized([btn_w, 26.0], egui::Button::new(
                             egui::RichText::new("Analyze").size(11.0)
-                        ).fill(dark_btn)).clicked() {
-                            trigger_analyze = true;
-                        }
-                        if ui.add_sized([btn_w, 26.0], egui::Button::new(
-                            egui::RichText::new("Save PGN").size(11.0)
-                        ).fill(dark_btn)).clicked() {
-                            save_pgn = true;
-                        }
+                        ).fill(dark_btn));
+                        if resp_analyze.clicked() { trigger_analyze = true; }
+
+                        let resp_save = ui.add_sized([btn_w, 26.0], egui::Button::new(
+                            egui::RichText::new(save_label).size(11.0)
+                        ).fill(dim));
+                        if pgn_loading { resp_save.on_hover_text("Fetching authoritative game record…"); }
+                        else if resp_save.clicked() { save_pgn = true; }
                         if has_rematch {
                             if ui.add_sized([btn_w, 26.0], egui::Button::new(
                                 egui::RichText::new("Rematch").size(11.0)
@@ -556,7 +569,8 @@ pub fn game_over_popup_system(
                         let play_label = if is_single_player { "Play Again" } else { "New Game" };
                         if ui.add_sized([btn_w, 32.0], egui::Button::new(
                             egui::RichText::new(play_label).size(12.0).strong()
-                        ).fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 220))).clicked() {
+                                .color(egui::Color32::from_rgb(20, 18, 10))
+                        ).fill(egui::Color32::from_rgba_unmultiplied(244, 187, 68, 220))).clicked() {
                             if is_single_player { play_again_bot = true; } else { next_state.set(GameState::InGame); }
                         }
                         let back_label = if payout_info.as_ref().and_then(|p| p.tournament_id).is_some() {

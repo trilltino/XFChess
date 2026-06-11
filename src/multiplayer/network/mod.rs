@@ -23,7 +23,7 @@ pub mod relay;
 
 pub use braid::*;
 pub use braid_pvp::{
-    BraidPvpIncomingMessage, BraidPvpPlugin, BraidPvpSession, PublishBraidMove,
+    BraidPvpPlugin, BraidPvpSession,
     PublishBraidResign, PublishBraidChat,
 };
 pub use p2p::*;

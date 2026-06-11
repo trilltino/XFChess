@@ -36,6 +36,9 @@ pub fn handler(
     next_board: [u8; 68],
     nonce: u64,
     _signature: Option<Vec<u8>>,
+    // Causal chain: client's claimed game.nonce before this move.
+    // Must equal game.nonce if provided; None = legacy client (skip check).
+    parent_nonce: Option<u64>,
 ) -> Result<()> {
     // Capture before mutable borrows to avoid split-borrow issues inside cfg blocks
     let _moving_player = ctx.accounts.session_delegation.player;
@@ -57,6 +60,11 @@ pub fn handler(
         expected_player == _moving_player,
         GameErrorCode::NotYourTurn
     );
+
+    // Causal chain check: parent_nonce must equal the current game.nonce before advancing.
+    if let Some(pn) = parent_nonce {
+        require!(pn == game.nonce, GameErrorCode::ParentNonceMismatch);
+    }
 
     // Replay Protection (Nonce stored directly in Game account)
     require!(nonce == game.nonce + 1, GameErrorCode::InvalidNonce);

@@ -25,12 +25,13 @@
 use crate::signing::storage::tournament::{TournamentStore, TournamentStatus};
 use crate::signing::tournament_gossip::TournamentGossipService;
 use braid_iroh::SwissMessage;
+use solana_sdk::signature::Keypair;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Channel buffer size for tournament trigger events.
 pub const TOURNAMENT_TRIGGER_CHANNEL_SIZE: usize = 256;
@@ -59,6 +60,14 @@ pub struct TournamentScheduler {
     /// Per-tournament grace-timer handles — aborted on max-fill or admin start.
     fill_timers: HashMap<u64, JoinHandle<()>>,
     gossip: Option<Arc<TournamentGossipService>>,
+    /// On-chain config — present when the backend has a VPS authority key.
+    on_chain: Option<OnChainConfig>,
+}
+
+struct OnChainConfig {
+    program_id: String,
+    rpc_url: String,
+    vps_authority: Arc<Keypair>,
 }
 
 impl TournamentScheduler {
@@ -71,6 +80,7 @@ impl TournamentScheduler {
                 trigger_rx,
                 fill_timers: HashMap::new(),
                 gossip: None,
+                on_chain: None,
             },
             trigger_tx,
         )
@@ -78,6 +88,10 @@ impl TournamentScheduler {
 
     pub fn set_gossip(&mut self, gossip: Arc<TournamentGossipService>) {
         self.gossip = Some(gossip);
+    }
+
+    pub fn set_on_chain(&mut self, program_id: String, rpc_url: String, vps_authority: Arc<Keypair>) {
+        self.on_chain = Some(OnChainConfig { program_id, rpc_url, vps_authority });
     }
 
     pub async fn run(mut self) {
@@ -232,6 +246,67 @@ impl TournamentScheduler {
     // ── start ─────────────────────────────────────────────────────────────────
 
     async fn start_tournament(&self, tournament_id: u64) {
+        // ── On-chain: start_tournament + initialize_match × N ────────────────
+        if let Some(cfg) = &self.on_chain {
+            let max_players = self.store.get(tournament_id).await
+                .map(|t| t.max_players)
+                .unwrap_or(0);
+
+            let program_id_str = cfg.program_id.clone();
+            let rpc_url = cfg.rpc_url.clone();
+            let authority = cfg.vps_authority.clone();
+            let total_matches = max_players.saturating_sub(1) as usize;
+
+            let result = tokio::task::spawn_blocking(move || {
+                use crate::signing::solana::{
+                    initialize_match_ix, make_rpc, sign_and_submit, start_tournament_ix,
+                };
+                use std::str::FromStr;
+                use solana_sdk::pubkey::Pubkey;
+                use solana_sdk::signature::Signer;
+
+                let program_id = Pubkey::from_str(&program_id_str)
+                    .map_err(|e| format!("bad program_id: {e}"))?;
+                let rpc = make_rpc(&rpc_url);
+
+                // Tx 1: start_tournament
+                let ix = start_tournament_ix(&program_id, tournament_id, &authority.pubkey());
+                sign_and_submit(&rpc, &authority, &[ix])
+                    .map_err(|e| format!("start_tournament tx: {e}"))?;
+
+                // Tx batches: initialize_match (20 per batch)
+                let mut idx = 0u16;
+                while (idx as usize) < total_matches {
+                    let end = ((idx as usize + 20).min(total_matches)) as u16;
+                    let ixs: Vec<_> = (idx..end).map(|i| {
+                        let round = (i as f32 + 1.0).log2() as u8;
+                        let next = if i == 0 { None } else { Some((i - 1) / 2) };
+                        initialize_match_ix(
+                            &program_id, tournament_id, i, round,
+                            None, None, next, (i % 2) as u8, &authority.pubkey(),
+                        )
+                    }).collect();
+                    sign_and_submit(&rpc, &authority, &ixs)
+                        .map_err(|e| format!("initialize_match batch {idx}: {e}"))?;
+                    idx = end;
+                }
+                Ok::<(), String>(())
+            }).await;
+
+            match result {
+                Ok(Ok(())) => info!("[tournament-scheduler] On-chain start confirmed for tournament {}", tournament_id),
+                Ok(Err(e)) => {
+                    error!("[tournament-scheduler] On-chain start failed for tournament {}: {}", tournament_id, e);
+                    return;
+                }
+                Err(e) => {
+                    error!("[tournament-scheduler] spawn_blocking panicked for tournament {}: {}", tournament_id, e);
+                    return;
+                }
+            }
+        }
+
+        // ── Store update ──────────────────────────────────────────────────────
         if let Err(e) = self.store.start_tournament(tournament_id).await {
             warn!(
                 "[tournament-scheduler] Failed to start tournament {}: {}",
@@ -278,15 +353,19 @@ impl TournamentScheduler {
 
 /// Spawn the scheduler as a background task.
 ///
-/// Pass `gossip` so the scheduler can broadcast [`SwissMessage::BracketFired`]
-/// when a tournament auto-starts.
+/// Pass `gossip` so the scheduler can broadcast [`SwissMessage::BracketFired`].
+/// Pass `on_chain` so the scheduler fires on-chain txs when starting a tournament.
 pub fn spawn_tournament_scheduler(
     store: TournamentStore,
     gossip: Option<Arc<TournamentGossipService>>,
+    on_chain: Option<(String, String, Arc<Keypair>)>,
 ) -> mpsc::Sender<TournamentTrigger> {
     let (mut scheduler, trigger_tx) = TournamentScheduler::new(store.clone());
     if let Some(g) = gossip {
         scheduler.set_gossip(g);
+    }
+    if let Some((program_id, rpc_url, authority)) = on_chain {
+        scheduler.set_on_chain(program_id, rpc_url, authority);
     }
     tokio::spawn(scheduler.run());
     spawn_scheduled_start_ticker(store, trigger_tx.clone());

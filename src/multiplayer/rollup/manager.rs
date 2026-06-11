@@ -206,6 +206,20 @@ pub enum RollupEvent {
     NeedResync {
         game_id: u64,
     },
+    /// A single move replayed during Braid reconnection recovery.
+    ResyncedMove {
+        game_id: u64,
+        move_uci: String,
+        next_fen: String,
+        move_number: u32,
+    },
+    /// Full game snapshot received from a peer (spectator catch-up or reconnect).
+    SnapshotReceived {
+        game_id: u64,
+        fen: String,
+        move_payloads: Vec<braid_uri::MovePayload>,
+        head_version: String,
+    },
 }
 
 pub struct EphemeralRollupPlugin;
@@ -233,6 +247,25 @@ fn handle_rollup_events(
                 rollup_manager.committed_turn = *new_turn;
                 rollup_manager.status = GameStateStatus::Synced;
                 info!("Batch committed successfully for game {}", game_id);
+            }
+            RollupEvent::ResyncedMove { game_id, move_uci, next_fen, .. }
+                if *game_id == rollup_manager.game_id =>
+            {
+                // A missed move arrived via Braid reconnection recovery.
+                // Update committed state to keep the rollup manager in sync;
+                // the actual board position is applied by the game-logic layer
+                // which receives the same event independently.
+                rollup_manager.committed_fen = next_fen.clone();
+                rollup_manager.committed_turn = rollup_manager.committed_turn.saturating_add(1);
+                info!("[ROLLUP] ResyncedMove {} applied, turn now {}", move_uci, rollup_manager.committed_turn);
+            }
+            RollupEvent::SnapshotReceived { game_id, fen, move_payloads, head_version }
+                if *game_id == rollup_manager.game_id =>
+            {
+                rollup_manager.committed_fen = fen.clone();
+                rollup_manager.committed_turn = move_payloads.len() as u16;
+                rollup_manager.status = GameStateStatus::Synced;
+                info!("[ROLLUP] SnapshotReceived: {} moves, head {}, fen set", move_payloads.len(), head_version);
             }
             RollupEvent::BatchFailed {
                 game_id,

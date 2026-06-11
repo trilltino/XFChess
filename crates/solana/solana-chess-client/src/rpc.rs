@@ -219,6 +219,7 @@ impl ChessRpcClient {
                 next_board,
                 nonce,
                 signature,
+                parent_nonce: None,
             }
             .data(),
         }

@@ -48,7 +48,7 @@ pub fn update_move_hints_system(
             commands.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(matl),
-                Transform::from_translation(Vec3::new(x as f32, 0.051, y as f32))
+                Transform::from_translation(Vec3::new(7.0 - x as f32, 0.051, y as f32))
                     .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                 MoveHint,
                 bevy::picking::Pickable::IGNORE,

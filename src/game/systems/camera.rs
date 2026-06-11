@@ -905,13 +905,48 @@ pub fn reset_game_camera(
         // Remove RTS controls
         commands.entity(entity).remove::<CameraController>();
 
-        // Reset order if needed (though 0 is usually fine for menus too)
+        // Reset order and viewport when leaving game
         if let Ok(mut camera) = query.get_mut(entity) {
             camera.order = 0;
+            camera.viewport = None;
         }
 
         info!("[CAMERA] Reset Persistent Camera (Removed Controls)");
     }
+}
+
+/// Restricts the 3D camera to the area not covered by the right game panel.
+/// The game_panel SidePanel has min_width(280) in logical pixels; without this
+/// system the board renders centered in the full window and appears offset right
+/// relative to the visible non-panel area.
+pub fn update_game_viewport(
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    mut cameras: Query<&mut Camera>,
+    windows: Query<&bevy::window::Window, With<bevy::window::PrimaryWindow>>,
+    hud_visibility: Res<crate::ui::game::game_ui::InGameHudVisibility>,
+    game_mode: Res<crate::core::GameMode>,
+) {
+    let Some(entity) = persistent_camera.entity else { return };
+    let Ok(mut camera) = cameras.get_mut(entity) else { return };
+    let Ok(window) = windows.single() else { return };
+
+    // HUD hidden or PGN replay: full viewport, no panel offset
+    if !hud_visibility.visible || *game_mode == crate::core::GameMode::PgnReplay {
+        camera.viewport = None;
+        return;
+    }
+
+    let scale = window.scale_factor() as f32;
+    let window_w = window.physical_width();
+    let window_h = window.physical_height();
+    // game_panel has min_width(280) logical pixels and is non-resizable
+    let panel_phys = (280.0 * scale) as u32;
+
+    camera.viewport = Some(bevy::camera::Viewport {
+        physical_position: UVec2::ZERO,
+        physical_size: UVec2::new(window_w.saturating_sub(panel_phys), window_h),
+        depth: 0.0..1.0,
+    });
 }
 
 /// System to reset camera to default "Standard Perspective" when 'N' is pressed

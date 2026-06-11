@@ -8,6 +8,7 @@ use crate::ui::account::auth::AuthState;
 use crate::multiplayer::network::p2p::{
     ConnectToPeerEvent, HostGameEvent, P2PConnectionState, P2PUIState,
 };
+use crate::multiplayer::spectator::SpectateViaLinkEvent;
 use crate::multiplayer::network::p2p_vps::P2PVpsState;
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::wager_rate::SolGbpRate;
@@ -110,4 +111,5 @@ pub struct MainMenuUIContext<'w, 's> {
     pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,
     pub menu_sounds: Option<Res<'w, MenuSounds>>,
     pub exit_confirm: ResMut<'w, MenuExitConfirm>,
+    pub spectate_events: Option<MessageWriter<'w, SpectateViaLinkEvent>>,
 }

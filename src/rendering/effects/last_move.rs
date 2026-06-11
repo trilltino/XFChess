@@ -70,7 +70,7 @@ pub fn update_last_move_highlight_system(
         commands.spawn((
             Mesh3d(materials.highlight_mesh.clone()),
             MeshMaterial3d(materials.hover_matl.clone()),
-            Transform::from_translation(Vec3::new(x as f32, 0.02, y as f32)),
+            Transform::from_translation(Vec3::new(7.0 - x as f32, 0.02, y as f32)),
             LastMoveHighlight,
             bevy::picking::Pickable::IGNORE,
             Name::new("Last Move Highlight"),
@@ -78,8 +78,8 @@ pub fn update_last_move_highlight_system(
         ));
     }
 
-    let src = Vec3::new(last_move.from.0 as f32, 0.03, last_move.from.1 as f32);
-    let dst = Vec3::new(last_move.to.0 as f32, 0.03, last_move.to.1 as f32);
+    let src = Vec3::new(7.0 - last_move.from.0 as f32, 0.03, last_move.from.1 as f32);
+    let dst = Vec3::new(7.0 - last_move.to.0 as f32, 0.03, last_move.to.1 as f32);
     let dir = dst - src;
     let length = dir.length();
     if length > 0.01 {

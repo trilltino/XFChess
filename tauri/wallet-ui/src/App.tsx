@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from "react";
+﻿import { useState, useEffect, type CSSProperties } from "react";
 import bs58 from "bs58";
 
 // ---------------------------------------------------------------------------
@@ -712,7 +712,7 @@ function WalletStep({
 }
 
 // ---------------------------------------------------------------------------
-// Step 3 � Entering Splash
+// Splash — shown after login is complete
 // ---------------------------------------------------------------------------
 function SplashStep({ username, onComplete }: { username: string; onComplete: () => void }) {
   return (
@@ -723,11 +723,9 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
           color: TEXT, letterSpacing: "0.1em",
         }}>XFCHESS</div>
       </div>
-
       <p style={{ fontSize: 14, color: TEXT_DIM, marginBottom: 24 }}>
         Welcome, <span style={{ color: TEXT, fontWeight: 600 }}>{username}</span>
       </p>
-
       <button
         onClick={onComplete}
         style={{
@@ -738,7 +736,7 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
           transition: "all 0.2s",
         }}
       >
-        View Profile Hub ?
+        View Profile Hub
       </button>
     </div>
   );
@@ -748,7 +746,7 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
 // ---------------------------------------------------------------------------
 // Background Transaction Signer
 // ---------------------------------------------------------------------------
-function TransactionSigner({ pubkey }: { pubkey: string }) {
+function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   const [pendingTx, setPendingTx] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -800,19 +798,15 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
         if (data.tx && data.tx !== pendingTx) {
           setPendingTx(data.tx);
           const secret = sessionStorage.getItem("xfchess_session_key");
-          if (secret) {
-            handleAutoSign(data.tx, secret);
-          }
+          if (secret) { handleAutoSign(data.tx, secret); }
         } else if (!data.tx) {
           setPendingTx(null);
         }
-      } catch (e) {
-        console.warn("[SIGNER] Poll failed", e);
-      }
+      } catch (e) { console.warn("[SIGNER] Poll failed", e); }
     };
-
     const interval = setInterval(poll, 1000);
     return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingTx]);
 
   if (!pendingTx) return null;
@@ -828,10 +822,9 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
         <span style={{ fontWeight: 800, fontSize: 13, color: TEXT }}>PENDING TRANSACTION</span>
       </div>
       <p style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 16 }}>
-        {signing ? "Signing…" : "Awaiting signature."}
+        {signing ? "Signing..." : "Awaiting signature."}
       </p>
       {error && <ErrorMsg msg={error} />}
-      {/* Fallback: extension signing when no session key stored */}
       {!signing && !sessionStorage.getItem("xfchess_session_key") && (
         <PrimaryBtn onClick={async () => {
           const provider = (window as any).phantom?.solana || (window as any).solflare;
@@ -847,13 +840,11 @@ function TransactionSigner({ pubkey }: { pubkey: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Root orchestrator
+// Step 3 — Choose a username handle (off-chain only).
+// On-chain Solana profile creation is deferred to first wager attempt.
 // ---------------------------------------------------------------------------
 function ProfileStep({
   onComplete,
-  pubkey,
-  isHotWallet = false,
-  walletProvider,
   onClose,
   defaultHandle = "",
 }: {
@@ -866,95 +857,23 @@ function ProfileStep({
   defaultHandle?: string;
 }) {
   const [handle, setHandle] = useState(defaultHandle || localStorage.getItem("xfchess_username") || "");
-  const [country, setCountry] = useState("GB");
-  const [dob, setDob] = useState("");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [synced, setSynced] = useState<string | null>(null);
-
-  const hasProvider = !!walletProvider && !isHotWallet;
-  const MAX_DOB = new Date(Date.now() - 567_648_000_000).toISOString().split("T")[0];
-
-  // On mount: try sync-profile (pulls on-chain canonical username into DB).
-  // If the user already has an on-chain profile we skip the form entirely.
-  useEffect(() => {
-    const trySync = async () => {
-      const token = localStorage.getItem("xfchess_token");
-      if (!token || isHotWallet) { setLoading(false); return; }
-      try {
-        const r = await fetch(`${API_BASE}/api/auth/sync-profile`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (r.ok) {
-          const { username } = await r.json();
-          localStorage.setItem("xfchess_username", username);
-          setSynced(username);
-          setLoading(false);
-          return;
-        }
-      } catch { /* no on-chain profile yet � show form */ }
-      setLoading(false);
-    };
-    trySync();
-  }, [isHotWallet]);
 
   const submit = async () => {
-    if (!handle) return;
+    if (!handle || handle.length < 3) return;
     setSaving(true);
     setError(null);
     try {
       const token = localStorage.getItem("xfchess_token");
-
-      if (hasProvider && pubkey) {
-        // ── On-chain profile creation ────────────────────────────────────────
-        if (!dob) throw new Error("Date of birth is required");
-        const dobTs = Math.floor(new Date(dob).getTime() / 1000);
-        const minDob = Math.floor(Date.now() / 1000) - 567_648_000;
-        if (dobTs > minDob) throw new Error("You must be 18 or older");
-        if (!token) throw new Error("Not authenticated");
-
-        // 1. Backend builds unsigned initProfile transaction
-        const buildResp = await fetch(`${API_BASE}/api/auth/init-profile-tx`, {
-          method: "POST",
+      if (token) {
+        const r = await fetch(`${API_BASE}/api/auth/username`, {
+          method: "PATCH",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ username: handle, country, date_of_birth: dobTs }),
+          body: JSON.stringify({ username: handle }),
         });
-        if (!buildResp.ok) throw new Error(await buildResp.text().catch(() => "Failed to build tx"));
-        const { tx_b64 } = await buildResp.json();
-
-        // 2. Deserialise (blockhash already set by backend) and sign
-        const txBytes = Uint8Array.from(atob(tx_b64), c => c.charCodeAt(0));
-        const tx = web3.Transaction.from(txBytes);
-        const signed = await walletProvider.signTransaction(tx);
-        const signedB64 = btoa(String.fromCharCode(...signed.serialize()));
-
-        // 3. Broadcast via backend
-        const broadcastResp = await fetch(`${API_BASE}/api/auth/broadcast-tx`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tx_b64: signedB64 }),
-        });
-        if (!broadcastResp.ok) throw new Error(await broadcastResp.text().catch(() => "Broadcast failed"));
-
-        // 4. Sync on-chain username back to SQLite
-        await fetch(`${API_BASE}/api/auth/sync-profile`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-      } else {
-        // ── Off-chain only (hot wallet / no provider) ───────────────────────
-        if (token) {
-          const r = await fetch(`${API_BASE}/api/auth/username`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ username: handle }),
-          });
-          if (!r.ok) throw new Error(await r.text().catch(() => "Failed to save username"));
-        }
+        if (!r.ok) throw new Error(await r.text().catch(() => "Failed to save username"));
       }
-
       localStorage.setItem("xfchess_username", handle);
       onComplete(handle);
     } catch (e: any) {
@@ -963,35 +882,6 @@ function ProfileStep({
       setSaving(false);
     }
   };
-
-  if (loading) {
-    return (
-      <Card showClose={true} onClose={onClose}>
-        <div style={{ textAlign: "center", padding: "40px 0" }}>
-          <div style={{ width: 24, height: 24, border: `2px solid ${RED_BORDER}`, borderTop: `2px solid ${RED}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
-          <p style={{ color: TEXT_DIM, fontSize: 13 }}>Loading profile�</p>
-        </div>
-      </Card>
-    );
-  }
-
-  // On-chain username found � confirm and proceed
-  if (synced) {
-    return (
-      <Card showClose={true} onClose={onClose}>
-        <StepDots step="profile" />
-        <div style={{ textAlign: "center" as const, marginBottom: 24 }}>
-          <h2 style={{ fontSize: 22, fontWeight: 800, color: TEXT, fontFamily: "'Cinzel', serif", letterSpacing: "0.05em" }}>Profile Found</h2>
-          <p style={{ fontSize: 14, color: TEXT_DIM, marginTop: 8 }}>
-            On-chain username: <strong style={{ color: PRIMARY }}>{synced}</strong>
-          </p>
-        </div>
-        <PrimaryBtn onClick={() => onComplete(synced)}>
-          Enter Arena ?
-        </PrimaryBtn>
-      </Card>
-    );
-  }
 
   return (
     <Card showClose={true} onClose={onClose}>
@@ -1006,58 +896,21 @@ function ProfileStep({
       </div>
       {error && <ErrorMsg msg={error} />}
       <InputField label="Chess Handle" value={handle} onChange={setHandle} placeholder="e.g. DragonKnight99" />
-
-      {hasProvider && (
-        <>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: TEXT_MUTED, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              Country
-            </label>
-            <select
-              value={country}
-              onChange={e => setCountry(e.target.value)}
-              style={{ background: INPUT_BG, border: `1px solid ${BORDER}`, color: TEXT, borderRadius: 8, padding: "10px 12px", fontSize: 14 }}
-            >
-              {[["GB","United Kingdom"],["BR","Brazil"],["CA","Canada"],["DE","Germany"],["OTHER","Other"]].map(([code, label]) => (
-                <option key={code} value={code} style={{ background: BG }}>{label}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: TEXT_MUTED, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              Date of Birth (must be 18+)
-            </label>
-            <input
-              type="date"
-              value={dob}
-              onChange={e => setDob(e.target.value)}
-              max={MAX_DOB}
-              style={{ background: INPUT_BG, border: `1px solid ${BORDER}`, color: TEXT, borderRadius: 8, padding: "10px 12px", fontSize: 14, colorScheme: "dark" }}
-            />
-          </div>
-          <p style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 4 }}>
-            Profile created on Solana Devnet. Country + DOB are required by law for wagered games.
-          </p>
-        </>
-      )}
-
-      {!hasProvider && (
-        <p style={{ fontSize: 11, color: TEXT_MUTED, textAlign: "center", marginBottom: 16 }}>
-          Username saved locally. Connect a wallet to lock your name on-chain.
-        </p>
-      )}
-
+      <p style={{ fontSize: 11, color: TEXT_MUTED, textAlign: "center" as const, marginBottom: 16 }}>
+        Your handle is saved to your account. On-chain Solana setup happens when you first wager.
+      </p>
       <PrimaryBtn
         onClick={submit}
         loading={saving}
-        disabled={!handle || handle.length < 3 || (hasProvider && !dob)}
-        style={{ marginTop: 12 }}
+        disabled={!handle || handle.length < 3}
+        style={{ marginTop: 4 }}
       >
-        {hasProvider ? "Create Profile (Devnet)" : "Finalise & Enter Arena"}
+        Save &amp; Enter Arena
       </PrimaryBtn>
     </Card>
   );
 }
+
 
 // ---------------------------------------------------------------------------
 // Root orchestrator
@@ -1145,6 +998,18 @@ function Onboarding() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Poll for profile-step requests from the game client (e.g. "Wagered PVP" clicked)
+  useEffect(() => {
+    if (step !== "splash") return;
+    const interval = setInterval(async () => {
+      try {
+        const r = await apiGet<{ needs_profile: boolean }>("/api/needs-profile-step");
+        if (r.needs_profile) setStep("profile");
+      } catch { /* ignore — bridge may not be running */ }
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [step]);
+
   const handleConsent = async () => {
     try { await apiPost("/api/consent", { version: CONSENT_VERSION }); } catch { /* non-critical */ }
     setStep("entry");
@@ -1192,7 +1057,7 @@ function Onboarding() {
         setStep("profile");
       } else {
         setStep("splash");
-        handleGameLaunch(nextPubkey, path === "hot", resolvedUser);
+        handleGameLaunch(nextPubkey, false, resolvedUser);
       }
       return;
     }

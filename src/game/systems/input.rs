@@ -460,9 +460,10 @@ pub fn on_piece_drag_end(
     // Find which square the piece was dropped on by checking the piece's current position
     // or finding the square under the pointer
     let target_square = if let Ok((_, _, _, transform)) = readonly_pieces.get(dragged_entity) {
-        // Calculate board position from world position
+        // Calculate board position from world position.
+        // X is mirrored (world_x = 7 - file), so invert: file = 7 - round(world_x).
         let world_pos = transform.translation;
-        let file = world_pos.x.round() as i32;
+        let file = (7.0 - world_pos.x).round() as i32;
         let rank = world_pos.z.round() as i32;
 
         debug!("[3D_DRAG] World pos: {:?}, Calculated: file={}, rank={}", world_pos, file, rank);

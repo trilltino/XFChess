@@ -87,6 +87,9 @@ pub enum GameErrorCode {
     #[msg("Invalid nonce provided for replay protection.")]
     InvalidNonce,            // Nonce is not strictly incrementing — replay attack guard
 
+    #[msg("Parent nonce mismatch: client's claimed parent state does not match on-chain nonce.")]
+    ParentNonceMismatch,     // Causal chain check: parent_nonce must equal game.nonce
+
     // ── Game status ───────────────────────────────────────────────────────────
     #[msg("Game is not in the required status for this operation.")]
     InvalidGameStatus,       // Generic status mismatch (e.g. trying to end a finished game)

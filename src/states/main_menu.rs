@@ -1264,7 +1264,7 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
         } else {
             Vec::new()
         };
-        render_spectator_popup(ctx, &mut ctx_menu.competitive_menu, &cached_games);
+        render_spectator_popup(ctx, &mut ctx_menu.competitive_menu, &cached_games, &mut ctx_menu.spectate_events);
     }
 
     if ctx_menu.competitive_menu.show_controls_popup {

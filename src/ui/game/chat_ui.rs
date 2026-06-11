@@ -6,10 +6,10 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
-use braid_uri::ChatPayload;
-use crossbeam_channel::TryRecvError;
 
 use crate::multiplayer::network::{BraidPvpSession, PublishBraidChat};
+use crate::multiplayer::network::braid_pvp::BraidChatMessage;
+use crate::multiplayer::traits::MessageReader;
 use crate::core::states::GameMode;
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -35,11 +35,11 @@ pub struct ChatState {
 }
 
 impl ChatState {
-    pub fn push_inbound(&mut self, payload: ChatPayload) {
+    pub fn push_inbound(&mut self, player: String, text: String, timestamp_ms: u64) {
         self.history.push(ChatEntry {
-            player: payload.player,
-            text: payload.text,
-            timestamp_ms: payload.timestamp_ms,
+            player,
+            text,
+            timestamp_ms,
         });
         if !self.open {
             self.unread += 1;
@@ -55,21 +55,22 @@ impl ChatState {
 
 // ── Systems ───────────────────────────────────────────────────────────────────
 
-/// Drain inbound chat messages from the Braid background subscriber task into `ChatState`.
+/// Drain inbound `BraidChatMessage` events into `ChatState`.
 pub fn drain_chat_messages(
     session: Option<Res<BraidPvpSession>>,
+    mut chat_events: MessageReader<BraidChatMessage>,
     mut chat_state: ResMut<ChatState>,
 ) {
-    let Some(session) = session else { return };
+    let Some(session) = session else {
+        chat_events.clear();
+        return;
+    };
     if !session.active {
+        chat_events.clear();
         return;
     }
-    loop {
-        match session.chat_rx.try_recv() {
-            Ok(payload) => chat_state.push_inbound(payload),
-            Err(TryRecvError::Empty) => break,
-            Err(TryRecvError::Disconnected) => break,
-        }
+    for msg in chat_events.read() {
+        chat_state.push_inbound(msg.player.clone(), msg.text.clone(), msg.timestamp_ms);
     }
 }
 

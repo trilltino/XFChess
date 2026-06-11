@@ -9,6 +9,8 @@ use crate::multiplayer::traits::{Message, MessageReader, MessageWriter};
 use crate::game::events::NetworkMoveEvent;
 use crate::core::states::{GameMode, GameState};
 use crate::multiplayer::TokioRuntime;
+#[cfg(feature = "solana")]
+use crate::multiplayer::network::protocol::NetworkMessage;
 
 /// Deep-link event fired when OS / CLI passes `xfchess://spectate/{game_id}`.
 #[derive(Message, Debug, Clone)]
@@ -45,18 +47,36 @@ impl SpectatorSession {
     pub const POLL_INTERVAL: f32 = 2.0;
 }
 
+/// Clock state for the spectated game, updated via Braid clock broadcasts.
+#[derive(Resource, Default)]
+pub struct SpectatorClockState {
+    pub white_ms: u64,
+    pub black_ms: u64,
+    /// Whether white is currently on the clock (last move was by black).
+    pub white_to_move: bool,
+    /// Local time (in seconds) when this state was last updated, for interpolation.
+    pub last_update_secs: f64,
+}
+
 /// Bevy plugin for spectator mode.
 pub struct SpectatorPlugin;
 
 impl Plugin for SpectatorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpectatorSession>()
+            .init_resource::<SpectatorClockState>()
             .add_message::<SpectateViaLinkEvent>()
             .add_systems(Update, (
                 handle_spectate_link,
                 tick_spectator_poll,
                 dispatch_pending_spectator_moves,
+                toggle_clock_side_on_move,
             ));
+        #[cfg(feature = "solana")]
+        app.add_systems(Update, (
+            apply_braid_resync_to_spectator,
+            tick_spectator_clock,
+        ));
     }
 }
 
@@ -67,6 +87,7 @@ fn handle_spectate_link(
     mut session: ResMut<SpectatorSession>,
     mut game_mode: ResMut<GameMode>,
     mut next_state: ResMut<NextState<GameState>>,
+    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
 ) {
     for ev in events.read() {
         info!("[spectator] Starting spectate for game {}", ev.game_id);
@@ -76,6 +97,24 @@ fn handle_spectate_link(
         session.pending_moves.clear();
         *game_mode = GameMode::Spectator;
         next_state.set(GameState::InGame);
+
+        #[cfg(feature = "solana")]
+        if let Some(ref ns) = network_state {
+            // Subscribe to the game's iroh gossip topic so GameSnapshot arrives.
+            if let Some(ref sub_tx) = ns.subscription_sender {
+                let topic = format!("/xfchess-game/{}", ev.game_id);
+                let _ = sub_tx.send(topic);
+            }
+            // Request full move history from the active peer (since_version "0" = all).
+            if let Some(gid) = ev.game_id.parse::<u64>().ok() {
+                if let Some(ref msg_tx) = ns.message_sender {
+                    let _ = msg_tx.send(NetworkMessage::BraidResyncRequest {
+                        game_id: gid,
+                        since_version: "0".to_string(),
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -95,18 +134,6 @@ fn tick_spectator_poll(
 
     let applied = session.applied_move_count;
 
-    // Run blocking HTTP in spawn_blocking so we don't stall the render thread.
-    // We can't await here so we write directly via a channel-less approach:
-    // store results straight into the resource after `block_in_place`.
-    // Since this is a regular Bevy system (sync context) we use spawn_blocking
-    // and rely on the result arriving next frame via the pending_moves vec.
-    //
-    // Limitation: the task result is not available this frame; it arrives next
-    // frame when tokio fires the oneshot.  We use a simple approach: spawn +
-    // read a shared Arc<Mutex<>> flag.  For simplicity, poll synchronously
-    // inside IoTaskPool via `block_in_place` (only safe when called from an
-    // async context, so we use `std::thread::spawn` as a fallback).
-
     let (tx, rx) = std::sync::mpsc::channel::<Vec<String>>();
     let game_id_clone = game_id.clone();
     tokio.0.spawn(async move {
@@ -118,8 +145,6 @@ fn tick_spectator_poll(
         }
     });
 
-    // Collect any result that arrived (possibly from previous spawn).
-    // We spin the channel without blocking to avoid stalling the game thread.
     if let Ok(all_moves) = rx.try_recv() {
         if all_moves.len() > applied {
             let new_moves = all_moves[applied..].to_vec();
@@ -154,8 +179,90 @@ fn dispatch_pending_spectator_moves(
             session.pending_moves.remove(0);
             session.applied_move_count += 1;
         } else {
-            // Malformed UCI — skip it.
             session.pending_moves.remove(0);
         }
+    }
+}
+
+/// Apply `RollupEvent::ResyncedMove` events to the spectator board — this is the
+/// fast path (arrives via gossip) versus the 2-second VPS poll.
+#[cfg(feature = "solana")]
+fn apply_braid_resync_to_spectator(
+    mut rollup_events: MessageReader<crate::multiplayer::rollup::manager::RollupEvent>,
+    mut move_events: MessageWriter<NetworkMoveEvent>,
+    game_mode: Res<GameMode>,
+    session: Res<SpectatorSession>,
+) {
+    if *game_mode != GameMode::Spectator {
+        return;
+    }
+    for ev in rollup_events.read() {
+        if let crate::multiplayer::rollup::manager::RollupEvent::ResyncedMove { move_uci, next_fen, .. } = ev {
+            let uci = move_uci;
+            if uci.len() >= 4 {
+                let from_col = (uci.as_bytes()[0].wrapping_sub(b'a')) as u8;
+                let from_row = (uci.as_bytes()[1].wrapping_sub(b'1')) as u8;
+                let to_col   = (uci.as_bytes()[2].wrapping_sub(b'a')) as u8;
+                let to_row   = (uci.as_bytes()[3].wrapping_sub(b'1')) as u8;
+                let promotion = uci.chars().nth(4).filter(|c| "qrbn".contains(*c));
+
+                move_events.write(NetworkMoveEvent {
+                    from: (from_col, from_row),
+                    to:   (to_col, to_row),
+                    promotion,
+                    expected_fen: Some(next_fen.clone()),
+                });
+                let _ = session.applied_move_count; // acknowledged; VPS poll will deduplicate
+            }
+        }
+    }
+}
+
+/// Update `SpectatorClockState` from incoming Braid clock messages and tick
+/// the active player's clock down locally between broadcasts.
+#[cfg(feature = "solana")]
+fn tick_spectator_clock(
+    mut clock: ResMut<SpectatorClockState>,
+    mut rollup_events: MessageReader<crate::multiplayer::rollup::manager::RollupEvent>,
+    game_mode: Res<GameMode>,
+    time: Res<Time>,
+) {
+    if *game_mode != GameMode::Spectator {
+        return;
+    }
+
+    // Apply any incoming clock snapshots first.
+    for ev in rollup_events.read() {
+        if let crate::multiplayer::rollup::manager::RollupEvent::SnapshotReceived { .. } = ev {
+            // SnapshotReceived carries move history — clock is implicit from move count.
+            // A dedicated ClockState message will arrive separately via the publisher.
+        }
+    }
+
+    // Tick active player's clock down between broadcasts.
+    let elapsed_ms = (time.delta_secs_f64() * 1000.0) as u64;
+    if clock.last_update_secs > 0.0 {
+        if clock.white_to_move {
+            clock.white_ms = clock.white_ms.saturating_sub(elapsed_ms);
+        } else {
+            clock.black_ms = clock.black_ms.saturating_sub(elapsed_ms);
+        }
+    }
+    clock.last_update_secs = time.elapsed_secs_f64();
+}
+
+/// Toggle `SpectatorClockState::white_to_move` each time a move is applied to the
+/// spectator board, so the local interpolation always ticks the right player's clock.
+fn toggle_clock_side_on_move(
+    mut move_events: MessageReader<NetworkMoveEvent>,
+    mut clock: ResMut<SpectatorClockState>,
+    game_mode: Res<GameMode>,
+) {
+    if *game_mode != GameMode::Spectator {
+        move_events.clear();
+        return;
+    }
+    for _ in move_events.read() {
+        clock.white_to_move = !clock.white_to_move;
     }
 }

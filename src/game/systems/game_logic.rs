@@ -150,7 +150,7 @@ pub fn update_game_timer(
     game_mode: Res<crate::core::GameMode>,
     mut flag_timeout: MessageWriter<crate::game::events::FlagTimeoutEvent>,
 ) {
-    if !timer.is_running || game_phase.0 != GamePhase::Playing {
+    if !timer.is_running || !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check) {
         return;
     }
 

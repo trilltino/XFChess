@@ -65,9 +65,9 @@ pub fn create_coordinate_labels(
     }
 
     // Spawn letter labels (A-H) along the horizontal X-axis (Files)
+    // Files are mirrored: a-file is at X=7, h-file is at X=0.
     for (file_idx, file_char) in ('a'..='h').enumerate() {
-        // File A (index 0) is at X=0.0
-        let x_pos = file_idx as f32;
+        let x_pos = 7.0 - file_idx as f32;
         let label = file_char.to_uppercase().to_string();
 
         // Front edge labels (near Rank 1, Z = -0.7)

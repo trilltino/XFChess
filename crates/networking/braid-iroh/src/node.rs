@@ -10,6 +10,7 @@ use iroh::{protocol::Router, Endpoint, EndpointAddr, EndpointId, SecretKey};
 use iroh_gossip::api::GossipReceiver;
 use iroh_gossip::net::Gossip;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -32,6 +33,11 @@ pub struct BraidIrohConfig {
     /// If `None`, a random identity is generated.
     pub secret_key: Option<SecretKey>,
 
+    /// Optional directory for durable resource persistence.
+    /// When set, every `put()` is written to `<data_dir>/resources.json`
+    /// and the store is reloaded from disk on startup.
+    pub data_dir: Option<PathBuf>,
+
     /// Optional configuration for the TCP proxy bridge.
     pub proxy_config: Option<ProxyConfig>,
 }
@@ -52,7 +58,37 @@ impl Default for BraidIrohConfig {
             discovery: DiscoveryConfig::Mock(MockDiscoveryMap::new()),
             secret_key: None,
             proxy_config: None,
+            data_dir: None,
         }
+    }
+}
+
+/// Sanitize a resource URL into a safe filesystem path component.
+/// `/xfchess-game/42/clock` → `xfchess-game_42_clock`
+fn url_to_filename(url: &str) -> String {
+    url.trim_start_matches('/')
+        .replace('/', "_")
+        .replace(':', "_")
+}
+
+/// Load the persisted resource map from `data_dir/resources.json`.
+/// Returns an empty map if the file doesn't exist or is corrupt.
+async fn load_resources(data_dir: &Path) -> HashMap<String, Vec<Update>> {
+    let path = data_dir.join("resources.json");
+    match tokio::fs::read_to_string(&path).await {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => HashMap::new(),
+    }
+}
+
+/// Flush the full resource map to `data_dir/resources.json` atomically
+/// (write to a temp file then rename).
+async fn save_resources(data_dir: &Path, map: &HashMap<String, Vec<Update>>) {
+    let path = data_dir.join("resources.json");
+    let tmp = data_dir.join("resources.json.tmp");
+    let Ok(json) = serde_json::to_string(map) else { return };
+    if tokio::fs::write(&tmp, &json).await.is_ok() {
+        tokio::fs::rename(&tmp, &path).await.ok();
     }
 }
 
@@ -64,6 +100,8 @@ pub struct BraidIrohNode {
     router: Router,
     subscription_mgr: Arc<SubscriptionManager>,
     resources: Arc<RwLock<HashMap<String, Vec<Update>>>>,
+    /// Optional directory for durable persistence of the resource store.
+    data_dir: Option<PathBuf>,
 }
 
 impl BraidIrohNode {
@@ -103,9 +141,17 @@ impl BraidIrohNode {
         // In iroh 0.96, spawning gossip is synchronous and returns the Gossip handle directly
         let gossip = Gossip::builder().spawn(endpoint.clone());
 
-        // 3. Build shared state
+        // 3. Build shared state — load from disk if data_dir is configured
+        let initial_data = if let Some(ref dir) = config.data_dir {
+            tokio::fs::create_dir_all(dir).await.ok();
+            let loaded = load_resources(dir).await;
+            tracing::info!("[braid] Loaded {} resource URLs from disk", loaded.len());
+            loaded
+        } else {
+            HashMap::new()
+        };
         let resources: Arc<RwLock<HashMap<String, Vec<Update>>>> =
-            Arc::new(RwLock::new(HashMap::new()));
+            Arc::new(RwLock::new(initial_data));
 
         let subscription_mgr = Arc::new(SubscriptionManager::new(gossip.clone()));
 
@@ -149,6 +195,7 @@ impl BraidIrohNode {
             router,
             subscription_mgr,
             resources,
+            data_dir: config.data_dir,
         })
     }
 
@@ -198,12 +245,19 @@ impl BraidIrohNode {
         }
         println!("----------------------------------------\n");
 
-        self.resources
-            .write()
-            .await
-            .entry(normalized.clone())
-            .or_insert_with(Vec::new)
-            .push(update.clone());
+        {
+            let mut guard = self.resources.write().await;
+            guard
+                .entry(normalized.clone())
+                .or_insert_with(Vec::new)
+                .push(update.clone());
+            // Flush to disk if persistence is configured.
+            if let Some(ref dir) = self.data_dir {
+                let snapshot: HashMap<String, Vec<Update>> = guard.clone();
+                let dir = dir.clone();
+                tokio::spawn(async move { save_resources(&dir, &snapshot).await });
+            }
+        }
         self.subscription_mgr.broadcast(&normalized, &update).await?;
         Ok(())
     }
@@ -253,6 +307,41 @@ impl BraidIrohNode {
                 .collect()
         } else {
             Vec::new()
+        }
+    }
+
+    /// GET all stored Updates for a resource URL, in order (oldest first).
+    pub async fn get_updates(&self, url: &str) -> Vec<Update> {
+        let normalized = SubscriptionManager::normalize_url(url);
+        self.resources
+            .read()
+            .await
+            .get(&normalized)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// GET all Updates for a resource that were stored after `since_version`.
+    ///
+    /// Walks the stored history and returns everything following the first
+    /// entry whose primary version string matches `since_version`.  If
+    /// `since_version` is not found, the full history is returned so the
+    /// caller always ends up in a consistent state.
+    pub async fn get_updates_since(&self, url: &str, since_version: &str) -> Vec<Update> {
+        let normalized = SubscriptionManager::normalize_url(url);
+        let guard = self.resources.read().await;
+        let Some(history) = guard.get(&normalized) else {
+            return Vec::new();
+        };
+        let pos = history.iter().position(|u| {
+            u.version
+                .first()
+                .map(|v| v.to_string() == since_version)
+                .unwrap_or(false)
+        });
+        match pos {
+            Some(idx) => history[idx + 1..].to_vec(),
+            None => history.clone(),
         }
     }
 

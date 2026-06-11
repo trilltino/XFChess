@@ -7,6 +7,7 @@ import {
   fetchPlayerProfile,
   fetchProfileByUsername,
 } from '../lib/anchor_client';
+import { LichessLinkCard } from '../components/LichessLinkCard';
 
 export function Players() {
   const { connection } = useConnection();
@@ -146,6 +147,20 @@ export function Players() {
                       <div className="l">Streak</div>
                     </div>
                   </div>
+
+                  <LichessLinkCard
+                    walletPubkey={
+                      wallet.publicKey &&
+                      profile.data.authority?.toString() === wallet.publicKey.toBase58()
+                        ? wallet.publicKey.toBase58()
+                        : null
+                    }
+                    lichessUsername={profile.data.lichessUsername}
+                    lichessBlitz={profile.data.lichessBlitz}
+                    lichessRapid={profile.data.lichessRapid}
+                    lichessBullet={profile.data.lichessBullet}
+                    lichessVerified={profile.data.lichessVerified}
+                  />
                 </div>
               )}
 

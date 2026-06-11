@@ -4,7 +4,13 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:www.solana.new)",
       "Bash(wsl --status)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(cargo build *)",
+      "Bash(grep -v \"//\\\\|\\\\.rs:[0-9]*:.*use \")",
+      "Bash(grep -v \"//\\\\|test\\\\|\\\\.md\")",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "WebSearch"
     ]
   }
 }

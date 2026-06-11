@@ -253,6 +253,14 @@ pub fn p2p_send_message(game_id: String, from_node_id: &str, message: &str) -> R
         return Err(format!("vps p2p_send_message: HTTP {status} - {body}"));
     }
 
+    #[derive(serde::Deserialize)]
+    struct SendResp { success: bool }
+    let body: SendResp = resp.json()
+        .map_err(|e| format!("vps p2p_send_message parse: {e}"))?;
+    if !body.success {
+        return Err("vps p2p_send_message: server rejected message (game not found or node_id mismatch)".to_string());
+    }
+
     Ok(())
 }
 

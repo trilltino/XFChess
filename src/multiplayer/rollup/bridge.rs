@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use crate::game::events::{GameEndedEvent, GameStartedEvent};
+use crate::game::replay::{ParsedPgnGameResource};
 use crate::multiplayer::{
     MagicBlockEvent, MagicBlockResolver,
     calculate_batch_hash, NetworkMessage,
@@ -70,6 +71,8 @@ pub struct RollupNetworkBridge {
     finalization_rx: Option<oneshot::Receiver<FinalizationResult>>,
     /// Channel receiving the resynced move nonce from the async RPC fetch.
     nonce_rx: Option<oneshot::Receiver<u64>>,
+    /// Channel receiving the assembled PGN game after game-end export.
+    pgn_rx: Option<oneshot::Receiver<Option<nimzovich_engine::ParsedPgnGame>>>,
 }
 
 /// Maximum frames to wait for opponent pubkey before giving up on deferred finalization.
@@ -130,6 +133,9 @@ impl Plugin for RollupNetworkBridgePlugin {
         app.add_systems(Update, apply_finalization_result);
         // Nonce resync: apply on-chain nonce once the async fetch completes.
         app.add_systems(Update, apply_nonce_resync);
+        // PGN export: fetch Braid move log and build replay resource after game ends.
+        app.add_systems(Update, handle_game_end_pgn_export);
+        app.add_systems(Update, apply_pgn_export_result);
 
         info!("RollupNetworkBridgePlugin initialized with Magic Block ER support");
     }
@@ -371,6 +377,94 @@ fn handle_network_to_rollup_events(
                 // Individual move broadcasts are handled by the game sync layer.
                 // Do NOT add to the local pending_batch — that must only contain
                 // moves made by the local player.
+            }
+
+            // ── Braid reconnection recovery ───────────────────────────────────
+            //
+            // A reconnecting peer sends BraidResyncRequest with the version hash
+            // of the last move it applied.  We look up our local Braid move log
+            // and replay every update that came after that version.
+            NetworkMessage::BraidResyncRequest { game_id, since_version } => {
+                let gid = *game_id;
+                let since = since_version.clone();
+                let msg_tx = network_state.message_sender.clone();
+
+                bevy::tasks::IoTaskPool::get()
+                    .spawn(async move {
+                        use crate::multiplayer::vps_client;
+                        use braid_uri::MovePayload;
+
+                        // Fetch the move log from the VPS (authoritative archive).
+                        // Falls back to an empty list if unavailable.
+                        let all_moves: Vec<MovePayload> = vps_client::fetch_move_log(gid)
+                            .unwrap_or_default();
+
+                        // Find the position of since_version in the log and return everything after.
+                        let since_ver = since.clone();
+                        let missed: Vec<String> = all_moves
+                            .iter()
+                            .skip_while(|m| {
+                                braid_uri::version_hash(&m.fen_after, m.move_number) != since_ver
+                            })
+                            .skip(1) // skip the matching entry itself
+                            .filter_map(|m| serde_json::to_string(m).ok())
+                            .collect();
+
+                        if missed.is_empty() {
+                            info!("[RESYNC] No missed moves for game {} since {}", gid, since);
+                            return;
+                        }
+
+                        info!("[RESYNC] Sending {} missed moves for game {} since {}", missed.len(), gid, since);
+                        if let Some(tx) = msg_tx {
+                            let _ = tx.send(NetworkMessage::BraidResyncResponse {
+                                game_id: gid,
+                                move_payloads: missed,
+                            });
+                        }
+                    })
+                    .detach();
+            }
+
+            // A peer sent us missed moves in response to our BraidResyncRequest.
+            // Replay each one through the normal NetworkEvent path.
+            NetworkMessage::BraidResyncResponse { game_id, move_payloads } => {
+                use braid_uri::MovePayload;
+                let gid = *game_id;
+                info!("[RESYNC] Received {} missed moves for game {}", move_payloads.len(), gid);
+                for json in move_payloads {
+                    if let Ok(p) = serde_json::from_str::<MovePayload>(json) {
+                        rollup_events.write(RollupEvent::ResyncedMove {
+                            game_id: gid,
+                            move_uci: p.uci.clone(),
+                            next_fen: p.fen_after.clone(),
+                            move_number: p.move_number,
+                        });
+                    }
+                }
+            }
+
+            // A new peer joined the game gossip topic and broadcast their full
+            // current game state.  If we are a spectator or have missed moves,
+            // apply the snapshot to catch up.
+            NetworkMessage::GameSnapshot { game_id, fen, move_payloads, head_version } => {
+                use braid_uri::MovePayload;
+                let gid = *game_id;
+                if gid != rollup_manager.game_id {
+                    // Not our game — ignore.
+                } else {
+                    info!("[SNAPSHOT] Received game snapshot for {} ({} moves, head {})", gid, move_payloads.len(), head_version);
+                    // Emit a full-state resync event so the game layer can
+                    // reconstruct position from the authoritative FEN.
+                    rollup_events.write(RollupEvent::SnapshotReceived {
+                        game_id: gid,
+                        fen: fen.clone(),
+                        move_payloads: move_payloads.iter()
+                            .filter_map(|j| serde_json::from_str::<MovePayload>(j).ok())
+                            .collect(),
+                        head_version: head_version.clone(),
+                    });
+                }
             }
 
             _ => {}
@@ -951,6 +1045,102 @@ fn apply_nonce_resync(mut bridge: ResMut<RollupNetworkBridge>) {
         }
         Err(oneshot::error::TryRecvError::Empty) => {}
         Err(_) => { bridge.nonce_rx = None; }
+    }
+}
+
+/// Fetch the Braid move log from the VPS at game end, convert to PGN, and
+/// put the result on a oneshot channel so `apply_pgn_export_result` can insert
+/// `ParsedPgnGameResource` from the Bevy main thread.
+fn handle_game_end_pgn_export(
+    mut game_ended_events: MessageReader<GameEndedEvent>,
+    rollup_manager: Res<EphemeralRollupManager>,
+    solana_state: Option<Res<SolanaIntegrationState>>,
+    mut bridge: ResMut<RollupNetworkBridge>,
+) {
+    for event in game_ended_events.read() {
+        if bridge.pgn_rx.is_some() {
+            continue;
+        }
+
+        let game_id = if rollup_manager.game_id != 0 {
+            rollup_manager.game_id
+        } else {
+            event.game_id
+        };
+
+        let white_name = if rollup_manager.is_creator { "You" } else { "Opponent" }.to_string();
+        let black_name = if rollup_manager.is_creator { "Opponent" } else { "You" }.to_string();
+        let result_str = match event.winner.as_deref() {
+            Some("white") => "1-0",
+            Some("black") => "0-1",
+            _ => "1/2-1/2",
+        }.to_string();
+
+        let (tx, rx) = oneshot::channel();
+        bridge.pgn_rx = Some(rx);
+
+        bevy::tasks::IoTaskPool::get()
+            .spawn(async move {
+                use crate::multiplayer::vps_client;
+                use crate::game::replay_braid::braid_move_log_to_parsed_pgn;
+
+                let moves = match vps_client::fetch_move_log(game_id) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        warn!("[PGN-EXPORT] fetch_move_log failed for game {}: {}", game_id, e);
+                        let _ = tx.send(None);
+                        return;
+                    }
+                };
+
+                let pgn = braid_move_log_to_parsed_pgn(&moves, &white_name, &black_name, &result_str);
+                if pgn.is_none() {
+                    warn!("[PGN-EXPORT] Failed to build PGN for game {} ({} moves)", game_id, moves.len());
+                }
+                let _ = tx.send(pgn);
+            })
+            .detach();
+    }
+}
+
+/// Poll the PGN export channel and, when ready, insert `ParsedPgnGameResource`
+/// so the replay UI can be opened immediately.
+fn apply_pgn_export_result(
+    mut bridge: ResMut<RollupNetworkBridge>,
+    mut commands: Commands,
+    mut cached_pgn: Option<ResMut<crate::ui::menus::game_over_popup::CachedGamePgn>>,
+) {
+    let rx = match bridge.pgn_rx.as_mut() {
+        Some(rx) => rx,
+        None => return,
+    };
+    match rx.try_recv() {
+        Ok(Some(pgn)) => {
+            bridge.pgn_rx = None;
+            info!("[PGN-EXPORT] Inserting ParsedPgnGameResource ({} moves)", pgn.moves.len());
+
+            // Update CachedGamePgn with the authoritative VPS-fetched PGN so that
+            // the Review / Analyze / Save PGN buttons use the full Braid move log.
+            if let Some(ref mut cached) = cached_pgn {
+                let pgn_str = crate::ui::menus::game_over_popup::pgn_to_string(&pgn);
+                cached.pgn_string = pgn_str;
+                cached.pgn = Some(pgn.clone());
+                cached.braid_pgn_ready = true;
+                info!("[PGN-EXPORT] CachedGamePgn updated from Braid log");
+            }
+
+            commands.insert_resource(ParsedPgnGameResource {
+                inner: pgn,
+                show_eval_graph: false,
+                puzzle_mode: false,
+                puzzle_revealed: false,
+            });
+        }
+        Ok(None) => {
+            bridge.pgn_rx = None;
+        }
+        Err(oneshot::error::TryRecvError::Empty) => {}
+        Err(_) => { bridge.pgn_rx = None; }
     }
 }
 

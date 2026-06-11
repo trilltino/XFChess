@@ -73,6 +73,31 @@ pub struct GameSession {
     pub game_state: Option<MultiplayerGameState>,
 }
 
+/// Tracks the causal version chain for each active game.
+///
+/// Used to detect equivocation (two moves claiming the same parent) and
+/// sequence gaps (a move whose `seq` is not `last_seq + 1`).
+/// Updated in `handle_network_events` before moves are forwarded to the board.
+#[derive(Resource, Default)]
+pub struct CausalChainState {
+    /// (game_id, agent_id_bytes) → last accepted sequence number from that agent.
+    pub last_seq: HashMap<(u64, Vec<u8>), u64>,
+    /// (game_id, agent_id_bytes) → version_hash of that agent's last accepted move.
+    ///
+    /// Gap B: the head is tracked PER (game, agent), not per game. With a single
+    /// shared slot, a move from one identity could overwrite the head another
+    /// identity's chain is validated against. Per-sender lanes mean an injected
+    /// move from a stranger cannot poison the real opponent's causal chain.
+    pub head_version: HashMap<(u64, Vec<u8>), String>,
+    /// game_id → allowed signer pubkeys (the participants' session keys).
+    ///
+    /// A2: populated from `SessionInfo` (sent only after the VPS confirms a
+    /// session is active). Once non-empty, a `Move` whose verified signer
+    /// (`agent_id`, bound in `bind_identity`) is not listed is rejected before
+    /// it can reach the board. Capped at two — the two players.
+    pub roster: HashMap<u64, Vec<Vec<u8>>>,
+}
+
 #[derive(Resource)]
 pub struct BraidNetworkState {
     pub node_id: Option<EndpointId>,

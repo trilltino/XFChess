@@ -59,6 +59,7 @@ impl Plugin for MultiplayerPlugin {
             .init_resource::<BraidGameSync>()
             .init_resource::<HeartbeatState>()
             .init_resource::<NetworkConfig>()
+            .init_resource::<crate::multiplayer::types::CausalChainState>()
             .init_resource::<network::braid::BraidP2PConfig>()
             .add_message::<NetworkEvent>()
             .add_message::<crate::game::events::GameStartedEvent>()
@@ -75,6 +76,7 @@ impl Plugin for MultiplayerPlugin {
             social::SocialPlugin,
             join_link::JoinLinkPlugin,
             spectator::SpectatorPlugin,
+            ui::spectator_overlay::SpectatorOverlayPlugin,
         ));
 
         #[cfg(feature = "solana")]

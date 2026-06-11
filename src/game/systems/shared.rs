@@ -154,8 +154,8 @@ pub fn update_piece_state(
     // matching the spawn position and the snap target in animate_piece_movement.
     // Integer coordinates match GLB mesh design and board square positions.
     commands.entity(entity).insert(PieceMoveAnimation::new(
-        Vec3::new(from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
-        Vec3::new(target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),
+        Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
+        Vec3::new(7.0 - target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),
         0.4,
     ));
 
@@ -217,8 +217,8 @@ fn apply_castling_rook_move(
         rook_has_moved.move_count += 1;
 
         commands.entity(rook_entity).insert(PieceMoveAnimation::new(
-            Vec3::new(rook_from.0 as f32, PIECE_ON_BOARD_Y, rook_from.1 as f32),
-            Vec3::new(rook_to.0 as f32, PIECE_ON_BOARD_Y, rook_to.1 as f32),
+            Vec3::new(7.0 - rook_from.0 as f32, PIECE_ON_BOARD_Y, rook_from.1 as f32),
+            Vec3::new(7.0 - rook_to.0 as f32, PIECE_ON_BOARD_Y, rook_to.1 as f32),
             0.25,
         ));
 

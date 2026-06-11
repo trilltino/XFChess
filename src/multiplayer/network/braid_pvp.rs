@@ -1,115 +1,96 @@
-//! Braid-HTTP PvP transport built on the `braid_uri` crate.
+//! Braid PvP transport — iroh gossip only.
 //!
-//! This module wires the typed [`braid_uri`] publisher/subscriber into the
-//! Bevy multiplayer stack so posted PvP games (and, optionally, non-Swiss
-//! match streams inside tournaments) can push and receive moves over the
-//! Braid-HTTP resource protocol.
+//! Moves, clock snapshots, and chat now travel exclusively over iroh gossip
+//! (`NetworkMessage` variants). The old Braid-HTTP subscriber/publisher tasks
+//! have been removed; the only remaining HTTP usage is the VPS `record_move`
+//! REST call (canonical on-chain record, separate from the P2P layer).
 //!
-//! The transport layer is orthogonal to the existing VPS HTTP relay and to
-//! the braid-iroh gossip used for tournament metadata. It is driven by a
-//! single Bevy [`Resource`] ([`BraidPvpSession`]) which, when activated,
-//! spawns a background subscriber that forwards incoming [`ChessMessage`]
-//! events onto a [`crossbeam_channel`] consumed from a Bevy [`Update`] system.
+//! What this module still does:
+//! - Owns `BraidPvpSession` (session config + move counter + nonce)
+//! - Fires `PublishBraidResign` / `PublishBraidChat` events → gossip
+//! - Broadcasts `NetworkMessage::Clock` after each local move
+//! - Broadcasts `NetworkMessage::Chat` for outgoing messages
+//! - Drains incoming `NetworkMessage::Chat` / `NetworkMessage::Clock` from gossip
+//!   into Bevy events for UI consumers
+//! - Sends `GameSnapshot` when a new peer joins mid-game
 
 #![allow(dead_code)]
 
 use bevy::prelude::*;
-use braid_uri::{ChatPayload, ChessMessage, ChessPublisher, ChessSubscriber, MovePayload};
-use crossbeam_channel::{bounded, Receiver, Sender};
-use tracing::{error, info, warn};
+use braid_uri::MovePayload;
+use tracing::{info, warn};
 
-/// Configuration + runtime handle for a single posted PvP game's Braid stream.
-///
-/// Only one PvP session is active at a time per client, so this is modeled
-/// as a single Bevy [`Resource`]. Set `active = true` and populate the URL
-/// + game id to kick off a background subscriber task.
+use crate::multiplayer::network::protocol::NetworkMessage;
+use crate::multiplayer::types::NetworkEvent;
+
+/// Configuration + runtime state for a single PvP game.
 #[derive(Resource)]
 pub struct BraidPvpSession {
-    /// Base URL of the Braid-HTTP backend (e.g. `http://127.0.0.1:8090`).
+    /// Base URL of the VPS backend (e.g. `http://127.0.0.1:8090`).
+    /// Used only for VPS `record_move` — never for live P2P traffic.
     pub base_url: String,
-    /// Posted game identifier (shared between host and joiner).
+    /// Posted game identifier.
     pub game_id: String,
-    /// Whether the subscriber task should be running.
+    /// Whether the session is active.
     pub active: bool,
-    /// Channel receiver for decoded inbound chess messages.
-    pub rx: Receiver<ChessMessage>,
-    /// Internal sender paired with `rx` — handed to the background task.
-    sender: Sender<ChessMessage>,
-    /// Inbound chat messages from the peer.
-    pub chat_rx: Receiver<ChatPayload>,
-    /// Internal sender for the chat channel — handed to the background chat subscriber task.
-    chat_sender: Sender<ChatPayload>,
-    /// Incrementing move counter used to populate [`MovePayload::move_number`].
+    /// Incrementing move counter for [`MovePayload::move_number`].
     pub next_move_number: u32,
-    /// Next nonce for on-chain replay protection (must match Game.nonce + 1).
+    /// Next nonce for on-chain replay protection.
     pub next_nonce: u64,
-    /// Wager amount in SOL (0 = casual unranked, >0 = ranked/wager PvP with ER settlement).
+    /// Wager amount in SOL (0 = casual).
     pub wager_amount: f64,
+    /// Content-addressed version of the last move we published.
+    /// Used to populate `GameSnapshot::head_version` for catch-up.
+    pub last_version: String,
 }
 
 impl Default for BraidPvpSession {
     fn default() -> Self {
-        let (tx, rx) = bounded(256);
-        let (chat_tx, chat_rx) = bounded(64);
         Self {
             base_url: String::new(),
             game_id: String::new(),
             active: false,
-            rx,
-            sender: tx,
-            chat_rx,
-            chat_sender: chat_tx,
             next_move_number: 1,
             next_nonce: 1,
             wager_amount: 0.0,
+            last_version: "0".to_string(),
         }
     }
 }
 
 impl BraidPvpSession {
-    /// Reset the session (drops both halves of the channel and starts fresh).
     pub fn reset(&mut self) {
-        let (tx, rx) = bounded(256);
-        let (chat_tx, chat_rx) = bounded(64);
-        self.sender = tx;
-        self.rx = rx;
-        self.chat_sender = chat_tx;
-        self.chat_rx = chat_rx;
         self.base_url.clear();
         self.game_id.clear();
         self.active = false;
         self.next_move_number = 1;
         self.next_nonce = 1;
         self.wager_amount = 0.0;
+        self.last_version = "0".to_string();
     }
 
-    /// Whether the session has enough info to talk to the backend.
     pub fn is_configured(&self) -> bool {
         !self.base_url.is_empty() && !self.game_id.is_empty()
     }
 }
 
-/// Bevy event emitted when the Braid subscriber receives an inbound message.
-#[derive(Message, Debug, Clone)]
-pub struct BraidPvpIncomingMessage(pub ChessMessage);
-
-/// Bevy event that callers fire to request publishing a move via Braid-HTTP.
-#[derive(Message, Debug, Clone)]
-pub struct PublishBraidMove {
-    pub uci: String,
-    pub fen_after: String,
-    pub player: String,
-}
-
-/// Bevy event to publish a resign over the Braid move stream.
+/// Bevy event to publish a resign over iroh gossip.
 #[derive(Message, Debug, Clone)]
 pub struct PublishBraidResign {
     pub player: String,
 }
 
-/// Bevy event to publish a chat message over the Braid chat stream.
+/// Bevy event to publish a chat message over iroh gossip.
 #[derive(Message, Debug, Clone)]
 pub struct PublishBraidChat {
+    pub player: String,
+    pub text: String,
+    pub timestamp_ms: u64,
+}
+
+/// Bevy event emitted when an inbound chat message arrives from the peer.
+#[derive(Message, Debug, Clone)]
+pub struct BraidChatMessage {
     pub player: String,
     pub text: String,
     pub timestamp_ms: u64,
@@ -121,24 +102,110 @@ pub struct BraidPvpPlugin;
 impl Plugin for BraidPvpPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BraidPvpSession>()
-            .add_message::<BraidPvpIncomingMessage>()
-            .add_message::<PublishBraidMove>()
             .add_message::<PublishBraidResign>()
             .add_message::<PublishBraidChat>()
+            .add_message::<BraidChatMessage>()
             .add_systems(
                 Update,
-                (drain_incoming_messages, handle_publish_move, handle_publish_resign, handle_publish_chat, publish_local_moves_via_braid),
+                (
+                    publish_local_move,
+                    handle_publish_resign,
+                    handle_publish_chat,
+                    drain_chat_messages,
+                    drain_clock_to_spectator,
+                    publish_clock_on_move,
+                ),
             );
+        #[cfg(feature = "solana")]
+        app.add_systems(Update, broadcast_snapshot_to_new_peer);
+    }
+}
+
+/// Read `MoveMadeEvent`s, send them as `NetworkMessage::Move` over iroh gossip,
+/// and update the session's causal version chain. This replaces the old
+/// `publish_local_moves_via_braid` + `handle_publish_move` pair.
+fn publish_local_move(
+    mut session: ResMut<BraidPvpSession>,
+    mut move_events: MessageReader<crate::game::events::MoveMadeEvent>,
+    network_state: Res<crate::multiplayer::BraidNetworkState>,
+    p2p_conn: Res<crate::multiplayer::network::p2p::P2PConnectionState>,
+) {
+    if !session.is_configured() {
+        move_events.clear();
+        return;
+    }
+    for event in move_events.read() {
+        if event.remote {
+            continue;
+        }
+        let game_id_u64 = session.game_id.parse::<u64>().unwrap_or(0);
+        let move_number = session.next_move_number;
+        let nonce = session.next_nonce;
+        session.next_move_number = session.next_move_number.saturating_add(1);
+        session.next_nonce = session.next_nonce.saturating_add(1);
+
+        // Build UCI string.
+        let from_file = (b'a' + event.from.0) as char;
+        let from_rank = event.from.1 + 1;
+        let to_file = (b'a' + event.to.0) as char;
+        let to_rank = event.to.1 + 1;
+        let mut uci = format!("{}{}{}{}", from_file, from_rank, to_file, to_rank);
+        if let Some(promo) = event.promotion {
+            let promo_char = match promo {
+                crate::game::components::PieceType::Queen => 'q',
+                crate::game::components::PieceType::Rook => 'r',
+                crate::game::components::PieceType::Bishop => 'b',
+                crate::game::components::PieceType::Knight => 'n',
+                _ => 'q',
+            };
+            uci.push(promo_char);
+        }
+
+        // Causal chain fields.
+        let parent_version = session.last_version.clone();
+        let new_version = braid_uri::version_hash(&event.next_fen, move_number);
+        session.last_version = new_version;
+
+        // agent_id = iroh node's public key bytes (stable identity).
+        let agent_id = network_state
+            .node_id
+            .as_ref()
+            .map(|id| id.as_bytes().to_vec())
+            .unwrap_or_default();
+
+        // Use move_number as the per-agent sequence number (monotonic, unique).
+        let seq = move_number as u64;
+
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        let _ = p2p_conn.player_color; // referenced for completeness; color is in the FEN
+
+        if let Some(ref tx) = network_state.message_sender {
+            let msg = NetworkMessage::Move {
+                game_id: game_id_u64,
+                turn: move_number as u16,
+                move_uci: uci.clone(),
+                next_fen: event.next_fen.clone(),
+                nonce,
+                timestamp_ms,
+                agent_id,
+                seq,
+                parent_version,
+            };
+            if let Err(e) = tx.send(msg) {
+                warn!("[braid-pvp] Move gossip send failed (game {game_id_u64}, turn {move_number}): {e}");
+            } else {
+                info!("[braid-pvp] Move sent via gossip (game {game_id_u64}, turn {move_number}, uci {uci})");
+            }
+        }
     }
 }
 
 /// Activate a fresh Braid PvP session for `game_id` against `base_url` and
-/// spawn the subscriber background task. Idempotent — calling it twice with
-/// the same config is a no-op; calling it with different config resets first.
-/// Also subscribes to the Iroh gossip topic for this game if the network layer is up.
-///
-/// When `wager_amount > 0`, the game will be settled via MagicBlock Ephemeral Rollups
-/// (delegation → batch commit → undelegate + finalize on game end).
+/// subscribe to the corresponding iroh gossip topic. Idempotent.
 pub fn start_session(
     session: &mut BraidPvpSession,
     base_url: String,
@@ -155,189 +222,21 @@ pub fn start_session(
     session.wager_amount = wager_amount;
     session.active = true;
 
-    // ── Subscribe to Iroh gossip topic for this game (fast path) ──────────
     if let Some(ref sub_tx) = network_state.subscription_sender {
         let topic = format!("{}/{}", crate::multiplayer::systems::GAME_TOPIC, game_id);
         if let Err(e) = sub_tx.send(topic) {
-            warn!("[braid-pvp] Failed to send Iroh subscription request: {e}");
+            warn!("[braid-pvp] Failed to subscribe to iroh topic: {e}");
         } else {
-            info!("[braid-pvp] Subscribed to Iroh gossip for game {game_id}");
-        }
-    }
-
-    let tx = session.sender.clone();
-    let chat_tx = session.chat_sender.clone();
-    let base_url_chat = base_url.clone();
-    let game_id_chat = game_id.clone();
-
-    // ── Moves subscriber ──────────────────────────────────────────────────────
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            let sub = match ChessSubscriber::new(&base_url, &game_id) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("[braid-pvp] Failed to build Braid-HTTP subscriber: {e}");
-                    return;
-                }
-            };
-            let (rx, _handle) = match sub.subscribe_moves().await {
-                Ok(x) => x,
-                Err(e) => {
-                    error!("[braid-pvp] Braid-HTTP subscribe_moves failed: {e}");
-                    return;
-                }
-            };
-            info!(
-                "[braid-pvp] Subscribed to Braid-HTTP moves stream for game {} @ {}",
-                game_id, base_url
-            );
-            while let Ok(msg) = rx.recv().await {
-                if tx.send(msg).is_err() {
-                    info!("[braid-pvp] Bevy-side receiver dropped — stopping Braid-HTTP subscriber");
-                    break;
-                }
-            }
-        })
-        .detach();
-
-    // ── Chat subscriber ───────────────────────────────────────────────────────
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            let sub = match ChessSubscriber::new(&base_url_chat, &game_id_chat) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("[braid-pvp] Failed to build Braid-HTTP chat subscriber: {e}");
-                    return;
-                }
-            };
-            let (rx, _handle) = match sub.subscribe_chat().await {
-                Ok(x) => x,
-                Err(e) => {
-                    error!("[braid-pvp] Braid-HTTP subscribe_chat failed: {e}");
-                    return;
-                }
-            };
-            info!(
-                "[braid-pvp] Subscribed to Braid-HTTP chat stream for game {} @ {}",
-                game_id_chat, base_url_chat
-            );
-            while let Ok(msg) = rx.recv().await {
-                if let ChessMessage::Chat(payload) = msg {
-                    if chat_tx.send(payload).is_err() {
-                        break;
-                    }
-                }
-            }
-        })
-        .detach();
-}
-
-/// Bevy system: drain any queued inbound messages into [`BraidPvpIncomingMessage`] events
-/// and also inject them into the main [`NetworkEvent`] stream for the game loop.
-fn drain_incoming_messages(
-    session: Res<BraidPvpSession>,
-    mut writer: MessageWriter<BraidPvpIncomingMessage>,
-    mut network_events: MessageWriter<crate::multiplayer::types::NetworkEvent>,
-) {
-    if !session.active {
-        return;
-    }
-    
-    // Parse game_id as u64 once for this frame
-    let game_id_u64 = session.game_id.parse::<u64>().unwrap_or(0);
-
-    // Use try_recv to avoid blocking the main thread.
-    while let Ok(msg) = session.rx.try_recv() {
-        writer.write(BraidPvpIncomingMessage(msg.clone()));
-
-        // Translate Braid-specific ChessMessage to generic NetworkMessage
-        let net_msg = match msg {
-            ChessMessage::Move(p) => Some(crate::multiplayer::network::protocol::NetworkMessage::Move {
-                game_id: game_id_u64,
-                turn: p.move_number as u16,
-                move_uci: p.uci,
-                next_fen: p.fen_after,
-                // Use move_number as the nonce so the replay-protection check in
-                // handle_network_events accepts Braid-HTTP moves in sequence.
-                nonce: p.move_number as u64,
-                timestamp_ms: 0,
-            }),
-            ChessMessage::Resign { player } => Some(crate::multiplayer::network::protocol::NetworkMessage::Resign {
-                game_id: game_id_u64,
-                winner: if player == "white" { "black".to_string() } else { "white".to_string() },
-                // Resign carries a single-use nonce; use a large sentinel so it's never
-                // confused with a move nonce and always passes the replay check.
-                nonce: u64::MAX,
-            }),
-            _ => None,
-        };
-
-        if let Some(m) = net_msg {
-            network_events.write(crate::multiplayer::types::NetworkEvent::MessageReceived(m));
+            info!("[braid-pvp] Subscribed to iroh gossip for game {game_id}");
         }
     }
 }
 
-/// Bevy system: react to [`PublishBraidMove`] by spawning a publish task.
-/// Publishes over both Iroh gossip (fast path) and Braid-HTTP (fallback).
-fn handle_publish_move(
-    mut session: ResMut<BraidPvpSession>,
-    mut reader: MessageReader<PublishBraidMove>,
-    network_state: Res<crate::multiplayer::BraidNetworkState>,
-    tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
-) {
-    if !session.is_configured() {
-        reader.clear();
-        return;
-    }
-    for event in reader.read() {
-        let game_id_u64 = session.game_id.parse::<u64>().unwrap_or(0);
-        let move_number = session.next_move_number;
-        let nonce = session.next_nonce;
-        session.next_move_number = session.next_move_number.saturating_add(1);
-        session.next_nonce = session.next_nonce.saturating_add(1);
-
-        // ── Fast path: Iroh gossip (fire-and-forget) ──────────────────────────
-        if let Some(ref tx) = network_state.message_sender {
-            let timestamp_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            let iroh_msg = crate::multiplayer::network::protocol::NetworkMessage::Move {
-                game_id: game_id_u64,
-                turn: move_number as u16,
-                move_uci: event.uci.clone(),
-                next_fen: event.fen_after.clone(),
-                nonce,
-                timestamp_ms,
-            };
-            if let Err(e) = tx.send(iroh_msg) {
-                warn!("[braid-pvp] Iroh fast-path publish failed (tx closed): {e}");
-            } else {
-                info!("[braid-pvp] Move sent via Iroh gossip (game {game_id_u64}, turn {}, nonce {})", move_number, nonce);
-            }
-        }
-
-        // ── Fallback / redundant path: Braid-HTTP ───────────────────────────
-        let base = session.base_url.clone();
-        let game = session.game_id.clone();
-        let payload = MovePayload::from_uci(
-            event.uci.clone(),
-            event.fen_after.clone(),
-            move_number,
-            event.player.clone(),
-        );
-        spawn_publish_move(base, game, payload, tokio_runtime.0.handle().clone());
-    }
-}
-
-/// Bevy system: react to [`PublishBraidResign`] by spawning a publish task.
-/// Publishes over both Iroh gossip and Braid-HTTP.
+/// Bevy system: send `PublishBraidResign` events over iroh gossip.
 fn handle_publish_resign(
     mut session: ResMut<BraidPvpSession>,
     mut reader: MessageReader<PublishBraidResign>,
     network_state: Res<crate::multiplayer::BraidNetworkState>,
-    tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
 ) {
     if !session.is_configured() {
         reader.clear();
@@ -349,132 +248,220 @@ fn handle_publish_resign(
         let nonce = session.next_nonce;
         session.next_nonce = session.next_nonce.saturating_add(1);
 
-        // ── Fast path: Iroh gossip ────────────────────────────────────────────
         if let Some(ref tx) = network_state.message_sender {
-            let iroh_msg = crate::multiplayer::network::protocol::NetworkMessage::Resign {
+            let msg = NetworkMessage::Resign {
                 game_id: game_id_u64,
                 winner: winner.to_string(),
                 nonce,
             };
-            if let Err(e) = tx.send(iroh_msg) {
-                warn!("[braid-pvp] Iroh resign publish failed (tx closed): {e}");
+            if let Err(e) = tx.send(msg) {
+                warn!("[braid-pvp] Resign gossip send failed: {e}");
             } else {
-                info!("[braid-pvp] Resign sent via Iroh gossip (game {game_id_u64}, nonce {})", nonce);
+                info!("[braid-pvp] Resign sent via gossip (game {game_id_u64})");
             }
         }
-
-        // ── Fallback / redundant path: Braid-HTTP ───────────────────────────
-        spawn_publish_resign(
-            session.base_url.clone(),
-            session.game_id.clone(),
-            event.player.clone(),
-            tokio_runtime.0.handle().clone(),
-        );
     }
 }
 
-/// Forward local `MoveMadeEvent`s to the Braid-HTTP publish stream via `PublishBraidMove`.
-/// Only fires in BraidMultiplayer mode when the session is configured.
-fn publish_local_moves_via_braid(
-    mut move_events: MessageReader<crate::game::events::MoveMadeEvent>,
-    mut publish_events: MessageWriter<PublishBraidMove>,
-    game_mode: Res<crate::core::states::GameMode>,
-    session: Res<BraidPvpSession>,
-    p2p_conn: Res<crate::multiplayer::network::p2p::P2PConnectionState>,
-) {
-    if *game_mode != crate::core::states::GameMode::BraidMultiplayer || !session.is_configured() {
-        return;
-    }
-    for event in move_events.read() {
-        if event.remote {
-            continue;
-        }
-        let from_file = (b'a' + event.from.0) as char;
-        let from_rank = event.from.1 + 1;
-        let to_file = (b'a' + event.to.0) as char;
-        let to_rank = event.to.1 + 1;
-        let mut uci = format!("{}{}{}{}", from_file, from_rank, to_file, to_rank);
-        if let Some(promo) = event.promotion {
-            let promo_char = match promo {
-                crate::game::components::PieceType::Queen => 'q',
-                crate::game::components::PieceType::Rook => 'r',
-                crate::game::components::PieceType::Bishop => 'b',
-                crate::game::components::PieceType::Knight => 'n',
-                _ => 'q',
-            };
-            uci.push(promo_char);
-        }
-        let player = match p2p_conn.player_color {
-            Some(crate::rendering::pieces::PieceColor::White) => "white",
-            Some(crate::rendering::pieces::PieceColor::Black) => "black",
-            None => "white",
-        };
-        info!("[braid-pvp] Forwarding local move {} to Braid-HTTP publish", uci);
-        publish_events.write(PublishBraidMove {
-            uci,
-            fen_after: event.next_fen.clone(),
-            player: player.to_string(),
-        });
-    }
-}
-
-fn spawn_publish_move(base_url: String, game_id: String, payload: MovePayload, handle: tokio::runtime::Handle) {
-    handle.spawn(async move {
-        let mut publisher = match ChessPublisher::new(&base_url, &game_id) {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("[braid-pvp] Braid-HTTP publisher init failed: {e}");
-                return;
-            }
-        };
-        if let Err(e) = publisher.publish_move(&payload).await {
-            warn!("[braid-pvp] Braid-HTTP publish_move failed: {e}");
-        }
-    });
-}
-
-fn spawn_publish_resign(base_url: String, game_id: String, player: String, handle: tokio::runtime::Handle) {
-    handle.spawn(async move {
-        let mut publisher = match ChessPublisher::new(&base_url, &game_id) {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("[braid-pvp] Braid-HTTP publisher init failed: {e}");
-                return;
-            }
-        };
-        if let Err(e) = publisher.publish_resign(&player).await {
-            warn!("[braid-pvp] Braid-HTTP publish_resign failed: {e}");
-        }
-    });
-}
-
-/// Bevy system: react to [`PublishBraidChat`] events — sends via Braid-HTTP chat resource.
+/// Bevy system: send `PublishBraidChat` events as `NetworkMessage::Chat` over gossip.
 fn handle_publish_chat(
     session: Res<BraidPvpSession>,
     mut reader: MessageReader<PublishBraidChat>,
-    tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
+    network_state: Res<crate::multiplayer::BraidNetworkState>,
 ) {
     if !session.is_configured() {
         reader.clear();
         return;
     }
     for event in reader.read() {
-        let base = session.base_url.clone();
-        let game = session.game_id.clone();
-        let player = event.player.clone();
-        let text = event.text.clone();
-        let ts = event.timestamp_ms;
-        tokio_runtime.0.handle().spawn(async move {
-            let mut publisher = match ChessPublisher::new(&base, &game) {
-                Ok(p) => p,
-                Err(e) => {
-                    warn!("[braid-pvp] chat publisher init failed: {e}");
-                    return;
-                }
+        let game_id_u64 = session.game_id.parse::<u64>().unwrap_or(0);
+        if let Some(ref tx) = network_state.message_sender {
+            let msg = NetworkMessage::Chat {
+                game_id: game_id_u64,
+                player: event.player.clone(),
+                text: event.text.clone(),
+                timestamp_ms: event.timestamp_ms,
             };
-            if let Err(e) = publisher.publish_chat(&player, &text, ts).await {
-                warn!("[braid-pvp] publish_chat failed: {e}");
+            if let Err(e) = tx.send(msg) {
+                warn!("[braid-pvp] Chat gossip send failed: {e}");
             }
-        });
+        }
     }
+}
+
+/// Drain incoming `NetworkMessage::Chat` events into `BraidChatMessage` Bevy events.
+fn drain_chat_messages(
+    session: Res<BraidPvpSession>,
+    mut network_events: MessageReader<NetworkEvent>,
+    mut writer: MessageWriter<BraidChatMessage>,
+) {
+    if !session.is_configured() {
+        return;
+    }
+    let game_id_u64 = session.game_id.parse::<u64>().unwrap_or(0);
+    for ev in network_events.read() {
+        if let NetworkEvent::MessageReceived(NetworkMessage::Chat {
+            game_id,
+            player,
+            text,
+            timestamp_ms,
+        }) = ev
+        {
+            if *game_id == game_id_u64 {
+                writer.write(BraidChatMessage {
+                    player: player.clone(),
+                    text: text.clone(),
+                    timestamp_ms: *timestamp_ms,
+                });
+            }
+        }
+    }
+}
+
+/// Drain incoming `NetworkMessage::Clock` events into `SpectatorClockState`.
+fn drain_clock_to_spectator(
+    session: Res<BraidPvpSession>,
+    mut network_events: MessageReader<NetworkEvent>,
+    mut clock: ResMut<crate::multiplayer::spectator::SpectatorClockState>,
+    time: Res<Time>,
+) {
+    if !session.is_configured() {
+        return;
+    }
+    let game_id_u64 = session.game_id.parse::<u64>().unwrap_or(0);
+    for ev in network_events.read() {
+        if let NetworkEvent::MessageReceived(NetworkMessage::Clock {
+            game_id,
+            white_ms,
+            black_ms,
+            ..
+        }) = ev
+        {
+            if *game_id == game_id_u64 {
+                clock.white_ms = *white_ms;
+                clock.black_ms = *black_ms;
+                clock.last_update_secs = time.elapsed_secs_f64();
+            }
+        }
+    }
+}
+
+/// Broadcast `NetworkMessage::Clock` over gossip after each local move.
+fn publish_clock_on_move(
+    mut move_events: MessageReader<crate::game::events::MoveMadeEvent>,
+    session: Res<BraidPvpSession>,
+    game_timer: Option<Res<crate::game::resources::turn::timer::GameTimer>>,
+    network_state: Res<crate::multiplayer::BraidNetworkState>,
+) {
+    if !session.is_configured() {
+        move_events.clear();
+        return;
+    }
+    let Some(timer) = game_timer else {
+        move_events.clear();
+        return;
+    };
+
+    for event in move_events.read() {
+        if event.remote {
+            continue;
+        }
+        let game_id_u64 = session.game_id.parse::<u64>().unwrap_or(0);
+        let white_ms = (timer.white_time_left * 1000.0) as u64;
+        let black_ms = (timer.black_time_left * 1000.0) as u64;
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        if let Some(ref tx) = network_state.message_sender {
+            let _ = tx.send(NetworkMessage::Clock {
+                game_id: game_id_u64,
+                white_ms,
+                black_ms,
+                timestamp_ms,
+            });
+        }
+    }
+}
+
+/// When a new peer joins the gossip topic mid-game, broadcast a `GameSnapshot`
+/// so they can catch up immediately.
+#[cfg(feature = "solana")]
+fn broadcast_snapshot_to_new_peer(
+    session: Res<BraidPvpSession>,
+    mut network_events: MessageReader<NetworkEvent>,
+    network_state: Res<crate::multiplayer::BraidNetworkState>,
+    rollup_manager: Res<crate::multiplayer::EphemeralRollupManager>,
+) {
+    if !session.is_configured() || session.last_version == "0" {
+        network_events.clear();
+        return;
+    }
+    let game_id = match session.game_id.parse::<u64>() {
+        Ok(id) => id,
+        Err(_) => {
+            network_events.clear();
+            return;
+        }
+    };
+
+    let mut peer_joined = false;
+    for event in network_events.read() {
+        if let NetworkEvent::PeerConnected(_) = event {
+            peer_joined = true;
+        }
+    }
+    if !peer_joined {
+        return;
+    }
+
+    let committed_fen = rollup_manager.committed_fen.clone();
+    let head_version = session.last_version.clone();
+    let msg_tx = network_state.message_sender.clone();
+
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            use crate::multiplayer::vps_client;
+            let moves = vps_client::fetch_move_log(game_id).unwrap_or_default();
+            let move_payloads: Vec<String> = moves
+                .iter()
+                .filter_map(|m| serde_json::to_string(m).ok())
+                .collect();
+
+            info!(
+                "[braid-pvp] New peer joined — sending GameSnapshot for game {} ({} moves)",
+                game_id,
+                move_payloads.len()
+            );
+
+            if let Some(tx) = msg_tx {
+                let _ = tx.send(NetworkMessage::GameSnapshot {
+                    game_id,
+                    fen: committed_fen,
+                    move_payloads,
+                    head_version,
+                });
+            }
+        })
+        .detach();
+}
+
+/// Update `last_version` on the session after a local move is published via
+/// gossip (called by the game's `handle_publish_move` equivalent in systems.rs).
+/// This keeps the catch-up snapshot's `head_version` accurate.
+pub fn advance_session_version(session: &mut BraidPvpSession, fen_after: &str) {
+    let version = braid_uri::version_hash(fen_after, session.next_move_number.saturating_sub(1));
+    session.last_version = version;
+}
+
+/// Build a `MovePayload` for the VPS `record_move` REST call.
+/// Does NOT send anything over the network — call site handles the HTTP.
+pub fn make_move_payload(
+    session: &BraidPvpSession,
+    uci: String,
+    fen_after: String,
+    player: String,
+) -> MovePayload {
+    MovePayload::from_uci(uci, fen_after, session.next_move_number.saturating_sub(1), player)
 }

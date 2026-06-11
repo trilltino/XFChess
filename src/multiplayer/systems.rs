@@ -7,6 +7,7 @@ use std::time::Instant;
 use futures_lite::StreamExt;
 use braid_iroh::{BraidIrohConfig, BraidIrohNode, DiscoveryConfig};
 use braid_core::{Update, Version};
+use braid_uri;
 
 use crate::multiplayer::types::*;
 use crate::multiplayer::network::protocol::{NetworkMessage, SignedNetworkMessage};
@@ -47,11 +48,22 @@ pub fn initialize_braid_network(
     tokio_runtime.0.spawn(async move {
         info!("[NET] Starting Iroh node task...");
         let (secret_key, raw_bytes) = load_or_generate_key();
+        // Derive node ID before consuming the key so we can set it as the
+        // proxy's default_peer (browser spectators → local iroh node).
+        let derived_node_id: EndpointId = secret_key.public();
+
+        let braid_data_dir = dirs::data_local_dir()
+            .map(|d| d.join("xfchess").join("braid"))
+            .or_else(|| Some(std::path::PathBuf::from("braid-data")));
 
         let config = BraidIrohConfig {
             secret_key: Some(secret_key),
             discovery: DiscoveryConfig::Real,
-            proxy_config: None,
+            proxy_config: Some(braid_iroh::ProxyConfig {
+                listen_addr: "127.0.0.1:8181".parse().expect("static addr"),
+                default_peer: derived_node_id,
+            }),
+            data_dir: braid_data_dir,
         };
 
         let node = match BraidIrohNode::spawn(config).await {
@@ -168,6 +180,23 @@ pub fn initialize_braid_network(
     });
 }
 
+/// Bind the causal identity to the verified signer.
+///
+/// The `agent_id` carried inside a `Move` is set by the sender and is NOT
+/// authenticated on its own — a malicious peer could put a victim's identity
+/// there. After a signature verifies, we overwrite `agent_id` with the public
+/// key that actually signed the message (`session_pubkey`). The causal
+/// fork-check in [`handle_network_events`] keys on `agent_id`, so this makes
+/// that identity unforgeable: to act as identity X you must hold X's signing
+/// key. Closes the impersonation gap the TLA+ model assumed away — see
+/// docs/plans/causal-authentication.md (Gap A1).
+fn bind_identity(mut signed: SignedNetworkMessage) -> NetworkMessage {
+    if let NetworkMessage::Move { agent_id, .. } = &mut signed.msg {
+        *agent_id = signed.session_pubkey.clone();
+    }
+    signed.msg
+}
+
 async fn process_gossip_stream(
     mut rx: iroh_gossip::api::GossipReceiver,
     event_tx: tokio::sync::mpsc::UnboundedSender<NetworkEvent>,
@@ -212,7 +241,7 @@ async fn process_gossip_stream(
                         0x02 => {
                             if let Ok(signed) = bincode::deserialize::<SignedNetworkMessage>(&body[1..]) {
                                 if signed.verify() {
-                                    event_tx.send(NetworkEvent::MessageReceived(signed.msg)).ok();
+                                    event_tx.send(NetworkEvent::MessageReceived(bind_identity(signed))).ok();
                                 } else {
                                     let game_id = signed.msg.game_id();
                                     event_tx.send(NetworkEvent::InvalidMoveRejected {
@@ -230,7 +259,7 @@ async fn process_gossip_stream(
                             // Try signed JSON first
                             if let Ok(signed) = serde_json::from_slice::<SignedNetworkMessage>(&body) {
                                 if signed.verify() {
-                                    event_tx.send(NetworkEvent::MessageReceived(signed.msg)).ok();
+                                    event_tx.send(NetworkEvent::MessageReceived(bind_identity(signed))).ok();
                                 } else {
                                     let game_id = signed.msg.game_id();
                                     event_tx.send(NetworkEvent::InvalidMoveRejected {
@@ -240,8 +269,24 @@ async fn process_gossip_stream(
                                     warn!("[NET] Dropped message with invalid signature for game {}", game_id);
                                 }
                             } else if let Ok(net_msg) = serde_json::from_slice::<NetworkMessage>(&body) {
-                                // Plain unsigned legacy message
-                                event_tx.send(NetworkEvent::MessageReceived(net_msg)).ok();
+                                // Plain unsigned legacy message. A3: rejected by
+                                // default — accepting it would let a peer bypass
+                                // authentication entirely by sending plaintext.
+                                // The `allow-unsigned-p2p` feature re-enables it
+                                // for local dev/testing only.
+                                #[cfg(feature = "allow-unsigned-p2p")]
+                                {
+                                    event_tx.send(NetworkEvent::MessageReceived(net_msg)).ok();
+                                }
+                                #[cfg(not(feature = "allow-unsigned-p2p"))]
+                                {
+                                    let game_id = net_msg.game_id();
+                                    event_tx.send(NetworkEvent::InvalidMoveRejected {
+                                        game_id,
+                                        reason: "unsigned messages are not accepted".to_string(),
+                                    }).ok();
+                                    warn!("[NET] Dropped unsigned message for game {}", game_id);
+                                }
                             }
                         }
                     }
@@ -260,6 +305,7 @@ async fn process_gossip_stream(
 /// Polling system to read NetworkEvents from the background task and write them as Bevy events.
 pub fn handle_network_events(
     mut network_state: ResMut<BraidNetworkState>,
+    mut causal: ResMut<crate::multiplayer::types::CausalChainState>,
     mut network_events: MessageWriter<NetworkEvent>,
     mut resign_events: MessageWriter<ResignEvent>,
 ) {
@@ -323,6 +369,107 @@ pub fn handle_network_events(
                     }
                     // Accept and advance expected nonce
                     network_state.expected_nonces.insert(game_id, nonce.saturating_add(1));
+                }
+
+                // A2: build the per-game roster of allowed signer keys from
+                // SessionInfo (broadcast only after the VPS confirms a session is
+                // active). Capped at two — the two participants.
+                if let NetworkMessage::SessionInfo { game_id: sg, session_pubkey, .. } = msg {
+                    #[cfg(feature = "solana")]
+                    let key = session_pubkey.to_bytes().to_vec();
+                    #[cfg(not(feature = "solana"))]
+                    let key = session_pubkey.0.to_vec();
+                    let entry = causal.roster.entry(*sg).or_default();
+                    if !entry.contains(&key) && entry.len() < 2 {
+                        entry.push(key);
+                    }
+                }
+
+                // Causal chain check (Gap 1/3): verify seq continuity + parent version.
+                // Only applied when the sender populates the causal fields (non-legacy).
+                if let NetworkMessage::Move {
+                    turn,
+                    next_fen,
+                    agent_id,
+                    seq,
+                    parent_version,
+                    ..
+                } = msg
+                {
+                    if !agent_id.is_empty() && *seq > 0 {
+                        // A2: roster check. `agent_id` here is the VERIFIED signer
+                        // (bound in `bind_identity`). Once we know this game's
+                        // participant session keys (from `SessionInfo`), reject any
+                        // move whose signer is not one of them — a stranger cannot
+                        // inject a move into a game they are not part of, even with
+                        // a valid signature of their own.
+                        if let Some(allowed) = causal.roster.get(&game_id) {
+                            if !allowed.is_empty() && !allowed.contains(agent_id) {
+                                warn!(
+                                    "[NET] Move from non-participant signer for game {} (agent {:?})",
+                                    game_id,
+                                    &agent_id[..4.min(agent_id.len())]
+                                );
+                                network_events.write(NetworkEvent::InvalidMoveRejected {
+                                    game_id,
+                                    reason: "signer is not a participant in this game".to_string(),
+                                });
+                                continue;
+                            }
+                        }
+
+                        let agent_key = (game_id, agent_id.clone());
+                        let last = causal.last_seq.get(&agent_key).copied().unwrap_or(0);
+                        if *seq != last + 1 {
+                            warn!(
+                                "[NET] Causal seq gap for game {} agent {:?}: got {} expected {}",
+                                game_id,
+                                &agent_id[..4.min(agent_id.len())],
+                                seq,
+                                last + 1
+                            );
+                            network_events.write(NetworkEvent::InvalidMoveRejected {
+                                game_id,
+                                reason: format!("causal seq gap: got {} expected {}", seq, last + 1),
+                            });
+                            continue;
+                        }
+                        // Equivocation guard. Once we have a head for THIS agent
+                        // (the game has progressed past their first move), EVERY
+                        // subsequent move must name that head as its parent —
+                        // including a move that falsely claims genesis ("0") or an
+                        // empty parent. Gating on `parent_version != "0"` (as
+                        // before) let a malicious peer bypass the check by attaching
+                        // "0" to a move with an otherwise-valid sequence number,
+                        // forking our local head. Verified by the TLA+ model in
+                        // specs/CausalChain.tla (CC_byzantine_current = fork,
+                        // CC_byzantine_fixed = safe across 15.2M states).
+                        let our_head = causal.head_version.get(&agent_key).cloned().unwrap_or_default();
+                        if !our_head.is_empty() && parent_version != &our_head {
+                            warn!(
+                                "[NET] Equivocation detected for game {}: \
+                                 sender parent_version={} our head={}",
+                                game_id, parent_version, our_head
+                            );
+                            network_events.write(NetworkEvent::InvalidMoveRejected {
+                                game_id,
+                                reason: format!(
+                                    "equivocation: parent {} != head {}",
+                                    parent_version, our_head
+                                ),
+                            });
+                            continue;
+                        }
+                        causal.last_seq.insert(agent_key.clone(), *seq);
+                        // Advance THIS agent's head (Gap B: per-sender lane).
+                        let new_head = braid_uri::version_hash(next_fen, *turn as u32);
+                        causal.head_version.insert(agent_key, new_head);
+                    } else {
+                        // Legacy move without causal fields: keep a per-game head
+                        // under the empty-agent key so resync still has a reference.
+                        let new_head = braid_uri::version_hash(next_fen, *turn as u32);
+                        causal.head_version.insert((game_id, Vec::new()), new_head);
+                    }
                 }
 
                 match msg {
@@ -880,4 +1027,54 @@ pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
     let sk = crate::multiplayer::network::identity::load_or_create();
     let bytes = sk.to_bytes();
     (sk, bytes)
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    /// A1 regression: an attacker who signs with their OWN key but stuffs a
+    /// victim's identity into `agent_id` must not be able to act as the victim.
+    /// `bind_identity` discards the claimed `agent_id` and substitutes the
+    /// verified signer, so the causal/roster checks see the attacker's real key.
+    #[test]
+    fn bind_identity_uses_verified_signer_not_claimed_agent_id() {
+        let attacker_sk = [9u8; 32];
+        let victim_id = vec![1u8; 32];
+
+        let msg = NetworkMessage::Move {
+            game_id: 1,
+            turn: 1,
+            move_uci: "e2e4".to_string(),
+            next_fen: "f".to_string(),
+            nonce: 1,
+            timestamp_ms: 0,
+            agent_id: victim_id.clone(), // forged: claims to be the victim
+            seq: 1,
+            parent_version: "0".to_string(),
+        };
+
+        let signed = SignedNetworkMessage::sign(msg, &attacker_sk);
+        // The signature IS valid — for the attacker's own key.
+        assert!(signed.verify());
+        let attacker_pub = signed.session_pubkey.clone();
+
+        let bound = bind_identity(signed);
+        match bound {
+            NetworkMessage::Move { agent_id, .. } => {
+                assert_eq!(agent_id, attacker_pub, "agent_id must be the verified signer");
+                assert_ne!(agent_id, victim_id, "the forged victim identity must be discarded");
+            }
+            _ => panic!("expected Move"),
+        }
+    }
+
+    /// Non-Move messages are passed through unchanged by `bind_identity`.
+    #[test]
+    fn bind_identity_leaves_non_move_untouched() {
+        let sk = [7u8; 32];
+        let msg = NetworkMessage::ResyncRequest { game_id: 42 };
+        let signed = SignedNetworkMessage::sign(msg, &sk);
+        assert!(matches!(bind_identity(signed), NetworkMessage::ResyncRequest { game_id: 42 }));
+    }
 }

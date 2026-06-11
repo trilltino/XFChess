@@ -51,6 +51,7 @@ pub async fn spawn_node(
         discovery,
         secret_key: Some(secret_key),
         proxy_config,
+        data_dir: None,
     })
     .await?;
 

@@ -86,7 +86,7 @@ pub fn create_board(
 
                 let file_char = (b'a' + file) as char;
                 let square_name = format!("Square {}{}", file_char, rank + 1);
-                let world_pos = Vec3::new(file as f32, 0., rank as f32);
+                let world_pos = Vec3::new(7.0 - file as f32, 0., rank as f32);
 
                 (Transform::from_translation(world_pos), square, Board, Name::new(square_name),
                  DespawnOnExit(GameState::InGame), mesh_3d.clone(), base_mat_3d, mesh_2d.clone(), base_mat_2d,

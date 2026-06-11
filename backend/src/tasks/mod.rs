@@ -42,9 +42,15 @@ pub async fn spawn_background_tasks(
         }
     };
     let _ws_subscriber = Arc::new(ws_subscriber);
+    let on_chain = Some((
+        state.config.program_id.clone(),
+        state.config.solana_rpc_url.clone(),
+        state.vps_authority.clone(),
+    ));
     let _tournament_handle = spawn_tournament_scheduler(
         (*state.tournament_store).clone(),
         Some(state.tournament_gossip.clone()),
+        on_chain,
     );
     // Placeholder for gossip_handle if needed
     let _gossip_handle = tokio::spawn(async move {
