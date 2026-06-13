@@ -64,9 +64,28 @@ tauri/target/
 *.dll
 *.dylib
 
-# SQLite database files
+# SQLite database files (NEVER commit live databases)
+*.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+
+# Runtime / process state
+*.pid
+.backend.pid
+
+# Editor scratch / temp files
+*.tmp
+*.tmp.*
+
+# Secrets — belt-and-suspenders (also matched by .env rules above)
+**/.env
+**/.env.*
+!**/.env.example
+*.keypair
+*-keypair.json
+id.json
 
 # Tauri generated
 tauri/gen/
