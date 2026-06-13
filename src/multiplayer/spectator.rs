@@ -1,8 +1,16 @@
-//! Spectator mode — watch a live game via `xfchess://spectate/{game_id}`.
+//! Spectator mode — watch a game via `xfchess://spectate/{game_id}`.
 //!
-//! The plugin polls `GET /games/{game_id}/moves` every 2 seconds and
+//! The plugin polls `GET /games/moves/{game_id}` every 2 seconds and
 //! dispatches `NetworkMoveEvent` for any new moves, letting the board
 //! render them without accepting local input.
+//!
+//! Broadcast integrity: before subscribing to the live P2P gossip feed, the
+//! spectator queries the game's broadcast delay. A game with a non-zero delay
+//! (tournament/esports) is watched *only* through the delay-gated HTTP feed —
+//! the live gossip subscription is never opened, so the stream can't be used
+//! to ghost. The default until the delay is known is "delayed" (fail safe).
+
+use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use crate::multiplayer::traits::{Message, MessageReader, MessageWriter};
@@ -30,6 +38,13 @@ pub fn make_spectate_link(game_id: &str) -> String {
     format!("xfchess://spectate/{}", game_id)
 }
 
+/// Whether a game with the given broadcast delay must be watched on the
+/// delayed HTTP feed only (no live gossip). Pure so the broadcast-integrity
+/// decision is unit-testable without the Bevy/iroh stack.
+pub fn feed_is_delayed(delay_secs: u64) -> bool {
+    delay_secs > 0
+}
+
 /// Resource tracking the active spectator session.
 #[derive(Resource, Default)]
 pub struct SpectatorSession {
@@ -41,6 +56,13 @@ pub struct SpectatorSession {
     pub poll_timer: f32,
     /// Pending UCI moves fetched from VPS, awaiting dispatch.
     pub pending_moves: Vec<String>,
+    /// True while this game must be watched via the delayed HTTP feed only —
+    /// no live gossip. Starts true (fail safe) until the delay is confirmed 0.
+    pub delayed: bool,
+    /// Whether the broadcast-delay lookup has resolved.
+    pub delay_checked: bool,
+    /// Async slot for the broadcast-delay lookup result (seconds).
+    pub delay_result: Option<Arc<Mutex<Option<u64>>>>,
 }
 
 impl SpectatorSession {
@@ -68,6 +90,7 @@ impl Plugin for SpectatorPlugin {
             .add_message::<SpectateViaLinkEvent>()
             .add_systems(Update, (
                 handle_spectate_link,
+                resolve_spectator_delay,
                 tick_spectator_poll,
                 dispatch_pending_spectator_moves,
                 toggle_clock_side_on_move,
@@ -87,7 +110,7 @@ fn handle_spectate_link(
     mut session: ResMut<SpectatorSession>,
     mut game_mode: ResMut<GameMode>,
     mut next_state: ResMut<NextState<GameState>>,
-    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
+    tokio: Res<TokioRuntime>,
 ) {
     for ev in events.read() {
         info!("[spectator] Starting spectate for game {}", ev.game_id);
@@ -95,25 +118,79 @@ fn handle_spectate_link(
         session.applied_move_count = 0;
         session.poll_timer = 0.0;
         session.pending_moves.clear();
+        // Fail safe: treat as delayed (HTTP-only) until the lookup confirms a
+        // live game. The live gossip subscription is opened later, in
+        // `resolve_spectator_delay`, only when the delay is 0.
+        session.delayed = true;
+        session.delay_checked = false;
         *game_mode = GameMode::Spectator;
         next_state.set(GameState::InGame);
 
-        #[cfg(feature = "solana")]
-        if let Some(ref ns) = network_state {
-            // Subscribe to the game's iroh gossip topic so GameSnapshot arrives.
-            if let Some(ref sub_tx) = ns.subscription_sender {
-                let topic = format!("/xfchess-game/{}", ev.game_id);
-                let _ = sub_tx.send(topic);
+        // Look up the game's broadcast delay off-thread.
+        let slot = Arc::new(Mutex::new(None));
+        session.delay_result = Some(slot.clone());
+        let game_id = ev.game_id.clone();
+        tokio.0.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                crate::multiplayer::network::vps::get_broadcast_delay(&game_id)
+            })
+            .await;
+            // On any failure, leave the slot as a large delay (fail safe).
+            let delay = match result {
+                Ok(Ok(d)) => d,
+                _ => u64::MAX,
+            };
+            if let Ok(mut guard) = slot.lock() {
+                *guard = Some(delay);
             }
-            // Request full move history from the active peer (since_version "0" = all).
-            if let Some(gid) = ev.game_id.parse::<u64>().ok() {
-                if let Some(ref msg_tx) = ns.message_sender {
-                    let _ = msg_tx.send(NetworkMessage::BraidResyncRequest {
-                        game_id: gid,
-                        since_version: "0".to_string(),
-                    });
-                }
-            }
+        });
+    }
+}
+
+/// Resolves the broadcast-delay lookup and, only for a live game (delay 0),
+/// opens the P2P gossip subscription + resync. A delayed game is watched
+/// exclusively through the delay-gated HTTP poll, so its live board can't be
+/// pulled over gossip to ghost a stream.
+fn resolve_spectator_delay(
+    mut session: ResMut<SpectatorSession>,
+    #[cfg(feature = "solana")] network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
+) {
+    if session.delay_checked || session.game_id.is_none() {
+        return;
+    }
+    let Some(slot) = session.delay_result.clone() else { return };
+    let delay = { slot.lock().ok().and_then(|g| *g) };
+    let Some(delay) = delay else { return }; // still pending
+
+    session.delayed = feed_is_delayed(delay);
+    session.delay_checked = true;
+    session.delay_result = None;
+
+    if session.delayed {
+        info!(
+            "[spectator] game {:?} has a {}s broadcast delay — HTTP-only, no live gossip",
+            session.game_id, delay
+        );
+        return;
+    }
+
+    info!("[spectator] game {:?} is live (no delay) — subscribing to gossip", session.game_id);
+    #[cfg(feature = "solana")]
+    if let (Some(ref ns), Some(game_id)) = (
+        network_state,
+        session.game_id.as_ref().and_then(|g| g.parse::<u64>().ok()),
+    ) {
+        // Subscribe to the game's iroh gossip topic so GameSnapshot arrives.
+        if let Some(ref sub_tx) = ns.subscription_sender {
+            let topic = format!("/xfchess-game/{}", game_id);
+            let _ = sub_tx.send(topic);
+        }
+        // Request full move history from the active peer (since_version "0" = all).
+        if let Some(ref msg_tx) = ns.message_sender {
+            let _ = msg_tx.send(NetworkMessage::BraidResyncRequest {
+                game_id,
+                since_version: "0".to_string(),
+            });
         }
     }
 }
@@ -196,6 +273,12 @@ fn apply_braid_resync_to_spectator(
     if *game_mode != GameMode::Spectator {
         return;
     }
+    // Never apply live gossip moves for a delayed broadcast (or before the
+    // delay is known) — those games are HTTP-delayed-feed only.
+    if session.delayed || !session.delay_checked {
+        rollup_events.clear();
+        return;
+    }
     for ev in rollup_events.read() {
         if let crate::multiplayer::rollup::manager::RollupEvent::ResyncedMove { move_uci, next_fen, .. } = ev {
             let uci = move_uci;
@@ -264,5 +347,40 @@ fn toggle_clock_side_on_move(
     }
     for _ in move_events.read() {
         clock.white_to_move = !clock.white_to_move;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_spectate_link() {
+        assert_eq!(
+            parse_spectate_link("xfchess://spectate/12345"),
+            Some("12345".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_scheme_and_empty_id() {
+        assert_eq!(parse_spectate_link("https://spectate/12345"), None);
+        assert_eq!(parse_spectate_link("xfchess://spectate/"), None);
+        assert_eq!(parse_spectate_link("garbage"), None);
+    }
+
+    #[test]
+    fn spectate_link_round_trips() {
+        let link = make_spectate_link("777");
+        assert_eq!(parse_spectate_link(&link), Some("777".to_string()));
+    }
+
+    #[test]
+    fn delay_decision_gates_live_gossip() {
+        // 0s delay → live game → gossip allowed.
+        assert!(!feed_is_delayed(0));
+        // Any positive delay → HTTP-only, no live gossip (ghosting defense).
+        assert!(feed_is_delayed(1));
+        assert!(feed_is_delayed(900));
     }
 }

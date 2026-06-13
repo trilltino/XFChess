@@ -65,6 +65,38 @@ struct DisputeReq<'a> {
     disputing_player: &'a str,
 }
 
+#[derive(Serialize)]
+struct BlurTelemetryReq<'a> {
+    game_id: u64,
+    move_number: u32,
+    color: &'a str,
+    blurred: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think_ms: Option<u32>,
+}
+
+/// Report a move's anti-cheat telemetry: whether the window lost focus since
+/// this player's previous move (the alt-tab signature) and how long the move
+/// took (`think_ms`). Fire-and-forget — failures are the caller's to log,
+/// never to surface to the player.
+pub fn report_blur(
+    game_id: u64,
+    move_number: u32,
+    color: &str,
+    blurred: bool,
+    think_ms: Option<u32>,
+) -> Result<(), String> {
+    let response = client()?
+        .post(format!("{}/telemetry/blur", vps_base()))
+        .json(&BlurTelemetryReq { game_id, move_number, color, blurred, think_ms })
+        .send()
+        .map_err(|e| format!("vps report_blur: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("vps report_blur: HTTP {}", response.status()));
+    }
+    Ok(())
+}
+
 /// Ask VPS to build, sign, and submit a `record_move` instruction on the ER.
 pub fn record_move(game_id: u64, move_uci: &str, next_fen: &str, nonce: u64) -> Result<String, String> {
     let response = client()?
@@ -204,7 +236,7 @@ pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String
     struct MovesResp { moves: Vec<MoveEntry> }
 
     let response = client()?
-        .get(format!("{}/games/{}/moves", vps_base(), game_id))
+        .get(format!("{}/games/moves/{}", vps_base(), game_id))
         .send()
         .map_err(|e| format!("spectator get_moves: {e}"))?;
     if !response.status().is_success() {
@@ -215,6 +247,26 @@ pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String
         .json::<MovesResp>()
         .map_err(|e| format!("spectator get_moves parse: {e}"))?;
     Ok(resp.moves.into_iter().map(|m| m.move_uci).collect())
+}
+
+/// Fetch a game's public broadcast delay in seconds (0 = live). A spectator
+/// queries this before subscribing to the live P2P gossip feed: a non-zero
+/// delay means the only permitted public source is the delay-gated HTTP feed.
+pub fn get_broadcast_delay(game_id: &str) -> Result<u64, String> {
+    #[derive(Deserialize)]
+    struct DelayResp { delay_secs: i64 }
+
+    let response = client()?
+        .get(format!("{}/games/{}/broadcast-delay", vps_base(), game_id))
+        .send()
+        .map_err(|e| format!("spectator get_broadcast_delay: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("spectator get_broadcast_delay: HTTP {}", response.status()));
+    }
+    let resp = response
+        .json::<DelayResp>()
+        .map_err(|e| format!("spectator get_broadcast_delay parse: {e}"))?;
+    Ok(resp.delay_secs.max(0) as u64)
 }
 
 /// Fetch the full move log for a game as typed [`braid_uri::MovePayload`] values.

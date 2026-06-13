@@ -12,6 +12,7 @@ pub mod types;
 pub mod systems;
 pub mod social;
 pub mod join_link;
+pub mod telemetry;
 
 // Submodules
 pub mod network;
@@ -77,6 +78,7 @@ impl Plugin for MultiplayerPlugin {
             join_link::JoinLinkPlugin,
             spectator::SpectatorPlugin,
             ui::spectator_overlay::SpectatorOverlayPlugin,
+            telemetry::FocusTelemetryPlugin,
         ));
 
         #[cfg(feature = "solana")]

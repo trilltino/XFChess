@@ -70,10 +70,6 @@ pub struct SquareMaterials {
     pub hover_matl: Handle<StandardMaterial>,
     /// Material for selected piece border (soft black)
     pub selected_border_matl: Handle<StandardMaterial>,
-    /// Grey material for TempleOS view (light squares)
-    pub grey_color: Handle<StandardMaterial>,
-    /// White material for TempleOS view (dark squares in standard view)
-    pub templeos_white: Handle<StandardMaterial>,
     /// Shared mesh for move hints (prevent per-frame allocation)
     pub hint_mesh: Handle<Mesh>,
     /// Annular ring mesh used for capture-target hints
@@ -104,19 +100,6 @@ impl FromWorld for SquareMaterials {
             }
         };
 
-        // Create unlit materials for TempleOS mode (flat colors without lighting)
-        // Matching reference image: dark grey for black squares, white for white squares
-        let grey_material = StandardMaterial {
-            base_color: Color::srgb(0.35, 0.35, 0.35), // Dark grey for black squares
-            unlit: true,                               // Unlit for flat 2D appearance
-            ..default()
-        };
-        let white_material = StandardMaterial {
-            base_color: Color::srgb(1.0, 1.0, 1.0), // Pure white for white squares
-            unlit: true,                            // Unlit for flat 2D appearance
-            ..default()
-        };
-
         SquareMaterials {
             black_color: materials.add(light_color), // Light squares
             white_color: materials.add(dark_color),  // Dark squares
@@ -132,8 +115,6 @@ impl FromWorld for SquareMaterials {
                 unlit: true,
                 ..default()
             }),
-            grey_color: materials.add(grey_material), // Dull grey for TempleOS (unlit)
-            templeos_white: materials.add(white_material), // Bright white for TempleOS (unlit)
             capture_hint_matl: materials.add(StandardMaterial {
                 base_color: Color::srgba(0.90, 0.25, 0.08, 0.85),
                 alpha_mode: AlphaMode::Blend,

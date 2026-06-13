@@ -224,7 +224,7 @@ pub fn setup_game_scene(
     global_ambient.brightness = 0.0;
 
     // Set background color based on view mode
-    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
+    if view_mode.is_templeos() {
         // Vibrant solid yellow background matching reference image (#FFFF00)
         commands.insert_resource(ClearColor(Color::srgb(1.0, 1.0, 0.0))); // Pure yellow #FFFF00
     } else {
@@ -240,7 +240,7 @@ pub fn setup_game_scene(
     // lights...
 
     // Skip lights for TempleOS mode (unlit rendering)
-    if *view_mode != crate::game::view_mode::ViewMode::TempleOS {
+    if !view_mode.is_templeos() {
         // Main directional light — no shadows to keep framerates smooth
         commands.spawn((
             DirectionalLight {

@@ -284,7 +284,7 @@ pub fn initialize_engine_from_ecs(
     info!("[GAME_INIT] View mode: {:?}", *view_mode);
 
     // Skip engine initialization in TempleOS mode (no pieces, no game)
-    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
+    if view_mode.is_templeos() {
         info!("[GAME_INIT] Skipping engine initialization - TempleOS mode (no game logic)");
         return;
     }

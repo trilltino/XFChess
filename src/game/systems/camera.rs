@@ -833,7 +833,7 @@ pub fn setup_game_camera(
     mut rotation_state: ResMut<CameraRotationState>,
 ) {
     // Only configure for standard views (TempleOS handles its own camera/view)
-    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
+    if view_mode.is_templeos() {
         return;
     }
 

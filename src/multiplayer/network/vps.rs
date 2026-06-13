@@ -41,9 +41,9 @@ pub use session::{
 #[cfg(feature = "solana")]
 pub use session::tee_authenticate;
 pub use game::{
-    fetch_move_log, get_active_game_for_wallet, get_game_moves_for_spectator, record_move,
-    vps_finalize_game, vps_fetch_move_nonce, vps_submit_free_rated_result,
-    vps_submit_dispute, vps_undelegate_game,
+    fetch_move_log, get_active_game_for_wallet, get_broadcast_delay, get_game_moves_for_spectator,
+    record_move, report_blur, vps_finalize_game, vps_fetch_move_nonce,
+    vps_submit_free_rated_result, vps_submit_dispute, vps_undelegate_game,
 };
 pub use identity::{
     fetch_player_profile, get_user_status, get_user_status_async, link_wallet, register_identity,

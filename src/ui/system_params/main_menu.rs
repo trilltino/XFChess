@@ -59,7 +59,6 @@ pub struct MainMenuUIContext<'w, 's> {
     pub menu_state: ResMut<'w, NextState<crate::core::MenuState>>,
     pub current_menu_state: Option<Res<'w, State<crate::core::MenuState>>>,
     pub ai_config: ResMut<'w, ChessAIResource>,
-    #[allow(dead_code)]
     pub view_mode: ResMut<'w, ViewMode>,
     pub loading_progress: ResMut<'w, LoadingProgress>,
     pub game_assets: ResMut<'w, GameAssets>,

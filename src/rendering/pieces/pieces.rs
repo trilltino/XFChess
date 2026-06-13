@@ -837,6 +837,7 @@ pub fn view_mode_rendering_toggle_system(
     let (show_3d, show_2d) = match mode {
         crate::game::view_mode::ViewMode::Standard3D => (true, false),
         crate::game::view_mode::ViewMode::Standard2D => (false, true),
+        #[cfg(feature = "templeos")]
         crate::game::view_mode::ViewMode::TempleOS => (true, false),
     };
 

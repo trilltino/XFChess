@@ -30,12 +30,9 @@ pub fn create_board(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    view_mode: Res<ViewMode>,
     square_materials: Res<crate::rendering::utils::SquareMaterials>,
 ) {
     use crate::core::{DespawnOnExit, GameState};
-
-    let _is_templeos = *view_mode == ViewMode::TempleOS;
 
     let boardmesh_3d = meshes.add(Cuboid::new(1.0, 0.1, 1.0));
     let boardmesh_2d = meshes.add(Rectangle::new(1.0, 1.0));
@@ -149,7 +146,7 @@ pub fn board_view_mode_toggle_system(
     mut board_2d_query: Query<&mut Visibility, (With<BoardSquare2DVisual>, Without<BoardSquare3DVisual>)>,
 ) {
     let mode = *view_mode;
-    let show_3d = mode == ViewMode::Standard3D || mode == ViewMode::TempleOS;
+    let show_3d = mode == ViewMode::Standard3D || mode.is_templeos();
     let show_2d = mode == ViewMode::Standard2D;
 
     for mut vis in board_3d_query.iter_mut() {
@@ -164,23 +161,12 @@ pub struct BoardPlugin;
 
 impl Plugin for BoardPlugin {
     fn build(&self, app: &mut App) {
-        use super::coordinates::create_coordinate_labels;
-        use super::templeos_ui::create_templeos_quote_ui;
         use crate::core::GameState;
-        use crate::rendering::setup_templeos_camera;
         use crate::rendering::update_last_move_highlight_system;
         use crate::rendering::update_move_hints_system;
         use crate::rendering::effects::{init_arrow_assets, update_check_highlight_system};
         app.add_systems(Startup, init_arrow_assets)
-        .add_systems(
-            OnEnter(GameState::InGame),
-            (
-                create_board,
-                create_coordinate_labels,
-                setup_templeos_camera,
-                create_templeos_quote_ui,
-            ),
-        )
+        .add_systems(OnEnter(GameState::InGame), create_board)
         .add_systems(
             Update,
             (
@@ -190,11 +176,25 @@ impl Plugin for BoardPlugin {
                 board_view_mode_toggle_system.run_if(
                     in_state(GameState::InGame).and(resource_changed::<crate::game::view_mode::ViewMode>)
                 ),
-                crate::rendering::templeos_camera_movement_system
-                    .run_if(in_state(GameState::InGame)),
                 crate::game::systems::debug_transform::debug_log_transforms
                     .run_if(in_state(GameState::InGame)),
             ),
+        );
+
+        // TempleOS tribute theme — dev builds only (`--features templeos`).
+        #[cfg(feature = "templeos")]
+        app.add_systems(
+            OnEnter(GameState::InGame),
+            (
+                super::coordinates::create_coordinate_labels,
+                crate::rendering::setup_templeos_camera,
+                super::templeos_ui::create_templeos_quote_ui,
+            ),
+        )
+        .add_systems(
+            Update,
+            crate::rendering::templeos_camera_movement_system
+                .run_if(in_state(GameState::InGame)),
         );
         // Debug markers removed - they were showing colored spheres on the board corners
         // app.add_systems(

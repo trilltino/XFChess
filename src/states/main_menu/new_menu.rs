@@ -79,11 +79,15 @@ pub struct MenuCameraOrbit {
     pub height: f32,
     /// Orbit speed (radians / second).
     pub speed: f32,
+    /// When true the camera holds a fixed isometric orthographic view
+    /// (same projection as the TempleOS in-game camera) instead of orbiting.
+    /// Toggled with **V**.
+    pub ortho: bool,
 }
 
 impl Default for MenuCameraOrbit {
     fn default() -> Self {
-        Self { angle: 0.0, radius: 16.0, height: 14.0, speed: 0.10 }
+        Self { angle: 0.0, radius: 16.0, height: 14.0, speed: 0.10, ortho: false }
     }
 }
 
@@ -296,23 +300,47 @@ pub fn setup_menu_fog(
 }
 
 /// Continuously orbits the camera around BOARD_CENTER.
+/// Press **V** to toggle a fixed isometric orthographic view of the board
+/// (the TempleOS-style projection) instead of the cinematic orbit.
 pub fn orbit_camera_system(
     time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     mut orbit: ResMut<MenuCameraOrbit>,
     cam: Res<crate::PersistentEguiCamera>,
-    mut query: Query<&mut Transform, With<Camera3d>>,
+    mut query: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
+    if keyboard.just_pressed(KeyCode::KeyV) {
+        orbit.ortho = !orbit.ortho;
+        info!("[MENU] Toggled menu board view to {}", if orbit.ortho { "orthographic" } else { "orbit" });
+    }
+
+    let Some(entity) = cam.entity else { return };
+    let Ok((mut t, mut proj)) = query.get_mut(entity) else { return };
+
+    if orbit.ortho {
+        // Fixed isometric view — mirrors setup_templeos_camera: equal offsets on
+        // X/Y/Z from the board centre with a FixedVertical orthographic projection.
+        if !matches!(*proj, Projection::Orthographic(_)) {
+            *proj = Projection::from(OrthographicProjection {
+                scaling_mode: bevy::camera::ScalingMode::FixedVertical { viewport_height: 16.0 },
+                ..OrthographicProjection::default_3d()
+            });
+        }
+        let offset = 5.0;
+        let pos = Vec3::new(BOARD_CENTER.x + offset, offset, BOARD_CENTER.z + offset);
+        *t = Transform::from_translation(pos).looking_at(BOARD_CENTER, Vec3::Y);
+        return;
+    }
+
+    if !matches!(*proj, Projection::Perspective(_)) {
+        *proj = Projection::default();
+    }
     orbit.angle += orbit.speed * time.delta_secs();
     let x = BOARD_CENTER.x + orbit.radius * orbit.angle.cos();
     let z = BOARD_CENTER.z + orbit.radius * orbit.angle.sin();
     // Look at a point slightly left of board centre so the board sits right-of-centre in screen space
     let look_target = Vec3::new(BOARD_CENTER.x - 1.2, BOARD_CENTER.y, BOARD_CENTER.z);
-    if let Some(entity) = cam.entity {
-        if let Ok(mut t) = query.get_mut(entity) {
-            *t = Transform::from_translation(Vec3::new(x, orbit.height, z))
-                .looking_at(look_target, Vec3::Y);
-        }
-    }
+    *t = Transform::from_translation(Vec3::new(x, orbit.height, z)).looking_at(look_target, Vec3::Y);
 }
 
 /// Handle keyboard shortcuts on the main menu.
@@ -543,6 +571,21 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         cx.next_state.set(GameState::InGame);
     }
     ui.add_space(SP);
+
+    // TempleOS tribute mode — dev builds only (`--features templeos`).
+    #[cfg(feature = "templeos")]
+    {
+        if item(ui, "TempleOS", W) {
+            play_click(&mut cx.commands, snd);
+            *cx.view_mode = crate::game::view_mode::ViewMode::TempleOS;
+            cx.commands.insert_resource(crate::game::view_mode::PlayerViewPreferences {
+                local_view: crate::game::view_mode::ViewMode::TempleOS,
+            });
+            *cx.core_mode = GameMode::SinglePlayer;
+            cx.next_state.set(GameState::InGame);
+        }
+        ui.add_space(SP);
+    }
 
     if item(ui, "XFChess.com", W) {
         play_click(&mut cx.commands, snd);

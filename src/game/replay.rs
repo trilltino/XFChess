@@ -658,6 +658,7 @@ pub fn replay_ui_system(
                 let view_label = match view_prefs.local_view {
                     ViewMode::Standard2D => "3D",
                     ViewMode::Standard3D => "2D",
+                    #[cfg(feature = "templeos")]
                     ViewMode::TempleOS => "3D",
                 };
                 if ui

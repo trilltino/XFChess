@@ -205,12 +205,12 @@ impl Plugin for GamePlugin {
                 camera_rotate_on_turn_detection_system
                     .in_set(GameSystems::Input)
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     }),
                 camera_rotate_on_turn_system
                     .in_set(GameSystems::Input)
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     }),
                 // Validation set: Sync board state before validation (disabled in TempleOS)
 
@@ -232,16 +232,16 @@ impl Plugin for GamePlugin {
                             || (!engine.has_legal_moves() && !game_over.is_game_over())
                     })
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     }),
                 start_timer_when_ready.in_set(GameSystems::Execution).run_if(
                     |view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     },
                 ),
                 update_game_timer.in_set(GameSystems::Execution).run_if(
                     |view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     },
                 ),
                 // check_game_over_state is gated on GameOverState changing so it
@@ -251,19 +251,19 @@ impl Plugin for GamePlugin {
                     .in_set(GameSystems::Execution)
                     .run_if(|go: Res<GameOverState>| go.is_changed())
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     }),
                 crate::game::systems::network_move::handle_resign_events
                     .in_set(GameSystems::Execution),
                 // Promotion detection and handling (disabled in TempleOS)
                 detect_pawn_promotion.in_set(GameSystems::Execution).run_if(
                     |view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     },
                 ),
                 apply_pawn_promotion.in_set(GameSystems::Execution).run_if(
                     |view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     },
                 ),
                 // Network Move Verification/Execution
@@ -277,7 +277,7 @@ impl Plugin for GamePlugin {
                     .in_set(GameSystems::Visual)
                     .run_if(|sel: Res<Selection>| sel.is_changed())
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        *view_mode != super::view_mode::ViewMode::TempleOS
+                        !view_mode.is_templeos()
                     }),
                 // animate_piece_movement is skipped entirely when no piece has a
                 // PieceMoveAnimation component (archetype cache lookup — zero cost).

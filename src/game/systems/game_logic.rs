@@ -56,7 +56,7 @@ pub fn update_game_phase(
     view_mode: Res<crate::game::view_mode::ViewMode>,
 ) {
     // Skip game phase checks in TempleOS mode (no pieces = empty board)
-    if *view_mode == crate::game::view_mode::ViewMode::TempleOS {
+    if view_mode.is_templeos() {
         debug!("[GAME] Skipping game phase check - TempleOS mode (no pieces)");
         return;
     }

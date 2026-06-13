@@ -93,12 +93,23 @@ impl Plugin for MainMenuPlugin {
                  mut fl: ResMut<FontsLoaded>,
                  mut anim: ResMut<board_animation::BoardAnimator>,
                  mut panel: ResMut<new_menu::NewMenuPanel>,
-                 mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>| {
+                 mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>,
+                 mut orbit: ResMut<new_menu::MenuCameraOrbit>,
+                 cam: Res<crate::PersistentEguiCamera>,
+                 mut projections: Query<&mut Projection, With<Camera3d>>| {
                     spawned.0 = false;
                     fl.0 = false;
                     *anim = board_animation::BoardAnimator::default();
                     *panel = new_menu::NewMenuPanel::default();
                     *global_ambient = bevy::light::GlobalAmbientLight::default();
+                    // Restore perspective so in-game cameras don't inherit the
+                    // menu's V-toggled orthographic projection.
+                    orbit.ortho = false;
+                    if let Some(entity) = cam.entity {
+                        if let Ok(mut proj) = projections.get_mut(entity) {
+                            *proj = Projection::default();
+                        }
+                    }
                 },
             )
             .init_resource::<BrandLogoState>()
