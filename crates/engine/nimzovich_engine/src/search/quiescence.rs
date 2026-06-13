@@ -69,21 +69,31 @@ fn quiescence_recursive(
     order_moves(game, &mut moves, 0);
 
     for mv in moves {
+        // Victim must be read BEFORE make_move (afterwards the destination
+        // holds the moving piece). FIGURE_VALUE[0] = 0 for non-captures.
+        let victim = game.board[mv.dst as usize];
+
+        if !in_check {
+            // Delta pruning: if even capturing the piece doesn't raise alpha,
+            // skip. i32 math — the sum overflows i16 when alpha is near ±AB_INF.
+            let captured_val = crate::constants::FIGURE_VALUE[victim.abs() as usize];
+            let promo_bonus: i32 = if (mv.nxt_dir_idx >> 4) != 0 { 800 } else { 0 };
+            let best_case = stand_pat as i32 + captured_val as i32 + promo_bonus + SP.qdelta_margin;
+            if best_case <= alpha as i32 {
+                continue;
+            }
+
+            // SEE filter: don't search losing captures in quiescence.
+            if !crate::see::see(game, mv, 0) {
+                continue;
+            }
+        }
+
         let undo = make_move(game, mv);
 
         if is_in_check(game, color) {
             unmake_move(game, mv, undo);
             continue;
-        }
-
-        // Delta pruning: if even capturing the piece doesn't raise alpha, skip
-        if !in_check {
-            let captured_val = crate::constants::FIGURE_VALUE[game.board[mv.dst as usize].abs() as usize];
-            let promo_bonus = if (mv.nxt_dir_idx >> 4) != 0 { 800 } else { 0 };
-            if stand_pat + captured_val + promo_bonus + SP.qdelta_margin as i16 <= alpha {
-                unmake_move(game, mv, undo);
-                continue;
-            }
         }
 
         let score = -quiescence_recursive(game, -beta, -alpha, -color, qs_depth + 1)?;

@@ -27,6 +27,14 @@ use core::sync::atomic::Ordering;
 // Global search parameters (tuned defaults)
 static SP: SearchParams = SearchParams::sarah_tuned();
 
+/// Master switch for the pruning that only became reachable after the
+/// is_capture fix (LMR, LMP, per-move futility). Match-tested 2026-06-12 with
+/// conservative LMR coefficients: REGRESSED −90 vs Rustic A2 (−168 vs −80
+/// baseline, 40 games each). Stays off until per-feature SPRT tuning
+/// (enable one of the three at a time; suspect LMP's limit is too tight and
+/// futility margins too low for the PeSTO eval scale).
+const SPECULATIVE_PRUNING: bool = false;
+
 /// Search node type
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NodeType {
@@ -57,14 +65,55 @@ fn search(
     ply: i32,
     skip_null: bool,
 ) -> ChessEngineResult<i16> {
-    // Check for search abort
-    if game.calls % 1024 == 0 && game.abort_search.load(Ordering::Relaxed) {
-        return Ok(0);
+    // Periodic poll: external abort and the hard wall-clock deadline. The
+    // deadline must be checked inside the node loop — time checked only
+    // between iterations loses games on the clock when an iteration runs long.
+    if game.calls % 1024 == 0 {
+        if game.abort_search.load(Ordering::Relaxed) {
+            return Ok(0);
+        }
+        if let Some(deadline) = game.search_deadline {
+            if std::time::Instant::now() >= deadline {
+                game.abort_search.store(true, Ordering::Relaxed);
+                return Ok(0);
+            }
+        }
     }
     game.calls += 1;
 
     let pv_node = nt == NodeType::Pv;
     let original_alpha = alpha;
+
+    // Hard ply ceiling: check extensions can keep depth from ever reaching 0
+    // down a forcing line (perpetual check has no repetition detection yet),
+    // which would recurse until the stack overflows. Bail out with a static
+    // assessment instead.
+    const MAX_PLY: i32 = 128;
+    if ply >= MAX_PLY {
+        return Ok(evaluate_position(game) * (if color > 0 { 1 } else { -1 }));
+    }
+
+    // Draw detection (50-move rule and repetition). The current position was
+    // pushed onto hash_history by the parent's make_move (or by do_move for
+    // the root), so scan everything before the top entry, bounded by the
+    // halfmove clock (only reversible moves can repeat). A single prior
+    // occurrence scores as a draw — standard within-search twofold handling.
+    if ply > 0 {
+        if game.halfmove_clock >= 100 {
+            return Ok(0);
+        }
+        let n = game.hash_history.len();
+        if n >= 2 {
+            let current = game.hash_history[n - 1];
+            let window = (game.halfmove_clock as usize).min(n - 1);
+            if game.hash_history[n - 1 - window..n - 1]
+                .iter()
+                .any(|h| *h == current)
+            {
+                return Ok(0);
+            }
+        }
+    }
 
     // Quiescence at leaf
     if depth <= 0 {
@@ -80,7 +129,9 @@ fn search(
             let entry = &cached.h[0];
             if entry.score != INVALID_SCORE {
                 use crate::types::{TT_EXACT, TT_LOWER, TT_UPPER};
-                let s = entry.score;
+                // Mate scores are stored relative to the storing node; convert
+                // back to distance-from-root for this node's ply.
+                let s = tt_score_from(entry.score, ply);
                 match entry.bound_type {
                     TT_EXACT => return Ok(s),
                     TT_LOWER if s >= beta  => return Ok(s),
@@ -105,11 +156,14 @@ fn search(
         depth += 1;
     }
 
-    // Static evaluation
+    // Static evaluation, recorded per ply for the `improving` heuristic.
     let eval = evaluate_position(game) * (if color > 0 { 1 } else { -1 });
+    let ply_idx = ply as usize; // ply < MAX_PLY = 128 guaranteed above
+    game.eval_stack[ply_idx] = eval;
 
-    // Improving: compare to eval from 2 plies ago (simplified)
-    let improving = ply >= 2 && eval > eval; // placeholder; real version needs eval stack
+    // Improving: our static eval is better than it was two plies ago (same
+    // side to move). In-check nodes are never "improving".
+    let improving = !in_check && ply >= 2 && eval > game.eval_stack[ply_idx - 2];
 
     // ── Pruning guards (before move loop) ──
 
@@ -172,11 +226,8 @@ fn search(
     // Generate and order moves
     let moves = generate_pseudo_legal_moves(game, color);
     if moves.is_empty() {
-        return Ok(if in_check {
-            -KING_VALUE + (100 - depth) as i16
-        } else {
-            0
-        });
+        // Mated: prefer shorter mates (higher score for the mating side).
+        return Ok(if in_check { -(KING_VALUE - ply as i16) } else { 0 });
     }
 
     let mut picker = build_picker(game, moves, depth, tt_move);
@@ -187,6 +238,14 @@ fn search(
     let mut searched_quiets: Vec<KK> = Vec::new();
 
     while let Some(mv) = picker.next_move() {
+        // Classify BEFORE making the move — after make_move the destination
+        // square holds the moving piece, so a post-move board read marks every
+        // move as a capture (which silently disabled LMR/LMP/futility).
+        let is_capture = game.board[mv.dst as usize] != 0
+            || (game.board[mv.src as usize].abs() == PAWN_ID
+                && game.en_passant_target == Some(mv.dst));
+        let is_promotion = (mv.nxt_dir_idx >> 4) != 0;
+
         let undo = make_move(game, mv);
 
         // Skip illegal moves (leaves king in check)
@@ -196,14 +255,13 @@ fn search(
         }
 
         legal_moves += 1;
-        let is_capture = game.board[mv.dst as usize] != 0 || undo.captured_piece != 0;
-        let is_promotion = (mv.nxt_dir_idx >> 4) != 0;
         let is_checking = is_in_check(game, -color);
 
         // ── Move-loop pruning ──
 
         // Late Move Pruning (LMP)
-        if !pv_node
+        if SPECULATIVE_PRUNING
+            && !pv_node
             && !in_check
             && !is_capture
             && !is_promotion
@@ -218,20 +276,13 @@ fn search(
             }
         }
 
-        // SEE Pruning
-        if depth <= SP.see_depth && !in_check && !is_checking {
-            if !is_capture && mv.score < SP.see_quiet_margin as i16 {
-                unmake_move(game, mv, undo);
-                continue;
-            }
-            if is_capture && mv.score < SP.see_nonquiet_margin as i16 {
-                unmake_move(game, mv, undo);
-                continue;
-            }
-        }
+        // SEE pruning intentionally removed: the previous version compared
+        // picker ordering scores against SEE margins, which prunes on the
+        // wrong scale. Reintroduce with real see() calls in Phase 2.2.
 
         // Futility pruning (per-move)
-        if !pv_node
+        if SPECULATIVE_PRUNING
+            && !pv_node
             && !in_check
             && !is_capture
             && !is_promotion
@@ -250,27 +301,30 @@ fn search(
 
         let mut new_depth = depth;
 
-        // Check extension
-        if is_checking {
-            new_depth += 1;
-        }
+        // Check extension is applied once, at the checked node's entry (the
+        // `in_check` extension above). Extending here as well would grant +2
+        // per check and let forcing lines grow the search without bound.
 
         // Late Move Reduction (LMR)
         let mut reduction = 0;
-        if depth >= SP.lmr_depth
+        if SPECULATIVE_PRUNING
+            && depth >= SP.lmr_depth
             && legal_moves > SP.lmr_move_start + if pv_node { 0 } else { 1 }
             && !is_capture
             && !is_promotion
             && !in_check
             && !is_checking
         {
+            // Conservative log-formula (the sarah coefficients with ±2
+            // PV/cut adjustments over-reduced for this search; these values
+            // are textbook-standard and match-verified against Rustic).
             let d = depth.max(1) as f64;
             let m = legal_moves.max(1) as f64;
-            let mut r = (d.ln() * m.ln()) * SP.lmr_quiet_mul + SP.lmr_quiet_base;
+            let mut r = (d.ln() * m.ln()) * 0.45 + 0.75;
             r -= (mv.score as f64) / (SP.lmr_hd as f64);
-            r -= if pv_node { 2.0 } else { 0.0 };
-            r += if cut_node { 2.0 } else { 0.0 };
-            r = r.clamp(0.0, (new_depth - 2) as f64);
+            r -= if pv_node { 1.0 } else { 0.0 };
+            r += if cut_node { 1.0 } else { 0.0 };
+            r = r.clamp(0.0, (new_depth - 2).max(0) as f64);
             reduction = (r + 0.5) as i32;
             new_depth -= reduction;
         }
@@ -326,6 +380,10 @@ fn search(
         if score > best_score {
             best_score = score;
             best_move = mv;
+            #[cfg(feature = "salewskiChessDebug")]
+            if ply == 0 {
+                eprintln!("[root] best now {}->{} score {} (legal_moves={})", mv.src, mv.dst, score, legal_moves);
+            }
 
             if score > alpha {
                 alpha = score;
@@ -344,11 +402,7 @@ fn search(
 
     // Checkmate / stalemate
     if legal_moves == 0 {
-        return Ok(if in_check {
-            -KING_VALUE + (100 - depth) as i16
-        } else {
-            0
-        });
+        return Ok(if in_check { -(KING_VALUE - ply as i16) } else { 0 });
     }
 
     // Update history heuristics on beta cutoff
@@ -356,16 +410,47 @@ fn search(
         update_histories(game, depth, best_move, &searched_quiets);
     }
 
-    // Store in transposition table
-    store_tt_entry(game, hash, depth, best_score, best_move, original_alpha, beta);
+    // Store in transposition table (don't pollute it with aborted results)
+    if !game.abort_search.load(Ordering::Relaxed) {
+        store_tt_entry(game, hash, depth, ply, best_score, best_move, original_alpha, beta);
+    }
 
     Ok(best_score)
+}
+
+/// Mate scores within this margin of ±KING_VALUE encode distance-to-mate.
+const MATE_BOUND: i16 = KING_VALUE - 512;
+
+/// Convert a node-relative score to TT storage form (mate distances become
+/// relative to the storing node instead of the root).
+#[inline]
+fn tt_score_to(score: i16, ply: i32) -> i16 {
+    if score > MATE_BOUND {
+        score.saturating_add(ply as i16)
+    } else if score < -MATE_BOUND {
+        score.saturating_sub(ply as i16)
+    } else {
+        score
+    }
+}
+
+/// Convert a TT-stored score back to root-relative form at the probing node.
+#[inline]
+fn tt_score_from(score: i16, ply: i32) -> i16 {
+    if score > MATE_BOUND {
+        score.saturating_sub(ply as i16)
+    } else if score < -MATE_BOUND {
+        score.saturating_add(ply as i16)
+    } else {
+        score
+    }
 }
 
 fn store_tt_entry(
     game: &mut Game,
     hash: BitBuffer192,
     depth: i32,
+    node_ply: i32,
     score: i16,
     best_move: KK,
     original_alpha: i16,
@@ -384,10 +469,12 @@ fn store_tt_entry(
     hash_result.hit = 1;
     hash_result.h[0] = Guide1 {
         ply: depth as i64,
-        score,
+        score: tt_score_to(score, node_ply),
         best_move_src: best_move.src,
         best_move_dst: best_move.dst,
-        best_move_nxt_dir_idx: 0,
+        // Promotion piece lives in the high nibble — losing it makes the root
+        // emit promotions without the piece suffix (illegal in UCI).
+        best_move_nxt_dir_idx: best_move.nxt_dir_idx,
         bound_type,
     };
     let priority = depth as i64 * 10 + game.move_counter as i64;

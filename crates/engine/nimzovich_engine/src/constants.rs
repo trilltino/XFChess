@@ -291,9 +291,11 @@ pub const COLOR_BLACK: i64 = -1;
 pub const COLOR_WHITE: i64 = 1;
 
 
-// Reduced from 8 to 6 to prevent stack overflow in async task pool threads
-// Even with iterative implementation, deep searches with many moves can cause issues
-pub const MAX_DEPTH: usize = 6;
+// Iterative-deepening ceiling. Time management stops the search long before
+// this in practice; the old stack-overflow concern is handled by the MAX_PLY
+// guard in alphabeta (the overflow came from unbounded check extensions, not
+// nominal depth).
+pub const MAX_DEPTH: usize = 64;
 
 #[allow(dead_code)] // Part of engine's public API
 pub const IGNORE_MARKER_LOW_INT16: i16 = i16::MIN;

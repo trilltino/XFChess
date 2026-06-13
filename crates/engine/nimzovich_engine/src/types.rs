@@ -193,7 +193,9 @@ pub type Row = i8;
 #[allow(dead_code)] // Part of engine's public API - type aliases
 pub type FigureID = i8;
 pub type Board = [i8; 64];
-pub type BitBuffer192 = [u8; BIT_BUFFER_SIZE];
+/// Position hash. Historically a 24/32-byte buffer (hence the name, kept for
+/// diff-friendliness); now a standard 64-bit Zobrist key.
+pub type BitBuffer192 = u64;
 pub type HashLine1 = [Guide1; 11];
 pub type HashLine2 = [Guide2; TT_TRY];
 pub type KKS = Vec<KK>;
@@ -236,10 +238,10 @@ pub struct Game {
 
     /// Zobrist random bitstrings for O(1) incremental hashing.
     #[cfg(feature = "search")]
-    pub zobrist_table: [[[u8; BIT_BUFFER_SIZE]; 64]; 12],
+    pub zobrist_table: [[u64; 64]; 12],
     /// Zobrist bitstring to XOR when it's black's turn.
     #[cfg(feature = "search")]
-    pub zobrist_black_turn: [u8; BIT_BUFFER_SIZE],
+    pub zobrist_black_turn: u64,
     /// The current position's hash, updated incrementally during search.
     #[cfg(feature = "search")]
     pub current_hash: BitBuffer192,
@@ -288,6 +290,17 @@ pub struct Game {
     /// Atomic flag to abort the search (e.g. on timeout)
     #[cfg(feature = "search")]
     pub abort_search: Arc<core::sync::atomic::AtomicBool>,
+    /// Static eval per ply, for the `improving` heuristic (indexed by ply, capped at 128).
+    #[cfg(feature = "search")]
+    pub eval_stack: [i16; 128],
+    /// Zobrist hashes of every position on the game + current search path.
+    /// `do_move`/`make_move` push, `unmake_move` pops; used for repetition detection.
+    #[cfg(feature = "search")]
+    pub hash_history: Vec<BitBuffer192>,
+    /// Hard wall-clock deadline for the running search — polled inside the
+    /// node loop so a long iteration cannot blow the clock.
+    #[cfg(feature = "search")]
+    pub search_deadline: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -402,7 +415,7 @@ pub struct Guide2 {
 impl Default for Guide2 {
     fn default() -> Self {
         Guide2 {
-            key: [0; BIT_BUFFER_SIZE],
+            key: 0,
             res: HashResult::default(),
             pri: 0,
         }
@@ -508,7 +521,7 @@ mod tests {
     #[test]
     fn test_guide2_default() {
         let g = Guide2::default();
-        assert_eq!(g.key, [0; BIT_BUFFER_SIZE]);
+        assert_eq!(g.key, 0);
         assert_eq!(g.pri, 0);
     }
 

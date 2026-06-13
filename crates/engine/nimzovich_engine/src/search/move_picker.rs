@@ -1,11 +1,18 @@
 //! Staged move picker for alpha-beta search
 //!
 //! Yields moves in order of expected quality without sorting the entire list upfront:
-//!   1. TT move (if provided)
-//!   2. Good captures (SEE-positive, sorted by MVV-LVA)
-//!   3. Killer moves (not captures)
+//!   1. TT move (validated against the generated move list)
+//!   2. Captures (sorted by MVV-LVA)
+//!   3. Killer moves (validated against the generated move list, non-captures)
 //!   4. Quiet moves (sorted by history heuristics)
-//!   5. Bad captures (SEE-negative)
+//!
+//! Every yielded move comes from the position's own generated move list.
+//! TT moves and killers are only used to *reorder* that list — they are never
+//! trusted directly, because TT entries can describe transpositions with
+//! different legality and killer slots are shared across plies/colors
+//! (killer_moves is indexed by depth, so a black reply stored by a deeper
+//! node can sit in the slot the root reads). `make_move` executes blindly,
+//! so yielding an unvalidated move corrupts the search with illegal moves.
 
 use crate::board::pos_to_square;
 use crate::constants::*;
@@ -23,76 +30,23 @@ enum Stage {
 }
 
 /// Staged move picker — yields one move at a time.
+/// All yielded moves are members of the move list passed to [`build_picker`].
 pub struct MovePicker {
     stage: Stage,
+    /// TT move, only if present in the move list.
     tt_move: Option<KK>,
-    moves: Vec<KK>,
-    good_captures: Vec<KK>,
-    bad_captures: Vec<KK>,
-    killers: [Option<KK>; 2],
+    /// SEE-nonnegative captures from the move list, MVV-LVA sorted.
+    captures: Vec<KK>,
+    /// Killer moves found in the move list (at most 2, non-captures).
+    killers: Vec<KK>,
+    /// Remaining quiet moves, history-sorted.
     quiets: Vec<KK>,
+    /// SEE-losing captures, searched last.
+    bad_captures: Vec<KK>,
     current: usize,
 }
 
 impl MovePicker {
-    pub fn new(moves: Vec<KK>, tt_move: Option<KK>, killers: [Option<KK>; 2]) -> Self {
-        let mut picker = Self {
-            stage: Stage::TtMove,
-            tt_move,
-            moves,
-            good_captures: Vec::new(),
-            bad_captures: Vec::new(),
-            killers,
-            quiets: Vec::new(),
-            current: 0,
-        };
-        picker.classify_moves();
-        picker
-    }
-
-    /// Classify all moves into categories and sort each.
-    fn classify_moves(&mut self) {
-        let tt_src_dst = self.tt_move.map(|m| (m.src, m.dst));
-
-        for mv in self.moves.drain(..) {
-            // Skip TT move (already yielded first)
-            if tt_src_dst == Some((mv.src, mv.dst)) {
-                continue;
-            }
-
-            // Skip killers (yielded separately)
-            if self.killers.iter().any(|k| {
-                k.map_or(false, |k| k.src == mv.src && k.dst == mv.dst)
-            }) {
-                self.quiets.push(mv);
-                continue;
-            }
-
-            let is_capture = mv.score != 0; // score is set by move generator for captures
-            if is_capture {
-                // Use SEE to classify as good or bad capture
-                // For simplicity, use the score heuristic; full SEE requires game ref
-                // which we don't have here. The caller should pre-score captures.
-                if mv.score > 5000 {
-                    self.good_captures.push(mv);
-                } else {
-                    self.bad_captures.push(mv);
-                }
-            } else {
-                self.quiets.push(mv);
-            }
-        }
-
-        // Sort good captures by MVV-LVA (score already set by order_moves)
-        self.good_captures.sort_by(|a, b| b.score.cmp(&a.score));
-
-        // Sort quiets by history score
-        self.quiets.sort_by(|a, b| b.score.cmp(&a.score));
-
-        // Sort bad captures (least bad first, but usually skipped in pruning)
-        self.bad_captures.sort_by(|a, b| b.score.cmp(&a.score));
-    }
-
     /// Yield the next best move, or `None` when exhausted.
     pub fn next_move(&mut self) -> Option<KK> {
         loop {
@@ -104,8 +58,8 @@ impl MovePicker {
                     }
                 }
                 Stage::GoodCaptures => {
-                    if self.current < self.good_captures.len() {
-                        let mv = self.good_captures[self.current];
+                    if self.current < self.captures.len() {
+                        let mv = self.captures[self.current];
                         self.current += 1;
                         return Some(mv);
                     }
@@ -113,10 +67,13 @@ impl MovePicker {
                     self.stage = Stage::Killers;
                 }
                 Stage::Killers => {
-                    self.stage = Stage::Quiets;
-                    for k in self.killers.iter().flatten() {
-                        return Some(*k);
+                    if self.current < self.killers.len() {
+                        let mv = self.killers[self.current];
+                        self.current += 1;
+                        return Some(mv);
                     }
+                    self.current = 0;
+                    self.stage = Stage::Quiets;
                 }
                 Stage::Quiets => {
                     if self.current < self.quiets.len() {
@@ -143,7 +100,8 @@ impl MovePicker {
 
 /// Score all moves and build a staged picker.
 ///
-/// This is the main entry point replacing the old `order_moves()` + iterate pattern.
+/// Capture/quiet classification is done from the board (the only reliable
+/// source) — never from move scores, which mix history and positional bonuses.
 pub fn build_picker(
     game: &Game,
     moves: Vec<KK>,
@@ -151,44 +109,81 @@ pub fn build_picker(
     tt_move: Option<KK>,
 ) -> MovePicker {
     let d_idx = depth.max(0) as usize;
-    let killers = if d_idx <= MAX_DEPTH {
+    let killer_slots = if d_idx <= MAX_DEPTH {
         game.killer_moves[d_idx]
     } else {
         [None; 2]
     };
+    let tt_key = tt_move.map(|m| (m.src, m.dst));
 
-    // Pre-score all moves (same logic as old order_moves)
-    let mut scored_moves = moves;
-    for mv in scored_moves.iter_mut() {
-        let mut score = 0i32;
+    let mut validated_tt: Option<KK> = None;
+    let mut captures: Vec<KK> = Vec::new();
+    let mut bad_captures: Vec<KK> = Vec::new();
+    let mut killers: Vec<KK> = Vec::new();
+    let mut quiets: Vec<KK> = Vec::new();
 
-        // 1. MVV-LVA for captures
-        let captured = game.board[mv.dst as usize];
-        if captured != 0 {
-            let attacker_value = FIGURE_VALUE[game.board[mv.src as usize].abs() as usize] as i32;
-            let victim_value = FIGURE_VALUE[captured.abs() as usize] as i32;
-            score += 10000 + (victim_value * 10 - attacker_value);
+    for mut mv in moves {
+        let is_capture = game.board[mv.dst as usize] != 0
+            || (game.board[mv.src as usize].abs() == PAWN_ID
+                && game.en_passant_target == Some(mv.dst));
+
+        // TT move: validated by membership in the generated list, yielded first.
+        if tt_key == Some((mv.src, mv.dst)) {
+            validated_tt = Some(mv);
+            continue;
         }
 
-        // 2. Killer bonus
-        for killer in killers.iter().flatten() {
-            if killer.src == mv.src && killer.dst == mv.dst {
-                score += 5000;
-                break;
+        if is_capture {
+            // MVV-LVA: most valuable victim, least valuable attacker.
+            let attacker = FIGURE_VALUE[game.board[mv.src as usize].abs() as usize] as i32;
+            let victim_sq = game.board[mv.dst as usize];
+            let victim = if victim_sq != 0 {
+                FIGURE_VALUE[victim_sq.abs() as usize] as i32
+            } else {
+                FIGURE_VALUE[PAWN_ID as usize] as i32 // en passant
+            };
+            let score = victim * 10 - attacker;
+            mv.score = score.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            // SEE-losing captures go to the back of the queue.
+            if crate::see::see(game, mv, 0) {
+                captures.push(mv);
+            } else {
+                bad_captures.push(mv);
             }
+            continue;
         }
 
-        // 3. History heuristic
-        let history = game.history_table[mv.src as usize][mv.dst as usize] as i32;
-        score += history / 128;
+        // Killer: validated by membership in the generated list, yielded after
+        // captures. Not also kept in quiets (no duplicate search).
+        if killer_slots
+            .iter()
+            .flatten()
+            .any(|k| k.src == mv.src && k.dst == mv.dst)
+        {
+            killers.push(mv);
+            continue;
+        }
 
-        // 4. Center control
+        // Quiet: history + small centralization tiebreak.
+        let history = game.history_table[mv.src as usize][mv.dst as usize] as i32 / 128;
         let (col, row) = pos_to_square(mv.dst);
         let center_dist = ((col - 3).abs() + (row - 3).abs()) as i32;
-        score += (8 - center_dist) * 2;
-
+        let score = history + (8 - center_dist) * 2;
         mv.score = score.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        quiets.push(mv);
     }
 
-    MovePicker::new(scored_moves, tt_move, killers)
+    captures.sort_by(|a, b| b.score.cmp(&a.score));
+    quiets.sort_by(|a, b| b.score.cmp(&a.score));
+    bad_captures.sort_by(|a, b| b.score.cmp(&a.score));
+
+    MovePicker {
+        stage: Stage::TtMove,
+        tt_move: validated_tt,
+        captures,
+        killers,
+        quiets,
+        bad_captures,
+        current: 0,
+    }
 }

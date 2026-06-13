@@ -13,6 +13,7 @@ pub(crate) struct UndoInfo {
     pub captured_piece: i8,
     pub from_square_piece: i8,
     pub old_ep_target: Option<i8>,
+    pub old_halfmove_clock: u32,
     pub flags: [bool; 6], // WK, BK, WR0, WR7, BR56, BR63
 }
 
@@ -30,6 +31,7 @@ pub(crate) fn make_move(game: &mut Game, mv: KK) -> UndoInfo {
         captured_piece,
         from_square_piece: moving_piece,
         old_ep_target: game.en_passant_target,
+        old_halfmove_clock: game.halfmove_clock,
         flags: [
             game.white_king_has_moved,
             game.black_king_has_moved,
@@ -111,6 +113,17 @@ pub(crate) fn make_move(game: &mut Game, mv: KK) -> UndoInfo {
     update_bitboards(game, dst, final_piece);
     toggle_turn(game);
 
+    // Halfmove clock: reset on pawn moves and captures (incl. en passant via
+    // the reassigned `captured_piece`), otherwise increment.
+    if piece_type == PAWN_ID || captured_piece != 0 {
+        game.halfmove_clock = 0;
+    } else {
+        game.halfmove_clock += 1;
+    }
+
+    // Record the new position for repetition detection.
+    game.hash_history.push(game.current_hash);
+
     undo
 }
 
@@ -120,6 +133,9 @@ pub(crate) fn unmake_move(game: &mut Game, mv: KK, undo: UndoInfo) {
     let dst = mv.dst as usize;
     let color = if undo.from_square_piece > 0 { 1 } else { -1 };
     let piece_type = undo.from_square_piece.abs();
+
+    game.hash_history.pop();
+    game.halfmove_clock = undo.old_halfmove_clock;
 
     toggle_turn(game);
 

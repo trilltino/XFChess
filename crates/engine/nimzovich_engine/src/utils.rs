@@ -1,4 +1,6 @@
 use super::types::KK;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Create an array of 64 empty Vecs for move tables
 ///

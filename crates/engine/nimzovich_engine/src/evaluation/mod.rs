@@ -13,6 +13,7 @@
 //! - `position` - Full position evaluation (material + positional + mobility)
 
 mod material;
+mod pesto;
 mod position;
 mod pst;
 

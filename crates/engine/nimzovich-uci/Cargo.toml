@@ -1,0 +1,13 @@
+[package]
+name = "nimzovich-uci"
+version = "0.1.0"
+edition = "2021"
+description = "UCI protocol adapter for the nimzovich chess engine (match testing via cutechess-cli)"
+
+[dependencies]
+nimzovich_engine = { workspace = true }
+futures-lite = "2.0"
+
+[[bin]]
+name = "nimzovich-uci"
+path = "src/main.rs"

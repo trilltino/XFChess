@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use crate::bitset::BitSet;
 use crate::board::{init_bitboards, init_board};
-use crate::constants::{BIT_BUFFER_SIZE, MAX_DEPTH, TTE_SIZE};
+use crate::constants::{MAX_DEPTH, TTE_SIZE};
 #[cfg(feature = "search")]
 use crate::hash::init_zobrist;
 use crate::move_gen::init_move_tables;
@@ -43,11 +43,11 @@ pub fn new_game() -> Game {
         tt_capacity: TTE_SIZE,
 
         #[cfg(feature = "search")]
-        zobrist_table: [[[0; BIT_BUFFER_SIZE]; 64]; 12],
+        zobrist_table: [[0u64; 64]; 12],
         #[cfg(feature = "search")]
-        zobrist_black_turn: [0; BIT_BUFFER_SIZE],
+        zobrist_black_turn: 0,
         #[cfg(feature = "search")]
-        current_hash: [0; BIT_BUFFER_SIZE],
+        current_hash: 0,
 
         max_depth_so_far: 0,
         abs_max_depth: MAX_DEPTH as i64,
@@ -68,6 +68,12 @@ pub fn new_game() -> Game {
         conthist: [[0; 64]; 64],
         #[cfg(feature = "search")]
         abort_search: std::sync::Arc::new(core::sync::atomic::AtomicBool::new(false)),
+        #[cfg(feature = "search")]
+        eval_stack: [0; 128],
+        #[cfg(feature = "search")]
+        hash_history: Vec::new(),
+        #[cfg(feature = "search")]
+        search_deadline: None,
 
         // Bitboards
         white_pawns: BitSet::default(),
@@ -96,6 +102,10 @@ pub fn new_game() -> Game {
 
     // Initialize bitboards
     init_bitboards(&mut game);
+
+    // Seed the repetition history with the starting position.
+    #[cfg(feature = "search")]
+    game.hash_history.push(game.current_hash);
 
     game
 }
@@ -226,7 +236,12 @@ pub fn set_game_from_fen(game: &mut Game, fen: &str) {
     // Sync bitboards and hash from the new board state
     init_bitboards(game);
     #[cfg(feature = "search")]
-    init_zobrist(game);
+    {
+        init_zobrist(game);
+        // Fresh position: repetition history restarts here.
+        game.hash_history.clear();
+        game.hash_history.push(game.current_hash);
+    }
 }
 
 /// Generate a FEN string from the current game state.

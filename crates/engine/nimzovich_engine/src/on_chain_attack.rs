@@ -14,16 +14,16 @@ use crate::on_chain::OnChainGame;
 // ---------------------------------------------------------------------------
 
 /// Knight attack bitboard for each of the 64 squares.
-const KNIGHT_ATTACKS: [u64; 64] = compute_knight_attacks();
+pub(crate) const KNIGHT_ATTACKS: [u64; 64] = compute_knight_attacks();
 
 /// King attack bitboard for each of the 64 squares.
-const KING_ATTACKS: [u64; 64] = compute_king_attacks();
+pub(crate) const KING_ATTACKS: [u64; 64] = compute_king_attacks();
 
 /// White pawn attack bitboard from each square (captures diagonally forward).
-const WHITE_PAWN_ATTACKS: [u64; 64] = compute_pawn_attacks(true);
+pub(crate) const WHITE_PAWN_ATTACKS: [u64; 64] = compute_pawn_attacks(true);
 
 /// Black pawn attack bitboard from each square (captures diagonally forward).
-const BLACK_PAWN_ATTACKS: [u64; 64] = compute_pawn_attacks(false);
+pub(crate) const BLACK_PAWN_ATTACKS: [u64; 64] = compute_pawn_attacks(false);
 
 // ---------------------------------------------------------------------------
 // Compile-time table generation

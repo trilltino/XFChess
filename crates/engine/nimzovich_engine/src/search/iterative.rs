@@ -28,9 +28,24 @@ pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) ->
     game.tte_hit = 0;
     game.abort_search.store(false, Ordering::Relaxed);
 
+    // Time budget: a hard wall-clock deadline polled inside the search (so a
+    // long iteration aborts instead of flagging), plus a soft limit below
+    // that stops starting new iterations (the next iteration typically costs
+    // 2-4x the previous one).
+    let budget = max_time_secs.max(0.01);
+    let soft_limit = budget * 0.7;
+    game.search_deadline = Some(start_time + std::time::Duration::from_secs_f32(budget * 0.95));
+
     let mut prev_score = 0i16;
 
-    for depth in 1..=MAX_DEPTH {
+    // Respect a caller-set nominal depth limit (UCI `go depth N`); 0 or
+    // negative means "no limit beyond MAX_DEPTH".
+    let depth_limit = if game.abs_max_depth > 0 {
+        (game.abs_max_depth as usize).min(MAX_DEPTH)
+    } else {
+        MAX_DEPTH
+    };
+    for depth in 1..=depth_limit {
         // Aspiration windows after depth 1
         let (alpha, beta) = if depth > 1 {
             let window = (SP.aspiration_base as i16 + (SP.aspiration_mul * depth as i32) as i16)
@@ -66,24 +81,21 @@ pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) ->
 
         prev_score = score;
 
-        // Check if search was aborted (either via time or external signal)
+        // If the iteration was aborted (deadline hit inside the search or an
+        // external stop), its score is untrustworthy — keep the previous
+        // iteration's move and stop.
         if game.abort_search.load(Ordering::Relaxed) {
-            break;
-        }
-
-        // Check time
-        if start_time.elapsed().as_secs_f32() > max_time_secs * 0.9 {
-            game.abort_search.store(true, Ordering::Relaxed);
-            // We still update for the current depth since it finished
-            game.max_depth_so_far = depth as i64;
-            best_score = score;
-            update_best_move_from_tt(game, &mut best_move, score);
             break;
         }
 
         game.max_depth_so_far = depth as i64;
         best_score = score;
         update_best_move_from_tt(game, &mut best_move, score);
+        #[cfg(feature = "salewskiChessDebug")]
+        eprintln!(
+            "[id] depth {} score {} tt_best {}->{}",
+            depth, score, best_move.src, best_move.dst
+        );
 
         // Check for checkmate
         if score.abs() > KING_VALUE_DIV_2 {
@@ -91,7 +103,14 @@ pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) ->
             best_move.checkmate_in = ((KING_VALUE - score.abs()) / 2) as i64;
             break;
         }
+
+        // Soft limit: don't start an iteration we can't plausibly finish.
+        if start_time.elapsed().as_secs_f32() > soft_limit {
+            break;
+        }
     }
+
+    game.search_deadline = None;
 
     // If no move found, find any legal move
     if best_move.src == 0 && best_move.dst == 0 {

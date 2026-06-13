@@ -72,14 +72,18 @@ fn init_sliding_masks(game: &mut Game) {
                     break;
                 }
                 let (new_col, new_row) = pos_to_square(current as i8);
-                // Check for wrap-around
-                if (dir == O && new_col < col as i8)
-                    || (dir == W && new_col > col as i8)
-                    || (dir == N && new_row > row as i8)
-                    || (dir == S && new_row < row as i8)
+                // Check for wrap-around. East/west rays must stay on the origin
+                // row — comparing columns to the origin misses the a/h-file case
+                // where the ray wraps onto the adjacent rank at the same column
+                // (e.g. h8 west: ... a8 → h7) and then keeps going.
+                // N = -8 (row decreases), S = +8 (row increases): wraps impossible.
+                if ((dir == O || dir == W) && new_row != row as i8)
+                    || (dir == N && new_row >= row as i8)
+                    || (dir == S && new_row <= row as i8)
                 {
                     break;
                 }
+                let _ = new_col;
                 // Check for diagonal wrap-around
                 if dir_idx >= 4 {
                     let col_dist = (new_col - col as i8).abs();
@@ -125,14 +129,16 @@ fn init_rook_moves_from(from: i8) -> KKS {
 
             let (new_col, new_row) = pos_to_square(current as i8);
 
-            // Check if we wrapped around the board (edge case for direction vectors)
-            if (dir == O && new_col < col as i8)
-                || (dir == W && new_col > col as i8)
-                || (dir == N && new_row > row as i8)
-                || (dir == S && new_row < row as i8)
+            // Check if we wrapped around the board. East/west rays must stay on
+            // the origin row (see init_sliding_masks for the a/h-file wrap case).
+            // N = -8 (row decreases), S = +8 (row increases): wraps impossible.
+            if ((dir == O || dir == W) && new_row != row as i8)
+                || (dir == N && new_row >= row as i8)
+                || (dir == S && new_row <= row as i8)
             {
                 break;
             }
+            let _ = new_col;
 
             moves.push(KK::new(from, current as i8, 0, 0));
         }

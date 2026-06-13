@@ -1,51 +1,51 @@
-//! Zobrist hashing and transposition table
+//! Zobrist hashing and transposition table.
 //!
-//! Implements position hashing for fast position lookup and caching
+//! Positions hash to a single `u64` (standard Zobrist: one random bitstring
+//! per piece/square plus a side-to-move bitstring, combined by XOR and
+//! updated incrementally). This replaced a 24/32-byte byte-array scheme whose
+//! per-byte XOR loops and 24-byte key compares were pure overhead — a u64
+//! provides ample collision resistance for a TT with power-of-two indexing.
 
-use super::constants::*;
 use super::types::*;
 
 /// Return the current pre-calculated hash
+#[inline]
 pub fn position_hash(game: &Game) -> BitBuffer192 {
     game.current_hash
 }
 
+/// splitmix64 — small, fast, high-quality PRNG for table initialization.
+fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E3779B97F4A7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
+}
+
 /// Initialize the Zobrist table with random values and compute initial hash
 pub fn init_zobrist(game: &mut Game) {
-    let mut seed = 42u64; // Fixed seed for reproducibility
+    let mut seed = 0x5EEDC0DE_u64; // fixed seed for reproducibility
     for p in 0..12 {
         for s in 0..64 {
-            for b in 0..BIT_BUFFER_SIZE {
-                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-                game.zobrist_table[p][s][b] = (seed >> 32) as u8;
-            }
+            game.zobrist_table[p][s] = splitmix64(&mut seed);
         }
     }
-    // Initialize turn bitstring
-    for b in 0..BIT_BUFFER_SIZE {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-        game.zobrist_black_turn[b] = (seed >> 32) as u8;
-    }
-    // Compute initial hash from board state
+    game.zobrist_black_turn = splitmix64(&mut seed);
     game.current_hash = compute_full_hash(game);
 }
 
-/// Compute a full hash from scratch (only used for initialization)
+/// Compute a full hash from scratch (initialization and API-level moves).
 pub fn compute_full_hash(game: &Game) -> BitBuffer192 {
-    let mut hash = [0u8; BIT_BUFFER_SIZE];
+    let mut hash = 0u64;
     for (s, &piece) in game.board.iter().enumerate() {
         if piece != 0 {
-            let p_idx = piece_to_zobrist_idx(piece);
-            for b in 0..BIT_BUFFER_SIZE {
-                hash[b] ^= game.zobrist_table[p_idx][s][b];
-            }
+            hash ^= game.zobrist_table[piece_to_zobrist_idx(piece)][s];
         }
     }
     // If it's black's turn (move_counter is odd), XOR the turn bitstring
     if game.move_counter % 2 != 0 {
-        for b in 0..BIT_BUFFER_SIZE {
-            hash[b] ^= game.zobrist_black_turn[b];
-        }
+        hash ^= game.zobrist_black_turn;
     }
     hash
 }
@@ -53,9 +53,7 @@ pub fn compute_full_hash(game: &Game) -> BitBuffer192 {
 /// Toggle the side-to-move in the current hash
 #[inline]
 pub fn toggle_turn(game: &mut Game) {
-    for b in 0..BIT_BUFFER_SIZE {
-        game.current_hash[b] ^= game.zobrist_black_turn[b];
-    }
+    game.current_hash ^= game.zobrist_black_turn;
 }
 
 /// Update the current hash by XORing a piece at a square
@@ -64,10 +62,7 @@ pub fn update_hash(game: &mut Game, square: usize, piece: i8) {
     if piece == 0 {
         return;
     }
-    let p_idx = piece_to_zobrist_idx(piece);
-    for b in 0..BIT_BUFFER_SIZE {
-        game.current_hash[b] ^= game.zobrist_table[p_idx][square][b];
-    }
+    game.current_hash ^= game.zobrist_table[piece_to_zobrist_idx(piece)][square];
 }
 
 /// Map a piece ID to a Zobrist table index (0-11)
@@ -78,13 +73,10 @@ fn piece_to_zobrist_idx(piece: i8) -> usize {
     piece_type + color_offset
 }
 
-/// Convert hash to TT index using the game's runtime capacity.
+/// Convert hash to TT index. Capacity is always a power of two.
+#[inline]
 pub fn hash_to_index(hash: &BitBuffer192, capacity: usize) -> usize {
-    let mut index = 0usize;
-    for (i, &byte) in hash.iter().take(4).enumerate() {
-        index |= (byte as usize) << (i * 8);
-    }
-    index % capacity
+    (*hash as usize) & (capacity - 1)
 }
 
 /// Probe transposition table (returns copy to avoid borrow issues)

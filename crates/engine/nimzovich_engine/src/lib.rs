@@ -234,6 +234,8 @@ pub mod move_gen;
 #[cfg(feature = "search")]
 mod search;
 #[cfg(feature = "search")]
+mod see;
+#[cfg(feature = "search")]
 pub mod perft;
 pub mod types;
 mod utils;
@@ -245,6 +247,9 @@ pub mod on_chain_moves;
 
 #[cfg(feature = "std")]
 mod pgn;
+
+#[cfg(feature = "std")]
+pub mod book;
 
 // Re-export public API
 #[cfg(feature = "std")]

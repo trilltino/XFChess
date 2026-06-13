@@ -103,6 +103,20 @@ pub fn do_move_with_promo(game: &mut Game, src: i8, dst: i8, update_flags: bool,
     //    not the mailbox, so they must stay consistent after every move.
     crate::board::init_bitboards(game);
 
+    // 9. Sync the incremental Zobrist hash. The search's TT keys on
+    //    game.current_hash; if API-level moves don't refresh it, every search
+    //    after the first probes the TT with a stale root hash and returns the
+    //    previous position's best move (observed as illegal-move forfeits in
+    //    UCI matches). move_counter was already incremented above, so the
+    //    side-to-move term is correct.
+    #[cfg(feature = "search")]
+    {
+        game.current_hash = crate::hash::compute_full_hash(game);
+        // Record the new position for repetition detection (the search scans
+        // this history, bounded by the halfmove clock).
+        game.hash_history.push(game.current_hash);
+    }
+
     true
 }
 
@@ -300,16 +314,23 @@ pub fn is_legal_move(game: &mut Game, src: i8, dst: i8, color: Color) -> bool {
             let ep_before = game.en_passant_target;
             let halfmove_before = game.halfmove_clock;
             let move_counter_before = game.move_counter;
+            #[cfg(feature = "search")]
+            let hash_before = game.current_hash;
 
             do_move(game, src, dst, false);
             let legal = !is_in_check(game, color);
 
-            // Restore state
+            // Restore state (do_move pushed a hash-history entry — pop it)
             game.board = board_before;
             game.en_passant_target = ep_before;
             game.halfmove_clock = halfmove_before;
             game.move_counter = move_counter_before;
             crate::board::init_bitboards(game);
+            #[cfg(feature = "search")]
+            {
+                game.hash_history.pop();
+                game.current_hash = hash_before;
+            }
 
             return legal;
         }
