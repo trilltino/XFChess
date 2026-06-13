@@ -133,6 +133,10 @@ impl Plugin for MainMenuPlugin {
                     // Wallet overlay runs in both menu and in-game so users can connect at any time
                     wallet_connect_overlay_system
                         .run_if(in_state(GameState::MainMenu).or(in_state(GameState::InGame))),
+                    // Plays a click sound on any egui UI/popup click while in the menu.
+                    new_menu::menu_click_sound
+                        .after(main_menu_ui_wrapper)
+                        .run_if(in_state(GameState::MainMenu)),
                 ),
             )
             .add_systems(

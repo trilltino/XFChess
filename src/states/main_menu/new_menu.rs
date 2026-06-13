@@ -15,9 +15,27 @@ use crate::game::resources::MenuSounds;
 use crate::rendering::pieces::{PieceColor, PieceMeshes, PieceType};
 use crate::ui::system_params::MainMenuUIContext;
 
-fn play_click(commands: &mut Commands, sounds: Option<&MenuSounds>) {
-    if let Some(s) = sounds {
-        commands.spawn(bevy::audio::AudioPlayer::new(s.menu_click.clone()));
+/// Click sounds are now played globally by [`menu_click_sound`] for *any* egui
+/// UI click (covering every popup — Host Game, Play vs Bot, dialogs, etc.), so
+/// this per-call helper is a no-op kept so existing call sites compile unchanged.
+fn play_click(_commands: &mut Commands, _sounds: Option<&MenuSounds>) {}
+
+/// Plays `menu_click.mp3` whenever the user presses the mouse over any egui UI
+/// area (menu items and every popup). The 3D board background is not an egui
+/// area, so clicks there stay silent. Runs while the main menu is active.
+pub(super) fn menu_click_sound(
+    mut contexts: bevy_egui::EguiContexts,
+    mouse: Res<ButtonInput<MouseButton>>,
+    sounds: Option<Res<MenuSounds>>,
+    mut commands: Commands,
+) {
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Some(sounds) = sounds else { return; };
+    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    if ctx.is_pointer_over_area() {
+        commands.spawn(bevy::audio::AudioPlayer::new(sounds.menu_click.clone()));
     }
 }
 
@@ -40,6 +58,7 @@ pub enum NewMenuPanel {
     #[default]
     Main,
     PlayOnline,
+    Puzzles,
     Tournaments,
     SolanaMultiplayer,
     SolanaConnect,
@@ -53,12 +72,13 @@ impl NewMenuPanel {
         match self {
             Self::Main => 0,
             Self::PlayOnline => 1,
-            Self::Tournaments => 2,
-            Self::SolanaMultiplayer => 3,
-            Self::SolanaConnect => 4,
-            Self::HowToPlay => 5,
-            Self::Settings => 6,
-            Self::Profile => 7,
+            Self::Puzzles => 2,
+            Self::Tournaments => 3,
+            Self::SolanaMultiplayer => 4,
+            Self::SolanaConnect => 5,
+            Self::HowToPlay => 6,
+            Self::Settings => 7,
+            Self::Profile => 8,
         }
     }
 }
@@ -459,6 +479,7 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             match current {
                 NewMenuPanel::Main => render_main_panel(ui, cx),
                 NewMenuPanel::PlayOnline => render_play_online_panel(ui, cx),
+                NewMenuPanel::Puzzles => render_puzzles_panel(ui, cx),
                 NewMenuPanel::Tournaments => render_tournaments_panel(ui, cx),
                 NewMenuPanel::SolanaConnect => render_solana_connect_panel(ui, cx),
                 NewMenuPanel::HowToPlay => render_how_to_play_panel(ui, cx),
@@ -681,6 +702,12 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
     ui.add_space(SP);
 
+    if item_expandable(ui, "Puzzles", W) {
+        play_click(&mut cx.commands, snd);
+        *cx.new_menu_panel = NewMenuPanel::Puzzles;
+    }
+    ui.add_space(SP);
+
     if item(ui, "PGN Replay", W) {
         play_click(&mut cx.commands, snd);
         *cx.core_mode = GameMode::PgnReplay;
@@ -780,6 +807,71 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     if item_expandable(ui, "Solana Multiplayer", W) {
         play_click(&mut cx.commands, snd);
         *cx.new_menu_panel = NewMenuPanel::SolanaConnect;
+    }
+}
+
+fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
+    const W: f32 = 280.0;
+    const SP: f32 = 6.0;
+
+    // Back arrow + "Puzzles" header (matches the other sub-panels).
+    ui.horizontal(|ui| {
+        if ui.add(
+            egui::Button::new(
+                egui::RichText::new("‹ Back")
+                    .size(10.0)
+                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+            )
+            .fill(egui::Color32::TRANSPARENT)
+            .stroke(egui::Stroke::NONE),
+        ).clicked() {
+            play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+            *cx.new_menu_panel = NewMenuPanel::Main;
+        }
+        ui.label(
+            egui::RichText::new("Puzzles")
+                .size(10.0)
+                .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160))
+                .family(egui::FontFamily::Proportional)
+                .strong(),
+        );
+    });
+    let sep_rect = ui.available_rect_before_wrap();
+    let sep_y = ui.cursor().top() + 3.0;
+    ui.painter().hline(
+        sep_rect.left()..=sep_rect.left() + W,
+        sep_y,
+        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60)),
+    );
+    ui.add_space(10.0);
+
+    let snd = cx.menu_sounds.as_deref();
+
+    // ── Play section ───────────────────────────────────────────────────────
+    ui.label(
+        egui::RichText::new("PLAY")
+            .size(11.0)
+            .color(egui::Color32::from_rgb(120, 180, 255))
+            .strong(),
+    );
+    ui.add_space(4.0);
+    if item(ui, "Solve Puzzles", W) {
+        play_click(&mut cx.commands, snd);
+        // TODO: launch puzzle-solving mode.
+    }
+    ui.add_space(SP * 2.0);
+
+    // ── Earn section ───────────────────────────────────────────────────────
+    ui.label(
+        egui::RichText::new("EARN")
+            .size(11.0)
+            .color(egui::Color32::from_rgb(120, 220, 140))
+            .strong(),
+    );
+    ui.add_space(4.0);
+    if item(ui, "Puzzle Rush (Earn)", W) {
+        play_click(&mut cx.commands, snd);
+        // TODO: launch wagered/earn puzzle mode.
     }
 }
 
