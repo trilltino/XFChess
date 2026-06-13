@@ -135,7 +135,6 @@ pub struct PlayerProfileResp {
 /// Creates the main API routes router.
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/auth/issue", post(issue_jwt))
         .route("/session/create", post(create_session))
         .route("/session/activate", post(activate_session))
         .route("/session/status/{game_id}", get(session_status))
@@ -154,23 +153,11 @@ pub fn routes() -> Router<AppState> {
 
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-
-/// POST /auth/issue - Issues a JWT token for a wallet.
-/// MVP: issues JWT unconditionally (add challenge-response later).
-pub async fn issue_jwt(
-    State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let wallet = body
-        .get("wallet_pubkey")
-        .and_then(|v| v.as_str())
-        .ok_or(StatusCode::BAD_REQUEST)?;
-    let token = state.jwt.issue(wallet).map_err(|e| {
-        error!("JWT issue error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    Ok(Json(serde_json::json!({ "jwt": token })))
-}
+//
+// NOTE: the former `POST /auth/issue` endpoint was removed. It issued a valid
+// JWT for any wallet pubkey with no proof of ownership (account takeover).
+// Wallet authentication now goes exclusively through the signature-verified
+// SIWS flow in `routes::auth` (`/api/auth/siws-challenge` + `/api/auth/siws-verify`).
 
 // ── Session ───────────────────────────────────────────────────────────────────
 

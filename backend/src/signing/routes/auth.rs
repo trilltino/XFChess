@@ -18,20 +18,44 @@ use axum::{
 };
 use borsh::BorshDeserialize;
 use serde::{Deserialize, Serialize};
-use tracing::{info, error};
-use crate::error::{AppError, AppResult};
+use tracing::info;
 use crate::signing::AppState;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Maximum age (seconds) a signed `timestamp` may have before the signature is
+/// rejected. Without this bound a captured signature is replayable forever,
+/// which is an account-takeover primitive for `login`/`register`/`delete`.
+const AUTH_SIG_MAX_AGE_SECS: u64 = 300; // 5 minutes
+/// Allowance for the client's clock running ahead of the server.
+const AUTH_SIG_FUTURE_SKEW_SECS: u64 = 60;
 
 /// Verifies a wallet signature over `"xfchess:<action>:<timestamp>"`.
-/// Returns `Err` with an appropriate HTTP status on failure.
+///
+/// The `timestamp` must be recent (within [`AUTH_SIG_MAX_AGE_SECS`]) to defeat
+/// replay of an old, legitimately-signed message. Returns `Err` with an
+/// appropriate HTTP status on failure.
 fn verify_wallet_sig(
     wallet: &str,
     signature: &str,
     action: &str,
     timestamp: u64,
 ) -> Result<Pubkey, (StatusCode, String)> {
+    // Reject stale or far-future timestamps before doing crypto work.
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if timestamp > now.saturating_add(AUTH_SIG_FUTURE_SKEW_SECS)
+        || now.saturating_sub(timestamp) > AUTH_SIG_MAX_AGE_SECS
+    {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Signature timestamp expired or invalid — re-sign with a current timestamp".to_string(),
+        ));
+    }
+
     let pk = Pubkey::from_str(wallet)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet address".to_string()))?;
     let sig = Signature::from_str(signature)
@@ -826,23 +850,4 @@ async fn siws_verify(
 
     info!("[SIWS] verified + JWT issued for {}", req.wallet);
     Ok(Json(AuthResp { token, username, wallet: req.wallet }))
-}
-
-// ── JWT issue (internal) ───────────────────────────────────────────────────────
-
-/// POST /auth/issue — Issues a JWT (used internally by session-key flow).
-pub async fn issue_jwt(
-    State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
-) -> AppResult<Json<serde_json::Value>> {
-    let wallet = body
-        .get("pubkey")
-        .or_else(|| body.get("wallet_pubkey"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AppError::BadRequest("Missing pubkey".to_string()))?;
-    let token = state.jwt.issue(wallet).map_err(|e| {
-        error!("JWT issue error: {e}");
-        AppError::Internal("Failed to issue token".to_string())
-    })?;
-    Ok(Json(serde_json::json!({ "token": token })))
 }

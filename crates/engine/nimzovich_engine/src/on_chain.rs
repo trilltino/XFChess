@@ -108,11 +108,15 @@ impl CompactBoard {
                         sq += ch as usize - '0' as usize;
                     }
                     c => {
-                        cb.squares[sq] = match c {
-                            'P' =>  1, 'N' =>  2, 'B' =>  3, 'R' =>  4, 'Q' =>  5, 'K' =>  6,
-                            'p' => -1, 'n' => -2, 'b' => -3, 'r' => -4, 'q' => -5, 'k' => -6,
-                            _ => 0,
-                        };
+                        // Guard against malformed FEN (over-full rank) running `sq`
+                        // past the board and panicking on the index write.
+                        if sq < 64 {
+                            cb.squares[sq] = match c {
+                                'P' =>  1, 'N' =>  2, 'B' =>  3, 'R' =>  4, 'Q' =>  5, 'K' =>  6,
+                                'p' => -1, 'n' => -2, 'b' => -3, 'r' => -4, 'q' => -5, 'k' => -6,
+                                _ => 0,
+                            };
+                        }
                         sq += 1;
                     }
                 }

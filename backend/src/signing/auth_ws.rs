@@ -10,7 +10,7 @@ use super::AppState;
 /// Handler for WebSocket connections for authentication sync.
 pub async fn handle_auth_websocket(
     ws: WebSocketUpgrade,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> impl IntoResponse {
     info!("[WS_AUTH] Received WebSocket upgrade request");
     ws.on_upgrade(|socket| async move {
@@ -26,22 +26,21 @@ pub async fn handle_auth_websocket(
                     // Check for authentication token
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                         if let Some(token) = json.get("token").and_then(|t| t.as_str()) {
-                            // Placeholder for token validation, assuming a method or logic to be implemented
-                            let claims = if token.len() > 0 {
-                                is_authenticated = true;
-                                client_id = token.to_string();
-                                Ok(serde_json::json!({"sub": token}).as_object().unwrap().clone())
-                            } else {
-                                Err("Empty token")
-                            };
-                            if claims.is_ok() {
-                                info!("[WS_AUTH] Client {} authenticated successfully", client_id);
-                                break;
-                            } else {
-                                error!("[WS_AUTH] Invalid token received");
-                                let _ = write.send(Message::Text("Invalid token".to_string().into())).await;
-                                let _ = write.close().await;
-                                return;
+                            // Verify the JWT cryptographically — the identity is the
+                            // signed `sub` claim, never the raw token bytes.
+                            match state.jwt.verify(token) {
+                                Ok(claims) => {
+                                    is_authenticated = true;
+                                    client_id = claims.sub;
+                                    info!("[WS_AUTH] Client {} authenticated successfully", client_id);
+                                    break;
+                                }
+                                Err(_) => {
+                                    error!("[WS_AUTH] Invalid or expired token received");
+                                    let _ = write.send(Message::Text("Invalid token".to_string().into())).await;
+                                    let _ = write.close().await;
+                                    return;
+                                }
                             }
                         }
                     }

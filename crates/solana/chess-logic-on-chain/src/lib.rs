@@ -36,8 +36,10 @@ mod tests {
 
     #[test]
     fn test_invalid_fen_returns_false() {
-        // is_move_legal should handle bad FEN gracefully
-        is_move_legal("not-a-fen", "e2e4");
+        // is_move_legal must handle bad FEN gracefully (no panic) and reject the move.
+        assert!(!is_move_legal("not-a-fen", "e2e4"));
+        // An over-full rank must not panic the FEN parser.
+        assert!(!is_move_legal("PPPPPPPPP/8/8/8/8/8/8/8 w - - 0 1", "a2a3"));
     }
 
     #[test]

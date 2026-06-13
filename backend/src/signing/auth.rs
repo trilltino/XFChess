@@ -7,14 +7,27 @@ use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
-/// Token time-to-live in seconds (7 days)
-const TOKEN_TTL_SECS: i64 = 604_800;
+/// Default token time-to-live in seconds (7 days) when `JWT_TTL_SECS` is unset.
+const DEFAULT_TOKEN_TTL_SECS: i64 = 604_800;
+
+/// Resolves the token TTL from the `JWT_TTL_SECS` env var, falling back to the
+/// default. Lets operators shorten the takeover window without a recompile.
+fn token_ttl_secs() -> i64 {
+    std::env::var("JWT_TTL_SECS")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(DEFAULT_TOKEN_TTL_SECS)
+}
 
 /// JWT claims structure containing wallet identity and expiration.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     /// Wallet public key (base58 encoded)
     pub sub: String,
+    /// Issued-at timestamp (Unix epoch)
+    #[serde(default)]
+    pub iat: i64,
     /// Expiration timestamp (Unix epoch)
     pub exp: i64,
 }
@@ -45,9 +58,11 @@ impl JwtIssuer {
     /// # Returns
     /// A signed JWT token string
     pub fn issue(&self, wallet_pubkey: &str) -> Result<String, jsonwebtoken::errors::Error> {
+        let now = Utc::now().timestamp();
         let claims = Claims {
             sub: wallet_pubkey.to_string(),
-            exp: Utc::now().timestamp() + TOKEN_TTL_SECS,
+            iat: now,
+            exp: now + token_ttl_secs(),
         };
         encode(&Header::default(), &claims, &self.encoding)
     }
