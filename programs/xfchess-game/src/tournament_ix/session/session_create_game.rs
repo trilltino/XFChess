@@ -151,6 +151,7 @@ pub fn handler(
     game.base_time_seconds = base_time_seconds;
     game.increment_seconds = increment_seconds;
     game.fee_payer = fee_payer.key();
+    game.halfmove_clock = 0;
     game.nonce = 0;
 
     // Transfer wager from session vault to escrow

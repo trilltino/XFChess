@@ -17,6 +17,7 @@ pub struct Game {
     pub result: GameResult,
     pub board_state: [u8; 68], // Compact binary form of the game (replaces FEN string)
     pub move_count: u16,     // Total half-moves made
+    pub halfmove_clock: u16, // Half-moves since the last pawn move or capture (50-move rule = 100)
     pub turn: u8,            // Increments each half-move (1 = white to move, 2 = black, ...)
     pub created_at: i64,     // Unix timestamp
     pub updated_at: i64,     // Updated on every move — used for inactivity checks

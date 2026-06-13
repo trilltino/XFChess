@@ -111,6 +111,7 @@ pub fn handler(
         game.board_state = [0; 68];
     }
     game.move_count = 0;
+    game.halfmove_clock = 0;
     game.turn = 1;
     game.nonce = 0;
     game.created_at = now;

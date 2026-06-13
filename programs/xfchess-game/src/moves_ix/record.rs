@@ -6,7 +6,7 @@ use crate::state::*;
 use anchor_lang::prelude::*;
 
 #[cfg(feature = "move-validation")]
-use chess_logic_on_chain::nimzovich_engine::{CompactBoard, MoveOutcome, validate_and_apply};
+use chess_logic_on_chain::nimzovich_engine::{CompactBoard, MoveOutcome, parse_uci, validate_and_apply};
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
@@ -93,19 +93,40 @@ pub fn handler(
             GameErrorCode::InvalidBoardState
         );
 
-        // 4. Auto-detect checkmate / stalemate
+        // 4. Halfmove clock for the 50-move rule: reset on a pawn move or a
+        //    capture (the only irreversible events), otherwise increment. `cb`
+        //    is the board *before* the move, so we read the moved piece and the
+        //    captured square from it.
+        let (src, dst, _promo) = parse_uci(&move_uci).map_err(|_| GameErrorCode::InvalidMove)?;
+        let moved_piece = cb.squares[src as usize];
+        let is_pawn_move = moved_piece.abs() == 1;
+        // A diagonal pawn move is always a capture (covers en passant, where the
+        // destination square itself is empty before the move).
+        let is_capture = cb.squares[dst as usize] != 0
+            || (is_pawn_move && (src % 8) != (dst % 8));
+        if is_pawn_move || is_capture {
+            game.halfmove_clock = 0;
+        } else {
+            game.halfmove_clock = game.halfmove_clock.saturating_add(1);
+        }
+
+        // 5. Auto-detect game end: mate, stalemate, dead position, or 50-move rule.
         match outcome {
             MoveOutcome::Checkmate => {
                 game.result = GameResult::Winner(_moving_player);
                 game.status = GameStatus::Finished;
-
             }
-            MoveOutcome::Stalemate => {
+            MoveOutcome::Stalemate | MoveOutcome::InsufficientMaterial => {
                 game.result = GameResult::Draw;
                 game.status = GameStatus::Finished;
-
             }
-            MoveOutcome::Playing => {}
+            MoveOutcome::Playing => {
+                // 50-move rule: 100 half-moves with no pawn move or capture.
+                if game.halfmove_clock >= 100 {
+                    game.result = GameResult::Draw;
+                    game.status = GameStatus::Finished;
+                }
+            }
         }
     }
 

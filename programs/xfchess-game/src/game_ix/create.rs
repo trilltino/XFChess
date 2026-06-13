@@ -52,6 +52,7 @@ pub fn handler(
         game.board_state = [0; 68]; // default zeroed if validation is off to save compute
     }
     game.move_count = 0;
+    game.halfmove_clock = 0;
     game.turn = 1;
     game.nonce = 0; // Initialize nonce to zero
     game.created_at = Clock::get()?.unix_timestamp;

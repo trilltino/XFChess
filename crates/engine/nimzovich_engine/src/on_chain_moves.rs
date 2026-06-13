@@ -24,6 +24,45 @@ pub enum MoveOutcome {
     Checkmate,
     /// No legal moves but not in check — stalemate.
     Stalemate,
+    /// Neither side has mating material (dead position) — automatic draw.
+    InsufficientMaterial,
+}
+
+/// Returns `true` when neither side has enough material to deliver checkmate,
+/// so the position is a dead draw regardless of play. Covers the FIDE
+/// automatic cases: K vs K, K+minor vs K, and K+B vs K+B with bishops on the
+/// same colour. Any pawn, rook, or queen means mate is still possible.
+pub fn is_insufficient_material(g: &OnChainGame) -> bool {
+    if g.white_pawns | g.black_pawns
+        | g.white_rooks | g.black_rooks
+        | g.white_queens | g.black_queens
+        != 0
+    {
+        return false;
+    }
+
+    let wn = g.white_knights.count_ones();
+    let wb = g.white_bishops.count_ones();
+    let bn = g.black_knights.count_ones();
+    let bb = g.black_bishops.count_ones();
+    let white_minors = wn + wb;
+    let black_minors = bn + bb;
+
+    // K vs K, or a lone minor against a bare king.
+    if white_minors + black_minors <= 1 {
+        return true;
+    }
+
+    // K+B vs K+B with both bishops on the same colour square.
+    if wn == 0 && bn == 0 && wb == 1 && bb == 1 {
+        let w_sq = g.white_bishops.trailing_zeros();
+        let b_sq = g.black_bishops.trailing_zeros();
+        let w_color = ((w_sq / 8) + (w_sq % 8)) & 1;
+        let b_color = ((b_sq / 8) + (b_sq % 8)) & 1;
+        return w_color == b_color;
+    }
+
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +164,9 @@ pub fn validate_and_apply_sq(
         } else {
             MoveOutcome::Stalemate
         }
+    } else if is_insufficient_material(g) {
+        // Mate is impossible for either side — dead draw.
+        MoveOutcome::InsufficientMaterial
     } else {
         MoveOutcome::Playing
     };
@@ -499,5 +541,31 @@ mod tests {
         // Knight to e4 is illegal from starting position
         let result = validate_and_apply(&mut g, b"e2e4\0");
         assert!(result.is_ok());
+    }
+
+    fn insufficient(fen: &str) -> bool {
+        let g = CompactBoard::from_fen(fen).to_on_chain_game();
+        is_insufficient_material(&g)
+    }
+
+    #[test]
+    fn test_insufficient_material_cases() {
+        assert!(insufficient("8/8/8/4k3/8/4K3/8/8 w - - 0 1"), "K vs K");
+        assert!(insufficient("8/8/8/4k3/8/4K3/5N2/8 w - - 0 1"), "K+N vs K");
+        assert!(insufficient("8/8/8/4k3/8/4K3/5B2/8 w - - 0 1"), "K+B vs K");
+        // Both bishops on dark squares (c1 and f4) → same colour → draw.
+        assert!(insufficient("8/8/8/4k3/5b2/4K3/8/2B5 w - - 0 1"), "K+B vs K+B same colour");
+        // Sufficient material:
+        assert!(!insufficient("8/8/8/4k3/8/4K3/5R2/8 w - - 0 1"), "K+R vs K");
+        assert!(!insufficient("8/8/8/4k3/8/4K3/4P3/8 w - - 0 1"), "K+P vs K");
+        assert!(!insufficient("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"), "start");
+    }
+
+    #[test]
+    fn test_capture_to_bare_kings_is_insufficient_material() {
+        // White king a1 captures the lone black knight on b1 → K vs K.
+        let mut g = CompactBoard::from_fen("7k/8/8/8/8/8/8/Kn6 w - - 0 1").to_on_chain_game();
+        let result = validate_and_apply(&mut g, b"a1b1\0");
+        assert_eq!(result, Ok(MoveOutcome::InsufficientMaterial));
     }
 }
