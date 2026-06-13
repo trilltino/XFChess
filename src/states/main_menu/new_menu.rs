@@ -358,9 +358,9 @@ pub fn orbit_camera_system(
     orbit.angle += orbit.speed * time.delta_secs();
     let x = BOARD_CENTER.x + orbit.radius * orbit.angle.cos();
     let z = BOARD_CENTER.z + orbit.radius * orbit.angle.sin();
-    // Look at a point slightly left of board centre so the board sits right-of-centre in screen space
-    let look_target = Vec3::new(BOARD_CENTER.x - 1.2, BOARD_CENTER.y, BOARD_CENTER.z);
-    *t = Transform::from_translation(Vec3::new(x, orbit.height, z)).looking_at(look_target, Vec3::Y);
+    // Look at the true board centre so the board is horizontally centred on
+    // screen, symmetric with the centred title.
+    *t = Transform::from_translation(Vec3::new(x, orbit.height, z)).looking_at(BOARD_CENTER, Vec3::Y);
 }
 
 /// Handle keyboard shortcuts on the main menu.
