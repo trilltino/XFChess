@@ -74,8 +74,11 @@ impl SigningConfig {
                 .unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
             er_rpc_url: env::var("ER_RPC_URL")
                 .unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into()),
+            // Canonical program ID — matches `declare_id!` in programs/xfchess-game
+            // and the deployed devnet program. Override with PROGRAM_ID for other
+            // clusters/deployments.
             program_id: env::var("PROGRAM_ID")
-                .unwrap_or_else(|_| "AhkTK5LVJHvR51gmDXbsJsqq4wg381AH6vTiaFGGJPWm".into()),
+                .unwrap_or_else(|_| "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into()),
             jwt_secret: env::var("JWT_SECRET")
                 .expect("JWT_SECRET must be set — generate with: openssl rand -hex 32"),
             identity_encryption_key: env::var("IDENTITY_ENCRYPTION_KEY")

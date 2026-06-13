@@ -42,7 +42,7 @@ fn test_config() -> SigningConfig {
         port: 0,
         solana_rpc_url: "http://127.0.0.1:9".into(),
         er_rpc_url: "http://127.0.0.1:9".into(),
-        program_id: "AhkTK5LVJHvR51gmDXbsJsqq4wg381AH6vTiaFGGJPWm".into(),
+        program_id: "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into(),
         jwt_secret: "test-secret-not-for-production".into(),
         identity_encryption_key: "0".repeat(64),
         identity_salt: "0".repeat(64),

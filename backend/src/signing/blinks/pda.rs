@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_pda_derivation() {
-        let program_id = Pubkey::from_str("A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W").unwrap();
+        let program_id = Pubkey::from_str("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU").unwrap();
         let tournament_id = 1u64;
 
         let tournament_pda = derive_tournament_pda(tournament_id, &program_id).unwrap();

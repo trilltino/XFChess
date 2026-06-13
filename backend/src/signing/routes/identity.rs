@@ -166,7 +166,7 @@ async fn register_identity(
     // 4. On-Chain Sync: VPS signs the instruction to flag the user as verified
     let admin_keypair = &state.kyc_authority;
     let program_id = Pubkey::from_str(&state.config.program_id)
-        .unwrap_or_else(|_| "A5HtSnmyTPohayj9633D9queFFmL2ep6u45nv1v4Wj3W".parse().expect("Default program ID should be valid"));
+        .unwrap_or_else(|_| "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".parse().expect("Default program ID should be valid"));
 
     let ix = crate::signing::solana::verify_profile_ix(&program_id, &admin_keypair.pubkey(), &pk);
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
