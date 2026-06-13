@@ -17,9 +17,11 @@ pub mod transactions;
 
 pub use debug::{debug_transaction, format_debug_info, parse_program_error, TransactionDebugInfo};
 pub use instructions::{
-    claim_fees_ix, claim_prize_ix, finalize_game_ix, initialize_escrow_ix, initialize_match_ix,
-    initialize_shards_ix, initialize_tournament_ix, leave_tournament_ix, link_external_elo_ix,
-    record_move_ix, record_result_ix, start_tournament_ix, undelegate_game_ix, verify_profile_ix,
+    claim_fees_ix, claim_prize_ix, distribute_tournament_prizes_ix, finalize_game_ix,
+    fund_sol_prize_ix, initialize_escrow_ix,
+    initialize_match_ix, initialize_shards_ix, initialize_tournament_ix, leave_tournament_ix,
+    link_external_elo_ix, record_move_ix, record_result_ix, start_tournament_ix,
+    undelegate_game_ix, verify_profile_ix,
 };
 pub use rpc::{make_rpc, rpc_url_or_devnet};
 pub use telemetry::{submit_er_with_telemetry, submit_with_telemetry, TxErrorCategory, TxErrorDetail};

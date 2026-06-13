@@ -18,6 +18,7 @@ pub const ORCHESTRATOR_CHANNEL_SIZE: usize = 100;
 pub mod anticheat_worker;
 pub mod matchmaking;
 pub mod fee_claimer;
+pub mod settlement_worker;
 pub mod tournament_scheduler;
 pub mod archiver;
 
@@ -46,12 +47,30 @@ pub async fn spawn_background_tasks(
         state.config.program_id.clone(),
         state.config.solana_rpc_url.clone(),
         state.vps_authority.clone(),
+        state.host_treasury_pubkey,
     ));
     let _tournament_handle = spawn_tournament_scheduler(
         (*state.tournament_store).clone(),
         Some(state.tournament_gossip.clone()),
         on_chain,
     );
+    // Auto prize distribution — pays tournament winners without a claim tx,
+    // gated on anti-cheat verdicts for the tournament's games.
+    crate::tasks::tournament_scheduler::spawn_prize_distributor(
+        (*state.tournament_store).clone(),
+        state.store.pool(),
+        Some((
+            state.config.program_id.clone(),
+            state.config.solana_rpc_url.clone(),
+            state.vps_authority.clone(),
+        )),
+    );
+    // Auto game settlement — finalizes finished games and pays wager escrows
+    // even when the client never calls /game/finalize.
+    crate::tasks::settlement_worker::spawn_settlement_worker(state.clone());
+    // Re-ingest sweep — retries anti-cheat jobs dropped by a full queue or
+    // lost to a restart, rebuilding them from the games table.
+    crate::signing::anticheat_enqueue::spawn_reingest_sweep(state.clone());
     // Placeholder for gossip_handle if needed
     let _gossip_handle = tokio::spawn(async move {
         // Placeholder for tournament gossip service

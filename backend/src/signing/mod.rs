@@ -29,8 +29,10 @@
 //! - `tee_relayer`: Tee Relayer routes
 //! - `auth_ws`: WebSocket authentication
 
+pub mod anticheat_enqueue;
 pub mod auth;
 pub mod blinks;
+pub mod linkage;
 pub mod social;
 pub mod blinks_onboarding;
 pub mod blinks_funding;

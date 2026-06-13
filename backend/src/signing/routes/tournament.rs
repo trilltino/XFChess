@@ -26,6 +26,7 @@ use solana_sdk::{
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use std::str::FromStr;
 
+use crate::db::repository::GameRepository;
 use crate::signing::storage::tournament::{MatchStatus, TournamentRecord, TournamentStatus, TournamentFormat};
 use crate::signing::{AppState, TournamentTrigger};
 use crate::signing::solana::{initialize_escrow_ix, initialize_shards_ix, initialize_tournament_ix, record_result_ix, sign_and_submit};
@@ -578,6 +579,22 @@ async fn set_match_game_id(
     }
     let ok = store.set_match_game_id(id, req.match_index, req.game_id).await;
     if !ok { return Err(StatusCode::NOT_FOUND); }
+
+    // Stamp the tournament's broadcast delay onto the game row so the public
+    // spectator feed for this match is gated (defeats live-stream ghosting).
+    if tournament.broadcast_delay_secs > 0 {
+        let repo = GameRepository::new(state.store.pool());
+        if let Err(e) = repo
+            .set_broadcast_delay(&req.game_id.to_string(), tournament.broadcast_delay_secs as i64)
+            .await
+        {
+            error!(
+                "[tournament] failed to set broadcast delay for game {}: {}",
+                req.game_id, e
+            );
+        }
+    }
+
     info!("[tournament] Match {} of tournament {} assigned game_id {}", req.match_index, id, req.game_id);
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -1157,6 +1174,7 @@ mod tests {
             match_index: 0,
             winner: "player1".to_string(),
             loser: "player2".to_string(),
+            reason: None,
         };
 
         let json = serde_json::to_string(&req);
@@ -1382,6 +1400,7 @@ mod tests {
                 match_index: index,
                 winner: "player1".to_string(),
                 loser: "player2".to_string(),
+                reason: None,
             };
             assert_eq!(req.match_index, index);
         }
@@ -1407,6 +1426,7 @@ mod tests {
             1,
             "Test Tournament".to_string(),
             1000000,
+            0,
             16,
             [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
             TournamentFormat::SingleElimination,

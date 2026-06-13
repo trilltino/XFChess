@@ -243,6 +243,7 @@ pub async fn build_start_tournament_transactions(
     store: &TournamentStore,
     program_id: &Pubkey,
     authority: &Keypair,
+    host_treasury: &Pubkey,
 ) -> Result<Vec<String>> {
     let tournament = store.get(tournament_id).await.ok_or_else(|| {
         anyhow::anyhow!("Tournament {} not found", tournament_id)
@@ -253,7 +254,7 @@ pub async fn build_start_tournament_transactions(
 
     // Tx 1: start_tournament
     {
-        let ix = start_tournament_ix(program_id, tournament_id, &authority.pubkey());
+        let ix = start_tournament_ix(program_id, tournament_id, &authority.pubkey(), host_treasury);
         let bh = rpc.get_latest_blockhash()?;
         use solana_sdk::{message::Message, transaction::Transaction};
         let msg = Message::new(&[ix], Some(&authority.pubkey()));

@@ -7,11 +7,7 @@
 use anyhow::Result;
 use solana_sdk::pubkey::Pubkey;
 
-use super::{
-    PROFILE_SEED, TOURNAMENT_ESCROW_SEED, TOURNAMENT_OPERATOR_ESCROW_SEED,
-    TOURNAMENT_OPS_ESCROW_SEED, TOURNAMENT_PRIZE_ESCROW_SEED, TOURNAMENT_SEED,
-    TOURNAMENT_USDC_PRIZE_SEED,
-};
+use super::{PROFILE_SEED, TOURNAMENT_ESCROW_SEED, TOURNAMENT_SEED, TOURNAMENT_USDC_PRIZE_SEED};
 
 /// Derives the tournament PDA address.
 ///
@@ -27,33 +23,6 @@ pub fn derive_tournament_pda(tournament_id: u64, program_id: &Pubkey) -> Result<
 /// Seeds: ["tournament_escrow", tournament_id_le_bytes]
 pub fn derive_escrow_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
     let seeds = &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()];
-    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
-    Ok(pda)
-}
-
-/// Derives the tournament prize escrow PDA address.
-///
-/// Seeds: ["tournament_prize_escrow", tournament_id_le_bytes]
-pub fn derive_prize_escrow_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
-    let seeds = &[TOURNAMENT_PRIZE_ESCROW_SEED, &tournament_id.to_le_bytes()];
-    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
-    Ok(pda)
-}
-
-/// Derives the tournament ops escrow PDA address.
-///
-/// Seeds: ["tournament_ops_escrow", tournament_id_le_bytes]
-pub fn derive_ops_escrow_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
-    let seeds = &[TOURNAMENT_OPS_ESCROW_SEED, &tournament_id.to_le_bytes()];
-    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
-    Ok(pda)
-}
-
-/// Derives the tournament operator escrow PDA address.
-///
-/// Seeds: ["tournament_operator_escrow", tournament_id_le_bytes]
-pub fn derive_operator_escrow_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
-    let seeds = &[TOURNAMENT_OPERATOR_ESCROW_SEED, &tournament_id.to_le_bytes()];
     let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
     Ok(pda)
 }

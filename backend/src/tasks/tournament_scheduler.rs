@@ -68,6 +68,8 @@ struct OnChainConfig {
     program_id: String,
     rpc_url: String,
     vps_authority: Arc<Keypair>,
+    /// Operator treasury — receives swept entry fees at start_tournament.
+    host_treasury: solana_sdk::pubkey::Pubkey,
 }
 
 impl TournamentScheduler {
@@ -90,8 +92,14 @@ impl TournamentScheduler {
         self.gossip = Some(gossip);
     }
 
-    pub fn set_on_chain(&mut self, program_id: String, rpc_url: String, vps_authority: Arc<Keypair>) {
-        self.on_chain = Some(OnChainConfig { program_id, rpc_url, vps_authority });
+    pub fn set_on_chain(
+        &mut self,
+        program_id: String,
+        rpc_url: String,
+        vps_authority: Arc<Keypair>,
+        host_treasury: solana_sdk::pubkey::Pubkey,
+    ) {
+        self.on_chain = Some(OnChainConfig { program_id, rpc_url, vps_authority, host_treasury });
     }
 
     pub async fn run(mut self) {
@@ -255,6 +263,7 @@ impl TournamentScheduler {
             let program_id_str = cfg.program_id.clone();
             let rpc_url = cfg.rpc_url.clone();
             let authority = cfg.vps_authority.clone();
+            let host_treasury = cfg.host_treasury;
             let total_matches = max_players.saturating_sub(1) as usize;
 
             let result = tokio::task::spawn_blocking(move || {
@@ -270,7 +279,7 @@ impl TournamentScheduler {
                 let rpc = make_rpc(&rpc_url);
 
                 // Tx 1: start_tournament
-                let ix = start_tournament_ix(&program_id, tournament_id, &authority.pubkey());
+                let ix = start_tournament_ix(&program_id, tournament_id, &authority.pubkey(), &host_treasury);
                 sign_and_submit(&rpc, &authority, &[ix])
                     .map_err(|e| format!("start_tournament tx: {e}"))?;
 
@@ -358,18 +367,247 @@ impl TournamentScheduler {
 pub fn spawn_tournament_scheduler(
     store: TournamentStore,
     gossip: Option<Arc<TournamentGossipService>>,
-    on_chain: Option<(String, String, Arc<Keypair>)>,
+    on_chain: Option<(String, String, Arc<Keypair>, solana_sdk::pubkey::Pubkey)>,
 ) -> mpsc::Sender<TournamentTrigger> {
     let (mut scheduler, trigger_tx) = TournamentScheduler::new(store.clone());
     if let Some(g) = gossip {
         scheduler.set_gossip(g);
     }
-    if let Some((program_id, rpc_url, authority)) = on_chain {
-        scheduler.set_on_chain(program_id, rpc_url, authority);
+    if let Some((program_id, rpc_url, authority, host_treasury)) = on_chain {
+        scheduler.set_on_chain(program_id, rpc_url, authority, host_treasury);
     }
     tokio::spawn(scheduler.run());
     spawn_scheduled_start_ticker(store, trigger_tx.clone());
     trigger_tx
+}
+
+/// Tick interval for the prize-distribution scanner.
+const PRIZE_DISTRIBUTION_TICK: Duration = Duration::from_secs(60);
+
+/// After completion, hold distribution this long while anti-cheat analysis of
+/// the tournament's games is still pending. Past the window we pay anyway —
+/// analysis lag must not freeze payouts indefinitely.
+const PRIZE_HOLD_WINDOW_SECS: i64 = 15 * 60;
+
+/// Anti-cheat gate decision for a completed tournament.
+enum PrizeGate {
+    /// Analysis still pending and we're inside the hold window.
+    Hold,
+    /// Distribute, withholding the places held by these flagged wallets.
+    Proceed { flagged: Vec<String> },
+}
+
+/// Checks the anti-cheat queue and verdicts for a tournament's games.
+async fn anticheat_gate(
+    pool: &sqlx::SqlitePool,
+    t: &crate::signing::storage::tournament::TournamentRecord,
+) -> PrizeGate {
+    let game_ids: Vec<String> = t
+        .matches
+        .iter()
+        .flatten()
+        .filter_map(|m| m.game_id)
+        .map(|g| g.to_string())
+        .collect();
+    if game_ids.is_empty() {
+        return PrizeGate::Proceed { flagged: Vec::new() };
+    }
+
+    let placeholders = vec!["?"; game_ids.len()].join(",");
+
+    // Any of this tournament's games still awaiting analysis?
+    let pending: i64 = {
+        let sql = format!(
+            "SELECT COUNT(*) FROM anticheat_queue WHERE game_id IN ({placeholders})"
+        );
+        let mut q = sqlx::query_as::<_, (i64,)>(&sql);
+        for id in &game_ids {
+            q = q.bind(id);
+        }
+        q.fetch_one(pool).await.map(|(n,)| n).unwrap_or(0)
+    };
+    let now = chrono::Utc::now().timestamp();
+    let within_window = t
+        .completed_at
+        .map(|c| now < c + PRIZE_HOLD_WINDOW_SECS)
+        .unwrap_or(false);
+    if pending > 0 && within_window {
+        return PrizeGate::Hold;
+    }
+
+    // Collect wallets with a Flag verdict in any of this tournament's games.
+    let flagged: Vec<String> = {
+        let sql = format!(
+            "SELECT white_pubkey, black_pubkey, white_verdict, black_verdict
+             FROM anticheat_verdicts WHERE game_id IN ({placeholders})
+             AND (white_verdict = 'Flag' OR black_verdict = 'Flag')"
+        );
+        let mut q = sqlx::query_as::<_, (String, String, String, String)>(&sql);
+        for id in &game_ids {
+            q = q.bind(id);
+        }
+        q.fetch_all(pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|(w, b, wv, bv)| {
+                let mut out = Vec::new();
+                if wv == "Flag" {
+                    out.push(w);
+                }
+                if bv == "Flag" {
+                    out.push(b);
+                }
+                out
+            })
+            .collect()
+    };
+    PrizeGate::Proceed { flagged }
+}
+
+/// Spawns a background task that pushes SOL prizes to tournament winners as
+/// soon as a tournament completes — winners never sign a claim transaction.
+///
+/// Scans for `Completed` tournaments with an unpaid prize pool and cranks the
+/// permissionless `distribute_tournament_prizes` instruction. The instruction
+/// is idempotent (claim bits guard double-pays), so retrying after a partial
+/// failure is safe.
+///
+/// Distribution is gated on anti-cheat: held up to [`PRIZE_HOLD_WINDOW_SECS`]
+/// while analysis of the tournament's games is pending, and places whose
+/// winner has a `Flag` verdict are withheld (resolution goes through the
+/// on-chain governance dispute flow).
+pub fn spawn_prize_distributor(
+    store: TournamentStore,
+    pool: sqlx::SqlitePool,
+    on_chain: Option<(String, String, Arc<Keypair>)>,
+) {
+    use crate::telemetry::worker_metrics;
+    use std::sync::atomic::Ordering;
+
+    let Some((program_id_str, rpc_url, authority)) = on_chain else {
+        info!("[prize-distributor] No on-chain config — distributor not started");
+        return;
+    };
+    tokio::spawn(async move {
+        info!(
+            "[prize-distributor] Auto prize distribution: {}s interval",
+            PRIZE_DISTRIBUTION_TICK.as_secs()
+        );
+        let mut ticker = tokio::time::interval(PRIZE_DISTRIBUTION_TICK);
+        ticker.tick().await; // skip immediate first tick
+
+        loop {
+            ticker.tick().await;
+            for t in store.list().await {
+                if t.status != TournamentStatus::Completed
+                    || t.prizes_distributed
+                    || t.prize_pool == 0
+                    || t.winner.is_none()
+                {
+                    continue;
+                }
+
+                let flagged = match anticheat_gate(&pool, &t).await {
+                    PrizeGate::Hold => {
+                        worker_metrics::PRIZE_DISTRIBUTION_HELD_TOTAL
+                            .fetch_add(1, Ordering::Relaxed);
+                        info!(
+                            "[prize-distributor] Tournament {} held — anti-cheat analysis pending",
+                            t.tournament_id
+                        );
+                        continue;
+                    }
+                    PrizeGate::Proceed { flagged } => flagged,
+                };
+
+                use solana_sdk::pubkey::Pubkey;
+                use std::str::FromStr;
+                let places = [
+                    &t.winner, &t.second_place, &t.third_place, &t.fourth_place,
+                    &t.fifth_place, &t.sixth_place, &t.seventh_place, &t.eighth_place,
+                    &t.ninth_place, &t.tenth_place,
+                ];
+                let flagged_places = places
+                    .iter()
+                    .filter_map(|p| p.as_deref())
+                    .filter(|s| flagged.iter().any(|f| f == s))
+                    .count() as u64;
+                if flagged_places > 0 {
+                    worker_metrics::PRIZE_DISTRIBUTION_FLAGGED_TOTAL
+                        .fetch_add(flagged_places, Ordering::Relaxed);
+                    warn!(
+                        "[prize-distributor] Tournament {}: withholding {} flagged prize place(s) — \
+                         resolve via governance dispute",
+                        t.tournament_id, flagged_places
+                    );
+                }
+                let winners: Vec<Pubkey> = places
+                    .iter()
+                    .filter_map(|p| p.as_deref())
+                    .filter(|s| !flagged.iter().any(|f| f == s))
+                    .filter_map(|s| Pubkey::from_str(s).ok())
+                    .collect();
+                if winners.is_empty() {
+                    // Every payable place is flagged — stop retrying; the
+                    // escrow stays claimable through governance resolution.
+                    warn!(
+                        "[prize-distributor] Tournament {}: all prize places flagged, leaving escrow for governance",
+                        t.tournament_id
+                    );
+                    store
+                        .update(t.tournament_id, |t| t.prizes_distributed = true)
+                        .await;
+                    continue;
+                }
+
+                let tournament_id = t.tournament_id;
+                let program_id_str = program_id_str.clone();
+                let rpc_url = rpc_url.clone();
+                let authority = authority.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    use crate::signing::solana::{
+                        distribute_tournament_prizes_ix, make_rpc, sign_and_submit,
+                    };
+                    use solana_sdk::signature::Signer;
+
+                    let program_id = Pubkey::from_str(&program_id_str)
+                        .map_err(|e| format!("bad program_id: {e}"))?;
+                    let rpc = make_rpc(&rpc_url);
+                    let ix = distribute_tournament_prizes_ix(
+                        &program_id,
+                        tournament_id,
+                        &authority.pubkey(),
+                        &winners,
+                    );
+                    sign_and_submit(&rpc, &authority, &[ix])
+                        .map_err(|e| format!("distribute tx: {e}"))
+                })
+                .await;
+
+                match result {
+                    Ok(Ok(sig)) => {
+                        worker_metrics::PRIZE_DISTRIBUTED_TOTAL.fetch_add(1, Ordering::Relaxed);
+                        info!(
+                            "[prize-distributor] Tournament {} prizes distributed, sig {}",
+                            tournament_id, sig
+                        );
+                        store
+                            .update(tournament_id, |t| t.prizes_distributed = true)
+                            .await;
+                    }
+                    Ok(Err(e)) => warn!(
+                        "[prize-distributor] Tournament {} distribution failed (will retry): {}",
+                        tournament_id, e
+                    ),
+                    Err(e) => error!(
+                        "[prize-distributor] spawn_blocking panicked for tournament {}: {}",
+                        tournament_id, e
+                    ),
+                }
+            }
+        }
+    });
 }
 
 /// Tick interval for the scheduled-start scanner.

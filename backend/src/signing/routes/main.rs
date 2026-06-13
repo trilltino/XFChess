@@ -67,6 +67,20 @@ pub struct SigResp {
     pub sig: String,
 }
 
+/// Client blur + think-time telemetry for one ply (see `report_blur_telemetry`).
+#[derive(Deserialize)]
+pub struct BlurTelemetryReq {
+    pub game_id: u64,
+    /// 1-based ply number, matching the server's `moves.move_number`.
+    pub move_number: u32,
+    /// "white" | "black" — must match the ply's parity.
+    pub color: String,
+    pub blurred: bool,
+    /// Client-measured think time for this move in ms (optional).
+    #[serde(default)]
+    pub think_ms: Option<u32>,
+}
+
 /// Extended finalize response including payout breakdown.
 #[derive(Serialize)]
 pub struct FinalizeResp {
@@ -128,6 +142,7 @@ pub fn routes() -> Router<AppState> {
         .route("/session/sign", post(sign_tx))
         .route("/session/tee_auth", post(tee_auth))
         .route("/move/record", post(record_move))
+        .route("/telemetry/blur", post(report_blur_telemetry))
         .route("/game/undelegate", post(undelegate_game))
         .route("/game/finalize", post(finalize_game))
         .route("/game/{game_id}/nonce", get(get_move_nonce))
@@ -331,6 +346,55 @@ pub async fn record_move(
     Ok(Json(SigResp { sig: sig.to_string() }))
 }
 
+/// Upper bound on a single move's think time (ms). Anything larger is a
+/// fabricated or buggy claim; clamping keeps the budget math meaningful.
+const MAX_THINK_MS: u32 = 2 * 60 * 60 * 1000; // 2 hours
+
+/// POST /telemetry/blur - Client-side anti-cheat telemetry.
+///
+/// Each client reports, for its *own* moves only, whether the game window
+/// lost focus since its previous move (the alt-tab-to-engine signature) and
+/// how long it spent on the move (`think_ms`). Ply parity is enforced (odd
+/// plies are white's), so a client can only attach telemetry to plies of the
+/// color it claims; first write per ply wins. The think time is a *claim* —
+/// the analysis enqueue audits it against the server-observed wall clock
+/// before scoring. Consumed by the anti-cheat pipeline as soft signals.
+pub async fn report_blur_telemetry(
+    State(state): State<AppState>,
+    Json(req): Json<BlurTelemetryReq>,
+) -> Result<StatusCode, StatusCode> {
+    // Only accept telemetry for games this server is actually relaying.
+    state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    if req.move_number == 0 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let expected_color = if req.move_number % 2 == 1 { "white" } else { "black" };
+    if req.color != expected_color {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let think_ms = req.think_ms.map(|t| t.min(MAX_THINK_MS) as i64);
+
+    sqlx::query(
+        "INSERT OR IGNORE INTO move_telemetry (game_id, move_number, color, blurred, think_ms)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(req.game_id.to_string())
+    .bind(req.move_number as i64)
+    .bind(&req.color)
+    .bind(req.blurred as i64)
+    .bind(think_ms)
+    .execute(&state.store.pool())
+    .await
+    .map_err(|e| {
+        error!("[telemetry] blur insert failed for game {}: {}", req.game_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Convert a UCI string (e.g. "e2e4" or "e7e8q") into a fixed 5-byte array.
 fn uci_to_fixed5(uci: &str) -> Result<[u8; 5], ()> {
     let bytes = uci.as_bytes();
@@ -395,13 +459,15 @@ pub async fn finalize_game(
 
     // Fire-and-forget DB write (log errors but don't fail the HTTP response)
     let game_id_str = req.game_id.to_string();
+    let game_id = req.game_id;
+    let wager_lamports = req.wager_lamports;
     let pool = state.store.pool();
     let elo_cache = state.elo_cache.clone();
     let white = req.white_pubkey.clone();
     let black = req.black_pubkey.clone();
     let winner = req.winner.clone();
     let sig_str = sig.to_string();
-    let anticheat_queue = state.anticheat_queue.clone();
+    let app_state = state.clone();
     tokio::spawn(async move {
         let repo = GameRepository::new(pool.clone());
         // Look up usernames from users_v2
@@ -454,62 +520,22 @@ pub async fn finalize_game(
         elo_cache.invalidate(&white);
         elo_cache.invalidate(&black);
 
-        // Enqueue post-game anti-cheat analysis (PvP and tournament games only)
-        if let Some(queue) = anticheat_queue {
-            let white_elo = elo_cache.get_elo(&white).await
-                .map(|e| (e.elo_rating / 100.0) as u32).unwrap_or(1200);
-            let black_elo = elo_cache.get_elo(&black).await
-                .map(|e| (e.elo_rating / 100.0) as u32).unwrap_or(1200);
-
-            // Fetch raw moves from DB for analysis
-            let raw_moves: Vec<(i64, String, Option<String>, String, i64)> = sqlx::query_as(
-                "SELECT move_number, move_uci, fen_after, player, timestamp
-                 FROM moves WHERE game_id = ? ORDER BY move_number ASC"
-            )
-            .bind(&game_id_str)
-            .fetch_all(&pool)
-            .await
-            .unwrap_or_default();
-
-            let move_records: Vec<xfchess_anticheat::types::MoveRecord> = raw_moves
-                .iter()
-                .enumerate()
-                .map(|(i, (num, uci, fen, _player, ts))| {
-                    let prev_ts = if i == 0 { *ts } else { raw_moves[i - 1].4 };
-                    xfchess_anticheat::types::MoveRecord {
-                        ply: *num as u32,
-                        move_uci: uci.clone(),
-                        fen_after: fen.clone().unwrap_or_default(),
-                        signed_at_ms: (*ts * 1000) as u64,
-                        latency_ms: ((*ts - prev_ts).max(0) * 1000) as u32,
-                    }
-                })
-                .collect();
-
-            if move_records.len() >= 10 {
-                let game_record = xfchess_anticheat::types::GameRecord {
-                    game_id: game_id_str.clone(),
-                    context: xfchess_anticheat::types::GameContext::Pvp { wager_sol: 0.0 },
-                    white: xfchess_anticheat::types::PlayerRef { pubkey: white.clone(), elo: white_elo },
-                    black: xfchess_anticheat::types::PlayerRef { pubkey: black.clone(), elo: black_elo },
-                    time_control: xfchess_anticheat::types::TimeControl { base_sec: 600, inc_sec: 0 },
-                    start_fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".into(),
-                    moves: move_records,
-                    result: match winner.as_deref() {
-                        Some("white") => xfchess_anticheat::types::GameResult::WhiteWin,
-                        Some("black") => xfchess_anticheat::types::GameResult::BlackWin,
-                        _ => xfchess_anticheat::types::GameResult::Draw,
-                    },
-                    ended_at_ms: 0,
-                };
-
-                if let Err(e) = queue.enqueue(game_record).await {
-                    error!("[anticheat] failed to enqueue game {game_id_str}: {e}");
-                } else {
-                    info!("[anticheat] game {game_id_str} queued for analysis");
-                }
-            }
-        }
+        // Enqueue post-game anti-cheat analysis via the shared path (also used
+        // by the auto-settlement worker), which resolves tournament context.
+        crate::signing::anticheat_enqueue::enqueue_game_analysis(
+            &app_state,
+            crate::signing::anticheat_enqueue::FinalizedGame {
+                game_id,
+                white: white.clone(),
+                black: black.clone(),
+                winner: winner.clone(),
+                wager_lamports,
+                tournament_id: None,
+                base_time_seconds: 0,
+                increment_seconds: 0,
+            },
+        )
+        .await;
     });
 
     // Fee breakdown mirroring the on-chain contract constants.
@@ -916,6 +942,7 @@ mod tests {
             winner: Some("white".to_string()),
             white_pubkey: "white_wallet".to_string(),
             black_pubkey: "black_wallet".to_string(),
+            wager_lamports: 0,
         };
 
         let json = serde_json::to_string(&req);
@@ -1005,6 +1032,7 @@ mod tests {
                 winner: winner.clone(),
                 white_pubkey: "white_wallet".to_string(),
                 black_pubkey: "black_wallet".to_string(),
+                wager_lamports: 0,
             };
             assert_eq!(req.winner, winner);
         }

@@ -294,6 +294,7 @@ async fn start_tournament(
         &state.tournament_store,
         &program_id,
         &state.vps_authority,
+        &state.host_treasury_pubkey,
     )
     .await
     .map_err(|e| {

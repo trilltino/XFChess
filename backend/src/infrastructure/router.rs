@@ -72,11 +72,16 @@ pub fn build_app_router(
                 .layer(middleware::from_fn(require_api_key))
         );
 
-    // Build metrics endpoint
+    // Build metrics endpoint — core HTTP/RPC metrics plus the background-worker
+    // and anti-cheat/linkage counters (settlement, prize distribution, blur,
+    // think-time discards, Sybil linkage).
     let metrics_router = base
         .clone()
         .route("/metrics", axum::routing::get(|State(app_state): State<AppState>| async move {
-            app_state.metrics.export_prometheus_format()
+            let mut out = app_state.metrics.export_prometheus_format();
+            out.push('\n');
+            out.push_str(&crate::telemetry::worker_metrics::render_prometheus());
+            out
         }));
 
     // Social (friends, presence, lobby invites)

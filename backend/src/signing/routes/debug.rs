@@ -167,9 +167,7 @@ pub async fn detailed_health_check(
 pub async fn metrics_endpoint(
     State(_state): State<AppState>,
 ) -> impl IntoResponse {
-    // For now, return a simple Prometheus format
-    // In full implementation, this would use the telemetry metrics
-    let metrics = format!(
+    let mut metrics = format!(
         "# HELP xfchess_health Health status (1 = healthy, 0 = unhealthy)\n\
          # TYPE xfchess_health gauge\n\
          xfchess_health 1\n\
@@ -179,7 +177,9 @@ pub async fn metrics_endpoint(
          xfchess_version{{version=\"{}\"}} 1\n",
         env!("CARGO_PKG_VERSION")
     );
-    
+    metrics.push('\n');
+    metrics.push_str(&crate::telemetry::worker_metrics::render_prometheus());
+
     ([("content-type", "text/plain")], metrics)
 }
 

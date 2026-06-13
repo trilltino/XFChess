@@ -19,8 +19,22 @@ pub fn history_routes() -> Router<AppState> {
         .route("/games/history/{wallet}", get(get_game_history))
         .route("/games/history/username/{username}", get(get_game_history_by_username))
         .route("/games/moves/{game_id}", get(get_game_moves))
+        .route("/games/{game_id}/broadcast-delay", get(get_broadcast_delay))
         .route("/games/{game_id}/pgn", get(get_game_pgn))
         .route("/ratings/history/{wallet}", get(get_ratings_history))
+}
+
+/// GET /games/{game_id}/broadcast-delay — the game's public spectator delay in
+/// seconds (0 = live). Spectator clients query this *before* deciding whether
+/// to subscribe to the live P2P gossip feed: a non-zero delay means the only
+/// permitted public source is the delay-gated HTTP move feed.
+pub async fn get_broadcast_delay(
+    State(state): State<AppState>,
+    Path(game_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let repo = GameRepository::new(state.store.pool());
+    let delay = repo.get_broadcast_delay(&game_id).await;
+    Json(serde_json::json!({ "delay_secs": delay }))
 }
  
 pub async fn get_game_history(
@@ -53,6 +67,13 @@ pub async fn get_game_history_by_username(
     Ok(Json(serde_json::json!({ "games": games })))
 }
 
+/// GET /games/moves/{game_id} — public (delayed) spectator feed.
+///
+/// Returns only moves at least the game's `broadcast_delay_secs` old, so a
+/// live stream can't be used to ghost. For delay = 0 games (all casual/ranked
+/// today) this is the full move list, unchanged. There is deliberately no
+/// `live` bypass on this unauthenticated endpoint — that's exactly the feed an
+/// accomplice would watch. Participants/casters get live via authorized paths.
 pub async fn get_game_moves(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
@@ -60,7 +81,8 @@ pub async fn get_game_moves(
     let pool = state.store.pool();
     let repo = GameRepository::new(pool);
 
-    let moves = repo.get_moves(&game_id).await.map_err(|e| {
+    let now_ts = chrono::Utc::now().timestamp();
+    let moves = repo.get_moves_visible(&game_id, now_ts).await.map_err(|e| {
         error!("[history] DB query failed: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;

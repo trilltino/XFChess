@@ -170,6 +170,7 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/admin/treasury/refund", post(treasury_refund))
         // Tournament extras
         .route("/admin/tournament/{id}/escrow-balance", get(tournament_escrow_balance))
+        .route("/admin/tournament/{id}/fund-prize", post(fund_tournament_prize))
         .route("/admin/tournament/{id}/fill-bots", post(fill_tournament_bots))
         // Tasks / infra
         .route("/admin/tasks/status", get(tasks_status))
@@ -480,7 +481,8 @@ async fn tournament_escrow_balance(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let program_id = state.program_id;
-    let seeds = &[b"escrow", &id.to_le_bytes()[..]];
+    // Tournament escrow seed is "t_escrow" ("escrow" is the per-game wager seed).
+    let seeds = &[b"t_escrow", &id.to_le_bytes()[..]];
     let (escrow_pda, _bump) = solana_sdk::pubkey::Pubkey::find_program_address(seeds, &program_id);
     let balance = state.solana_rpc.get_balance(&escrow_pda).unwrap_or(0);
     Ok(Json(json!({
@@ -488,6 +490,55 @@ async fn tournament_escrow_balance(
         "escrow_pda": escrow_pda.to_string(),
         "balance_lamports": balance,
         "balance_sol": balance as f64 / 1e9,
+    })))
+}
+
+#[derive(Deserialize)]
+struct FundPrizeRequest {
+    amount_lamports: u64,
+}
+
+/// Locks the guaranteed SOL prize for a tournament in its escrow PDA.
+/// Must be called after initialization but BEFORE the first registration —
+/// the program rejects registrations on paid tournaments until this runs,
+/// and rejects funding once anyone has registered (the guarantee is immutable).
+/// Funds are drawn from the server's vps_authority wallet.
+async fn fund_tournament_prize(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+    Json(req): Json<FundPrizeRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    use crate::signing::solana::{fund_sol_prize_ix, make_rpc, sign_and_submit};
+    use solana_sdk::signature::Signer;
+
+    if req.amount_lamports == 0 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let program_id = state.program_id;
+    let rpc_url = state.config.solana_rpc_url.clone();
+    let authority = state.vps_authority.clone();
+    let amount = req.amount_lamports;
+
+    let sig = tokio::task::spawn_blocking(move || {
+        let rpc = make_rpc(&rpc_url);
+        let ix = fund_sol_prize_ix(&program_id, id, &authority.pubkey(), amount);
+        sign_and_submit(&rpc, &authority, &[ix])
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|e| {
+        tracing::error!("[admin] fund_sol_prize failed for tournament {}: {}", id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    add_audit("fund_prize", &format!("tournament:{}", id), &format!("{} lamports", amount));
+    info!("[admin] Guaranteed prize of {} lamports locked for tournament {} ({})", amount, id, sig);
+    Ok(Json(json!({
+        "ok": true,
+        "tournament_id": id,
+        "amount_lamports": amount,
+        "signature": sig.to_string(),
     })))
 }
 

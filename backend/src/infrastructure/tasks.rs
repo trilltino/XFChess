@@ -46,6 +46,7 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> (tokio:
         config.program_id.clone(),
         config.solana_rpc_url.clone(),
         state.vps_authority.clone(),
+        state.host_treasury_pubkey,
     ));
     let trigger_tx = spawn_tournament_scheduler(tournament_store, gossip, on_chain);
     info!("[Tasks] Tournament scheduler spawned with async-fill and gossip broadcast");

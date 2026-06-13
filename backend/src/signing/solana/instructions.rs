@@ -432,15 +432,23 @@ pub fn initialize_shards_ix(
 }
 
 /// Builds a `start_tournament` instruction.
-/// Locks registration and seeds players for bracket generation.
+/// Locks registration, seeds players for bracket generation, and sweeps the
+/// entry-fee deposits from the tournament escrow to `host_treasury` (operator
+/// revenue — the guaranteed prize stays locked in escrow).
 /// All 4 shard PDAs are always passed; the program ignores extra ones.
 pub fn start_tournament_ix(
     program_id: &Pubkey,
     tournament_id: u64,
     authority: &Pubkey,
+    host_treasury: &Pubkey,
 ) -> Instruction {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         program_id,
     ).0;
 
@@ -462,9 +470,85 @@ pub fn start_tournament_ix(
             AccountMeta::new_readonly(shard(1), false),
             AccountMeta::new_readonly(shard(2), false),
             AccountMeta::new_readonly(shard(3), false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(*host_treasury, false),
             AccountMeta::new(*authority, true),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ],
+        data,
+    }
+}
+
+/// Builds a `fund_sol_prize` instruction.
+/// Locks the guaranteed SOL prize in the tournament escrow PDA. Must be sent
+/// before the first player registers — the program rejects it afterwards, and
+/// rejects registrations on paid tournaments until a prize is funded.
+pub fn fund_sol_prize_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    operator: &Pubkey,
+    amount_lamports: u64,
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let mut data = anchor_discriminator("fund_sol_prize").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&amount_lamports.to_le_bytes());
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(*operator, true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+        data,
+    }
+}
+
+/// Builds a `distribute_tournament_prizes` instruction.
+///
+/// Push-based payout: pays every unclaimed place its SOL share directly, so
+/// winners never have to sign a claim. `winners` are passed as writable
+/// remaining accounts; the program only pays wallets that match the places
+/// recorded on the Tournament account.
+pub fn distribute_tournament_prizes_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    cranker: &Pubkey,
+    winners: &[Pubkey],
+) -> Instruction {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    ).0;
+
+    let mut data = anchor_discriminator("distribute_tournament_prizes").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    let mut accounts = vec![
+        AccountMeta::new(tournament_pda, false),
+        AccountMeta::new(escrow_pda, false),
+        AccountMeta::new_readonly(*cranker, true),
+    ];
+    accounts.extend(winners.iter().map(|w| AccountMeta::new(*w, false)));
+
+    Instruction {
+        program_id: *program_id,
+        accounts,
         data,
     }
 }

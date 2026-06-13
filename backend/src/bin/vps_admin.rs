@@ -150,6 +150,7 @@ fn print_menu() {
     println!("├─────────────────────────────────────────────────────────────────┤");
     println!("│  7. Cancel tournament (refund all)                              │");
     println!("│  8. Calculate prize payout                                      │");
+    println!("│  9. Fund guaranteed prize pool (before registration opens)      │");
     println!("│                                                                 │");
     println!("│  0. Exit                                                        │");
     println!("└─────────────────────────────────────────────────────────────────┘");
@@ -655,6 +656,51 @@ fn cancel_tournament() {
     println!("     `solana program invoke --program-id <PROGRAM_ID> cancel_tournament <TOURNAMENT_ID>`");
 }
 
+fn fund_prize() {
+    let id = read_u64("Tournament ID");
+    let sol = {
+        print!("  Guaranteed prize in SOL (e.g. 0.5): ");
+        io::stdout().flush().unwrap();
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf).unwrap();
+        match buf.trim().parse::<f64>() {
+            Ok(v) if v > 0.0 => v,
+            _ => {
+                println!("  [ERROR] Invalid amount.");
+                return;
+            }
+        }
+    };
+    let lamports = (sol * 1e9) as u64;
+
+    println!("\n[FUND] This locks {} SOL ({} lamports) as the FIXED prize for tournament {}.", sol, lamports, id);
+    println!("       The amount cannot be changed afterwards and does not grow with entries.");
+    println!("       Players cannot register on a paid tournament until this is done.");
+
+    if !confirm("Lock the guaranteed prize now?") {
+        println!("  Cancelled.");
+        return;
+    }
+
+    match client()
+        .post(format!("{}/admin/tournament/{}/fund-prize", vps_base(), id))
+        .json(&serde_json::json!({ "amount_lamports": lamports }))
+        .send()
+    {
+        Ok(resp) if resp.status().is_success() => {
+            let body: serde_json::Value = resp.json().unwrap_or_default();
+            println!("  [OK] Prize locked. Signature: {}", body["signature"].as_str().unwrap_or("?"));
+            println!("       Verify escrow: GET /admin/tournament/{}/escrow-balance", id);
+        }
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            println!("  [ERROR] Failed: HTTP {} - {}", status, body);
+        }
+        Err(e) => println!("  [ERROR] Request failed: {}", e),
+    }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -672,6 +718,7 @@ fn main() {
             "6" => set_match_game_id(),
             "7" => cancel_tournament(),
             "8" => calculate_prizes(),
+            "9" => fund_prize(),
             "0" | "q" | "quit" | "exit" => {
                 println!("\nGoodbye!\n");
                 break;

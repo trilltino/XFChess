@@ -1,4 +1,4 @@
-//! Tournament data store for managing 8-128 player single-elimination tournaments.
+﻿//! Tournament data store for managing 8-128 player single-elimination tournaments.
 //!
 //! This module provides SQLite-backed storage for tournament records,
 //! including player registration, bracket management, and match results.
@@ -172,6 +172,13 @@ pub struct TournamentRecord {
     pub kyc_required: bool,
     /// Optional bcrypt hash of join password (if private). When `Some`, `/join` must supply matching password.
     pub password_hash: Option<String>,
+    /// True once the on-chain prize distribution crank has paid the winners.
+    #[serde(default)]
+    pub prizes_distributed: bool,
+    /// Public spectator broadcast delay in seconds (0 = live). Stamped onto
+    /// each match's game row so the public feed can't be used to ghost.
+    #[serde(default)]
+    pub broadcast_delay_secs: u32,
 }
 
 impl TournamentRecord {
@@ -212,6 +219,8 @@ impl TournamentRecord {
             elo_max: None,
             created_at: chrono::Utc::now().timestamp(),
             kyc_required: false,
+            prizes_distributed: false,
+            broadcast_delay_secs: 0,
         }
     }
 
@@ -265,6 +274,8 @@ impl TournamentRecord {
             elo_max,
             created_at: chrono::Utc::now().timestamp(),
             kyc_required,
+            prizes_distributed: false,
+            broadcast_delay_secs: 0,
         }
     }
 
@@ -758,6 +769,8 @@ impl Default for TournamentRecord {
             elo_max: None,
             created_at: chrono::Utc::now().timestamp(),
             kyc_required: false,
+            prizes_distributed: false,
+            broadcast_delay_secs: 0,
         }
     }
 }

@@ -86,6 +86,82 @@ impl SessionStore {
         .execute(&self.pool)
         .await?;
 
+        // Client-side anti-cheat telemetry (blur + think-time reporting) —
+        // mirrors migrations/013_move_telemetry.sql and 014_think_time.sql for
+        // deployments that don't run sqlx migrations.
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS move_telemetry (
+                game_id     TEXT    NOT NULL,
+                move_number INTEGER NOT NULL,
+                color       TEXT    NOT NULL,
+                blurred     INTEGER NOT NULL DEFAULT 0,
+                think_ms    INTEGER,
+                reported_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                PRIMARY KEY (game_id, move_number)
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Defensive ALTER for DBs created before migration 014. SQLite has no
+        // ADD COLUMN IF NOT EXISTS; a duplicate-column error here is expected
+        // and harmless.
+        let _ = sqlx::query("ALTER TABLE move_telemetry ADD COLUMN think_ms INTEGER")
+            .execute(&self.pool)
+            .await;
+
+        // Per-game broadcast delay (migration 015) — same guarded-ALTER pattern.
+        let _ = sqlx::query(
+            "ALTER TABLE games ADD COLUMN broadcast_delay_secs INTEGER NOT NULL DEFAULT 0",
+        )
+        .execute(&self.pool)
+        .await;
+
+        // Reconcile the migration-006 `games`/`moves` schema with the columns
+        // the repository actually reads/writes. Migration 006 created the
+        // minimal tables; `pgn_text`, `move_san`, and `fen_before` live only in
+        // the alternate `db::schema` init path that the signing-server does not
+        // run. Without these, SAN/PGN persistence and `SELECT *` of GameRecord
+        // fail (silently, on fire-and-forget paths). Guarded ALTERs are
+        // idempotent across restarts.
+        let _ = sqlx::query("ALTER TABLE games ADD COLUMN pgn_text TEXT")
+            .execute(&self.pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE moves ADD COLUMN move_san TEXT")
+            .execute(&self.pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE moves ADD COLUMN fen_before TEXT")
+            .execute(&self.pool)
+            .await;
+
+        // Account-linkage / Sybil signals (migration 016).
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS account_linkage (
+                wallet        TEXT    PRIMARY KEY,
+                funder        TEXT,
+                device_hash   TEXT,
+                ip_count      INTEGER NOT NULL DEFAULT 0,
+                flagged       INTEGER NOT NULL DEFAULT 0,
+                hard_blocked  INTEGER NOT NULL DEFAULT 0,
+                first_seen    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                last_seen     INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_linkage_funder ON account_linkage(funder)")
+            .execute(&self.pool)
+            .await
+            .ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_linkage_device ON account_linkage(device_hash)")
+            .execute(&self.pool)
+            .await
+            .ok();
+
         Ok(())
     }
 
@@ -291,6 +367,26 @@ impl SessionStore {
             .execute(&self.pool)
             .await
             .ok();
+    }
+
+    /// Marks a session as inactive (game settled or abandoned).
+    pub async fn deactivate(&self, game_id: u64) {
+        sqlx::query("UPDATE sessions SET active = 0 WHERE game_id = ?")
+            .bind(game_id as i64)
+            .execute(&self.pool)
+            .await
+            .ok();
+    }
+
+    /// Lists the game IDs of all currently active sessions.
+    pub async fn list_active_game_ids(&self) -> Vec<u64> {
+        sqlx::query_as::<_, (i64,)>("SELECT game_id FROM sessions WHERE active = 1")
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id,)| id as u64)
+            .collect()
     }
 
     /// Checks if a session is currently active.

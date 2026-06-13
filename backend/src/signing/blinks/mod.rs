@@ -38,12 +38,6 @@ pub use routes::blinks_routes;
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";
 /// PDA seed for tournament escrow accounts
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"tournament_escrow";
-/// PDA seed for tournament prize escrow
-pub const TOURNAMENT_PRIZE_ESCROW_SEED: &[u8] = b"tournament_prize_escrow";
-/// PDA seed for tournament ops escrow
-pub const TOURNAMENT_OPS_ESCROW_SEED: &[u8] = b"tournament_ops_escrow";
-/// PDA seed for tournament operator escrow
-pub const TOURNAMENT_OPERATOR_ESCROW_SEED: &[u8] = b"tournament_operator_escrow";
 /// PDA seed for USDC prize escrow
 pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
 /// PDA seed for player profile accounts

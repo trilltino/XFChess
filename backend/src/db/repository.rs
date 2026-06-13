@@ -4,6 +4,21 @@ use anyhow::Result;
 
 const PGN_ZSTD_PREFIX: &str = "zstd:";
 
+/// Filters a game's moves to those visible on the public (delayed) feed:
+/// any move recorded at least `delay_secs` ago. With `delay_secs == 0` this is
+/// a no-op (returns every move), preserving the live feed for casual games.
+pub fn filter_visible_moves(
+    moves: Vec<MoveRecord>,
+    now_ts: i64,
+    delay_secs: i64,
+) -> Vec<MoveRecord> {
+    if delay_secs <= 0 {
+        return moves;
+    }
+    let horizon = now_ts - delay_secs;
+    moves.into_iter().filter(|m| m.timestamp <= horizon).collect()
+}
+
 fn compress_pgn(pgn: &str) -> String {
     match zstd::encode_all(pgn.as_bytes(), 3) {
         Ok(compressed) => format!("{}{}", PGN_ZSTD_PREFIX, base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &compressed)),
@@ -322,6 +337,47 @@ impl GameRepository {
         Ok(moves)
     }
 
+    /// Reads the per-game broadcast delay (0 = live). Missing row → 0.
+    pub async fn get_broadcast_delay(&self, game_id: &str) -> i64 {
+        sqlx::query_as::<_, (i64,)>(
+            "SELECT broadcast_delay_secs FROM games WHERE id = ?",
+        )
+        .bind(game_id)
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(d,)| d)
+        .unwrap_or(0)
+    }
+
+    /// Sets a game's broadcast delay, creating the row if it doesn't exist yet
+    /// (tournament games are stamped before the first move is recorded).
+    pub async fn set_broadcast_delay(&self, game_id: &str, secs: i64) -> Result<()> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            r#"INSERT INTO games (id, stake_amount, fee_lamports, start_time, status, created_at, broadcast_delay_secs)
+               VALUES (?, 0.0, 0, ?, 'playing', ?, ?)
+               ON CONFLICT(id) DO UPDATE SET broadcast_delay_secs = excluded.broadcast_delay_secs"#,
+        )
+        .bind(game_id)
+        .bind(now)
+        .bind(now)
+        .bind(secs)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Public spectator view: moves at least `broadcast_delay_secs` old, so a
+    /// live stream can't be used to ghost. For delay = 0 this returns all moves
+    /// (today's behavior). `now_ts` is the current unix time in seconds.
+    pub async fn get_moves_visible(&self, game_id: &str, now_ts: i64) -> Result<Vec<MoveRecord>> {
+        let delay = self.get_broadcast_delay(game_id).await;
+        let moves = self.get_moves(game_id).await?;
+        Ok(filter_visible_moves(moves, now_ts, delay))
+    }
+
     /// Update game status and winner
     pub async fn end_game(
         &self,
@@ -608,4 +664,55 @@ pub struct NewMove {
     pub fen_after: Option<String>,
     pub player: String,
     pub timestamp: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mv(move_number: i32, timestamp: i64) -> MoveRecord {
+        MoveRecord {
+            id: None,
+            game_id: "g".into(),
+            move_number,
+            move_uci: "e2e4".into(),
+            move_san: None,
+            fen_before: None,
+            fen_after: None,
+            player: "w".into(),
+            timestamp,
+        }
+    }
+
+    #[test]
+    fn zero_delay_shows_all_moves() {
+        let now = 1_000_000;
+        let moves = vec![mv(1, now - 1), mv(2, now)];
+        let out = filter_visible_moves(moves, now, 0);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn delay_hides_recent_moves() {
+        let now = 1_000_000;
+        let delay = 900; // 15 minutes
+        let moves = vec![
+            mv(1, now - 1000), // older than horizon → visible
+            mv(2, now - 901),  // just past horizon → visible
+            mv(3, now - 899),  // inside the delay window → hidden
+            mv(4, now),        // live → hidden
+        ];
+        let out = filter_visible_moves(moves, now, delay);
+        let visible: Vec<i32> = out.iter().map(|m| m.move_number).collect();
+        assert_eq!(visible, vec![1, 2]);
+    }
+
+    #[test]
+    fn delay_can_hide_entire_game() {
+        let now = 1_000_000;
+        let moves = vec![mv(1, now - 10), mv(2, now - 5)];
+        // A game whose every move is newer than the delay horizon shows nothing
+        // publicly yet — the broadcast is fully behind.
+        assert!(filter_visible_moves(moves, now, 1800).is_empty());
+    }
 }

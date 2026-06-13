@@ -26,15 +26,18 @@ const FROM_EMAIL: &str = "noreply@xfchess.com";
 
 // ── Route builder ─────────────────────────────────────────────────────────────
 
+// Paths are relative to the nest prefixes applied in `build_app_router`
+// (`/dispute` and `/admin/dispute`). Absolute paths here would double-prefix
+// to `/dispute/dispute/notify`, leaving the endpoints unreachable.
 pub fn dispute_routes() -> Router<AppState> {
     Router::new()
-        .route("/dispute/notify", post(notify_dispute))
-        .route("/dispute/{game_id}", get(get_dispute_status))
+        .route("/notify", post(notify_dispute))
+        .route("/{game_id}", get(get_dispute_status))
 }
 
 pub fn admin_dispute_routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/dispute/resolve", post(resolve_dispute))
+        .route("/resolve", post(resolve_dispute))
 }
 
 // ── Request / Response types ──────────────────────────────────────────────────
