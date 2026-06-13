@@ -135,9 +135,10 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         }
     }
 
-    // ── SOL prize path (collective wager pool from entry fees) ────────────────
-    // Pays winner's % share of the SOL wager contributions (£2.50 per player).
-    // Runs whether or not there is a USDC pool — both can pay out simultaneously.
+    // ── SOL prize path (operator-funded guaranteed pool) ──────────────────────
+    // Pays winner's % share of the guaranteed SOL prize the operator locked in
+    // escrow before registration opened (fund_sol_prize). Entry fees never enter
+    // this pool. Runs whether or not there is a USDC pool — both can pay out.
     if tournament.prize_pool > 0 {
         let sol_prize = (tournament.prize_pool as u128)
             .checked_mul(prize_share_bps as u128)

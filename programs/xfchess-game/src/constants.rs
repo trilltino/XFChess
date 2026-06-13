@@ -26,9 +26,6 @@ pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation"; // Derives a p
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";       // Derives the TournamentState PDA
 pub const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players"; // Derives the TournamentPlayersShard PDAs (4 shards with 64 players each, seeded with shard_id)
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";  // Derives the prize-pool escrow vault for a tournament
-pub const TOURNAMENT_PRIZE_ESCROW_SEED: &[u8] = b"tournament_prize_escrow";  // Derives the prize escrow vault (85% of fees)
-pub const TOURNAMENT_OPS_ESCROW_SEED: &[u8] = b"t_ops";      // Derives the ops escrow vault (10% of fees)
-pub const TOURNAMENT_OPERATOR_ESCROW_SEED: &[u8] = b"t_operator";  // Derives the operator escrow vault (5% of fees)
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";    // Derives an individual match record within a tournament
 pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";  // Derives the SPL token escrow for USDC prize pool
 
@@ -108,7 +105,6 @@ pub const UNDELEGATE_COST: u64 = 5_000;
 pub const COMMIT_ER_COST: u64 = 5_000; // per ER→L1 commit (0 if MagicBlock sponsors)
 pub const RECORD_RESULT_COST: u64 = 5_000;
 pub const CLAIM_PRIZE_COST: u64 = 5_000;
-pub const MARGIN_BPS: u16 = 25; // 0.25% of wager pool, priority-fee spike insurance
 
 // ---------------------------------------------------------------------------
 // Platform fees

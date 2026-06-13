@@ -114,8 +114,9 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
     // Decrement the player count
     tournament.num_registered_players -= 1;
 
-    // Refund entry fee from the tournament escrow PDA (direct lamport manipulation,
-    // same pattern as the wager escrow in finalize.rs).
+    // Refund the entry-fee deposit from the tournament escrow PDA. The guaranteed
+    // prize (tournament.prize_pool) is untouched — it was operator-funded before
+    // registration and does not change with entry count.
     let refund_amount = tournament.entry_fee;
     if refund_amount > 0 {
         require!(
@@ -124,11 +125,6 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
         );
         **ctx.accounts.escrow_pda.lamports.borrow_mut() -= refund_amount;
         **ctx.accounts.player.lamports.borrow_mut() += refund_amount;
-    }
-
-    // Update prize pool
-    if tournament.prize_pool >= tournament.entry_fee {
-        tournament.prize_pool -= tournament.entry_fee;
     }
 
     Ok(())

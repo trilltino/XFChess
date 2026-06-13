@@ -40,6 +40,20 @@ pub struct StartTournament<'info> {
         bump
     )]
     pub tournament_players_shard_3: Account<'info, TournamentPlayersShard>,
+    /// CHECK: Tournament escrow PDA — entry-fee deposits are swept from here to
+    /// host_treasury once the tournament actually starts.
+    #[account(
+        mut,
+        seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        bump
+    )]
+    pub escrow_pda: UncheckedAccount<'info>,
+    /// CHECK: Operator treasury — receives the swept entry fees (operator revenue).
+    #[account(
+        mut,
+        constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess
+    )]
+    pub host_treasury: UncheckedAccount<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -54,10 +68,23 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
         tournament.status == TournamentStatus::Registration,
         GameErrorCode::TournamentNotInRegistration
     );
-    require!(
-        tournament.num_registered_players == tournament.max_players,
-        GameErrorCode::TournamentFull
-    );
+    // Swiss tournaments may start at min_players (pairing handles any count);
+    // single-elimination needs the full bracket. Below min_players the backend
+    // should call cancel_tournament instead, which refunds every entry fee.
+    match tournament.tournament_type {
+        TournamentType::Swiss { .. } => {
+            require!(
+                tournament.num_registered_players >= tournament.min_players,
+                GameErrorCode::MinPlayersNotReached
+            );
+        }
+        TournamentType::SingleElimination => {
+            require!(
+                tournament.num_registered_players == tournament.max_players,
+                GameErrorCode::TournamentFull
+            );
+        }
+    }
 
     let player_count = tournament.num_registered_players as usize;
 
@@ -133,6 +160,23 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
             }
             _ => return Err(GameErrorCode::TournamentFull.into()),
         }
+    }
+
+    // The tournament is definitely running: sweep the entry-fee deposits from
+    // escrow to the operator treasury. What remains in escrow afterwards is
+    // exactly the guaranteed SOL prize (prize_pool) locked before registration.
+    let fees_collected = tournament
+        .entry_fee
+        .checked_mul(tournament.num_registered_players as u64)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
+    if fees_collected > 0 {
+        require!(
+            ctx.accounts.escrow_pda.lamports() >= fees_collected,
+            GameErrorCode::InsufficientFunds
+        );
+        **ctx.accounts.escrow_pda.lamports.borrow_mut() -= fees_collected;
+        **ctx.accounts.host_treasury.lamports.borrow_mut() += fees_collected;
+        tournament.platform_fee_pool = fees_collected;
     }
 
     tournament.status = TournamentStatus::Active;

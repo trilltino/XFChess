@@ -35,7 +35,7 @@ pub use governance_ix::{ClaimStaleDispute, DisputeGame, ResolveDispute};
 pub use moves_ix::RecordMove;
 pub use tournament_ix::{
     AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
-    CancelTournament, ClaimTournamentPrize, FundUsdcPrize, InitializeMatch, InitializeTournament,
+    CancelTournament, ClaimTournamentPrize, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize, InitializeMatch, InitializeTournament,
     InitializeTournamentEscrow, InitializeTournamentShards, InitializeShardsSmall, InitializeShardsMedium,
     RecordMatchResult, RecordSwissResult, RegisterPlayer, LeaveTournament,
     RevokeTournamentSessionCtx, SessionCreateGame, SessionJoinGame, StartTournament, SwissMatchResult,
@@ -138,11 +138,17 @@ pub mod __client_accounts_initialize_match {
 pub mod __client_accounts_claim_tournament_prize {
     pub use crate::tournament_ix::prizes::claim_prize::__client_accounts_claim_tournament_prize::*;
 }
+pub mod __client_accounts_distribute_tournament_prizes {
+    pub use crate::tournament_ix::prizes::distribute::__client_accounts_distribute_tournament_prizes::*;
+}
 pub mod __client_accounts_cancel_tournament {
     pub use crate::tournament_ix::lifecycle::cancel::__client_accounts_cancel_tournament::*;
 }
 pub mod __client_accounts_fund_usdc_prize {
     pub use crate::tournament_ix::prizes::fund_prize::__client_accounts_fund_usdc_prize::*;
+}
+pub mod __client_accounts_fund_sol_prize {
+    pub use crate::tournament_ix::prizes::fund_sol_prize::__client_accounts_fund_sol_prize::*;
 }
 pub mod __client_accounts_record_swiss_result {
     pub use crate::tournament_ix::matches::record_swiss_result::__client_accounts_record_swiss_result::*;
@@ -495,6 +501,13 @@ pub mod xfchess_game {
         crate::tournament_ix::prizes::claim_prize::handler(ctx, tournament_id)
     }
 
+    pub fn distribute_tournament_prizes<'a, 'b, 'c, 'info>(
+        ctx: Context<'a, 'b, 'c, 'info, DistributeTournamentPrizes<'info>>,
+        tournament_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::prizes::distribute::handler(ctx, tournament_id)
+    }
+
     pub fn cancel_tournament<'a, 'b, 'c, 'info>(
         ctx: Context<'a, 'b, 'c, 'info, CancelTournament<'info>>,
         tournament_id: u64,
@@ -508,6 +521,14 @@ pub mod xfchess_game {
         amount: u64,
     ) -> Result<()> {
         crate::tournament_ix::prizes::fund_prize::handler(ctx, tournament_id, amount)
+    }
+
+    pub fn fund_sol_prize(
+        ctx: Context<FundSolPrize>,
+        tournament_id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::prizes::fund_sol_prize::handler(ctx, tournament_id, amount)
     }
 
     pub fn record_swiss_result(

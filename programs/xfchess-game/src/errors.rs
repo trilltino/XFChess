@@ -155,6 +155,15 @@ pub enum GameErrorCode {
     #[msg("USDC prize pool has not been funded yet.")]
     UsdcPrizeNotFunded,      // register_player called before operator deposited USDC prize
 
+    #[msg("Guaranteed prize pool must be funded before registration opens.")]
+    PrizeNotFunded,          // register_player called before the operator locked the guaranteed prize
+
+    #[msg("Guaranteed prize pool is already funded and cannot be changed.")]
+    PrizeAlreadyFunded,      // fund called twice, or after players registered — guarantee is immutable
+
+    #[msg("Minimum player count not reached.")]
+    MinPlayersNotReached,    // start_tournament called with fewer than min_players registered
+
     #[msg("USDC transfer failed.")]
     UsdcTransferFailed,      // SPL token transfer failed (insufficient balance or approval)
 
@@ -192,7 +201,7 @@ pub enum GameErrorCode {
     // ── Fee rebate system ─────────────────────────────────────────────────────
     #[msg("Wager amount is below the minimum required")]
     StakeTooLow,
-    #[msg("Wager pool is too small to cover fees and margin")]
+    #[msg("Wager pool is too small to cover the advanced fees")]
     PoolTooSmallForFees,
     #[msg("Fee payer does not match the initial payer")]
     FeePayerMismatch,

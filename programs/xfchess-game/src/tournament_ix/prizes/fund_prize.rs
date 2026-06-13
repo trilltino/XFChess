@@ -65,6 +65,13 @@ pub fn handler(ctx: Context<FundUsdcPrize>, tournament_id: u64, amount: u64) -> 
         GameErrorCode::TournamentNotInRegistration
     );
 
+    // The guarantee must be locked before the first player registers so the
+    // prize is provably independent of entry count.
+    require!(
+        tournament.num_registered_players == 0,
+        GameErrorCode::PrizeAlreadyFunded
+    );
+
     // Transfer USDC from operator to escrow
     let transfer_instruction = Transfer {
         from: ctx.accounts.operator_usdc_ata.to_account_info(),

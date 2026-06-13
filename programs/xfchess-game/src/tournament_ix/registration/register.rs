@@ -1,6 +1,11 @@
 //! Instruction allowing players to opt-in and pay their entry fee for the tournament.
-//! Entry fee is transferred directly into the tournament escrow PDA — the operator
-//! cannot access it until match logic executes and distributes funds to winners.
+//!
+//! Guaranteed-prize model: the prize pool is locked by the operator BEFORE any
+//! registration is possible (see fund_sol_prize / fund_usdc_prize) and never
+//! changes with entry count. The entry fee is NOT prize money — it is held in
+//! the escrow PDA as a refundable deposit until the tournament starts, at which
+//! point it is swept to host_treasury as operator revenue (see start.rs). If the
+//! tournament is cancelled or the player leaves, the fee is refunded in full.
 //!
 //! Shards 1-3 are optional — small/medium tournaments only initialize shard 0 or 0-1.
 //! Pass the remaining shards as None / the zero pubkey in those cases.
@@ -26,7 +31,8 @@ pub struct RegisterPlayer<'info> {
     pub player_profile: Account<'info, PlayerProfile>,
     #[account(mut)]
     pub player: Signer<'info>,
-    /// CHECK: Tournament escrow PDA — holds entry fees (prize pool).
+    /// CHECK: Tournament escrow PDA — holds the operator-funded guaranteed prize
+    /// plus entry-fee deposits (refundable custody until the tournament starts).
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
@@ -61,8 +67,9 @@ pub struct RegisterPlayer<'info> {
         bump
     )]
     pub tournament_players_shard_3: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// CHECK: Operator treasury — receives the platform fee cut (£0.50 equivalent per entry).
-    /// Must match tournament.host_treasury set at initialize.
+    /// CHECK: Operator treasury. Kept in the account list for client compatibility;
+    /// entry fees no longer flow here at registration — they are swept from escrow
+    /// at start_tournament instead. Must match tournament.host_treasury.
     #[account(
         mut,
         constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess
@@ -84,6 +91,14 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Re
         tournament.num_registered_players < tournament.max_players,
         GameErrorCode::TournamentFull
     );
+    // Paid tournaments must have a guaranteed prize locked in escrow before any
+    // player can register — SOL (prize_pool) or USDC (usdc_prize_funded).
+    if tournament.entry_fee > 0 {
+        require!(
+            tournament.prize_pool > 0 || tournament.usdc_prize_funded,
+            GameErrorCode::PrizeNotFunded
+        );
+    }
     require!(
         tournament.elo_min <= elo && elo <= tournament.elo_max,
         GameErrorCode::EloOutOfRange
@@ -135,41 +150,20 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Re
 
     tournament.num_registered_players += 1;
 
-    // Split entry fee:
-    //   wager_contribution (entry_fee - platform_fee) → prize escrow (locked until prizes paid)
-    //   platform_fee                                  → host_treasury (operational income)
+    // Entry fee → escrow PDA as a refundable deposit. It never touches the prize
+    // pool (which the operator locked before registration opened) and is only
+    // swept to host_treasury when the tournament actually starts.
     if tournament.entry_fee > 0 {
-        let wager_contribution = tournament.entry_fee
-            .saturating_sub(tournament.platform_fee);
-        let fee_cut = tournament.platform_fee;
-
-        if wager_contribution > 0 {
-            anchor_lang::system_program::transfer(
-                CpiContext::new(
-                    ctx.accounts.system_program.to_account_info(),
-                    anchor_lang::system_program::Transfer {
-                        from: ctx.accounts.player.to_account_info(),
-                        to: ctx.accounts.escrow_pda.to_account_info(),
-                    },
-                ),
-                wager_contribution,
-            )?;
-            tournament.prize_pool += wager_contribution;
-        }
-
-        if fee_cut > 0 {
-            anchor_lang::system_program::transfer(
-                CpiContext::new(
-                    ctx.accounts.system_program.to_account_info(),
-                    anchor_lang::system_program::Transfer {
-                        from: ctx.accounts.player.to_account_info(),
-                        to: ctx.accounts.host_treasury.to_account_info(),
-                    },
-                ),
-                fee_cut,
-            )?;
-            tournament.platform_fee_pool += fee_cut;
-        }
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.player.to_account_info(),
+                    to: ctx.accounts.escrow_pda.to_account_info(),
+                },
+            ),
+            tournament.entry_fee,
+        )?;
     }
 
     msg!("Player {} registered with ELO {} in shard {}", player, elo, shard_id);
