@@ -31,6 +31,15 @@ pub fn client() -> Result<reqwest::blocking::Client, String> {
                 "ngrok-skip-browser-warning",
                 reqwest::header::HeaderValue::from_static("true"),
             );
+            // Application-layer auth for the VPS session-key signing endpoints
+            // (/move/record, /session/*, /game/finalize, …). Must match the
+            // backend's RELAY_SHARED_SECRET; when unset on both sides the backend
+            // falls open and relies on the network firewall.
+            if let Ok(secret) = std::env::var("RELAY_SHARED_SECRET") {
+                if let Ok(value) = reqwest::header::HeaderValue::from_str(&secret) {
+                    h.insert("X-Relay-Secret", value);
+                }
+            }
             h
         })
         .timeout(std::time::Duration::from_secs(120))

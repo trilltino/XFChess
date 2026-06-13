@@ -62,6 +62,50 @@ pub async fn require_api_key(
     Ok(next.run(request).await)
 }
 
+/// Middleware protecting the session-key signing endpoints (`/move/record`,
+/// `/session/*`, `/game/finalize`, …) which the VPS signs on the caller's
+/// behalf. Requires a matching `X-Relay-Secret` header when `RELAY_SHARED_SECRET`
+/// is configured.
+///
+/// When the env var is unset it **fails open** — these endpoints are firewalled
+/// to the game client on the VPS, so an unset secret keeps existing deployments
+/// working while a one-time warning flags that they're relying on the network
+/// boundary alone. Set `RELAY_SHARED_SECRET` (and the matching client value) to
+/// add application-layer auth.
+pub async fn require_relay_secret(
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    use std::sync::Once;
+    static UNSET_WARNING: Once = Once::new();
+
+    let expected_secret = match env::var("RELAY_SHARED_SECRET") {
+        Ok(secret) if !secret.is_empty() => secret,
+        _ => {
+            UNSET_WARNING.call_once(|| {
+                tracing::warn!(
+                    "[auth] RELAY_SHARED_SECRET not set — relay/signing endpoints are \
+                     unauthenticated and rely on the network firewall"
+                );
+            });
+            return Ok(next.run(request).await);
+        }
+    };
+
+    let provided_secret = request
+        .headers()
+        .get("X-Relay-Secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+
+    if !constant_time_eq(provided_secret, &expected_secret) {
+        tracing::debug!("[auth] Invalid or missing X-Relay-Secret on a protected relay endpoint");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(next.run(request).await)
+}
+
 /// Constant-time string comparison to prevent timing attacks.
 fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {

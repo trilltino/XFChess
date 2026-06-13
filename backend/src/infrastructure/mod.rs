@@ -13,7 +13,7 @@ pub mod router;
 pub mod tasks;
 pub mod ngrok;
 
-pub use auth_middleware::require_api_key;
+pub use auth_middleware::{require_api_key, require_relay_secret};
 pub use database::{initialize_pools, run_migrations};
 pub use router::build_app_router;
 pub use tasks::spawn_background_tasks;

@@ -162,7 +162,54 @@ impl SessionStore {
             .await
             .ok();
 
+        // JWT revocation cut-offs (migration 017). A logout records the current
+        // time for a subject; any token issued at or before `valid_after` is then
+        // rejected, giving us a kill switch for the otherwise non-revocable JWTs.
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS jwt_revocations (
+                subject     TEXT    PRIMARY KEY,
+                valid_after INTEGER NOT NULL
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
+    }
+
+    /// Revokes all JWTs for `subject` issued at or before `valid_after` (Unix
+    /// seconds). Used by logout; safe to call repeatedly (last write wins).
+    pub async fn revoke_tokens_before(&self, subject: &str, valid_after: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO jwt_revocations (subject, valid_after) VALUES (?, ?)
+             ON CONFLICT(subject) DO UPDATE SET valid_after = MAX(valid_after, excluded.valid_after)",
+        )
+        .bind(subject)
+        .bind(valid_after)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Returns `true` if a token for `subject` issued at `iat` has been revoked.
+    /// Tokens without an `iat` (legacy, `iat == 0`) are treated as revoked once a
+    /// cut-off exists for the subject, forcing a fresh login.
+    pub async fn token_is_revoked(&self, subject: &str, iat: i64) -> bool {
+        let cutoff: Option<(i64,)> =
+            sqlx::query_as("SELECT valid_after FROM jwt_revocations WHERE subject = ?")
+                .bind(subject)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+        match cutoff {
+            // Strict `<` so a token re-issued in the same second as the logout
+            // (a normal logout-then-login) is not itself revoked.
+            Some((valid_after,)) => iat < valid_after,
+            None => false,
+        }
     }
 
     /// Finds a user by wallet pubkey. Returns (wallet, username, email, kyc_status, password_hash).

@@ -300,6 +300,138 @@ async fn dispute_notify_then_status() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+// ── Auth-chain hardening (this pass) ─────────────────────────────────────────
+
+use solana_sdk::signature::{Keypair, Signer};
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+impl TestApp {
+    /// Send a request with an optional Bearer token and optional JSON body.
+    async fn send_auth(
+        &self,
+        method: &str,
+        uri: &str,
+        bearer: Option<&str>,
+        body: Option<&Value>,
+    ) -> (StatusCode, Value) {
+        let mut b = Request::builder().uri(uri).method(method);
+        if let Some(t) = bearer {
+            b = b.header("authorization", format!("Bearer {t}"));
+        }
+        let req = match body {
+            Some(body) => b
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(body).unwrap()))
+                .unwrap(),
+            None => b.body(Body::empty()).unwrap(),
+        };
+        self.send(req).await
+    }
+}
+
+/// The unconditional token-minting endpoint was removed; the route must be gone.
+#[tokio::test]
+async fn auth_issue_endpoint_is_removed() {
+    let app = spawn_app().await;
+    let (status, _) = app
+        .post_json("/auth/issue", &json!({ "wallet_pubkey": "anything" }))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// Full SIWS login produces a working JWT, and logout revokes it server-side.
+#[tokio::test]
+async fn siws_login_then_logout_revokes_token() {
+    let app = spawn_app().await;
+    let kp = Keypair::new();
+    let wallet = kp.pubkey().to_string();
+
+    let (status, body) = app
+        .post_json("/api/auth/siws-challenge", &json!({ "wallet": wallet }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "challenge: {body}");
+    let nonce = body["nonce"].as_str().expect("nonce").to_string();
+
+    let sig = kp.sign_message(format!("xfchess:siws:{nonce}").as_bytes()).to_string();
+    let (status, body) = app
+        .post_json(
+            "/api/auth/siws-verify",
+            &json!({ "wallet": wallet, "signature": sig, "nonce": nonce }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "verify: {body}");
+    let token = body["token"].as_str().expect("token").to_string();
+
+    // A JWT-protected, chain-free route works with the fresh token.
+    let (status, _) = app
+        .send_auth("PATCH", "/api/auth/username", Some(&token), Some(&json!({ "username": "e2eplayer" })))
+        .await;
+    assert_eq!(status, StatusCode::OK, "authed route should accept fresh token");
+
+    // Cross a one-second boundary so the logout cut-off is strictly after `iat`.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+    let (status, _) = app.send_auth("POST", "/api/auth/logout", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK, "logout should succeed");
+
+    // The same token is now rejected.
+    let (status, _) = app
+        .send_auth("PATCH", "/api/auth/username", Some(&token), Some(&json!({ "username": "e2eplayer2" })))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "revoked token must be rejected");
+}
+
+/// A correctly-signed login with a stale timestamp is rejected (replay window).
+#[tokio::test]
+async fn login_rejects_stale_timestamp() {
+    let app = spawn_app().await;
+    let kp = Keypair::new();
+    let wallet = kp.pubkey().to_string();
+    let ts = now_secs() - 4000; // well outside the 300s freshness window
+    let sig = kp.sign_message(format!("xfchess:login:{ts}").as_bytes()).to_string();
+
+    let (status, body) = app
+        .post_json(
+            "/api/auth/login",
+            &json!({ "wallet": wallet, "signature": sig, "timestamp": ts }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "stale signature must be rejected: {body}");
+}
+
+/// When RELAY_SHARED_SECRET is configured, the signing endpoints require the
+/// matching header; without it they 401 before the handler runs.
+#[tokio::test]
+async fn relay_secret_guards_signing_endpoints() {
+    std::env::set_var("RELAY_SHARED_SECRET", "e2e-relay-secret");
+    let app = spawn_app().await;
+
+    let body = json!({ "game_id": 1, "move_uci": "e2e4", "next_fen": "x", "nonce": 1 });
+
+    // No secret header → rejected by middleware.
+    let (status, _) = app.post_json("/move/record", &body).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "missing relay secret must 401");
+
+    // Correct secret → passes the guard (handler then 404s: no such session).
+    let req = Request::builder()
+        .uri("/move/record")
+        .method("POST")
+        .header("content-type", "application/json")
+        .header("X-Relay-Secret", "e2e-relay-secret")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let (status, _) = app.send(req).await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED, "valid relay secret must pass the guard");
+
+    std::env::remove_var("RELAY_SHARED_SECRET");
+}
+
 #[tokio::test]
 async fn admin_route_requires_api_key() {
     let app = spawn_app().await;

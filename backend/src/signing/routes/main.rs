@@ -132,23 +132,32 @@ pub struct PlayerProfileResp {
 
 
 
-/// Creates the main API routes router.
+/// Public main API routes — reads and player-initiated writes that carry their
+/// own validation. No relay-secret required.
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/session/create", post(create_session))
-        .route("/session/activate", post(activate_session))
         .route("/session/status/{game_id}", get(session_status))
-        .route("/session/sign", post(sign_tx))
-        .route("/session/tee_auth", post(tee_auth))
-        .route("/move/record", post(record_move))
         .route("/telemetry/blur", post(report_blur_telemetry))
-        .route("/game/undelegate", post(undelegate_game))
-        .route("/game/finalize", post(finalize_game))
         .route("/game/{game_id}/nonce", get(get_move_nonce))
         .route("/ratings/update", post(update_free_rated_result))
         .route("/dispute/submit", post(submit_dispute))
         .route("/player/{pubkey}", get(get_player_profile))
         .route("/stats", get(get_stats))
+}
+
+/// Session-key signing endpoints. The VPS holds the session keypair and signs
+/// Solana transactions on the caller's behalf, so these are wrapped with
+/// [`require_relay_secret`](crate::infrastructure::require_relay_secret) by the
+/// caller in `build_router`.
+pub fn protected_routes() -> Router<AppState> {
+    Router::new()
+        .route("/session/create", post(create_session))
+        .route("/session/activate", post(activate_session))
+        .route("/session/sign", post(sign_tx))
+        .route("/session/tee_auth", post(tee_auth))
+        .route("/move/record", post(record_move))
+        .route("/game/undelegate", post(undelegate_game))
+        .route("/game/finalize", post(finalize_game))
 }
 
 

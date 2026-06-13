@@ -67,9 +67,35 @@ fn verify_wallet_sig(
     Ok(pk)
 }
 
+/// Authenticates a Bearer JWT request: verifies the token signature/expiry and
+/// checks it against the per-subject revocation cut-off. Returns the wallet
+/// (the `sub` claim) on success.
+async fn authed_wallet(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<String, (StatusCode, String)> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(crate::signing::auth::extract_bearer)
+        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
+
+    let claims = state
+        .jwt
+        .verify(token)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
+
+    if state.store.token_is_revoked(&claims.sub, claims.iat).await {
+        return Err((StatusCode::UNAUTHORIZED, "Token revoked — please log in again".to_string()));
+    }
+
+    Ok(claims.sub)
+}
+
 /// Creates the authentication router.
 pub fn auth_routes() -> Router<AppState> {
     Router::new()
+        .route("/logout", post(logout))
         .route("/register", post(register))
         .route("/register-email", post(register_email))
         .route("/login", post(login))
@@ -306,16 +332,9 @@ async fn me(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<MeResp>, (StatusCode, String)> {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(crate::signing::auth::extract_bearer)
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
+    let wallet = authed_wallet(&state, &headers).await?;
 
-    let claims = state.jwt.verify(token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
-
-    let user = state.store.find_user_by_wallet(&claims.sub).await
+    let user = state.store.find_user_by_wallet(&wallet).await
         .ok_or((StatusCode::UNAUTHORIZED, "Account not found".to_string()))?;
 
     let wallet_linked = !user.0.is_empty();
@@ -333,7 +352,7 @@ async fn me(
     // Check whether an on-chain PlayerProfile PDA exists for this wallet.
     let has_onchain_profile = if wallet_linked {
         let rpc = std::sync::Arc::clone(&state.solana_rpc);
-        let wallet_pk = claims.sub.clone();
+        let wallet_pk = wallet.clone();
         let program_id = state.program_id;
         tokio::task::spawn_blocking(move || {
             use std::str::FromStr;
@@ -353,7 +372,7 @@ async fn me(
     };
 
     // Pull ELO from on-chain cache (non-fatal if missing or no profile yet).
-    let cached_elo = state.elo_cache.get_elo(&claims.sub).await.ok();
+    let cached_elo = state.elo_cache.get_elo(&wallet).await.ok();
     let elo = cached_elo.as_ref().map(|e| e.elo_rating as u32).unwrap_or(0);
     let country = kyc_country.unwrap_or_default();
 
@@ -384,15 +403,7 @@ async fn add_email(
     headers: axum::http::HeaderMap,
     Json(req): Json<AddEmailReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(crate::signing::auth::extract_bearer)
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
-
-    let claims = state.jwt.verify(token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
-    let wallet = claims.sub;
+    let wallet = authed_wallet(&state, &headers).await?;
 
     state.store.find_user_by_wallet(&wallet).await
         .ok_or((StatusCode::UNAUTHORIZED, "Account not found".to_string()))?;
@@ -449,15 +460,8 @@ async fn sync_profile(
     headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     // 1. Validate JWT → wallet pubkey
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(crate::signing::auth::extract_bearer)
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
-
-    let claims = state.jwt.verify(token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
-    let wallet = &claims.sub;
+    let wallet = authed_wallet(&state, &headers).await?;
+    let wallet = &wallet;
 
     // 2. Derive PlayerProfile PDA  (seeds: ["profile", wallet_bytes])
     let wallet_pk = Pubkey::from_str(wallet)
@@ -530,14 +534,8 @@ async fn init_profile_tx(
     use base64::Engine as _;
 
     // Validate JWT → wallet pubkey
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(crate::signing::auth::extract_bearer)
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
-    let claims = state.jwt.verify(token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
-    let wallet_pk = Pubkey::from_str(&claims.sub)
+    let wallet = authed_wallet(&state, &headers).await?;
+    let wallet_pk = Pubkey::from_str(&wallet)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet in token".to_string()))?;
 
     // Validate inputs
@@ -671,14 +669,7 @@ async fn set_username(
     headers: axum::http::HeaderMap,
     Json(req): Json<SetUsernameReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(crate::signing::auth::extract_bearer)
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
-
-    let claims = state.jwt.verify(token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
+    let wallet = authed_wallet(&state, &headers).await?;
 
     if req.username.len() < 3 || req.username.len() > 20 {
         return Err((StatusCode::BAD_REQUEST, "Username must be 3-20 characters".to_string()));
@@ -688,11 +679,29 @@ async fn set_username(
         return Err((StatusCode::CONFLICT, "Username already taken".to_string()));
     }
 
-    state.store.update_username(&claims.sub, &req.username).await
+    state.store.update_username(&wallet, &req.username).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    info!("[Auth] Username updated to '{}' for {}", req.username, claims.sub);
+    info!("[Auth] Username updated to '{}' for {}", req.username, wallet);
     Ok(Json(serde_json::json!({ "username": req.username })))
+}
+
+// ── POST /auth/logout ──────────────────────────────────────────────────────────
+
+/// POST /auth/logout — revokes every JWT previously issued to the caller.
+/// Requires a valid Bearer JWT. After this, the presented token (and any other
+/// outstanding token for the same wallet) is rejected until the user logs in
+/// again, giving JWTs a server-side kill switch.
+async fn logout(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let wallet = authed_wallet(&state, &headers).await?;
+    let now = chrono::Utc::now().timestamp();
+    state.store.revoke_tokens_before(&wallet, now).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    info!("[Auth] Logout — revoked tokens for {}", wallet);
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // ── Check username ─────────────────────────────────────────────────────────────

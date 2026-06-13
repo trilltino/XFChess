@@ -294,6 +294,12 @@ pub fn build_router(state: AppState) -> Router<AppState> {
         
         // Core game session and move routes (These were missing from build_app_router)
         .merge(crate::signing::routes::main::routes())
+
+        // Session-key signing endpoints — wrapped with the relay-secret guard.
+        .merge(
+            crate::signing::routes::main::protected_routes()
+                .layer(axum::middleware::from_fn(crate::infrastructure::require_relay_secret)),
+        )
         
         // Feature-specific nested routes
         .nest("/api/auth", crate::signing::routes::auth::auth_routes())
