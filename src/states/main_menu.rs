@@ -749,6 +749,11 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
     if !me_resp.status().is_success() {
         return Err(format!("/auth/me HTTP {}", me_resp.status()));
     }
+
+    // /auth/me accepted the JWT — make it the auth token for all subsequent VPS
+    // session/move calls (preferred per-user auth on the signing endpoints).
+    crate::multiplayer::network::vps::set_auth_token(Some(jwt.clone()));
+
     let me: serde_json::Value = me_resp.json()
         .map_err(|e| format!("/auth/me parse: {e}"))?;
 

@@ -33,7 +33,7 @@ pub mod p2p;
 pub mod social;
 
 // Re-exports preserving the flat `crate::multiplayer::network::vps::*` API.
-pub use client::{client, fetch_sol_gbp_rate, vps_base, SolGbpRateResponse};
+pub use client::{client, fetch_sol_gbp_rate, set_auth_token, vps_base, SolGbpRateResponse};
 pub use session::{
     activate_session, create_session, session_status, sign_and_submit, verify_global_session,
     SessionStatus,

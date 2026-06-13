@@ -6,9 +6,23 @@
 //! (compile-time), defaulting to local dev.
 
 use serde::Deserialize;
+use std::sync::RwLock;
 
 const VPS_PROD_URL: &str = "http://178.104.55.19";
 const VPS_LOCAL_URL: &str = "http://127.0.0.1:8090";
+
+/// The current backend JWT, set after wallet login (SIWS/bridge). When present,
+/// it is sent as `Authorization: Bearer …` on every VPS call, which is the
+/// preferred (per-user) auth for the session-key signing endpoints.
+static AUTH_TOKEN: RwLock<Option<String>> = RwLock::new(None);
+
+/// Store (or clear) the backend JWT used for VPS requests. Call with `Some(jwt)`
+/// after login and `None` on logout.
+pub fn set_auth_token(token: Option<String>) {
+    if let Ok(mut guard) = AUTH_TOKEN.write() {
+        *guard = token;
+    }
+}
 
 pub fn vps_base() -> String {
     std::env::var("SIGNING_SERVICE_URL")
@@ -31,10 +45,20 @@ pub fn client() -> Result<reqwest::blocking::Client, String> {
                 "ngrok-skip-browser-warning",
                 reqwest::header::HeaderValue::from_static("true"),
             );
-            // Application-layer auth for the VPS session-key signing endpoints
-            // (/move/record, /session/*, /game/finalize, …). Must match the
-            // backend's RELAY_SHARED_SECRET; when unset on both sides the backend
-            // falls open and relies on the network firewall.
+            // Preferred per-user auth: a backend JWT obtained after wallet login.
+            if let Ok(guard) = AUTH_TOKEN.read() {
+                if let Some(token) = guard.as_ref() {
+                    if let Ok(value) =
+                        reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+                    {
+                        h.insert(reqwest::header::AUTHORIZATION, value);
+                    }
+                }
+            }
+            // Legacy fallback for the VPS session-key signing endpoints
+            // (/move/record, /session/*, /game/finalize, …): a shared relay
+            // secret matching the backend's RELAY_SHARED_SECRET. Sent alongside
+            // the JWT during the dual-accept rollout; harmless once retired.
             if let Ok(secret) = std::env::var("RELAY_SHARED_SECRET") {
                 if let Ok(value) = reqwest::header::HeaderValue::from_str(&secret) {
                     h.insert("X-Relay-Secret", value);

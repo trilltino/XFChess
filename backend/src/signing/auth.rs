@@ -80,6 +80,13 @@ impl JwtIssuer {
     }
 }
 
+/// Request extension inserted by the dual-accept auth middleware when a request
+/// authenticated via a per-user JWT (as opposed to the legacy relay secret).
+/// Handlers can extract `Option<Extension<AuthedWallet>>` to apply per-caller
+/// authorization (e.g. you may only open a session for your own wallet).
+#[derive(Clone, Debug)]
+pub struct AuthedWallet(pub String);
+
 /// Extracts the Bearer token from an Authorization header value.
 ///
 /// # Arguments

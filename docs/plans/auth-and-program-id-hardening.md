@@ -9,6 +9,15 @@ recommended starting point despite "Part B".
 
 ## Part A — Replace the relay shared-secret with per-user JWT auth on the signing endpoints
 
+> **Status (Phase 1 done):** dual-accept implemented — `require_relay_or_jwt` accepts a
+> valid per-user JWT *or* the legacy relay secret (fails open only when neither is
+> configured), stashing the caller wallet as `AuthedWallet`. `create_session` enforces
+> own-wallet-only for JWT callers. Client sends the JWT via `set_auth_token` (wired in
+> `main_menu` after `/auth/me`). Covered by `dual_accept_auth_guards_signing_endpoints`.
+> **Phase 2 remaining:** strict per-game participant authz on the *move/finalize* paths
+> (verify `sub ∈ {white, black}`), which needs the on-chain `Game` read or a session-store
+> that records both players; then retire the relay-secret branch once clients have migrated.
+
 ### Why
 The relay shared-secret (`X-Relay-Secret`, added 2026-06-13) is defense-in-depth, not
 auth:

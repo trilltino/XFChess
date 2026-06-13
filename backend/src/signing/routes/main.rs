@@ -173,8 +173,17 @@ pub fn protected_routes() -> Router<AppState> {
 /// POST /session/create - Creates a new session for a game.
 pub async fn create_session(
     State(state): State<AppState>,
+    authed: Option<axum::Extension<crate::signing::auth::AuthedWallet>>,
     Json(req): Json<CreateSessionReq>,
 ) -> Result<Json<CreateSessionResp>, StatusCode> {
+    // If the caller authenticated with a per-user JWT, they may only open a
+    // session for their own wallet. (Legacy relay-secret callers have no
+    // AuthedWallet and are unaffected during the dual-accept rollout.)
+    if let Some(axum::Extension(crate::signing::auth::AuthedWallet(w))) = &authed {
+        if w != &req.wallet_pubkey {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
     let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
     let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
         error!("[VPS] Failed to create session for game {}: {}", req.game_id, e);

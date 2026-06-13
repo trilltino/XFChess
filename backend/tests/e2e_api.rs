@@ -405,29 +405,54 @@ async fn login_rejects_stale_timestamp() {
     assert_eq!(status, StatusCode::UNAUTHORIZED, "stale signature must be rejected: {body}");
 }
 
-/// When RELAY_SHARED_SECRET is configured, the signing endpoints require the
-/// matching header; without it they 401 before the handler runs.
+/// Dual-accept guard on the signing endpoints: a valid per-user JWT *or* the
+/// legacy relay secret is accepted; neither → 401. JWT callers are also
+/// authorized per-wallet on session creation. All RELAY_SHARED_SECRET handling
+/// is kept in this one test to avoid racing the process-global env var.
 #[tokio::test]
-async fn relay_secret_guards_signing_endpoints() {
+async fn dual_accept_auth_guards_signing_endpoints() {
     std::env::set_var("RELAY_SHARED_SECRET", "e2e-relay-secret");
     let app = spawn_app().await;
 
-    let body = json!({ "game_id": 1, "move_uci": "e2e4", "next_fen": "x", "nonce": 1 });
+    let move_body = json!({ "game_id": 1, "move_uci": "e2e4", "next_fen": "x", "nonce": 1 });
 
-    // No secret header → rejected by middleware.
-    let (status, _) = app.post_json("/move/record", &body).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "missing relay secret must 401");
+    // (a) No auth at all → rejected by the guard.
+    let (status, _) = app.post_json("/move/record", &move_body).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "no auth must 401");
 
-    // Correct secret → passes the guard (handler then 404s: no such session).
+    // (b) Legacy relay secret → accepted (handler then 404s: no such session).
     let req = Request::builder()
         .uri("/move/record")
         .method("POST")
         .header("content-type", "application/json")
         .header("X-Relay-Secret", "e2e-relay-secret")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .body(Body::from(serde_json::to_vec(&move_body).unwrap()))
         .unwrap();
     let (status, _) = app.send(req).await;
-    assert_ne!(status, StatusCode::UNAUTHORIZED, "valid relay secret must pass the guard");
+    assert_ne!(status, StatusCode::UNAUTHORIZED, "valid relay secret must pass");
+
+    // (c) Per-user JWT (no relay header) → accepted.
+    let kp = Keypair::new();
+    let wallet = kp.pubkey().to_string();
+    let token = app.state.jwt.issue(&wallet).expect("issue jwt");
+    let (status, _) = app
+        .send_auth("POST", "/move/record", Some(&token), Some(&move_body))
+        .await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED, "valid JWT must pass the guard");
+
+    // (d) A JWT may only open a session for its own wallet.
+    let other = Keypair::new().pubkey().to_string();
+    let (status, _) = app
+        .send_auth("POST", "/session/create", Some(&token), Some(&json!({ "game_id": 7, "wallet_pubkey": other })))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "JWT creating a session for another wallet must 403");
+
+    // (e) Same JWT, own wallet → passes both authn and authz.
+    let (status, _) = app
+        .send_auth("POST", "/session/create", Some(&token), Some(&json!({ "game_id": 8, "wallet_pubkey": wallet })))
+        .await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED, "own-wallet session must pass authn");
+    assert_ne!(status, StatusCode::FORBIDDEN, "own-wallet session must pass authz");
 
     std::env::remove_var("RELAY_SHARED_SECRET");
 }

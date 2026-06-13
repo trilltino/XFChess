@@ -4,12 +4,15 @@
 //! The expected key is set via the `ADMIN_API_KEY` environment variable.
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::StatusCode,
     middleware::Next,
     response::Response,
 };
 use std::env;
+
+use crate::signing::AppState;
+use crate::signing::auth::AuthedWallet;
 
 /// Middleware function that validates the X-API-Key header.
 ///
@@ -104,6 +107,70 @@ pub async fn require_relay_secret(
     }
 
     Ok(next.run(request).await)
+}
+
+/// Dual-accept guard for the session-key signing endpoints.
+///
+/// A request is allowed if **either**:
+///  1. it carries a valid, non-revoked per-user JWT (`Authorization: Bearer …`) —
+///     the preferred path; the caller's wallet is stashed as [`AuthedWallet`] so
+///     handlers can apply per-caller authorization, **or**
+///  2. it carries the legacy `X-Relay-Secret` matching `RELAY_SHARED_SECRET`.
+///
+/// This is the rollout bridge from the shared secret to per-user auth: old
+/// clients (relay secret) and new clients (JWT) both work, so the secret can be
+/// retired once clients have migrated. When neither `RELAY_SHARED_SECRET` is set
+/// nor a JWT is presented, it fails **open** (relying on the network firewall),
+/// preserving prior behaviour for un-migrated deployments.
+pub async fn require_relay_or_jwt(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    use std::sync::Once;
+    static UNSET_WARNING: Once = Once::new();
+
+    // 1) Preferred: a valid, non-revoked per-user JWT.
+    if let Some(token) = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        if let Ok(claims) = state.jwt.verify(token) {
+            if state.store.token_is_revoked(&claims.sub, claims.iat).await {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            request.extensions_mut().insert(AuthedWallet(claims.sub));
+            return Ok(next.run(request).await);
+        }
+        // Invalid token → fall through to the relay-secret path (dual-accept).
+    }
+
+    // 2) Legacy: the shared relay secret.
+    match env::var("RELAY_SHARED_SECRET") {
+        Ok(secret) if !secret.is_empty() => {
+            let provided = request
+                .headers()
+                .get("X-Relay-Secret")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default();
+            if constant_time_eq(provided, &secret) {
+                Ok(next.run(request).await)
+            } else {
+                Err(StatusCode::UNAUTHORIZED)
+            }
+        }
+        _ => {
+            UNSET_WARNING.call_once(|| {
+                tracing::warn!(
+                    "[auth] No JWT and RELAY_SHARED_SECRET unset — signing endpoints are \
+                     unauthenticated and rely on the network firewall"
+                );
+            });
+            Ok(next.run(request).await)
+        }
+    }
 }
 
 /// Constant-time string comparison to prevent timing attacks.
