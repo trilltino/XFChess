@@ -62,6 +62,14 @@ strip = "debuginfo" # Strip debuginfo from the resulting binary (reduces .exe si
 [profile.dev.package."*"]
 opt-level = 3
 
+# Compile build scripts and proc-macros optimized so they *run* faster during
+# every compile (Bevy / Anchor / serde / sqlx are heavily macro-driven). This
+# speeds up build time and has no effect on the final runtime binary.
+[profile.dev.build-override]
+opt-level = 3
+[profile.release.build-override]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = true
