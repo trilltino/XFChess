@@ -2,15 +2,17 @@
 Description=XFChess Backend API
 After=network.target
 
+# NOTE: Type=simple — the signing-server binary does not implement sd_notify,
+# so Type=notify/WatchdogSec would (correctly) be treated as a failed start and
+# crash-loop the service.
 [Service]
-Type=notify
+Type=simple
 User=xfchess
 WorkingDirectory=/opt/xfchess
 ExecStart=/opt/xfchess/signing-server-http
 EnvironmentFile=/opt/xfchess/.env
 Restart=on-failure
 RestartSec=5
-WatchdogSec=30
 
 # Harden: no privilege escalation, read-only filesystem except data dir
 NoNewPrivileges=true

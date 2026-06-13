@@ -17,6 +17,12 @@ path = "src/main.rs"
 name = "signing-server"
 path = "src/signing_server.rs"
 
+# Deploy/prod alias: the systemd unit, deploy scripts and CI all build/run
+# `signing-server-http`. It is the same maintained server as `signing-server`.
+[[bin]]
+name = "signing-server-http"
+path = "src/signing_server.rs"
+
 [[bin]]
 name = "vps_admin"
 path = "src/bin/vps_admin.rs"

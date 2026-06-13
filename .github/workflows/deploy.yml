@@ -83,4 +83,4 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             chmod +x /opt/xfchess/signing-server-http
-            systemctl restart xfchess
+            systemctl restart xfchess-backend

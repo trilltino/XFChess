@@ -33,7 +33,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     write_pid_file();
 
     // ── Initialize database pools ────────────────────────────────────────
-    let pools = initialize_pools("sqlite://sessions.db?mode=rwc", "sqlite://vault.db?mode=rwc").await?;
+    // Read DB locations from the environment so production can point them at
+    // /opt/xfchess/data (the only writable path under the hardened systemd
+    // unit). Falls back to the local-dev defaults when unset.
+    let session_db = std::env::var("SESSION_DB_URL")
+        .unwrap_or_else(|_| "sqlite://sessions.db?mode=rwc".into());
+    let vault_db = std::env::var("VAULT_DB_URL")
+        .unwrap_or_else(|_| "sqlite://vault.db?mode=rwc".into());
+    let pools = initialize_pools(&session_db, &vault_db).await?;
     info!("[signing-server] Database pools initialized");
 
     // ── Run database migrations ───────────────────────────────────────────
