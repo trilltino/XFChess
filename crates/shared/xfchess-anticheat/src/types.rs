@@ -42,6 +42,27 @@ pub struct MoveRecord {
     pub signed_at_ms: u64,
     /// signed_at_ms - prev signed_at_ms (0 for ply 0).
     pub latency_ms: u32,
+    /// Client-reported: window lost focus since this player's previous move
+    /// (the alt-tab-to-engine signature). False when no telemetry was sent.
+    #[serde(default)]
+    pub blurred: bool,
+    /// Client-reported think time for this move in ms (None = no telemetry).
+    /// A *claim*, not a fact — the backend audits it against server-observed
+    /// budgets before it reaches analysis (see docs/plans/think-time-telemetry.md).
+    #[serde(default)]
+    pub think_ms: Option<u32>,
+}
+
+/// Where a side's per-move timing came from. Server timestamps are
+/// unforgeable but collapse to garbage for batch-submitted games; client
+/// think times are accurate but audited claims. `None` means timing signals
+/// are disabled for that side rather than fed bad numbers.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TimingSource {
+    Client,
+    Server,
+    #[default]
+    None,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,6 +111,14 @@ pub struct SignalValues {
     pub avg_cpl: f64,
     /// Number of Complex positions used in the sample.
     pub complex_ply_count: u32,
+    /// Fraction of this side's moves with client-reported window blur
+    /// (0.0–1.0; 0.0 when no telemetry was received).
+    #[serde(default)]
+    pub blur_rate: f64,
+    /// Provenance of the timing data behind `timing_anomaly` — surfaces in
+    /// reports so reviewers know what they're reading.
+    #[serde(default)]
+    pub timing_source: TimingSource,
 }
 
 // ── Verdict ────────────────────────────────────────────────────────────────────

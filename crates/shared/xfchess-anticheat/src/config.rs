@@ -32,6 +32,10 @@ pub struct AcConfig {
     pub weight_timing: f64,
     pub weight_cpl_vs_elo: f64,
     pub weight_t1_rate: f64,
+    /// Blur escalator weight — applied *on top of* the normalized weights so
+    /// games without client telemetry score exactly as before. Blur alone can
+    /// never reach the flag threshold.
+    pub weight_blur: f64,
 
     // ── Minimum samples ───────────────────────────────────────────────────────
     /// Skip analysis if fewer Complex plies than this.
@@ -66,6 +70,7 @@ impl Default for AcConfig {
             weight_timing: 0.40,
             weight_cpl_vs_elo: 0.35,
             weight_t1_rate: 0.25,
+            weight_blur: 0.15,
 
             min_complex_plies: 5,
 

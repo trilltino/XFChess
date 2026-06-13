@@ -27,6 +27,11 @@ impl AnalysisQueue {
             .map_err(|_| crate::error::AcError::QueueFull)?;
         Ok(job_id)
     }
+
+    /// Jobs currently sitting in the in-memory queue.
+    pub fn depth(&self) -> usize {
+        self.tx.max_capacity() - self.tx.capacity()
+    }
 }
 
 pub fn spawn_workers(cfg: Arc<AcConfig>, pool: sqlx::SqlitePool) -> AnalysisQueue {
@@ -53,7 +58,20 @@ pub fn spawn_workers(cfg: Arc<AcConfig>, pool: sqlx::SqlitePool) -> AnalysisQueu
                     Some(job) => {
                         let game_id = job.game.game_id.clone();
                         info!("[anticheat worker {worker_id}] analysing game {game_id}");
-                        match analyse_game(job.game, &cfg).await {
+                        let started = std::time::Instant::now();
+                        let outcome = analyse_game(job.game, &cfg).await;
+                        {
+                            use std::sync::atomic::Ordering;
+                            crate::metrics::ANALYSIS_MILLIS_LAST
+                                .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+                            match &outcome {
+                                Ok(_) => crate::metrics::ANALYSES_TOTAL.fetch_add(1, Ordering::Relaxed),
+                                Err(_) => {
+                                    crate::metrics::ANALYSIS_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed)
+                                }
+                            };
+                        }
+                        match outcome {
                             Ok(report) => {
                                 if let Err(e) = crate::report::store::save_report(&pool, &report, &cfg).await {
                                     error!("[anticheat worker {worker_id}] save_report failed for {game_id}: {e}");

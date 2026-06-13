@@ -1,4 +1,4 @@
-use crate::types::{AcReport, Complexity, GameContext, GameResult, SideAnalysis};
+use crate::types::{AcReport, Complexity, GameContext, GameResult, SideAnalysis, TimingSource};
 
 pub fn render(report: &AcReport) -> String {
     let mut out = String::new();
@@ -44,8 +44,13 @@ fn render_side(out: &mut String, label: &str, side: &SideAnalysis, thin: &str) {
     ));
     out.push_str(&format!("VERDICT   : {}  (score: {:.2})\n", side.verdict.as_str(), side.weighted_score));
     out.push_str(&format!("{thin}\n"));
+    let timing_src = match side.signals.timing_source {
+        TimingSource::Client => "client think-time",
+        TimingSource::Server => "server timestamps",
+        TimingSource::None => "DISABLED (untrusted/batched)",
+    };
     out.push_str(&format!(
-        "  timing_anomaly : {:.3}  [wt 0.40]\n",
+        "  timing_anomaly : {:.3}  [wt 0.40]  source: {timing_src}\n",
         side.signals.timing_anomaly
     ));
     out.push_str(&format!(
@@ -55,6 +60,10 @@ fn render_side(out: &mut String, label: &str, side: &SideAnalysis, thin: &str) {
     out.push_str(&format!(
         "  t1_rate        : {:.3}  [wt 0.25]  ({} complex plies)\n",
         side.signals.t1_rate, side.signals.complex_ply_count
+    ));
+    out.push_str(&format!(
+        "  blur_rate      : {:.3}  [wt 0.15]\n",
+        side.signals.blur_rate
     ));
     out.push_str(&format!("{thin}\n"));
 

@@ -5,6 +5,7 @@ pub mod engine;
 pub mod error;
 pub mod features;
 pub mod ingest;
+pub mod metrics;
 pub mod report;
 pub mod scoring;
 pub mod types;
@@ -16,7 +17,7 @@ use tracing::debug;
 use config::AcConfig;
 use engine::stockfish::StockfishHandle;
 use error::AcResult;
-use features::{accuracy, complexity, timing};
+use features::{accuracy, blur, complexity, timing};
 use types::{
     AcReport, GameRecord, PlyEval, SideAnalysis, SignalValues,
 };
@@ -47,8 +48,8 @@ pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport
     .map_err(|e| error::AcError::Stockfish(format!("spawn_blocking panicked: {e}")))?
     ?;
 
-    let white = build_side_analysis(&white_ref.pubkey, white_ref.elo, &white_evals, &moves_clone, cfg);
-    let black = build_side_analysis(&black_ref.pubkey, black_ref.elo, &black_evals, &moves_clone, cfg);
+    let white = build_side_analysis(&white_ref.pubkey, white_ref.elo, &white_evals, &moves_clone, 0, cfg);
+    let black = build_side_analysis(&black_ref.pubkey, black_ref.elo, &black_evals, &moves_clone, 1, cfg);
 
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -144,13 +145,16 @@ fn build_side_analysis(
     elo: u32,
     evals: &[PlyEval],
     moves: &[types::MoveRecord],
+    parity: usize,
     cfg: &AcConfig,
 ) -> SideAnalysis {
     let avg_cpl = accuracy::avg_cpl(evals);
     let t1 = accuracy::t1_rate(evals);
     let cpl_signal = accuracy::cpl_signal(elo, evals);
-    let timing = timing::timing_anomaly(evals, moves, cfg);
+    let timing_source = timing::source_for(moves, parity);
+    let timing = timing::timing_anomaly(evals, moves, timing_source, cfg);
     let complex_count = accuracy::complex_ply_count(evals);
+    let blur_rate = blur::blur_rate(moves, parity);
 
     let signals = SignalValues {
         timing_anomaly: timing,
@@ -158,6 +162,8 @@ fn build_side_analysis(
         t1_rate: t1,
         avg_cpl,
         complex_ply_count: complex_count,
+        blur_rate,
+        timing_source,
     };
 
     let (score, verdict) = if complex_count < cfg.min_complex_plies {

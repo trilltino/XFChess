@@ -25,10 +25,12 @@ fn side_json(side: &crate::types::SideAnalysis) -> serde_json::Value {
         "weighted_score": side.weighted_score,
         "signals": {
             "timing_anomaly": side.signals.timing_anomaly,
+            "timing_source": side.signals.timing_source,
             "cpl_vs_elo": side.signals.cpl_vs_elo,
             "t1_rate": side.signals.t1_rate,
             "avg_cpl": side.signals.avg_cpl,
             "complex_ply_count": side.signals.complex_ply_count,
+            "blur_rate": side.signals.blur_rate,
         },
         "ply_evals": side.ply_evals,
     })

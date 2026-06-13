@@ -1,13 +1,18 @@
 use crate::error::{AcError, AcResult};
 use crate::types::{GameContext, GameRecord, GameResult, MoveRecord, PlayerRef, TimeControl};
 
-/// Raw DB row shape — matches the `moves` + `games` tables from migration 006.
+/// Raw DB row shape — matches the `moves` + `games` tables from migration 006,
+/// with `blurred` and `think_ms` joined from `move_telemetry` (migrations
+/// 013/014). `think_ms` is the audited client think time (None when absent or
+/// rejected by the backend's budget checks).
 pub struct MoveRow {
     pub move_number: i64,
     pub move_uci: String,
     pub fen_after: Option<String>,
     pub player: String,
     pub timestamp: i64,
+    pub blurred: bool,
+    pub think_ms: Option<u32>,
 }
 
 pub struct GameMeta {
@@ -57,6 +62,8 @@ pub fn build_game_record(rows: &[MoveRow], meta: &GameMeta) -> AcResult<GameReco
             fen_after: row.fen_after.clone().unwrap_or_default(),
             signed_at_ms: (row.timestamp * 1000) as u64,
             latency_ms,
+            blurred: row.blurred,
+            think_ms: row.think_ms,
         });
     }
 
@@ -94,6 +101,8 @@ mod tests {
                 fen_after: Some("startpos".into()),
                 player: "white".into(),
                 timestamp: 1_700_000_000 + i as i64 * 3,
+                blurred: false,
+                think_ms: None,
             })
             .collect();
         let meta = GameMeta {

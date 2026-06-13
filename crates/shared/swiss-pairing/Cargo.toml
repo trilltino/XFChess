@@ -12,7 +12,7 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 
 # Optional networking integration
-braid-iroh = { path = "../../networking/braid-iroh", optional = true }
+braid-iroh = { path = "../../zarathustra_net/braid-iroh", optional = true }
 tokio = { workspace = true, optional = true }
 axum = { version = "0.8", optional = true }
 
