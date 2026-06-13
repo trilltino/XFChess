@@ -529,7 +529,75 @@ fn render_corner_logos(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         });
 }
 
+/// Welcome card shown on the startup (main) menu, anchored to the far right of
+/// the screen. Dismissable; stays closed for the rest of the session once the
+/// user hits ✕.
+fn render_welcome_panel(ctx: &egui::Context) {
+    let welcome_closed_id = egui::Id::new("startup_welcome_closed");
+    if ctx.data(|d| d.get_temp::<bool>(welcome_closed_id).unwrap_or(false)) {
+        return;
+    }
+
+    let panel_frame = egui::Frame {
+        corner_radius: egui::CornerRadius::same(8),
+        fill: egui::Color32::from_rgba_unmultiplied(8, 8, 12, 240),
+        stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 28)),
+        inner_margin: egui::Margin::symmetric(18, 16),
+        ..egui::Frame::NONE
+    };
+    egui::Window::new("xfchess_welcome_panel")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        // Far right of the screen, vertically centred (20px padding from the edge).
+        .anchor(egui::Align2::RIGHT_CENTER, egui::vec2(-20.0, 0.0))
+        .fixed_size([280.0, 320.0])
+        .frame(panel_frame)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Welcome to XFChess")
+                        .size(17.0)
+                        .color(egui::Color32::from_rgb(100, 200, 255))
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let close = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new("✕").size(13.0).color(egui::Color32::from_rgb(180, 180, 180)),
+                        )
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE),
+                    );
+                    if close.clicked() {
+                        ui.ctx().data_mut(|d| d.insert_temp(welcome_closed_id, true));
+                    }
+                    if close.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                });
+            });
+
+            ui.add_space(3.0);
+            ui.label(
+                egui::RichText::new("King_dev")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(80, 160, 100))
+                    .italics(),
+            );
+
+            ui.add_space(10.0);
+            ui.add(egui::Separator::default().horizontal());
+            ui.add_space(10.0);
+
+            // Space for more text
+        });
+}
+
 fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
+    // Startup welcome card, pinned to the far right of the screen.
+    render_welcome_panel(ui.ctx());
+
     const W: f32 = 280.0;
     const SP: f32 = 6.0;
 

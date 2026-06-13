@@ -2073,65 +2073,7 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
 }
 
 pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
-    let welcome_closed_id = egui::Id::new("host_welcome_closed");
-    let welcome_closed = ui.ctx().data(|d| d.get_temp::<bool>(welcome_closed_id).unwrap_or(false));
-
-    if !welcome_closed {
-        let panel_frame = egui::Frame {
-            corner_radius: egui::CornerRadius::same(8),
-            fill: egui::Color32::from_rgba_unmultiplied(8, 8, 12, 240),
-            stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 28)),
-            inner_margin: egui::Margin::symmetric(18, 16),
-            ..egui::Frame::NONE
-        };
-        egui::Window::new("xfchess_welcome_panel")
-            .title_bar(false)
-            .resizable(false)
-            .collapsible(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(-360.0, 0.0))
-            .fixed_size([280.0, 320.0])
-            .frame(panel_frame)
-            .show(ui.ctx(), |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Welcome to XFChess")
-                            .size(17.0)
-                            .color(egui::Color32::from_rgb(100, 200, 255))
-                            .strong(),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let close = ui.add(
-                            egui::Button::new(
-                                egui::RichText::new("✕").size(13.0).color(egui::Color32::from_rgb(180, 180, 180)),
-                            )
-                            .fill(egui::Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::NONE),
-                        );
-                        if close.clicked() {
-                            ui.ctx().data_mut(|d| d.insert_temp(welcome_closed_id, true));
-                        }
-                        if close.hovered() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                    });
-                });
-
-                ui.add_space(3.0);
-                ui.label(
-                    egui::RichText::new("King_dev")
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(80, 160, 100))
-                        .italics(),
-                );
-
-                ui.add_space(10.0);
-                ui.add(egui::Separator::default().horizontal());
-                ui.add_space(10.0);
-
-                // Space for more text
-            });
-    }
-
+    // (The welcome card moved to the startup main menu — see render_welcome_panel.)
     ui.vertical_centered(|ui| {
         ui.heading(egui::RichText::new("Create Game").size(24.0).color(egui::Color32::from_rgb(100, 200, 255)).strong());
         ui.add_space(16.0);
