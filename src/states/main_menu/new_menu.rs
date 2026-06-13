@@ -327,8 +327,13 @@ pub fn orbit_camera_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut orbit: ResMut<MenuCameraOrbit>,
     cam: Res<crate::PersistentEguiCamera>,
+    cinematic: Res<super::cinematic::MenuCinematic>,
     mut query: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
+    // While a cinematic is running, its camera system owns the Camera3d.
+    if cinematic.active() {
+        return;
+    }
     if keyboard.just_pressed(KeyCode::KeyV) {
         orbit.ortho = !orbit.ortho;
         info!("[MENU] Toggled menu board view to {}", if orbit.ortho { "orthographic" } else { "orbit" });

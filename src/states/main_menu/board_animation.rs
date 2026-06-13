@@ -98,7 +98,7 @@ impl Default for BoardAnimator {
 }
 
 // Sämisch vs Nimzowitsch, Copenhagen 1923 — the Immortal Zugzwang Game.
-const ZUGZWANG_PGN: &str = "
+pub(super) const ZUGZWANG_PGN: &str = "
 1. d4 Nf6 2. c4 e6 3. Nf3 b6 4. g3 Bb7 5. Bg2 Be7
 6. Nc3 O-O 7. O-O d5 8. Ne5 c6
 9. cxd5 cxd5 10. Bf4 a6

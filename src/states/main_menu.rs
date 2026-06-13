@@ -41,6 +41,8 @@ mod modals;
 pub mod new_menu;
 #[path = "main_menu/board_animation.rs"]
 mod board_animation;
+#[path = "main_menu/cinematic.rs"]
+mod cinematic;
 
 use screens::*;
 use modals::{render_ai_setup_modal, render_controls_popup, render_pgn_input_modal};
@@ -69,6 +71,8 @@ impl Plugin for MainMenuPlugin {
             .init_resource::<new_menu::NewMenuPanel>()
             .init_resource::<new_menu::MenuExitConfirm>()
             .init_resource::<board_animation::BoardAnimator>()
+            .init_resource::<cinematic::MenuCinematic>()
+            .init_resource::<cinematic::CinematicBoard>()
             .init_resource::<WalletBridgePoller>()
             .init_resource::<FontsLoaded>()
             .add_systems(
@@ -112,6 +116,7 @@ impl Plugin for MainMenuPlugin {
                     }
                 },
             )
+            .add_systems(OnExit(GameState::MainMenu), cinematic::reset_cinematic_on_exit)
             .init_resource::<BrandLogoState>()
             .init_resource::<SolanaLogoState>()
             .init_resource::<PlayerColorChoice>()
@@ -137,6 +142,9 @@ impl Plugin for MainMenuPlugin {
                     new_menu::menu_click_sound
                         .after(main_menu_ui_wrapper)
                         .run_if(in_state(GameState::MainMenu)),
+                    // Cinematic showcase: black fade overlay drawn over the board.
+                    cinematic::cinematic_fade_overlay
+                        .run_if(in_state(GameState::MainMenu)),
                 ),
             )
             .add_systems(
@@ -154,6 +162,12 @@ impl Plugin for MainMenuPlugin {
                     board_animation::animate_board_system,
                     board_animation::animate_menu_pieces,
                     menu_escape_system,
+                    // Cinematic showcase: advance the timeline, then drive the camera
+                    // (after the orbit system, which yields while a cinematic is active).
+                    cinematic::cinematic_director,
+                    cinematic::cinematic_camera_system
+                        .after(orbit_camera_system)
+                        .after(cinematic::cinematic_director),
                 )
                     .run_if(in_state(GameState::MainMenu)),
             )
