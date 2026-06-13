@@ -41,7 +41,7 @@ path = "src/bin/debugger.rs"
 [workspace]
 resolver = "2"
 members = [
-    "crates/networking/*",
+    "crates/zarathustra_net/*",
     "crates/solana/*",
     "crates/engine/*",
     "crates/shared/*",
@@ -108,11 +108,11 @@ bevy_egui = "=0.39.1"
 
 webbrowser = "=1.0"
 xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
-braid-core = { path = "crates/networking/braid-core" }
-braid-http = { path = "crates/networking/braid-http" }
-braid-iroh = { path = "crates/networking/braid-iroh" }
-braid_uri = { path = "crates/networking/braid_uri" }
-iroh-gossip = { path = "crates/networking/iroh-gossip" }
+braid-core = { path = "crates/zarathustra_net/braid-core" }
+braid-http = { path = "crates/zarathustra_net/braid-http" }
+braid-iroh = { path = "crates/zarathustra_net/braid-iroh" }
+braid_uri = { path = "crates/zarathustra_net/braid_uri" }
+iroh-gossip = { path = "crates/zarathustra_net/iroh-gossip" }
 shared = { path = "crates/shared/shared" }
 solana-chess-client = { path = "crates/solana/solana-chess-client" }
 nimzovich_engine = { path = "crates/engine/nimzovich_engine" }
@@ -162,6 +162,9 @@ profile = ["bevy/trace_tracy"]
 # build rejects unsigned moves so a peer cannot skip authentication by
 # sending plaintext. See docs/plans/causal-authentication.md (Gap A3).
 allow-unsigned-p2p = []
+# TempleOS tribute board theme (orthographic camera, unlit board, Terry Davis
+# quote). DEV ONLY — compiled out of default builds; enables the main-menu entry.
+templeos = []
 solana = [
     "anchor-lang",
     "solana-sdk",
