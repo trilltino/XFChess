@@ -9,23 +9,32 @@
 set windows-shell := ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
 
 # ── Environment ───────────────────────────────────────────────────────────────
+#
+# Secrets are loaded from an untracked `.env` (see `.env.example`). This file is
+# TRACKED — never hardcode private keys or API keys here. The fallbacks below let
+# `just dev` boot without a `.env` (using public RPC + throwaway crypto), but
+# on-chain signing needs real values supplied via `.env`.
+set dotenv-load := true
 
+# Public, non-secret config (safe to keep inline)
 export BACKEND_URL             := "http://127.0.0.1:8090"
 export SIGNING_SERVICE_URL     := "http://127.0.0.1:8090"
-export SOLANA_RPC_URL          := "https://beta.helius-rpc.com/?api-key=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5"
-export HELIUS_API_KEY          := "5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5"
 export ER_RPC_URL              := "https://devnet.magicblock.app"
 export MAGIC_BLOCK_RPC_URL     := "https://devnet.magicblock.app"
 export PROGRAM_ID              := "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
-export JWT_SECRET              := "137a895ebd9506dad79ba1f6c7d1119ad1446f7214710d93a0743f72deb5b5f3"
-export IDENTITY_ENCRYPTION_KEY := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-export IDENTITY_SALT           := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-export FEE_PAYER_KEYS          := "61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi"
-export VPS_AUTHORITY_KEY       := "61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi"
-export KYC_AUTHORITY_KEY       := "61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi"
 export HOST_TREASURY_PUBKEY    := "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"
-export ADMIN_API_KEY           := "dev"
 export RUST_LOG                := "info"
+
+# Secrets (sourced from .env; fallbacks are non-production)
+export SOLANA_RPC_URL          := env_var_or_default("SOLANA_RPC_URL", "https://api.devnet.solana.com")
+export HELIUS_API_KEY          := env_var_or_default("HELIUS_API_KEY", "")
+export JWT_SECRET              := env_var_or_default("JWT_SECRET", "0000000000000000000000000000000000000000000000000000000000000000")
+export IDENTITY_ENCRYPTION_KEY := env_var_or_default("IDENTITY_ENCRYPTION_KEY", "0000000000000000000000000000000000000000000000000000000000000000")
+export IDENTITY_SALT           := env_var_or_default("IDENTITY_SALT", "1111111111111111111111111111111111111111111111111111111111111111")
+export FEE_PAYER_KEYS          := env_var_or_default("FEE_PAYER_KEYS", "")
+export VPS_AUTHORITY_KEY       := env_var_or_default("VPS_AUTHORITY_KEY", "")
+export KYC_AUTHORITY_KEY       := env_var_or_default("KYC_AUTHORITY_KEY", "")
+export ADMIN_API_KEY           := env_var_or_default("ADMIN_API_KEY", "dev")
 
 # Debug build dir (fast local iteration)
 bin := "target/debug"
