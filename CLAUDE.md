@@ -149,9 +149,9 @@ Axum server with four binaries. Key areas:
 - `src/signing/` — Solana transaction building, blinks API, anti-cheat (IP-based), compliance checks (UK/Brazil/Germany/Canada)
 - `src/signing/routes/` — HTTP handlers for matchmaking, ratings, tournaments, PDF mailer
 - `src/db/` — SQLite via SQLx with migrations in `backend/migrations/`
-- `src/tasks/` — background task scheduler (tournament auto-advancement)
+- `src/tasks/` — background tasks (tournament auto-advancement, auto game settlement, auto prize distribution)
 - `src/telemetry/` — Prometheus metrics exposed at `/metrics`
-- `src/tournament_store.rs` — in-memory tournament state (not persisted to DB)
+- `src/signing/storage/tournament.rs` — SQLite-backed tournament store (survives restarts)
 
 The backend holds in-memory P2P relay state via `braid-iroh`. The `signing/` module builds unsigned Solana transactions that the client signs locally — the backend never holds private keys.
 

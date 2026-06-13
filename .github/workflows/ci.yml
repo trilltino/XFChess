@@ -61,14 +61,55 @@ jobs:
         run: cargo test --workspace
 
   test-chess-engine:
-    name: Chess Engine Tests
+    name: Chess Engine Tests (unit + perft)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Test
-        run: cargo test -p chess_engine --all-features
+      - name: Unit tests (includes fast perft suite)
+        run: cargo test -p nimzovich_engine
+      - name: Deep perft (movegen correctness, release)
+        run: cargo test -p nimzovich_engine --release --lib -- --ignored
+      - name: Differential perft vs shakmaty reference
+        run: cargo test -p nimzovich_engine --release --test differential_perft -- --ignored
+
+  # Engine sanity match: 20 fast self-play games via cutechess-cli. Catches the
+  # bug class unit tests cannot: illegal moves, protocol violations, crashes,
+  # clock forfeits. Does NOT measure strength (that stays a local concern via
+  # scripts/engine_match.bat against the Rustic ladder).
+  engine-match-sanity:
+    name: Engine Match Sanity (no forfeits)
+    runs-on: ubuntu-latest
+    needs: test-chess-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build UCI adapter
+        run: cargo build --release -p nimzovich-uci
+      - name: Install cutechess-cli
+        run: |
+          wget -q https://github.com/cutechess/cutechess/releases/download/v1.4.0/cutechess-cli-1.4.0-linux64.tar.gz -O /tmp/cc.tar.gz
+          tar -xzf /tmp/cc.tar.gz -C /tmp
+          echo "CUTECHESS=$(find /tmp -name cutechess-cli -type f | head -1)" >> "$GITHUB_ENV"
+      - name: Self-play 20 games
+        run: |
+          "$CUTECHESS" \
+            -engine name=A cmd=target/release/nimzovich-uci proto=uci \
+            -engine name=B cmd=target/release/nimzovich-uci proto=uci \
+            -each tc=2+0.05 option.Hash=32 timemargin=300 \
+            -rounds 10 -games 2 -repeat -concurrency 2 \
+            -draw movenumber=60 movecount=8 score=10 \
+            -resign movecount=5 score=700 \
+            -pgnout /tmp/sanity.pgn | tee /tmp/match.log
+      - name: Fail on forfeits (illegal moves, disconnects, time losses, stalls)
+        run: |
+          if grep -E "illegal move|disconnects|loses on time|stalls" /tmp/match.log; then
+            echo "::error::Engine forfeited games — see match log above"
+            exit 1
+          fi
+          echo "No forfeits in 20 games."
 
   test-shared:
     name: Shared Protocol Tests
