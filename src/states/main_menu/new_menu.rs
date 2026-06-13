@@ -471,18 +471,66 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         });
 }
 
-/// Title logo pinned to top-center — shown on all panels while the 3D menu is active.
+/// Title logo — pinned top-center by default, draggable, and fades out when
+/// clicked. Shown on all panels while the 3D menu is active.
 fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     super::ensure_brand_logo_texture(ctx, &mut cx.brand_logo);
     let Some(ref handle) = cx.brand_logo.texture else { return };
     let [w, h] = handle.size();
     let display_h = 150.0_f32;
     let display_w = (w as f32 / h as f32) * display_h;
+
+    let pos_id = egui::Id::new("title_logo_pos");
+    let clicked_id = egui::Id::new("title_logo_clicked");
+    let fade_id = egui::Id::new("title_logo_fade");
+
+    // Once clicked, animate opacity 1 → 0 over ~0.6s, then stop drawing.
+    let clicked = ctx.data(|d| d.get_temp::<bool>(clicked_id).unwrap_or(false));
+    let mut alpha = ctx.data(|d| d.get_temp::<f32>(fade_id).unwrap_or(1.0));
+    if clicked && alpha > 0.0 {
+        let dt = ctx.input(|i| i.stable_dt).min(0.1);
+        alpha = (alpha - dt / 0.6).max(0.0);
+        ctx.request_repaint(); // keep animating without further input
+    }
+    ctx.data_mut(|d| d.insert_temp(fade_id, alpha));
+    if alpha <= 0.001 {
+        return;
+    }
+
+    // Default to top-center; after that, wherever the user dragged it.
+    let screen = ctx.screen_rect();
+    let default_pos = egui::pos2(screen.center().x - display_w / 2.0, screen.top() + 20.0);
+    let mut pos = ctx.data(|d| d.get_temp::<egui::Pos2>(pos_id).unwrap_or(default_pos));
+
     egui::Area::new("title_logo".into())
-        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 20.0))
+        .current_pos(pos)
         .show(ctx, |ui| {
-            ui.add(egui::Image::new(egui::load::SizedTexture::new(handle.id(), [display_w, display_h])));
+            ui.set_opacity(alpha);
+            let resp = ui
+                .add(egui::Image::new(egui::load::SizedTexture::new(
+                    handle.id(),
+                    [display_w, display_h],
+                )))
+                .interact(egui::Sense::click_and_drag());
+
+            if resp.dragged() {
+                pos += resp.drag_delta();
+            }
+            // A click (press/release without dragging) starts the fade-out.
+            if resp.clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(clicked_id, true));
+            }
+            if resp.hovered() || resp.dragged() {
+                ui.ctx().set_cursor_icon(if resp.dragged() {
+                    egui::CursorIcon::Grabbing
+                } else {
+                    egui::CursorIcon::Grab
+                });
+            }
         });
+
+    // Persist the (possibly dragged) position for the next frame.
+    ctx.data_mut(|d| d.insert_temp(pos_id, pos));
 }
 
 /// Keyboard hint bar pinned to bottom-right — always shown while the 3D menu is active.
