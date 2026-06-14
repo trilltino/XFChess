@@ -37,6 +37,20 @@ required-features = ["solana"]
 name = "debugger"
 path = "src/bin/debugger.rs"
 
+# Solana-only helper. Declared explicitly so Cargo skips it without the feature;
+# otherwise auto-discovery tries to build it and `cargo test` fails (the file is
+# entirely `#![cfg(feature = "solana")]`, leaving no `main`).
+[[bin]]
+name = "profile_pda"
+path = "src/bin/profile_pda.rs"
+required-features = ["solana"]
+
+# Solana-only RPC benchmark. Gated for the same reason as profile_pda above.
+[[bin]]
+name = "on_chain_benchmark"
+path = "src/bin/on_chain_benchmark.rs"
+required-features = ["solana"]
+
 
 [workspace]
 resolver = "2"

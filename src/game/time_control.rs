@@ -73,6 +73,9 @@ impl TimeControl {
         let inc = self.increment_seconds();
         if base_min > 0 && base_sec == 0 {
             format!("{}+{}", base_min, inc)
+        } else if base_min == 0 && base_sec == 0 {
+            // No base time at all (e.g. Unlimited): render "0+inc", not "0s+0".
+            format!("{}+{}", base_sec, inc)
         } else if base_min == 0 {
             format!("{}s+{}", base_sec, inc)
         } else {

@@ -1,6 +1,17 @@
-//! End-to-end Swiss pairing integration test
+//! End-to-end Swiss pairing integration test.
 //!
-//! Tests the full tournament lifecycle:
+//! PARKED — NOT COMPILED. This file lives in `tests/disabled/` (a non-target
+//! subdirectory) because it is stale against the current backend API and needs a
+//! Phase-3 rewrite (see docs/plans/comprehensive-testing.md). Known drift:
+//!   - `infrastructure::initialize_pools` no longer exists — use the current
+//!     pool setup / `infrastructure::build_app_router`.
+//!   - `AppState::new(..)` signature changed.
+//!   - `signing::swiss::handlers::swiss_routes` split into `swiss_read_routes`
+//!     and `swiss_admin_routes`.
+//! To revive: fix the imports above, move this file up to `backend/tests/`, and
+//! verify it runs against an in-memory SQLite + in-process Axum router.
+//!
+//! Original intent — full tournament lifecycle:
 //! 1. Create Swiss tournament (5 rounds, 8 players)
 //! 2. Join 8 players with varying ELO ratings
 //! 3. Trigger tournament start via scheduler

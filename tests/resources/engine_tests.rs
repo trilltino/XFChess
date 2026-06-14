@@ -32,19 +32,20 @@ fn example_validate_move_helpers() {
 #[test]
 fn example_get_legal_moves_for_square() {
     let mut engine = ChessEngine::default();
+    // The cache is empty until rebuilt; `default()` does not populate it.
+    engine.rebuild_legal_move_cache();
 
-    // White pawn on e2.
-    // Rank 1 (0-indexed), File 4 (0-indexed implies e).
-    // Coords: (1, 4)
-    let legal_moves = engine.get_legal_moves_for_square((1, 4), PieceColor::White);
+    // Coords are (file, rank), 0-indexed — matching the rest of the codebase
+    // (e2 = file 4, rank 1). White pawn on e2:
+    let legal_moves = engine.get_legal_moves_for_square((4, 1), PieceColor::White);
 
-    // Should include e3 (2, 4) and e4 (3, 4)
+    // Should include e3 (4, 2) and e4 (4, 3).
     assert!(
-        legal_moves.contains(&(2, 4)),
-        "Should be able to move to e3"
+        legal_moves.contains(&(4, 2)),
+        "Should be able to move to e3, got {legal_moves:?}"
     );
     assert!(
-        legal_moves.contains(&(3, 4)),
-        "Should be able to move to e4"
+        legal_moves.contains(&(4, 3)),
+        "Should be able to move to e4, got {legal_moves:?}"
     );
 }

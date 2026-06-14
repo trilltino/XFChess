@@ -7,6 +7,7 @@
 use bevy::app::{App, Update};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::{AppExtStates, MinimalPlugins, ResMut, Resource};
+use bevy::state::app::StatesPlugin;
 use bevy::state::{
     condition::in_state,
     state::{NextState, State},
@@ -39,6 +40,7 @@ fn test_initial_state_is_main_menu() {
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
     app.init_state::<GameState>();
 
     // Run one update cycle
@@ -58,6 +60,7 @@ fn test_state_transition_to_multiplayer() {
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
     app.init_state::<GameState>();
 
     // Trigger state transition
@@ -82,6 +85,7 @@ fn test_state_transition_back_to_main_menu() {
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
     app.init_state::<GameState>();
 
     // Start in MainMenu (default)
@@ -115,6 +119,7 @@ fn test_systems_run_conditionally_based_on_state() {
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
     app.init_state::<GameState>();
     app.init_resource::<SystemExecutionTracker>();
 
@@ -166,6 +171,7 @@ fn test_multiple_state_transitions() {
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
     app.init_state::<GameState>();
 
     // Perform multiple transitions
@@ -195,6 +201,7 @@ fn test_debug_current_gamestate_system() {
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
     app.init_state::<GameState>();
     app.add_systems(Update, debug_current_gamestate);
 
@@ -215,6 +222,7 @@ fn test_state_persistence_across_updates() {
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
     app.init_state::<GameState>();
 
     // Set to InGame

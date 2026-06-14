@@ -1,8 +1,9 @@
-//! Networking Tests
+//! Protocol message tests for the `shared` crate.
 //!
-//! Tests for NetworkMoveEvent handling and message serialization.
+//! Construction/variant tests for `GameMessage` and `LobbyMessage`. (Moved here
+//! from the game crate's `tests/`, where it could not compile — these types live
+//! in `shared`, not `xfchess`.)
 
-use bevy::prelude::*;
 use shared::protocol::{GameMessage, LobbyMessage};
 
 /// Test basic message creation

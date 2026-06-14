@@ -47,6 +47,7 @@ fn test_reset_game_resources_system() {
     app.insert_resource(GameOverState::WhiteWon);
     app.insert_resource(TurnStateContext::default());
     app.insert_resource(ChessEngine::default()); // Mock or default engine
+    app.insert_resource(ActiveTimeControl::default()); // reset_game_resources reads this to seed GameTimer
 
     // Register types used in spawn
     app.register_type::<PointLight>();

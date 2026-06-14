@@ -11,7 +11,7 @@
 //! ```
 //!
 //! ## Within the game process:
-//! ```rust
+//! ```rust,ignore
 //! let debugger = TransactionDebugger::new(Some(file), true);
 //! debugger.start_listening(rollup_events);
 //! ```
