@@ -497,8 +497,9 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         });
 }
 
-/// Title logo — pinned top-center by default, draggable, and fades out when
-/// clicked. Shown on all panels while the 3D menu is active.
+/// Title logo — pinned top-center and fades out when clicked. Not draggable
+/// (the welcome card is the draggable element). Shown on all panels while the
+/// 3D menu is active.
 fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     super::ensure_brand_logo_texture(ctx, &mut cx.brand_logo);
     let Some(ref handle) = cx.brand_logo.texture else { return };
@@ -506,7 +507,6 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     let display_h = 150.0_f32;
     let display_w = (w as f32 / h as f32) * display_h;
 
-    let pos_id = egui::Id::new("title_logo_pos");
     let clicked_id = egui::Id::new("title_logo_clicked");
     let fade_id = egui::Id::new("title_logo_fade");
 
@@ -523,13 +523,9 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         return;
     }
 
-    // Default to top-center; after that, wherever the user dragged it.
-    let screen = ctx.screen_rect();
-    let default_pos = egui::pos2(screen.center().x - display_w / 2.0, screen.top() + 20.0);
-    let mut pos = ctx.data(|d| d.get_temp::<egui::Pos2>(pos_id).unwrap_or(default_pos));
-
+    // Pinned top-center; anchoring keeps it centred across window resizes.
     egui::Area::new("title_logo".into())
-        .current_pos(pos)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 20.0))
         .show(ctx, |ui| {
             ui.set_opacity(alpha);
             let resp = ui
@@ -537,26 +533,16 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                     handle.id(),
                     [display_w, display_h],
                 )))
-                .interact(egui::Sense::click_and_drag());
+                .interact(egui::Sense::click());
 
-            if resp.dragged() {
-                pos += resp.drag_delta();
-            }
-            // A click (press/release without dragging) starts the fade-out.
+            // A click starts the fade-out.
             if resp.clicked() {
                 ui.ctx().data_mut(|d| d.insert_temp(clicked_id, true));
             }
-            if resp.hovered() || resp.dragged() {
-                ui.ctx().set_cursor_icon(if resp.dragged() {
-                    egui::CursorIcon::Grabbing
-                } else {
-                    egui::CursorIcon::Grab
-                });
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
         });
-
-    // Persist the (possibly dragged) position for the next frame.
-    ctx.data_mut(|d| d.insert_temp(pos_id, pos));
 }
 
 /// Keyboard hint bar pinned to bottom-right — always shown while the 3D menu is active.
@@ -603,9 +589,9 @@ fn render_corner_logos(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         });
 }
 
-/// Welcome card shown on the startup (main) menu, anchored to the far right of
-/// the screen. Dismissable; stays closed for the rest of the session once the
-/// user hits ✕.
+/// Welcome card shown on the startup (main) menu. Starts docked to the far
+/// right of the screen but is draggable. Dismissable; stays closed for the rest
+/// of the session once the user hits ✕.
 fn render_welcome_panel(ctx: &egui::Context) {
     let welcome_closed_id = egui::Id::new("startup_welcome_closed");
     if ctx.data(|d| d.get_temp::<bool>(welcome_closed_id).unwrap_or(false)) {
@@ -619,12 +605,16 @@ fn render_welcome_panel(ctx: &egui::Context) {
         inner_margin: egui::Margin::symmetric(18, 16),
         ..egui::Frame::NONE
     };
+    // Start docked to the far right (vertically centred). No anchor + movable so
+    // egui lets the user drag it by its body (there is no title-bar drag handle).
+    let screen = ctx.screen_rect();
+    let default_pos = egui::pos2(screen.right() - 280.0 - 20.0, screen.center().y - 160.0);
     egui::Window::new("xfchess_welcome_panel")
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
-        // Far right of the screen, vertically centred (20px padding from the edge).
-        .anchor(egui::Align2::RIGHT_CENTER, egui::vec2(-20.0, 0.0))
+        .movable(true)
+        .default_pos(default_pos)
         .fixed_size([280.0, 320.0])
         .frame(panel_frame)
         .show(ctx, |ui| {

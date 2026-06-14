@@ -158,8 +158,9 @@ impl Plugin for MainMenuPlugin {
                     orbit_camera_system,
                     spawn_menu_bg_pieces,
                     try_setup_fonts,
-                    board_animation::init_board_animator,
-                    board_animation::animate_board_system,
+                    // The ambient Immortal-Zugzwang auto-play is disabled — the menu
+                    // board stays at the static starting position. `animate_menu_pieces`
+                    // stays: the cinematic showcase still uses it to slide its pieces.
                     board_animation::animate_menu_pieces,
                     menu_escape_system,
                     // Cinematic showcase: advance the timeline, then drive the camera

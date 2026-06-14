@@ -1,8 +1,10 @@
 //! Cinematic Chessboard Showcase for the main menu.
 //!
-//! Every ~10–15s the calm orbit fades to black, cuts to a dramatic camera angle,
-//! plays one curated "beautiful moment" (a move from a famous game or a hand-set
-//! position), holds, then fades back to the default orbit. See
+//! After a short initial delay the calm orbit fades to black, cuts to a dramatic
+//! camera angle, plays one curated "beautiful moment" (a move from a famous game
+//! or a hand-set position), holds, then fades straight into the next moment — a
+//! continuous loop that never restores the ambient board. Toggling it off (C)
+//! lets the current shot finish, then fades back to the default orbit. See
 //! `docs/plans/cinematic-menu-showcase.md`.
 //!
 //! Builds on the existing menu scene: it reuses [`MenuBgPieceAnim`] for the slide
@@ -414,8 +416,18 @@ pub fn cinematic_director(
             cine.fade_alpha = 0.0;
             cine.shot_t = (cine.shot_t + dt * 0.05).min(1.0);
             if cine.timer <= 0.0 {
-                cine.phase = CinematicPhase::FadeIn;
-                cine.timer = FADE_IN_SECS;
+                if cine.enabled {
+                    // Continuous loop: advance to the next moment and fade straight
+                    // into it. The ambient board is NOT restored between shots — the
+                    // showcase runs position-to-position until toggled off.
+                    cine.moment_index = cine.moment_index.wrapping_add(1);
+                    cine.phase = CinematicPhase::FadeOut;
+                    cine.timer = FADE_OUT_SECS;
+                } else {
+                    // Disabled (C pressed): fade back to the ambient board / orbit.
+                    cine.phase = CinematicPhase::FadeIn;
+                    cine.timer = FADE_IN_SECS;
+                }
             }
         }
         CinematicPhase::FadeIn => {
