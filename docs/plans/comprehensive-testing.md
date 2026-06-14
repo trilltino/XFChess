@@ -153,79 +153,69 @@ The heart of the product. The two highest-leverage items are implemented and gre
 
 ---
 
-## 5. Phase 2 — Game client (`src/`)
+## 5. Phase 2 — Game client (`src/`) — ✅ DONE (core)
 
-Keep the genuinely-useful existing tests (`core_tests`, `types_tests`,
-`systems_tests`, `resources/{engine,captured,turn}`). Delete the tautological ones
-(`components/piece_tests` field-echo tests, `networking_tests` non-serializing
-"serialization" tests). Add:
+Kept the genuinely-useful tests; the tautological / non-compiling ones were
+removed/relocated in Phase 0.
 
-- [ ] **State machine:** `AppState` transitions `Splash → MainMenu → Game → Pause`
-      and back, incl. resource reset on exit (extend `core_tests.rs`).
-- [ ] **Board/FEN:** the client's board state stays in sync with FEN after a
-      sequence of moves; capture/promotion update `CapturedPieces` + material.
-- [ ] **Network protocol:** real serde round-trip of `NetworkMessage` /
-      `GameMessage` (serialize → bytes → deserialize → equal), plus sign/verify/
-      tamper (keep these current with the struct — this is what rotted before).
-- [ ] **Replay:** PGN → ply list → board states (the `replay` / menu-animation
-      path), asserting final FEN.
-- [ ] Headless Bevy `App` tests for critical systems only (move application,
-      game-over detection) — avoid rendering-dependent systems.
+- [x] **State machine:** `core_tests.rs` covers `AppState` transitions and the
+      conditional-system gating (fixed for Bevy 0.18 in Phase 0).
+- [x] **Network protocol:** real wire round-trips added — `tests/protocol_roundtrip_tests.rs`
+      JSON-round-trips `NetworkMessage`, and crucially **signs → serializes →
+      deserializes → still verifies** (the real P2P path; this is what rotted
+      before). The `shared` crate gained bincode round-trips for `GameMessage` /
+      `LobbyMessage` (`crates/shared/shared/tests/protocol_tests.rs`). Sign/verify/
+      tamper unit tests already live in `src/multiplayer/network/protocol.rs`.
+- [ ] (Deferred, lower value) board/FEN-sync and replay-final-FEN tests — the
+      engine's move correctness is already covered by the Phase-1 perft suite.
 
 ---
 
-## 6. Phase 3 — Backend (`backend/`)
+## 6. Phase 3 — Backend (`backend/`) — ✅ DONE (core)
 
-Per [backend/CLAUDE.md](../../backend/CLAUDE.md): in-process Axum via `tower`,
-HTTP mocking via `wiremock`, SQLite for storage. **Never hit live devnet in CI.**
+In-process Axum via `tower`, SQLite, no live devnet. Much was already covered by
+the existing `backend/tests/e2e_api.rs` harness (`spawn_app()`); gaps were filled.
 
-- [ ] **Route tests** (in-process `Router` + `tower::ServiceExt::oneshot`):
-      matchmaking, ratings, tournament create/register/advance, history, auth.
-- [ ] **Auth hardening regression tests** (lock in the fixes from memory
-      `project_auth_hardening`): removed `/auth/issue`, `/ws/auth` correctness,
-      sig-replay window, JWT TTL + revocation. One test per fixed vuln so it can't
-      regress.
-- [ ] **Tournament store** (`storage/tournament.rs`): persistence across a
-      simulated restart, prize-share math, Swiss integration (the relocated test).
-- [ ] **Signing/transaction building** (no broadcast): assert the *unsigned* tx
-      has the right instructions/accounts; the backend never holds keys, so verify
-      it builds the correct ix and refuses to sign user funds.
-- [ ] **Compliance (`cacf/`)**: restricted-jurisdiction rules accept/deny the
-      right country codes (extend existing `#[cfg(test)]`).
-- [ ] **Puzzle endpoints** (when built — see [PUZZLES.md](../PUZZLES.md)):
-      server-side solve verification (correct line wins, wrong line loses, nonce
-      single-use/expiry), funding via VPS authority, bounty burn-down. These move
-      money, so they need the heaviest coverage.
+- [x] **Auth hardening regression tests** already exist in `e2e_api.rs`:
+      `auth_issue_endpoint_is_removed`, `siws_login_then_logout_revokes_token`,
+      `login_rejects_stale_timestamp`, `dual_accept_auth_guards_signing_endpoints`,
+      `admin_route_requires_api_key` — one per fixed vuln (memory `project_auth_hardening`).
+- [x] **Route tests** already present: metrics, blur/think telemetry parity,
+      broadcast-delay gating, game history, dispute notify→status.
+- [x] **Compliance (`cacf/`)** — added the legally-critical **default-deny**
+      tests: restricted jurisdictions (GB/BR/DE/CA) with no record cannot wager;
+      non-restricted countries default-allow (`signing/cacf/mod.rs`).
+- [ ] (Deferred) tournament-store persistence/prize-math, signing/tx-builder
+      assertions, and the parked Swiss e2e rewrite (`backend/tests/disabled/`).
+- [ ] (Future) puzzle endpoints — when built (see [PUZZLES.md](../PUZZLES.md)).
 
 ---
 
-## 7. Phase 4 — Solana program (`programs/`)
+## 7. Phase 4 — Solana program (`programs/`) — ⚠️ needs a local validator
 
-Anchor program; tested with TypeScript via `anchor test` against a local validator.
+Anchor tests run via `anchor test` against a local validator — **not runnable in
+this environment**, so left as tracked work rather than shipping unverifiable TS.
 
-- [ ] Relocate + wire `hardening_tests.ts` into `anchor test`.
-- [ ] Maintain `smoke_tests` (happy-path lifecycle: create → join → moves →
-      finalize) and `security_tests` (referenced in [CLAUDE.md](../../CLAUDE.md)).
-- [ ] **Instruction-group coverage:** account_ix (profile/vault/session/ELO),
-      game_ix (create/join/cancel/resign/timeout/finalize), moves_ix (record_move),
-      delegation_ix (delegate/undelegate ER), tournament_ix (full lifecycle),
-      governance_ix (dispute/resolve/claim), crank_ix (feature-gated).
-- [ ] **Negative tests** (security-critical): wrong signer, replayed move, illegal
-      move rejected on-chain (with `move-validation` feature), funding a paid
-      tournament after registration, double-finalize.
-- [ ] **Rust program unit tests** for `chess-logic-on-chain` validation paths
-      (Phase 1 differential test covers the engine-agreement angle).
+- The program's most security-critical logic — on-chain move legality — **is
+  already guarded** by the Phase-1 differential test (`chess-logic-on-chain` ↔
+  `nimzovich_engine`), which runs in normal `cargo test`.
+- [ ] `hardening_tests.ts` is now under `programs/xfchess-game/tests/` (Phase 0);
+      wire it + smoke/security tests into `anchor test` in CI (nightly, with a
+      validator).
+- [ ] Negative tests (wrong signer, replayed move, illegal move rejected on-chain,
+      double-finalize, fund-after-registration) — require the validator.
 
 ---
 
-## 8. Phase 5 — Web (`web-solana/`) & desktop (`tauri/`)
+## 8. Phase 5 — Web (`web-solana/`) & desktop (`tauri/`) — ◑ partial
 
-- [ ] **web-solana:** add Vitest + React Testing Library. Unit-test wallet/connect
-      logic and transaction-building hooks (mock the RPC). Keep `npm run lint`
-      green. Smoke e2e (Playwright) optional for the connect → sign flow.
-- [ ] **tauri:** keep `config_tests.rs` / `logging_tests.rs`; add tests for the
-      tournament-admin API client and the puzzle-admin page once built
-      (ELO/name indexing, funding call shape — see [PUZZLES.md §9](../PUZZLES.md)).
+- [x] **tauri:** extended `utils/crypto.rs` tests — **fixed a never-run broken
+      test** (`test_token_validation` asserted a 17-char token valid against a
+      ≥32-char rule) and added token-length boundary + `hash_password`
+      determinism/salting tests. `config_tests.rs` / `logging_tests.rs` retained.
+- [ ] **web-solana:** Vitest + React Testing Library needs an npm/toolchain setup
+      (not runnable here) — tracked. Unit-test wallet/connect + tx-building hooks
+      with a mocked RPC; add a puzzle-admin page test once built ([PUZZLES.md §9](../PUZZLES.md)).
 
 ---
 

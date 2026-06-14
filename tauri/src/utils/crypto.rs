@@ -56,9 +56,27 @@ mod tests {
 
   #[test]
   fn test_token_validation() {
-    assert!(validate_token_format("valid_token_12345"));
+    // A valid token is 32..=1024 chars (the previous example was 17 chars and
+    // could never have passed — this test simply never ran).
+    assert!(validate_token_format(&"a".repeat(40)));
     assert!(!validate_token_format(""));
     assert!(!validate_token_format("short"));
     assert!(!validate_token_format(&"a".repeat(1025)));
+  }
+
+  #[test]
+  fn test_token_validation_boundaries() {
+    assert!(!validate_token_format(&"a".repeat(31)), "31 chars must be rejected");
+    assert!(validate_token_format(&"a".repeat(32)), "32 chars (min) must pass");
+    assert!(validate_token_format(&"a".repeat(1024)), "1024 chars (max) must pass");
+    assert!(!validate_token_format(&"a".repeat(1025)), "1025 chars must be rejected");
+  }
+
+  #[test]
+  fn test_hash_password_is_deterministic_and_salted() {
+    let a = hash_password("hunter2", "salt-a");
+    assert_eq!(a, hash_password("hunter2", "salt-a"), "same input → same hash");
+    assert_ne!(a, hash_password("hunter2", "salt-b"), "different salt → different hash");
+    assert_eq!(a.len(), 64, "sha256 hex digest is 64 chars");
   }
 }

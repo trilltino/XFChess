@@ -103,4 +103,38 @@ mod tests {
 
         assert!(manager.can_participate_in_wagers("wallet1", "GB"));
     }
+
+    /// Restricted jurisdictions must DEFAULT-DENY: a wallet with no compliance
+    /// record on file cannot wager. This is the legally-critical edge — a
+    /// regression flipping the default to allow would let unverified users in
+    /// restricted countries wager.
+    #[test]
+    fn restricted_countries_default_deny_without_record() {
+        let manager = CacfComplianceManager::new();
+        for country in ["GB", "BR", "DE", "CA"] {
+            assert_eq!(
+                manager.get_compliance_status("unknown-wallet", country),
+                CacfComplianceStatus::NotCompliant,
+                "{country}: no record must be NotCompliant"
+            );
+            assert!(
+                !manager.can_participate_in_wagers("unknown-wallet", country),
+                "{country}: a wallet with no record must NOT be able to wager"
+            );
+        }
+    }
+
+    /// Non-restricted jurisdictions default-allow (no CACF regime applies).
+    #[test]
+    fn unrestricted_countries_default_allow() {
+        let manager = CacfComplianceManager::new();
+        for country in ["US", "FR", "JP", "ZZ"] {
+            assert_eq!(
+                manager.get_compliance_status("any-wallet", country),
+                CacfComplianceStatus::FullyCompliant,
+                "{country}: non-restricted country should be FullyCompliant"
+            );
+            assert!(manager.can_participate_in_wagers("any-wallet", country));
+        }
+    }
 }
