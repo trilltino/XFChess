@@ -15,3 +15,7 @@ default = []
 std = ["nimzovich_engine/std"]
 
 [dev-dependencies]
+# Tests run on the host with std; the engine's `std` feature unlocks helpers like
+# `game_from_fen`. This only affects test/bench builds — the Solana program builds
+# chess-logic-on-chain as a normal (no_std) dependency, unaffected by dev-deps.
+nimzovich_engine = { path = "../../engine/nimzovich_engine", features = ["std"] }
