@@ -919,95 +919,6 @@ pub fn identicon_color(name: &str) -> egui::Color32 {
     colors[(hash as usize) % colors.len()]
 }
 
-fn render_player_info(ui: &mut egui::Ui, name: &str, elo: &str, wager: &str, is_white: bool, online: Option<bool>) {
-    let color = if is_white { UiColors::TEXT_PRIMARY } else { UiColors::TEXT_SECONDARY };
-
-    ui.horizontal(|ui| {
-        let badge_color = identicon_color(name);
-        let initial = name.chars().next().unwrap_or('?').to_uppercase().next().unwrap_or('?');
-        let (badge_rect, _) = ui.allocate_exact_size(egui::Vec2::splat(22.0), egui::Sense::hover());
-        ui.painter().circle_filled(badge_rect.center(), 11.0, badge_color);
-        ui.painter().text(
-            badge_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            initial.to_string(),
-            egui::FontId::proportional(12.0),
-            egui::Color32::WHITE,
-        );
-        // Online status ring
-        if let Some(is_online) = online {
-            let ring_col = if is_online {
-                egui::Color32::from_rgb(60, 210, 80)
-            } else {
-                egui::Color32::from_gray(90)
-            };
-            ui.painter().circle_stroke(
-                badge_rect.center(),
-                13.0,
-                egui::Stroke::new(2.5, ring_col),
-            );
-        }
-        ui.colored_label(color, egui::RichText::new(name).size(14.0).strong());
-    });
-
-    if !elo.is_empty() || !wager.is_empty() {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            if !elo.is_empty() {
-                ui.label(
-                    egui::RichText::new(elo)
-                        .size(12.0)
-                        .color(UiColors::TEXT_TERTIARY),
-                );
-            }
-            if !elo.is_empty() && !wager.is_empty() {
-                ui.add_space(8.0);
-            }
-            if !wager.is_empty() {
-                ui.label(
-                    egui::RichText::new(wager)
-                        .size(12.0)
-                        .color(UiColors::ACCENT_GOLD),
-                );
-            }
-        });
-    }
-}
-
-/// Render material score bar showing advantage
-fn render_material_score_bar(ui: &mut egui::Ui, advantage: i32) {
-    ui.label(
-        egui::RichText::new("MATERIAL ADVANTAGE")
-            .size(11.0)
-            .color(UiColors::TEXT_TERTIARY)
-            .strong(),
-    );
-    ui.add_space(6.0);
-    
-    if advantage == 0 {
-        ui.label(
-            egui::RichText::new("Even")
-                .size(13.0)
-                .color(UiColors::TEXT_SECONDARY)
-                .strong(),
-        );
-    } else if advantage > 0 {
-        ui.colored_label(
-            UiColors::TEXT_PRIMARY,
-            egui::RichText::new(format!("White +{}", advantage))
-                .size(13.0)
-                .strong(),
-        );
-    } else {
-        ui.colored_label(
-            UiColors::TEXT_SECONDARY,
-            egui::RichText::new(format!("Black +{}", advantage.abs()))
-                .size(13.0)
-                .strong(),
-        );
-    }
-}
-
 /// Render captured piece symbols as a compact tray row.
 /// `pieces` = pieces captured BY this side (the opponent's piece type).
 /// `is_dark` true = render as dark pieces (captured by white), false = light pieces (captured by black).
@@ -1066,56 +977,6 @@ fn annotate_move(ply_idx: usize, color: PieceColor, scores: &[i16]) -> Option<(&
     let before = if ply_idx > 0 { scores[ply_idx - 1] } else { 0 };
     let gain   = if color == PieceColor::White { after - before } else { before - after };
     MoveQuality::classify(gain).map(|q| (q.symbol(), q.color()))
-}
-
-fn render_move_history(
-    ui: &mut egui::Ui,
-    history: &crate::game::resources::history::MoveHistory,
-    eval_history: &crate::ui::game::game_2d::EvalHistory,
-) {
-    if history.is_empty() {
-        ui.label(
-            egui::RichText::new("No moves yet")
-                .size(12.0)
-                .color(UiColors::TEXT_TERTIARY),
-        );
-        return;
-    }
-
-    let moves = &history.moves;
-    let mut move_number = 1;
-
-    // Display moves in pairs (White then Black)
-    for (i, mv) in moves.iter().enumerate() {
-        let is_white = mv.piece_color == PieceColor::White;
-
-        if is_white {
-            ui.label(
-                egui::RichText::new(format!("{}.", move_number))
-                    .size(12.0)
-                    .color(UiColors::TEXT_TERTIARY)
-                    .strong(),
-            );
-        }
-
-        ui.label(
-            egui::RichText::new(format_move_algebraic(mv))
-                .size(13.0)
-                .color(if is_white { UiColors::TEXT_PRIMARY } else { UiColors::TEXT_SECONDARY })
-                .strong(),
-        );
-
-        if let Some((symbol, color)) = annotate_move(i, mv.piece_color, &eval_history.scores) {
-            ui.label(egui::RichText::new(symbol).size(11.0).color(color).strong());
-        }
-
-        if is_white {
-            ui.add_space(4.0);
-        } else {
-            ui.add_space(8.0);
-            move_number += 1;
-        }
-    }
 }
 
 /// Format a move record as algebraic notation
@@ -1248,21 +1109,6 @@ fn format_time(seconds: f32) -> String {
     let minutes = total_seconds / 60;
     let secs = total_seconds % 60;
     format!("{:02}:{:02}", minutes, secs)
-}
-
-/// Helper to convert ISO country code to emoji flag
-fn country_to_flag(country_code: &str) -> String {
-    if country_code.len() != 2 {
-        return "?".to_string();
-    }
-    let mut flag = String::new();
-    for c in country_code.to_uppercase().chars() {
-        let cp = c as u32 + 127397;
-        if let Some(ch) = std::char::from_u32(cp) {
-            flag.push(ch);
-        }
-    }
-    flag
 }
 
 /// Overlay system: shows an Accept/Decline banner when the opponent has offered a draw.

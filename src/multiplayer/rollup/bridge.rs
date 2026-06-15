@@ -392,7 +392,7 @@ fn handle_network_to_rollup_events(
                 bevy::tasks::IoTaskPool::get()
                     .spawn(async move {
                         use crate::multiplayer::vps_client;
-                        use braid_uri::MovePayload;
+                        use braid_chess::MovePayload;
 
                         // Fetch the move log from the VPS (authoritative archive).
                         // Falls back to an empty list if unavailable.
@@ -404,7 +404,7 @@ fn handle_network_to_rollup_events(
                         let missed: Vec<String> = all_moves
                             .iter()
                             .skip_while(|m| {
-                                braid_uri::version_hash(&m.fen_after, m.move_number) != since_ver
+                                braid_chess::version_hash(&m.fen_after, m.move_number) != since_ver
                             })
                             .skip(1) // skip the matching entry itself
                             .filter_map(|m| serde_json::to_string(m).ok())
@@ -429,7 +429,7 @@ fn handle_network_to_rollup_events(
             // A peer sent us missed moves in response to our BraidResyncRequest.
             // Replay each one through the normal NetworkEvent path.
             NetworkMessage::BraidResyncResponse { game_id, move_payloads } => {
-                use braid_uri::MovePayload;
+                use braid_chess::MovePayload;
                 let gid = *game_id;
                 info!("[RESYNC] Received {} missed moves for game {}", move_payloads.len(), gid);
                 for json in move_payloads {
@@ -448,7 +448,7 @@ fn handle_network_to_rollup_events(
             // current game state.  If we are a spectator or have missed moves,
             // apply the snapshot to catch up.
             NetworkMessage::GameSnapshot { game_id, fen, move_payloads, head_version } => {
-                use braid_uri::MovePayload;
+                use braid_chess::MovePayload;
                 let gid = *game_id;
                 if gid != rollup_manager.game_id {
                     // Not our game — ignore.
@@ -1054,7 +1054,6 @@ fn apply_nonce_resync(mut bridge: ResMut<RollupNetworkBridge>) {
 fn handle_game_end_pgn_export(
     mut game_ended_events: MessageReader<GameEndedEvent>,
     rollup_manager: Res<EphemeralRollupManager>,
-    solana_state: Option<Res<SolanaIntegrationState>>,
     mut bridge: ResMut<RollupNetworkBridge>,
 ) {
     for event in game_ended_events.read() {

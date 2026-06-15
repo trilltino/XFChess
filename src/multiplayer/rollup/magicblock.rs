@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Magic Block Ephemeral Rollups Resolver Integration
 //!
 //! This module provides integration with Magic Block's Ephemeral Rollups (ER) for sub-second

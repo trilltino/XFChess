@@ -1,10 +1,43 @@
-#![allow(dead_code)]
 //! Error handling utilities for state systems
 //!
 //! Provides wrappers and utilities for handling errors gracefully in state systems,
 //! preventing panics from crashing the entire application.
 
+use bevy::ecs::error::{BevyError, ErrorContext, FallbackErrorHandler};
 use bevy::prelude::*;
+
+/// Global fallback error handler for the Bevy world.
+///
+/// As of Bevy 0.19, panics raised inside systems, commands, observers and run
+/// conditions are caught by the executor and routed here instead of unwinding
+/// the whole app. We log the failure (and append a crash-report line so it ends
+/// up alongside [`crate::core::crash`] reports) and then **return**, which tells
+/// Bevy to recover and keep the schedule running.
+///
+/// This matters for XFChess specifically: a hard crash mid-match drops the P2P
+/// session and lets the on-chain game run down to a timeout/forfeit. Logging and
+/// continuing means a buggy rendering/UI system degrades the frame instead of
+/// surrendering the match.
+fn recovering_error_handler(error: BevyError, ctx: ErrorContext) {
+    error!(
+        "[RECOVERED] {} `{}` failed — logged and continuing instead of crashing: {}",
+        ctx.kind(),
+        ctx.name(),
+        error,
+    );
+
+    crate::core::crash::record_recovered_error(&format!("{} `{}`", ctx.kind(), ctx.name()), &error);
+    // Intentionally no panic/re-raise: returning here keeps the app alive.
+}
+
+/// Installs [`recovering_error_handler`] as the world's [`FallbackErrorHandler`].
+///
+/// Call this once while building the [`App`]. Systems that explicitly want to
+/// abort can still do so by returning a `Severity::Panic` error or panicking
+/// from within the handler itself.
+pub fn install_recovering_error_handler(app: &mut App) {
+    app.insert_resource(FallbackErrorHandler(recovering_error_handler));
+}
 
 /// Helper macro to safely unwrap Option with error logging
 #[macro_export]

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Camera control system for RTS-style board observation
 //!
 //! Implements Total War-style camera controls with smooth WASD movement

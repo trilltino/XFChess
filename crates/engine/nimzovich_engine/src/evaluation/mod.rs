@@ -8,13 +8,11 @@
 //!
 //! ## Module Organization
 //!
-//! - `pst` - Piece-square tables for positional evaluation
 //! - `material` - Material balance evaluation
 //! - `position` - Full position evaluation (material + positional + mobility)
 
 mod material;
 mod pesto;
 mod position;
-mod pst;
 
 pub use position::evaluate_position;

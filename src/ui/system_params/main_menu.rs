@@ -62,12 +62,10 @@ pub struct MainMenuUIContext<'w, 's> {
     pub view_mode: ResMut<'w, ViewMode>,
     pub loading_progress: ResMut<'w, LoadingProgress>,
     pub game_assets: ResMut<'w, GameAssets>,
-    #[allow(dead_code)]
     pub previous_state: ResMut<'w, PreviousState>,
 
     pub settings: ResMut<'w, GameSettings>,
     pub core_mode: ResMut<'w, CoreGameMode>,
-    #[allow(dead_code)]
     pub competitive_menu: ResMut<'w, CompetitiveMenuState>,
     pub braid_config: Option<ResMut<'w, BraidP2PConfig>>,
     pub network_state: Option<Res<'w, BraidNetworkState>>,
@@ -91,7 +89,6 @@ pub struct MainMenuUIContext<'w, 's> {
     pub sol_gbp_rate: Option<Res<'w, SolGbpRate>>,
     #[cfg(feature = "solana")]
     pub tournament_client: Option<ResMut<'w, crate::multiplayer::solana::tournament::TournamentClientState>>,
-    #[allow(dead_code)]
     pub tournament_lobby: ResMut<'w, crate::states::tournament_menu::TournamentLobbyState>,
     pub compliance: ResMut<'w, crate::ui::compliance_modal::ComplianceState>,
     pub auth_state: ResMut<'w, AuthState>,
@@ -102,9 +99,11 @@ pub struct MainMenuUIContext<'w, 's> {
     pub friends: ResMut<'w, FriendsState>,
     pub lobby_chat: ResMut<'w, crate::multiplayer::social::LobbyChatSession>,
     pub backend_region: Res<'w, crate::multiplayer::social::BackendRegion>,
+    pub online_players: Res<'w, crate::multiplayer::social::OnlinePlayersState>,
     pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
     pub active_time_control: ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
     pub menu_style: ResMut<'w, crate::states::main_menu::MenuStyle>,
+    pub menu_intro: Res<'w, crate::states::main_menu::MenuIntro>,
     pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
     pub solana_logos: ResMut<'w, crate::states::main_menu::SolanaLogoState>,
     pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,

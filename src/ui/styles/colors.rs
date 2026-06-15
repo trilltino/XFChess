@@ -30,18 +30,15 @@ impl UiColors {
     // === Accent Colors ===
 
     /// Primary accent (gold - for important buttons and highlights)
-    #[allow(dead_code)]
     pub const ACCENT_GOLD: egui::Color32 = egui::Color32::from_rgb(218, 165, 32);
 
     /// Error/danger color (red)
     pub const DANGER: egui::Color32 = egui::Color32::from_rgb(220, 50, 50);
 
     /// Warning color (orange)
-    #[allow(dead_code)]
     pub const WARNING: egui::Color32 = egui::Color32::from_rgb(255, 150, 0);
 
     /// Success color (green)
-    #[allow(dead_code)]
     pub const SUCCESS: egui::Color32 = egui::Color32::from_rgb(40, 180, 40);
 
     // === Text Colors ===

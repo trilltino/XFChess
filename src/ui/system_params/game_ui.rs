@@ -25,15 +25,12 @@ use crate::ui::game::game_ui::InGameHudVisibility;
 pub struct GameUIParams<'w, 's> {
     pub contexts: EguiContexts<'w, 's>,
     pub game_state: GameStateParams<'w>,
-    #[allow(dead_code)]
     pub ai_params: AIParams<'w>,
     pub move_history: Res<'w, MoveHistory>,
-    #[allow(dead_code)]
     pub players: Res<'w, Players>,
     pub exit_confirmation: ResMut<'w, InGameExitConfirmation>,
     pub game_timer: Res<'w, GameTimer>,
     pub next_state: ResMut<'w, NextState<GameState>>,
-    #[allow(dead_code)]
     pub previous_state: ResMut<'w, PreviousState>,
     pub game_mode: Res<'w, CoreGameMode>,
     pub view_preferences: ResMut<'w, PlayerViewPreferences>,

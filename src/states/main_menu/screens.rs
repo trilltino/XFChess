@@ -11,8 +11,9 @@ use super::*;
 use crate::core::GameMode as CoreGameMode;
 #[cfg(feature = "solana")]
 use crate::game::ai::GameMode as AIGameMode;
-use crate::multiplayer::network::p2p::P2PConnectionStatus;
+#[cfg(feature = "solana")]
 use crate::ui::styles::Layout;
+use crate::multiplayer::network::p2p::P2PConnectionStatus;
 use bevy_egui::egui;
 use tracing::{error, info, warn};
 
@@ -491,156 +492,6 @@ pub(super) fn render_loading_screen_website(ctx: &egui::Context, ctx_menu: &mut 
 }
 
 /// Render join lobby popup — kept for legacy callers; no longer wired to a button.
-#[allow(dead_code)]
-fn render_join_lobby_popup(
-    ctx: &egui::Context,
-    ctx_menu: &mut MainMenuUIContext,
-) {
-    egui::Window::new("Join a Lobby")
-        .collapsible(false)
-        .resizable(false)
-        .fixed_size(egui::Vec2::new(500.0, 320.0))
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .title_bar(false)
-        .frame(egui::Frame {
-            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
-            corner_radius: egui::CornerRadius::same(4),
-            stroke: egui::Stroke::new(2.0, BEZEL_GREY),
-            inner_margin: egui::Margin::same(16),
-            ..egui::Frame::NONE
-        })
-        .show(ctx, |ui| {
-            let mut do_close = false;
-            let mut do_refresh = false;
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Join a Lobby")
-                        .size(18.0)
-                        .color(egui::Color32::WHITE)
-                        .strong(),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("X").clicked() { do_close = true; }
-                    if ui.button("⟳").clicked() { do_refresh = true; }
-                });
-            });
-            if do_close { ctx_menu.competitive_menu.show_join_popup = false; }
-            if do_refresh {
-                if let Some(ref mut vps) = ctx_menu.p2p_vps_state {
-                    vps.last_poll = None;
-                }
-            }
-
-            ui.add_space(12.0);
-
-            if let Some(vps_state) = ctx_menu.p2p_vps_state.as_ref() {
-                if !vps_state.cached_games.is_empty() {
-                    for listing in &vps_state.cached_games {
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(&listing.display_name)
-                                        .size(14.0)
-                                        .color(egui::Color32::WHITE)
-                                        .strong(),
-                                );
-                                let prize = if listing.stake_amount > 0.0 {
-                                    format!("{:.3} SOL", listing.stake_amount)
-                                } else {
-                                    "Free".to_string()
-                                };
-                                ui.label(
-                                    egui::RichText::new(prize)
-                                        .size(12.0)
-                                        .color(egui::Color32::from_rgb(150, 200, 150)),
-                                );
-                                let type_label = if listing.stake_amount > 0.0 {
-                                    (" Wagered", egui::Color32::from_rgb(230, 57, 70))
-                                } else {
-                                    (" Free", egui::Color32::from_rgb(100, 200, 100))
-                                };
-                                ui.label(
-                                    egui::RichText::new(type_label.0)
-                                        .size(10.0)
-                                        .color(type_label.1)
-                                        .strong(),
-                                );
-                            });
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui
-                                    .add_sized(
-                                        [80.0, 28.0],
-                                        egui::Button::new(
-                                            egui::RichText::new("Join")
-                                                .size(12.0)
-                                                .color(egui::Color32::WHITE)
-                                                .strong(),
-                                        )
-                                        .fill(egui::Color32::from_rgb(100, 200, 100))
-                                        .corner_radius(4.0)
-                                        .stroke(egui::Stroke::new(
-                                            1.0,
-                                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
-                                        )),
-                                    )
-                                    .clicked()
-                                {
-                                    info!("[MENU] Joining lobby: {}", listing.game_id);
-                                    let game_id = listing.game_id.clone();
-                                    let stake_amount = listing.stake_amount;
-                                    let local_node_id = ctx_menu.network_state.as_ref()
-                                        .and_then(|ns| ns.node_id.as_ref().map(|id| bs58::encode(id.as_bytes()).into_string()))
-                                        .unwrap_or_else(|| "unknown".to_string());
-                                    let joiner_display_name = ctx_menu.player_identity.display_name().to_string();
-                                    let joiner_elo_str = ctx_menu.player_identity.display_elo();
-                                    let response_tx = ctx_menu.p2p_vps_state.as_ref().map(|vps| vps.response_tx.clone());
-
-                                    if let Some(tx) = response_tx {
-                                        bevy::tasks::IoTaskPool::get().spawn(async move {
-                                            match crate::multiplayer::network::vps::p2p_join_game(game_id.clone(), &local_node_id) {
-                                                Ok(Some(host_id)) => {
-                                                    let ack = format!("JOIN_ACK:{}|{}|{}", local_node_id, joiner_display_name, joiner_elo_str);
-                                                    if let Err(e) = crate::multiplayer::vps_client::p2p_send_message(game_id.clone(), &local_node_id, &ack) {
-                                                        warn!("[MENU] JOIN_ACK send failed: {}", e);
-                                                    } else {
-                                                        info!("[MENU] Sent JOIN_ACK for {}", game_id);
-                                                    }
-                                                    let _ = tx.send(crate::multiplayer::network::p2p_vps::VpsResponse::JoinResult {
-                                                        game_id,
-                                                        host_node_id: Some(host_id),
-                                                        stake_amount,
-                                                    });
-                                                }
-                                                Ok(None) => warn!("[MENU] Join rejected by VPS for {}", game_id),
-                                                Err(e) => error!("[MENU] Join error for {}: {}", game_id, e),
-                                            }
-                                        }).detach();
-                                    } else {
-                                        warn!("[MENU] Join requested but VPS relay state is unavailable");
-                                    }
-
-                                    ctx_menu.competitive_menu.show_join_popup = false;
-                                }
-                            });
-                        });
-                        ui.add_space(8.0);
-                    }
-                } else {
-                    ui.label(
-                        egui::RichText::new("No open lobbies available.")
-                            .size(14.0)
-                            .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180)),
-                    );
-                }
-            } else {
-                ui.label(
-                    egui::RichText::new("No lobby data available.")
-                        .size(14.0)
-                        .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180)),
-                );
-            }
-        });
-}
 
 #[cfg(feature = "solana")]
 fn render_create_tab(

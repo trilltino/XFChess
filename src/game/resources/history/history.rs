@@ -128,7 +128,6 @@ impl MoveHistory {
     /// - `None` - Index out of bounds
     ///
     /// For usage examples, see `tests/resources/history_tests.rs`
-    #[allow(dead_code)]
     pub fn get_move(&self, index: usize) -> Option<&MoveRecord> {
         self.moves.get(index)
     }

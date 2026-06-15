@@ -39,5 +39,6 @@ impl Plugin for UiPlugin {
         app.add_plugins(stats::StatsPlugin);
         app.add_plugins(multiplayer_menu::MultiplayerMenuPlugin);
         app.add_plugins(SpectatorModePlugin);
+        app.add_plugins(game::hud::FixedHudPlugin);
     }
 }

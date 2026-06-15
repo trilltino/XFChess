@@ -7,7 +7,6 @@ use bevy::prelude::*;
 
 /// Resource to control debug log timing
 #[derive(Resource, Debug)]
-#[allow(dead_code)]
 pub struct DebugThrottle {
     /// Last time we logged a periodic summary
     pub last_summary_time: f32,

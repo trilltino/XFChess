@@ -255,7 +255,6 @@ impl CinematicSequence {
 #[derive(Resource, Debug, Default)]
 pub struct CinematicFadeOverlay {
     /// Entity ID of the fade UI element
-    #[allow(dead_code)]
     pub entity: Option<Entity>,
 }
 

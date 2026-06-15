@@ -6,12 +6,10 @@ use super::colors::UiColors;
 use bevy_egui::egui;
 
 /// Helper functions for creating styled text
-#[allow(dead_code)]
 pub struct TextStyle;
 
 impl TextStyle {
     /// Create a heading with the XFChess style
-    #[allow(dead_code)]
     pub fn heading(text: impl Into<String>, size: f32) -> egui::RichText {
         egui::RichText::new(text)
             .size(size)
@@ -20,7 +18,6 @@ impl TextStyle {
     }
 
     /// Create body text
-    #[allow(dead_code)]
     pub fn body(text: impl Into<String>) -> egui::RichText {
         egui::RichText::new(text)
             .size(TextSize::BODY)
@@ -28,7 +25,6 @@ impl TextStyle {
     }
 
     /// Create caption text (small, less prominent)
-    #[allow(dead_code)]
     pub fn caption(text: impl Into<String>) -> egui::RichText {
         egui::RichText::new(text)
             .size(TextSize::CAPTION)
@@ -56,7 +52,6 @@ pub struct TextSize;
 
 impl TextSize {
     /// Extra large heading (main menu title)
-    #[allow(dead_code)]
     pub const XL: f32 = 48.0;
 
     /// Large heading (section titles)
@@ -66,7 +61,6 @@ impl TextSize {
     pub const MD: f32 = 24.0;
 
     /// Small heading (card titles)
-    #[allow(dead_code)]
     pub const SM: f32 = 18.0;
 
     /// Body text

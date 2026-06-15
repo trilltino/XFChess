@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Settings persistence system
 //!
 //! Saves and loads [`GameSettings`] to/from a JSON file. Provides automatic

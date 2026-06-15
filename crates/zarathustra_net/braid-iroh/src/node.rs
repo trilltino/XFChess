@@ -63,14 +63,6 @@ impl Default for BraidIrohConfig {
     }
 }
 
-/// Sanitize a resource URL into a safe filesystem path component.
-/// `/xfchess-game/42/clock` → `xfchess-game_42_clock`
-fn url_to_filename(url: &str) -> String {
-    url.trim_start_matches('/')
-        .replace('/', "_")
-        .replace(':', "_")
-}
-
 /// Load the persisted resource map from `data_dir/resources.json`.
 /// Returns an empty map if the file doesn't exist or is corrupt.
 async fn load_resources(data_dir: &Path) -> HashMap<String, Vec<Update>> {

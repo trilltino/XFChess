@@ -10,9 +10,9 @@
 //! The resulting ParsedPgnGame can be inserted as ParsedPgnGameResource and the
 //! existing replay UI plays it back immediately (no PGN text round-trip needed).
 
-use braid_uri::MovePayload;
+use braid_chess::MovePayload;
 use nimzovich_engine::{
-    do_move_with_promo, move_to_san, new_game, parse_uci, ParsedPgnGame, QUEEN_ID,
+    do_move_with_promo, move_to_san, new_game, parse_uci, ParsedPgnGame,
 };
 use std::collections::BTreeMap;
 use tracing::{info, warn};

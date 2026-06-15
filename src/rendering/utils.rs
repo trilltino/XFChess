@@ -7,7 +7,6 @@
 //! - **SquareMaterials**: Resource holding material handles for square colors
 //! - **ReturnMaterials**: Utility for restoring original square colors after hover effects
 //!
-#![allow(dead_code)]
 //! # Chess Board Coloring
 //!
 //! Traditional chess boards alternate between light and dark squares. The `is_white()`
@@ -39,7 +38,7 @@ use bevy::prelude::*;
 /// Uses standard chess coordinates where:
 /// - `x` = file (0-7, corresponds to files a-h)
 /// - `y` = rank (0-7, corresponds to ranks 1-8)
-#[derive(Default, Resource, Component, Debug, Clone, Eq, PartialEq)]
+#[derive(Default, Component, Debug, Clone, Eq, PartialEq)]
 pub struct Square {
     /// File (column) - 0 = a, 7 = h
     pub x: u8,
@@ -62,7 +61,7 @@ impl Square {
     }
 }
 
-#[derive(Resource, Component)]
+#[derive(Resource)]
 pub struct SquareMaterials {
     pub black_color: Handle<StandardMaterial>,
     pub white_color: Handle<StandardMaterial>,

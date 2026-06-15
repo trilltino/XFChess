@@ -11,8 +11,6 @@ pub struct SearchParams {
     pub lmr_depth: i32,
     pub lmr_move_start: i32,
     pub lmr_hd: i32,
-    pub lmr_quiet_mul: f64,
-    pub lmr_quiet_base: f64,
     pub lmp_depth: i32,
     pub lmp_base: i32,
     pub lmp_improving: i32,
@@ -27,9 +25,6 @@ pub struct SearchParams {
     pub nmp_base: i32,
     pub nmp_mul: i32,
     pub nmp_slope: i32,
-    pub see_depth: i32,
-    pub see_quiet_margin: i32,
-    pub see_nonquiet_margin: i32,
 }
 
 impl Default for SearchParams {
@@ -52,8 +47,6 @@ impl SearchParams {
             lmr_depth: 3,
             lmr_move_start: 3,
             lmr_hd: 16760,
-            lmr_quiet_mul: 0.613,
-            lmr_quiet_base: 1.225,
             lmp_depth: 4,
             lmp_base: 8,
             lmp_improving: 1,
@@ -68,9 +61,6 @@ impl SearchParams {
             nmp_base: 11,
             nmp_mul: 626,
             nmp_slope: 320,
-            see_depth: 2,
-            see_quiet_margin: -76,
-            see_nonquiet_margin: -105,
         }
     }
 }

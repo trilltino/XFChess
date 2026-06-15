@@ -225,7 +225,7 @@ pub fn replay_2d_annotation_system(
                 }
 
                 // ── Last-move highlight ──
-                if let Some(ref pgn_res) = pgn {
+                if pgn.is_some() {
                     if replay.current_ply > 0 {
                         // Highlight is shown via the engine state — we just tint lightly
                         // (actual from/to squares would require parsing the last SAN)

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! In-game profile panel — overlay showing username, ELO, W/L/D, recent games, ELO sparkline.
 //!
 //! Toggled open by setting `ProfileViewState.open = true`.

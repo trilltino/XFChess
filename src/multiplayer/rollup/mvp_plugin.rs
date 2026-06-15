@@ -1,5 +1,4 @@
 // Ephemeral MVP Plugin for MagicBlock ER
-#![allow(dead_code)]
 //! MVP Plugin for MagicBlock integration
 //!
 //! Simple plugin to manage MagicBlock state and basic delegation lifecycle.

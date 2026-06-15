@@ -1,9 +1,6 @@
 //! Braid HTTP Protocol Implementation for Rust (Core + Server)
 
 pub mod error;
-pub mod merge;
-#[cfg(feature = "server")]
-pub mod server;
 pub mod traits;
 
 // Re-export from braid-http

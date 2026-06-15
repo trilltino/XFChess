@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Blocking HTTP client for the XFChess signing-server VPS.
 //!
 //! This module is a thin facade that re-exports the feature-grouped
@@ -62,7 +61,7 @@ pub use p2p::{
 };
 pub use social::{
     send_friend_request, get_pending_requests, respond_friend_request,
-    get_contacts, remove_contact, update_presence, push_lobby_invite,
+    get_contacts, remove_contact, update_presence, get_online, push_lobby_invite,
     poll_social, fetch_region,
     Contact as SocialContact, FriendRequest as SocialFriendRequest,
     LobbyInvite, Presence as SocialPresence, SocialPollResponse,

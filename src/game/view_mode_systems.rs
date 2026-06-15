@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Conditional rendering systems based on view mode
 //!
 //! Provides systems that run conditionally based on the current ViewMode.

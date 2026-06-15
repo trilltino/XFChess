@@ -22,18 +22,12 @@ pub const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 pub const GAME_SEED: &[u8] = b"game";
 pub const MOVE_LOG_SEED: &[u8] = b"move_log";
 pub const PROFILE_SEED: &[u8] = b"profile";
-#[allow(dead_code)]
 pub const USERNAME_SEED: &[u8] = b"username";
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
-#[allow(dead_code)]
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
-#[allow(dead_code)]
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";
-#[allow(dead_code)]
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
-#[allow(dead_code)]
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
-#[allow(dead_code)]
 pub const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
@@ -48,7 +42,6 @@ fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
 }
 
 /// Encode a Borsh-style `String` (u32 length prefix + utf-8 bytes).
-#[allow(dead_code)]
 fn borsh_string(s: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(4 + s.len());
     buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
@@ -188,7 +181,6 @@ pub fn join_game_ix(
 ///
 /// `annotation`, `move_time`, and `prev_hash` are client-side metadata used
 /// for local hash-chaining and display; they are **not** sent on-chain.
-#[allow(dead_code)]
 pub fn record_move_ix(
     program_id: Pubkey,
     session_key: Pubkey,
@@ -363,7 +355,6 @@ pub fn authorize_session_key_ix(
 ///   0. player_profile  (init, seeds=["profile", player])
 ///   1. player          (mut, signer)
 ///   2. system_program
-#[allow(dead_code)]
 /// Build an `init_profile` instruction.
 pub fn init_profile_ix(
     program_id: Pubkey,
@@ -410,7 +401,6 @@ pub fn init_profile_ix(
 ///   0. player_profile  (mut, seeds=["profile", player])
 ///   1. admin           (mut, signer)
 ///   2. player          (pubkey only)
-#[allow(dead_code)]
 pub fn verify_profile_ix(program_id: Pubkey, admin: Pubkey, player: Pubkey) -> Result<Instruction> {
     let player_profile_pda = Pubkey::find_program_address(
         &[PROFILE_SEED, player.as_ref()],
@@ -444,7 +434,6 @@ pub fn verify_profile_ix(program_id: Pubkey, admin: Pubkey, player: Pubkey) -> R
 ///   2. player          (mut, signer)
 ///   3. authority       (must match profile.authority)
 ///   4. system_program
-#[allow(dead_code)]
 pub fn set_username_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -479,7 +468,6 @@ pub fn set_username_ix(
 }
 
 /// Build an `initialize_tournament` instruction.
-#[allow(dead_code)]
 pub fn initialize_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -546,7 +534,6 @@ pub fn initialize_tournament_ix(
 }
 
 /// Build a `register_player` instruction.
-#[allow(dead_code)]
 pub fn register_player_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -610,7 +597,6 @@ pub fn register_player_ix(
 }
 
 /// Build a `start_tournament` instruction.
-#[allow(dead_code)]
 pub fn start_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -662,7 +648,6 @@ pub fn start_tournament_ix(
 }
 
 /// Build a `record_match_result` instruction.
-#[allow(dead_code)]
 pub fn record_match_result_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -694,7 +679,6 @@ pub fn record_match_result_ix(
 }
 
 /// Build a `record_swiss_result` instruction.
-#[allow(dead_code)]
 pub fn record_swiss_result_ix(
     program_id: Pubkey,
     tournament_id: u64,
@@ -749,7 +733,6 @@ pub fn record_swiss_result_ix(
 }
 
 /// Build an `advance_final` instruction.
-#[allow(dead_code)]
 pub fn advance_final_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -776,7 +759,6 @@ pub fn advance_final_ix(
 }
 
 /// Build a `leave_tournament` instruction.
-#[allow(dead_code)]
 pub fn leave_tournament_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -830,7 +812,6 @@ pub fn leave_tournament_ix(
 }
 
 /// Re-export program ID for convenience.
-#[allow(dead_code)]
 pub fn get_program_id() -> Result<Pubkey> {
     PROGRAM_ID
         .parse()

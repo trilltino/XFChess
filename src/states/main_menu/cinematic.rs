@@ -20,7 +20,7 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::core::GameState;
 use crate::rendering::pieces::{PieceColor, PieceMeshes, PieceType};
-use super::board_animation::{BoardAnimator, MenuBgPieceAnim, MenuBgPieceHome, MenuBgPiecePos};
+use super::board_animation::{BoardAnimator, MenuBgPieceAnim, MenuBgPieceHome};
 use super::new_menu::{MenuCameraOrbit, MenuBg, BOARD_CENTER};
 
 // ── Tunables ────────────────────────────────────────────────────────────────
@@ -98,9 +98,6 @@ pub struct CinematicPiece;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CameraAngle {
     KingsideLow,
-    QueensideLow,
-    WhitePlayerView,
-    BlackPlayerView,
     TopDownTilted,
     CornerCloseup,
     HeroShot,
@@ -112,9 +109,6 @@ impl CameraAngle {
     fn offset(self) -> (Vec3, bool) {
         match self {
             CameraAngle::KingsideLow => (Vec3::new(-6.0, 2.5, -6.0), false),
-            CameraAngle::QueensideLow => (Vec3::new(6.0, 2.5, -6.0), false),
-            CameraAngle::WhitePlayerView => (Vec3::new(0.0, 7.0, -9.0), false),
-            CameraAngle::BlackPlayerView => (Vec3::new(0.0, 7.0, 9.0), false),
             CameraAngle::TopDownTilted => (Vec3::new(2.0, 14.0, -4.0), true),
             CameraAngle::CornerCloseup => (Vec3::new(5.0, 3.5, -5.0), false),
             CameraAngle::HeroShot => (Vec3::new(2.5, 1.5, -3.5), false),
@@ -132,8 +126,6 @@ enum MomentSource {
 }
 
 struct CinematicMoment {
-    #[allow(dead_code)]
-    name: &'static str,
     angle: CameraAngle,
     source: MomentSource,
     move_secs: f32,
@@ -152,26 +144,26 @@ fn moments() -> &'static [CinematicMoment] {
     use CameraAngle::*;
     &[
         // ── Immortal Game (PGN replay — guaranteed legal positions) ──
-        CinematicMoment { name: "Immortal Game — Bxg1 (queen sac line)",
+        CinematicMoment {
             angle: TopDownTilted, source: MomentSource::Pgn { pgn: IMMORTAL_GAME_PGN, ply: 35 },
             move_secs: 3.0, hold_secs: 1.5 },
-        CinematicMoment { name: "Immortal Game — Be7# (the finish)",
+        CinematicMoment {
             angle: HeroShot, source: MomentSource::Pgn { pgn: IMMORTAL_GAME_PGN, ply: 44 },
             move_secs: 2.5, hold_secs: 3.0 },
         // ── The Immortal Zugzwang Game — the same game the ambient board plays ──
-        CinematicMoment { name: "Immortal Zugzwang — 25…h6",
+        CinematicMoment {
             angle: CornerCloseup, source: MomentSource::Pgn { pgn: super::board_animation::ZUGZWANG_PGN, ply: 49 },
             move_secs: 2.5, hold_secs: 2.5 },
         // ── Hand-set positions (FEN) ──
-        CinematicMoment { name: "Knight leaps in (Ng5)",
+        CinematicMoment {
             angle: HeroShot,
             source: MomentSource::Fen { fen: "r1bqk2r/ppp2ppp/2n5/3np3/2B5/5N2/PPPP1PPP/RNBQ1RK1 w kq - 0 1", mv: "f3g5" },
             move_secs: 2.5, hold_secs: 1.5 },
-        CinematicMoment { name: "Castles kingside (O-O)",
+        CinematicMoment {
             angle: KingsideLow,
             source: MomentSource::Fen { fen: "rnbqk2r/pppp1ppp/5n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1", mv: "e1g1" },
             move_secs: 2.0, hold_secs: 1.5 },
-        CinematicMoment { name: "Pawn promotes (e8=Q)",
+        CinematicMoment {
             angle: HeroShot,
             source: MomentSource::Fen { fen: "4k3/4P3/8/8/8/8/8/4K3 w - - 0 1", mv: "e7e8q" },
             move_secs: 2.5, hold_secs: 2.0 },
@@ -302,7 +294,6 @@ fn spawn_piece(
             MenuBg,
             DespawnOnExit(GameState::MainMenu),
             CinematicPiece,
-            MenuBgPiecePos { file: file as u8, rank: rank as u8 },
         ))
         .id();
     Some(e)

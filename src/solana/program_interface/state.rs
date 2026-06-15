@@ -2,7 +2,6 @@
 //!
 //! Private Borsh-compatible mirrors of `xfchess_game` enums used by the
 //! legacy `solana::multiplayer` ECS code. Not re-exported publicly.
-#![allow(dead_code)]
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_sdk::pubkey::Pubkey;

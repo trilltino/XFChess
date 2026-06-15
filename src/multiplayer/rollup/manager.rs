@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Ephemeral Rollup Manager
 //!
 //! Manages the state of an ephemeral rollup for fast move execution
@@ -217,7 +216,7 @@ pub enum RollupEvent {
     SnapshotReceived {
         game_id: u64,
         fen: String,
-        move_payloads: Vec<braid_uri::MovePayload>,
+        move_payloads: Vec<braid_chess::MovePayload>,
         head_version: String,
     },
 }

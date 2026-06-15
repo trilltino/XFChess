@@ -7,7 +7,6 @@
 //!   Host: announces → waits → polls relay for JOIN_ACK → starts game
 //!   Joiner: sees listing → clicks join → sends JOIN_ACK → starts game immediately
 
-#![allow(dead_code)]
 
 use bevy::prelude::*;
 use std::collections::VecDeque;

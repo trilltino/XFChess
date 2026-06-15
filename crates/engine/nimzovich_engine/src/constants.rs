@@ -227,10 +227,6 @@ pub const KING_VALUE: i16 = 18000;
 pub const KING_VALUE_DIV_2: i16 = KING_VALUE / 2;
 pub const SURE_CHECKMATE: i16 = KING_VALUE / 2;
 
-// Tapered eval phase constants
-pub const MAX_PHASE: i16 = 24;
-pub const PHASE_VALUES: [i16; 7] = [0, 0, 1, 1, 2, 4, 0]; // [empty, pawn, knight, bishop, rook, queen, king]
-
 pub const FIGURE_VALUE: [i16; KING_ID as usize + 1] = [
     VOID_VALUE,
     PAWN_VALUE,
@@ -333,22 +329,6 @@ pub const TTE_SIZE: usize = 16; // 16 entries (~17 KB) — correctness tests don
 pub const TTE_SIZE: usize = 1024 * 1024 * 2; // 2M entries for native
 
 pub const TT_TRY: usize = 5;
-
-pub const CORE_BIT_BUFFER_SIZE: usize = 24;
-#[allow(dead_code)] // Part of engine's public API - used with salewskiChessDebug feature
-pub const HASH_BIT_BUFFER_SIZE: usize = 32;
-pub const BIT_BUFFER_SIZE: usize = bit_buffer_size();
-
-pub const fn bit_buffer_size() -> usize {
-    #[cfg(feature = "salewskiChessDebug")]
-    {
-        HASH_BIT_BUFFER_SIZE
-    }
-    #[cfg(not(feature = "salewskiChessDebug"))]
-    {
-        CORE_BIT_BUFFER_SIZE
-    }
-}
 
 #[allow(dead_code)] // Part of engine's public API - search extension configuration
 pub const V_RATIO: i64 = 8;

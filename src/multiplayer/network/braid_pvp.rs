@@ -14,10 +14,9 @@
 //!   into Bevy events for UI consumers
 //! - Sends `GameSnapshot` when a new peer joins mid-game
 
-#![allow(dead_code)]
 
 use bevy::prelude::*;
-use braid_uri::MovePayload;
+use braid_chess::MovePayload;
 use tracing::{info, warn};
 
 use crate::multiplayer::network::protocol::NetworkMessage;
@@ -163,7 +162,7 @@ fn publish_local_move(
 
         // Causal chain fields.
         let parent_version = session.last_version.clone();
-        let new_version = braid_uri::version_hash(&event.next_fen, move_number);
+        let new_version = braid_chess::version_hash(&event.next_fen, move_number);
         session.last_version = new_version;
 
         // agent_id = iroh node's public key bytes (stable identity).
@@ -451,7 +450,7 @@ fn broadcast_snapshot_to_new_peer(
 /// gossip (called by the game's `handle_publish_move` equivalent in systems.rs).
 /// This keeps the catch-up snapshot's `head_version` accurate.
 pub fn advance_session_version(session: &mut BraidPvpSession, fen_after: &str) {
-    let version = braid_uri::version_hash(fen_after, session.next_move_number.saturating_sub(1));
+    let version = braid_chess::version_hash(fen_after, session.next_move_number.saturating_sub(1));
     session.last_version = version;
 }
 

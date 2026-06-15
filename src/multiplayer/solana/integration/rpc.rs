@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{

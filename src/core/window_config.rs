@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Window configuration resource
 //!
 //! Centralizes window settings for the application, allowing easy configuration

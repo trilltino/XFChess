@@ -661,23 +661,20 @@ pub fn parse_pgn_annotated(text: &str) -> Result<ParsedPgnGame, PgnParseError> {
         San(String),
         Comment(String),
         Nag(u8),
-        Result(String),
+        Result,
     }
 
     let mut raw: Vec<RawToken> = Vec::new();
     let mut chars = text.chars().peekable();
-    let mut in_tag = false;
     let mut var_depth: i32 = 0;
 
     while let Some(&ch) = chars.peek() {
         match ch {
-            '[' if !in_tag && var_depth == 0 => {
-                in_tag = true;
+            '[' if var_depth == 0 => {
                 chars.next();
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == ']' { break; }
                 }
-                in_tag = false;
             }
             '{' if var_depth == 0 => {
                 chars.next();
@@ -714,7 +711,7 @@ pub fn parse_pgn_annotated(text: &str) -> Result<ParsedPgnGame, PgnParseError> {
                 if word.ends_with('.') || word.ends_with("...") { continue; }
                 if matches!(word.as_str(), "1-0" | "0-1" | "1/2-1/2" | "*") {
                     game.result = word.clone();
-                    raw.push(RawToken::Result(word));
+                    raw.push(RawToken::Result);
                     continue;
                 }
                 if word.len() >= 2 {

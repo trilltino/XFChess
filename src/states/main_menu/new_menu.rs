@@ -199,7 +199,6 @@ pub fn spawn_menu_bg_pieces(
             Visibility::Visible,
             MenuBg,
             DespawnOnExit(GameState::MainMenu),
-            super::board_animation::MenuBgPiecePos { file, rank: 0 },
             super::board_animation::MenuBgPieceHome { file, rank: 0 },
         )).id();
         anim.board[0][f] = Some(ew);
@@ -212,7 +211,6 @@ pub fn spawn_menu_bg_pieces(
             Visibility::Visible,
             MenuBg,
             DespawnOnExit(GameState::MainMenu),
-            super::board_animation::MenuBgPiecePos { file, rank: 7 },
             super::board_animation::MenuBgPieceHome { file, rank: 7 },
         )).id();
         anim.board[7][f] = Some(eb);
@@ -228,7 +226,6 @@ pub fn spawn_menu_bg_pieces(
             Visibility::Visible,
             MenuBg,
             DespawnOnExit(GameState::MainMenu),
-            super::board_animation::MenuBgPiecePos { file, rank: 1 },
             super::board_animation::MenuBgPieceHome { file, rank: 1 },
         )).id();
         anim.board[1][f] = Some(ewp);
@@ -241,7 +238,6 @@ pub fn spawn_menu_bg_pieces(
             Visibility::Visible,
             MenuBg,
             DespawnOnExit(GameState::MainMenu),
-            super::board_animation::MenuBgPiecePos { file, rank: 6 },
             super::board_animation::MenuBgPieceHome { file, rank: 6 },
         )).id();
         anim.board[6][f] = Some(ebp);
@@ -285,7 +281,7 @@ pub fn spawn_menu_bg_lights(
         PointLight {
             intensity: 2_000_000.0,
             range: 100.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(3.5, 20.0, 3.5),
@@ -300,7 +296,7 @@ pub fn spawn_menu_bg_lights(
             intensity: 900_000.0,
             range: 60.0,
             color: Color::srgb(0.72, 0.82, 1.0),
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(3.5, 7.0, 13.0),
@@ -393,6 +389,30 @@ pub fn menu_escape_system(
 }
 
 // ── egui panel ───────────────────────────────────────────────────────────────
+
+/// Attract-loop overlay shown before the player presses Enter: just the title
+/// logo over the orbiting board, plus a pulsing "Press ENTER to begin" prompt.
+/// No menu buttons, no welcome card, no cinematic (see `MenuIntro`).
+pub fn render_intro_overlay(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
+    render_title_logo(ctx, cx);
+
+    let t = ctx.input(|i| i.time) as f32;
+    let pulse = 0.55 + 0.45 * (t * 2.2).sin().abs();
+    let alpha = (pulse * 255.0) as u8;
+
+    egui::Area::new("intro_prompt".into())
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -90.0))
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new("Press Enter to Start")
+                    .size(22.0)
+                    .strong()
+                    .color(egui::Color32::from_white_alpha(alpha)),
+            );
+        });
+}
 
 /// Render the bottom-left button list.
 /// Modals (AI setup, controls popup) are rendered by the caller in `main_menu.rs`.
@@ -681,6 +701,22 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60)),
     );
     ui.add_space(10.0);
+
+    // Live online-player count (refreshed every ~15s by the social subsystem).
+    let online = cx.online_players.count;
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("●")
+                .size(11.0)
+                .color(egui::Color32::from_rgb(120, 220, 140)),
+        );
+        ui.label(
+            egui::RichText::new(format!("{online} online"))
+                .size(11.0)
+                .color(egui::Color32::from_rgb(200, 220, 210))
+                .family(egui::FontFamily::Proportional),
+        );
+    });
     ui.add_space(6.0);
 
     let snd = cx.menu_sounds.as_deref();
@@ -852,7 +888,11 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.add_space(4.0);
     if item(ui, "Solve Puzzles", W) {
         play_click(&mut cx.commands, snd);
-        // TODO: launch puzzle-solving mode.
+        let wallet = cx.player_identity.pubkey_str.clone().unwrap_or_default();
+        cx.commands.insert_resource(crate::puzzle::PendingPuzzleRequest {
+            mode: crate::puzzle::PuzzleMode::Solve,
+            wallet,
+        });
     }
     ui.add_space(SP * 2.0);
 
@@ -864,9 +904,13 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             .strong(),
     );
     ui.add_space(4.0);
-    if item(ui, "Puzzle Rush (Earn)", W) {
+    if item(ui, "Puzzles (Earn)", W) {
         play_click(&mut cx.commands, snd);
-        // TODO: launch wagered/earn puzzle mode.
+        let wallet = cx.player_identity.pubkey_str.clone().unwrap_or_default();
+        cx.commands.insert_resource(crate::puzzle::PendingPuzzleRequest {
+            mode: crate::puzzle::PuzzleMode::Earn,
+            wallet,
+        });
     }
 }
 

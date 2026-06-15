@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Solana addon types for multiplayer integration
 //!
 //! Provides types for Solana wallet, game sync, and competitive match state.

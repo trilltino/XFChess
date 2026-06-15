@@ -113,7 +113,7 @@ fn init_sliding_masks(game: &mut Game) {
 /// Vector of `KK` moves representing all possible rook destinations
 fn init_rook_moves_from(from: i8) -> KKS {
     let mut moves = Vec::new();
-    let (col, row) = pos_to_square(from);
+    let (_, row) = pos_to_square(from);
 
     // Rooks move in four directions: North, East, South, West
     for &dir in &ROOK_DIRS {

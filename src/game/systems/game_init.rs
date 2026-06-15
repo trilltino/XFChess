@@ -122,7 +122,7 @@ pub fn reset_game_resources(
         .spawn(PointLight {
             intensity: 2_000_000.0, // High intensity for clear visibility
             range: 100.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..Default::default()
         })
         .insert(Transform::from_xyz(3.5, 20.0, 3.5))
@@ -274,7 +274,6 @@ pub fn start_timer_when_ready(
 /// before syncing to the engine.
 ///
 /// For usage examples, see `tests/systems_tests.rs`
-#[allow(dead_code)]
 pub fn initialize_engine_from_ecs(
     mut engine: ResMut<ChessEngine>,
     pieces_query: Query<(Entity, &Piece, &HasMoved)>,

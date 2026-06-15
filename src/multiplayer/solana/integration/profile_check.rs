@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Profile check system - Detects if wallet needs profile creation
 //!
 //! When a wallet connects, checks if the player has a profile with username.
@@ -82,7 +81,6 @@ pub fn check_profile_on_connect(
 /// Populates cached_elo and cached_display_name; redirects to ProfileCreation when needed.
 pub fn handle_profile_check_tasks(
     mut solana_state: ResMut<SolanaIntegrationState>,
-    mut menu_state: ResMut<NextState<crate::core::states::MenuState>>,
 ) {
     if let Some(task) = solana_state.pending_profile_check.take() {
         if task.is_finished() {

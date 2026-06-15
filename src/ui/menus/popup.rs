@@ -48,13 +48,11 @@ impl GamePopup {
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_copy(mut self, text: impl Into<String>) -> Self {
         self.copy_text = Some(text.into());
         self
     }
 
-    #[allow(dead_code)]
     pub fn with_url(mut self, url: impl Into<String>, label: impl Into<String>) -> Self {
         let url_str = url.into();
         let label_str = label.into();
@@ -63,7 +61,6 @@ impl GamePopup {
         self
     }
 
-    #[allow(dead_code)]
     pub fn persistent(mut self) -> Self {
         self.lifetime = f32::INFINITY;
         self.remaining = f32::INFINITY;

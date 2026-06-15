@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Main menu plugin with polished UI.
 //!
 //! Displays the primary game menu with options to:
@@ -47,9 +46,9 @@ mod cinematic;
 use screens::*;
 use modals::{render_ai_setup_modal, render_controls_popup, render_pgn_input_modal};
 use new_menu::{
-    menu_escape_system, orbit_camera_system, purge_stale_lights, render_new_style_panel,
-    render_solana_splash, render_wallet_hud, setup_menu_fog, spawn_menu_bg_board,
-    spawn_menu_bg_lights, spawn_menu_bg_pieces,
+    menu_escape_system, orbit_camera_system, purge_stale_lights, render_intro_overlay,
+    render_new_style_panel, render_solana_splash, render_wallet_hud, setup_menu_fog,
+    spawn_menu_bg_board, spawn_menu_bg_lights, spawn_menu_bg_pieces,
 };
 pub use new_menu::NewMenuPanel;
 
@@ -58,6 +57,69 @@ pub use new_menu::NewMenuPanel;
 pub enum MenuStyle {
     #[default]
     New,
+}
+
+/// Attract-loop gate for the main menu. While `awaiting_enter` is true the menu
+/// shows only the orbiting board + title + a "Press ENTER" prompt (no buttons,
+/// no welcome card, no cinematic). Pressing Enter clears it and cuts straight
+/// into the Immortal Game cinematic. See `menu_intro_enter_system`.
+#[derive(Resource)]
+pub struct MenuIntro {
+    pub awaiting_enter: bool,
+}
+
+impl Default for MenuIntro {
+    fn default() -> Self {
+        Self { awaiting_enter: true }
+    }
+}
+
+/// Run condition: true once the player has pressed Enter (menu "started").
+/// Gates the cinematic systems so they stay dormant during the attract loop.
+fn menu_started(intro: Res<MenuIntro>) -> bool {
+    !intro.awaiting_enter
+}
+
+/// Attract-loop input: while awaiting, Enter leaves the intro and cuts straight
+/// into the Immortal Game cinematic (moment index 0).
+fn menu_intro_enter_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut intro: ResMut<MenuIntro>,
+    mut cine: ResMut<cinematic::MenuCinematic>,
+) {
+    if !intro.awaiting_enter {
+        return;
+    }
+    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+        intro.awaiting_enter = false;
+        cine.enabled = true;
+        cine.moment_index = 0;
+        cine.phase = cinematic::CinematicPhase::FadeOut;
+        cine.timer = 0.3;
+    }
+}
+
+/// Reversed reveal: the board (and its pieces/lights, all tagged `MenuBg`) is
+/// hidden during the attract loop and rises into view only once Enter is
+/// pressed. Force-hides every frame while awaiting (to catch late-spawned
+/// pieces), then reveals once on the transition and hands control back to the
+/// cinematic / orbit systems.
+fn apply_intro_board_visibility(
+    intro: Res<MenuIntro>,
+    mut was_awaiting: Local<bool>,
+    mut q: Query<&mut Visibility, With<new_menu::MenuBg>>,
+) {
+    if intro.awaiting_enter {
+        for mut v in &mut q {
+            *v = Visibility::Hidden;
+        }
+        *was_awaiting = true;
+    } else if *was_awaiting {
+        for mut v in &mut q {
+            *v = Visibility::Visible;
+        }
+        *was_awaiting = false;
+    }
 }
 
 /// Plugin for main menu state.
@@ -73,15 +135,18 @@ impl Plugin for MainMenuPlugin {
             .init_resource::<board_animation::BoardAnimator>()
             .init_resource::<cinematic::MenuCinematic>()
             .init_resource::<cinematic::CinematicBoard>()
+            .init_resource::<MenuIntro>()
             .init_resource::<WalletBridgePoller>()
             .init_resource::<FontsLoaded>()
             .add_systems(
                 OnEnter(GameState::MainMenu),
                 (
                     // Reset panel to Main every time we enter the menu (e.g. returning from a game)
-                    |mut panel: ResMut<new_menu::NewMenuPanel>, mut exit_confirm: ResMut<new_menu::MenuExitConfirm>| {
+                    |mut panel: ResMut<new_menu::NewMenuPanel>, mut exit_confirm: ResMut<new_menu::MenuExitConfirm>, mut intro: ResMut<MenuIntro>| {
                         *panel = new_menu::NewMenuPanel::default();
                         exit_confirm.visible = false;
+                        // Every entry to the menu re-arms the attract loop.
+                        intro.awaiting_enter = true;
                     },
                     purge_stale_lights,
                     setup_menu_camera,
@@ -163,12 +228,18 @@ impl Plugin for MainMenuPlugin {
                     // stays: the cinematic showcase still uses it to slide its pieces.
                     board_animation::animate_menu_pieces,
                     menu_escape_system,
+                    // Attract loop: wait for Enter, then hand off to the cinematic.
+                    menu_intro_enter_system,
+                    // Reversed reveal: board hidden until Enter, then it rises in.
+                    apply_intro_board_visibility,
                     // Cinematic showcase: advance the timeline, then drive the camera
                     // (after the orbit system, which yields while a cinematic is active).
-                    cinematic::cinematic_director,
+                    // Both gated off during the pre-Enter attract loop.
+                    cinematic::cinematic_director.run_if(menu_started),
                     cinematic::cinematic_camera_system
                         .after(orbit_camera_system)
-                        .after(cinematic::cinematic_director),
+                        .after(cinematic::cinematic_director)
+                        .run_if(menu_started),
                 )
                     .run_if(in_state(GameState::MainMenu)),
             )
@@ -892,8 +963,6 @@ pub struct NewsBannerState {
     pub loaded: bool,
 }
 
-const NEWS_BANNER_PATH: &str = r"C:\Users\isich\Pictures\Camera Roll\Screenshots\Screenshot 2026-04-08 172321.png";
-
 /// Cached Solana splash textures (Screenshot logo + Solana coin logo).
 #[derive(Resource, Default)]
 pub struct SolanaLogoState {
@@ -951,33 +1020,6 @@ const BRAND_LOGO_PATH: &str = "assets/xfchess-title.png";
 
 /// Grey bezel border color shared by popups and modals.
 const BEZEL_GREY: egui::Color32 = egui::Color32::from_rgb(100, 100, 100);
-
-fn ensure_news_banner_texture(ctx: &egui::Context, banner: &mut NewsBannerState) -> Option<egui::TextureId> {
-    if let Some(texture) = banner.texture.as_ref() {
-        return Some(texture.id());
-    }
-    if banner.loaded {
-        return None;
-    }
-    banner.loaded = true;
-
-    let Ok(bytes) = std::fs::read(NEWS_BANNER_PATH) else {
-        warn!("[MAIN_MENU] Failed to read news banner image at {}", NEWS_BANNER_PATH);
-        return None;
-    };
-    let Ok(decoded) = image::load_from_memory(&bytes) else {
-        warn!("[MAIN_MENU] Failed to decode news banner image at {}", NEWS_BANNER_PATH);
-        return None;
-    };
-
-    let rgba = decoded.to_rgba8();
-    let size = [rgba.width() as usize, rgba.height() as usize];
-    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-    let texture = ctx.load_texture("news_banner_screenshot", color_image, egui::TextureOptions::LINEAR);
-    let texture_id = texture.id();
-    banner.texture = Some(texture);
-    Some(texture_id)
-}
 
 pub(super) fn ensure_brand_logo_texture(ctx: &egui::Context, logo: &mut BrandLogoState) -> Option<egui::TextureId> {
     if let Some(texture) = logo.texture.as_ref() {
@@ -1271,6 +1313,12 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
 fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     if !ctx_menu.loading_progress.complete {
         render_loading_screen_website(ctx, ctx_menu);
+        return;
+    }
+
+    // Attract loop: before Enter, show only the orbiting board + title + prompt.
+    if ctx_menu.menu_intro.awaiting_enter {
+        render_intro_overlay(ctx, ctx_menu);
         return;
     }
 

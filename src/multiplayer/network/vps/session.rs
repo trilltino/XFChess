@@ -8,8 +8,19 @@ use serde::{Deserialize, Serialize};
 
 use super::client::{client, vps_base};
 
+// TEE (trusted-execution) authentication is only wired up under the `solana` feature.
+#[cfg(feature = "solana")]
 const TEE_AUTH_MESSAGE: &str = "Authenticate with MagicBlock TEE";
+#[cfg(feature = "solana")]
 const TEE_DEVNET_ADDR: &str = "FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA";
+
+#[cfg(feature = "solana")]
+#[derive(Serialize)]
+struct TeeAuthReq<'a> {
+    game_id: u64,
+    wallet_pubkey: &'a str,
+    signature_b64: &'a str,
+}
 
 #[derive(Serialize)]
 struct CreateSessionReq<'a> {
@@ -45,13 +56,6 @@ pub(super) struct SigResp {
 pub struct SessionStatus {
     pub active: bool,
     pub session_pubkey: String,
-}
-
-#[derive(Serialize)]
-struct TeeAuthReq<'a> {
-    game_id: u64,
-    wallet_pubkey: &'a str,
-    signature_b64: &'a str,
 }
 
 /// Ask VPS to create (or return existing) session keypair for `game_id`.

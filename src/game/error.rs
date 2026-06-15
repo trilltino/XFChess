@@ -3,7 +3,6 @@
 //! Provides custom error types for game logic including move validation,
 //! engine synchronization, and game state management.
 
-#![allow(dead_code)]
 
 /// Errors that can occur in game logic
 #[derive(Debug, thiserror::Error)]

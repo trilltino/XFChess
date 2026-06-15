@@ -39,28 +39,6 @@ pub struct Board2DExtras<'w> {
     pub board_fade: Res<'w, BoardFadeState>,
 }
 
-#[allow(dead_code)]
-fn ai_level_label(difficulty: crate::game::ai::resource::AIDifficulty) -> &'static str {
-    match difficulty {
-        crate::game::ai::resource::AIDifficulty::Level1 => "400 ELO",
-        crate::game::ai::resource::AIDifficulty::Level2 => "700 ELO",
-        crate::game::ai::resource::AIDifficulty::Level3 => "1000 ELO",
-        crate::game::ai::resource::AIDifficulty::Level4 => "1300 ELO",
-        crate::game::ai::resource::AIDifficulty::Level5 => "1600 ELO",
-        crate::game::ai::resource::AIDifficulty::Level6 => "1900 ELO",
-        crate::game::ai::resource::AIDifficulty::Level7 => "2200 ELO",
-        crate::game::ai::resource::AIDifficulty::Level8 => "2500+ ELO",
-    }
-}
-
-#[allow(dead_code)]
-fn player_card_text(name: &str, elo: &str) -> String {
-    if elo.is_empty() {
-        name.to_string()
-    } else {
-        format!("{} - {}", name, elo)
-    }
-}
 
     // The local is_black_view function is removed in favor of the shared helper in camera.rs
 

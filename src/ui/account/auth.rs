@@ -749,7 +749,6 @@ pub fn render_profile_consent_modal(
     mut contexts: EguiContexts,
     mut consent_state: ResMut<ProfileConsentState>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut menu_state: ResMut<NextState<crate::core::states::MenuState>>,
 ) {
     if !consent_state.show {
         return;

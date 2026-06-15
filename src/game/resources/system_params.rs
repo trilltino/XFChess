@@ -26,7 +26,6 @@ use crate::engine::board_state::ChessEngine;
 #[derive(SystemParam)]
 pub struct GameStateParams<'w> {
     /// Current turn information
-    #[allow(dead_code)]
     pub current_turn: Res<'w, CurrentTurn>,
     /// Current game phase
     pub game_phase: Res<'w, CurrentGamePhase>,
@@ -35,10 +34,8 @@ pub struct GameStateParams<'w> {
     /// Captured pieces tracking
     pub captured: Res<'w, CapturedPieces>,
     /// Piece selection state
-    #[allow(dead_code)]
     pub selection: ResMut<'w, Selection>,
     /// Chess engine for move validation
-    #[allow(dead_code)]
     pub engine: ResMut<'w, ChessEngine>,
 }
 
@@ -66,12 +63,9 @@ pub struct GameStateParams<'w> {
 #[derive(SystemParam)]
 pub struct AIParams<'w> {
     /// AI configuration
-    #[allow(dead_code)]
     pub ai_config: Res<'w, crate::game::ai::ChessAIResource>,
     /// Pending AI move computation
-    #[allow(dead_code)]
     pub pending_ai: Option<Res<'w, crate::game::ai::PendingAIMove>>,
     /// AI statistics
-    #[allow(dead_code)]
     pub ai_stats: Res<'w, crate::game::ai::AIStatistics>,
 }

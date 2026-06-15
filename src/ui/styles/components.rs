@@ -35,12 +35,10 @@ impl Layout {
 }
 
 /// Modern glassmorphic buttons with transparent backgrounds
-#[allow(dead_code)]
 pub struct ModernButton;
 
 impl ModernButton {
     /// Create a primary action button with glassmorphic effect
-    #[allow(dead_code)]
     pub fn primary(ui: &mut egui::Ui, text: &str) -> egui::Response {
         let button = egui::Button::new(text)
             .fill(egui::Color32::from_rgba_premultiplied(40, 40, 45, 200))
@@ -49,7 +47,6 @@ impl ModernButton {
     }
 
     /// Create a secondary action button with glassmorphic effect
-    #[allow(dead_code)]
     pub fn secondary(ui: &mut egui::Ui, text: &str) -> egui::Response {
         let button = egui::Button::new(text)
             .fill(egui::Color32::from_rgba_premultiplied(30, 30, 35, 180))
@@ -59,12 +56,10 @@ impl ModernButton {
 }
 
 /// Helper functions for creating styled buttons
-#[allow(dead_code)]
 pub struct StyledButton;
 
 impl StyledButton {
     /// Create a primary action button (gold accent)
-    #[allow(dead_code)]
     pub fn primary(ui: &mut egui::Ui, text: &str) -> egui::Response {
         let button = egui::Button::new(text)
             .fill(UiColors::ACCENT_GOLD)
@@ -73,7 +68,6 @@ impl StyledButton {
     }
 
     /// Create a small button for less important actions
-    #[allow(dead_code)]
     pub fn small(ui: &mut egui::Ui, text: &str) -> egui::Response {
         let button = egui::Button::new(text)
             .fill(UiColors::BG_LIGHT)
@@ -82,7 +76,6 @@ impl StyledButton {
     }
 
     /// Create a danger button (red, for destructive actions)
-    #[allow(dead_code)]
     pub fn danger(ui: &mut egui::Ui, text: &str) -> egui::Response {
         let button = egui::Button::new(text)
             .fill(UiColors::DANGER)
@@ -91,7 +84,6 @@ impl StyledButton {
     }
 
     /// Create a secondary action button
-    #[allow(dead_code)]
     pub fn secondary(ui: &mut egui::Ui, text: &str) -> egui::Response {
         let button = egui::Button::new(text)
             .fill(UiColors::BG_LIGHT)
@@ -101,12 +93,10 @@ impl StyledButton {
 }
 
 /// Helper functions for creating styled panels
-#[allow(dead_code)]
 pub struct StyledPanel;
 
 impl StyledPanel {
     /// Create a main content panel
-    #[allow(dead_code)]
     pub fn main() -> egui::Frame {
         egui::Frame {
             fill: UiColors::BG_DARK,
@@ -119,7 +109,6 @@ impl StyledPanel {
     }
 
     /// Create a card panel
-    #[allow(dead_code)]
     pub fn card() -> egui::Frame {
         egui::Frame {
             fill: UiColors::BG_MID,
@@ -132,7 +121,6 @@ impl StyledPanel {
     }
 
     /// Create an overlay panel
-    #[allow(dead_code)]
     pub fn overlay() -> egui::Frame {
         egui::Frame {
             fill: UiColors::BG_OVERLAY,
