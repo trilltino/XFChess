@@ -26,6 +26,7 @@ impl Plugin for RenderingPlugin {
             camera::CameraPlugin,
             pieces::PiecePlugin,
             effects::DynamicLightingPlugin,
+            effects::SkyPlugin,
         ))
         .add_systems(
             Update,

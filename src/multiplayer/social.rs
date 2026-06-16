@@ -9,8 +9,8 @@ use std::time::Instant;
 use tracing::info;
 
 use crate::multiplayer::network::vps::{
-    SocialContact, SocialFriendRequest, LobbyInvite,
-    get_contacts, get_pending_requests, poll_social,
+    SocialContact, SocialFriendRequest, SocialPresence, LobbyInvite,
+    get_contacts, get_pending_requests, get_online, poll_social, update_presence,
 };
 use crate::multiplayer::types::NetworkEvent;
 
@@ -58,6 +58,17 @@ impl Default for FriendsState {
             fetch_rx: None,
         }
     }
+}
+
+/// Bevy resource holding the count of players currently online (per the VPS
+/// presence store). Refreshed every ~15s by [`tick_presence_sync`].
+#[derive(Resource, Default)]
+pub struct OnlinePlayersState {
+    /// Number of players the backend reports as online (Online + InGame).
+    pub count: usize,
+    pub last_sync: Option<Instant>,
+    /// Background fetch receiver for the `GET /presence` result.
+    pub fetch_rx: Option<Receiver<usize>>,
 }
 
 /// Bevy resource tracking the backend region + measured latency to it.
@@ -127,7 +138,7 @@ impl LobbyChatSession {
         let sender = tx_in;
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
-                let sub = match braid_uri::ChessSubscriber::new(&base_url, &game_id) {
+                let sub = match braid_chess::ChessSubscriber::new(&base_url, &game_id) {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::error!("[lobby-chat] subscriber init failed: {e}");
@@ -143,7 +154,7 @@ impl LobbyChatSession {
                 };
                 tracing::info!("[lobby-chat] Subscribed to {} @ {}", game_id, base_url);
                 while let Ok(msg) = rx.recv().await {
-                    if let braid_uri::ChessMessage::Chat(p) = msg {
+                    if let braid_chess::ChessMessage::Chat(p) = msg {
                         let lobby_msg = LobbyMsg {
                             player: display.clone(),
                             text: p.text,
@@ -230,11 +241,13 @@ impl Plugin for SocialPlugin {
             .init_resource::<LobbyFilterConfig>()
             .init_resource::<LobbyFetchState>()
             .init_resource::<BackendRegion>()
+            .init_resource::<OnlinePlayersState>()
             .add_systems(Update, (
                 sync_node_id_from_network,
                 poll_friends_fetch,
                 drain_lobby_chat,
                 tick_friends_sync,
+                tick_presence_sync,
                 fetch_backend_region_once,
             ));
     }
@@ -325,6 +338,51 @@ fn tick_friends_sync(mut state: ResMut<FriendsState>) {
                 invites: poll_resp.invites,
                 next_poll_index: poll_resp.next_index,
             });
+        })
+        .detach();
+}
+
+/// Every ~15s: send our presence heartbeat (`PUT /presence`) so we count as
+/// online, then fetch the current online count (`GET /presence`). Both run on a
+/// background IO task; the count is drained into [`OnlinePlayersState`].
+fn tick_presence_sync(
+    friends: Res<FriendsState>,
+    mut online: ResMut<OnlinePlayersState>,
+) {
+    // Drain any in-flight result first.
+    if let Some(rx) = online.fetch_rx.as_ref() {
+        if let Ok(count) = rx.try_recv() {
+            online.count = count;
+            online.last_sync = Some(Instant::now());
+            online.fetch_rx = None;
+        }
+    }
+
+    if online.fetch_rx.is_some() { return; }
+    let elapsed = online.last_sync.map(|t| t.elapsed().as_secs()).unwrap_or(u64::MAX);
+    if elapsed < 15 { return; }
+
+    // Need a stable identity before we can announce presence.
+    let Some(node_id) = friends.our_node_id.clone() else { return; };
+    let pubkey = friends.our_pubkey.clone();
+    let display = friends.our_display.clone();
+
+    let (tx, rx) = bounded(1);
+    online.fetch_rx = Some(rx);
+
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            // Heartbeat — best-effort; ignore failures.
+            let _ = update_presence(&SocialPresence {
+                node_id,
+                pubkey,
+                display_name: display,
+                status: "online".to_string(),
+                game_id: None,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            });
+            let count = get_online().map(|v| v.len()).unwrap_or(0);
+            let _ = tx.send(count);
         })
         .detach();
 }

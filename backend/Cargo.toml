@@ -31,6 +31,10 @@ path = "src/bin/vps_admin.rs"
 name = "tournament_admin"
 path = "src/bin/tournament_admin.rs"
 
+[[bin]]
+name = "import_puzzles"
+path = "src/bin/import_puzzles.rs"
+
 [dependencies]
 axum = "0.8.8"
 tokio = { version = "1.50.0", features = ["full"] }
@@ -63,8 +67,7 @@ borsh = "=1.5.7"
 # Braid/Iroh dependencies
 braid-iroh = { path = "../crates/zarathustra_net/braid-iroh" }
 iroh-gossip = { path = "../crates/zarathustra_net/iroh-gossip" }
-braid-core = { path = "../crates/zarathustra_net/braid-core" }
-braid_uri = { path = "../crates/zarathustra_net/braid_uri" }
+braid_chess = { path = "../crates/zarathustra_net/braid_chess" }
 
 # Solana dependencies
 solana-sdk = "=2.2.1"
@@ -95,6 +98,9 @@ once_cell = "1.19"
 
 # PGN compression
 zstd = "0.13"
+
+# Lichess puzzle CSV import (import_puzzles binary)
+csv = "1"
 
 # Error handling
 thiserror = "2.0.18"

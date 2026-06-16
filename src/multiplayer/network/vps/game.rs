@@ -269,11 +269,11 @@ pub fn get_broadcast_delay(game_id: &str) -> Result<u64, String> {
     Ok(resp.delay_secs.max(0) as u64)
 }
 
-/// Fetch the full move log for a game as typed [`braid_uri::MovePayload`] values.
+/// Fetch the full move log for a game as typed [`braid_chess::MovePayload`] values.
 ///
 /// Used by Braid reconnection recovery: the caller filters the returned list
 /// to find moves that arrived after a given `since_version` hash.
-pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_uri::MovePayload>, String> {
+pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, String> {
     #[derive(serde::Deserialize)]
     struct MoveEntry {
         move_uci: String,
@@ -297,7 +297,7 @@ pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_uri::MovePayload>, Strin
         .map_err(|e| format!("fetch_move_log parse: {e}"))?;
     Ok(resp.moves
         .into_iter()
-        .map(|m| braid_uri::MovePayload::from_uci(
+        .map(|m| braid_chess::MovePayload::from_uci(
             m.move_uci,
             m.fen_after,
             m.move_number,

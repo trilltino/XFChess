@@ -46,7 +46,7 @@ pub fn update_check_highlight_system(
                 intensity: 20_000.0,
                 radius: 1.5,
                 range: 3.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             Transform::from_translation(pos),

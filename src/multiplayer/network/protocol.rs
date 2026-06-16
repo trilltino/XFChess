@@ -172,7 +172,7 @@ pub enum NetworkMessage {
     /// Response to [`BraidResyncRequest`]: ordered list of missed move payloads.
     BraidResyncResponse {
         game_id: u64,
-        /// JSON-encoded [`braid_uri::MovePayload`] values, oldest first.
+        /// JSON-encoded [`braid_chess::MovePayload`] values, oldest first.
         move_payloads: Vec<String>,
     },
     /// Broadcast by any peer when a new neighbor joins a game gossip topic.
@@ -181,7 +181,7 @@ pub enum NetworkMessage {
         game_id: u64,
         /// Current FEN (authoritative board position).
         fen: String,
-        /// All moves so far, each JSON-encoded as [`braid_uri::MovePayload`].
+        /// All moves so far, each JSON-encoded as [`braid_chess::MovePayload`].
         move_payloads: Vec<String>,
         /// Content-addressed version of the last move in the log.
         head_version: String,

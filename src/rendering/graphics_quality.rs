@@ -125,15 +125,15 @@ pub fn apply_graphics_quality_lights_system(
     let shadow_size = settings.graphics_quality.shadow_map_size();
 
     for mut light in directional_lights.iter_mut() {
-        light.shadows_enabled = shadows_enabled;
+        light.shadow_maps_enabled = shadows_enabled;
     }
     for mut light in point_lights.iter_mut() {
-        light.shadows_enabled = shadows_enabled;
+        light.shadow_maps_enabled = shadows_enabled;
         // Bias scales with map resolution: smaller map → more bias to hide aliasing
         light.shadow_depth_bias = 4096.0 / shadow_size as f32 * 0.05;
     }
     for mut light in spot_lights.iter_mut() {
-        light.shadows_enabled = shadows_enabled;
+        light.shadow_maps_enabled = shadows_enabled;
     }
 
     info!("[GRAPHICS] Shadow quality: {:?} (map {}px, enabled: {})", current_quality, shadow_size, shadows_enabled);

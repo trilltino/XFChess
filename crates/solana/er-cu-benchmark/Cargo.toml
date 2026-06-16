@@ -4,15 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1"
-clap = { version = "4", features = ["derive"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-solana-client = "=2.2.1"
-solana-sdk = "=2.2.1"
-solana-program = "=2.2.1"
+# Inherit shared pins from the workspace dependency table where they exist, so
+# this benchmark can't drift onto a divergent version graph. See
+# docs/SOLANA_CRATES_AUDIT.md.
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+solana-client.workspace = true
+solana-sdk.workspace = true
+solana-program.workspace = true
+# Not in the workspace table — pin locally, matched to the solana-* versions above.
 solana-transaction-status = "=2.2.1"
 sha2 = "0.10"
 nimzovich_engine = { path = "../../engine/nimzovich_engine" }
-ephemeral-rollups-sdk = { version = "0.8.5" }
+ephemeral-rollups-sdk = { version = "0.13.0" }

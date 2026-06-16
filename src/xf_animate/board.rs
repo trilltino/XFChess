@@ -75,7 +75,7 @@ pub fn spawn_mini_lights(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 2_800.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(
@@ -93,7 +93,7 @@ pub fn spawn_mini_lights(mut commands: Commands) {
         PointLight {
             intensity: 600.0,
             range: 18.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(3.5, 4.5, 3.5),

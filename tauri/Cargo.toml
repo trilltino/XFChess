@@ -21,8 +21,8 @@ all = ["dev", "wallet", "tournament-admin"]
 [dependencies]
 base64 = "0.22"
 bs58 = "0.5"
-tauri = { version = "2.1", features = ["devtools", "unstable", "tray-icon"] }
-tauri-build = { version = "2.1", features = [] }
+tauri = { version = "2.11", features = ["devtools", "unstable", "tray-icon"] }
+tauri-build = { version = "2.6", features = [] }
 tauri-plugin-deep-link = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"

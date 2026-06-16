@@ -13,9 +13,10 @@ import KycStatus from "./components/KycStatus";
 import Dashboard from "./components/Dashboard";
 import DeploymentManager from "./components/DeploymentManager";
 import Treasury from "./components/Treasury";
+import Puzzles from "./components/Puzzles";
 import Settings from "./components/Settings";
 
-type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc" | "treasury" | "settings";
+type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc" | "treasury" | "puzzles" | "settings";
 
 function AppContent() {
   const { authState, loading, login } = useAuth();
@@ -97,6 +98,8 @@ function AppContent() {
         return <KycStatus />;
       case "treasury":
         return <Treasury />;
+      case "puzzles":
+        return <Puzzles />;
       case "settings":
         return <Settings />;
       default:

@@ -67,3 +67,30 @@ pub fn setup_enhanced_panic_hook() {
         eprintln!("========================================");
     }));
 }
+
+/// Append a *recovered* (non-fatal) error to the crash log.
+///
+/// Used by the Bevy 0.19 fallback error handler: when a panic inside a system,
+/// command or observer is caught and the app keeps running, we still want a
+/// breadcrumb on disk. Unlike [`setup_enhanced_panic_hook`], this appends rather
+/// than truncating and never tears down the process.
+pub fn record_recovered_error(source: &str, error: &dyn std::fmt::Display) {
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let logs_dir = Path::new("logs");
+    if !logs_dir.exists() {
+        let _ = fs::create_dir_all(logs_dir);
+    }
+
+    let filepath = logs_dir.join("recovered_errors.log");
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&filepath)
+    {
+        let _ = writeln!(file, "[{timestamp}] RECOVERED from {source}: {error}");
+    }
+}

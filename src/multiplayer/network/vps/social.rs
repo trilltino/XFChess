@@ -150,6 +150,18 @@ pub fn update_presence(p: &Presence) -> Result<(), String> {
     Ok(())
 }
 
+/// GET /presence — fetch everyone currently online (server filters to the last 5 min).
+pub fn get_online() -> Result<Vec<Presence>, String> {
+    let resp = client()?
+        .get(format!("{}/presence", vps_base()))
+        .send()
+        .map_err(|e| format!("get_online: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("get_online: HTTP {}", resp.status()));
+    }
+    resp.json::<Vec<Presence>>().map_err(|e| format!("parse: {e}"))
+}
+
 pub fn push_lobby_invite(
     game_id: &str,
     from_node_id: &str,

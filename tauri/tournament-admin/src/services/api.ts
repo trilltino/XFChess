@@ -292,6 +292,68 @@ class ApiClient {
     return this.request<any>("/api/rates/all");
   }
 
+  // ── Puzzles (admin) ───────────────────────────────────────────────────────
+  async listPuzzles(q: {
+    eloMin?: number; eloMax?: number; name?: string; theme?: string;
+    limit?: number; offset?: number;
+  } = {}) {
+    const p = new URLSearchParams();
+    if (q.eloMin != null) p.set("elo_min", String(q.eloMin));
+    if (q.eloMax != null) p.set("elo_max", String(q.eloMax));
+    if (q.name) p.set("name", q.name);
+    if (q.theme) p.set("theme", q.theme);
+    if (q.limit != null) p.set("limit", String(q.limit));
+    if (q.offset != null) p.set("offset", String(q.offset));
+    return this.request<any>(`/admin/puzzles?${p.toString()}`);
+  }
+
+  async getPuzzle(id: string) {
+    return this.request<any>(`/admin/puzzles/${id}`);
+  }
+
+  async namePuzzle(id: string, name: string) {
+    return this.request<any>(`/admin/puzzles/${id}/name`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async featurePuzzle(id: string, featured: boolean) {
+    return this.request<any>(`/admin/puzzles/${id}/feature`, {
+      method: "POST",
+      body: JSON.stringify({ featured }),
+    });
+  }
+
+  async enablePuzzle(id: string, enabled: boolean) {
+    return this.request<any>(`/admin/puzzles/${id}/enable`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  async fundPuzzle(body: {
+    scope: "puzzle" | "band" | "daily";
+    puzzle_id?: string; band_lo?: number; band_hi?: number;
+    reward_lamports: number; budget_lamports: number; max_per_wallet?: number;
+  }) {
+    return this.request<any>("/admin/puzzles/fund", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getPuzzleBounties() {
+    return this.request<any>("/admin/puzzles/bounties");
+  }
+
+  async closePuzzleBounty(id: number) {
+    return this.request<any>(`/admin/puzzles/bounties/${id}/close`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   // Helper to get base URL for Blinks
   getBaseUrl() {
     return this.baseUrl;

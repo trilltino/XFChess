@@ -104,6 +104,10 @@ pub const DELEGATE_COST: u64 = 5_000;
 pub const UNDELEGATE_COST: u64 = 5_000;
 pub const COMMIT_ER_COST: u64 = 5_000; // per ER→L1 commit (0 if MagicBlock sponsors)
 pub const RECORD_RESULT_COST: u64 = 5_000;
+
+/// How often (ms) the Ephemeral Rollup commits delegated game state back to the
+/// base layer. A fixed cadence — must not be derived from per-game arguments.
+pub const ER_COMMIT_FREQUENCY_MS: u32 = 30_000; // 30s
 pub const CLAIM_PRIZE_COST: u64 = 5_000;
 
 // ---------------------------------------------------------------------------

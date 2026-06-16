@@ -3,7 +3,7 @@
 pub use self::inner::*;
 
 mod inner {
-    use crate::constants::DELEGATE_COST;
+    use crate::constants::{DELEGATE_COST, ER_COMMIT_FREQUENCY_MS};
     use crate::state::{Game, GameStatus};
     use crate::errors::GameErrorCode;
     use anchor_lang::prelude::*;
@@ -16,19 +16,20 @@ mod inner {
     pub fn handler_delegate_game(
         ctx: Context<DelegateGameCtx>,
         _game_id: u64,
-        valid_until: i64,
+        // Retained for instruction ABI compatibility; no longer used to derive
+        // the commit cadence (that was a bug — it multiplied a unix timestamp).
+        _valid_until: i64,
     ) -> Result<()> {
         // Seeds WITHOUT bump — delegate_account adds the bump internally
         let game_id_bytes = _game_id.to_le_bytes();
         let seeds: &[&[u8]] = &[b"game", &game_id_bytes];
 
-        // EU devnet validator for devnet-eu.magicblock.app
-        let eu_validator = "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e"
-            .parse::<Pubkey>()
-            .map_err(|_| GameErrorCode::InvalidArgument)?;
+        // validator: None lets the delegation program / magic-router assign a
+        // validator. Pinning a single devnet pubkey here broke mainnet and forced
+        // every game onto one region. See docs/MAGICBLOCK_INTEGRATION.md §2.
         let config = DelegateConfig {
-            commit_frequency_ms: (valid_until as u32).saturating_mul(1000),
-            validator: Some(eu_validator),
+            commit_frequency_ms: ER_COMMIT_FREQUENCY_MS,
+            validator: None,
         };
 
         // Delegate the game PDA
@@ -93,6 +94,8 @@ mod inner {
             ],
             &ctx.accounts.magic_context.to_account_info(),
             &ctx.accounts.magic_program.to_account_info(),
+            // magic_fee_vault: new optional 5th arg in ER SDK 0.13.0; None = default fee vault.
+            None,
         )?;
 
         Ok(())
@@ -152,10 +155,11 @@ mod inner {
         pub payer: Signer<'info>,
 
         /// CHECK: MagicBlock magic context account for commit/undelegate.
-        #[account(mut)]
+        #[account(mut, address = ephemeral_rollups_sdk::consts::MAGIC_CONTEXT_ID)]
         pub magic_context: AccountInfo<'info>,
 
         /// CHECK: MagicBlock magic program.
+        #[account(address = ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID)]
         pub magic_program: AccountInfo<'info>,
     }
 }

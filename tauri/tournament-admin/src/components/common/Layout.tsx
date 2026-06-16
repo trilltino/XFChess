@@ -22,6 +22,7 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
     { id: "deploy", label: "Deployment", icon: "🚀" },
     { id: "explorer", label: "Game Explorer", icon: "👁️" },
     { id: "treasury", label: "Treasury", icon: "💎" },
+    { id: "puzzles", label: "Puzzles", icon: "🧩" },
     { id: "settings", label: "Settings", icon: "⚙️" },
   ];
 

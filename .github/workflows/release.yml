@@ -1,0 +1,179 @@
+name: Release
+
+# Tag-driven signed installers for Windows + macOS.
+#   git tag v0.1.0 && git push origin v0.1.0
+# Provision the signing secrets first — see docs/DISTRIBUTION.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Production endpoints baked into the installers. CHANGE for real releases.
+  BACKEND_URL: https://api.xfchess.com
+  SIGNING_URL: https://api.xfchess.com
+
+jobs:
+  # ───────────────────────────── Windows ─────────────────────────────
+  windows:
+    runs-on: windows-latest
+    env:
+      AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Derive version from tag
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build web frontends
+        shell: bash
+        env:
+          VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+        run: |
+          (cd web-solana && npm ci && npm run build)
+          (cd tauri/wallet-ui && npm ci && npm run build)
+          (cd tauri/tournament-admin && npm ci && npm run build) || echo "tournament-admin build skipped"
+
+      - name: Build binaries (release)
+        run: |
+          cargo build --release --bin xfchess --features solana
+          cargo build --release -p xfchess-tauri
+
+      - name: Stage payload
+        shell: pwsh
+        run: |
+          $stage = "release/win"
+          New-Item -ItemType Directory -Force -Path "$stage/assets" | Out-Null
+          Copy-Item -Recurse -Force assets/* "$stage/assets/"
+          Copy-Item -Force target/release/xfchess.exe "$stage/"
+          Copy-Item -Force target/release/xfchess-tauri.exe "$stage/"
+          if (Test-Path stockfish.exe) { Copy-Item -Force stockfish.exe "$stage/" }
+          if (Test-Path tauri/tournament-admin/dist) {
+            New-Item -ItemType Directory -Force -Path "$stage/tournament-admin/dist" | Out-Null
+            Copy-Item -Recurse -Force tauri/tournament-admin/dist/* "$stage/tournament-admin/dist/"
+          }
+
+      # Sign the binaries BEFORE packaging. Azure Trusted Signing path:
+      - name: Sign binaries (Azure Trusted Signing)
+        if: env.AZURE_TS_ACCOUNT != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: ${{ github.workspace }}/release/win
+          files-folder-filter: exe
+          files-folder-recurse: true
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "$env:ProgramFiles(x86)\NSIS\makensis.exe" `
+            "/DAPP_VERSION=${{ steps.ver.outputs.version }}" `
+            "/DBACKEND_URL=${{ env.BACKEND_URL }}" `
+            "/DSIGNING_URL=${{ env.SIGNING_URL }}" `
+            tauri/installer/xfchess.nsi
+
+      - name: Sign installer (Azure Trusted Signing)
+        if: env.AZURE_TS_ACCOUNT != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: ${{ github.workspace }}/release
+          files-folder-filter: exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/XFChess-Setup-*.exe
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/XFChess-Setup-*.exe
+
+  # ───────────────────────────── macOS ─────────────────────────────
+  macos:
+    runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Import signing certificate
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN=build.keychain
+          security create-keychain -p actions "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN"
+          rm cert.p12
+
+      - name: Build web frontends
+        env:
+          VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+        run: |
+          (cd web-solana && npm ci && npm run build)
+          (cd tauri/wallet-ui && npm ci && npm run build)
+          (cd tauri/tournament-admin && npm ci && npm run build) || echo "tournament-admin build skipped"
+
+      - name: Build binaries (release)
+        run: |
+          cargo build --release --bin xfchess --features solana
+          cargo build --release -p xfchess-tauri
+
+      - name: Package, sign, notarize, DMG
+        env:
+          APP_VERSION: ${{ steps.ver.outputs.version }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash tauri/macos/package_macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: release/XFChess-*.dmg
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/XFChess-*.dmg

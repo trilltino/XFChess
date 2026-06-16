@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk 'NR>=1009 && NR<=1253 && \\(/^fn |^pub fn |^\\\\/\\\\/\\\\/ /\\){print NR\": \"$0}' src/ui/game/game_ui.rs)",
+      "Bash(awk 'NR>=1071 && /^}/{print \"render_move_history ends at line \"NR; exit}' src/ui/game/game_ui.rs)",
+      "Bash(cp src/ui/game/game_ui.rs /tmp/game_ui.bak)",
+      "Bash(sed -i -e '921,1009d' -e '1070,1119d' -e '1252,1266d' src/ui/game/game_ui.rs)",
+      "Bash(grep -nE \"pub fn|deprecated|pub mod|module|^//!\")",
+      "WebFetch(domain:stripe.com)",
+      "WebFetch(domain:www.coinbase.com)",
+      "WebFetch(domain:transak.com)"
+    ]
+  }
+}

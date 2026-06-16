@@ -47,16 +47,23 @@ curl -sL -o tla2tools.jar \
 ```bash
 cd specs
 
-# P2P causal chain — five configurations
+# P2P causal chain
 java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_honest_safety.cfg     CausalChain.tla
 java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_honest_live.cfg       CausalChain.tla
 java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_byzantine_current.cfg CausalChain.tla
 java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_byzantine_fixed.cfg   CausalChain.tla
 java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_byzantine_broken.cfg  CausalChain.tla
+java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_combined.cfg          CausalChain.tla   # equivocator + impersonator together
+java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_byzantine_live.cfg    CausalChain.tla   # liveness under Byzantine peer
+java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_impersonation_current.cfg CausalChain.tla
+java -cp tla2tools.jar tlc2.TLC -deadlock -config CC_impersonation_fixed.cfg   CausalChain.tla
 
-# Solana finality — two configurations
-java -cp tla2tools.jar tlc2.TLC -deadlock -config SF_normal.cfg   SolanaFinality.tla
-java -cp tla2tools.jar tlc2.TLC -deadlock -config SF_no_nonce.cfg SolanaFinality.tla
+# Solana finality
+java -cp tla2tools.jar tlc2.TLC -deadlock -config SF_normal.cfg        SolanaFinality.tla
+java -cp tla2tools.jar tlc2.TLC -deadlock -config SF_no_nonce.cfg      SolanaFinality.tla
+java -cp tla2tools.jar tlc2.TLC -deadlock -config SF_replicas.cfg      SolanaFinality.tla
+java -cp tla2tools.jar tlc2.TLC -deadlock -config SF_impersonation.cfg SolanaFinality.tla   # on-chain auth backstop
+java -cp tla2tools.jar tlc2.TLC -deadlock -config SF_no_auth.cfg       SolanaFinality.tla   # backstop necessity
 ```
 
 `-deadlock` disables deadlock detection: these are bounded models that reach a
@@ -117,6 +124,12 @@ Both findings have been fixed in the live client and tied to the configs above:
 - `ChainLinearizable` — the committed on-chain history is a gap-free nonce
   sequence (1, 2, 3, …) with consistent parents, even under a reordering
   mempool and Byzantine submitters.
+- `OnlyAuthorizedCommitted` — no transaction from an author without a registered
+  session key is ever committed, even when its nonce is otherwise valid. This is
+  the on-chain authorization backstop (models the `session_delegation` roster
+  checks in `record.rs:26-27`): it is what makes an accepted-but-forged P2P move
+  harmless, because it can never settle. Checked against a forging outsider in
+  `SF_impersonation`; shown necessary by `SF_no_auth`.
 
 ---
 
@@ -220,11 +233,14 @@ registered in the on-chain `session_delegation` for the game.
   is sound. A 3+ participant topic (e.g. a shared spectator channel that also
   accepted moves) would make that slot flip between senders — out of scope here
   and worth a separate model if the topology ever changes.
-- **No message authentication.** The model assumes a Byzantine peer acts as
-  *itself* (cannot forge another peer's `agent_id`). The gossip messages are
-  not signed at the causal-chain layer — only Solana transactions are. Modelling
-  impersonation would require adding signatures to the protocol first; that gap
-  is noted but not modelled.
+- **Impersonation IS modelled (as of the scope-completion pass).** An earlier
+  version of this doc disclaimed message authentication. That is no longer
+  accurate: the `Adversary` action (`EnableAdversary`) models a forging third
+  node injecting moves under another peer's `agent_id`, and `AuthBinding` models
+  the `bind_identity` + roster fix. See Finding 3. The remaining authentication
+  abstraction is that signatures are modelled as a single `authentic` boolean,
+  not as concrete keys/crypto — sound for the identity-binding property, but it
+  does not model signature forgery via key compromise.
 - **Bounded.** TLC checks finite instances (`MaxSeq`/`MaxNonce` = 2–3). This is
   exhaustive within the bound, not a proof for unbounded games. Phase 5 (TLAPS
   deductive proof) in the plan would lift the bound; it is not done here.

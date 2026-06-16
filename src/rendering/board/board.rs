@@ -10,7 +10,7 @@ use crate::rendering::utils::Square;
 use bevy::picking::pointer::PointerInteraction;
 use bevy::prelude::*;
 
-#[derive(Resource, Component)]
+#[derive(Component)]
 pub struct Board;
 
 /// Component marking a 3D visual element of a board square

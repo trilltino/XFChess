@@ -26,11 +26,22 @@ EXTENDS Naturals, Sequences
 
 CONSTANTS
     Agents,        \* submitting players, e.g. {A, B}
+    Outsiders,     \* authors with NO registered session key (forging nodes);
+                   \* {} in configs where impersonation is not exercised
+    Authorized,    \* authors whose session key is registered for this game.
+                   \* Models the session_delegation roster record_move enforces.
     MaxNonce,      \* bound on committed moves
     MaxContent,    \* bound on distinct contents (allows conflicting moves)
     Byzantine,     \* players that may submit arbitrary transactions
     SubmitCap,     \* bound on outstanding submissions (keeps model finite)
-    EnforceNonce   \* TRUE = real code; FALSE = nonce check removed (necessity)
+    EnforceNonce,  \* TRUE = real code; FALSE = nonce check removed (necessity)
+    EnforceAuth    \* TRUE = models the session-key/roster constraints in
+                   \*        record.rs (session_delegation.session_key == player,
+                   \*        .enabled). FALSE = auth check removed (necessity).
+
+\* All possible transaction authors: registered players plus unregistered
+\* outsiders. With Outsiders = {} this collapses to Agents (existing configs).
+Authors == Agents \cup Outsiders
 
 VARIABLES
     chain_nonce,   \* Nat        on-chain game.nonce
@@ -47,7 +58,7 @@ Tx == [ target:    1..MaxNonce,
         parentSet: BOOLEAN,
         parent:    0..MaxNonce,
         content:   1..MaxContent,
-        author:    Agents ]
+        author:    Authors ]
 
 Init ==
     /\ chain_nonce = 0
@@ -78,9 +89,20 @@ SubmitByz(p) ==
     /\ submits' = submits + 1
     /\ UNCHANGED <<chain_nonce, chain_log>>
 
+(* A forging outsider (no registered session key) submits an arbitrary       *)
+(* transaction -- e.g. a P2P-layer impersonator trying to settle a move it    *)
+(* forged. record_move must reject it on the session_delegation roster check.  *)
+SubmitOutsider(p) ==
+    /\ p \in Outsiders
+    /\ submits < SubmitCap
+    /\ \E t \in Tx : t.author = p /\ mempool' = mempool \cup {t}
+    /\ submits' = submits + 1
+    /\ UNCHANGED <<chain_nonce, chain_log>>
+
 (* The runtime applies a transaction. This is record_move's guard set.      *)
 ApplyTx(t) ==
     /\ t \in mempool
+    /\ (EnforceAuth  => t.author \in Authorized)           \* InvalidSessionKey / roster
     /\ (EnforceNonce => t.target = chain_nonce + 1)        \* InvalidNonce check
     /\ (t.parentSet => t.parent = chain_nonce)             \* ParentNonceMismatch
     /\ chain_nonce' = t.target
@@ -91,6 +113,7 @@ ApplyTx(t) ==
 Next ==
     \/ \E p \in Agents : SubmitHonest(p)
     \/ \E p \in Agents : SubmitByz(p)
+    \/ \E p \in Outsiders : SubmitOutsider(p)
     \/ \E t \in mempool : ApplyTx(t)
 
 Spec == Init /\ [][Next]_vars
@@ -114,5 +137,13 @@ ChainParentConsistent ==
         chain_log[i].parentSet => (chain_log[i].parent = i - 1)
 
 ChainLinearizable == ChainLinear /\ ChainParentConsistent
+
+(* On-chain authorization backstop: no transaction from an author without a   *)
+(* registered session key is ever committed. This is the property that makes  *)
+(* an accepted-but-forged P2P move harmless -- it can never settle, because    *)
+(* record_move requires the game's registered session key. Holds when         *)
+(* EnforceAuth = TRUE; violated when it is removed (SF_no_auth).               *)
+OnlyAuthorizedCommitted ==
+    \A i \in 1..Len(chain_log) : chain_log[i].author \in Authorized
 
 ============================================================================

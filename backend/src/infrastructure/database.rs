@@ -153,6 +153,12 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_012 = include_str!("../../migrations/012_perf_indexes.sql");
     run_script(&pools.session_pool, migration_012, "012").await?;
 
+    // ── Migration 018: puzzle pool + bounties ──────────────────────────────────
+    // (013–017 are created idempotently by SessionStore::init; 018 is applied
+    // here because the puzzle tables have no init hook of their own.)
+    let migration_018 = include_str!("../../migrations/018_puzzles.sql");
+    run_script(&pools.session_pool, migration_018, "018").await?;
+
     info!("[Database] All migrations completed successfully");
     Ok(())
 }

@@ -11,6 +11,7 @@ use crate::signing::routes::matchmaking::matchmaking_routes;
 use crate::signing::routes::pdf_mailer::pdf_mailer_routes;
 use crate::signing::routes::kyc::kyc_routes;
 use crate::signing::routes::history::history_routes;
+use crate::signing::routes::puzzle::{puzzle_routes, puzzle_admin_routes};
 use crate::signing::routes::dispute::{dispute_routes, admin_dispute_routes};
 use crate::signing::routes::archive::archive_routes;
 use crate::signing::routes::admin::admin_routes;
@@ -95,10 +96,12 @@ pub fn build_app_router(
         .merge(pdf_router)
         .merge(kyc_router)
         .merge(history_router)
+        .merge(puzzle_routes())
         .merge(dispute_router)
         .merge(metrics_router)
         .merge(archive_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
         .merge(admin_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
+        .merge(puzzle_admin_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
         .merge(chat_routes().with_state(signing_state.clone()))
         .merge(social_router)
         .layer(

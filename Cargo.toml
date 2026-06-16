@@ -64,7 +64,6 @@ members = [
 ]
 exclude = [
     "references/ephemeral-rollups-sdk/rust",
-    "crates/solana/solana-contract-fuzzer",
 ]
 
 [profile.dev]
@@ -122,20 +121,20 @@ borsh = "=1.5.7"
 chrono = { version = "=0.4.44", features = ["serde"] }
 serde_bytes = "=0.11.17"
 clap = { version = "=4.5", features = ["derive", "env"] }
-egui = "=0.29"
+egui = "=0.34"
 sdk = { package = "solana-sdk", version = "=2.2.1" }
 rpc = { package = "solana-rpc-client", version = "=2.2.1" }
 rpc-api = { package = "solana-rpc-client-api", version = "=2.2.1" }
 iroh = "=0.96.1"
 iroh-base = "=0.96.1"
-bevy_egui = "=0.39.1"
+bevy_egui = "=0.40.0-rc.1"
 
 webbrowser = "=1.0"
 xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
 braid-core = { path = "crates/zarathustra_net/braid-core" }
 braid-http = { path = "crates/zarathustra_net/braid-http" }
 braid-iroh = { path = "crates/zarathustra_net/braid-iroh" }
-braid_uri = { path = "crates/zarathustra_net/braid_uri" }
+braid_chess = { path = "crates/zarathustra_net/braid_chess" }
 iroh-gossip = { path = "crates/zarathustra_net/iroh-gossip" }
 shared = { path = "crates/shared/shared" }
 solana-chess-client = { path = "crates/solana/solana-chess-client" }
@@ -144,11 +143,14 @@ xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
 braid_stockfish_ai = { path = "crates/braid_stockfish_ai" }
 chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
 magic-resolver = { version = "0.2.0" }
-bevy = { version = "=0.18.1", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg"] }
-bevy_sprite = "=0.18.1"
-bevy_text = "=0.18.1"
-bevy_ui = "=0.18.1"
+bevy = { version = "=0.19.0-rc.3", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg"] }
+bevy_sprite = "=0.19.0-rc.3"
+bevy_text = "=0.19.0-rc.3"
+bevy_ui = "=0.19.0-rc.3"
 image = { version = "=0.25.5", default-features = false, features = ["png"] }
+# Pinned to the version Bevy 0.19-rc pulls in so the winit::window::Icon type
+# unifies with bevy_winit (used to set the OS window/taskbar icon at startup).
+winit = "=0.30.13"
 tokio = { version = "=1.50.0", features = ["full"] }
 tokio-tungstenite = "=0.20.1"
 serde = { version = "=1.0.228", features = ["derive"] }
@@ -182,6 +184,16 @@ web-time = "=1.1"
 [features]
 default = []
 profile = ["bevy/trace_tracy"]
+# Tag the in-game HUD root with `bevy_ui::FixedNode` (viewport-anchored UI).
+# `FixedNode` landed after bevy 0.19.0-rc.3, the version this project pins, so
+# this is opt-in until a release that exports it is pinned. See
+# src/ui/game/hud.rs.
+bevy_fixed_node = []
+# Opt-in physically-based sky/atmosphere for the in-game board scene. OFF by
+# default: bevy 0.19.0-rc.3 still uses the single-camera atmosphere path, and
+# XFChess runs multiple cameras, so this is gated until a release with the
+# multi-camera fix is pinned. See src/rendering/effects/sky.rs.
+sky = []
 # Accept unsigned (0x01) P2P gossip messages. DEV/TEST ONLY — the default
 # build rejects unsigned moves so a peer cannot skip authentication by
 # sending plaintext. See docs/plans/causal-authentication.md (Gap A3).
@@ -205,6 +217,7 @@ bevy_sprite = { workspace = true }
 bevy_text = { workspace = true }
 bevy_ui = { workspace = true }
 image = { workspace = true }
+winit = { workspace = true }
 tokio.workspace = true
 futures-lite.workspace = true
 async-trait.workspace = true
@@ -223,7 +236,7 @@ bevy_egui = { workspace = true }
 solana-sdk = { workspace = true, optional = true }
 solana-client = { workspace = true, optional = true }
 webbrowser = "1.1.0"
-braid_uri.workspace = true
+braid_chess.workspace = true
 braid-iroh = { workspace = true, features = ["proxy"] }
 braid-core.workspace = true
 iroh-gossip.workspace = true
@@ -251,7 +264,7 @@ base64.workspace = true
 regex.workspace = true
 magic-resolver = { workspace = true, optional = true }
 ed25519-dalek = "2"
-ephemeral-rollups-sdk = { version = "0.8.5", features = ["anchor"], optional = true }
+ephemeral-rollups-sdk = { version = "0.13.0", features = ["anchor"], optional = true }
 xfchess-game = { workspace = true, optional = true }
 backend-types = { path = "crates/shared/backend-types" }
 

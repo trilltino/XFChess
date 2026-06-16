@@ -35,4 +35,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. Create `crates/<name>/Cargo.toml` and `src/lib.rs`.
 2. Add to `workspace.dependencies` in the root `Cargo.toml`.
 3. Reference via `{ path = "crates/<name>" }` in consuming crate's `Cargo.toml`.
-4. Exclude from the workspace in root `Cargo.toml` if it should not be compiled by default (like `solana-contract-fuzzer`).
+4. Exclude from the workspace in root `Cargo.toml` only if it must not be compiled by default. Note: an excluded crate **cannot** use `dep.workspace = true` inheritance (it has no workspace root), so excluding trades drift-protection for build-time. Prefer keeping crates as members unless the build-time cost is real and unique to that crate.

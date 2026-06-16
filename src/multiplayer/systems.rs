@@ -7,7 +7,7 @@ use std::time::Instant;
 use futures_lite::StreamExt;
 use braid_iroh::{BraidIrohConfig, BraidIrohNode, DiscoveryConfig};
 use braid_core::{Update, Version};
-use braid_uri;
+use braid_chess;
 
 use crate::multiplayer::types::*;
 use crate::multiplayer::network::protocol::{NetworkMessage, SignedNetworkMessage};
@@ -462,12 +462,12 @@ pub fn handle_network_events(
                         }
                         causal.last_seq.insert(agent_key.clone(), *seq);
                         // Advance THIS agent's head (Gap B: per-sender lane).
-                        let new_head = braid_uri::version_hash(next_fen, *turn as u32);
+                        let new_head = braid_chess::version_hash(next_fen, *turn as u32);
                         causal.head_version.insert(agent_key, new_head);
                     } else {
                         // Legacy move without causal fields: keep a per-game head
                         // under the empty-agent key so resync still has a reference.
-                        let new_head = braid_uri::version_hash(next_fen, *turn as u32);
+                        let new_head = braid_chess::version_hash(next_fen, *turn as u32);
                         causal.head_version.insert((game_id, Vec::new()), new_head);
                     }
                 }

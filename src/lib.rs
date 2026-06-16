@@ -7,6 +7,7 @@ pub mod game;
 pub mod input;
 pub mod multiplayer;
 pub mod presentation;
+pub mod puzzle;
 pub mod rendering;
 #[cfg(feature = "solana")]
 pub mod solana;
@@ -193,7 +194,11 @@ struct SessionConfigFile {
 /// Builds the Bevy application with all plugins and configuration
 pub fn build_app(game_config: GameConfig) -> App {
     let mut app = App::new();
-    
+
+    // Bevy 0.19: route panics in systems/commands/observers to a handler that
+    // logs and recovers instead of tearing down the app mid-match.
+    core::error_handling::install_recovering_error_handler(&mut app);
+
     // Configure AI if requested
     if let Some(diff_val) = game_config.ai_difficulty {
         use crate::game::ai::resource::{ChessAIResource, GameMode, AIDifficulty};
@@ -285,11 +290,41 @@ pub fn build_app(game_config: GameConfig) -> App {
         states::pause::PausePlugin,
         states::settings::SettingsPlugin,
         xf_animate::XfAnimatePlugin,
+        puzzle::PuzzlePlugin,
     ))
     .add_plugins(multiplayer::MultiplayerPlugin);
 
     #[cfg(feature = "solana")]
     app.add_plugins(solana::SolanaPlugin);
 
+    // Set the OS window / taskbar icon once the winit window exists.
+    app.add_systems(Startup, set_window_icon);
+
     app
+}
+
+/// Sets the OS window (title-bar + taskbar) icon. The PNG is embedded in the
+/// binary via `include_bytes!`, so it works regardless of working directory or
+/// how the game is packaged. Runs once at startup against the primary window.
+fn set_window_icon(
+    windows: NonSend<bevy::winit::WinitWindows>,
+    primary: Query<Entity, With<bevy::window::PrimaryWindow>>,
+) {
+    const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+    let Ok(entity) = primary.single() else {
+        return;
+    };
+    let Some(window) = windows.get_window(entity) else {
+        return;
+    };
+    let Ok(image) = image::load_from_memory(ICON_PNG) else {
+        warn!("[window_icon] failed to decode embedded icon");
+        return;
+    };
+    let rgba = image.into_rgba8();
+    let (width, height) = rgba.dimensions();
+    match winit::window::Icon::from_rgba(rgba.into_raw(), width, height) {
+        Ok(icon) => window.set_window_icon(Some(icon)),
+        Err(e) => warn!("[window_icon] invalid icon data: {e}"),
+    }
 }

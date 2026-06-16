@@ -643,12 +643,12 @@ fn open_in_browser(url: &str) {
         return;
       }
     }
-    // Fallback: default browser
-    let _ = Command::new("cmd").args(["/C", "start", "", &url_ts]).spawn();
+    // Fallback: default browser (cross-platform via the `open` crate).
+    let _ = open::that(&url_ts);
   }
   #[cfg(not(windows))]
   {
-    let _ = Command::new("xdg-open").arg(&url_ts).spawn();
+    let _ = open::that(&url_ts);
   }
 }
 

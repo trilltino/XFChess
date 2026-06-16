@@ -72,7 +72,7 @@ fn spawn_orbital_lights(mut commands: Commands, settings: Res<GameSettings>) {
             PointLight {
                 intensity: 500_000.0,
                 color,
-                shadows_enabled,
+                shadow_maps_enabled: shadows_enabled,
                 range: 30.0,
                 radius: 0.5,
                 ..default()
@@ -122,7 +122,7 @@ fn update_orbital_lights(
         point_light.color = color;
 
         // Update shadows setting (allows real-time shadow toggling)
-        point_light.shadows_enabled = shadows_enabled;
+        point_light.shadow_maps_enabled = shadows_enabled;
     }
 }
 
@@ -166,7 +166,7 @@ fn sync_light_count(
                 PointLight {
                     intensity: 500_000.0,
                     color,
-                    shadows_enabled,
+                    shadow_maps_enabled: shadows_enabled,
                     range: 30.0,
                     radius: 0.5,
                     ..default()

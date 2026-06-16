@@ -90,6 +90,7 @@ pub fn create_pieces(
     _view_mode: Res<crate::game::view_mode::ViewMode>,
     mut pieces_spawned: ResMut<PiecesSpawned>,
     sprite_handles: Option<Res<PieceSpriteHandles>>,
+    puzzle_board: Option<Res<crate::puzzle::PuzzleBoard>>,
 ) {
     // Skip if already spawned
     if pieces_spawned.spawned {
@@ -116,6 +117,24 @@ pub fn create_pieces(
     // Use the documented constant offset to position pieces on the board surface
     // See PIECE_Y_OFFSET documentation for how to recalculate if models change
     let visual_offset = Vec3::new(0.0, PIECE_Y_OFFSET, 0.0);
+
+    // Puzzle mode: spawn the position described by the FEN instead of the
+    // standard starting layout.
+    if let Some(pb) = puzzle_board.as_ref() {
+        if pb.active && !pb.fen.is_empty() {
+            spawn_pieces_from_fen(
+                &mut commands,
+                &piece_meshes,
+                &mut materials,
+                &pb.fen,
+                visual_offset,
+                &sprite_handles,
+            );
+            pieces_spawned.spawned = true;
+            info!("[PIECES] Spawned puzzle position from FEN");
+            return;
+        }
+    }
 
     // Each piece will get its own unique material to prevent color bleeding
     // during capture animations. This ensures fade effects don't affect other pieces.
@@ -194,6 +213,69 @@ pub fn create_pieces(
 
     pieces_spawned.spawned = true;
     info!("[PIECES] All 32 pieces spawned successfully");
+}
+
+/// Spawn pieces for an arbitrary position from the board field of a FEN string.
+/// FEN ranks run 8→1 (top to bottom); board rank 0 is white's first rank, so
+/// FEN row index `i` maps to board rank `7 - i`.
+#[allow(clippy::too_many_arguments)]
+fn spawn_pieces_from_fen(
+    commands: &mut Commands,
+    meshes: &PieceMeshes,
+    materials: &mut Assets<StandardMaterial>,
+    fen: &str,
+    visual_offset: Vec3,
+    sprite_handles: &Option<Res<PieceSpriteHandles>>,
+) {
+    let board = fen.split_whitespace().next().unwrap_or("");
+    for (row_idx, row) in board.split('/').enumerate() {
+        if row_idx >= 8 {
+            break;
+        }
+        let rank = 7u8.saturating_sub(row_idx as u8);
+        let mut file: u8 = 0;
+        for ch in row.chars() {
+            if let Some(d) = ch.to_digit(10) {
+                file = file.saturating_add(d as u8);
+                continue;
+            }
+            let color = if ch.is_ascii_uppercase() {
+                PieceColor::White
+            } else {
+                PieceColor::Black
+            };
+            let piece_type = match ch.to_ascii_lowercase() {
+                'k' => PieceType::King,
+                'q' => PieceType::Queen,
+                'r' => PieceType::Rook,
+                'b' => PieceType::Bishop,
+                'n' => PieceType::Knight,
+                'p' => PieceType::Pawn,
+                _ => {
+                    file = file.saturating_add(1);
+                    continue;
+                }
+            };
+            if file < 8 {
+                let material = if color == PieceColor::White {
+                    materials.add(white_piece_material())
+                } else {
+                    materials.add(black_piece_material())
+                };
+                spawn_piece_at(
+                    commands,
+                    meshes,
+                    material,
+                    color,
+                    piece_type,
+                    (file, rank),
+                    visual_offset,
+                    sprite_handles,
+                );
+            }
+            file = file.saturating_add(1);
+        }
+    }
 }
 
 /// Container for piece mesh handles - using wooden_chess_board.glb like the reference

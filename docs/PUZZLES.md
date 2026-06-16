@@ -1,7 +1,19 @@
 # Puzzles & Puzzle Payouts — Backend Design
 
-> Status: design / not yet implemented.
+> Status: **implemented (v1), full e2e** — backend serve/verify/rating/anti-cheat/
+> daily + interactive per-move flow + admin curation/funding + client play loop
+> (FEN board spawn → InGame → setup move → `/puzzle/move` → opponent reply →
+> result) + admin Puzzles page. All Rust targets and the admin TS compile clean;
+> the import pipeline is smoke-tested. Remaining ops step: run the one-time
+> Lichess CSV import on the VPS (§4). The 3D play loop compiles but has not been
+> launched in a live client here (no runtime/display); one known UX edge: input
+> is not blocked during the opponent's reply turn.
 > Owner: see [CLAUDE.md](../CLAUDE.md). Companion to [PATH_TO_MAINNET.md](PATH_TO_MAINNET.md).
+>
+> Implemented in: `backend/migrations/018_puzzles.sql`,
+> `backend/src/signing/routes/puzzle.rs` (public + admin routes),
+> `backend/src/bin/import_puzzles.rs`, `src/puzzle/mod.rs` (client),
+> `tauri/tournament-admin/src/components/Puzzles.tsx`.
 
 This document explains how to add a **puzzle pool** to XFChess, store it in the
 backend on the VPS, serve puzzles to the game client, verify solutions
@@ -11,7 +23,7 @@ involved.
 
 The two **player** UI entry points already exist as stubs in
 [`src/states/main_menu/new_menu.rs`](../src/states/main_menu/new_menu.rs):
-"Solve Puzzles" (Play) and "Puzzle Rush (Earn)". This doc fills in everything
+"Solve Puzzles" (Play) and "Puzzles (Earn)". This doc fills in everything
 behind those two TODOs.
 
 The **operator** UI is an **extension of the existing
@@ -157,8 +169,7 @@ CREATE TABLE puzzle_challenges (
     nonce       TEXT PRIMARY KEY,        -- random, returned to client
     wallet      TEXT NOT NULL,
     puzzle_id   TEXT NOT NULL,
-    mode        TEXT NOT NULL,           -- 'solve' | 'rush'
-    rush_id     TEXT,                    -- groups a Puzzle Rush run
+    mode        TEXT NOT NULL,           -- 'solve' | 'earn' | 'daily'
     issued_at   INTEGER NOT NULL,
     expires_at  INTEGER NOT NULL,
     consumed    INTEGER NOT NULL DEFAULT 0
@@ -184,20 +195,6 @@ CREATE TABLE puzzle_bounties (
     created_at      INTEGER NOT NULL
 );
 CREATE INDEX idx_puzzle_bounties_active ON puzzle_bounties(status, scope);
-
--- A wagered Puzzle Rush run (the "Earn" mode).
-CREATE TABLE puzzle_rush_runs (
-    rush_id     TEXT PRIMARY KEY,
-    wallet      TEXT NOT NULL,
-    stake_lamports INTEGER NOT NULL,
-    stake_sig   TEXT,                    -- proof the stake was paid in
-    score       INTEGER NOT NULL DEFAULT 0,
-    status      TEXT NOT NULL,           -- 'open' | 'finished' | 'paid'
-    payout_lamports INTEGER,
-    payout_sig  TEXT,
-    started_at  INTEGER NOT NULL,
-    finished_at INTEGER
-);
 ```
 
 Why a `puzzle_challenges` table and a `nonce`? Because the solve endpoint must
@@ -258,9 +255,11 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-Run once during VPS provisioning. ~5M rows in SQLite is a few hundred MB — fine
-on the Hetzner box. You can pre-filter the CSV (e.g. drop deviation > 100, or
-ratings outside 800–2600) to shrink it.
+Run once during VPS provisioning. The full ~5M-row pool is ≈1.2–1.3 GB in
+SQLite (table + indexes) — trivial for the Hetzner box. Pre-filtering the CSV
+(e.g. drop deviation > 100, or ratings outside 800–2600) cuts it to ≈600–900 MB.
+The `puzzles` table is static, regenerable data — it can be excluded from
+routine DB backups and re-imported from the CSV at any time.
 
 ---
 
@@ -289,10 +288,11 @@ LIMIT 1;
 - `:lo / :hi` = player rating ± window. Start window ≈ ±150; widen on retry if
   empty (mirrors Lichess's `compromise` back-off in `PuzzlePath.nextFor`).
 - New players default to rating 1500 (see `puzzle_ratings`).
-- For **Puzzle Rush**, don't pick randomly — serve a **fixed climbing ladder**
-  of increasing rating, exactly like
-  [`PuzzleStreak.scala`](../reference/lila/modules/puzzle/src/main/PuzzleStreak.scala)
-  (its buckets run 1050 → 2799). Precompute the ladder when the run starts.
+- For the **Earn mode**, use the same query but restrict to **admin-funded**
+  puzzles, e.g. `AND id IN (SELECT puzzle_id FROM puzzle_bounties
+  WHERE status='active' AND scope='puzzle')` (or the equivalent band filter).
+  Only puzzles the operator has prefunded are served; solving one pays its
+  posted reward (§8).
 
 `ORDER BY RANDOM()` over a rating-banded index is acceptable here; if it ever
 shows up in profiling, switch to "pick a random offset in the band."
@@ -308,24 +308,25 @@ New route module `backend/src/signing/routes/puzzle.rs`, registered in
 `Router<AppState>`, a `GameRepository`-style repo, `State(state)` extractors.
 
 ```
-GET  /puzzle/next?mode=solve
-        -> { nonce, id, fen, color }          // NO line
+GET  /puzzle/next?mode=solve|earn
+        -> { nonce, id, fen, color, reward_lamports? }   // NO line.
+           // mode=earn serves only admin-funded puzzles (§5); reward_lamports
+           // is the bounty payout for a clean solve.
 POST /puzzle/solve
-        body: { nonce, moves: ["e2e4", ...] }
+        body: { nonce, moves: ["e2e4", ...] }   // all player moves at once
         -> { win, rating, rating_diff, payout_sig? }
-
-POST /puzzle/rush/start
-        body: { stake_lamports }              // returns unsigned stake tx
-        -> { rush_id, unsigned_tx }
-GET  /puzzle/rush/next?rush_id=...
-        -> { nonce, id, fen, color } | { rush_complete: true }
-POST /puzzle/rush/solve
-        body: { rush_id, nonce, moves: [...] }
-        -> { correct, score, next? }
-POST /puzzle/rush/finish
-        body: { rush_id }
-        -> { score, payout_lamports, payout_sig }
+POST /puzzle/move
+        body: { nonce, uci: "e2e4" }            // interactive, one move at a time
+        -> { correct, done, win?, reply?, rating, rating_diff, payout_sig? }
+           // `reply` is the opponent's next move, revealed ONLY after a correct
+           // player move; future player moves are never sent. The final correct
+           // move pays any bounty (anti-cheat gated, §7). The game client uses
+           // this interactive endpoint; /puzzle/solve is the batch equivalent.
 ```
+
+There is **no** separate stake/run lifecycle — the earn path is the same
+serve→solve pair as the free path; the only difference is that an earn puzzle
+carries a bounty and a verified solve triggers a payout from it.
 
 ### Serving (`GET /puzzle/next`)
 
@@ -397,12 +398,13 @@ every puzzle instantly and perfectly. The defenses, reusing what already exists:
    `backend/src/signing/` and `tasks/anticheat_worker.rs`. Cap free-tier payouts
    per wallet **and per IP** per day so the faucet has a bounded daily cost.
 
-5. **Make the wagered mode the real earner.** See §8 — staked Puzzle Rush can't
-   be farmed for free because entry costs SOL.
+5. **Bounded bounty cost.** Every bounty has a `budget_lamports` cap and a
+   `max_per_wallet` limit (§3), so the worst-case cost of any funded puzzle is
+   fixed in advance: when `spent >= budget` the bounty closes and pays no more.
 
 The free "Solve Puzzles" tier should pay little or nothing (or only a small
 **daily** bonus) — its job is acquisition (get a wallet connected), not to be a
-SOL spigot.
+SOL spigot. All real payouts come from **admin-funded** puzzles (§8).
 
 ---
 
@@ -414,38 +416,39 @@ settles game wagers and tournament prizes:
 - `backend/src/signing/solana/instructions.rs` — instruction builders.
 - `backend/src/tasks/settlement_worker.rs` — scans games, auto-submits payouts.
 - `backend/src/tasks/fee_claimer.rs` — vault claims.
-- `signing/routes/tournament.rs` + `tasks/tournament_scheduler.rs` — pooled
-  prize distribution (the model the wagered mode copies).
+- `signing/routes/tournament.rs` + `tasks/tournament_scheduler.rs` — prefunded
+  prize distribution (the model the puzzle bounty copies).
 - A fee/prize vault exists in `programs/xfchess-game/src/account_ix/`.
 - The **global session key** (see memory `project_global_session.md`) means the
   payout needs no extra wallet popup.
 
-### Model A — House-funded bounty (free tier, capped)
+### The model: admin-prefunded puzzle bounties
 
-Solve a puzzle (server-verified) → backend builds a vault→player transfer →
-records `paid_sig` on the `puzzle_rounds` row. This is a **faucet**: gate it hard
-with §7 and a strict daily cap. Good for a single **Daily Puzzle** (§10), bad as
-an uncapped reward on every solve.
+There is **one** earn model, and it mirrors how tournament prizes already work:
+the operator **prefunds** a puzzle, and a player who **completes** it gets the
+posted payout. No staking, no ladder, no rake.
 
-### Model B — Wagered Puzzle Rush (the "Earn" button, recommended)
+1. **Fund (operator).** In the admin app the operator picks a puzzle (or an ELO
+   band, or the daily), sets `reward_lamports` (per solve) and `budget_lamports`
+   (total locked), and clicks fund. The VPS authority key signs the funding tx
+   exactly like `fund_tournament_prize`, and a `puzzle_bounties` row is written
+   (§9). This is the prefunding step — the SOL is committed up front.
+2. **Solve (player).** `GET /puzzle/next?mode=earn` serves a funded puzzle (with
+   its `reward_lamports`); the player submits the solution; the server verifies
+   it against the secret `line` (§6).
+3. **Pay (server).** On a server-verified win that passes the anti-cheat gate
+   (§7), the backend builds a vault→player transfer for `reward_lamports`,
+   records `paid_sig` on the `puzzle_rounds` row, and debits `spent_lamports` on
+   the bounty. `max_per_wallet` caps repeat claims; when `spent >= budget` the
+   bounty flips to `exhausted` and pays no more.
 
-Self-funding and abuse-resistant:
+This is the same prefunded-prize flow as the tournaments: the cost of any bounty
+is fixed up front by its `budget_lamports`, so there is no open-ended faucet. The
+"Puzzles (Earn)" button surfaces exactly these funded puzzles.
 
-1. `POST /puzzle/rush/start { stake_lamports }` → backend returns an **unsigned
-   stake transaction** (client signs, stake lands in the prize vault); record a
-   `puzzle_rush_runs` row (`status='open'`).
-2. Serve the fixed climbing ladder (§5 / `PuzzleStreak`). Each solve advances
-   `score`; first miss ends the run.
-3. `POST /puzzle/rush/finish` → backend computes payout from `score` and the
-   pooled stakes minus a rake, builds the payout tx (same path as tournament
-   prize distribution), records `payout_sig`, sets `status='paid'`.
-
-Economically this is pari-mutuel like the tournaments — growth here **pays** a
-rake instead of costing a vault. This is the mode the "Puzzle Rush (Earn)"
-button should launch.
-
-> **Decision needed:** free-tier reward policy for Model A (nothing / daily-only
-> / small per-solve cap), and the Model B payout curve + rake.
+> **Decision needed:** does the free "Solve Puzzles" tier pay anything at all
+> (nothing vs. a single small daily bounty), or are payouts only ever on
+> admin-funded puzzles?
 
 ---
 
@@ -581,11 +584,15 @@ model, no CLI.
 
 ## 10. Game client integration (`src/`)
 
-Mirror the existing `AppState::Game` flow (see [CLAUDE.md](../CLAUDE.md) §Game
-client). The client is a **renderer + input collector**, never the judge.
+Mirror the existing in-game flow (see [CLAUDE.md](../CLAUDE.md) §Game client).
+The client is a **renderer + input collector**, never the judge.
 
-1. New `src/puzzle/` module and an `AppState::Puzzle` variant in
-   `core/` alongside `Splash → MainMenu → Game → Pause`.
+1. New `src/puzzle/` module and a `GameState::Puzzle` variant in
+   [`core/states.rs`](../src/core/states.rs) alongside the existing `MainMenu`,
+   `InGame`, `Paused`, … — and add the `MainMenu↔Puzzle` transitions to the
+   state-transition validator in that same file. (Alternatively, reuse `InGame`
+   with a new `GameMode::Puzzle` to inherit the board systems wholesale — likely
+   the cleaner path.)
 2. On entering: `GET /puzzle/next`, receive `{ nonce, fen, color }`, set up the
    board via the existing FEN/board rendering in `game/` + `rendering/`.
 3. Collect the player's moves. Optionally pre-validate locally with
@@ -594,10 +601,11 @@ client). The client is a **renderer + input collector**, never the judge.
 4. On the last move, `POST /puzzle/solve { nonce, moves }`. Show the returned
    `win`, `rating_diff`, and (if any) payout confirmation.
 5. Wire the two stubs:
-   - [`new_menu.rs:865`](../src/states/main_menu/new_menu.rs#L865) "Solve
-     Puzzles" → enter `AppState::Puzzle` in `solve` mode.
-   - [`new_menu.rs:879`](../src/states/main_menu/new_menu.rs#L879) "Puzzle Rush
-     (Earn)" → stake flow, then `AppState::Puzzle` in `rush` mode.
+   - [`new_menu.rs:853`](../src/states/main_menu/new_menu.rs#L853) "Solve
+     Puzzles" → enter puzzle mode, fetching with `GET /puzzle/next?mode=solve`.
+   - [`new_menu.rs:867`](../src/states/main_menu/new_menu.rs#L867) "Puzzles
+     (Earn)" → enter puzzle mode, fetching with `GET /puzzle/next?mode=earn`
+     (admin-funded puzzles only); a clean solve pays the posted reward.
 
 ---
 
@@ -609,7 +617,7 @@ slice, copying [`DailyPuzzle.scala`](../reference/lila/modules/puzzle/src/main/D
 - One shared puzzle per day (pick one row, pin it for 24h).
 - `GET /puzzle/daily` (serve) + `POST /puzzle/daily/solve` (verify) — no rating,
   no sessions, just the nonce + verify path.
-- Small fixed house bounty, one claim per wallet per day (Model A, tightly
+- Small fixed admin-funded bounty, one claim per wallet per day (tightly
   capped).
 - Shareable result ("I solved today's XFChess puzzle") = free organic reach.
 
@@ -620,18 +628,18 @@ selection/rating machinery, and is a daily reason to open the app.
 
 ## 12. Phased build plan
 
-| Phase | Deliverable | Touches |
-|-------|-------------|---------|
-| 0 | `018_puzzles.sql` migration + `import_puzzles` binary; load Lichess CSV | `backend/migrations/`, `backend/src/bin/` |
-| 1 | `routes/puzzle.rs`: serve + **server-side verify** (no payout, no rating) | `backend/src/signing/routes/` |
-| 2 | Client `AppState::Puzzle` + wire "Solve Puzzles" stub | `src/puzzle/`, `src/states/main_menu/` |
-| 3 | Puzzle rating (Glicko) + `puzzle_rounds`/`puzzle_ratings` | `backend/src/db/`, `routes/puzzle.rs` |
-| 4 | **Admin (tournament-admin extension §9):** ELO/name index endpoints + `Puzzles.tsx` page (browse, select, no funding yet) | `routes/admin.rs`, `tauri/tournament-admin/` |
-| 5 | Anti-cheat gate: think-time floor, dubious-rating, daily caps | reuse `tasks/anticheat_worker.rs`, `signing/` |
-| 6 | **Admin funding** `/admin/puzzles/fund` via `vps_authority` + `puzzle_bounties`; funding panel in `Puzzles.tsx` | `routes/admin.rs`, `tauri/tournament-admin/` |
-| 7 | Daily Puzzle + capped house bounty (Model A), paid from a bounty | `routes/puzzle.rs`, `signing/solana/` |
-| 8 | Wagered Puzzle Rush (Model B): stake → ladder → payout | `routes/puzzle.rs`, reuse tournament payout |
-| 9 | (optional) On-chain puzzle prize vault + solution verification | `programs/xfchess-game/` |
+| Phase | Deliverable | Status |
+|-------|-------------|--------|
+| 0 | `018_puzzles.sql` migration + `import_puzzles` binary; load Lichess CSV | ✅ code + smoke-tested; full CSV import is a VPS ops step |
+| 1 | `routes/puzzle.rs`: serve + **server-side verify** | ✅ implemented (`get_next`/`post_solve`, secret line, nonce) |
+| 2 | Client puzzle mode + wire "Solve Puzzles" stub | ✅ full loop: FEN board spawn + InGame transition + setup move + interactive `/puzzle/move` + result |
+| 3 | Puzzle rating (Glicko) + `puzzle_rounds`/`puzzle_ratings` | ✅ simplified Glicko/Elo in `rating_update` |
+| 4 | **Admin** ELO/name index endpoints + `Puzzles.tsx` page | ✅ admin routes + Puzzles page (browse/inspect/fund/bounties) |
+| 5 | Anti-cheat gate: think-time floor, daily caps, budget cap | ✅ `payout_decision` |
+| 6 | **Admin funding** `/admin/puzzles/fund` + `puzzle_bounties` | ✅ off-chain VPS-budget v1 (on-chain escrow deferred) |
+| 7 | Daily Puzzle + capped admin-funded bounty | ✅ `get_daily` + bounty payout |
+| 8 | "Puzzles (Earn)" client surface | ✅ `mode=earn` fetch (reward shown); shares solve path |
+| 9 | (optional) On-chain puzzle prize vault + solution verification | ⬜ deferred (optional) |
 
 Phases 0–4 are shippable as a **free, unpaid** puzzle trainer with an admin
 browser (zero financial risk). Money only enters at Phase 6+, after the
@@ -641,10 +649,10 @@ anti-cheat gate (Phase 5) and the VPS-key funding plumbing are in place.
 
 ## 13. Open decisions
 
-1. **Free-tier reward:** nothing, daily-only, or a small capped per-solve
-   bounty? (Drives faucet cost + abuse surface.)
-2. **Rush payout curve + rake:** how does payout scale with streak length, and
-   what's the house cut?
+1. **Free-tier reward:** does "Solve Puzzles" pay anything (a single small daily
+   bounty), or are payouts only ever on admin-funded puzzles?
+2. **Bounty scope default:** do operators mostly fund individual puzzles, ELO
+   bands, or a rotating daily? (Drives the admin funding form's defaults.)
 3. **Funding escrow (§9.3):** keep admin-funded bounties as plain VPS-wallet
    transfers accounted in `puzzle_bounties`, or escrow them in an on-chain puzzle
    prize vault PDA? (VPS-wallet v1, on-chain later — same as moves.)
@@ -660,9 +668,9 @@ anti-cheat gate (Phase 5) and the VPS-key funding plumbing are in place.
 - Lila puzzle module:
   [`reference/lila/modules/puzzle/src/main/`](../reference/lila/modules/puzzle/src/main/)
   — `Puzzle.scala` (data model), `PuzzleSelector.scala` (selection),
-  `PuzzleFinisher.scala` (rating + dubious check), `PuzzleStreak.scala` (rush
-  ladder), `DailyPuzzle.scala` (daily), `PuzzleComplete.scala` (the
-  client-trusted flow we deliberately do **not** copy for payouts).
+  `PuzzleFinisher.scala` (rating + dubious check), `DailyPuzzle.scala` (daily),
+  `PuzzleComplete.scala` (the client-trusted flow we deliberately do **not** copy
+  for payouts).
 - Existing backend patterns to copy:
   [`routes/history.rs`](../backend/src/signing/routes/history.rs) (route shape),
   [`db/repository.rs`](../backend/src/db/repository.rs) (repo + FromRow),

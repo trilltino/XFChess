@@ -23,36 +23,32 @@ anchor-spl = "=0.31.1"
 solana-program = "=2.2.1"
 # solana-program version pulled in by anchor-lang
 chess-logic-on-chain = { workspace = true, optional = true }
-ephemeral-rollups-sdk = { version = "0.8.5", features = ["anchor"] }
+ephemeral-rollups-sdk = { version = "0.13.0", features = ["anchor"] }
 
 # Crank dependencies (MagicBlock scheduled tasks) — gated by the `cranks` feature
 magicblock-magic-program-api = { version = "=0.3.1", default-features = false, optional = true }
 bincode = { version = "=1.3", optional = true }
 
+# Ephemeral-Rollups move-path suite. Runs the real on-chain `record_move`
+# logic in-process via solana-program-test (loads target/deploy/xfchess_game.so).
+# Requires `cargo build-sbf` first. See docs/ER_TESTING.md.
 [[test]]
-name = "game_tests"
-path = "tests/game_tests.rs"
-required-features = ["legacy-game-tests"]
+name = "er_move_tests"
+path = "tests/er_move_tests.rs"
 
+# Delegation/undelegation account-constraint suite (negative paths that don't
+# need a live ER — e.g. the magic_program/magic_context address constraints).
 [[test]]
-name = "security_tests"
-path = "tests/security_tests.rs"
-required-features = ["legacy-game-tests"]
-
-[[test]]
-name = "fee_model_tests"
-path = "tests/fee_model_tests.rs"
-required-features = ["legacy-game-tests"]
-
-[[test]]
-name = "smoke_tests"
-path = "tests/smoke_tests.rs"
-required-features = ["game-tests"]
+name = "er_delegation_tests"
+path = "tests/er_delegation_tests.rs"
 
 [dev-dependencies]
 tokio = { version = "=1", features = ["full"] }
 solana-program-test = "=2.2.1"
 solana-sdk = "=2.2.1"
+# Reused to craft board state and compute expected next-boards exactly as the
+# program does (zero divergence between test oracle and on-chain validator).
+chess-logic-on-chain = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow" }

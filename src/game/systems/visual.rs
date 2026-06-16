@@ -245,7 +245,7 @@ pub fn setup_game_scene(
         commands.spawn((
             DirectionalLight {
                 illuminance: 8_000.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 color: Color::srgb(1.0, 0.97, 0.90),
                 ..default()
             },
@@ -259,7 +259,7 @@ pub fn setup_game_scene(
             PointLight {
                 intensity: 120_000.0,
                 color: Color::srgb(1.0, 1.0, 1.0),
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 range: 100.0,
                 ..default()
             },

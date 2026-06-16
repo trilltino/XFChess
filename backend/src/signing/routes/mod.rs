@@ -20,6 +20,7 @@ pub mod rates;
 pub mod pdf_mailer;
 pub mod kyc;
 pub mod history;
+pub mod puzzle;
 pub mod dispute;
 pub mod relayer;
 pub mod debug;
