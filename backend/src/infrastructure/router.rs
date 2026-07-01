@@ -8,7 +8,7 @@ use crate::signing::{AppState, build_router};
 use crate::signing::swiss::handlers::{swiss_admin_routes, swiss_read_routes};
 use crate::signing::routes::tournament as tournament_routes;
 use crate::signing::routes::matchmaking::matchmaking_routes;
-use crate::signing::routes::pdf_mailer::pdf_mailer_routes;
+use crate::signing::routes::mailer::mailer_routes;
 use crate::signing::routes::kyc::kyc_routes;
 use crate::signing::routes::history::history_routes;
 use crate::signing::routes::puzzle::{puzzle_routes, puzzle_admin_routes};
@@ -55,8 +55,8 @@ pub fn build_app_router(
         .clone()
         .nest("/matchmaking", matchmaking_routes());
 
-    // Build pdf mailer router (no auth required for signup)
-    let pdf_router = pdf_mailer_routes();
+    // Build mailer router (no auth required for signup / waitlist)
+    let mail_router = mailer_routes();
 
     // Build KYC / user-status router (needs AppState for vault_pool + store)
     let kyc_router = kyc_routes();
@@ -93,7 +93,7 @@ pub fn build_app_router(
     signing_router
         .merge(tournament_router)
         .merge(matchmaking_router)
-        .merge(pdf_router)
+        .nest("/api", mail_router)
         .merge(kyc_router)
         .merge(history_router)
         .merge(puzzle_routes())
@@ -104,8 +104,63 @@ pub fn build_app_router(
         .merge(puzzle_admin_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
         .merge(chat_routes().with_state(signing_state.clone()))
         .merge(social_router)
+        .layer(cors_layer())
+        // Correlation IDs: accept an inbound x-request-id or mint a UUID, include it in
+        // the request span (so every log line within the request carries it), and echo
+        // it on the response so clients/support can quote it.
+        .layer(tower_http::propagate_header::PropagateHeaderLayer::new(
+            axum::http::HeaderName::from_static("x-request-id"),
+        ))
         .layer(
-            tower_http::cors::CorsLayer::permissive()
+            tower_http::trace::TraceLayer::new_for_http().make_span_with(
+                |request: &axum::http::Request<_>| {
+                    let request_id = request
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("-");
+                    tracing::info_span!(
+                        "http",
+                        method = %request.method(),
+                        uri = %request.uri().path(),
+                        request_id = %request_id,
+                    )
+                },
+            ),
         )
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            tower_http::request_id::MakeRequestUuid,
+        ))
+}
+
+/// CORS layer built from the `ALLOWED_ORIGINS` env var (comma-separated list of
+/// origins, e.g. `https://xfchess.com,https://www.xfchess.com`).
+///
+/// If `ALLOWED_ORIGINS` is unset/empty we fall back to permissive (any origin) —
+/// convenient for local dev, but **ALLOWED_ORIGINS must be set in production**.
+fn cors_layer() -> tower_http::cors::CorsLayer {
+    use axum::http::{header, HeaderValue, Method};
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+
+    let origins: Vec<HeaderValue> = std::env::var("ALLOWED_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<HeaderValue>().ok())
+        .collect();
+
+    let base = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
+
+    if origins.is_empty() {
+        tracing::warn!(
+            "[cors] ALLOWED_ORIGINS not set — allowing any origin (dev only; set it in production)"
+        );
+        base.allow_origin(AllowOrigin::any())
+    } else {
+        tracing::info!("[cors] restricting origins to: {:?}", origins);
+        base.allow_origin(AllowOrigin::list(origins))
+    }
 }

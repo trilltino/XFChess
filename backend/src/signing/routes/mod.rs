@@ -17,7 +17,7 @@ pub mod identity;
 pub mod matchmaking;
 pub mod tournament;
 pub mod rates;
-pub mod pdf_mailer;
+pub mod mailer;
 pub mod kyc;
 pub mod history;
 pub mod puzzle;

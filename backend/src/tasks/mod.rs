@@ -18,6 +18,7 @@ pub const ORCHESTRATOR_CHANNEL_SIZE: usize = 100;
 pub mod anticheat_worker;
 pub mod matchmaking;
 pub mod fee_claimer;
+pub mod queue;
 pub mod settlement_worker;
 pub mod tournament_scheduler;
 pub mod archiver;

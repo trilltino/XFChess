@@ -63,6 +63,14 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> (tokio:
     let ac_queue = anticheat_worker::spawn_anticheat_workers(ac_pool);
     info!("[Tasks] Anti-cheat analysis workers spawned");
 
+    // Spawn the durable job queue worker (email delivery with retries + DLQ).
+    // Settlement/prizes stay scan-based (chain-derived, already durable) — see
+    // tasks/queue.rs module docs.
+    crate::tasks::queue::QueueWorker::new()
+        .register("email.send", crate::signing::routes::mailer::handle_email_job)
+        .spawn(state.store.pool());
+    info!("[Tasks] Durable job-queue worker spawned (email.send)");
+
     info!("[Tasks] All background tasks spawned successfully");
     (trigger_tx, ac_queue)
 }

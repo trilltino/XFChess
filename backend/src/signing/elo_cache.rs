@@ -6,10 +6,7 @@
 //! current ELO rating.
 
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    pubkey::Pubkey,
-    commitment_config::CommitmentConfig,
-};
+use solana_sdk::pubkey::Pubkey;
 use std::{
     collections::HashMap,
     str::FromStr,
@@ -65,11 +62,10 @@ impl EloCache {
     /// # Returns
     /// A new EloCache instance
     pub fn new(rpc_url: String, ttl: Duration, program_id: Pubkey) -> Self {
-        let rpc = Arc::new(RpcClient::new_with_commitment(
-            rpc_url,
-            CommitmentConfig::confirmed(),
-        ));
-        
+        // Use the shared hardened constructor (bounded request timeout) rather than a
+        // bespoke client — an RPC hang must not wedge profile/matchmaking reads.
+        let rpc = Arc::new(crate::signing::solana::make_rpc(&rpc_url));
+
         Self {
             rpc,
             cache: Arc::new(Mutex::new(HashMap::new())),

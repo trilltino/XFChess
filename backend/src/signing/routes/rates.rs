@@ -110,34 +110,35 @@ async fn fetch_sol_rates_from_coingecko() -> Result<HashMap<String, f64>, String
 }
 
 /// Fetch SOL/USD spot price from Helius token-price API.
+/// Skips straight to the CoinGecko fallback when HELIUS_API_KEY is unset —
+/// never ship a hardcoded key in source.
 async fn fetch_sol_usd_helius(client: &reqwest::Client) -> Result<f64, String> {
-    let api_key = std::env::var("HELIUS_API_KEY")
-        .unwrap_or_else(|_| "5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5".to_string());
-    // Use Helius DAS getAsset-style price endpoint (v1)
-    let url = format!(
-        "https://mainnet.helius-rpc.com/?api-key={}",
-        api_key
-    );
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "sol-price",
-        "method": "getAsset",
-        "params": { "id": "So11111111111111111111111111111111111111112" }
-    });
+    // Try Helius first when a key is configured (never hardcode a key in source);
+    // otherwise go straight to the CoinGecko fallback below.
+    if let Ok(api_key) = std::env::var("HELIUS_API_KEY") {
+        if !api_key.is_empty() {
+            let url = format!("https://mainnet.helius-rpc.com/?api-key={}", api_key);
+            let body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": "sol-price",
+                "method": "getAsset",
+                "params": { "id": "So11111111111111111111111111111111111111112" }
+            });
 
-    // Try Helius RPC first; fall back to CoinGecko public API if it fails
-    let helius_result: Result<f64, String> = async {
-        let resp = client.post(&url).json(&body).send().await
-            .map_err(|e| format!("Helius RPC: {e}"))?;
-        let json: serde_json::Value = resp.json().await
-            .map_err(|e| format!("Helius json: {e}"))?;
-        json.pointer("/result/token_info/price_info/price_per_token")
-            .and_then(|p| p.as_f64())
-            .ok_or_else(|| "Helius RPC: no price_per_token".to_string())
-    }.await;
+            let helius_result: Result<f64, String> = async {
+                let resp = client.post(&url).json(&body).send().await
+                    .map_err(|e| format!("Helius RPC: {e}"))?;
+                let json: serde_json::Value = resp.json().await
+                    .map_err(|e| format!("Helius json: {e}"))?;
+                json.pointer("/result/token_info/price_info/price_per_token")
+                    .and_then(|p| p.as_f64())
+                    .ok_or_else(|| "Helius RPC: no price_per_token".to_string())
+            }.await;
 
-    if let Ok(price) = helius_result {
-        return Ok(price);
+            if let Ok(price) = helius_result {
+                return Ok(price);
+            }
+        }
     }
 
     // Fallback: CoinGecko public (no key, rate-limited but always available)
