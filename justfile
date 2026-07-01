@@ -5,6 +5,7 @@
 #          just kill           — stop all running XFChess processes
 #          just backend        — build + run backend only
 #          just game           — build + run game only
+#          just viz            — standalone Triton/network visualiser (Tauri)
 
 set windows-shell := ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
 
@@ -27,6 +28,7 @@ export RUST_LOG                := "info"
 
 # Secrets (sourced from .env; fallbacks are non-production)
 export SOLANA_RPC_URL          := env_var_or_default("SOLANA_RPC_URL", "https://api.devnet.solana.com")
+export SOLANA_RPC_FALLBACK_URL := env_var_or_default("SOLANA_RPC_FALLBACK_URL", "https://api.devnet.solana.com")
 export HELIUS_API_KEY          := env_var_or_default("HELIUS_API_KEY", "")
 export JWT_SECRET              := env_var_or_default("JWT_SECRET", "0000000000000000000000000000000000000000000000000000000000000000")
 export IDENTITY_ENCRYPTION_KEY := env_var_or_default("IDENTITY_ENCRYPTION_KEY", "0000000000000000000000000000000000000000000000000000000000000000")
@@ -74,6 +76,7 @@ kill:
      Stop-Process -Name "signing-server" -Force; \
      Stop-Process -Name "xfchess" -Force; \
      Stop-Process -Name "xfchess-tauri" -Force; \
+     Stop-Process -Name "xfchess-viz" -Force; \
      Start-Sleep -Milliseconds 500; \
      Write-Host "[CLEANUP] Done" -ForegroundColor Green
 
@@ -133,7 +136,7 @@ build-wallet-ui-force:
 
 # Build web frontend (production)
 build-web:
-    Set-Location web-solana && npm install && npm run build && Set-Location ..
+    Set-Location web-solana; npm install; if ($?) { npm run build }
 
 # ── Run individual services ───────────────────────────────────────────────────
 
@@ -163,11 +166,60 @@ profile: build-profile
 
 # Run web frontend dev server
 web:
-    Set-Location web-solana && npm run dev
+    Set-Location web-solana; npm run dev
 
 # Run tournament admin dev server
 admin:
-    Set-Location tauri/tournament-admin && npm run dev -- --port 7455
+    Set-Location tauri/tournament-admin; npm run dev -- --port 7455
+
+# Run backend + web frontend only (for e2e web testing, e.g. sign up)
+web-stack: kill build-backend build-web-ui
+    @Write-Host "" -ForegroundColor White
+    @Write-Host "========================================" -ForegroundColor Cyan
+    @Write-Host " XFChess Web Stack (backend + web)" -ForegroundColor Cyan
+    @Write-Host "========================================" -ForegroundColor Cyan
+    @$hasWT = Get-Command wt -ErrorAction SilentlyContinue; \
+     $bin = "{{bin}}"; \
+     $root = (Get-Location).Path; \
+     if ($hasWT) { \
+         Write-Host "[LAUNCH] Using Windows Terminal tabs" -ForegroundColor Green; \
+         wt -w 0 nt --title "Backend" -d "$root/backend" powershell -NoProfile -Command "$root/$bin/signing-server.exe"; \
+         Start-Sleep -Seconds 2; \
+         wt -w 0 nt --title "Web Frontend" -d "$root/web-solana" powershell -NoProfile -Command "npm run dev" \
+     } else { \
+         Write-Host "[LAUNCH] Windows Terminal not found, using separate windows" -ForegroundColor Yellow; \
+         Start-Process powershell -ArgumentList "-NoProfile -Command Set-Location '$root/backend'; '$root/$bin/signing-server.exe'" -WindowStyle Normal; \
+         Start-Sleep -Seconds 2; \
+         Start-Process powershell -ArgumentList "-NoProfile -Command Set-Location '$root/web-solana'; npm run dev" -WindowStyle Normal \
+     }
+    @Write-Host ""
+    @Write-Host "Backend:      http://127.0.0.1:8090" -ForegroundColor White
+    @Write-Host "Web Frontend: http://localhost:5173" -ForegroundColor White
+    @Write-Host "========================================" -ForegroundColor Cyan
+
+# ── Visualiser ────────────────────────────────────────────────────────────────
+
+# Install visualiser deps (only if node_modules is missing)
+build-viz-ui:
+    @if (-not (Test-Path "viz/node_modules/.bin/vite")) { \
+        Write-Host "[BUILD] Installing Visualiser dependencies..." -ForegroundColor Cyan; \
+        Set-Location viz; npm install; Set-Location .. \
+    } else { \
+        Write-Host "[BUILD] Visualiser node_modules exists, skipping" \
+    }
+
+# Run the standalone Tauri network visualiser (Triton RPC benchmark + topology)
+viz: build-viz-ui
+    @Write-Host "[VIZ] Launching XFChess Network Visualiser..." -ForegroundColor Cyan
+    Set-Location viz && npm run tauri dev
+
+# Build the visualiser as a distributable installer (bundle under viz/src-tauri/target)
+viz-build: build-viz-ui
+    Set-Location viz && npm run tauri build
+
+# Run the CLI RPC benchmark — text output, no GUI (uses $SOLANA_RPC_URL from .env)
+viz-bench:
+    cargo run -p er-cu-benchmark --bin triton-bench -- read-load
 
 # ── Full dev stack ────────────────────────────────────────────────────────────
 
@@ -216,33 +268,34 @@ dev: kill build build-wallet-ui build-admin-ui build-web-ui
 dev2: kill build build-wallet-ui build-admin-ui build-web-ui
     @$root = (Get-Location).Path; \
      $bin = ("{{bin}}" -replace '/', '\'); \
+     New-Item -ItemType Directory -Force -Path "$root\tmp" | Out-Null; \
      $env_common = "`$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:BACKEND_URL='{{BACKEND_URL}}'; `$env:RUST_LOG='{{RUST_LOG}}'; `$env:HELIUS_API_KEY='{{HELIUS_API_KEY}}'"; \
-     Set-Content -Path "$root\dev2-backend.ps1"   -Value "Set-Location '$root\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:HOST_TREASURY_PUBKEY='{{HOST_TREASURY_PUBKEY}}'; `$env:ADMIN_API_KEY='{{ADMIN_API_KEY}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\dev2-wallet-p1.ps1" -Value "Set-Location '$root\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
-     Set-Content -Path "$root\dev2-tauri-p1.ps1"  -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\dev2-game-p1.ps1"   -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\dev2-web.ps1"        -Value "Set-Location '$root\web-solana'; npm run dev" -Encoding utf8; \
-     Set-Content -Path "$root\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7464'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
-     Set-Content -Path "$root\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-backend.ps1"   -Value "Set-Location '$root\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:HOST_TREASURY_PUBKEY='{{HOST_TREASURY_PUBKEY}}'; `$env:ADMIN_API_KEY='{{ADMIN_API_KEY}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-wallet-p1.ps1" -Value "Set-Location '$root\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-tauri-p1.ps1"  -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-game-p1.ps1"   -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-web.ps1"        -Value "Set-Location '$root\web-solana'; npm run dev" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7464'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
      $hasWT = Get-Command wt -ErrorAction SilentlyContinue; \
      if ($hasWT) { \
          Write-Host "[ P1 ] Opening Player 1 window..." -ForegroundColor Cyan; \
-         cmd /c "wt -w new nt --title Backend powershell -NoProfile -File `"$root\dev2-backend.ps1`" ; nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\dev2-wallet-p1.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\dev2-tauri-p1.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\dev2-game-p1.ps1`" ; nt --title `"Web Frontend`" powershell -NoProfile -File `"$root\dev2-web.ps1`" ; nt --title `"Tournament Admin`" -d `"$root\tauri\tournament-admin`" powershell -NoProfile -Command `"npm run dev -- --port 7455`""; \
+         cmd /c "wt -w new nt --title Backend powershell -NoProfile -File `"$root\tmp\dev2-backend.ps1`" ; nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\tmp\dev2-wallet-p1.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\tmp\dev2-tauri-p1.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\tmp\dev2-game-p1.ps1`" ; nt --title `"Web Frontend`" powershell -NoProfile -File `"$root\tmp\dev2-web.ps1`" ; nt --title `"Tournament Admin`" -d `"$root\tauri\tournament-admin`" powershell -NoProfile -Command `"npm run dev -- --port 7455`""; \
          Start-Sleep -Seconds 2; \
          Write-Host "[ P2 ] Opening Player 2 window..." -ForegroundColor Yellow; \
-         cmd /c "wt -w new nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\dev2-wallet-p2.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\dev2-tauri-p2.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\dev2-game-p2.ps1`"" \
+         cmd /c "wt -w new nt --title `"Wallet UI`" powershell -NoProfile -File `"$root\tmp\dev2-wallet-p2.ps1`" ; nt --title Tauri powershell -NoProfile -File `"$root\tmp\dev2-tauri-p2.ps1`" ; nt --title Game powershell -NoProfile -File `"$root\tmp\dev2-game-p2.ps1`"" \
      } else { \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-backend.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\tmp\dev2-backend.ps1'" -WindowStyle Normal; \
          Start-Sleep -Seconds 2; \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-wallet-p1.ps1'" -WindowStyle Normal; \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-tauri-p1.ps1'" -WindowStyle Minimized; \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-game-p1.ps1'" -WindowStyle Normal; \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-web.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\tmp\dev2-wallet-p1.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\tmp\dev2-tauri-p1.ps1'" -WindowStyle Minimized; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\tmp\dev2-game-p1.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\tmp\dev2-web.ps1'" -WindowStyle Normal; \
          Start-Sleep -Seconds 1; \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-wallet-p2.ps1'" -WindowStyle Normal; \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-tauri-p2.ps1'" -WindowStyle Minimized; \
-         Start-Process powershell -ArgumentList "-NoProfile -File '$root\dev2-game-p2.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\tmp\dev2-wallet-p2.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\tmp\dev2-tauri-p2.ps1'" -WindowStyle Minimized; \
+         Start-Process powershell -ArgumentList "-NoProfile -File '$root\tmp\dev2-game-p2.ps1'" -WindowStyle Normal; \
          Start-Process powershell -ArgumentList "-NoProfile -Command Set-Location '$root\tauri\tournament-admin'; npm run dev -- --port 7455" -WindowStyle Normal \
      }
     @Write-Host "  [P1] Backend :8090  Wallet UI :5174  Bridge :7454  (window: XFChess P1)" -ForegroundColor Cyan
@@ -315,7 +368,7 @@ db-reset:
 
 # Run SQLx migrations manually
 db-migrate:
-    Set-Location backend && sqlx migrate run && Set-Location ..
+    Set-Location backend; sqlx migrate run
 
 # ── Watch ─────────────────────────────────────────────────────────────────────
 
@@ -350,5 +403,6 @@ logs:
 clean:
     cargo clean
     @if (Test-Path "web-solana/dist") { Remove-Item -Recurse -Force web-solana/dist }
+    @if (Test-Path "viz/dist") { Remove-Item -Recurse -Force viz/dist }
     @if (Test-Path "tauri/wallet-ui/dist") { Remove-Item -Recurse -Force tauri/wallet-ui/dist }
     @if (Test-Path "tauri/tournament-admin/dist") { Remove-Item -Recurse -Force tauri/tournament-admin/dist }

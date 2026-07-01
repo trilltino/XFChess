@@ -1,0 +1,12 @@
+[Unit]
+Description=Run XFChess DB backup daily
+
+[Timer]
+# Daily at 03:17 UTC, with catch-up if the machine was off, and jitter to avoid
+# hammering the remote at a round time.
+OnCalendar=*-*-* 03:17:00 UTC
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

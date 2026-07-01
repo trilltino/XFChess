@@ -135,3 +135,42 @@ jobs:
       - name: Build WASM
         run: cargo build --target wasm32-unknown-unknown -p xfchess
         continue-on-error: true
+
+  # ── Security & supply chain (WS-F) ──────────────────────────────────────────
+  # RustSec advisory scan. Informative first (large Solana/Iroh tree has advisories
+  # without upstream fixes); flip continue-on-error → false once triaged to gate.
+  cargo-audit:
+    name: Security Audit (cargo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit Rust dependencies
+        run: cargo audit
+        continue-on-error: true
+
+  # Web frontend: build gate + dependency audit (npm). Build is a hard gate; audit
+  # is informative until triaged.
+  web-ci:
+    name: Web (build + audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-solana
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install deps
+        run: npm ci --legacy-peer-deps
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+      - name: Build
+        run: npm run build
+      - name: npm audit (high+)
+        run: npm audit --audit-level=high
+        continue-on-error: true

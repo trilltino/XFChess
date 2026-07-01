@@ -1,0 +1,32 @@
+[Unit]
+Description=XFChess Backend API (STAGING)
+After=network.target
+
+# Staging mirror of the prod unit, isolated by user + data dir + port so it can run
+# on the same box without touching production. See docs/ENVIRONMENTS.md.
+[Service]
+Type=simple
+User=xfchess-staging
+WorkingDirectory=/opt/xfchess-staging
+ExecStart=/opt/xfchess-staging/signing-server-http
+EnvironmentFile=/opt/xfchess-staging/.env
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/xfchess-staging/data
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Same fail-fast env guards as prod.
+ExecStartPre=/bin/sh -c 'test -f /opt/xfchess-staging/.env || (echo "/opt/xfchess-staging/.env not found"; exit 1)'
+ExecStartPre=/bin/sh -c 'grep -q JWT_SECRET /opt/xfchess-staging/.env || (echo "JWT_SECRET not set"; exit 1)'
+ExecStartPre=/bin/sh -c 'grep -q IDENTITY_ENCRYPTION_KEY /opt/xfchess-staging/.env || (echo "IDENTITY_ENCRYPTION_KEY not set"; exit 1)'
+
+[Install]
+WantedBy=multi-user.target
