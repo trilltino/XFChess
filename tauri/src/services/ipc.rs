@@ -34,22 +34,22 @@ pub enum IpcCommands {
 #[tauri::command]
 pub fn show_tournament_admin(app: AppHandle) {
   if let Some(window) = app.get_webview_window("tournament-admin") {
-    window.show().unwrap();
-    window.set_focus().unwrap();
+    window.show().ok();
+    window.set_focus().ok();
   }
 }
 
 #[tauri::command]
 pub fn hide_tournament_admin(app: AppHandle) {
   if let Some(window) = app.get_webview_window("tournament-admin") {
-    window.hide().unwrap();
+    window.hide().ok();
   }
 }
 
 #[tauri::command]
 pub fn set_tournament_admin_title(title: String, app: AppHandle) {
   if let Some(window) = app.get_webview_window("tournament-admin") {
-    window.set_title(&title).unwrap();
+    window.set_title(&title).ok();
   }
 }
 
@@ -60,7 +60,7 @@ pub fn set_tournament_admin_size(width: f64, height: f64, app: AppHandle) {
       width: width as u32,
       height: height as u32,
     });
-    window.set_size(size).unwrap();
+    window.set_size(size).ok();
   }
 }
 
@@ -71,48 +71,61 @@ pub fn set_tournament_admin_position(x: f64, y: f64, app: AppHandle) {
       x: x as i32,
       y: y as i32,
     });
-    window.set_position(pos).unwrap();
+    window.set_position(pos).ok();
   }
 }
 
 #[tauri::command]
 pub fn minimize_tournament_admin(app: AppHandle) {
   if let Some(window) = app.get_webview_window("tournament-admin") {
-    window.minimize().unwrap();
+    window.minimize().ok();
   }
 }
 
 #[tauri::command]
 pub fn maximize_tournament_admin(app: AppHandle) {
   if let Some(window) = app.get_webview_window("tournament-admin") {
-    window.maximize().unwrap();
+    window.maximize().ok();
   }
 }
 
 #[tauri::command]
 pub fn close_tournament_admin(app: AppHandle) {
   if let Some(window) = app.get_webview_window("tournament-admin") {
-    window.close().unwrap();
+    window.close().ok();
   }
 }
 
 #[tauri::command]
 pub fn show_notification(title: String, body: String, app: AppHandle) {
-  app
+  if let Err(e) = app
     .notification()
     .builder()
     .title(title)
     .body(body)
     .show()
-    .unwrap();
+  {
+    tracing::warn!("[ipc] show_notification failed: {e}");
+  }
 }
 
 #[tauri::command]
 pub fn open_url(url: String, _app: AppHandle) {
-  open::that(&url).ok();
+  // Only open safe, expected schemes. `open::that` maps to ShellExecute on Windows,
+  // which would otherwise launch arbitrary files/executables/protocol handlers.
+  const ALLOWED: [&str; 4] = ["http://", "https://", "mailto:", "xfchess://"];
+  if ALLOWED.iter().any(|p| url.starts_with(p)) {
+    if let Err(e) = open::that(&url) {
+      tracing::warn!("[ipc] open_url failed: {e}");
+    }
+  } else {
+    tracing::warn!("[ipc] open_url blocked disallowed scheme: {url}");
+  }
 }
 
 #[tauri::command]
 pub fn copy_to_clipboard(text: String, app: AppHandle) {
-  app.clipboard().write_text(&text).unwrap();
+  if let Err(e) = app.clipboard().write_text(&text) {
+    tracing::warn!("[ipc] copy_to_clipboard failed: {e}");
+  }
 }

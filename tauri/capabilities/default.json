@@ -1,37 +1,8 @@
 {
   "identifier": "default",
-  "description": "Permissions for the XFChess Admin Panel",
+  "description": "Base permissions for all XFChess windows. Shell access is intentionally NOT granted here — it is scoped to the tournament-admin window only via admin-shell.json.",
   "windows": ["main", "tournament-admin", "wallet-popup"],
   "permissions": [
-    "core:default",
-    "shell:allow-spawn",
-    {
-      "identifier": "shell:allow-spawn",
-      "allow": [
-        {
-          "cmd": "powershell",
-          "args": [
-            "-NoExit",
-            "-Command",
-            { "validator": "ssh root@\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}" }
-          ]
-        }
-      ]
-    },
-    "shell:allow-execute",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "cmd": "powershell",
-          "args": [
-            "-NoExit",
-            "-Command",
-            { "validator": "ssh root@\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}" }
-          ]
-        }
-      ]
-    },
-    "shell:allow-open"
+    "core:default"
   ]
 }

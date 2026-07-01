@@ -23,15 +23,6 @@ pub fn validate_token_format(token: &str) -> bool {
   !token.is_empty() && token.len() >= 32 && token.len() <= 1024
 }
 
-pub fn hash_password(password: &str, salt: &str) -> String {
-  use sha2::{Digest, Sha256};
-
-  let mut hasher = Sha256::new();
-  hasher.update(password.as_bytes());
-  hasher.update(salt.as_bytes());
-  format!("{:x}", hasher.finalize())
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -70,13 +61,5 @@ mod tests {
     assert!(validate_token_format(&"a".repeat(32)), "32 chars (min) must pass");
     assert!(validate_token_format(&"a".repeat(1024)), "1024 chars (max) must pass");
     assert!(!validate_token_format(&"a".repeat(1025)), "1025 chars must be rejected");
-  }
-
-  #[test]
-  fn test_hash_password_is_deterministic_and_salted() {
-    let a = hash_password("hunter2", "salt-a");
-    assert_eq!(a, hash_password("hunter2", "salt-a"), "same input → same hash");
-    assert_ne!(a, hash_password("hunter2", "salt-b"), "different salt → different hash");
-    assert_eq!(a.len(), 64, "sha256 hex digest is 64 chars");
   }
 }

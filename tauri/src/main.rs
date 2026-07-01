@@ -130,7 +130,7 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     routing::{get, post},
     Json, Router,
   };
-  use tower_http::cors::{Any, CorsLayer};
+  use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
   #[derive(Clone)]
   struct LocalState {
@@ -535,8 +535,19 @@ async fn http_server(app: tauri::AppHandle, pending: PendingTx, wallet_pubkey: W
     }
   }
 
+  // Only reflect local / Tauri-webview origins. This stops arbitrary websites the
+  // user visits from reading bridge responses cross-origin (notably GET /token,
+  // which would otherwise leak the wallet JWT to any page). The wallet-ui runs on
+  // localhost (dev) or tauri.localhost (prod), so it stays allowed.
   let cors = CorsLayer::new()
-    .allow_origin(Any)
+    .allow_origin(AllowOrigin::predicate(|origin, _parts| {
+      let o = origin.as_bytes();
+      o.starts_with(b"tauri://")
+        || o.starts_with(b"http://tauri.localhost")
+        || o.starts_with(b"https://tauri.localhost")
+        || o.starts_with(b"http://localhost:")
+        || o.starts_with(b"http://127.0.0.1:")
+    }))
     .allow_methods([Method::GET, Method::POST, axum::http::Method::PATCH, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
     .allow_headers(Any);
 
