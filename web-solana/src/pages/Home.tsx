@@ -1,9 +1,6 @@
 ﻿import { Link } from 'react-router-dom';
-import chessboardSpace from '../assets/chessboard-space.png';
-import chessWageringUI from '../assets/chess-wagering-ui.png';
 import highFidelityChess from '../assets/high-fidelity-chess.png';
 import xfchessLogo from '../assets/xfchess-logo.png';
-import learnTheGame from '../assets/learn-the-game.png';
 
 
 export function Home() {
@@ -49,9 +46,6 @@ export function Home() {
             <section className="fullscreen-section">
                 <div className="section-overlay" style={{ background: 'linear-gradient(to left, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.20))' }}></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
-                    <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-start' }}>
-                        <img src={chessboardSpace} alt="Chessboard in space" style={{ display: 'block', maxWidth: '300px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
-                    </div>
                     <div style={{ flex: '1', textAlign: 'right' }}>
                         <h2 className="feature-title">3D and 2D GUI</h2>
 
@@ -83,9 +77,6 @@ export function Home() {
             <section className="fullscreen-section">
                 <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
-                    <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-start' }}>
-                        <img src={chessWageringUI} alt="Chess wagering interface" style={{ display: 'block', maxWidth: '300px', width: '100%', height: 'auto', objectFit: 'contain', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
-                    </div>
                     <div style={{ flex: '1', textAlign: 'right' }}>
                         <h2 className="feature-title">Own your Hustle</h2>
 
@@ -106,9 +97,6 @@ export function Home() {
                         <p className="feature-desc">
                             Learn from the historic game modes represented in a 2D or 3D interface, understand the people who changed the game for centuries, common pitfalls and how to teach chess to your peers.
                         </p>
-                    </div>
-                    <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>
-                        <img src={learnTheGame} alt="Learn the game" style={{ display: 'block', maxWidth: '400px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
                     </div>
                 </div>
             </section>

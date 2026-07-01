@@ -25,11 +25,9 @@ import { LichessLinkCard } from '../components/LichessLinkCard';
 
 const COUNTRIES = [
   { code: 'GB', label: 'United Kingdom' },
-  { code: 'US', label: 'United States' },
-  { code: 'BR', label: 'Brazil' },
-  { code: 'DE', label: 'Germany' },
   { code: 'CA', label: 'Canada' },
-  { code: 'AU', label: 'Australia' },
+  { code: 'DE', label: 'Germany' },
+  { code: 'BR', label: 'Brazil' },
 ];
 
 interface SignupFormProps {
@@ -162,9 +160,9 @@ function SignupForm({
           required
           style={{ ...inputStyle, width: '100%', textAlign: 'center', cursor: 'pointer' }}
         >
-          <option value="">Select your country�</option>
+          <option value="" style={{ background: '#1a1a1a', color: '#fff' }}>Select your country</option>
           {COUNTRIES.map(c => (
-            <option key={c.code} value={c.code}>{c.label}</option>
+            <option key={c.code} value={c.code} style={{ background: '#1a1a1a', color: '#fff' }}>{c.label}</option>
           ))}
         </select>
       </div>
@@ -196,25 +194,6 @@ function SignupForm({
             Valid email format
           </div>
         )}
-      </div>
-
-      {/* GDPR Compliance Notice */}
-      <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(20, 241, 149, 0.05)', borderRadius: '8px', border: '1px solid rgba(20, 241, 149, 0.2)', textAlign: 'center' }}>
-        <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-dim)', lineHeight: 1.6 }}>
-          <strong style={{ color: '#ffffff' }}>Data Protection:</strong> Your email and username are stored securely 
-          for account recovery and wagered game verification. By proceeding, you consent to our{' '}
-          <Link to="/privacy" style={{ color: '#ffffff' }}>Privacy Policy</Link> and{' '}
-          <Link to="/kyc" style={{ color: '#ffffff' }}>KYC Terms</Link> (UK GDPR & AML compliant).
-        </p>
-      </div>
-
-      {/* Wagering & Wallet Notice */}
-      <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.10)', textAlign: 'center' }}>
-        <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-dim)', lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> PvP wagering and Cash Tournaments require a Solana wallet and KYC verification.
-          <Link to="/kyc" style={{ color: '#ffffff', fontWeight: 600, marginLeft: '8px' }}>Complete KYC</Link> or{' '}
-          <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ffffff', fontWeight: 600 }}>create a wallet on Solflare</a>.
-        </p>
       </div>
 
       {/* Create Account Button */}
@@ -541,7 +520,7 @@ export function ProfileViewer() {
         )}
 
         {/* Your on-chain profile card */}
-        {!disconnected && (
+        {!disconnected && (loading || hasProfile || error) && (
           <div className="profile-section-wrap" style={{ marginTop: 0, padding: 0, display: 'block' }}>
             <div className="profile-card" style={{ margin: '0 auto', maxWidth: '600px' }}>
               {loading && (
@@ -644,7 +623,7 @@ export function ProfileViewer() {
         )}
 
         {/* Match history + dispute UI */}
-        {!disconnected && wallet.publicKey && (
+        {!disconnected && wallet.publicKey && hasProfile && (
           <div style={{ marginTop: 40 }}>
             <MatchHistory wallet={wallet.publicKey.toBase58()} />
           </div>

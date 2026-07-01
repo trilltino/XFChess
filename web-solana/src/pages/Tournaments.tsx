@@ -1,7 +1,6 @@
 ﻿import { useState } from 'react';
 import { X } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import chessboardSpace from '../assets/chessboard-space.png';
 
 
 export function Tournaments() {
@@ -66,13 +65,6 @@ export function Tournaments() {
                     borderRadius: '16px',
                     padding: '40px'
                 }}>
-                    <div style={{ flex: '0 0 350px' }}>
-                        <img
-                            src={chessboardSpace}
-                            alt="Tournament Chess Board"
-                            style={{ width: '100%', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }}
-                        />
-                    </div>
                     <div style={{ flex: '1' }}>
                         <h3 style={{ fontSize: '1.8rem', fontWeight: 800, marginBottom: '16px', color: '#fff' }}>
                             Compete for Grand Prizes

@@ -37,9 +37,14 @@ export interface LoginResponse {
   username: string;
 }
 
-/** Submit a legacy email-based signup. */
-export function submitSignup(body: SignupRequest): Promise<{ ok: boolean }> {
+/** Record a signup; the confirmation email is queued for durable delivery. */
+export function submitSignup(body: SignupRequest): Promise<{ ok: boolean; queued: boolean }> {
   return request('/api/signup', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** Join the waitlist; the acknowledgement email is queued for durable delivery. */
+export function submitWaitlist(email: string, referral?: string): Promise<{ ok: boolean; queued: boolean }> {
+  return request('/api/waitlist', { method: 'POST', body: JSON.stringify({ email, referral }) });
 }
 
 /** Create an account proving wallet ownership with a signed message. */

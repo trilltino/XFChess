@@ -27,9 +27,9 @@ import TournamentStandings from './pages/TournamentStandings';
 import TournamentPlay from './pages/TournamentPlay';
 import { ProfileViewer } from './pages/ProfileViewer';
 import { LichessCallback } from './pages/LichessCallback';
-import { Friends } from './pages/Friends';
-import { Puzzles } from './pages/Puzzles';
-import { Learn } from './pages/Learn';
+import { Features } from './pages/Features';
+import { Waitlist } from './pages/Waitlist';
+import { PrivyAuthButton } from './privy/PrivyAuthButton';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
 import { Menu, X, ChevronDown, Sun, Moon } from 'lucide-react';
@@ -64,8 +64,9 @@ export default function App() {
             new WalletConnectWalletAdapter({
                 network: network,
                 options: {
-                    // Get a Project ID at https://cloud.walletconnect.com/
-                    projectId: '66e133d368e7ec815db15024d2627e2b', // Using a placeholder ID
+                    // Get your own Project ID at https://cloud.reown.com and set
+                    // VITE_WALLETCONNECT_PROJECT_ID. Fallback keeps dev working.
+                    projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '66e133d368e7ec815db15024d2627e2b',
                     metadata: {
                         name: 'XFChess',
                         description: 'XFChess - Decentralized Chess on Solana',
@@ -216,9 +217,11 @@ function AppContent() {
                 <div className={`nav-links ${isMenuOpen ? 'active' : ''}`}>
                     <Link to="/home" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Home</Link>
                     <Link to="/play" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
+                    <Link to="/waitlist" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Waitlist</Link>
+                    <PrivyAuthButton />
                     <div className="nav-legal-dropdown">
                         <button className="nav-link dropdown-toggle" onClick={() => { setIsGameTypesOpen(v => !v); setIsCommunityOpen(false); setIsLegalOpen(false); }}>
-                            Game Modes <ChevronDown size={14} className={`dropdown-icon ${isGameTypesOpen ? 'open' : ''}`} />
+                            Game <ChevronDown size={14} className={`dropdown-icon ${isGameTypesOpen ? 'open' : ''}`} />
                         </button>
                         <AnimatePresence>
                             {isGameTypesOpen && (
@@ -230,6 +233,7 @@ function AppContent() {
                                     exit="exit"
                                     transition={{ duration: 0.2 }}
                                 >
+                                    <Link to="/features" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Features</Link>
                                     <Link to="/tournaments" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Tournament</Link>
                                     <Link to="/computer" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Chess Computer</Link>
                                 </motion.div>
@@ -331,7 +335,7 @@ function AppContent() {
 
                     <div className="nav-wallet-wrap">
                         {connected ? (
-                            <button onClick={() => { disconnect(); setIsMenuOpen(false); }} className="btn-secondary disconnect-btn" style={{ height: '44px', width: '44px', padding: '0', borderRadius: '4px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <button onClick={() => { disconnect(); setIsMenuOpen(false); }} title="Disconnect wallet" aria-label="Disconnect wallet" className="btn-secondary disconnect-btn" style={{ height: '44px', width: '44px', padding: '0', borderRadius: '4px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <X size={24} />
                             </button>
                         ) : (
@@ -350,24 +354,6 @@ function AppContent() {
                     </button>
                 </div>
             </nav>
-
-            <AnimatePresence>
-                {connected && (
-                    <motion.div
-                        className="connected-subnav"
-                        initial={{ opacity: 0, y: -8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.2 }}
-                    >
-                        <Link to="/tournaments" className="subnav-link" onClick={closeDropdowns}>Tournaments</Link>
-                        <Link to="/players" className="subnav-link" onClick={closeDropdowns}>Player Search</Link>
-                        <Link to="/friends" className="subnav-link" onClick={closeDropdowns}>Friends</Link>
-                        <Link to="/puzzles" className="subnav-link" onClick={closeDropdowns}>Puzzles</Link>
-                        <Link to="/learn" className="subnav-link" onClick={closeDropdowns}>Learn</Link>
-                    </motion.div>
-                )}
-            </AnimatePresence>
 
             <div style={{ flex: 1 }}>
                 <AnimatePresence mode="wait">
@@ -395,9 +381,8 @@ function AppContent() {
                         <Route path="/tournament/:id/play" element={<TournamentPlay />} />
                         <Route path="/spectate/:game_id" element={<Spectate />} />
                         <Route path="/computer" element={<ChessComputer />} />
-                        <Route path="/friends" element={<Friends />} />
-                        <Route path="/puzzles" element={<Puzzles />} />
-                        <Route path="/learn" element={<Learn />} />
+                        <Route path="/features" element={<Features />} />
+                        <Route path="/waitlist" element={<Waitlist />} />
                     </Routes>
                 </AnimatePresence>
             </div>
