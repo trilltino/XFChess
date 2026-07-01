@@ -27,6 +27,8 @@ use crate::signing::{
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
+    /// Git commit the binary was built from (deploy → commit traceability).
+    pub git_sha: String,
     pub timestamp: String,
 }
 
@@ -56,13 +58,33 @@ pub struct DebugTxResponse {
     pub formatted: String,
 }
 
-/// Basic health check
+/// Basic liveness check — is the process up? (cheap, no dependency I/O)
 pub async fn health_check() -> impl IntoResponse {
     Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        git_sha: option_env!("GIT_SHA").unwrap_or("unknown").to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
+}
+
+/// Readiness check — can we actually serve traffic? Verifies DB connectivity and
+/// returns 503 if not, so deploy smoke-tests / load balancers don't route to a
+/// process that's up but can't reach its database.
+pub async fn readiness_check(State(state): State<AppState>) -> impl IntoResponse {
+    match check_database(&state).await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "ready",
+                "git_sha": option_env!("GIT_SHA").unwrap_or("unknown"),
+            })),
+        ),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "status": "not_ready", "error": e.to_string() })),
+        ),
+    }
 }
 
 /// Detailed health check
@@ -232,6 +254,7 @@ pub async fn debug_transaction_endpoint(
 pub fn debug_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health_check))
+        .route("/readyz", get(readiness_check))
         .route("/health/detailed", get(detailed_health_check))
         .route("/api/debug/tx/{signature}", get(debug_transaction_endpoint))
 }

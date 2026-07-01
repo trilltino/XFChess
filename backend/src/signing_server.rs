@@ -22,11 +22,31 @@ fn remove_pid_file() {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    // Structured JSON logs when LOG_FORMAT=json (production: machine-parseable, one
+    // object per line, includes the per-request `request_id` span field). Human-readable
+    // pretty logs otherwise (local dev).
+    let json_logs = std::env::var("LOG_FORMAT").is_ok_and(|v| v.eq_ignore_ascii_case("json"));
+    if json_logs {
+        tracing_subscriber::fmt()
+            .json()
+            .flatten_event(true)
+            .with_current_span(true)
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    }
 
     let config = SigningConfig::from_env();
+
+    // ── Fail fast on bad/placeholder config (hard error under APP_ENV=production) ──
+    if let Err(problems) = config.validate() {
+        eprintln!("[signing-server] FATAL: invalid production configuration:\n{problems}");
+        std::process::exit(1);
+    }
+
     let port = config.port;
 
     // ── Write PID so the launcher can kill exactly this process on restart ──
@@ -87,16 +107,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| anyhow::anyhow!("Failed to bind TCP listener on port {}: {}", port, e))?;
     info!("[signing-server] Listening for HTTP traffic on port {}", port);
 
-    tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app.with_state(state.clone())).await {
-            tracing::error!("HTTP server error: {}", e);
-        }
-    });
+    // Serve with graceful shutdown: on SIGTERM (systemctl stop/restart) or Ctrl-C,
+    // stop accepting new connections and let in-flight requests finish before exit.
+    axum::serve(listener, app.with_state(state.clone()))
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .map_err(|e| anyhow::anyhow!("HTTP server error: {}", e))?;
 
-    // ── Wait for shutdown signal ───────────────────────────────────────────
-    tokio::signal::ctrl_c().await.map_err(|e| anyhow::anyhow!("failed to wait for sigint: {}", e))?;
-    info!("[signing-server] Shutting down");
+    info!("[signing-server] Graceful shutdown complete");
     remove_pid_file();
 
     Ok(())
+}
+
+/// Resolve when the process receives a shutdown signal: SIGTERM (systemd) or Ctrl-C.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(e) => tracing::warn!("[signing-server] failed to install SIGTERM handler: {}", e),
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => info!("[signing-server] SIGINT received — shutting down"),
+        _ = terminate => info!("[signing-server] SIGTERM received — shutting down"),
+    }
 }

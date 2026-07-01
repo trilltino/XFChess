@@ -23,7 +23,7 @@ pub use instructions::{
     link_external_elo_ix, record_move_ix, record_result_ix, start_tournament_ix,
     undelegate_game_ix, verify_profile_ix,
 };
-pub use rpc::{make_rpc, rpc_url_or_devnet};
+pub use rpc::{fallback_rpc_url, make_rpc, read_with_failover, redact_url, rpc_url_or_devnet};
 pub use telemetry::{submit_er_with_telemetry, submit_with_telemetry, TxErrorCategory, TxErrorDetail};
 pub use transactions::{
     cosign_and_submit_tx, fund_account, sign_and_submit, sign_and_submit_er, submit_signed_tx,

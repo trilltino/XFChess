@@ -103,6 +103,54 @@ impl SigningConfig {
                 .unwrap_or_default(),
         }
     }
+
+    /// Validate config at startup so bad/placeholder secrets fail loudly instead of
+    /// silently running an insecure production server.
+    ///
+    /// Behaviour depends on `APP_ENV`:
+    /// - `APP_ENV=production` → any problem is a hard **error** (caller should exit).
+    /// - otherwise (dev/local) → problems are **warnings** so `just backend` still runs
+    ///   with the throwaway placeholders from the justfile.
+    pub fn validate(&self) -> Result<(), String> {
+        let prod = env::var("APP_ENV")
+            .map(|v| v.eq_ignore_ascii_case("production"))
+            .unwrap_or(false);
+
+        let zero64 = "0".repeat(64);
+        let one64 = "1".repeat(64);
+        let is_hex64 = |s: &str| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit());
+
+        let checks: Vec<(bool, &str)> = vec![
+            (self.jwt_secret.len() >= 32, "JWT_SECRET too short (need >= 32 chars; openssl rand -hex 32)"),
+            (self.jwt_secret != zero64, "JWT_SECRET is the all-zeros dev placeholder — generate a real one"),
+            (is_hex64(&self.identity_encryption_key), "IDENTITY_ENCRYPTION_KEY must be 64 hex chars (openssl rand -hex 32)"),
+            (self.identity_encryption_key != zero64, "IDENTITY_ENCRYPTION_KEY is the all-zeros dev placeholder"),
+            (is_hex64(&self.identity_salt), "IDENTITY_SALT must be 64 hex chars (openssl rand -hex 32)"),
+            (self.identity_salt != one64, "IDENTITY_SALT is the all-ones dev placeholder"),
+            (self.solana_rpc_url.starts_with("http"), "SOLANA_RPC_URL must be an http(s) URL"),
+        ];
+
+        let mut problems: Vec<&str> = checks.into_iter().filter(|(ok, _)| !ok).map(|(_, m)| m).collect();
+        if prod && self.fee_payer_keys.is_empty() {
+            problems.push("FEE_PAYER_KEYS empty — backend cannot pay transaction fees in production");
+        }
+
+        if problems.is_empty() {
+            return Ok(());
+        }
+        if prod {
+            Err(problems
+                .iter()
+                .map(|p| format!("  - {p}"))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        } else {
+            for p in &problems {
+                tracing::warn!("[config] {} (APP_ENV != production, continuing)", p);
+            }
+            Ok(())
+        }
+    }
 }
 
 impl Default for SigningConfig {
