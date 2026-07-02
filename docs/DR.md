@@ -81,7 +81,8 @@ BACKUP_REMOTE=... BACKUP_AGE_IDENTITY=... \
 
 | Drill date | DB(s) | Result | Restore time | By |
 |---|---|---|---|---|
-| _pending_ | | | | |
+| 2026-07-02 | test vault.db (mechanics only, WSL) | ✅ round-trip OK: snapshot→age-encrypt→upload→download→decrypt→integrity→restore; data intact; ciphertext verified | <1s | script validation |
+| _pending_ | **production restore drill on the VPS** (real backup + offline key) | | | |
 
 ## Regional / total-VPS loss
 

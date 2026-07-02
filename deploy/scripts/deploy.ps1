@@ -81,11 +81,10 @@ Write-Host "Branch: $branch" -ForegroundColor Green
 
 $dirty = git status --porcelain 2>&1
 if ($dirty) {
-    Write-Host "Uncommitted changes detected — auto-committing..." -ForegroundColor Yellow
-    git add -A
-    git commit -m "Deploy $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    git push origin $branch
-    if ($LASTEXITCODE -ne 0) { Write-Host "ABORT: git push failed." -ForegroundColor Red; exit 1 }
+    Write-Host "ABORT: uncommitted changes in the working tree." -ForegroundColor Red
+    Write-Host "Review, then commit or stash before deploying (never auto-commit secrets/junk):" -ForegroundColor Yellow
+    Write-Host $dirty
+    exit 1
 }
 
 git fetch --quiet 2>&1 | Out-Null
@@ -106,7 +105,10 @@ Pop-Location
 if (-not $SkipBuild) {
     Write-Host "`n=== Building frontend ===" -ForegroundColor Green
     Push-Location "$ROOT\web-solana"
-    "VITE_BACKEND_URL=https://${TlsDomain}`nSIGNING_SERVICE_URL=https://${TlsDomain}" | Out-File -Encoding utf8 ".env.production"
+    # Write BOM-less UTF-8: PS5.1 Out-File -Encoding utf8 adds a BOM, which breaks
+    # env parsing (this is the class of bug that took the backend .env down).
+    $frontendEnv = "VITE_BACKEND_URL=https://${TlsDomain}`nSIGNING_SERVICE_URL=https://${TlsDomain}`n"
+    [System.IO.File]::WriteAllText("$ROOT\web-solana\.env.production", $frontendEnv, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "VITE_BACKEND_URL=https://${TlsDomain}" -ForegroundColor DarkGray
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
@@ -121,7 +123,10 @@ Run-Remote "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups /op
 Run-Remote "chown -R xfchess:xfchess /opt/xfchess"
 
 Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates certbot python3-certbot-nginx ufw logrotate"
-Run-Remote "command -v cargo >/dev/null 2>&1 || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh && chmod +x /tmp/rustup.sh && /tmp/rustup.sh -y)"
+# Install rustup FOR the xfchess build user (shell overridden — xfchess is nologin),
+# with CARGO_HOME/RUSTUP_HOME under /opt/xfchess so the build in Step 3 can find cargo.
+$rustupCmd = 'su -s /bin/bash xfchess -c ''export CARGO_HOME=/opt/xfchess/.cargo RUSTUP_HOME=/opt/xfchess/.rustup HOME=/opt/xfchess; [ -x $CARGO_HOME/bin/cargo ] || (curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh && sh /tmp/rustup.sh -y --no-modify-path --default-toolchain stable)'''
+Run-Remote $rustupCmd
 
 # ── Step 2a: Deploy user with restricted sudo ─────────────────────────────────
 Write-Host "`n=== Creating deploy user ===" -ForegroundColor Green
@@ -238,9 +243,14 @@ Write-Host "ACTION REQUIRED: run 'rclone config' on the server to set up the B2 
 # ── Step 3: Sync source and build backend ─────────────────────────────────────
 if (-not $SkipBuild) {
     Write-Host "`n=== Syncing source and building backend on server ===" -ForegroundColor Green
-    Run-Remote "if [ ! -d /opt/xfchess/src/.git ]; then git clone --depth 1 $remoteUrl /opt/xfchess/src; fi"
-    Run-Remote "cd /opt/xfchess/src && git fetch --all --tags --prune && git checkout $commitHash && git reset --hard $commitHash"
-    Run-Remote "su - xfchess -c 'export PATH=\$HOME/.cargo/bin:\$PATH && cd /opt/xfchess/src/backend && cargo build --release --bin signing-server-http'"
+    # Clone into a clean dir: `git clone` fails if /opt/xfchess/src exists as a non-git
+    # dir (older layouts put the game src there), so remove a non-git dir first.
+    Run-Remote "if [ ! -d /opt/xfchess/src/.git ]; then rm -rf /opt/xfchess/src && git clone $remoteUrl /opt/xfchess/src; fi"
+    Run-Remote "cd /opt/xfchess/src && git fetch --all --tags --prune && git checkout $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src"
+    # Build as the (nologin) xfchess user via -s /bin/bash, with cargo on PATH; this is a
+    # workspace, so build with -p backend from the repo root.
+    $buildCmd = 'su -s /bin/bash xfchess -c ''export CARGO_HOME=/opt/xfchess/.cargo RUSTUP_HOME=/opt/xfchess/.rustup HOME=/opt/xfchess PATH=/opt/xfchess/.cargo/bin:$PATH && cd /opt/xfchess/src && cargo build --release -p backend --bin signing-server-http'''
+    Run-Remote $buildCmd
 }
 
 # ── Step 4: Snapshot databases + binary ──────────────────────────────────────
@@ -258,8 +268,9 @@ Run-Remote "cp /opt/xfchess/signing-server-http /opt/xfchess/signing-server-http
 
 if (-not $SkipBuild) {
     Write-Host "`n=== Installing Linux backend binary ===" -ForegroundColor Green
-    Run-Remote "cp /opt/xfchess/src/backend/target/release/signing-server-http /opt/xfchess/signing-server-http"
-    Run-Remote "chmod +x /opt/xfchess/signing-server-http"
+    # Workspace target dir is at the repo root, not backend/target.
+    Run-Remote "cp /opt/xfchess/src/target/release/signing-server-http /opt/xfchess/signing-server-http"
+    Run-Remote "chmod +x /opt/xfchess/signing-server-http && chown xfchess:xfchess /opt/xfchess/signing-server-http"
 }
 
 # ── Step 5a: Upload keypair files ─────────────────────────────────────────────
@@ -299,6 +310,10 @@ if ($serverHasEnv) {
     Write-Host "  SESSION_DB_URL=sqlite:///opt/xfchess/data/sessions.db?mode=rwc"
     Write-Host "  VAULT_DB_URL=sqlite:///opt/xfchess/data/vault.db?mode=rwc"
 }
+
+# Defensive: strip a UTF-8 BOM from .env if present. systemd's EnvironmentFile
+# silently ignores the first line when it starts with a BOM (this took the backend down).
+Run-Remote "sed -i '1s/^\xEF\xBB\xBF//' /opt/xfchess/.env 2>/dev/null || true"
 
 # ── Step 6: Install systemd service ──────────────────────────────────────────
 Write-Host "`n=== Installing systemd service ===" -ForegroundColor Green
@@ -373,12 +388,15 @@ if ($result) {
 } else {
     Write-Host "Backend check failed — check logs: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
 }
+# /health now returns JSON {status, version, git_sha, timestamp}
 $health = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/health" -SkipCertificateCheck -ErrorAction SilentlyContinue
-if ($health -eq "OK") {
-    Write-Host "Health endpoint OK." -ForegroundColor Green
+if ($health.status -eq "ok") {
+    Write-Host "Health OK — running git_sha $($health.git_sha), version $($health.version)." -ForegroundColor Green
 } else {
-    Write-Host "Health endpoint failed — check nginx: ssh ${DEST} nginx -t" -ForegroundColor Red
+    Write-Host "Health endpoint failed — check: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
 }
+$ready = try { Invoke-WebRequest -Uri "${proto}://${TlsDomain}/readyz" -SkipCertificateCheck -ErrorAction Stop; "200" } catch { $_.Exception.Response.StatusCode.value__ }
+Write-Host "Readiness (/readyz): $ready (200 = DB reachable)" -ForegroundColor DarkGray
 
 Write-Host "`n=== Deploy complete ===" -ForegroundColor Green
 Write-Host "Frontend: https://${TlsDomain}" -ForegroundColor Cyan
