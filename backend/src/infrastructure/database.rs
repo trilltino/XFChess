@@ -159,6 +159,10 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_018 = include_str!("../../migrations/018_puzzles.sql");
     run_script(&pools.session_pool, migration_018, "018").await?;
 
+    // ── Migration 019: durable job queue (WS-A) ───────────────────────────────
+    let migration_019 = include_str!("../../migrations/019_job_queue.sql");
+    run_script(&pools.session_pool, migration_019, "019").await?;
+
     info!("[Database] All migrations completed successfully");
     Ok(())
 }
