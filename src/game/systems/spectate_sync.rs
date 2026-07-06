@@ -1,11 +1,11 @@
-use bevy::prelude::*;
 use crate::core::states::GameMode;
-use crate::multiplayer::types::NetworkEvent;
+use crate::engine::board_state::ChessEngine;
+use crate::game::events::NetworkMoveEvent;
+use crate::game::resources::MoveHistory;
 use crate::multiplayer::network::protocol::NetworkMessage;
 use crate::multiplayer::traits::{MessageReader, MessageWriter};
-use crate::game::events::NetworkMoveEvent;
-use crate::engine::board_state::ChessEngine;
-use crate::game::resources::MoveHistory;
+use crate::multiplayer::types::NetworkEvent;
+use bevy::prelude::*;
 
 /// Resource to track if we've successfully synced the initial board state
 #[derive(Resource, Default)]
@@ -61,12 +61,16 @@ pub fn sync_spectator_board(
             if let Some(uci) = last_move {
                 if Some(uci.clone()) != sync_status.last_move_uci {
                     info!("[SPECTATE] Detected new move: {}", uci);
-                    
+
                     if uci.len() >= 4 {
-                        let from_file = (uci.as_bytes()[0] as char).to_digit(36).unwrap_or(0) as u8 - 10;
-                        let from_rank = (uci.as_bytes()[1] as char).to_digit(10).unwrap_or(0) as u8 - 1;
-                        let to_file = (uci.as_bytes()[2] as char).to_digit(36).unwrap_or(0) as u8 - 10;
-                        let to_rank = (uci.as_bytes()[3] as char).to_digit(10).unwrap_or(0) as u8 - 1;
+                        let from_file =
+                            (uci.as_bytes()[0] as char).to_digit(36).unwrap_or(0) as u8 - 10;
+                        let from_rank =
+                            (uci.as_bytes()[1] as char).to_digit(10).unwrap_or(0) as u8 - 1;
+                        let to_file =
+                            (uci.as_bytes()[2] as char).to_digit(36).unwrap_or(0) as u8 - 10;
+                        let to_rank =
+                            (uci.as_bytes()[3] as char).to_digit(10).unwrap_or(0) as u8 - 1;
                         let promotion = uci.get(4..5).map(|s| s.chars().next().unwrap());
 
                         move_events.write(NetworkMoveEvent {
@@ -75,7 +79,7 @@ pub fn sync_spectator_board(
                             promotion,
                             expected_fen: None,
                         });
-                        
+
                         sync_status.last_move_uci = Some(uci.clone());
                     }
                 }

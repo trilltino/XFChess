@@ -1,7 +1,7 @@
 //! Tournament player registration instructions
 
-pub mod register;
 pub mod leave;
+pub mod register;
 
-pub use register::RegisterPlayer;
 pub use leave::LeaveTournament;
+pub use register::RegisterPlayer;

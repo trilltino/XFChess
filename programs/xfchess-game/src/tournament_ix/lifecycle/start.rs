@@ -4,6 +4,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::shards;
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -18,24 +19,28 @@ pub struct StartTournament<'info> {
     pub tournament: Account<'info, Tournament>,
     /// TournamentPlayersShard 0 (players 0-63)
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
     /// TournamentPlayersShard 1 (players 64-127)
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Account<'info, TournamentPlayersShard>,
     /// TournamentPlayersShard 2 (players 128-191)
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Account<'info, TournamentPlayersShard>,
     /// TournamentPlayersShard 3 (players 192-255)
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
@@ -63,7 +68,10 @@ pub struct StartTournament<'info> {
 /// Backend uses this to generate matches via separate initialize_match calls.
 pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
-    require!(tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
+    require!(
+        tournament.tournament_id == tournament_id,
+        GameErrorCode::UnauthorizedAccess
+    );
     require!(
         tournament.status == TournamentStatus::Registration,
         GameErrorCode::TournamentNotInRegistration
@@ -88,77 +96,64 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
 
     let player_count = tournament.num_registered_players as usize;
 
-    // Collect all players and ELOs from all shards
-    let mut all_players: Vec<Pubkey> = Vec::with_capacity(player_count);
-    let mut all_elos: Vec<u32> = Vec::with_capacity(player_count);
-
-    let shards = [
+    let shards: [&TournamentPlayersShard; 4] = [
         &ctx.accounts.tournament_players_shard_0,
         &ctx.accounts.tournament_players_shard_1,
         &ctx.accounts.tournament_players_shard_2,
         &ctx.accounts.tournament_players_shard_3,
     ];
-
-    for shard in shards.iter() {
-        for i in 0..shard.players.len() {
-            all_players.push(shard.players[i]);
-            all_elos.push(shard.player_elos[i]);
-        }
-    }
+    let collected = shards::collect_players(&shards)?;
+    require!(
+        collected.len() == player_count,
+        GameErrorCode::InvalidTournamentStatus
+    );
 
     // Sort players by ELO descending
-    let mut indexed: Vec<(usize, u32)> = all_elos
-        .iter()
-        .enumerate()
-        .map(|(i, &elo)| (i, elo))
-        .collect();
-    indexed.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut seeded = collected;
+    seeded.sort_by(|a, b| b.1.cmp(&a.1));
 
-    // Create sorted arrays
-    let mut seeded_players: Vec<Pubkey> = Vec::with_capacity(player_count);
-    let mut seeded_elos: Vec<u32> = Vec::with_capacity(player_count);
-    for (original_idx, elo) in indexed {
-        seeded_players.push(all_players[original_idx]);
-        seeded_elos.push(elo);
-    }
+    {
+        let tp0 = &mut ctx.accounts.tournament_players_shard_0;
+        let tp1 = &mut ctx.accounts.tournament_players_shard_1;
+        let tp2 = &mut ctx.accounts.tournament_players_shard_2;
+        let tp3 = &mut ctx.accounts.tournament_players_shard_3;
 
-    // Redistribute sorted players back to shards in order
-    let tp0 = &mut ctx.accounts.tournament_players_shard_0;
-    let tp1 = &mut ctx.accounts.tournament_players_shard_1;
-    let tp2 = &mut ctx.accounts.tournament_players_shard_2;
-    let tp3 = &mut ctx.accounts.tournament_players_shard_3;
+        tp0.players.clear();
+        tp0.player_elos.clear();
+        tp0.swiss_standings.clear();
+        tp1.players.clear();
+        tp1.player_elos.clear();
+        tp1.swiss_standings.clear();
+        tp2.players.clear();
+        tp2.player_elos.clear();
+        tp2.swiss_standings.clear();
+        tp3.players.clear();
+        tp3.player_elos.clear();
+        tp3.swiss_standings.clear();
 
-    // Clear all shards
-    tp0.players.clear();
-    tp0.player_elos.clear();
-    tp1.players.clear();
-    tp1.player_elos.clear();
-    tp2.players.clear();
-    tp2.player_elos.clear();
-    tp3.players.clear();
-    tp3.player_elos.clear();
+        for (i, (player, elo)) in seeded.iter().copied().enumerate() {
+            let shard_id = (i / TournamentPlayersShard::SHARD_CAPACITY as usize) as u8;
+            match shard_id {
+                0 => {
+                    shards::push_player(tp0, player, elo)?;
+                }
+                1 => {
+                    shards::push_player(tp1, player, elo)?;
+                }
+                2 => {
+                    shards::push_player(tp2, player, elo)?;
+                }
+                3 => {
+                    shards::push_player(tp3, player, elo)?;
+                }
+                _ => return Err(GameErrorCode::TournamentFull.into()),
+            }
+        }
 
-    // Distribute sorted players across shards
-    for (i, &player) in seeded_players.iter().enumerate() {
-        let shard_id = (i / TournamentPlayersShard::SHARD_CAPACITY as usize) as u8;
-        match shard_id {
-            0 => {
-                tp0.players.push(player);
-                tp0.player_elos.push(seeded_elos[i]);
-            }
-            1 => {
-                tp1.players.push(player);
-                tp1.player_elos.push(seeded_elos[i]);
-            }
-            2 => {
-                tp2.players.push(player);
-                tp2.player_elos.push(seeded_elos[i]);
-            }
-            3 => {
-                tp3.players.push(player);
-                tp3.player_elos.push(seeded_elos[i]);
-            }
-            _ => return Err(GameErrorCode::TournamentFull.into()),
+        if matches!(tournament.tournament_type, TournamentType::Swiss { .. }) {
+            let mut swiss_shards: [&mut TournamentPlayersShard; 4] =
+                [&mut **tp0, &mut **tp1, &mut **tp2, &mut **tp3];
+            shards::initialize_swiss_standings(&mut swiss_shards)?;
         }
     }
 

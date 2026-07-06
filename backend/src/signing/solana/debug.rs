@@ -92,32 +92,36 @@ fn extract_error_code(error_str: &str) -> Option<u32> {
 /// Format debug info for human-readable output
 pub fn format_debug_info(info: &TransactionDebugInfo) -> String {
     let mut output = String::new();
-    
+
     output.push_str(&format!("Transaction: {}\n", info.signature));
     output.push_str(&format!("Slot: {}\n", info.slot));
-    
+
     if let Some(ts) = info.timestamp {
         let datetime = chrono::DateTime::from_timestamp(ts, 0)
             .map(|dt| dt.to_rfc3339())
             .unwrap_or_else(|| "Unknown".to_string());
         output.push_str(&format!("Time: {}\n", datetime));
     }
-    
-    output.push_str(&format!("Status: {}\n", if info.success { " Success" } else { " Failed" }));
-    
+
+    output.push_str(&format!(
+        "Status: {}\n",
+        if info.success { " Success" } else { " Failed" }
+    ));
+
     if let Some(ref error) = info.error {
         output.push_str(&format!("\nError:\n  {}\n", error));
     }
-    
+
     if let Some(cu) = info.compute_units_consumed {
         output.push_str(&format!("\nCompute Units: {}\n", cu));
     }
-    
-    output.push_str(&format!("Fee Paid: {} lamports ({} SOL)\n", 
-        info.fee_paid, 
+
+    output.push_str(&format!(
+        "Fee Paid: {} lamports ({} SOL)\n",
+        info.fee_paid,
         info.fee_paid as f64 / 1_000_000_000.0
     ));
-    
+
     if !info.account_changes.is_empty() {
         output.push_str("\nAccount Changes:\n");
         for change in &info.account_changes {
@@ -133,14 +137,14 @@ pub fn format_debug_info(info: &TransactionDebugInfo) -> String {
             ));
         }
     }
-    
+
     if !info.program_ids.is_empty() {
         output.push_str("\nPrograms Invoked:\n");
         for (idx, program_id) in info.program_ids.iter().enumerate() {
             output.push_str(&format!("  {}. {}\n", idx + 1, program_id));
         }
     }
-    
+
     if !info.logs.is_empty() {
         output.push_str("\nProgram Logs:\n");
         for log in &info.logs {
@@ -148,21 +152,27 @@ pub fn format_debug_info(info: &TransactionDebugInfo) -> String {
             output.push_str(&format!("  {}\n", log));
         }
     }
-    
+
     output
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_parse_program_error() {
-        assert_eq!(parse_program_error(0x1), "GameAlreadyFull - Game already has two players");
-        assert_eq!(parse_program_error(0x2), "InvalidMove - Move is not valid for current position");
+        assert_eq!(
+            parse_program_error(0x1),
+            "GameAlreadyFull - Game already has two players"
+        );
+        assert_eq!(
+            parse_program_error(0x2),
+            "InvalidMove - Move is not valid for current position"
+        );
         assert_eq!(parse_program_error(0xFF), "Unknown program error");
     }
-    
+
     #[test]
     fn test_extract_error_code() {
         assert_eq!(extract_error_code("custom program error: 0x1"), Some(1));
@@ -170,4 +180,3 @@ mod tests {
         assert_eq!(extract_error_code("no error code"), None);
     }
 }
-

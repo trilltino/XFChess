@@ -33,9 +33,12 @@ pub enum MoveOutcome {
 /// automatic cases: K vs K, K+minor vs K, and K+B vs K+B with bishops on the
 /// same colour. Any pawn, rook, or queen means mate is still possible.
 pub fn is_insufficient_material(g: &OnChainGame) -> bool {
-    if g.white_pawns | g.black_pawns
-        | g.white_rooks | g.black_rooks
-        | g.white_queens | g.black_queens
+    if g.white_pawns
+        | g.black_pawns
+        | g.white_rooks
+        | g.black_rooks
+        | g.white_queens
+        | g.black_queens
         != 0
     {
         return false;
@@ -78,8 +81,15 @@ pub fn parse_uci(mv: &[u8; 5]) -> Result<(i8, i8, i8), ()> {
     let dst_file = mv[2].wrapping_sub(b'a') as i8;
     let dst_rank = mv[3].wrapping_sub(b'1') as i8;
 
-    if src_file < 0 || src_file > 7 || src_rank < 0 || src_rank > 7 ||
-       dst_file < 0 || dst_file > 7 || dst_rank < 0 || dst_rank > 7 {
+    if src_file < 0
+        || src_file > 7
+        || src_rank < 0
+        || src_rank > 7
+        || dst_file < 0
+        || dst_file > 7
+        || dst_rank < 0
+        || dst_rank > 7
+    {
         return Err(());
     }
 
@@ -180,12 +190,12 @@ pub fn validate_and_apply_sq(
 
 fn is_geometrically_valid(g: &OnChainGame, src: i8, dst: i8, piece_type: i8, color: i8) -> bool {
     match piece_type {
-        PAWN_ID   => is_pawn_move_valid(g, src, dst, color),
+        PAWN_ID => is_pawn_move_valid(g, src, dst, color),
         KNIGHT_ID => is_knight_move(src, dst),
         BISHOP_ID => is_bishop_path_clear(g, src, dst),
-        ROOK_ID   => is_rook_path_clear(g, src, dst),
-        QUEEN_ID  => is_bishop_path_clear(g, src, dst) || is_rook_path_clear(g, src, dst),
-        KING_ID   => is_king_move_valid(g, src, dst, color),
+        ROOK_ID => is_rook_path_clear(g, src, dst),
+        QUEEN_ID => is_bishop_path_clear(g, src, dst) || is_rook_path_clear(g, src, dst),
+        KING_ID => is_king_move_valid(g, src, dst, color),
         _ => false,
     }
 }
@@ -226,11 +236,15 @@ fn is_knight_move(src: i8, dst: i8) -> bool {
 fn is_bishop_path_clear(g: &OnChainGame, src: i8, dst: i8) -> bool {
     let dr = dst / 8 - src / 8;
     let df = dst % 8 - src % 8;
-    if dr.abs() != df.abs() || dr == 0 { return false; }
+    if dr.abs() != df.abs() || dr == 0 {
+        return false;
+    }
     let step = dr.signum() * 8 + df.signum();
     let mut sq = src + step;
     while sq != dst {
-        if g.board[sq as usize] != 0 { return false; }
+        if g.board[sq as usize] != 0 {
+            return false;
+        }
         sq += step;
     }
     true
@@ -239,12 +253,22 @@ fn is_bishop_path_clear(g: &OnChainGame, src: i8, dst: i8) -> bool {
 fn is_rook_path_clear(g: &OnChainGame, src: i8, dst: i8) -> bool {
     let dr = dst / 8 - src / 8;
     let df = dst % 8 - src % 8;
-    if dr != 0 && df != 0 { return false; }
-    if dr == 0 && df == 0 { return false; }
-    let step: i8 = if dr != 0 { dr.signum() * 8 } else { df.signum() };
+    if dr != 0 && df != 0 {
+        return false;
+    }
+    if dr == 0 && df == 0 {
+        return false;
+    }
+    let step: i8 = if dr != 0 {
+        dr.signum() * 8
+    } else {
+        df.signum()
+    };
     let mut sq = src + step;
     while sq != dst {
-        if g.board[sq as usize] != 0 { return false; }
+        if g.board[sq as usize] != 0 {
+            return false;
+        }
         sq += step;
     }
     true
@@ -268,39 +292,53 @@ fn is_king_move_valid(g: &OnChainGame, src: i8, dst: i8, color: i8) -> bool {
 
 fn is_castling_valid(g: &OnChainGame, src: i8, dst: i8, color: i8) -> bool {
     if color > 0 {
-        if src != 4 { return false; }
+        if src != 4 {
+            return false;
+        }
         if dst == 6 {
             // White kingside
             (g.castling & CASTLE_WK != 0)
-                && g.board[5] == 0 && g.board[6] == 0
+                && g.board[5] == 0
+                && g.board[6] == 0
                 && !is_in_check_fast(g, color)
                 && !sq_attacked_by(g, 5, -color)
                 && !sq_attacked_by(g, 6, -color)
         } else if dst == 2 {
             // White queenside
             (g.castling & CASTLE_WQ != 0)
-                && g.board[1] == 0 && g.board[2] == 0 && g.board[3] == 0
+                && g.board[1] == 0
+                && g.board[2] == 0
+                && g.board[3] == 0
                 && !is_in_check_fast(g, color)
                 && !sq_attacked_by(g, 3, -color)
                 && !sq_attacked_by(g, 2, -color)
-        } else { false }
+        } else {
+            false
+        }
     } else {
-        if src != 60 { return false; }
+        if src != 60 {
+            return false;
+        }
         if dst == 62 {
             // Black kingside
             (g.castling & CASTLE_BK != 0)
-                && g.board[61] == 0 && g.board[62] == 0
+                && g.board[61] == 0
+                && g.board[62] == 0
                 && !is_in_check_fast(g, color)
                 && !sq_attacked_by(g, 61, -color)
                 && !sq_attacked_by(g, 62, -color)
         } else if dst == 58 {
             // Black queenside
             (g.castling & CASTLE_BQ != 0)
-                && g.board[57] == 0 && g.board[58] == 0 && g.board[59] == 0
+                && g.board[57] == 0
+                && g.board[58] == 0
+                && g.board[59] == 0
                 && !is_in_check_fast(g, color)
                 && !sq_attacked_by(g, 59, -color)
                 && !sq_attacked_by(g, 58, -color)
-        } else { false }
+        } else {
+            false
+        }
     }
 }
 
@@ -321,7 +359,14 @@ fn sq_attacked_by(g: &OnChainGame, sq: i8, by_color: i8) -> bool {
 // Internal move application (no legality check)
 // ---------------------------------------------------------------------------
 
-fn apply_move_internal(g: &mut OnChainGame, src: i8, dst: i8, piece_type: i8, color: i8, promo: i8) {
+fn apply_move_internal(
+    g: &mut OnChainGame,
+    src: i8,
+    dst: i8,
+    piece_type: i8,
+    color: i8,
+    promo: i8,
+) {
     // Reset EP target
     let old_ep = g.ep_target;
     g.ep_target = -1;
@@ -335,18 +380,32 @@ fn apply_move_internal(g: &mut OnChainGame, src: i8, dst: i8, piece_type: i8, co
     // Castling: move the rook
     if piece_type == KING_ID && (dst - src).abs() == 2 {
         if color > 0 {
-            if dst == 6 { g.clear_square(7); g.set_square(5,  W_ROOK); }
-            else        { g.clear_square(0); g.set_square(3,  W_ROOK); }
+            if dst == 6 {
+                g.clear_square(7);
+                g.set_square(5, W_ROOK);
+            } else {
+                g.clear_square(0);
+                g.set_square(3, W_ROOK);
+            }
         } else {
-            if dst == 62 { g.clear_square(63); g.set_square(61, B_ROOK); }
-            else         { g.clear_square(56); g.set_square(59, B_ROOK); }
+            if dst == 62 {
+                g.clear_square(63);
+                g.set_square(61, B_ROOK);
+            } else {
+                g.clear_square(56);
+                g.set_square(59, B_ROOK);
+            }
         }
     }
 
     // Determine final piece (promotion)
     let final_piece = if piece_type == PAWN_ID && (dst / 8 == 0 || dst / 8 == 7) {
         let p = if promo > 0 { promo } else { QUEEN_ID };
-        if color > 0 { p } else { -p }
+        if color > 0 {
+            p
+        } else {
+            -p
+        }
     } else {
         g.board[src as usize]
     };
@@ -366,9 +425,9 @@ fn apply_move_internal(g: &mut OnChainGame, src: i8, dst: i8, piece_type: i8, co
 
 fn update_castling(g: &mut OnChainGame, src: i8, dst: i8) {
     match src {
-        0  => g.castling &= !CASTLE_WQ,
-        4  => g.castling &= !(CASTLE_WK | CASTLE_WQ),
-        7  => g.castling &= !CASTLE_WK,
+        0 => g.castling &= !CASTLE_WQ,
+        4 => g.castling &= !(CASTLE_WK | CASTLE_WQ),
+        7 => g.castling &= !CASTLE_WK,
         56 => g.castling &= !CASTLE_BQ,
         60 => g.castling &= !(CASTLE_BK | CASTLE_BQ),
         63 => g.castling &= !CASTLE_BK,
@@ -376,8 +435,8 @@ fn update_castling(g: &mut OnChainGame, src: i8, dst: i8) {
     }
     // Capturing a rook also removes its castling right
     match dst {
-        0  => g.castling &= !CASTLE_WQ,
-        7  => g.castling &= !CASTLE_WK,
+        0 => g.castling &= !CASTLE_WQ,
+        7 => g.castling &= !CASTLE_WK,
         56 => g.castling &= !CASTLE_BQ,
         63 => g.castling &= !CASTLE_BK,
         _ => {}
@@ -392,7 +451,11 @@ fn update_castling(g: &mut OnChainGame, src: i8, dst: i8) {
 /// Uses early-exit — stops as soon as any legal move is found.
 pub fn has_any_legal_move(g: &mut OnChainGame, color: i8) -> bool {
     // Collect all pieces of this color
-    let pieces_bb = if color > 0 { g.occupied_white } else { g.occupied_black };
+    let pieces_bb = if color > 0 {
+        g.occupied_white
+    } else {
+        g.occupied_black
+    };
     let mut bb = pieces_bb;
 
     while bb != 0 {
@@ -415,15 +478,21 @@ fn has_any_legal_move_for_piece(g: &mut OnChainGame, src: i8, piece_type: i8, co
     for &dst in candidates.iter().flatten() {
         let dst_piece = g.board[dst as usize];
         // Skip own pieces
-        if dst_piece != 0 && (dst_piece > 0) == (color > 0) { continue; }
-        if !is_geometrically_valid(g, src, dst, piece_type, color) { continue; }
+        if dst_piece != 0 && (dst_piece > 0) == (color > 0) {
+            continue;
+        }
+        if !is_geometrically_valid(g, src, dst, piece_type, color) {
+            continue;
+        }
 
         let saved = *g;
         apply_move_internal(g, src, dst, piece_type, color, QUEEN_ID);
         let legal = !is_in_check_fast(g, color);
         *g = saved;
 
-        if legal { return true; }
+        if legal {
+            return true;
+        }
     }
     false
 }
@@ -436,28 +505,50 @@ fn get_candidate_destinations(src: i8, piece_type: i8, color: i8) -> [Option<i8>
 
     match piece_type {
         KNIGHT_ID => {
-            for &(dr, df) in &[(2,1),(2,-1),(-2,1),(-2,-1),(1,2),(1,-2),(-1,2),(-1,-2)] {
+            for &(dr, df) in &[
+                (2, 1),
+                (2, -1),
+                (-2, 1),
+                (-2, -1),
+                (1, 2),
+                (1, -2),
+                (-1, 2),
+                (-1, -2),
+            ] {
                 let r = src / 8 + dr;
                 let f = src % 8 + df;
                 if r >= 0 && r < 8 && f >= 0 && f < 8 {
-                    out[idx] = Some(r * 8 + f); idx += 1;
+                    out[idx] = Some(r * 8 + f);
+                    idx += 1;
                 }
             }
         }
         KING_ID => {
-            for &(dr, df) in &[(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)] {
+            for &(dr, df) in &[
+                (1, 0),
+                (-1, 0),
+                (0, 1),
+                (0, -1),
+                (1, 1),
+                (1, -1),
+                (-1, 1),
+                (-1, -1),
+            ] {
                 let r = src / 8 + dr;
                 let f = src % 8 + df;
                 if r >= 0 && r < 8 && f >= 0 && f < 8 {
-                    out[idx] = Some(r * 8 + f); idx += 1;
+                    out[idx] = Some(r * 8 + f);
+                    idx += 1;
                 }
             }
             // Castling candidates
             if color > 0 && src == 4 {
-                out[idx] = Some(6); idx += 1;
+                out[idx] = Some(6);
+                idx += 1;
                 out[idx] = Some(2);
             } else if color < 0 && src == 60 {
-                out[idx] = Some(62); idx += 1;
+                out[idx] = Some(62);
+                idx += 1;
                 out[idx] = Some(58);
             }
         }
@@ -465,26 +556,46 @@ fn get_candidate_destinations(src: i8, piece_type: i8, color: i8) -> [Option<i8>
             let dir: i8 = if color > 0 { 8 } else { -8 };
             let start_rank: i8 = if color > 0 { 1 } else { 6 };
             // Pushes
-            out[idx] = Some(src + dir); idx += 1;
-            if src / 8 == start_rank { out[idx] = Some(src + dir * 2); idx += 1; }
+            out[idx] = Some(src + dir);
+            idx += 1;
+            if src / 8 == start_rank {
+                out[idx] = Some(src + dir * 2);
+                idx += 1;
+            }
             // Diagonal captures
             let f = src % 8;
-            if f > 0 { out[idx] = Some(src + dir - 1); idx += 1; }
-            if f < 7 { out[idx] = Some(src + dir + 1); }
+            if f > 0 {
+                out[idx] = Some(src + dir - 1);
+                idx += 1;
+            }
+            if f < 7 {
+                out[idx] = Some(src + dir + 1);
+            }
         }
         // Sliders — iterate rays up to 7 squares
         ROOK_ID | BISHOP_ID | QUEEN_ID => {
             let dirs: &[(i8, i8)] = match piece_type {
-                ROOK_ID   => &[(1,0),(-1,0),(0,1),(0,-1)],
-                BISHOP_ID => &[(1,1),(1,-1),(-1,1),(-1,-1)],
-                _         => &[(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)],
+                ROOK_ID => &[(1, 0), (-1, 0), (0, 1), (0, -1)],
+                BISHOP_ID => &[(1, 1), (1, -1), (-1, 1), (-1, -1)],
+                _ => &[
+                    (1, 0),
+                    (-1, 0),
+                    (0, 1),
+                    (0, -1),
+                    (1, 1),
+                    (1, -1),
+                    (-1, 1),
+                    (-1, -1),
+                ],
             };
             for &(dr, df) in dirs {
                 let mut r = src / 8 + dr;
                 let mut f = src % 8 + df;
                 while r >= 0 && r < 8 && f >= 0 && f < 8 && idx < 28 {
-                    out[idx] = Some(r * 8 + f); idx += 1;
-                    r += dr; f += df;
+                    out[idx] = Some(r * 8 + f);
+                    idx += 1;
+                    r += dr;
+                    f += df;
                 }
             }
         }
@@ -521,10 +632,10 @@ mod tests {
         let mut g = CompactBoard::starting_position().to_on_chain_game();
         let result = validate_and_apply(&mut g, b"e2e4\0");
         assert_eq!(result, Ok(MoveOutcome::Playing));
-        assert_eq!(g.board[28], W_PAWN);  // e4
-        assert_eq!(g.board[12], 0);       // e2 empty
-        assert_eq!(g.ep_target, 20);      // e3 is EP target
-        assert_eq!(g.side_to_move, -1);   // now black's turn
+        assert_eq!(g.board[28], W_PAWN); // e4
+        assert_eq!(g.board[12], 0); // e2 empty
+        assert_eq!(g.ep_target, 20); // e3 is EP target
+        assert_eq!(g.side_to_move, -1); // now black's turn
     }
 
     #[test]
@@ -554,11 +665,17 @@ mod tests {
         assert!(insufficient("8/8/8/4k3/8/4K3/5N2/8 w - - 0 1"), "K+N vs K");
         assert!(insufficient("8/8/8/4k3/8/4K3/5B2/8 w - - 0 1"), "K+B vs K");
         // Both bishops on dark squares (c1 and f4) → same colour → draw.
-        assert!(insufficient("8/8/8/4k3/5b2/4K3/8/2B5 w - - 0 1"), "K+B vs K+B same colour");
+        assert!(
+            insufficient("8/8/8/4k3/5b2/4K3/8/2B5 w - - 0 1"),
+            "K+B vs K+B same colour"
+        );
         // Sufficient material:
         assert!(!insufficient("8/8/8/4k3/8/4K3/5R2/8 w - - 0 1"), "K+R vs K");
         assert!(!insufficient("8/8/8/4k3/8/4K3/4P3/8 w - - 0 1"), "K+P vs K");
-        assert!(!insufficient("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"), "start");
+        assert!(
+            !insufficient("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+            "start"
+        );
     }
 
     #[test]

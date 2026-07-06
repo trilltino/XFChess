@@ -1,5 +1,6 @@
 //! Instruction for initializing and verifying player profiles.
 
+use crate::account_ix::profile_init;
 use crate::constants::*;
 use crate::state::*;
 use anchor_lang::prelude::*;
@@ -33,7 +34,12 @@ pub struct InitProfile<'info> {
 /// Seconds in 18 years (18 * 365.25 days).
 const EIGHTEEN_YEARS_SECS: i64 = 567_648_000;
 
-pub fn handler(ctx: Context<InitProfile>, username: String, country: String, date_of_birth: i64) -> Result<()> {
+pub fn handler(
+    ctx: Context<InitProfile>,
+    username: String,
+    country: String,
+    date_of_birth: i64,
+) -> Result<()> {
     // Validate username format
     validate_username(&username)?;
 
@@ -43,7 +49,7 @@ pub fn handler(ctx: Context<InitProfile>, username: String, country: String, dat
         date_of_birth > 0 && now - date_of_birth >= EIGHTEEN_YEARS_SECS,
         crate::errors::GameErrorCode::UnderagePlayer
     );
-    
+
     let profile_info = &ctx.accounts.player_profile;
     let player = &ctx.accounts.player;
     let system_program = &ctx.accounts.system_program;
@@ -51,17 +57,15 @@ pub fn handler(ctx: Context<InitProfile>, username: String, country: String, dat
 
     // 1. Manually Handle Profile Account (Creation or Allocation)
     if profile_info.data_is_empty() {
-        let (pda, bump) = Pubkey::find_program_address(
-            &[PROFILE_SEED, player.key().as_ref()], 
-            ctx.program_id
-        );
+        let (pda, bump) =
+            Pubkey::find_program_address(&[PROFILE_SEED, player.key().as_ref()], ctx.program_id);
         if profile_info.key() != pda {
             return err!(crate::errors::GameErrorCode::UnauthorizedAccess);
         }
-        
+
         let space = 8 + PlayerProfile::INIT_SPACE;
         let lamports = Rent::get()?.minimum_balance(space);
-        
+
         invoke_signed(
             &system_instruction::create_account(
                 &player.key(),
@@ -70,23 +74,30 @@ pub fn handler(ctx: Context<InitProfile>, username: String, country: String, dat
                 space as u64,
                 ctx.program_id,
             ),
-            &[player.to_account_info(), profile_info.to_account_info(), system_program.to_account_info()],
+            &[
+                player.to_account_info(),
+                profile_info.to_account_info(),
+                system_program.to_account_info(),
+            ],
             &[&[PROFILE_SEED, player.key().as_ref(), &[bump]]],
         )?;
     } else {
         // Already exists - verify ownership
-        require!(profile_info.owner == ctx.program_id, crate::errors::GameErrorCode::UnauthorizedAccess);
-        
+        require!(
+            profile_info.owner == ctx.program_id,
+            crate::errors::GameErrorCode::UnauthorizedAccess
+        );
+
         // 2. Ensure enough space (Realloc if needed for legacy accounts)
         let required_space = 8 + PlayerProfile::INIT_SPACE;
         if profile_info.data_len() < required_space {
             profile_info.realloc(required_space, false)?;
-            
+
             // Adjust lamports for rent exemption
             let rent = Rent::get()?;
             let new_minimum_balance = rent.minimum_balance(required_space);
             let lamports_diff = new_minimum_balance.saturating_sub(profile_info.lamports());
-            
+
             if lamports_diff > 0 {
                 invoke(
                     &system_instruction::transfer(
@@ -104,27 +115,23 @@ pub fn handler(ctx: Context<InitProfile>, username: String, country: String, dat
         }
     }
 
-
-    // 2. Write Data using Manual Deserialization-like access
-    let mut data = profile_info.try_borrow_mut_data()?;
-    let mut profile = PlayerProfile::default();
-    
-    // Set initial values
-    profile.authority = player.key();
-    profile.elo_rating = 120000.0;
-    profile.rd = 0.0;
-    profile.volatility = 0.0;
-    profile.created_at = now;
-    profile.date_of_birth = date_of_birth;
-    profile.is_verified = false;
-    profile.username = username.clone();
-    profile.username_set = true;
-    profile.country = country;
+    let profile = {
+        let data = profile_info.try_borrow_data()?;
+        let mut profile = profile_init::load_or_new_profile(&data, player.key(), now)?;
+        profile_init::update_identity_fields(
+            &mut profile,
+            username.clone(),
+            country,
+            date_of_birth,
+        );
+        profile
+    };
 
     // Write Discriminator
+    let mut data = profile_info.try_borrow_mut_data()?;
     let disc = PlayerProfile::DISCRIMINATOR;
     data[..8].copy_from_slice(&disc);
-    
+
     // Serialize state
     let mut writer = &mut data[8..];
     profile.serialize(&mut writer)?;
@@ -139,7 +146,6 @@ pub fn handler(ctx: Context<InitProfile>, username: String, country: String, dat
 
     Ok(())
 }
-
 
 #[derive(Accounts)]
 pub struct VerifyProfile<'info> {

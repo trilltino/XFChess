@@ -53,7 +53,10 @@ pub fn handler_small(ctx: Context<InitializeShardsSmall>, tournament_id: u64) ->
     s.players = Vec::with_capacity(TournamentPlayersShard::SHARD_CAPACITY as usize);
     s.player_elos = Vec::with_capacity(TournamentPlayersShard::SHARD_CAPACITY as usize);
     s.swiss_standings = Vec::with_capacity(TournamentPlayersShard::SHARD_CAPACITY as usize);
-    msg!("Tournament {} shard 0 initialized (small, ≤64 players)", tournament_id);
+    msg!(
+        "Tournament {} shard 0 initialized (small, ≤64 players)",
+        tournament_id
+    );
     Ok(())
 }
 
@@ -108,7 +111,10 @@ pub fn handler_medium(ctx: Context<InitializeShardsMedium>, tournament_id: u64) 
     };
     init_shard(&mut ctx.accounts.tournament_players_shard_0, 0);
     init_shard(&mut ctx.accounts.tournament_players_shard_1, 1);
-    msg!("Tournament {} shards 0-1 initialized (medium, ≤128 players)", tournament_id);
+    msg!(
+        "Tournament {} shards 0-1 initialized (medium, ≤128 players)",
+        tournament_id
+    );
     Ok(())
 }
 
@@ -180,6 +186,9 @@ pub fn handler(ctx: Context<InitializeTournamentShards>, tournament_id: u64) -> 
     init_shard(&mut ctx.accounts.tournament_players_shard_1, 1);
     init_shard(&mut ctx.accounts.tournament_players_shard_2, 2);
     init_shard(&mut ctx.accounts.tournament_players_shard_3, 3);
-    msg!("Tournament {} shards 0-3 initialized (large, 256 players)", tournament_id);
+    msg!(
+        "Tournament {} shards 0-3 initialized (large, 256 players)",
+        tournament_id
+    );
     Ok(())
 }

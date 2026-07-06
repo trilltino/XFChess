@@ -1,6 +1,6 @@
-use sqlx::SqlitePool;
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 
 const PGN_ZSTD_PREFIX: &str = "zstd:";
 
@@ -16,19 +16,28 @@ pub fn filter_visible_moves(
         return moves;
     }
     let horizon = now_ts - delay_secs;
-    moves.into_iter().filter(|m| m.timestamp <= horizon).collect()
+    moves
+        .into_iter()
+        .filter(|m| m.timestamp <= horizon)
+        .collect()
 }
 
 fn compress_pgn(pgn: &str) -> String {
     match zstd::encode_all(pgn.as_bytes(), 3) {
-        Ok(compressed) => format!("{}{}", PGN_ZSTD_PREFIX, base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &compressed)),
+        Ok(compressed) => format!(
+            "{}{}",
+            PGN_ZSTD_PREFIX,
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &compressed)
+        ),
         Err(_) => pgn.to_owned(),
     }
 }
 
 fn decompress_pgn(raw: &str) -> String {
     if let Some(encoded) = raw.strip_prefix(PGN_ZSTD_PREFIX) {
-        if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) {
+        if let Ok(bytes) =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+        {
             if let Ok(decompressed) = zstd::decode_all(bytes.as_slice()) {
                 if let Ok(s) = String::from_utf8(decompressed) {
                     return s;
@@ -194,23 +203,21 @@ impl GameRepository {
 
     /// Gets the next move number for a game (current max + 1).
     pub async fn get_next_move_number(&self, game_id: &str) -> Result<i64> {
-        let result: Option<(i64,)> = sqlx::query_as(
-            "SELECT COALESCE(MAX(move_number), 0) FROM moves WHERE game_id = ?"
-        )
-        .bind(game_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let result: Option<(i64,)> =
+            sqlx::query_as("SELECT COALESCE(MAX(move_number), 0) FROM moves WHERE game_id = ?")
+                .bind(game_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(result.map(|(n,)| n + 1).unwrap_or(1))
     }
 
     /// Looks up a username from the users_v2 table by wallet pubkey.
     pub async fn get_username(&self, wallet: &str) -> Result<String> {
-        let result: (String,) = sqlx::query_as(
-            "SELECT username FROM users_v2 WHERE wallet = ? AND deleted_at IS NULL"
-        )
-        .bind(wallet)
-        .fetch_one(&self.pool)
-        .await?;
+        let result: (String,) =
+            sqlx::query_as("SELECT username FROM users_v2 WHERE wallet = ? AND deleted_at IS NULL")
+                .bind(wallet)
+                .fetch_one(&self.pool)
+                .await?;
         Ok(result.0)
     }
 
@@ -246,42 +253,36 @@ impl GameRepository {
 
     /// Get a game by ID
     pub async fn get_game(&self, game_id: &str) -> Result<Option<GameRecord>> {
-        let game = sqlx::query_as::<_, GameRecord>(
-            "SELECT * FROM games WHERE id = ?"
-        )
-        .bind(game_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let game = sqlx::query_as::<_, GameRecord>("SELECT * FROM games WHERE id = ?")
+            .bind(game_id)
+            .fetch_optional(&self.pool)
+            .await?;
 
         Ok(game)
     }
 
     /// List all games, optionally with pagination
-    pub async fn list_games(&self, limit: Option<i32>, offset: Option<i32>) -> Result<Vec<GameRecord>> {
+    pub async fn list_games(
+        &self,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> Result<Vec<GameRecord>> {
         let query = match (limit, offset) {
-            (Some(limit), Some(offset)) => {
-                sqlx::query_as::<_, GameRecord>(
-                    "SELECT * FROM games ORDER BY start_time DESC LIMIT ? OFFSET ?"
-                )
-                .bind(limit)
-                .bind(offset)
-            }
-            (Some(limit), None) => {
-                sqlx::query_as::<_, GameRecord>(
-                    "SELECT * FROM games ORDER BY start_time DESC LIMIT ?"
-                )
-                .bind(limit)
-            }
-            (None, Some(offset)) => {
-                sqlx::query_as::<_, GameRecord>(
-                    "SELECT * FROM games ORDER BY start_time DESC OFFSET ?"
-                )
-                .bind(offset)
-            }
+            (Some(limit), Some(offset)) => sqlx::query_as::<_, GameRecord>(
+                "SELECT * FROM games ORDER BY start_time DESC LIMIT ? OFFSET ?",
+            )
+            .bind(limit)
+            .bind(offset),
+            (Some(limit), None) => sqlx::query_as::<_, GameRecord>(
+                "SELECT * FROM games ORDER BY start_time DESC LIMIT ?",
+            )
+            .bind(limit),
+            (None, Some(offset)) => sqlx::query_as::<_, GameRecord>(
+                "SELECT * FROM games ORDER BY start_time DESC OFFSET ?",
+            )
+            .bind(offset),
             (None, None) => {
-                sqlx::query_as::<_, GameRecord>(
-                    "SELECT * FROM games ORDER BY start_time DESC"
-                )
+                sqlx::query_as::<_, GameRecord>("SELECT * FROM games ORDER BY start_time DESC")
             }
         };
 
@@ -328,7 +329,7 @@ impl GameRepository {
     /// Get all moves for a game
     pub async fn get_moves(&self, game_id: &str) -> Result<Vec<MoveRecord>> {
         let moves = sqlx::query_as::<_, MoveRecord>(
-            "SELECT * FROM moves WHERE game_id = ? ORDER BY move_number ASC"
+            "SELECT * FROM moves WHERE game_id = ? ORDER BY move_number ASC",
         )
         .bind(game_id)
         .fetch_all(&self.pool)
@@ -339,16 +340,14 @@ impl GameRepository {
 
     /// Reads the per-game broadcast delay (0 = live). Missing row → 0.
     pub async fn get_broadcast_delay(&self, game_id: &str) -> i64 {
-        sqlx::query_as::<_, (i64,)>(
-            "SELECT broadcast_delay_secs FROM games WHERE id = ?",
-        )
-        .bind(game_id)
-        .fetch_optional(&self.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|(d,)| d)
-        .unwrap_or(0)
+        sqlx::query_as::<_, (i64,)>("SELECT broadcast_delay_secs FROM games WHERE id = ?")
+            .bind(game_id)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(d,)| d)
+            .unwrap_or(0)
     }
 
     /// Sets a game's broadcast delay, creating the row if it doesn't exist yet
@@ -415,13 +414,15 @@ impl GameRepository {
             .fetch_one(&self.pool)
             .await?;
 
-        let active_games: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games WHERE status = 'playing'")
-            .fetch_one(&self.pool)
-            .await?;
+        let active_games: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM games WHERE status = 'playing'")
+                .fetch_one(&self.pool)
+                .await?;
 
-        let completed_games: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games WHERE status = 'completed'")
-            .fetch_one(&self.pool)
-            .await?;
+        let completed_games: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM games WHERE status = 'completed'")
+                .fetch_one(&self.pool)
+                .await?;
 
         let total_moves: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM moves")
             .fetch_one(&self.pool)
@@ -436,11 +437,7 @@ impl GameRepository {
     }
 
     /// Get all games for a specific player wallet (as white or black)
-    pub async fn get_games_by_player(
-        &self,
-        wallet: &str,
-        limit: i32,
-    ) -> Result<Vec<GameRecord>> {
+    pub async fn get_games_by_player(&self, wallet: &str, limit: i32) -> Result<Vec<GameRecord>> {
         let games = sqlx::query_as::<_, GameRecord>(
             "SELECT * FROM games WHERE player_white = ? OR player_black = ? ORDER BY start_time DESC LIMIT ?"
         )
@@ -499,7 +496,7 @@ impl GameRepository {
         tx.commit().await?;
         Ok(())
     }
- 
+
     /// Gets all completed but not yet archived games
     pub async fn get_unarchived_games(&self, limit: i32) -> Result<Vec<GameRecord>> {
         let games = sqlx::query_as::<_, GameRecord>(
@@ -510,7 +507,7 @@ impl GameRepository {
         .await?;
         Ok(games)
     }
- 
+
     /// Store pre-assembled PGN text for a game (zstd-compressed, ~3-5× smaller).
     pub async fn set_pgn_text(&self, game_id: &str, pgn: &str) -> Result<()> {
         let stored = compress_pgn(pgn);
@@ -524,12 +521,10 @@ impl GameRepository {
 
     /// Retrieve stored PGN text for a game (decompresses zstd if needed).
     pub async fn get_pgn_text(&self, game_id: &str) -> Result<Option<String>> {
-        let result: Option<(String,)> = sqlx::query_as(
-            "SELECT pgn_text FROM games WHERE id = ?"
-        )
-        .bind(game_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let result: Option<(String,)> = sqlx::query_as("SELECT pgn_text FROM games WHERE id = ?")
+            .bind(game_id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(result.map(|(raw,)| decompress_pgn(&raw)))
     }
 
@@ -545,12 +540,11 @@ impl GameRepository {
 
     /// Lists all active game sessions
     pub async fn list_active_sessions(&self) -> Result<Vec<serde_json::Value>> {
-        let rows: Vec<sqlx::sqlite::SqliteRow> = sqlx::query(
-            "SELECT * FROM active_sessions WHERE status = 'active'"
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        
+        let rows: Vec<sqlx::sqlite::SqliteRow> =
+            sqlx::query("SELECT * FROM active_sessions WHERE status = 'active'")
+                .fetch_all(&self.pool)
+                .await?;
+
         let mut sessions = Vec::new();
         for row in rows {
             use sqlx::Row;
@@ -620,12 +614,10 @@ impl DisputeRepository {
     }
 
     pub async fn get(&self, game_id: i64) -> Result<Option<DisputeRecord>> {
-        let rec = sqlx::query_as::<_, DisputeRecord>(
-            "SELECT * FROM disputes WHERE game_id = ?"
-        )
-        .bind(game_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let rec = sqlx::query_as::<_, DisputeRecord>("SELECT * FROM disputes WHERE game_id = ?")
+            .bind(game_id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(rec)
     }
 

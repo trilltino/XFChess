@@ -4,70 +4,137 @@
 /// Moves encoded as ((from_file, from_rank), (to_file, to_rank)).
 pub fn classify_opening(moves: &[((u8, u8), (u8, u8))]) -> Option<&'static str> {
     // Helper: check if `prefix` is a prefix of `moves`.
-    let has = |prefix: &[((u8,u8),(u8,u8))]| moves.starts_with(prefix);
+    let has = |prefix: &[((u8, u8), (u8, u8))]| moves.starts_with(prefix);
 
     // Coordinate shorthands: (file 0=a..7=h, rank 0=1..7=8)
-    let e2e4 = ((4,1),(4,3));  let e7e5 = ((4,6),(4,4));
-    let d2d4 = ((3,1),(3,3));  let d7d5 = ((3,6),(3,4));
-    let c2c4 = ((2,1),(2,3));  let c7c5 = ((2,6),(2,4));
-    let g1f3 = ((6,0),(5,2));  let g8f6 = ((6,7),(5,5));
-    let b8c6 = ((1,7),(2,5));
-    let f1b5 = ((5,0),(1,4));  let f1c4 = ((5,0),(2,3));
-    let _d2d3 = ((3,1),(3,2)); let e7e6 = ((4,6),(4,5));
-    let c7c6 = ((2,6),(2,5));  let d7d6 = ((3,6),(3,5));
-    let g7g6 = ((6,6),(6,5));  let f2f4 = ((5,1),(5,3));
-    let b2b3 = ((1,1),(1,2));  let g2g3 = ((6,1),(6,2));
+    let e2e4 = ((4, 1), (4, 3));
+    let e7e5 = ((4, 6), (4, 4));
+    let d2d4 = ((3, 1), (3, 3));
+    let d7d5 = ((3, 6), (3, 4));
+    let c2c4 = ((2, 1), (2, 3));
+    let c7c5 = ((2, 6), (2, 4));
+    let g1f3 = ((6, 0), (5, 2));
+    let g8f6 = ((6, 7), (5, 5));
+    let b8c6 = ((1, 7), (2, 5));
+    let f1b5 = ((5, 0), (1, 4));
+    let f1c4 = ((5, 0), (2, 3));
+    let _d2d3 = ((3, 1), (3, 2));
+    let e7e6 = ((4, 6), (4, 5));
+    let c7c6 = ((2, 6), (2, 5));
+    let d7d6 = ((3, 6), (3, 5));
+    let g7g6 = ((6, 6), (6, 5));
+    let f2f4 = ((5, 1), (5, 3));
+    let b2b3 = ((1, 1), (1, 2));
+    let g2g3 = ((6, 1), (6, 2));
 
     // ── 1.e4 lines ──────────────────────────────────────────────────────
     if has(&[e2e4, e7e5]) {
-        if has(&[e2e4, e7e5, f2f4])          { return Some("King's Gambit"); }
-        if has(&[e2e4, e7e5, g1f3, b8c6, f1b5]) { return Some("Ruy Lopez"); }
-        if has(&[e2e4, e7e5, g1f3, b8c6, f1c4]) { return Some("Italian Game"); }
-        if has(&[e2e4, e7e5, g1f3, b8c6, d2d4]) { return Some("Scotch Game"); }
-        if has(&[e2e4, e7e5, g1f3, g8f6])       { return Some("Russian Game"); }
-        if has(&[e2e4, e7e5, g1f3])              { return Some("Open Game"); }
+        if has(&[e2e4, e7e5, f2f4]) {
+            return Some("King's Gambit");
+        }
+        if has(&[e2e4, e7e5, g1f3, b8c6, f1b5]) {
+            return Some("Ruy Lopez");
+        }
+        if has(&[e2e4, e7e5, g1f3, b8c6, f1c4]) {
+            return Some("Italian Game");
+        }
+        if has(&[e2e4, e7e5, g1f3, b8c6, d2d4]) {
+            return Some("Scotch Game");
+        }
+        if has(&[e2e4, e7e5, g1f3, g8f6]) {
+            return Some("Russian Game");
+        }
+        if has(&[e2e4, e7e5, g1f3]) {
+            return Some("Open Game");
+        }
         return Some("Open Game");
     }
     if has(&[e2e4, c7c5]) {
-        if has(&[e2e4, c7c5, g1f3, d7d6]) { return Some("Sicilian: Najdorf setup"); }
-        if has(&[e2e4, c7c5, g1f3, b8c6]) { return Some("Sicilian: Open"); }
-        if has(&[e2e4, c7c5, g1f3, e7e6]) { return Some("Sicilian: Kan/Taimanov"); }
+        if has(&[e2e4, c7c5, g1f3, d7d6]) {
+            return Some("Sicilian: Najdorf setup");
+        }
+        if has(&[e2e4, c7c5, g1f3, b8c6]) {
+            return Some("Sicilian: Open");
+        }
+        if has(&[e2e4, c7c5, g1f3, e7e6]) {
+            return Some("Sicilian: Kan/Taimanov");
+        }
         return Some("Sicilian Defense");
     }
-    if has(&[e2e4, e7e6]) { return Some("French Defense"); }
+    if has(&[e2e4, e7e6]) {
+        return Some("French Defense");
+    }
     if has(&[e2e4, c7c6]) {
-        if has(&[e2e4, c7c6, d2d4, d7d5]) { return Some("Caro-Kann Defense"); }
+        if has(&[e2e4, c7c6, d2d4, d7d5]) {
+            return Some("Caro-Kann Defense");
+        }
         return Some("Caro-Kann Defense");
     }
-    if has(&[e2e4, d7d5]) { return Some("Scandinavian Defense"); }
-    if has(&[e2e4, g8f6]) { return Some("Alekhine's Defense"); }
-    if has(&[e2e4, g7g6]) { return Some("Modern Defense"); }
-    if has(&[e2e4, b8c6]) { return Some("Nimzowitsch Defense"); }
-    if has(&[e2e4])       { return Some("King's Pawn Opening"); }
+    if has(&[e2e4, d7d5]) {
+        return Some("Scandinavian Defense");
+    }
+    if has(&[e2e4, g8f6]) {
+        return Some("Alekhine's Defense");
+    }
+    if has(&[e2e4, g7g6]) {
+        return Some("Modern Defense");
+    }
+    if has(&[e2e4, b8c6]) {
+        return Some("Nimzowitsch Defense");
+    }
+    if has(&[e2e4]) {
+        return Some("King's Pawn Opening");
+    }
 
     // ── 1.d4 lines ──────────────────────────────────────────────────────
     if has(&[d2d4, d7d5]) {
-        if has(&[d2d4, d7d5, c2c4, e7e6])         { return Some("Queen's Gambit Declined"); }
-        if has(&[d2d4, d7d5, c2c4, c7c6])         { return Some("Slav Defense"); }
-        if has(&[d2d4, d7d5, c2c4])               { return Some("Queen's Gambit"); }
+        if has(&[d2d4, d7d5, c2c4, e7e6]) {
+            return Some("Queen's Gambit Declined");
+        }
+        if has(&[d2d4, d7d5, c2c4, c7c6]) {
+            return Some("Slav Defense");
+        }
+        if has(&[d2d4, d7d5, c2c4]) {
+            return Some("Queen's Gambit");
+        }
         return Some("Queen's Pawn: Closed");
     }
     if has(&[d2d4, g8f6]) {
-        if has(&[d2d4, g8f6, c2c4, g7g6]) { return Some("King's Indian Defense"); }
-        if has(&[d2d4, g8f6, c2c4, e7e6]) { return Some("Nimzo/QGD Indian"); }
-        if has(&[d2d4, g8f6, c2c4, c7c5]) { return Some("Benoni Defense"); }
-        if has(&[d2d4, g8f6, c2c4])       { return Some("Indian Defense"); }
+        if has(&[d2d4, g8f6, c2c4, g7g6]) {
+            return Some("King's Indian Defense");
+        }
+        if has(&[d2d4, g8f6, c2c4, e7e6]) {
+            return Some("Nimzo/QGD Indian");
+        }
+        if has(&[d2d4, g8f6, c2c4, c7c5]) {
+            return Some("Benoni Defense");
+        }
+        if has(&[d2d4, g8f6, c2c4]) {
+            return Some("Indian Defense");
+        }
         return Some("Queen's Pawn: Indian setup");
     }
-    let f7f5: ((u8,u8),(u8,u8)) = ((5,6),(5,4));
-    if has(&[d2d4, f7f5]) { return Some("Dutch Defense"); }
-    if has(&[d2d4])                        { return Some("Queen's Pawn Opening"); }
+    let f7f5: ((u8, u8), (u8, u8)) = ((5, 6), (5, 4));
+    if has(&[d2d4, f7f5]) {
+        return Some("Dutch Defense");
+    }
+    if has(&[d2d4]) {
+        return Some("Queen's Pawn Opening");
+    }
 
     // ── 1.c4 / 1.Nf3 / others ───────────────────────────────────────────
-    if has(&[c2c4]) { return Some("English Opening"); }
-    if has(&[g1f3]) { return Some("Réti Opening"); }
-    if has(&[g2g3]) { return Some("King's Fianchetto"); }
-    if has(&[b2b3]) { return Some("Larsen's Opening"); }
+    if has(&[c2c4]) {
+        return Some("English Opening");
+    }
+    if has(&[g1f3]) {
+        return Some("Réti Opening");
+    }
+    if has(&[g2g3]) {
+        return Some("King's Fianchetto");
+    }
+    if has(&[b2b3]) {
+        return Some("Larsen's Opening");
+    }
 
     None
 }
@@ -143,25 +210,34 @@ pub struct AvatarCache {
 impl Default for AvatarCache {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
-        Self { entries: HashMap::new(), rx: std::sync::Mutex::new(rx), tx }
+        Self {
+            entries: HashMap::new(),
+            rx: std::sync::Mutex::new(rx),
+            tx,
+        }
     }
 }
 
 impl AvatarCache {
     /// Kick off a background fetch for `name` if not already in progress.
     pub fn fetch_if_absent(&mut self, name: &str) {
-        if self.entries.contains_key(name) { return; }
+        if self.entries.contains_key(name) {
+            return;
+        }
         self.entries.insert(name.to_string(), AvatarEntry::Loading);
         let tx = self.tx.clone();
         let key = name.to_string();
         let base = crate::multiplayer::network::vps::vps_base();
         std::thread::spawn(move || {
             let url = format!("{}/api/players/{}/avatar", base, key);
-            let result = reqwest::blocking::get(&url)
-                .and_then(|r| r.bytes().map(|b| b.to_vec()));
+            let result = reqwest::blocking::get(&url).and_then(|r| r.bytes().map(|b| b.to_vec()));
             match result {
-                Ok(bytes) if !bytes.is_empty() => { let _ = tx.send((key, bytes)); }
-                _ => { let _ = tx.send((key, Vec::new())); }
+                Ok(bytes) if !bytes.is_empty() => {
+                    let _ = tx.send((key, bytes));
+                }
+                _ => {
+                    let _ = tx.send((key, Vec::new()));
+                }
             }
         });
     }
@@ -190,11 +266,16 @@ impl AvatarCache {
                             [w as usize, h as usize],
                             &rgba,
                         );
-                        let tex = ctx.load_texture("player_avatar", color_img,
-                            egui::TextureOptions::LINEAR);
+                        let tex = ctx.load_texture(
+                            "player_avatar",
+                            color_img,
+                            egui::TextureOptions::LINEAR,
+                        );
                         *entry = AvatarEntry::Loaded(tex);
                     }
-                    Err(_) => { *entry = AvatarEntry::Failed; }
+                    Err(_) => {
+                        *entry = AvatarEntry::Failed;
+                    }
                 }
             }
         }
@@ -264,7 +345,9 @@ pub fn game_status_ui(mut params: GameUIParams) {
     // allowing &mut params to be passed into SidePanel closures below.
     // egui::Context is Arc-backed, so the clone shares the same frame data.
     let ctx = {
-        let Ok(ctx_ref) = params.contexts.ctx_mut() else { return };
+        let Ok(ctx_ref) = params.contexts.ctx_mut() else {
+            return;
+        };
         ctx_ref.clone()
     };
 
@@ -279,7 +362,8 @@ pub fn game_status_ui(mut params: GameUIParams) {
     let white_flagged = params.hourglass.flagged_player.as_deref() == Some("white");
     let black_flagged = params.hourglass.flagged_player.as_deref() == Some("black");
     let hourglass_elapsed = params.hourglass.elapsed;
-    let pulse_alpha = ((hourglass_elapsed * std::f32::consts::TAU * 2.0).sin() * 87.0 + 168.0) as u8;
+    let pulse_alpha =
+        ((hourglass_elapsed * std::f32::consts::TAU * 2.0).sin() * 87.0 + 168.0) as u8;
 
     // Decode any pending avatar bytes into egui textures.
     params.avatar_cache.flush_pending(&ctx);
@@ -295,7 +379,10 @@ pub fn game_status_ui(mut params: GameUIParams) {
     // Show once the first move has been played; hide after move 10 (most openings set by then).
     let move_count = params.move_history.moves.len();
     if move_count >= 1 && move_count <= 20 {
-        let seq: Vec<((u8, u8), (u8, u8))> = params.move_history.moves.iter()
+        let seq: Vec<((u8, u8), (u8, u8))> = params
+            .move_history
+            .moves
+            .iter()
             .map(|m| (m.from, m.to))
             .collect();
         if let Some(name) = classify_opening(&seq) {
@@ -323,7 +410,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
     if params.exit_confirmation.visible && !params.game_state.game_over.is_game_over() {
         let is_online = matches!(
             *params.game_mode,
-            GameMode::BraidMultiplayer | GameMode::MultiplayerCompetitive
+            GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
         );
         let confirmation_text = if is_online {
             "Are you sure you want to exit? If you leave an online game, it will be forfeited."
@@ -347,24 +434,39 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     ui.add_space(18.0);
                     ui.horizontal_centered(|ui| {
                         ui.spacing_mut().item_spacing.x = 14.0;
-                        if ui.add_sized(
-                            [120.0, 40.0],
-                            egui::Button::new(egui::RichText::new("No").size(13.0).color(egui::Color32::WHITE))
+                        if ui
+                            .add_sized(
+                                [120.0, 40.0],
+                                egui::Button::new(
+                                    egui::RichText::new("No")
+                                        .size(13.0)
+                                        .color(egui::Color32::WHITE),
+                                )
                                 .fill(UiColors::BTN_POPUP_DARK)
                                 .stroke(egui::Stroke::NONE)
                                 .corner_radius(8.0),
-                        ).clicked() {
+                            )
+                            .clicked()
+                        {
                             params.exit_confirmation.visible = false;
                             params.exit_confirmation.pending_exit = false;
                         }
 
-                        if ui.add_sized(
-                            [120.0, 40.0],
-                            egui::Button::new(egui::RichText::new("Yes").size(13.0).color(egui::Color32::WHITE).strong())
+                        if ui
+                            .add_sized(
+                                [120.0, 40.0],
+                                egui::Button::new(
+                                    egui::RichText::new("Yes")
+                                        .size(13.0)
+                                        .color(egui::Color32::WHITE)
+                                        .strong(),
+                                )
                                 .fill(UiColors::DANGER)
                                 .stroke(egui::Stroke::NONE)
                                 .corner_radius(8.0),
-                        ).clicked() {
+                            )
+                            .clicked()
+                        {
                             params.exit_confirmation.pending_exit = true;
                         }
                     });
@@ -394,10 +496,8 @@ pub fn game_status_ui(mut params: GameUIParams) {
                         .max_height(f32::INFINITY)
                         .show(ui, |ui| {
                             if let Some(si) = solana_integration {
-                                let mut pv_open = profile_view
-                                    .as_ref()
-                                    .map(|pv| pv.open)
-                                    .unwrap_or(false);
+                                let mut pv_open =
+                                    profile_view.as_ref().map(|pv| pv.open).unwrap_or(false);
                                 #[cfg(feature = "solana")]
                                 let gs = params.global_session_active.as_deref();
                                 #[cfg(not(feature = "solana"))]
@@ -477,7 +577,9 @@ fn render_game_right_panel(
 ) {
     use crate::game::resources::TurnPhase;
 
-    let local_color = params.p2p_conn.as_ref()
+    let local_color = params
+        .p2p_conn
+        .as_ref()
         .and_then(|c| c.player_color)
         .unwrap_or(PieceColor::White);
     let opp_color = match local_color {
@@ -487,7 +589,7 @@ fn render_game_right_panel(
     let is_spectating = *params.game_mode == crate::core::GameMode::Spectator;
     let is_online = matches!(
         *params.game_mode,
-        crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive
+        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
     );
 
     // Build name/elo for white and black from available sources.
@@ -499,41 +601,46 @@ fn render_game_right_panel(
     if is_spectating {
         let w = params.spectator_mode.white_player.as_ref();
         let b = params.spectator_mode.black_player.as_ref();
-        white_name = w.map(|p| p.username.clone()).unwrap_or_else(|| "White".to_string());
-        white_elo  = w.map(|p| format!("{}", p.rating)).unwrap_or_default();
-        black_name = b.map(|p| p.username.clone()).unwrap_or_else(|| "Black".to_string());
-        black_elo  = b.map(|p| format!("{}", p.rating)).unwrap_or_default();
+        white_name = w
+            .map(|p| p.username.clone())
+            .unwrap_or_else(|| "White".to_string());
+        white_elo = w.map(|p| format!("{}", p.rating)).unwrap_or_default();
+        black_name = b
+            .map(|p| p.username.clone())
+            .unwrap_or_else(|| "Black".to_string());
+        black_elo = b.map(|p| format!("{}", p.rating)).unwrap_or_default();
     } else {
         #[cfg(feature = "solana")]
         {
-            if let (Some(ref profile), Some(ref comp)) =
-                (params.solana_profile.as_ref(), params.competitive_match.as_ref())
-            {
+            if let (Some(ref profile), Some(ref comp)) = (
+                params.solana_profile.as_ref(),
+                params.competitive_match.as_ref(),
+            ) {
                 let is_white_local = local_color == PieceColor::White;
                 if is_white_local {
                     white_name = profile.username.clone();
-                    white_elo  = format!("{}", profile.elo);
+                    white_elo = format!("{}", profile.elo);
                     black_name = comp.opponent_username.clone();
-                    black_elo  = format!("{}", comp.opponent_elo);
+                    black_elo = format!("{}", comp.opponent_elo);
                 } else {
                     black_name = profile.username.clone();
-                    black_elo  = format!("{}", profile.elo);
+                    black_elo = format!("{}", profile.elo);
                     white_name = comp.opponent_username.clone();
-                    white_elo  = format!("{}", comp.opponent_elo);
+                    white_elo = format!("{}", comp.opponent_elo);
                 }
             } else {
                 white_name = params.players.player_1.name.clone();
-                white_elo  = String::new();
+                white_elo = String::new();
                 black_name = params.players.player_2.name.clone();
-                black_elo  = String::new();
+                black_elo = String::new();
             }
         }
         #[cfg(not(feature = "solana"))]
         {
             white_name = params.players.player_1.name.clone();
-            white_elo  = String::new();
+            white_elo = String::new();
             black_name = params.players.player_2.name.clone();
-            black_elo  = String::new();
+            black_elo = String::new();
         }
     }
 
@@ -557,8 +664,16 @@ fn render_game_right_panel(
 
     let top_is_active = top_color == PieceColor::White && white_active
         || top_color == PieceColor::Black && !white_active;
-    let top_flagged = if top_color == PieceColor::White { white_flagged } else { black_flagged };
-    let bot_flagged = if bot_color == PieceColor::White { white_flagged } else { black_flagged };
+    let top_flagged = if top_color == PieceColor::White {
+        white_flagged
+    } else {
+        black_flagged
+    };
+    let bot_flagged = if bot_color == PieceColor::White {
+        white_flagged
+    } else {
+        black_flagged
+    };
 
     let top_time = if top_color == PieceColor::White {
         params.game_timer.white_time_left
@@ -584,15 +699,25 @@ fn render_game_right_panel(
         (cap.black_captured.as_slice(), true)
     };
     let mat_adv = cap.material_advantage();
-    let top_delta = if top_color == PieceColor::White { mat_adv.max(0) } else { (-mat_adv).max(0) };
-    let bot_delta = if bot_color == PieceColor::White { mat_adv.max(0) } else { (-mat_adv).max(0) };
+    let top_delta = if top_color == PieceColor::White {
+        mat_adv.max(0)
+    } else {
+        (-mat_adv).max(0)
+    };
+    let bot_delta = if bot_color == PieceColor::White {
+        mat_adv.max(0)
+    } else {
+        (-mat_adv).max(0)
+    };
 
     let opponent_online: Option<bool> = if is_online {
-        params.p2p_conn.as_ref().map(|c| matches!(
-            c.status,
-            crate::multiplayer::network::p2p::P2PConnectionStatus::Connected
-                | crate::multiplayer::network::p2p::P2PConnectionStatus::InGame
-        ))
+        params.p2p_conn.as_ref().map(|c| {
+            matches!(
+                c.status,
+                crate::multiplayer::network::p2p::P2PConnectionStatus::Connected
+                    | crate::multiplayer::network::p2p::P2PConnectionStatus::InGame
+            )
+        })
     } else {
         None
     };
@@ -603,19 +728,32 @@ fn render_game_right_panel(
     // ── OPPONENT (top of panel) ───────────────────────────────────────────────
     // material tray
     if !top_cap.is_empty() || top_delta > 0 {
-        egui::Frame::none().inner_margin(egui::Margin::symmetric(12, 4)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                render_captured_pieces_tray(ui, top_cap, top_is_dark);
-                if top_delta > 0 {
-                    ui.label(egui::RichText::new(format!("+{}", top_delta))
-                        .size(11.0).color(UiColors::TEXT_TERTIARY));
-                }
+        egui::Frame::none()
+            .inner_margin(egui::Margin::symmetric(12, 4))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    render_captured_pieces_tray(ui, top_cap, top_is_dark);
+                    if top_delta > 0 {
+                        ui.label(
+                            egui::RichText::new(format!("+{}", top_delta))
+                                .size(11.0)
+                                .color(UiColors::TEXT_TERTIARY),
+                        );
+                    }
+                });
             });
-        });
     }
     // clock
     if show_timers {
-        render_clock_bar(ui, top_time, top_is_active, top_flagged, pulse_alpha, increment, &params.increment_flash);
+        render_clock_bar(
+            ui,
+            top_time,
+            top_is_active,
+            top_flagged,
+            pulse_alpha,
+            increment,
+            &params.increment_flash,
+        );
     }
     // name row
     egui::Frame::none().inner_margin(p).show(ui, |ui| {
@@ -655,44 +793,71 @@ fn render_game_right_panel(
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
             let is_game_over = params.game_state.game_over.is_game_over();
-            let is_waiting   = params.turn_ctx.phase == TurnPhase::WaitingForInput;
+            let is_waiting = params.turn_ctx.phase == TurnPhase::WaitingForInput;
 
             if !is_game_over {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     // Resign — red text button
-                    if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new("✕  Resign").size(12.0)
-                                .color(egui::Color32::from_rgb(220, 80, 80)),
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("✕  Resign")
+                                    .size(12.0)
+                                    .color(egui::Color32::from_rgb(220, 80, 80)),
+                            )
+                            .fill(egui::Color32::from_rgba_unmultiplied(60, 18, 18, 180))
+                            .min_size(egui::Vec2::new(90.0, 28.0)),
                         )
-                        .fill(egui::Color32::from_rgba_unmultiplied(60, 18, 18, 180))
-                        .min_size(egui::Vec2::new(90.0, 28.0)),
-                    ).clicked() && is_waiting {
+                        .clicked()
+                        && is_waiting
+                    {
                         let winner = match params.current_turn.color {
                             PieceColor::White => "black".to_string(),
                             PieceColor::Black => "white".to_string(),
                         };
-                        params.resign_writer.write(crate::game::events::ResignEvent { winner, remote: false });
+                        params
+                            .resign_writer
+                            .write(crate::game::events::ResignEvent {
+                                winner,
+                                remote: false,
+                            });
                     }
 
                     if is_online {
                         let draw_offered = params.pending_draw.from_player.is_some();
-                        if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(if draw_offered { "½  Sent" } else { "½  Draw" })
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(if draw_offered {
+                                        "½  Sent"
+                                    } else {
+                                        "½  Draw"
+                                    })
                                     .size(12.0)
                                     .color(egui::Color32::from_rgb(180, 180, 80)),
+                                )
+                                .fill(egui::Color32::from_rgba_unmultiplied(45, 45, 12, 180))
+                                .min_size(egui::Vec2::new(80.0, 28.0))
+                                .sense(if draw_offered {
+                                    egui::Sense::hover()
+                                } else {
+                                    egui::Sense::click()
+                                }),
                             )
-                            .fill(egui::Color32::from_rgba_unmultiplied(45, 45, 12, 180))
-                            .min_size(egui::Vec2::new(80.0, 28.0))
-                            .sense(if draw_offered { egui::Sense::hover() } else { egui::Sense::click() }),
-                        ).clicked() && !draw_offered {
+                            .clicked()
+                            && !draw_offered
+                        {
                             let player = match params.current_turn.color {
                                 PieceColor::White => "white".to_string(),
                                 PieceColor::Black => "black".to_string(),
                             };
-                            params.draw_writer.write(crate::game::events::DrawOfferEvent { player, remote: false });
+                            params
+                                .draw_writer
+                                .write(crate::game::events::DrawOfferEvent {
+                                    player,
+                                    remote: false,
+                                });
                         }
                     }
                 });
@@ -704,11 +869,18 @@ fn render_game_right_panel(
                 crate::game::view_mode::ViewMode::Standard3D => "⬡  2D View",
                 _ => "⬡  3D View",
             };
-            if ui.add(
-                egui::Button::new(egui::RichText::new(view_label).size(12.0).color(egui::Color32::from_gray(180)))
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new(view_label)
+                            .size(12.0)
+                            .color(egui::Color32::from_gray(180)),
+                    )
                     .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 55, 180))
                     .min_size(egui::Vec2::new(90.0, 26.0)),
-            ).clicked() {
+                )
+                .clicked()
+            {
                 params.view_preferences.toggle_view();
                 *params.view_mode = params.view_preferences.local_view;
             }
@@ -723,28 +895,36 @@ fn render_game_right_panel(
     });
     // clock
     if show_timers {
-        render_clock_bar(ui, bot_time, bot_is_active, bot_flagged, pulse_alpha, increment, &params.increment_flash);
+        render_clock_bar(
+            ui,
+            bot_time,
+            bot_is_active,
+            bot_flagged,
+            pulse_alpha,
+            increment,
+            &params.increment_flash,
+        );
     }
     // material tray
     if !bot_cap.is_empty() || bot_delta > 0 {
-        egui::Frame::none().inner_margin(egui::Margin::symmetric(12, 4)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                render_captured_pieces_tray(ui, bot_cap, bot_is_dark);
-                if bot_delta > 0 {
-                    ui.label(egui::RichText::new(format!("+{}", bot_delta))
-                        .size(11.0).color(UiColors::TEXT_TERTIARY));
-                }
+        egui::Frame::none()
+            .inner_margin(egui::Margin::symmetric(12, 4))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    render_captured_pieces_tray(ui, bot_cap, bot_is_dark);
+                    if bot_delta > 0 {
+                        ui.label(
+                            egui::RichText::new(format!("+{}", bot_delta))
+                                .size(11.0)
+                                .color(UiColors::TEXT_TERTIARY),
+                        );
+                    }
+                });
             });
-        });
     }
 }
 
-fn render_compact_user_row(
-    ui: &mut egui::Ui,
-    name: &str,
-    elo: &str,
-    online: Option<bool>,
-) {
+fn render_compact_user_row(ui: &mut egui::Ui, name: &str, elo: &str, online: Option<bool>) {
     let display_name = if name.is_empty() { "Player" } else { name };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -759,7 +939,13 @@ fn render_compact_user_row(
         }
         // Identicon badge via Frame — avoids allocate+painter cursor bug
         let ic_color = identicon_color(display_name);
-        let initial = display_name.chars().next().unwrap_or('?').to_uppercase().next().unwrap_or('?');
+        let initial = display_name
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .next()
+            .unwrap_or('?');
         egui::Frame::none()
             .fill(ic_color)
             .corner_radius(12.0)
@@ -773,11 +959,20 @@ fn render_compact_user_row(
                 );
             });
         // Name
-        ui.label(egui::RichText::new(display_name).size(13.0).color(UiColors::TEXT_PRIMARY).strong());
+        ui.label(
+            egui::RichText::new(display_name)
+                .size(13.0)
+                .color(UiColors::TEXT_PRIMARY)
+                .strong(),
+        );
         // ELO — right-aligned if present
         if !elo.is_empty() {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(elo).size(11.0).color(UiColors::TEXT_TERTIARY));
+                ui.label(
+                    egui::RichText::new(elo)
+                        .size(11.0)
+                        .color(UiColors::TEXT_TERTIARY),
+                );
             });
         }
     });
@@ -868,24 +1063,42 @@ fn render_move_list_paired(
                 if white_idx < total {
                     let mv = &moves[white_idx];
                     let mut text = format_move_algebraic(mv);
-                    if let Some((sym, _)) = annotate_move(white_idx, PieceColor::White, &eval_history.scores) {
+                    if let Some((sym, _)) =
+                        annotate_move(white_idx, PieceColor::White, &eval_history.scores)
+                    {
                         text.push(' ');
                         text.push_str(sym);
                     }
-                    ui.label(egui::RichText::new(text).size(13.0).color(UiColors::TEXT_PRIMARY).strong());
+                    ui.label(
+                        egui::RichText::new(text)
+                            .size(13.0)
+                            .color(UiColors::TEXT_PRIMARY)
+                            .strong(),
+                    );
                 } else {
                     ui.label("");
                 }
                 if black_idx < total {
                     let mv = &moves[black_idx];
                     let mut text = format_move_algebraic(mv);
-                    if let Some((sym, _)) = annotate_move(black_idx, PieceColor::Black, &eval_history.scores) {
+                    if let Some((sym, _)) =
+                        annotate_move(black_idx, PieceColor::Black, &eval_history.scores)
+                    {
                         text.push(' ');
                         text.push_str(sym);
                     }
-                    ui.label(egui::RichText::new(text).size(13.0).color(UiColors::TEXT_SECONDARY).strong());
+                    ui.label(
+                        egui::RichText::new(text)
+                            .size(13.0)
+                            .color(UiColors::TEXT_SECONDARY)
+                            .strong(),
+                    );
                 } else if white_idx < total {
-                    ui.label(egui::RichText::new("…").size(13.0).color(UiColors::TEXT_TERTIARY));
+                    ui.label(
+                        egui::RichText::new("…")
+                            .size(13.0)
+                            .color(UiColors::TEXT_TERTIARY),
+                    );
                 } else {
                     ui.label("");
                 }
@@ -907,13 +1120,13 @@ pub fn identicon_color(name: &str) -> egui::Color32 {
     }
     // Map to 8 hue buckets (HSL-like, pre-defined colors)
     let colors = [
-        egui::Color32::from_rgb(70,  130, 200), // blue
-        egui::Color32::from_rgb(60,  160, 100), // green
-        egui::Color32::from_rgb(200,  90,  60), // red-orange
-        egui::Color32::from_rgb(140,  80, 200), // purple
-        egui::Color32::from_rgb(200, 150,  40), // amber
-        egui::Color32::from_rgb(40,  170, 170), // teal
-        egui::Color32::from_rgb(200,  70, 140), // pink
+        egui::Color32::from_rgb(70, 130, 200),  // blue
+        egui::Color32::from_rgb(60, 160, 100),  // green
+        egui::Color32::from_rgb(200, 90, 60),   // red-orange
+        egui::Color32::from_rgb(140, 80, 200),  // purple
+        egui::Color32::from_rgb(200, 150, 40),  // amber
+        egui::Color32::from_rgb(40, 170, 170),  // teal
+        egui::Color32::from_rgb(200, 70, 140),  // pink
         egui::Color32::from_rgb(100, 100, 120), // slate
     ];
     colors[(hash as usize) % colors.len()]
@@ -922,24 +1135,36 @@ pub fn identicon_color(name: &str) -> egui::Color32 {
 /// Render captured piece symbols as a compact tray row.
 /// `pieces` = pieces captured BY this side (the opponent's piece type).
 /// `is_dark` true = render as dark pieces (captured by white), false = light pieces (captured by black).
-fn render_captured_pieces_tray(ui: &mut egui::Ui, pieces: &[crate::rendering::pieces::PieceType], is_dark: bool) {
+fn render_captured_pieces_tray(
+    ui: &mut egui::Ui,
+    pieces: &[crate::rendering::pieces::PieceType],
+    is_dark: bool,
+) {
     use crate::rendering::pieces::PieceType;
-    if pieces.is_empty() { return; }
+    if pieces.is_empty() {
+        return;
+    }
 
     let (sym_color, _bg) = if is_dark {
-        (egui::Color32::from_gray(30), egui::Color32::from_rgba_unmultiplied(230, 220, 195, 60))
+        (
+            egui::Color32::from_gray(30),
+            egui::Color32::from_rgba_unmultiplied(230, 220, 195, 60),
+        )
     } else {
-        (egui::Color32::from_gray(225), egui::Color32::from_rgba_unmultiplied(50, 50, 60, 60))
+        (
+            egui::Color32::from_gray(225),
+            egui::Color32::from_rgba_unmultiplied(50, 50, 60, 60),
+        )
     };
 
     let mut sorted = pieces.to_vec();
     let order = |p: &PieceType| match p {
-        PieceType::Queen  => 0,
-        PieceType::Rook   => 1,
+        PieceType::Queen => 0,
+        PieceType::Rook => 1,
         PieceType::Bishop => 2,
         PieceType::Knight => 3,
-        PieceType::Pawn   => 4,
-        PieceType::King   => 5,
+        PieceType::Pawn => 4,
+        PieceType::King => 5,
     };
     sorted.sort_by_key(order);
 
@@ -948,21 +1173,21 @@ fn render_captured_pieces_tray(ui: &mut egui::Ui, pieces: &[crate::rendering::pi
         for pt in &sorted {
             let sym = if is_dark {
                 match pt {
-                    PieceType::Queen  => "♛",
-                    PieceType::Rook   => "♜",
+                    PieceType::Queen => "♛",
+                    PieceType::Rook => "♜",
                     PieceType::Bishop => "♝",
                     PieceType::Knight => "♞",
-                    PieceType::Pawn   => "♟",
-                    PieceType::King   => "♚",
+                    PieceType::Pawn => "♟",
+                    PieceType::King => "♚",
                 }
             } else {
                 match pt {
-                    PieceType::Queen  => "♕",
-                    PieceType::Rook   => "♖",
+                    PieceType::Queen => "♕",
+                    PieceType::Rook => "♖",
                     PieceType::Bishop => "♗",
                     PieceType::Knight => "♘",
-                    PieceType::Pawn   => "♙",
-                    PieceType::King   => "♔",
+                    PieceType::Pawn => "♙",
+                    PieceType::King => "♔",
                 }
             };
             ui.label(egui::RichText::new(sym).size(12.0).color(sym_color));
@@ -970,19 +1195,29 @@ fn render_captured_pieces_tray(ui: &mut egui::Ui, pieces: &[crate::rendering::pi
     });
 }
 
-fn annotate_move(ply_idx: usize, color: PieceColor, scores: &[i16]) -> Option<(&'static str, egui::Color32)> {
+fn annotate_move(
+    ply_idx: usize,
+    color: PieceColor,
+    scores: &[i16],
+) -> Option<(&'static str, egui::Color32)> {
     use crate::ui::game::game_2d::MoveQuality;
-    if scores.len() <= ply_idx { return None; }
-    let after  = scores[ply_idx];
+    if scores.len() <= ply_idx {
+        return None;
+    }
+    let after = scores[ply_idx];
     let before = if ply_idx > 0 { scores[ply_idx - 1] } else { 0 };
-    let gain   = if color == PieceColor::White { after - before } else { before - after };
+    let gain = if color == PieceColor::White {
+        after - before
+    } else {
+        before - after
+    };
     MoveQuality::classify(gain).map(|q| (q.symbol(), q.color()))
 }
 
 /// Format a move record as algebraic notation
 fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
     use crate::rendering::pieces::PieceType;
-    
+
     // Piece letter (or empty for pawn)
     let piece_letter = match mv.piece_type {
         PieceType::King => "K",
@@ -992,16 +1227,16 @@ fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
         PieceType::Knight => "N",
         PieceType::Pawn => "",
     };
-    
+
     // Destination square
     let from_file = (b'a' + mv.from.0) as char;
     let _from_rank = mv.from.1 + 1;
     let to_file = (b'a' + mv.to.0) as char;
     let to_rank = mv.to.1 + 1;
-    
+
     // Build notation
     let mut notation = String::new();
-    
+
     // Castling
     if mv.is_castling {
         if mv.to.0 > mv.from.0 {
@@ -1017,24 +1252,24 @@ fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
         } else {
             notation.push_str(piece_letter);
         }
-        
+
         // Capture symbol
         if mv.captured.is_some() {
             notation.push('x');
         }
-        
+
         // Destination
         notation.push(to_file);
         notation.push_str(&to_rank.to_string());
     }
-    
+
     // Check/Checkmate
     if mv.is_checkmate {
         notation.push('#');
     } else if mv.is_check {
         notation.push('+');
     }
-    
+
     notation
 }
 
@@ -1050,7 +1285,10 @@ fn render_check_banner(ctx: &egui::Context) {
                 .fill(egui::Color32::from_rgba_unmultiplied(173, 92, 47, 200)) // Primary bronze with transparency
                 .corner_radius(20.0) // Pill shape
                 .inner_margin(egui::Margin::symmetric(16, 8)) // Compact padding
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(244, 187, 68, 150))), // Gold accent border
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgba_unmultiplied(244, 187, 68, 150),
+                )), // Gold accent border
         )
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
@@ -1077,7 +1315,7 @@ fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
     let (winner_text, _) = match game_state.game_over.winner() {
         Some(PieceColor::White) => ("White wins", egui::Color32::from_rgb(240, 240, 240)),
         Some(PieceColor::Black) => ("Black wins", egui::Color32::from_rgb(200, 200, 200)),
-        None                    => ("Draw",        egui::Color32::from_rgb(200, 200, 200)),
+        None => ("Draw", egui::Color32::from_rgb(200, 200, 200)),
     };
 
     let label = format!("Checkmate  \u{2022}  {}", winner_text);
@@ -1092,7 +1330,10 @@ fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
                 .fill(egui::Color32::from_rgba_unmultiplied(12, 12, 14, 210))
                 .corner_radius(20.0)
                 .inner_margin(egui::Margin::symmetric(18, 8))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                )),
         )
         .show(ctx, |ui| {
             ui.label(
@@ -1119,7 +1360,9 @@ pub fn draw_offer_ui(
     mut draw_response: bevy::prelude::MessageWriter<crate::game::events::DrawResponseEvent>,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
 ) {
-    let Some(from) = pending.from_player.as_ref() else { return };
+    let Some(from) = pending.from_player.as_ref() else {
+        return;
+    };
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
     egui::Window::new("draw_offer_banner")
@@ -1146,13 +1389,21 @@ pub fn draw_offer_ui(
                         .unwrap_or("white")
                         .to_string();
 
-                    if ui.add_sized(
-                        [120.0, 38.0],
-                        egui::Button::new(egui::RichText::new("Accept").size(13.0).color(egui::Color32::WHITE).strong())
+                    if ui
+                        .add_sized(
+                            [120.0, 38.0],
+                            egui::Button::new(
+                                egui::RichText::new("Accept")
+                                    .size(13.0)
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            )
                             .fill(egui::Color32::from_rgb(34, 100, 50))
                             .stroke(egui::Stroke::NONE)
                             .corner_radius(8.0),
-                    ).clicked() {
+                        )
+                        .clicked()
+                    {
                         draw_response.write(crate::game::events::DrawResponseEvent {
                             player: local_player.clone(),
                             accepted: true,
@@ -1160,13 +1411,20 @@ pub fn draw_offer_ui(
                         });
                     }
 
-                    if ui.add_sized(
-                        [120.0, 38.0],
-                        egui::Button::new(egui::RichText::new("Decline").size(13.0).color(egui::Color32::WHITE))
+                    if ui
+                        .add_sized(
+                            [120.0, 38.0],
+                            egui::Button::new(
+                                egui::RichText::new("Decline")
+                                    .size(13.0)
+                                    .color(egui::Color32::WHITE),
+                            )
                             .fill(UiColors::BTN_POPUP_DARK)
                             .stroke(egui::Stroke::NONE)
                             .corner_radius(8.0),
-                    ).clicked() {
+                        )
+                        .clicked()
+                    {
                         draw_response.write(crate::game::events::DrawResponseEvent {
                             player: local_player,
                             accepted: false,
@@ -1178,75 +1436,6 @@ pub fn draw_offer_ui(
         });
 }
 
-/// Pause/resume button for online multiplayer: pauses/resumes both clocks.
-/// Shown only in BraidMultiplayer mode and only when the game is active.
-pub fn pause_resume_ui(
-    mut contexts: bevy_egui::EguiContexts,
-    mut game_timer: ResMut<crate::game::resources::GameTimer>,
-    game_over: Res<crate::game::resources::GameOverState>,
-    game_mode: Res<crate::core::GameMode>,
-    network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
-    session: Option<Res<crate::multiplayer::network::braid_pvp::BraidPvpSession>>,
-    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
-) {
-    use crate::core::GameMode;
-    use crate::multiplayer::network::protocol::NetworkMessage;
-
-    if !matches!(*game_mode, GameMode::BraidMultiplayer | GameMode::MultiplayerCompetitive) { return; }
-    if game_over.is_game_over() { return; }
-    let Ok(ctx) = contexts.ctx_mut() else { return };
-
-    let is_paused = !game_timer.is_running;
-    let label = if is_paused { "▶ Resume" } else { "⏸ Pause" };
-    let color = if is_paused {
-        egui::Color32::from_rgb(40, 160, 80)
-    } else {
-        egui::Color32::from_rgb(160, 120, 40)
-    };
-
-    egui::Window::new("pause_resume_btn")
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .anchor(egui::Align2::RIGHT_BOTTOM, [-20.0, -60.0])
-        .fixed_size([100.0, 36.0])
-        .frame(egui::Frame::NONE)
-        .show(ctx, |ui| {
-            if ui.add_sized([100.0, 34.0],
-                egui::Button::new(egui::RichText::new(label).size(13.0).color(egui::Color32::WHITE).strong())
-                    .fill(color).corner_radius(6.0),
-            ).clicked() {
-                let game_id = session.as_ref()
-                    .and_then(|s| s.game_id.parse::<u64>().ok())
-                    .unwrap_or(0);
-                let player = p2p_conn.as_ref()
-                    .and_then(|c| c.player_color)
-                    .map(|col| match col {
-                        PieceColor::White => "white",
-                        PieceColor::Black => "black",
-                    })
-                    .unwrap_or("white")
-                    .to_string();
-
-                if is_paused {
-                    game_timer.is_running = true;
-                    if let Some(ref ns) = network_state {
-                        if let Some(ref tx) = ns.message_sender {
-                            let _ = tx.send(NetworkMessage::ResumeRequest { game_id, player });
-                        }
-                    }
-                } else {
-                    game_timer.is_running = false;
-                    if let Some(ref ns) = network_state {
-                        if let Some(ref tx) = ns.message_sender {
-                            let _ = tx.send(NetworkMessage::PauseRequest { game_id, player });
-                        }
-                    }
-                }
-            }
-        });
-}
-
 /// Overlay system: shows an Accept/Decline banner when the opponent has offered a rematch.
 pub fn rematch_offer_ui(
     mut contexts: bevy_egui::EguiContexts,
@@ -1254,7 +1443,9 @@ pub fn rematch_offer_ui(
     mut rematch_response: bevy::prelude::MessageWriter<crate::game::events::RematchResponseEvent>,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
 ) {
-    let Some(from) = pending.from_player.clone() else { return };
+    let Some(from) = pending.from_player.clone() else {
+        return;
+    };
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
     let local_player = p2p_conn
@@ -1281,12 +1472,21 @@ pub fn rematch_offer_ui(
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
 
-                    if ui.add_sized([120.0, 38.0],
-                        egui::Button::new(egui::RichText::new("Accept").size(13.0).color(egui::Color32::WHITE).strong())
+                    if ui
+                        .add_sized(
+                            [120.0, 38.0],
+                            egui::Button::new(
+                                egui::RichText::new("Accept")
+                                    .size(13.0)
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            )
                             .fill(egui::Color32::from_rgb(34, 100, 50))
                             .stroke(egui::Stroke::NONE)
                             .corner_radius(8.0),
-                    ).clicked() {
+                        )
+                        .clicked()
+                    {
                         rematch_response.write(crate::game::events::RematchResponseEvent {
                             player: local_player.clone(),
                             accepted: true,
@@ -1295,12 +1495,20 @@ pub fn rematch_offer_ui(
                         pending.from_player = None;
                     }
 
-                    if ui.add_sized([120.0, 38.0],
-                        egui::Button::new(egui::RichText::new("Decline").size(13.0).color(egui::Color32::WHITE))
+                    if ui
+                        .add_sized(
+                            [120.0, 38.0],
+                            egui::Button::new(
+                                egui::RichText::new("Decline")
+                                    .size(13.0)
+                                    .color(egui::Color32::WHITE),
+                            )
                             .fill(UiColors::BTN_POPUP_DARK)
                             .stroke(egui::Stroke::NONE)
                             .corner_radius(8.0),
-                    ).clicked() {
+                        )
+                        .clicked()
+                    {
                         rematch_response.write(crate::game::events::RematchResponseEvent {
                             player: local_player,
                             accepted: false,
@@ -1323,10 +1531,15 @@ pub fn post_game_overlay(
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
     move_history: Res<crate::game::resources::MoveHistory>,
 ) {
-    if !game_over.is_game_over() { return; }
+    if !game_over.is_game_over() {
+        return;
+    }
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
-    let is_online = matches!(*game_mode, crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive);
+    let is_online = matches!(
+        *game_mode,
+        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
+    );
 
     let result_line = game_over.message();
     let reason_line = match *game_over {
@@ -1359,15 +1572,20 @@ pub fn post_game_overlay(
                 };
                 ui.label(egui::RichText::new(icon).size(36.0).color(result_color));
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(result_line)
-                    .size(22.0)
-                    .family(egui::FontFamily::Name("CinzelBold".into()))
-                    .color(result_color));
+                ui.label(
+                    egui::RichText::new(result_line)
+                        .size(22.0)
+                        .family(egui::FontFamily::Name("CinzelBold".into()))
+                        .color(result_color),
+                );
                 if !reason_line.is_empty() {
                     ui.label(TextStyle::popup_body(reason_line));
                 }
                 ui.add_space(8.0);
-                ui.label(TextStyle::popup_body(format!("{} moves played", total_moves)));
+                ui.label(TextStyle::popup_body(format!(
+                    "{} moves played",
+                    total_moves
+                )));
 
                 ui.add_space(20.0);
                 ui.separator();
@@ -1378,7 +1596,8 @@ pub fn post_game_overlay(
 
                     // Rematch button (online only)
                     if is_online {
-                        let local_player = p2p_conn.as_ref()
+                        let local_player = p2p_conn
+                            .as_ref()
                             .and_then(|c| c.player_color)
                             .map(|col| match col {
                                 PieceColor::White => "white",
@@ -1387,12 +1606,21 @@ pub fn post_game_overlay(
                             .unwrap_or("white")
                             .to_string();
 
-                        if ui.add_sized([120.0, 40.0],
-                            egui::Button::new(egui::RichText::new("Rematch").size(13.0).color(egui::Color32::WHITE).strong())
+                        if ui
+                            .add_sized(
+                                [120.0, 40.0],
+                                egui::Button::new(
+                                    egui::RichText::new("Rematch")
+                                        .size(13.0)
+                                        .color(egui::Color32::WHITE)
+                                        .strong(),
+                                )
                                 .fill(egui::Color32::from_rgb(34, 80, 160))
                                 .stroke(egui::Stroke::NONE)
                                 .corner_radius(8.0),
-                        ).clicked() {
+                            )
+                            .clicked()
+                        {
                             rematch_offer.write(crate::game::events::RematchOfferEvent {
                                 player: local_player,
                                 remote: false,
@@ -1400,12 +1628,20 @@ pub fn post_game_overlay(
                         }
                     }
 
-                    if ui.add_sized([120.0, 40.0],
-                        egui::Button::new(egui::RichText::new("Main Menu").size(13.0).color(egui::Color32::WHITE))
+                    if ui
+                        .add_sized(
+                            [120.0, 40.0],
+                            egui::Button::new(
+                                egui::RichText::new("Main Menu")
+                                    .size(13.0)
+                                    .color(egui::Color32::WHITE),
+                            )
                             .fill(UiColors::BTN_POPUP_DARK)
                             .stroke(egui::Stroke::NONE)
                             .corner_radius(8.0),
-                    ).clicked() {
+                        )
+                        .clicked()
+                    {
                         next_state.set(crate::core::GameState::MainMenu);
                     }
                 });
@@ -1426,7 +1662,9 @@ pub struct OpponentDisconnectState {
 
 impl OpponentDisconnectState {
     pub fn elapsed_secs(&self) -> u64 {
-        self.disconnected_at.map(|t| t.elapsed().as_secs()).unwrap_or(0)
+        self.disconnected_at
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0)
     }
     pub fn remaining_secs(&self) -> u64 {
         60u64.saturating_sub(self.elapsed_secs())
@@ -1440,7 +1678,10 @@ pub fn ping_chip_ui(
     game_mode: Res<crate::core::GameMode>,
 ) {
     use crate::core::GameMode;
-    if !matches!(*game_mode, GameMode::BraidMultiplayer | GameMode::MultiplayerCompetitive) {
+    if !matches!(
+        *game_mode,
+        GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
+    ) {
         return;
     }
     let Some(conn) = p2p_conn else { return };
@@ -1469,9 +1710,15 @@ pub fn ping_chip_ui(
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 5.0;
-                let (dot_rect, _) = ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::hover());
-                ui.painter().circle_filled(dot_rect.center(), 5.0, dot_color);
-                ui.label(egui::RichText::new(label).size(10.5).color(egui::Color32::from_gray(200)));
+                let (dot_rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::hover());
+                ui.painter()
+                    .circle_filled(dot_rect.center(), 5.0, dot_color);
+                ui.label(
+                    egui::RichText::new(label)
+                        .size(10.5)
+                        .color(egui::Color32::from_gray(200)),
+                );
             });
         });
 }
@@ -1488,13 +1735,17 @@ pub fn opponent_disconnect_ui(
     current_turn: Res<crate::game::resources::CurrentTurn>,
 ) {
     use crate::multiplayer::network::p2p::P2PConnectionStatus;
-    if game_over.is_game_over() { return; }
+    if game_over.is_game_over() {
+        return;
+    }
 
     let is_online = matches!(
         *game_mode,
-        GameMode::BraidMultiplayer | GameMode::MultiplayerCompetitive
+        GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
     );
-    if !is_online { return; }
+    if !is_online {
+        return;
+    }
 
     // Detect disconnect / reconnect
     if let Some(conn) = p2p_conn.as_ref() {
@@ -1514,7 +1765,9 @@ pub fn opponent_disconnect_ui(
         }
     }
 
-    let Some(_since) = disc.disconnected_at else { return };
+    let Some(_since) = disc.disconnected_at else {
+        return;
+    };
     let remaining = disc.remaining_secs();
 
     // Auto-fire timeout
@@ -1534,7 +1787,7 @@ pub fn opponent_disconnect_ui(
 
     // Render banner
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    let col_bg  = egui::Color32::from_rgba_unmultiplied(180, 60, 20, 220);
+    let col_bg = egui::Color32::from_rgba_unmultiplied(180, 60, 20, 220);
     let col_txt = egui::Color32::WHITE;
 
     egui::Window::new("opponent_disconnect_banner")
@@ -1543,11 +1796,22 @@ pub fn opponent_disconnect_ui(
         .collapsible(false)
         .anchor(egui::Align2::CENTER_TOP, [0.0, 50.0])
         .auto_sized()
-        .frame(egui::Frame::default().fill(col_bg).corner_radius(8.0).inner_margin(12.0))
+        .frame(
+            egui::Frame::default()
+                .fill(col_bg)
+                .corner_radius(8.0)
+                .inner_margin(12.0),
+        )
         .show(ctx, |ui| {
-            ui.label(egui::RichText::new(
-                format!("Opponent disconnected — waiting {}s for reconnect…", remaining)
-            ).size(13.0).color(col_txt).strong());
+            ui.label(
+                egui::RichText::new(format!(
+                    "Opponent disconnected — waiting {}s for reconnect…",
+                    remaining
+                ))
+                .size(13.0)
+                .color(col_txt)
+                .strong(),
+            );
         });
 }
 
@@ -1561,8 +1825,12 @@ pub fn play_check_sound_system(
     settings: Res<crate::core::GameSettings>,
 ) {
     use crate::game::components::GamePhase;
-    if !game_phase.is_changed() { return; }
-    if settings.muted { return; }
+    if !game_phase.is_changed() {
+        return;
+    }
+    if settings.muted {
+        return;
+    }
     let Some(s) = sounds else { return };
     if game_phase.0 == GamePhase::Check {
         commands.spawn(bevy::audio::AudioPlayer::new(s.check.clone()));
@@ -1594,7 +1862,9 @@ pub fn tournament_sidebar_widget(
     lobby: Option<Res<crate::states::tournament_menu::TournamentLobbyState>>,
 ) {
     let Some(tc) = tournament else { return };
-    if tc.active_tournament_id.is_none() { return };
+    if tc.active_tournament_id.is_none() {
+        return;
+    };
 
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
@@ -1616,34 +1886,52 @@ pub fn tournament_sidebar_widget(
         )
         .show(ctx, |ui| {
             ui.set_max_width(180.0);
-            ui.label(egui::RichText::new("TOURNAMENT").size(10.0).strong()
-                .color(egui::Color32::GOLD));
+            ui.label(
+                egui::RichText::new("TOURNAMENT")
+                    .size(10.0)
+                    .strong()
+                    .color(egui::Color32::GOLD),
+            );
             ui.add_space(4.0);
 
             if tc.waiting_for_next_match {
-                ui.label(egui::RichText::new("Waiting for next round…")
-                    .size(11.0).italics().color(egui::Color32::from_rgb(100, 200, 255)));
+                ui.label(
+                    egui::RichText::new("Waiting for next round…")
+                        .size(11.0)
+                        .italics()
+                        .color(egui::Color32::from_rgb(100, 200, 255)),
+                );
             }
             if let Some(ref result) = tc.last_match_result {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Last result:").size(10.0)
-                        .color(egui::Color32::from_gray(160)));
+                    ui.label(
+                        egui::RichText::new("Last result:")
+                            .size(10.0)
+                            .color(egui::Color32::from_gray(160)),
+                    );
                     let col = match result.as_str() {
                         "1-0" => egui::Color32::from_rgb(100, 220, 100),
                         "0-1" => egui::Color32::from_rgb(220, 100, 100),
-                        _     => egui::Color32::from_rgb(220, 200, 100),
+                        _ => egui::Color32::from_rgb(220, 200, 100),
                     };
                     ui.label(egui::RichText::new(result).size(11.0).strong().color(col));
                 });
             }
             if let Some(slot) = tc.my_slot {
-                ui.label(egui::RichText::new(format!("Slot {}", slot + 1)).size(10.0)
-                    .color(egui::Color32::from_gray(140)));
+                ui.label(
+                    egui::RichText::new(format!("Slot {}", slot + 1))
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(140)),
+                );
             }
             if !tc.status_message.is_empty() {
                 ui.add_space(2.0);
-                ui.label(egui::RichText::new(&tc.status_message).size(10.0)
-                    .color(egui::Color32::from_gray(180)).italics());
+                ui.label(
+                    egui::RichText::new(&tc.status_message)
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(180))
+                        .italics(),
+                );
             }
 
             // Swiss standings (collapsible)
@@ -1653,21 +1941,40 @@ pub fn tournament_sidebar_widget(
                         ui.add_space(6.0);
                         ui.separator();
                         ui.add_space(4.0);
-                        let round_label = match (lobby_state.swiss_current_round, lobby_state.swiss_total_rounds) {
+                        let round_label = match (
+                            lobby_state.swiss_current_round,
+                            lobby_state.swiss_total_rounds,
+                        ) {
                             (Some(cur), Some(tot)) => format!("Round {}/{}", cur, tot),
                             (Some(cur), None) => format!("Round {}", cur),
                             _ => "Standings".to_string(),
                         };
-                        ui.label(egui::RichText::new(round_label).size(10.0)
-                            .strong().color(egui::Color32::from_gray(200)));
+                        ui.label(
+                            egui::RichText::new(round_label)
+                                .size(10.0)
+                                .strong()
+                                .color(egui::Color32::from_gray(200)),
+                        );
                         ui.add_space(2.0);
                         egui::Grid::new("swiss_standings_grid")
                             .num_columns(3)
                             .spacing([4.0, 2.0])
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new("Player").size(9.0).color(egui::Color32::from_gray(140)));
-                                ui.label(egui::RichText::new("Pts").size(9.0).color(egui::Color32::from_gray(140)));
-                                ui.label(egui::RichText::new("BH").size(9.0).color(egui::Color32::from_gray(140)));
+                                ui.label(
+                                    egui::RichText::new("Player")
+                                        .size(9.0)
+                                        .color(egui::Color32::from_gray(140)),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Pts")
+                                        .size(9.0)
+                                        .color(egui::Color32::from_gray(140)),
+                                );
+                                ui.label(
+                                    egui::RichText::new("BH")
+                                        .size(9.0)
+                                        .color(egui::Color32::from_gray(140)),
+                                );
                                 ui.end_row();
                                 for (rank, s) in standings.iter().enumerate().take(8) {
                                     let name_short = if s.player.len() > 10 {
@@ -1680,15 +1987,37 @@ pub fn tournament_sidebar_widget(
                                     } else {
                                         egui::Color32::from_gray(200)
                                     };
-                                    ui.label(egui::RichText::new(format!("{}. {}", rank + 1, name_short)).size(9.0).color(row_col));
-                                    ui.label(egui::RichText::new(format!("{:.1}", s.score as f32 / 2.0)).size(9.0).color(row_col));
-                                    ui.label(egui::RichText::new(format!("{:.1}", s.buchholz as f32 / 10.0)).size(9.0).color(egui::Color32::from_gray(150)));
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{}. {}",
+                                            rank + 1,
+                                            name_short
+                                        ))
+                                        .size(9.0)
+                                        .color(row_col),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!("{:.1}", s.score as f32 / 2.0))
+                                            .size(9.0)
+                                            .color(row_col),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{:.1}",
+                                            s.buchholz as f32 / 10.0
+                                        ))
+                                        .size(9.0)
+                                        .color(egui::Color32::from_gray(150)),
+                                    );
                                     ui.end_row();
                                 }
                             });
 
                         // Round progress dots
-                        if let (Some(cur), Some(tot)) = (lobby_state.swiss_current_round, lobby_state.swiss_total_rounds) {
+                        if let (Some(cur), Some(tot)) = (
+                            lobby_state.swiss_current_round,
+                            lobby_state.swiss_total_rounds,
+                        ) {
                             let tot = tot as usize;
                             let cur = cur as usize;
                             ui.add_space(6.0);
@@ -1697,15 +2026,24 @@ pub fn tournament_sidebar_widget(
                                     let done = r < cur;
                                     let active = r == cur;
                                     let size = egui::Vec2::splat(8.0);
-                                    let (dot_rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                                    let (dot_rect, _) =
+                                        ui.allocate_exact_size(size, egui::Sense::hover());
                                     let center = dot_rect.center();
                                     let p = ui.painter();
                                     if done {
                                         p.circle_filled(center, 4.0, egui::Color32::GOLD);
                                     } else if active {
-                                        p.circle_filled(center, 4.0, egui::Color32::from_rgb(100, 200, 255));
+                                        p.circle_filled(
+                                            center,
+                                            4.0,
+                                            egui::Color32::from_rgb(100, 200, 255),
+                                        );
                                     } else {
-                                        p.circle_stroke(center, 3.5, egui::Stroke::new(1.0, egui::Color32::from_gray(100)));
+                                        p.circle_stroke(
+                                            center,
+                                            3.5,
+                                            egui::Stroke::new(1.0, egui::Color32::from_gray(100)),
+                                        );
                                     }
                                     ui.add_space(2.0);
                                 }
@@ -1729,7 +2067,9 @@ pub fn increment_flash_system(
 ) {
     flash.tick(time.delta_secs());
 
-    if active_tc.control.increment_seconds() == 0 { return; }
+    if active_tc.control.increment_seconds() == 0 {
+        return;
+    }
 
     for ev in move_events.read() {
         let white_gained = ev.player == "white";
@@ -1802,18 +2142,29 @@ pub fn disconnect_recovery_banner(
 ) {
     let is_online = matches!(
         *game_mode,
-        crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive
+        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
     );
-    if !is_online { return; }
-    if game_over.is_game_over() { return; }
+    if !is_online {
+        return;
+    }
+    if game_over.is_game_over() {
+        return;
+    }
 
-    let disconnected = p2p_conn.as_ref().map(|c| matches!(
-        c.status,
-        crate::multiplayer::network::p2p::P2PConnectionStatus::Disconnected
-            | crate::multiplayer::network::p2p::P2PConnectionStatus::Error(_)
-    )).unwrap_or(false);
+    let disconnected = p2p_conn
+        .as_ref()
+        .map(|c| {
+            matches!(
+                c.status,
+                crate::multiplayer::network::p2p::P2PConnectionStatus::Disconnected
+                    | crate::multiplayer::network::p2p::P2PConnectionStatus::Error(_)
+            )
+        })
+        .unwrap_or(false);
 
-    if !disconnected { return; }
+    if !disconnected {
+        return;
+    }
 
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
@@ -1844,7 +2195,11 @@ pub fn disconnect_recovery_banner(
                                 std::thread::spawn(move || {
                                     let url = format!("{}/api/games/{}/state", base, game_id);
                                     if let Ok(resp) = reqwest::blocking::get(&url) {
-                                        info!("[RECONNECT] Fetched state for game {}: {}", game_id, resp.status());
+                                        info!(
+                                            "[RECONNECT] Fetched state for game {}: {}",
+                                            game_id,
+                                            resp.status()
+                                        );
                                     }
                                 });
                             }
@@ -1865,4 +2220,3 @@ pub fn avatar_fetch_system(
     avatar_cache.fetch_if_absent(&players.player_2.name);
     avatar_cache.drain_channel();
 }
-

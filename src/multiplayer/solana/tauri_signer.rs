@@ -16,7 +16,7 @@ use solana_sdk::{
     instruction::Instruction,
     message::{v0, VersionedMessage},
     pubkey::Pubkey,
-    signature::{Keypair, Signature, Signer, NullSigner},
+    signature::{Keypair, NullSigner, Signature, Signer},
     transaction::{Transaction, VersionedTransaction},
 };
 
@@ -61,20 +61,20 @@ pub fn sign_via_tauri_only(
     let blockhash = rpc
         .get_latest_blockhash()
         .map_err(|e| format!("get_latest_blockhash: {}", e))?;
-    
+
     // Use legacy Transaction to match wallet UI
     let mut tx = Transaction::new_with_payer(instructions, Some(&wallet_pubkey));
-    
+
     // Add local signers first (if any)
     for keypair in local_signers {
         tx.try_sign(&[*keypair], blockhash)
             .map_err(|e| format!("local_sign: {}", e))?;
     }
-    
+
     // Partially sign with wallet as NullSigner placeholder
     tx.try_partial_sign(&[&NullSigner::new(&wallet_pubkey)], blockhash)
         .map_err(|e| format!("partial_sign: {}", e))?;
-    
+
     let tx_bytes = bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
     send_to_tauri_blocking(&tx_bytes)
 }
@@ -107,14 +107,10 @@ pub fn sign_and_send_via_tauri(
         dyn_signers.push(*k as &dyn Signer);
     }
 
-    let tx = VersionedTransaction::try_new(
-        VersionedMessage::V0(message),
-        dyn_signers.as_slice(),
-    )
-    .map_err(|e| format!("build_tx: {}", e))?;
+    let tx = VersionedTransaction::try_new(VersionedMessage::V0(message), dyn_signers.as_slice())
+        .map_err(|e| format!("build_tx: {}", e))?;
 
-    let tx_bytes =
-        bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
+    let tx_bytes = bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
 
     let signed_bytes = send_to_tauri_blocking(&tx_bytes)?;
 
@@ -122,17 +118,15 @@ pub fn sign_and_send_via_tauri(
 }
 
 /// Sign and send a pre-built base64-encoded transaction via the Tauri bridge.
-pub fn sign_and_send_b64_via_tauri(
-    rpc_url: &str,
-    tx_b64: &str,
-) -> Result<Signature, String> {
-    use base64::{Engine as _, engine::general_purpose};
-    
-    let tx_bytes = general_purpose::STANDARD.decode(tx_b64)
+pub fn sign_and_send_b64_via_tauri(rpc_url: &str, tx_b64: &str) -> Result<Signature, String> {
+    use base64::{engine::general_purpose, Engine as _};
+
+    let tx_bytes = general_purpose::STANDARD
+        .decode(tx_b64)
         .map_err(|e| format!("decode_b64: {}", e))?;
-        
+
     let signed_bytes = send_to_tauri_blocking(&tx_bytes)?;
-    
+
     submit_signed_to_rpc(rpc_url, &signed_bytes)
 }
 
@@ -162,9 +156,7 @@ fn send_to_tauri_blocking(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
         let _ = stream.set_read_timeout(Some(read_timeout));
 
         let len = tx_bytes.len() as u32;
-        if stream.write_all(&len.to_le_bytes()).is_err()
-            || stream.write_all(tx_bytes).is_err()
-        {
+        if stream.write_all(&len.to_le_bytes()).is_err() || stream.write_all(tx_bytes).is_err() {
             continue;
         }
 
@@ -185,14 +177,18 @@ fn send_to_tauri_blocking(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     let range = tcp_port_range();
-    Err(format!("Could not connect to Tauri signing server on ports {}-{}", range.start(), range.end()))
+    Err(format!(
+        "Could not connect to Tauri signing server on ports {}-{}",
+        range.start(),
+        range.end()
+    ))
 }
 
 /// Deserialise the wire-format signed bytes into a `VersionedTransaction` and
 /// submit it to the Solana RPC, then block until confirmed.
 fn submit_signed_to_rpc(rpc_url: &str, signed_bytes: &[u8]) -> Result<Signature, String> {
-    let signed_tx: VersionedTransaction = bincode::deserialize(signed_bytes)
-        .map_err(|e| format!("deserialize_signed_tx: {}", e))?;
+    let signed_tx: VersionedTransaction =
+        bincode::deserialize(signed_bytes).map_err(|e| format!("deserialize_signed_tx: {}", e))?;
 
     let rpc = RpcClient::new(rpc_url.to_string());
 

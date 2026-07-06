@@ -15,14 +15,29 @@ use nimzovich_engine::api::game::game_from_fen;
 use nimzovich_engine::{generate_pseudo_legal_moves, is_legal_move, Color};
 
 fn fen_color(fen: &str) -> Color {
-    if fen.split_whitespace().nth(1) == Some("w") { 1 } else { -1 }
+    if fen.split_whitespace().nth(1) == Some("w") {
+        1
+    } else {
+        -1
+    }
 }
 
-fn file_ch(sq: i8) -> char { (b'a' + (sq % 8) as u8) as char }
-fn rank_ch(sq: i8) -> char { (b'1' + (sq / 8) as u8) as char }
+fn file_ch(sq: i8) -> char {
+    (b'a' + (sq % 8) as u8) as char
+}
+fn rank_ch(sq: i8) -> char {
+    (b'1' + (sq / 8) as u8) as char
+}
 
 fn coord_uci(src: i8, dst: i8, promo: &str) -> String {
-    format!("{}{}{}{}{}", file_ch(src), rank_ch(src), file_ch(dst), rank_ch(dst), promo)
+    format!(
+        "{}{}{}{}{}",
+        file_ch(src),
+        rank_ch(src),
+        file_ch(dst),
+        rank_ch(dst),
+        promo
+    )
 }
 
 type UciSet = std::collections::BTreeSet<String>;

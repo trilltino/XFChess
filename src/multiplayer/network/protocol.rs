@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
 #[cfg(not(feature = "solana"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Pubkey(pub [u8; 32]);
 
 #[cfg(not(feature = "solana"))]
@@ -153,16 +155,6 @@ pub enum NetworkMessage {
         player: String,
         accepted: bool,
     },
-    /// Request to pause the game clocks (both players must agree or host decides).
-    PauseRequest {
-        game_id: u64,
-        player: String,
-    },
-    /// Resume game clocks after a pause.
-    ResumeRequest {
-        game_id: u64,
-        player: String,
-    },
     /// Request moves missed since `since_version` (content-hash of last applied move).
     /// Sent by a reconnecting client so the peer can replay the gap.
     BraidResyncRequest {
@@ -193,7 +185,7 @@ pub enum NetworkMessage {
         black_ms: u64,
         timestamp_ms: u64,
     },
-    /// In-game chat message sent over iroh gossip instead of Braid-HTTP.
+    /// In-game chat message sent over the online transport.
     Chat {
         game_id: u64,
         player: String,
@@ -228,8 +220,6 @@ impl NetworkMessage {
             NetworkMessage::Pong { game_id, .. } => *game_id,
             NetworkMessage::RematchOffer { game_id, .. } => *game_id,
             NetworkMessage::RematchResponse { game_id, .. } => *game_id,
-            NetworkMessage::PauseRequest { game_id, .. } => *game_id,
-            NetworkMessage::ResumeRequest { game_id, .. } => *game_id,
             NetworkMessage::BraidResyncRequest { game_id, .. } => *game_id,
             NetworkMessage::BraidResyncResponse { game_id, .. } => *game_id,
             NetworkMessage::GameSnapshot { game_id, .. } => *game_id,

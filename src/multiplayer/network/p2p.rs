@@ -1,10 +1,10 @@
+use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
 use iroh::EndpointId;
-use crate::rendering::pieces::PieceColor;
 
 use crate::core::states::GameState;
 use crate::game::events::GameStartedEvent;
-use crate::multiplayer::{network::protocol::NetworkMessage, BraidNetworkState, NetworkEvent};
+use crate::multiplayer::{network::protocol::NetworkMessage, NetworkEvent, OnlineNetworkState};
 
 /// Resource tracking P2P connection state
 #[derive(Resource, Debug, Clone, Default)]
@@ -163,7 +163,7 @@ impl Plugin for P2PConnectionPlugin {
 fn handle_host_game(
     mut events: MessageReader<HostGameEvent>,
     mut connection_state: ResMut<P2PConnectionState>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
     for _ in events.read() {
         // Generate a random game ID
@@ -184,13 +184,18 @@ fn handle_host_game(
 fn handle_connect_to_peer(
     mut events: MessageReader<ConnectToPeerEvent>,
     mut connection_state: ResMut<P2PConnectionState>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
     for event in events.read() {
         // Guard: don't re-connect if already connecting/connected/in-game
         match &connection_state.status {
-            P2PConnectionStatus::Connecting | P2PConnectionStatus::Connected | P2PConnectionStatus::InGame => {
-                info!("Ignoring duplicate connect request — already {:?}", connection_state.status);
+            P2PConnectionStatus::Connecting
+            | P2PConnectionStatus::Connected
+            | P2PConnectionStatus::InGame => {
+                info!(
+                    "Ignoring duplicate connect request — already {:?}",
+                    connection_state.status
+                );
                 continue;
             }
             _ => {}
@@ -293,7 +298,7 @@ fn handle_connect_to_peer(
 fn handle_network_events(
     mut network_events: MessageReader<NetworkEvent>,
     mut connection_state: ResMut<P2PConnectionState>,
-    mut network_state: ResMut<BraidNetworkState>,
+    mut network_state: ResMut<OnlineNetworkState>,
     mut next_state: ResMut<NextState<GameState>>,
     mut game_started: MessageWriter<GameStartedEvent>,
 ) {
@@ -332,10 +337,14 @@ fn handle_network_events(
                                     "Sent game invite {} to peer {} after network connect",
                                     game_id, peer_id
                                 );
-                                
+
                                 // Subscribe to game-specific topic for move traffic
                                 if let Some(sub_tx) = &network_state.subscription_sender {
-                                    let _ = sub_tx.send(format!("{}/{}", crate::multiplayer::systems::GAME_TOPIC, game_id));
+                                    let _ = sub_tx.send(format!(
+                                        "{}/{}",
+                                        crate::multiplayer::systems::GAME_TOPIC,
+                                        game_id
+                                    ));
                                 }
                             }
                         } else {
@@ -390,10 +399,14 @@ fn handle_network_events(
                             connection_state.game_id = Some(*game_id);
                             connection_state.status = P2PConnectionStatus::Connected;
                             connection_state.player_color = Some(PieceColor::Black);
-                            
+
                             // Subscribe to game-specific topic for move traffic
                             if let Some(sub_tx) = &network_state.subscription_sender {
-                                let _ = sub_tx.send(format!("{}/{}", crate::multiplayer::systems::GAME_TOPIC, game_id));
+                                let _ = sub_tx.send(format!(
+                                    "{}/{}",
+                                    crate::multiplayer::systems::GAME_TOPIC,
+                                    game_id
+                                ));
                             }
                         }
                     }
@@ -429,9 +442,7 @@ fn handle_network_events(
 
                                     // Joiner won't receive its own gossip broadcast,
                                     // so transition to InGame directly here.
-                                    game_started.write(GameStartedEvent {
-                                        game_id: *game_id,
-                                    });
+                                    game_started.write(GameStartedEvent { game_id: *game_id });
                                     next_state.set(GameState::InGame);
                                 }
                             } else {
@@ -455,9 +466,7 @@ fn handle_network_events(
                             );
                             connection_state.status = P2PConnectionStatus::InGame;
 
-                            game_started.write(GameStartedEvent {
-                                game_id: *game_id,
-                            });
+                            game_started.write(GameStartedEvent { game_id: *game_id });
 
                             next_state.set(GameState::InGame);
                         }
@@ -475,7 +484,7 @@ fn handle_network_events(
 fn handle_accept_invite(
     mut events: MessageReader<AcceptInviteEvent>,
     connection_state: ResMut<P2PConnectionState>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
     for event in events.read() {
         if connection_state.game_id == Some(event.game_id) {
@@ -501,9 +510,8 @@ fn tick_connection_timeout(mut connection_state: ResMut<P2PConnectionState>) {
         if let Some(since) = connection_state.connecting_since {
             if since.elapsed().as_secs() >= 12 {
                 warn!("[P2P] Connection timed out after 12s — resetting to allow retry");
-                connection_state.status = P2PConnectionStatus::Error(
-                    "Connection timed out — try again".to_string(),
-                );
+                connection_state.status =
+                    P2PConnectionStatus::Error("Connection timed out — try again".to_string());
                 connection_state.connecting_since = None;
             }
         }
@@ -514,7 +522,7 @@ fn tick_connection_timeout(mut connection_state: ResMut<P2PConnectionState>) {
 fn handle_reject_invite(
     mut events: MessageReader<RejectInviteEvent>,
     mut connection_state: ResMut<P2PConnectionState>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
     for event in events.read() {
         if connection_state.game_id == Some(event.game_id) {

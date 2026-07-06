@@ -50,6 +50,10 @@ dist/
 build/
 release/
 
+# Stale committed web build at repo root (frontend is built fresh by CI / deploy.ps1)
+/index.html
+/assets/
+
 # Anchor
 .anchor/
 

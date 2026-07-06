@@ -33,4 +33,3 @@ impl FromWorld for GameSounds {
         }
     }
 }
-

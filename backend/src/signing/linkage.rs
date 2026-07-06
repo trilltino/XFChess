@@ -71,12 +71,10 @@ impl LinkageStore {
     /// Increments the per-IP registration counter (the demoted IP signal,
     /// now persisted and cross-tournament rather than an in-memory HashMap).
     pub async fn bump_ip_count(&self, wallet: &str) {
-        let _ = sqlx::query(
-            "UPDATE account_linkage SET ip_count = ip_count + 1 WHERE wallet = ?",
-        )
-        .bind(wallet)
-        .execute(&self.pool)
-        .await;
+        let _ = sqlx::query("UPDATE account_linkage SET ip_count = ip_count + 1 WHERE wallet = ?")
+            .bind(wallet)
+            .execute(&self.pool)
+            .await;
     }
 
     /// Returns other wallets that share this wallet's funder or device hash —
@@ -95,17 +93,19 @@ impl LinkageStore {
 
         let mut out = Vec::new();
         if let Some(f) = funder.filter(|s| !s.is_empty()) {
-            if let Ok(rows) = sqlx::query(
-                "SELECT wallet FROM account_linkage WHERE funder = ? AND wallet != ?",
-            )
-            .bind(&f)
-            .bind(wallet)
-            .fetch_all(&self.pool)
-            .await
+            if let Ok(rows) =
+                sqlx::query("SELECT wallet FROM account_linkage WHERE funder = ? AND wallet != ?")
+                    .bind(&f)
+                    .bind(wallet)
+                    .fetch_all(&self.pool)
+                    .await
             {
                 for r in rows {
                     if let Ok(w) = r.try_get::<String, _>("wallet") {
-                        out.push(LinkedWallet { wallet: w, reason: LinkReason::SharedFunder });
+                        out.push(LinkedWallet {
+                            wallet: w,
+                            reason: LinkReason::SharedFunder,
+                        });
                     }
                 }
             }
@@ -123,7 +123,10 @@ impl LinkageStore {
                     if let Ok(w) = r.try_get::<String, _>("wallet") {
                         // Avoid duplicate if already linked by funder.
                         if !out.iter().any(|l| l.wallet == w) {
-                            out.push(LinkedWallet { wallet: w, reason: LinkReason::SharedDevice });
+                            out.push(LinkedWallet {
+                                wallet: w,
+                                reason: LinkReason::SharedDevice,
+                            });
                         }
                     }
                 }
@@ -142,16 +145,14 @@ impl LinkageStore {
 
     /// True if the wallet is hard-blocked from prize entry.
     pub async fn is_hard_blocked(&self, wallet: &str) -> bool {
-        sqlx::query_as::<_, (i64,)>(
-            "SELECT hard_blocked FROM account_linkage WHERE wallet = ?",
-        )
-        .bind(wallet)
-        .fetch_optional(&self.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|(b,)| b != 0)
-        .unwrap_or(false)
+        sqlx::query_as::<_, (i64,)>("SELECT hard_blocked FROM account_linkage WHERE wallet = ?")
+            .bind(wallet)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(b,)| b != 0)
+            .unwrap_or(false)
     }
 }
 

@@ -90,7 +90,13 @@ pub fn apply_pawn_promotion(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for event in promotion_messages.read() {
-        apply_selected_promotion(&mut commands, &mut pieces, &piece_meshes, &mut materials, event.clone());
+        apply_selected_promotion(
+            &mut commands,
+            &mut pieces,
+            &piece_meshes,
+            &mut materials,
+            event.clone(),
+        );
         pending_promotion.clear();
     }
 }

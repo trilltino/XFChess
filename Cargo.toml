@@ -64,6 +64,7 @@ members = [
 ]
 exclude = [
     "references/ephemeral-rollups-sdk/rust",
+    "tauri/viz/src-tauri",
 ]
 
 [profile.dev]

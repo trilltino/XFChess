@@ -3,11 +3,11 @@
 //! Uses the tournament-scoped session key to co-sign joining a game,
 //! drawing funds from the delegation PDA vault for cross-border fees and wagers.
 
+use crate::account_ix::session_guards;
 use crate::constants::*;
 use crate::errors::*;
 use crate::state::*;
 use anchor_lang::prelude::*;
-
 
 #[derive(Accounts)]
 #[instruction(tournament_id: u64, game_id: u64)]
@@ -53,6 +53,7 @@ pub struct SessionJoinGame<'info> {
         bump = session_delegation.bump,
         constraint = session_delegation.enabled @ XfchessGameError::SessionNotAuthorized,
         constraint = session_delegation.player == player.key() @ XfchessGameError::UnauthorizedAccess,
+        constraint = session_delegation.session_key == session_signer.key() @ XfchessGameError::InvalidSessionKey,
     )]
     pub session_delegation: Box<Account<'info, TournamentSessionDelegation>>,
 
@@ -88,11 +89,7 @@ pub struct SessionJoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
-    ctx: Context<SessionJoinGame>,
-    _tournament_id: u64,
-    _game_id: u64,
-) -> Result<()> {
+pub fn handler(ctx: Context<SessionJoinGame>, _tournament_id: u64, _game_id: u64) -> Result<()> {
     let delegation = &mut ctx.accounts.session_delegation;
     let game = &mut ctx.accounts.game;
     let player_key = ctx.accounts.player.key();
@@ -117,10 +114,18 @@ pub fn handler(
     // Platform fee was set at game creation time (universal, live-price-based).
     let final_fee = game.country_fee;
 
-    let total_cost = game.wager_amount.saturating_add(final_fee);
+    let total_cost = game
+        .wager_amount
+        .checked_add(final_fee)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
 
     require!(
-        delegation.total_spent.saturating_add(total_cost) <= delegation.spending_limit,
+        game.wager_amount <= delegation.max_wager,
+        XfchessGameError::WagerLimitExceeded
+    );
+    require!(
+        session_guards::checked_session_total(delegation.total_spent, total_cost)?
+            <= delegation.spending_limit,
         XfchessGameError::SessionSpendingLimitExceeded
     );
 
@@ -156,7 +161,8 @@ pub fn handler(
     }
 
     // Update delegation spending (count wager + fee)
-    delegation.total_spent = delegation.total_spent.saturating_add(total_cost);
+    delegation.total_spent =
+        session_guards::checked_session_total(delegation.total_spent, total_cost)?;
     delegation.games_played = delegation.games_played.saturating_add(1);
 
     Ok(())

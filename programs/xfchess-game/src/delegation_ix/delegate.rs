@@ -3,12 +3,10 @@
 pub use self::inner::*;
 
 mod inner {
-    use crate::constants::{DELEGATE_COST, ER_COMMIT_FREQUENCY_MS};
-    use crate::state::{Game, GameStatus};
     use crate::errors::GameErrorCode;
+    use crate::state::Game;
     use anchor_lang::prelude::*;
-    use ephemeral_rollups_sdk::cpi::{delegate_account, DelegateAccounts, DelegateConfig};
-    use ephemeral_rollups_sdk::ephem::deprecated::v0::commit_and_undelegate_accounts;
+    use ephemeral_rollups_sdk::cpi::DelegateAccounts;
 
     /// Delegate the Game PDA to the MagicBlock ephemeral rollup so that
     /// subsequent moves can be processed with sub-second latency on the ER.
@@ -22,16 +20,10 @@ mod inner {
     ) -> Result<()> {
         // Seeds WITHOUT bump — delegate_account adds the bump internally
         let game_id_bytes = _game_id.to_le_bytes();
-        let seeds: &[&[u8]] = &[b"game", &game_id_bytes];
 
         // validator: None lets the delegation program / magic-router assign a
         // validator. Pinning a single devnet pubkey here broke mainnet and forced
         // every game onto one region. See docs/MAGICBLOCK_INTEGRATION.md §2.
-        let config = DelegateConfig {
-            commit_frequency_ms: ER_COMMIT_FREQUENCY_MS,
-            validator: None,
-        };
-
         // Delegate the game PDA
         let delegate_accounts = DelegateAccounts {
             payer: &ctx.accounts.payer.to_account_info(),
@@ -50,11 +42,11 @@ mod inner {
 
         let fee_payer = &ctx.accounts.fee_payer;
 
-        require!(game.status == GameStatus::Active, GameErrorCode::GameNotActive);
-        require!(game.fee_payer == fee_payer.key(), GameErrorCode::FeePayerMismatch);
-
-        game.fees_advanced = game.fees_advanced.checked_add(DELEGATE_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
-        game.is_delegated = true;
+        require!(
+            game.fee_payer == fee_payer.key(),
+            GameErrorCode::FeePayerMismatch
+        );
+        crate::lifecycle::transitions::mark_delegated(&mut game)?;
 
         let mut writer = &mut game_data[..];
         game.try_serialize(&mut writer)?;
@@ -62,7 +54,7 @@ mod inner {
 
         // Delegate the game PDA — must happen AFTER all game mutations because
         // the CPI changes the account owner to the delegation program.
-        delegate_account(delegate_accounts, seeds, config)?;
+        crate::magicblock::delegation::delegate_game_pda(delegate_accounts, &game_id_bytes)?;
 
         Ok(())
     }
@@ -77,7 +69,7 @@ mod inner {
         let mut game_struct = Game::try_deserialize(&mut &data[..])?;
 
         // 2. Modify is_delegated
-        game_struct.is_delegated = false;
+        crate::lifecycle::transitions::mark_undelegated(&mut game_struct)?;
 
         // 3. Manually serialize it back
         let mut writer = &mut data[..];
@@ -87,15 +79,11 @@ mod inner {
         drop(data);
 
         // 5. Call delegation CPI
-        commit_and_undelegate_accounts(
+        crate::magicblock::delegation::commit_and_undelegate_game_pda(
             &ctx.accounts.payer.to_account_info(),
-            vec![
-                &ctx.accounts.game.to_account_info(),
-            ],
+            &ctx.accounts.game.to_account_info(),
             &ctx.accounts.magic_context.to_account_info(),
             &ctx.accounts.magic_program.to_account_info(),
-            // magic_fee_vault: new optional 5th arg in ER SDK 0.13.0; None = default fee vault.
-            None,
         )?;
 
         Ok(())
@@ -116,6 +104,7 @@ mod inner {
         pub payer: Signer<'info>,
 
         /// CHECK: The xfchess-game program itself (owner).
+        #[account(address = crate::ID @ GameErrorCode::InvalidOwnerProgram)]
         pub owner_program: AccountInfo<'info>,
 
         /// CHECK: Temporary buffer for game PDA delegation.

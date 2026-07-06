@@ -9,7 +9,9 @@ fn main() {
         "https://api.devnet.solana.com".to_string(),
         CommitmentConfig::confirmed(),
     );
-    let program_id: Pubkey = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".parse().unwrap();
+    let program_id: Pubkey = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+        .parse()
+        .unwrap();
     let tournament_id = 1779104020u64;
 
     let children_data = fs::read_to_string("keys/er-cu-children.json").unwrap();
@@ -17,14 +19,23 @@ fn main() {
     let player = Keypair::from_bytes(&children_arr[0]).unwrap();
 
     let session_delegation = Pubkey::find_program_address(
-        &[b"tournament_session", &tournament_id.to_le_bytes(), player.pubkey().as_ref()],
+        &[
+            b"tournament_session",
+            &tournament_id.to_le_bytes(),
+            player.pubkey().as_ref(),
+        ],
         &program_id,
-    ).0;
+    )
+    .0;
 
     println!("Player: {}", player.pubkey());
     println!("Session delegation: {}", session_delegation);
     match rpc.get_account(&session_delegation) {
-        Ok(acc) => println!("Exists: {} bytes, {} lamports", acc.data.len(), acc.lamports),
+        Ok(acc) => println!(
+            "Exists: {} bytes, {} lamports",
+            acc.data.len(),
+            acc.lamports
+        ),
         Err(e) => println!("Does not exist: {}", e),
     }
 }

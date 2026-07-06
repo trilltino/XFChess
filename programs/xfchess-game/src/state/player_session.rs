@@ -30,16 +30,20 @@ pub struct PlayerSession {
 
 impl PlayerSession {
     pub const SEED: &'static [u8] = b"player_session";
-    pub const DEFAULT_DURATION: i64 = 86_400;              // 24 hours
-    pub const DEFAULT_SPENDING_LIMIT: u64 = 500_000_000;   // 0.5 SOL
-    pub const MAX_WAGER_DEFAULT: u64 = 10_000_000_000;     // 10 SOL
+    pub const DEFAULT_DURATION: i64 = 86_400; // 24 hours
+    pub const DEFAULT_SPENDING_LIMIT: u64 = 500_000_000; // 0.5 SOL
+    pub const MAX_WAGER_DEFAULT: u64 = 10_000_000_000; // 10 SOL
 
     pub fn is_valid(&self, now: i64) -> bool {
         self.is_active && now < self.expires_at
     }
 
     pub fn has_budget(&self, amount: u64) -> bool {
-        self.total_spent.saturating_add(amount) <= self.spending_limit
-            && amount <= self.max_wager
+        amount <= self.max_wager
+            && self
+                .total_spent
+                .checked_add(amount)
+                .map(|total| total <= self.spending_limit)
+                .unwrap_or(false)
     }
 }

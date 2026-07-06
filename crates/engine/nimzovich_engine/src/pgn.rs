@@ -45,9 +45,7 @@ pub fn move_to_san(game: &Game, src: i8, dst: i8, promo: i8) -> String {
     let same_piece_same_dst: Vec<&KK> = all_moves
         .iter()
         .filter(|m| {
-            m.dst == dst
-                && game.board[m.src as usize].abs() == piece_type as i8
-                && m.src != src
+            m.dst == dst && game.board[m.src as usize].abs() == piece_type as i8 && m.src != src
         })
         .collect();
 
@@ -141,8 +139,7 @@ fn piece_letter(piece_type: usize) -> char {
 
 fn is_en_passant(game: &Game, src: i8, dst: i8) -> bool {
     let piece = game.board[src as usize];
-    piece.abs() == PAWN_ID
-        && game.en_passant_target == Some(dst)
+    piece.abs() == PAWN_ID && game.en_passant_target == Some(dst)
 }
 
 fn has_any_legal_move(game: &mut Game, color: Color) -> bool {
@@ -476,7 +473,13 @@ pub fn san_to_move(game: &mut Game, san: &str) -> Result<(i8, i8, i8), PgnParseE
         (&san_trimmed[..eq_pos], promo_id)
     } else if san_trimmed.len() >= 3 {
         let last_char = san_trimmed.chars().last().unwrap();
-        if "QRBN".contains(last_char) && san_trimmed.bytes().nth(san_trimmed.len() - 2).map(|b| b.is_ascii_digit()).unwrap_or(false) {
+        if "QRBN".contains(last_char)
+            && san_trimmed
+                .bytes()
+                .nth(san_trimmed.len() - 2)
+                .map(|b| b.is_ascii_digit())
+                .unwrap_or(false)
+        {
             let promo_id = char_to_piece_id(last_char);
             (&san_trimmed[..san_trimmed.len() - 1], promo_id)
         } else {
@@ -673,22 +676,37 @@ pub fn parse_pgn_annotated(text: &str) -> Result<ParsedPgnGame, PgnParseError> {
             '[' if var_depth == 0 => {
                 chars.next();
                 for c in chars.by_ref() {
-                    if c == ']' { break; }
+                    if c == ']' {
+                        break;
+                    }
                 }
             }
             '{' if var_depth == 0 => {
                 chars.next();
                 let mut comment = String::new();
                 for c in chars.by_ref() {
-                    if c == '}' { break; }
+                    if c == '}' {
+                        break;
+                    }
                     comment.push(c);
                 }
                 raw.push(RawToken::Comment(comment));
             }
-            '(' if var_depth == 0 => { var_depth += 1; chars.next(); }
-            '(' => { var_depth += 1; chars.next(); }
-            ')' if var_depth > 0 => { var_depth -= 1; chars.next(); }
-            _ if var_depth > 0 => { chars.next(); }
+            '(' if var_depth == 0 => {
+                var_depth += 1;
+                chars.next();
+            }
+            '(' => {
+                var_depth += 1;
+                chars.next();
+            }
+            ')' if var_depth > 0 => {
+                var_depth -= 1;
+                chars.next();
+            }
+            _ if var_depth > 0 => {
+                chars.next();
+            }
             '$' => {
                 chars.next();
                 let mut num = String::new();
@@ -699,16 +717,24 @@ pub fn parse_pgn_annotated(text: &str) -> Result<ParsedPgnGame, PgnParseError> {
                     raw.push(RawToken::Nag(n));
                 }
             }
-            c if c.is_whitespace() => { chars.next(); }
+            c if c.is_whitespace() => {
+                chars.next();
+            }
             _ => {
                 let mut word = String::new();
                 while let Some(&c) = chars.peek() {
-                    if c.is_whitespace() || c == '{' || c == '(' || c == ')' || c == '$' { break; }
+                    if c.is_whitespace() || c == '{' || c == '(' || c == ')' || c == '$' {
+                        break;
+                    }
                     word.push(c);
                     chars.next();
                 }
-                if word.is_empty() { continue; }
-                if word.ends_with('.') || word.ends_with("...") { continue; }
+                if word.is_empty() {
+                    continue;
+                }
+                if word.ends_with('.') || word.ends_with("...") {
+                    continue;
+                }
                 if matches!(word.as_str(), "1-0" | "0-1" | "1/2-1/2" | "*") {
                     game.result = word.clone();
                     raw.push(RawToken::Result);
@@ -730,7 +756,10 @@ pub fn parse_pgn_annotated(text: &str) -> Result<ParsedPgnGame, PgnParseError> {
         match &raw[i] {
             RawToken::San(san_raw) => {
                 let (clean, quality) = strip_quality_suffix(san_raw);
-                let mut ann = PerPlyAnnotation { quality, ..Default::default() };
+                let mut ann = PerPlyAnnotation {
+                    quality,
+                    ..Default::default()
+                };
 
                 // Consume trailing comments / NAGs before the next SAN / Result
                 let mut j = i + 1;
@@ -743,7 +772,9 @@ pub fn parse_pgn_annotated(text: &str) -> Result<ParsedPgnGame, PgnParseError> {
                         }
                         RawToken::Nag(n) => {
                             let q = nag_to_quality(*n);
-                            if q != MoveQuality::Normal { ann.quality = q; }
+                            if q != MoveQuality::Normal {
+                                ann.quality = q;
+                            }
                             j += 1;
                         }
                         _ => break,
@@ -754,7 +785,9 @@ pub fn parse_pgn_annotated(text: &str) -> Result<ParsedPgnGame, PgnParseError> {
                 game.per_ply_annotations.push(ann);
                 i = j;
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
 
@@ -771,12 +804,24 @@ pub fn parse_pgn_annotated(text: &str) -> Result<ParsedPgnGame, PgnParseError> {
 fn strip_quality_suffix(san: &str) -> (String, MoveQuality) {
     // Strip trailing check/mate first, then quality
     let s = san.trim_end_matches('+').trim_end_matches('#');
-    if s.ends_with("!!") { return (s[..s.len()-2].to_string(), MoveQuality::Brilliant); }
-    if s.ends_with("??") { return (s[..s.len()-2].to_string(), MoveQuality::Blunder); }
-    if s.ends_with("!?") { return (s[..s.len()-2].to_string(), MoveQuality::Interesting); }
-    if s.ends_with("?!") { return (s[..s.len()-2].to_string(), MoveQuality::Dubious); }
-    if s.ends_with('!') { return (s[..s.len()-1].to_string(), MoveQuality::Good); }
-    if s.ends_with('?') { return (s[..s.len()-1].to_string(), MoveQuality::Mistake); }
+    if s.ends_with("!!") {
+        return (s[..s.len() - 2].to_string(), MoveQuality::Brilliant);
+    }
+    if s.ends_with("??") {
+        return (s[..s.len() - 2].to_string(), MoveQuality::Blunder);
+    }
+    if s.ends_with("!?") {
+        return (s[..s.len() - 2].to_string(), MoveQuality::Interesting);
+    }
+    if s.ends_with("?!") {
+        return (s[..s.len() - 2].to_string(), MoveQuality::Dubious);
+    }
+    if s.ends_with('!') {
+        return (s[..s.len() - 1].to_string(), MoveQuality::Good);
+    }
+    if s.ends_with('?') {
+        return (s[..s.len() - 1].to_string(), MoveQuality::Mistake);
+    }
     (s.to_string(), MoveQuality::Normal)
 }
 
@@ -814,10 +859,14 @@ fn parse_comment_annotations(comment: &str, ann: &mut PerPlyAnnotation) {
             "%cal" | "%arrow" => {
                 for pair in args.split(',') {
                     let pair = pair.trim();
-                    if pair.len() < 5 { continue; }
+                    if pair.len() < 5 {
+                        continue;
+                    }
                     let kind = pgn_color_to_kind(pair.chars().next().unwrap_or('G'));
                     let data = &pair[1..];
-                    if data.len() < 4 { continue; }
+                    if data.len() < 4 {
+                        continue;
+                    }
                     let mut dc = data.chars();
                     let ff = dc.next().and_then(file_char_to_u8);
                     let fr = dc.next().and_then(rank_char_to_u8);
@@ -831,7 +880,9 @@ fn parse_comment_annotations(comment: &str, ann: &mut PerPlyAnnotation) {
             "%csl" => {
                 for sq in args.split(',') {
                     let sq = sq.trim();
-                    if sq.len() < 3 { continue; }
+                    if sq.len() < 3 {
+                        continue;
+                    }
                     let kind = pgn_color_to_kind(sq.chars().next().unwrap_or('G'));
                     let mut sc = sq[1..].chars();
                     let f = sc.next().and_then(file_char_to_u8);
@@ -849,16 +900,23 @@ fn parse_comment_annotations(comment: &str, ann: &mut PerPlyAnnotation) {
 fn pgn_color_to_kind(c: char) -> u8 {
     match c {
         'Y' | 'y' | 'R' | 'r' => 1, // orange/yellow/red → kind 1
-        'B' | 'b' => 2,               // blue
-        _ => 0,                        // green (G) and anything else
+        'B' | 'b' => 2,             // blue
+        _ => 0,                     // green (G) and anything else
     }
 }
 
 fn file_char_to_u8(c: char) -> Option<u8> {
-    if ('a'..='h').contains(&c) { Some(c as u8 - b'a') } else { None }
+    if ('a'..='h').contains(&c) {
+        Some(c as u8 - b'a')
+    } else {
+        None
+    }
 }
 
 fn rank_char_to_u8(c: char) -> Option<u8> {
-    if ('1'..='8').contains(&c) { Some(c as u8 - b'1') } else { None }
+    if ('1'..='8').contains(&c) {
+        Some(c as u8 - b'1')
+    } else {
+        None
+    }
 }
-

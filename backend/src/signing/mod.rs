@@ -32,41 +32,42 @@
 pub mod anticheat_enqueue;
 pub mod auth;
 pub mod blinks;
-pub mod linkage;
-pub mod social;
-pub mod blinks_onboarding;
 pub mod blinks_funding;
-pub mod ws_subscriber;
-pub mod tee_relayer;
+pub mod blinks_onboarding;
 pub mod cacf;
 pub mod config;
 pub mod elo_cache;
 pub mod feepayer;
 pub mod identity;
+pub mod linkage;
 pub mod p2p_relay;
 pub mod pyth_oracle;
 pub mod routes;
+pub mod social;
 pub mod solana;
 pub mod storage;
 pub mod swiss;
+pub mod tee_relayer;
 pub mod tournament_gossip;
+pub mod ws_subscriber;
 pub mod relayer {
     //! Re-export relayer routes from the routes module.
     pub use crate::signing::routes::relayer::*;
 }
 pub mod auth_ws;
 
-use axum::Router;
-use axum::routing::get;
 use crate::signing::auth_ws::handle_auth_websocket;
+use axum::routing::get;
+use axum::Router;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::str::FromStr;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::warn;
 
+pub use crate::tasks::tournament_scheduler::TournamentTrigger;
 pub use auth::JwtIssuer;
 pub use config::SigningConfig;
 pub use elo_cache::EloCache;
@@ -74,13 +75,12 @@ pub use feepayer::FeepayerPool;
 pub use identity::IdentityVault;
 pub use pyth_oracle::PythOracle;
 pub use routes::matchmaking::SharedMatchmakingState;
-pub use storage::{SessionStore, tournament::TournamentStore};
-pub use swiss::{SwissService, OrchestratorEvent};
-pub use tournament_gossip::TournamentGossipService;
-pub use crate::tasks::tournament_scheduler::TournamentTrigger;
-pub use xfchess_braid_server::ResourceHub;
-pub use xfchess_anticheat::engine::job_queue::AnalysisQueue;
 pub use social::{FriendManager, PresenceStore};
+pub use storage::{tournament::TournamentStore, SessionStore};
+pub use swiss::{OrchestratorEvent, SwissService};
+pub use tournament_gossip::TournamentGossipService;
+pub use xfchess_anticheat::engine::job_queue::AnalysisQueue;
+pub use xfchess_braid_server::ResourceHub;
 
 /// Shared state injected into every route handler.
 #[derive(Clone)]
@@ -142,28 +142,33 @@ const _: () = {
 };
 
 impl AppState {
-    pub fn new(config: SigningConfig, pool: sqlx::SqlitePool, vault_pool: sqlx::SqlitePool, tournament_store: Arc<TournamentStore>) -> Self {
+    pub fn new(
+        config: SigningConfig,
+        pool: sqlx::SqlitePool,
+        vault_pool: sqlx::SqlitePool,
+        tournament_store: Arc<TournamentStore>,
+    ) -> Self {
         let store = Arc::new(storage::SessionStore::new(pool.clone()));
-        let feepayer = Arc::new(feepayer::FeepayerPool::from_base58_list(&config.fee_payer_keys));
+        let feepayer = Arc::new(feepayer::FeepayerPool::from_base58_list(
+            &config.fee_payer_keys,
+        ));
         let jwt = Arc::new(auth::JwtIssuer::new(&config.jwt_secret));
         let matchmaking = routes::matchmaking::SharedMatchmakingState::default();
 
-        let identity_vault = identity::IdentityVault::new(
-            &config.identity_encryption_key,
-            &config.identity_salt
-        ).expect("Failed to initialize IdentityVault from env config");
-        
+        let identity_vault =
+            identity::IdentityVault::new(&config.identity_encryption_key, &config.identity_salt)
+                .expect("Failed to initialize IdentityVault from env config");
+
         let p2p_relay = Arc::new(p2p_relay::create_relay_state());
-        
+
         // Initialize ELO cache with 5-minute TTL
-        let program_id = Pubkey::from_str(&config.program_id)
-            .expect("Invalid program_id in config");
+        let program_id =
+            Pubkey::from_str(&config.program_id).expect("Invalid program_id in config");
         let elo_cache = Arc::new(EloCache::new(
             config.solana_rpc_url.clone(),
             std::time::Duration::from_secs(300),
             program_id,
         ));
-
 
         // Parse authority keys — accepts either a JSON file path or a base58 string
         let load_keypair = |val: &str| -> Keypair {
@@ -178,19 +183,27 @@ impl AppState {
             }
         };
 
-        let vps_authority = Arc::new(config.vps_authority_key.as_deref()
-            .map(load_keypair)
-            .unwrap_or_else(|| {
-                warn!("[VPS] No vps_authority_key provided, using random fallback");
-                Keypair::new()
-            }));
+        let vps_authority = Arc::new(
+            config
+                .vps_authority_key
+                .as_deref()
+                .map(load_keypair)
+                .unwrap_or_else(|| {
+                    warn!("[VPS] No vps_authority_key provided, using random fallback");
+                    Keypair::new()
+                }),
+        );
 
-        let kyc_authority = Arc::new(config.kyc_authority_key.as_deref()
-            .map(load_keypair)
-            .unwrap_or_else(|| {
-                warn!("[VPS] No kyc_authority_key provided, using random fallback");
-                Keypair::new()
-            }));
+        let kyc_authority = Arc::new(
+            config
+                .kyc_authority_key
+                .as_deref()
+                .map(load_keypair)
+                .unwrap_or_else(|| {
+                    warn!("[VPS] No kyc_authority_key provided, using random fallback");
+                    Keypair::new()
+                }),
+        );
 
         let link_authority = Arc::new(config.link_authority_key.as_deref()
             .map(load_keypair)
@@ -214,8 +227,8 @@ impl AppState {
         // Parse host treasury and USDC mint pubkeys
         let host_treasury_pubkey = Pubkey::from_str(&config.host_treasury_pubkey)
             .expect("Invalid host_treasury_pubkey in config");
-        let usdc_mint_pubkey = Pubkey::from_str(&config.usdc_mint_pubkey)
-            .expect("Invalid usdc_mint_pubkey in config");
+        let usdc_mint_pubkey =
+            Pubkey::from_str(&config.usdc_mint_pubkey).expect("Invalid usdc_mint_pubkey in config");
 
         // Initialize Pyth oracle for dynamic pricing
         let pyth_oracle = Arc::new(PythOracle::new());
@@ -275,10 +288,13 @@ impl AppState {
             (*self.tournament_store).clone(),
             Some(vps_node_id.clone()), // Pass the String directly
         ));
-        
+
         // This would require interior mutability in practice
         // For now, gossip service is initialized without VPS node ID
-        tracing::info!("[AppState] Gossip service initialized with VPS node {}", vps_node_id);
+        tracing::info!(
+            "[AppState] Gossip service initialized with VPS node {}",
+            vps_node_id
+        );
     }
 }
 
@@ -291,54 +307,59 @@ pub fn build_router(state: AppState) -> Router<AppState> {
     base
         // Debug and health routes
         .merge(crate::signing::routes::debug::debug_routes())
-        
         // Core game session and move routes (These were missing from build_app_router)
         .merge(crate::signing::routes::main::routes())
-
         // Session-key signing endpoints — dual-accept guard: a valid per-user JWT
         // (preferred) or the legacy relay secret. See `require_relay_or_jwt`.
-        .merge(
-            crate::signing::routes::main::protected_routes()
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    crate::infrastructure::require_relay_or_jwt,
-                )),
-        )
-        
+        .merge(crate::signing::routes::main::protected_routes().layer(
+            axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::infrastructure::require_relay_or_jwt,
+            ),
+        ))
         // Feature-specific nested routes
         .nest("/api/auth", crate::signing::routes::auth::auth_routes())
         .nest("/api/actions", blinks::blinks_routes())
-        .nest(
-            "/api/rates",
-            crate::signing::routes::rates::rates_routes(),
-        )
+        .nest("/api/rates", crate::signing::routes::rates::rates_routes())
         .merge(p2p_relay::p2p_routes())
-        .nest("/identity", crate::signing::routes::identity::identity_routes())
-        
+        .nest(
+            "/identity",
+            crate::signing::routes::identity::identity_routes(),
+        )
         // Relayer infrastructure
         .merge(relayer::routes())
         .merge(tee_relayer::routes())
-        
         // WebSocket route for authentication sync
         .route("/ws/auth", get(handle_auth_websocket))
-
         // Global persistent session delegation — verify is public, mutations require admin key
-        .nest("/api/global-session", crate::signing::routes::global_session::global_session_public_routes())
         .nest(
             "/api/global-session",
-            crate::signing::routes::global_session::global_session_protected_routes()
-                .layer(axum::middleware::from_fn(crate::infrastructure::auth_middleware::require_api_key)),
+            crate::signing::routes::global_session::global_session_public_routes(),
         )
-
+        .nest(
+            "/api/global-session",
+            crate::signing::routes::global_session::global_session_protected_routes().layer(
+                axum::middleware::from_fn(crate::infrastructure::auth_middleware::require_api_key),
+            ),
+        )
         // Anti-cheat verdict + player stats queries
-        .nest("/api", crate::signing::routes::anticheat::anticheat_routes())
-
+        .nest(
+            "/api",
+            crate::signing::routes::anticheat::anticheat_routes(),
+        )
         // Wallet balance (SOL + stablecoins via Helius, converted to local currency)
-        .nest("/api/wallet", crate::signing::routes::wallet::wallet_routes())
-
+        .nest(
+            "/api/wallet",
+            crate::signing::routes::wallet::wallet_routes(),
+        )
         // External ELO linking (Lichess)
-        .nest("/api", crate::signing::routes::external_elo::external_elo_routes())
-
+        .nest(
+            "/api",
+            crate::signing::routes::external_elo::external_elo_routes(),
+        )
         // Lichess OAuth 2.0 + PKCE flow (primary)
-        .nest("/api", crate::signing::routes::lichess_oauth::lichess_oauth_routes())
+        .nest(
+            "/api",
+            crate::signing::routes::lichess_oauth::lichess_oauth_routes(),
+        )
 }

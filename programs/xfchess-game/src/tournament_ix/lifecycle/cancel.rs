@@ -87,7 +87,10 @@ pub struct CancelTournament<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTournament<'info>>, tournament_id: u64) -> Result<()> {
+pub fn handler<'a, 'b, 'c, 'info>(
+    ctx: Context<'a, 'b, 'c, 'info, CancelTournament<'info>>,
+    tournament_id: u64,
+) -> Result<()> {
     require!(
         ctx.accounts.tournament.status == TournamentStatus::Registration
             || ctx.accounts.tournament.status == TournamentStatus::Active,
@@ -120,9 +123,15 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
 
     // Step 1: Return USDC prize pool to operator (if funded)
     if tournament.usdc_prize_mint.is_some() && tournament.usdc_prize_funded {
-        let usdc_prize_escrow = ctx.accounts.usdc_prize_escrow.as_ref()
+        let usdc_prize_escrow = ctx
+            .accounts
+            .usdc_prize_escrow
+            .as_ref()
             .ok_or(GameErrorCode::MissingTokenAccounts)?;
-        let operator_usdc_ata = ctx.accounts.operator_usdc_ata.as_ref()
+        let operator_usdc_ata = ctx
+            .accounts
+            .operator_usdc_ata
+            .as_ref()
             .ok_or(GameErrorCode::MissingTokenAccounts)?;
 
         let usdc_balance = usdc_prize_escrow.amount;
@@ -131,7 +140,8 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
             // Transfer USDC from escrow back to operator
             let tournament_id_bytes = tournament_id.to_le_bytes();
             let bump = ctx.bumps.usdc_prize_escrow_authority;
-            let escrow_seeds: &[&[&[u8]]] = &[&[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump]]];
+            let escrow_seeds: &[&[&[u8]]] =
+                &[&[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump]]];
 
             token::transfer(
                 CpiContext::new_with_signer(
@@ -145,7 +155,6 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
                 ),
                 usdc_balance,
             )?;
-
         }
     }
 
@@ -167,7 +176,8 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
             GameErrorCode::NotInGame
         );
 
-        let total_refund = refund_amount.checked_mul(registered as u64)
+        let total_refund = refund_amount
+            .checked_mul(registered as u64)
             .ok_or(GameErrorCode::Overflow)?;
         let refund_source_balance = if refund_from_escrow {
             ctx.accounts.escrow_pda.lamports()
@@ -182,14 +192,8 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
         for i in 0..registered {
             let player_key = all_players[i];
             let player_wallet = &ctx.remaining_accounts[i];
-            require!(
-                player_wallet.key() == player_key,
-                GameErrorCode::NotInGame
-            );
-            require!(
-                player_wallet.is_writable,
-                GameErrorCode::UnauthorizedAccess
-            );
+            require!(player_wallet.key() == player_key, GameErrorCode::NotInGame);
+            require!(player_wallet.is_writable, GameErrorCode::UnauthorizedAccess);
 
             if refund_from_escrow {
                 // Program-owned escrow: direct lamport move.
@@ -209,7 +213,6 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
                 )?;
             }
         }
-
     }
 
     // Step 3: Return the guaranteed SOL prize from escrow to the operator.
@@ -219,7 +222,12 @@ pub fn handler<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, CancelTourname
             GameErrorCode::InsufficientFunds
         );
         **ctx.accounts.escrow_pda.lamports.borrow_mut() -= sol_guarantee;
-        **ctx.accounts.host_treasury.to_account_info().lamports.borrow_mut() += sol_guarantee;
+        **ctx
+            .accounts
+            .host_treasury
+            .to_account_info()
+            .lamports
+            .borrow_mut() += sol_guarantee;
     }
 
     // Mark tournament as cancelled

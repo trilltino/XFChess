@@ -15,10 +15,10 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
-use swiss_pairing::{MatchResult, SwissRound, StandingsEntry};
+use swiss_pairing::{MatchResult, StandingsEntry, SwissRound};
 
-use crate::signing::AppState;
 use super::service::SwissServiceError;
+use crate::signing::AppState;
 
 // ── Request / response types ──────────────────────────────────────────────────
 
@@ -134,7 +134,12 @@ async fn start_round(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<SwissRound>, StatusCode> {
-    state.swiss_service.start_round(id).await.map(Json).map_err(swiss_err)
+    state
+        .swiss_service
+        .start_round(id)
+        .await
+        .map(Json)
+        .map_err(swiss_err)
 }
 
 /// GET /tournament/{id}/current-round
@@ -187,7 +192,12 @@ async fn get_standings(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<StandingsEntry>>, StatusCode> {
-    state.swiss_service.get_standings(id).await.map(Json).map_err(swiss_err)
+    state
+        .swiss_service
+        .get_standings(id)
+        .await
+        .map(Json)
+        .map_err(swiss_err)
 }
 
 /// POST /tournament/{id}/absent  — Gap 1

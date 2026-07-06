@@ -25,10 +25,10 @@ pub enum LobbyMode {
 /// ELO range matching preference for matchmaking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EloMatchPref {
-    Strict,   // ±50 ELO
+    Strict, // ±50 ELO
     #[default]
     Expanded, // ±150 ELO
-    Any,      // no filter
+    Any,    // no filter
 }
 
 impl EloMatchPref {
@@ -58,11 +58,18 @@ pub enum LobbyStatus {
     /// Game was created or joined successfully — stores the game_id.
     Success(u64),
     /// RPC returned a wager amount for a join lookup.
-    Fetched { wager_sol: f64, game_id: u64 },
+    Fetched {
+        wager_sol: f64,
+        game_id: u64,
+    },
     /// Creator is waiting for opponent to sign join_game on-chain.
-    WaitingForOpponent { game_id: u64 },
+    WaitingForOpponent {
+        game_id: u64,
+    },
     /// Opponent detected on-chain — host can now start P2P.
-    OpponentJoined { game_id: u64 },
+    OpponentJoined {
+        game_id: u64,
+    },
     Error(String),
 }
 
@@ -120,7 +127,9 @@ pub struct SolanaLobbyState {
     /// Last time the browse list was fetched.
     pub browse_last_fetch: Option<std::time::Instant>,
     /// Receiver for background browse-list fetch.
-    pub browse_rx: Option<crossbeam_channel::Receiver<Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>>>,
+    pub browse_rx: Option<
+        crossbeam_channel::Receiver<Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>>,
+    >,
 }
 
 impl Default for SolanaLobbyState {
@@ -170,7 +179,16 @@ impl Plugin for SolanaLobbyPlugin {
         app.init_resource::<SolanaLobbyState>()
             .init_resource::<crate::multiplayer::solana::addon::SolanaGameSync>()
             .init_resource::<crate::multiplayer::solana::addon::CompetitiveMatchState>()
-            .add_systems(Update, (sync_from_solana_state, poll_lobby_tasks, poll_rejoin_check, poll_solana_browse).chain());
+            .add_systems(
+                Update,
+                (
+                    sync_from_solana_state,
+                    poll_lobby_tasks,
+                    poll_rejoin_check,
+                    poll_solana_browse,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -188,12 +206,20 @@ pub fn spawn_create_game(
     time_inc: u32,
     tx: oneshot::Sender<Result<u64, String>>,
 ) {
-    let program_id: solana_sdk::pubkey::Pubkey =
-        SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+    let program_id: solana_sdk::pubkey::Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            let result = async_create_game(rpc_url, wallet_pubkey, program_id, wager_lamports, match_type, time_base, time_inc).await;
+            let result = async_create_game(
+                rpc_url,
+                wallet_pubkey,
+                program_id,
+                wager_lamports,
+                match_type,
+                time_base,
+                time_inc,
+            )
+            .await;
             let _ = tx.send(result);
         })
         .detach();
@@ -205,8 +231,7 @@ pub fn spawn_lookup_game(
     game_id: u64,
     tx: oneshot::Sender<Result<(u64, u64), String>>,
 ) {
-    let program_id: solana_sdk::pubkey::Pubkey =
-        SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+    let program_id: solana_sdk::pubkey::Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
@@ -224,8 +249,7 @@ pub fn spawn_poll_opponent_joined(
     game_id: u64,
     tx: oneshot::Sender<Result<(), String>>,
 ) {
-    let program_id: solana_sdk::pubkey::Pubkey =
-        SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+    let program_id: solana_sdk::pubkey::Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
@@ -242,8 +266,7 @@ pub fn spawn_join_game(
     game_id: u64,
     tx: oneshot::Sender<Result<u64, String>>,
 ) {
-    let program_id: solana_sdk::pubkey::Pubkey =
-        SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+    let program_id: solana_sdk::pubkey::Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
@@ -316,14 +339,17 @@ async fn async_create_game(
 
     // Gate: only wallets with profile + email + KYC may create a wagered match.
     if wager_lamports > 0 {
-        crate::multiplayer::network::vps::identity::require_wager_eligibility(&wallet_pubkey.to_string())?;
+        crate::multiplayer::network::vps::identity::require_wager_eligibility(
+            &wallet_pubkey.to_string(),
+        )?;
     }
 
     let game_id: u64 = rand::random();
 
     // 1. Ask VPS to generate session keypair → get session_pubkey + platform fee.
-    let (session_pubkey_str, platform_fee_lamports) = vps_client::create_session(game_id, &wallet_pubkey.to_string())
-        .map_err(|e| format!("vps create_session: {e}"))?;
+    let (session_pubkey_str, platform_fee_lamports) =
+        vps_client::create_session(game_id, &wallet_pubkey.to_string())
+            .map_err(|e| format!("vps create_session: {e}"))?;
     let session_pubkey: Pubkey = session_pubkey_str
         .parse()
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
@@ -340,8 +366,9 @@ async fn async_create_game(
         time_inc as u16,
     )
     .map_err(|e| format!("build create_game_ix: {e}"))?;
-    let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
-        .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
+    let auth_ix =
+        authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
+            .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
 
     let ixs = vec![create_ix, auth_ix];
 
@@ -354,23 +381,33 @@ async fn async_create_game(
         .map_err(|e| format!("vps activate_session: {e}"))?;
 
     // Poll for game account to exist on-chain (max 60 seconds)
-    let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let rpc = RpcClient::new(rpc_url);
-    
+
     let start = Instant::now();
     let timeout = Duration::from_secs(60);
     let poll_interval = Duration::from_secs(1);
-    
-    info!("[CREATE_GAME] Waiting for game account {} to be confirmed on-chain...", game_pda);
-    
+
+    info!(
+        "[CREATE_GAME] Waiting for game account {} to be confirmed on-chain...",
+        game_pda
+    );
+
     loop {
         if start.elapsed() > timeout {
-            return Err(format!("Game account {} not found after 60s - transaction may have failed", game_pda));
+            return Err(format!(
+                "Game account {} not found after 60s - transaction may have failed",
+                game_pda
+            ));
         }
-        
+
         match rpc.get_account(&game_pda) {
             Ok(_) => {
-                info!("[CREATE_GAME] Game account {} confirmed on-chain for game {}", game_pda, game_id);
+                info!(
+                    "[CREATE_GAME] Game account {} confirmed on-chain for game {}",
+                    game_pda, game_id
+                );
                 break;
             }
             Err(_) => {
@@ -387,8 +424,11 @@ async fn async_lookup_game(
     program_id: solana_sdk::pubkey::Pubkey,
     game_id: u64,
 ) -> Result<(u64, u64), String> {
-    let game_pda =
-        solana_sdk::pubkey::Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let game_pda = solana_sdk::pubkey::Pubkey::find_program_address(
+        &[GAME_SEED, &game_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
 
     let rpc = RpcClient::new(rpc_url);
     let data = rpc
@@ -422,7 +462,10 @@ async fn async_lookup_game(
             3 => "Expired",
             _ => "unknown status",
         };
-        return Err(format!("Game {} is not available to join: {}", game_id, label));
+        return Err(format!(
+            "Game {} is not available to join: {}",
+            game_id, label
+        ));
     }
 
     let offset = parse_wager_offset(&data)?;
@@ -436,7 +479,6 @@ async fn async_lookup_game(
     );
     Ok((wager_lamports, game_id))
 }
-
 
 /// Walk the Borsh-encoded Game account to find the wager_amount offset.
 fn parse_wager_offset(data: &[u8]) -> Result<usize, String> {
@@ -454,7 +496,6 @@ fn parse_wager_offset(data: &[u8]) -> Result<usize, String> {
     Ok(after_fen + 2 + 1 + 8 + 8)
 }
 
-
 async fn async_join_game(
     rpc_url: String,
     wallet_pubkey: Pubkey,
@@ -465,7 +506,9 @@ async fn async_join_game(
     use crate::multiplayer::vps_client;
 
     // Gate: joining any on-chain game requires the wager eligibility checks.
-    crate::multiplayer::network::vps::identity::require_wager_eligibility(&wallet_pubkey.to_string())?;
+    crate::multiplayer::network::vps::identity::require_wager_eligibility(
+        &wallet_pubkey.to_string(),
+    )?;
 
     // 1. Ask VPS for a session keypair for this game.
     // The VPS uses get-or-create semantics, so the same session pubkey that was
@@ -477,11 +520,8 @@ async fn async_join_game(
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
 
     // 2. Read the game account to get the white player pubkey for white_profile PDA.
-    let game_pda = Pubkey::find_program_address(
-        &[GAME_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let rpc = solana_client::rpc_client::RpcClient::new(rpc_url.clone());
     let game_data = rpc
         .get_account_data(&game_pda)
@@ -496,10 +536,17 @@ async fn async_join_game(
         .map_err(|_| "bad white bytes".to_string())?;
     let white_player = Pubkey::from(white_bytes);
 
-    let join_ix = join_game_ix(program_id, wallet_pubkey, white_player, session_pubkey, game_id)
-        .map_err(|e| format!("build join_game_ix: {e}"))?;
-    let auth_ix = authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
-        .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
+    let join_ix = join_game_ix(
+        program_id,
+        wallet_pubkey,
+        white_player,
+        session_pubkey,
+        game_id,
+    )
+    .map_err(|e| format!("build join_game_ix: {e}"))?;
+    let auth_ix =
+        authorize_session_key_ix(program_id, wallet_pubkey, game_id, session_pubkey, 86400)
+            .map_err(|e| format!("build authorize_session_key_ix: {e}"))?;
 
     let ixs = vec![join_ix, auth_ix];
 
@@ -539,7 +586,10 @@ fn poll_lobby_tasks(
                 crate::multiplayer::network::game_id_store::set(game_id);
                 rollup_manager.game_id = game_id;
                 rollup_manager.is_creator = lobby.mode == LobbyMode::Create;
-                info!("[LOBBY] Active game_id {} stored globally (rollup updated, is_creator={})", game_id, rollup_manager.is_creator);
+                info!(
+                    "[LOBBY] Active game_id {} stored globally (rollup updated, is_creator={})",
+                    game_id, rollup_manager.is_creator
+                );
 
                 if lobby.mode == LobbyMode::Create && lobby.wager_sol > 0.0 {
                     let display_name = lobby
@@ -553,24 +603,45 @@ fn poll_lobby_tasks(
 
                     let announce_result = if let Some(ref pwd) = lobby.room_password.clone() {
                         crate::multiplayer::vps_client::p2p_announce_game_with_password(
-                            game_id.to_string(), &host_node_id, &display_name,
-                            lobby.wager_sol as f64, "solana_wager", 300, 0,
+                            game_id.to_string(),
+                            &host_node_id,
+                            &display_name,
+                            lobby.wager_sol as f64,
+                            "solana_wager",
+                            lobby.time_control_base,
+                            lobby.time_control_inc as u16,
                             Some(display_name.clone()),
-                            if lobby.cached_elo > 0 { Some(lobby.cached_elo) } else { None },
+                            if lobby.cached_elo > 0 {
+                                Some(lobby.cached_elo)
+                            } else {
+                                None
+                            },
                             lobby.cached_region.clone(),
                             pwd.clone(),
                         )
                     } else {
                         crate::multiplayer::vps_client::p2p_announce_game(
-                            game_id.to_string(), &host_node_id, &display_name,
-                            lobby.wager_sol as f64, "solana_wager", 300, 0,
+                            game_id.to_string(),
+                            &host_node_id,
+                            &display_name,
+                            lobby.wager_sol as f64,
+                            "solana_wager",
+                            lobby.time_control_base,
+                            lobby.time_control_inc as u16,
                             Some(display_name.clone()),
-                            if lobby.cached_elo > 0 { Some(lobby.cached_elo) } else { None },
+                            if lobby.cached_elo > 0 {
+                                Some(lobby.cached_elo)
+                            } else {
+                                None
+                            },
                             lobby.cached_region.clone(),
                         )
                     };
                     if let Err(e) = announce_result {
-                        warn!("[LOBBY] Failed to announce wagered game {} to VPS: {}", game_id, e);
+                        warn!(
+                            "[LOBBY] Failed to announce wagered game {} to VPS: {}",
+                            game_id, e
+                        );
                     } else {
                         info!("[LOBBY] Announced wagered game {} to VPS relay", game_id);
                     }
@@ -656,7 +727,9 @@ fn sync_from_solana_state(
             // Read session key expiry once per wallet connection.
             if lobby.session_expires_at.is_none() {
                 lobby.session_expires_at =
-                    crate::multiplayer::solana::session_key_manager::SessionKeyManager::expires_at(pubkey);
+                    crate::multiplayer::solana::session_key_manager::SessionKeyManager::expires_at(
+                        pubkey,
+                    );
             }
 
             // Kick off a one-time on-chain active-game check for the rejoin flow.
@@ -671,10 +744,7 @@ fn sync_from_solana_state(
 
 /// Spawn a task that looks for an active on-chain game belonging to `wallet`.
 /// Resolves to Some(game_id) if one is found, None otherwise.
-pub fn spawn_check_active_game(
-    wallet_pubkey: Pubkey,
-    tx: oneshot::Sender<Option<u64>>,
-) {
+pub fn spawn_check_active_game(wallet_pubkey: Pubkey, tx: oneshot::Sender<Option<u64>>) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
             // Enumerate up to 20 recent game IDs and check for an Active game owned by wallet.
@@ -730,8 +800,8 @@ pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
 
     let (tx, rx) = crossbeam_channel::bounded(1);
     lobby.browse_rx = Some(rx);
-    std::thread::spawn(move || {
-        match crate::multiplayer::vps_client::p2p_list_games() {
+    std::thread::spawn(
+        move || match crate::multiplayer::vps_client::p2p_list_games() {
             Ok(games) => {
                 let filtered: Vec<_> = games
                     .into_iter()
@@ -755,6 +825,6 @@ pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
                 let _ = tx.send(filtered);
             }
             Err(e) => warn!("[SOLANA_BROWSE] Failed to fetch games: {}", e),
-        }
-    });
+        },
+    );
 }

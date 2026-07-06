@@ -37,10 +37,7 @@ pub struct FixedHudPlugin;
 impl Plugin for FixedHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::InGame), spawn_turn_hud)
-            .add_systems(
-                Update,
-                update_turn_hud.run_if(in_state(GameState::InGame)),
-            );
+            .add_systems(Update, update_turn_hud.run_if(in_state(GameState::InGame)));
     }
 }
 

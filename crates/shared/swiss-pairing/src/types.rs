@@ -54,7 +54,10 @@ impl SwissPlayer {
 
     /// Most recent float status (None if no rounds played)
     pub fn last_float(&self) -> FloatStatus {
-        self.float_history.last().copied().unwrap_or(FloatStatus::None)
+        self.float_history
+            .last()
+            .copied()
+            .unwrap_or(FloatStatus::None)
     }
 
     /// True if the player was floated down in the immediately preceding round
@@ -69,8 +72,16 @@ impl SwissPlayer {
 
     /// Calculate color balance (positive = needs white, negative = needs black)
     pub fn color_balance(&self) -> i8 {
-        let whites = self.color_history.iter().filter(|c| **c == Color::White).count() as i8;
-        let blacks = self.color_history.iter().filter(|c| **c == Color::Black).count() as i8;
+        let whites = self
+            .color_history
+            .iter()
+            .filter(|c| **c == Color::White)
+            .count() as i8;
+        let blacks = self
+            .color_history
+            .iter()
+            .filter(|c| **c == Color::Black)
+            .count() as i8;
         blacks - whites
     }
 
@@ -183,7 +194,10 @@ impl MatchResult {
     }
 
     pub fn is_forfeit(&self) -> bool {
-        matches!(self, MatchResult::ForfeitWhiteWin | MatchResult::ForfeitBlackWin)
+        matches!(
+            self,
+            MatchResult::ForfeitWhiteWin | MatchResult::ForfeitBlackWin
+        )
     }
 }
 

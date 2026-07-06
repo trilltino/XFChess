@@ -41,6 +41,7 @@ const RESULT_WINNER: u8 = 1;
 struct GameSnapshot {
     white: Pubkey,
     black: Pubkey,
+    fee_payer: Pubkey,
     status: u8,
     result_tag: u8,
     winner: Option<Pubkey>,
@@ -65,6 +66,7 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
     o += 1;
     o += 8; // last_move_timestamp
     o += 8; // fees_advanced
+    let fee_payer = Pubkey::try_from(data.get(o..o + 32)?).ok()?;
     o += 32; // fee_payer
     let result_tag = *data.get(o)?;
     o += 1;
@@ -77,7 +79,7 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
     };
     o += 68; // board_state
     o += 2; // move_count
-    o += 1; // turn
+    o += 2; // turn (u16)
     o += 8; // created_at
     o += 8; // updated_at
     let wager_amount = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
@@ -109,6 +111,7 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
     Some(GameSnapshot {
         white,
         black,
+        fee_payer,
         status,
         result_tag,
         winner,
@@ -207,8 +210,7 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
         .map(|id| Pubkey::find_program_address(&[GAME_SEED, &id.to_le_bytes()], &program_id).0)
         .collect();
 
-    let fetched =
-        fetch_accounts_batched(state.config.solana_rpc_url.clone(), pdas.clone()).await;
+    let fetched = fetch_accounts_batched(state.config.solana_rpc_url.clone(), pdas.clone()).await;
     if fetched.len() != game_ids.len() {
         return Err("batched fetch returned wrong length".into());
     }
@@ -237,8 +239,7 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
                         match state.store.get(game_id).await {
                             Some(entry) => {
                                 if let Err(e) =
-                                    finalize_on_chain(state, game_id, &entry.keypair(), &snap)
-                                        .await
+                                    finalize_on_chain(state, game_id, &entry.keypair(), &snap).await
                                 {
                                     warn!("[settlement] game {}: {}", game_id, e);
                                 }
@@ -257,8 +258,7 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
     // pull finished games back to devnet so finalize can run next tick.
     if !delegated.is_empty() {
         let er_pdas: Vec<Pubkey> = delegated.iter().map(|&i| pdas[i]).collect();
-        let er_fetched =
-            fetch_accounts_batched(state.config.er_rpc_url.clone(), er_pdas).await;
+        let er_fetched = fetch_accounts_batched(state.config.er_rpc_url.clone(), er_pdas).await;
         for (j, f) in er_fetched.iter().enumerate() {
             let game_id = game_ids[delegated[j]];
             if let Fetched::Found(acc) = f {
@@ -291,7 +291,7 @@ async fn undelegate_from_er(
     let session_pk = session_kp.pubkey();
     let ix = solana::undelegate_game_ix(program_id, &session_pk, game_id)
         .map_err(|e| format!("build undelegate: {e}"))?;
-    let er_url = state.config.er_rpc_url.clone();
+    let er_url = state.config.magic_router_rpc_url.clone();
     let sig = tokio::task::spawn_blocking(move || {
         let rpc = solana::make_rpc(&er_url);
         solana::sign_and_submit_er(&rpc, &session_kp, &[ix])
@@ -299,8 +299,7 @@ async fn undelegate_from_er(
     .await
     .map_err(|e| format!("join error: {e}"))?
     .map_err(|e| format!("undelegate: {e}"))?;
-    worker_metrics::SETTLEMENT_UNDELEGATED_TOTAL
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    worker_metrics::SETTLEMENT_UNDELEGATED_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     info!(
         "[settlement] game {} finished on ER — undelegated, sig {}",
         game_id, sig
@@ -323,14 +322,16 @@ async fn finalize_on_chain(
         Some(_) => Some("black"),
         None => None, // draw
     };
-    let fee_payer = session_kp.pubkey();
+    // finalize now requires the passed fee_payer to equal the recorded
+    // game.fee_payer (rent + reimbursement go there); the tx is still signed by
+    // session_kp, but fee_payer is a non-signer account.
     let ix = solana::finalize_game_ix(
         &program_id,
         game_id,
         &snap.white,
         &snap.black,
         winner_side,
-        &fee_payer,
+        &snap.fee_payer,
     );
 
     let rpc_url = state.config.solana_rpc_url.clone();
@@ -339,7 +340,7 @@ async fn finalize_on_chain(
         let kp = solana_sdk::signature::Keypair::from_bytes(&kp_bytes)
             .map_err(|e| format!("bad keypair: {e}"))?;
         let rpc = solana::make_rpc(&rpc_url);
-        solana::sign_and_submit_er(&rpc, &kp, &[ix]).map_err(|e| format!("finalize: {e}"))
+        solana::sign_and_submit(&rpc, &kp, &[ix]).map_err(|e| format!("finalize: {e}"))
     })
     .await
     .map_err(|e| format!("join error: {e}"))??;
@@ -370,7 +371,10 @@ async fn finalize_on_chain(
         )
         .await
     {
-        error!("[settlement] DB completion failed for game {}: {}", game_id, e);
+        error!(
+            "[settlement] DB completion failed for game {}: {}",
+            game_id, e
+        );
     }
 
     // Same anti-cheat path as the HTTP finalize route — auto-settled games
@@ -424,7 +428,7 @@ mod tests {
         }
         d.extend_from_slice(&[0u8; 68]); // board_state
         d.extend_from_slice(&10u16.to_le_bytes()); // move_count
-        d.push(1); // turn
+        d.extend_from_slice(&1u16.to_le_bytes()); // turn (u16)
         d.extend_from_slice(&0i64.to_le_bytes()); // created_at
         d.extend_from_slice(&0i64.to_le_bytes()); // updated_at
         d.extend_from_slice(&1_000u64.to_le_bytes()); // wager_amount

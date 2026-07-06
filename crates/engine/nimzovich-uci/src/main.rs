@@ -46,12 +46,20 @@ struct Engine {
 
 impl Engine {
     fn new() -> Self {
-        Self { game: new_game(), stm: 1, startpos_moves: Some(Vec::new()) }
+        Self {
+            game: new_game(),
+            stm: 1,
+            startpos_moves: Some(Vec::new()),
+        }
     }
 
     fn set_position(&mut self, fen: &str, moves: &[&str]) {
         set_game_from_fen(&mut self.game, fen);
-        self.stm = if fen.split_whitespace().nth(1) == Some("b") { -1 } else { 1 };
+        self.stm = if fen.split_whitespace().nth(1) == Some("b") {
+            -1
+        } else {
+            1
+        };
         self.startpos_moves = if fen == START_FEN {
             Some(moves.iter().map(|m| m.to_string()).collect())
         } else {
@@ -70,10 +78,16 @@ impl Engine {
     /// Try the opening book. Returns true if a (validated legal) book move
     /// was emitted.
     fn try_book(&mut self) -> bool {
-        let Some(history) = &self.startpos_moves else { return false };
+        let Some(history) = &self.startpos_moves else {
+            return false;
+        };
         let played: Vec<&str> = history.iter().map(|s| s.as_str()).collect();
-        let Some(book) = book_move(&played) else { return false };
-        let Some((src, dst, _promo)) = parse_uci_move(book) else { return false };
+        let Some(book) = book_move(&played) else {
+            return false;
+        };
+        let Some((src, dst, _promo)) = parse_uci_move(book) else {
+            return false;
+        };
         // A book typo must degrade to "out of book", never to a forfeit.
         if !is_legal_move(&mut self.game, src, dst, self.stm) {
             eprintln!("info string book move {book} failed legality check — searching");
@@ -151,7 +165,14 @@ fn move_to_uci(src: i8, dst: i8, promo_id: i8) -> String {
         2 => "n",
         _ => "",
     };
-    format!("{}{}{}{}{}", file(src), rank(src), file(dst), rank(dst), promo)
+    format!(
+        "{}{}{}{}{}",
+        file(src),
+        rank(src),
+        file(dst),
+        rank(dst),
+        promo
+    )
 }
 
 /// Compute a think budget in seconds from `go` arguments.
@@ -186,7 +207,11 @@ fn parse_go_budget(tokens: &[&str], stm: i64) -> f32 {
 }
 
 fn fen_color(fen: &str) -> i64 {
-    if fen.split_whitespace().nth(1) == Some("b") { -1 } else { 1 }
+    if fen.split_whitespace().nth(1) == Some("b") {
+        -1
+    } else {
+        1
+    }
 }
 
 fn bench(hash_mb: usize) {

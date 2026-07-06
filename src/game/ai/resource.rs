@@ -292,7 +292,6 @@ impl AIDifficulty {
             Self::Level8 => "Master (2500+ ELO)",
         }
     }
-
 }
 
 #[cfg(test)]

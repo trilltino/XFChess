@@ -63,12 +63,22 @@ async fn handle_get(
 
             // Try to get current content to send as initial state (latest version)
             let resources = state.resources.read().await;
-            println!("[PROTOCOL] Looking for resource in store, available keys: {:?}", resources.keys().collect::<Vec<_>>());
+            println!(
+                "[PROTOCOL] Looking for resource in store, available keys: {:?}",
+                resources.keys().collect::<Vec<_>>()
+            );
             let initial_content = if let Some(history) = resources.get(&url) {
-                println!("[PROTOCOL] Found history with {} entries for {}", history.len(), url);
+                println!(
+                    "[PROTOCOL] Found history with {} entries for {}",
+                    history.len(),
+                    url
+                );
                 if let Some(latest) = history.last() {
                     let content = serde_json::to_string(latest).unwrap_or_default();
-                    println!("[PROTOCOL] Sending initial content (len: {})", content.len());
+                    println!(
+                        "[PROTOCOL] Sending initial content (len: {})",
+                        content.len()
+                    );
                     content
                 } else {
                     println!("[PROTOCOL] History empty for {}", url);

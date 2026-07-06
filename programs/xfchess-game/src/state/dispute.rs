@@ -17,6 +17,10 @@ pub struct DisputeRecord {
     pub created_at: i64,
     pub expires_at: i64,
     pub resolved_at: Option<i64>,
+    /// Lamports the challenger posted as a bond when opening the dispute. Held in
+    /// this record's PDA; refunded to the challenger if the dispute is upheld or
+    /// auto-resolved after the TTL, forfeited to the treasury if dismissed.
+    pub bond_amount: u64,
     pub bump: u8,
 }
 

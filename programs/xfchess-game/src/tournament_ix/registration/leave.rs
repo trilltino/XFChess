@@ -4,6 +4,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::shards;
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -17,24 +18,28 @@ pub struct LeaveTournament<'info> {
     pub tournament: Account<'info, Tournament>,
     /// TournamentPlayersShard 0 (players 0-63)
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
     /// TournamentPlayersShard 1 (players 64-127)
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Account<'info, TournamentPlayersShard>,
     /// TournamentPlayersShard 2 (players 128-191)
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Account<'info, TournamentPlayersShard>,
     /// TournamentPlayersShard 3 (players 192-255)
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
@@ -53,7 +58,10 @@ pub struct LeaveTournament<'info> {
 
 pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
-    require!(tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
+    require!(
+        tournament.tournament_id == tournament_id,
+        GameErrorCode::UnauthorizedAccess
+    );
     let player_key = ctx.accounts.player.key();
 
     // Validate tournament state
@@ -62,34 +70,14 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
         GameErrorCode::InvalidTournamentStatus
     );
 
-    // Find the player's shard and index
-    let mut found_shard_id: Option<u8> = None;
-    let mut player_index_in_shard: Option<usize> = None;
-
-    let shards = [
-        (&mut ctx.accounts.tournament_players_shard_0, 0u8),
-        (&mut ctx.accounts.tournament_players_shard_1, 1u8),
-        (&mut ctx.accounts.tournament_players_shard_2, 2u8),
-        (&mut ctx.accounts.tournament_players_shard_3, 3u8),
+    let shard_refs: [&TournamentPlayersShard; 4] = [
+        &ctx.accounts.tournament_players_shard_0,
+        &ctx.accounts.tournament_players_shard_1,
+        &ctx.accounts.tournament_players_shard_2,
+        &ctx.accounts.tournament_players_shard_3,
     ];
-
-    for (shard, shard_id) in shards.iter() {
-        for (i, player) in shard.players.iter().enumerate() {
-            if *player == player_key {
-                found_shard_id = Some(*shard_id);
-                player_index_in_shard = Some(i);
-                break;
-            }
-        }
-        if found_shard_id.is_some() {
-            break;
-        }
-    }
-
-    let (shard_id, index) = match (found_shard_id, player_index_in_shard) {
-        (Some(sid), Some(idx)) => (sid, idx),
-        _ => return Err(GameErrorCode::PlayerNotFound.into()),
-    };
+    let (shard_id, index) =
+        shards::find_player(&shard_refs, player_key).ok_or(GameErrorCode::PlayerNotFound)?;
 
     // Get mutable reference to the correct shard
     let target_shard = match shard_id {
@@ -100,19 +88,16 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
         _ => return Err(GameErrorCode::PlayerNotFound.into()),
     };
 
-    // Remove player and their ELO by shifting the array left
-    let num_in_shard = target_shard.players.len();
-    for i in index..(num_in_shard - 1) {
-        target_shard.players[i] = target_shard.players[i + 1];
-        target_shard.player_elos[i] = target_shard.player_elos[i + 1];
-    }
+    shards::remove_player(target_shard, index)?;
 
-    // Clear the last element (optional but clean)
-    target_shard.players[num_in_shard - 1] = Pubkey::default();
-    target_shard.player_elos[num_in_shard - 1] = 0;
-
-    // Decrement the player count
-    tournament.num_registered_players -= 1;
+    tournament.num_registered_players = tournament
+        .num_registered_players
+        .checked_sub(1)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
+    tournament.player_count = tournament
+        .player_count
+        .checked_sub(1)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
 
     // Refund the entry-fee deposit from the tournament escrow PDA. The guaranteed
     // prize (tournament.prize_pool) is untouched — it was operator-funded before

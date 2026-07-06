@@ -61,7 +61,9 @@ impl TimeControl {
             TimeControl::BlitzThreePlus => 2,
             TimeControl::BlitzPlus => 3,
             TimeControl::RapidPlus => 10,
-            TimeControl::Custom { increment_seconds, .. } => increment_seconds,
+            TimeControl::Custom {
+                increment_seconds, ..
+            } => increment_seconds,
             _ => 0,
         }
     }
@@ -171,7 +173,10 @@ mod tests {
 
     #[test]
     fn custom_preset() {
-        let tc = TimeControl::Custom { base_seconds: 120, increment_seconds: 5 };
+        let tc = TimeControl::Custom {
+            base_seconds: 120,
+            increment_seconds: 5,
+        };
         assert_eq!(tc.base_seconds(), 120);
         assert_eq!(tc.increment_seconds(), 5);
         assert_eq!(tc.short_label(), "2+5");
@@ -179,10 +184,12 @@ mod tests {
 
     #[test]
     fn categories_are_correct() {
-        assert_eq!(TimeControl::UltraBullet.category(), TimeCategory::UltraBullet);
+        assert_eq!(
+            TimeControl::UltraBullet.category(),
+            TimeCategory::UltraBullet
+        );
         assert_eq!(TimeControl::Blitz.category(), TimeCategory::Blitz);
         assert_eq!(TimeControl::Classical.category(), TimeCategory::Classical);
         assert_eq!(TimeControl::Unlimited.category(), TimeCategory::Unlimited);
     }
 }
-

@@ -64,7 +64,10 @@ pub struct SessionStatus {
 pub fn create_session(game_id: u64, wallet_pubkey: &str) -> Result<(String, u64), String> {
     let resp = client()?
         .post(format!("{}/session/create", vps_base()))
-        .json(&CreateSessionReq { game_id, wallet_pubkey })
+        .json(&CreateSessionReq {
+            game_id,
+            wallet_pubkey,
+        })
         .send()
         .map_err(|e| format!("vps create_session: {e}"))?
         .json::<CreateSessionResp>()
@@ -79,7 +82,10 @@ pub fn activate_session(game_id: u64, signed_tx_bytes: &[u8]) -> Result<String, 
     let b64 = base64::engine::general_purpose::STANDARD.encode(signed_tx_bytes);
     let response = client()?
         .post(format!("{}/session/activate", vps_base()))
-        .json(&ActivateSessionReq { game_id, signed_tx_b64: &b64 })
+        .json(&ActivateSessionReq {
+            game_id,
+            signed_tx_b64: &b64,
+        })
         .send()
         .map_err(|e| format!("vps activate_session: {e}"))?;
     if !response.status().is_success() {
@@ -100,7 +106,10 @@ pub fn sign_and_submit(game_id: u64, tx_bytes: &[u8]) -> Result<String, String> 
     let b64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
     let resp = client()?
         .post(format!("{}/session/sign", vps_base()))
-        .json(&SignReq { game_id, tx_b64: &b64 })
+        .json(&SignReq {
+            game_id,
+            tx_b64: &b64,
+        })
         .send()
         .map_err(|e| format!("vps sign_and_submit: {e}"))?
         .json::<SigResp>()
@@ -115,10 +124,15 @@ pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {
         .send()
         .map_err(|e| format!("vps session_status: {e}"))?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Err(format!("vps session_status: session not found for game {game_id}"));
+        return Err(format!(
+            "vps session_status: session not found for game {game_id}"
+        ));
     }
     if !resp.status().is_success() {
-        return Err(format!("vps session_status: server error {}", resp.status()));
+        return Err(format!(
+            "vps session_status: server error {}",
+            resp.status()
+        ));
     }
     resp.json::<SessionStatus>()
         .map_err(|e| format!("vps session_status parse: {e}"))
@@ -158,7 +172,10 @@ pub fn tee_authenticate(game_id: u64, wallet_pubkey: &str) -> Result<String, Str
         .json::<SigResp>()
         .map_err(|e| format!("vps tee_auth parse: {e}"))?;
 
-    info!("[TEE-AUTH] SUCCESS for game {} (TEE: {})", game_id, TEE_DEVNET_ADDR);
+    info!(
+        "[TEE-AUTH] SUCCESS for game {} (TEE: {})",
+        game_id, TEE_DEVNET_ADDR
+    );
     Ok(resp.sig)
 }
 
@@ -168,7 +185,11 @@ pub fn tee_authenticate(game_id: u64, wallet_pubkey: &str) -> Result<String, Str
 /// Returns `Ok(Some(session_pubkey))` if active, `Ok(None)` if not, `Err` on network failure.
 pub fn verify_global_session(wallet_pubkey: &str) -> Result<Option<String>, String> {
     let resp = client()?
-        .get(format!("{}/global-session/{}/verify", vps_base(), wallet_pubkey))
+        .get(format!(
+            "{}/global-session/{}/verify",
+            vps_base(),
+            wallet_pubkey
+        ))
         .send()
         .map_err(|e| format!("verify_global_session: {e}"))?;
     if !resp.status().is_success() {
@@ -177,7 +198,10 @@ pub fn verify_global_session(wallet_pubkey: &str) -> Result<Option<String>, Stri
     let data = resp
         .json::<serde_json::Value>()
         .map_err(|e| format!("verify_global_session parse: {e}"))?;
-    let active = data.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
+    let active = data
+        .get("active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if active {
         let session_pubkey = data
             .get("session_pubkey")

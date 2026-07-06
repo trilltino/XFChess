@@ -100,9 +100,9 @@ async fn register_identity(
     Json(payload): Json<IdentityPayload>,
 ) -> Result<Json<()>, (StatusCode, String)> {
     // 1. Verify Authentication
-    let pk = Pubkey::from_str(&payload.pubkey)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-        
+    let pk =
+        Pubkey::from_str(&payload.pubkey).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
     let sig = Signature::from_str(&payload.signature)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -122,26 +122,32 @@ async fn register_identity(
 
     // 2. Encryption
     let blind_index = state.identity_vault.generate_blind_index(&payload.tax_id);
-    
+
     let privacy_json = serde_json::json!({
         "full_name": payload.full_name,
         "dob": payload.dob,
         "address": payload.address,
         "country": payload.country,
-        "tax_id": payload.tax_id, 
-    }).to_string();
-    
-    let encrypted_blob = state.identity_vault.encrypt(&privacy_json)
+        "tax_id": payload.tax_id,
+    })
+    .to_string();
+
+    let encrypted_blob = state
+        .identity_vault
+        .encrypt(&privacy_json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     let registered_at = now as i64;
 
     // 3. Vault Storage
     let pool = &state.vault_pool;
-    
+
     // Reject if GDPR consent was not given
     if !payload.consent_kyc {
-        return Err((StatusCode::BAD_REQUEST, "GDPR consent is required to store identity data".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "GDPR consent is required to store identity data".to_string(),
+        ));
     }
 
     let result = sqlx::query(
@@ -158,54 +164,81 @@ async fn register_identity(
 
     if let Err(e) = result {
         if e.to_string().contains("UNIQUE") {
-            return Err((StatusCode::CONFLICT, "Tax ID or Wallet already registered".to_string()));
+            return Err((
+                StatusCode::CONFLICT,
+                "Tax ID or Wallet already registered".to_string(),
+            ));
         }
         return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
-    
+
     // 4. On-Chain Sync: VPS signs the instruction to flag the user as verified
     let admin_keypair = &state.kyc_authority;
-    let program_id = Pubkey::from_str(&state.config.program_id)
-        .unwrap_or_else(|_| "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".parse().expect("Default program ID should be valid"));
+    let program_id = Pubkey::from_str(&state.config.program_id).unwrap_or_else(|_| {
+        "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+            .parse()
+            .expect("Default program ID should be valid")
+    });
 
     let ix = crate::signing::solana::verify_profile_ix(&program_id, &admin_keypair.pubkey(), &pk);
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
 
     match crate::signing::solana::sign_and_submit(&rpc, admin_keypair, &[ix]) {
         Ok(sig) => tracing::info!("[Identity] On-chain verification tx confirmed: {}", sig),
-        Err(e) => tracing::error!("[Identity] Failed to submit verification tx on-chain: {}", e),
+        Err(e) => tracing::error!(
+            "[Identity] Failed to submit verification tx on-chain: {}",
+            e
+        ),
     }
 
     // 5. Write-through to kyc_records (unified vault table) so user_status and
     //    can_wager checks see the record regardless of which path was used.
     let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
-    if let Err(e) = vault.insert_kyc(crate::signing::storage::vault::KycInput {
-        wallet_pubkey: &payload.pubkey,
-        country: &payload.country,
-        full_name: &payload.full_name,
-        dob: &payload.dob,
-        residence: &payload.address,
-        tax_id_raw: &payload.tax_id,
-        data_source: "identity_verified",
-    }).await {
-        warn!("[Identity] kyc_records write-through failed for {}: {}", payload.pubkey, e);
+    if let Err(e) = vault
+        .insert_kyc(crate::signing::storage::vault::KycInput {
+            wallet_pubkey: &payload.pubkey,
+            country: &payload.country,
+            full_name: &payload.full_name,
+            dob: &payload.dob,
+            residence: &payload.address,
+            tax_id_raw: &payload.tax_id,
+            data_source: "identity_verified",
+        })
+        .await
+    {
+        warn!(
+            "[Identity] kyc_records write-through failed for {}: {}",
+            payload.pubkey, e
+        );
     }
 
     // 6. Mark kyc_status = 'approved' in users_v2 (on-chain verification succeeded).
-    let _ = state.store.set_kyc_status(&payload.pubkey, "approved").await;
+    let _ = state
+        .store
+        .set_kyc_status(&payload.pubkey, "approved")
+        .await;
 
     // 7. Persist CACF compliance: identity verification → fully_compliant for their country.
-    if let Err(e) = vault.save_cacf(
-        &payload.pubkey,
-        &payload.country,
-        "fully_compliant",
-        true,
-        None,
-    ).await {
-        warn!("[Identity] CACF persist failed for {}: {}", payload.pubkey, e);
+    if let Err(e) = vault
+        .save_cacf(
+            &payload.pubkey,
+            &payload.country,
+            "fully_compliant",
+            true,
+            None,
+        )
+        .await
+    {
+        warn!(
+            "[Identity] CACF persist failed for {}: {}",
+            payload.pubkey, e
+        );
     }
 
-    info!("[Identity] Successfully registered and vaulted user {} securely", payload.pubkey);
+    info!(
+        "[Identity] Successfully registered and vaulted user {} securely",
+        payload.pubkey
+    );
 
     // 8. Log audit event for GDPR compliance
     log_audit_event(&payload.pubkey, "KYC_REGISTERED", &state.vault_pool).await;
@@ -219,19 +252,17 @@ async fn check_kyc_status(
     State(state): State<AppState>,
 ) -> Result<Json<KycStatus>, StatusCode> {
     let pool = &state.vault_pool;
-    
+
     // Check if user exists and get basic info (without decrypting PII)
-    let row = sqlx::query(
-        "SELECT registered_at, blind_index_hash FROM users WHERE pubkey = ?"
-    )
-    .bind(&pubkey)
-    .fetch_optional(&**pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row = sqlx::query("SELECT registered_at, blind_index_hash FROM users WHERE pubkey = ?")
+        .bind(&pubkey)
+        .fetch_optional(&**pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let verified = row.is_some();
     let verified_at = row.as_ref().map(|r| r.get::<i64, _>("registered_at"));
-    
+
     // Log access for GDPR audit trail
     log_audit_event(&pubkey, "KYC_STATUS_CHECKED", pool).await;
 
@@ -249,9 +280,8 @@ async fn delete_identity_data(
     Json(req): Json<DeleteDataRequest>,
 ) -> Result<Json<()>, (StatusCode, String)> {
     // 1. Verify Authentication
-    let pk = Pubkey::from_str(&req.pubkey)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-        
+    let pk = Pubkey::from_str(&req.pubkey).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
     let sig = Signature::from_str(&req.signature)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -273,7 +303,10 @@ async fn delete_identity_data(
 
     // 3. Log deletion request before deleting (for audit)
     let reason = req.reason.as_deref().unwrap_or("User request");
-    warn!("[GDPR] Identity deletion requested for {}. Reason: {}", req.pubkey, reason);
+    warn!(
+        "[GDPR] Identity deletion requested for {}. Reason: {}",
+        req.pubkey, reason
+    );
     log_audit_event(&req.pubkey, "KYC_DELETION_REQUESTED", pool).await;
 
     // 4. Delete user data
@@ -285,14 +318,20 @@ async fn delete_identity_data(
     match result {
         Ok(res) => {
             if res.rows_affected() == 0 {
-                return Err((StatusCode::NOT_FOUND, "No data found for this wallet".to_string()));
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    "No data found for this wallet".to_string(),
+                ));
             }
             info!("[GDPR] Identity data deleted for {}", req.pubkey);
             log_audit_event(&req.pubkey, "KYC_DATA_DELETED", pool).await;
             Ok(Json(()))
         }
         Err(e) => {
-            error!("[GDPR] Failed to delete identity data for {}: {}", req.pubkey, e);
+            error!(
+                "[GDPR] Failed to delete identity data for {}: {}",
+                req.pubkey, e
+            );
             Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
         }
     }
@@ -301,15 +340,13 @@ async fn delete_identity_data(
 /// Logs audit events for GDPR compliance.
 async fn log_audit_event(pubkey: &str, action: &str, pool: &Arc<sqlx::SqlitePool>) {
     let timestamp = Utc::now().timestamp();
-    let result = sqlx::query(
-        "INSERT INTO audit_log (pubkey, action, timestamp) VALUES (?, ?, ?)"
-    )
-    .bind(pubkey)
-    .bind(action)
-    .bind(timestamp)
-    .execute(pool.as_ref())
-    .await;
-    
+    let result = sqlx::query("INSERT INTO audit_log (pubkey, action, timestamp) VALUES (?, ?, ?)")
+        .bind(pubkey)
+        .bind(action)
+        .bind(timestamp)
+        .execute(pool.as_ref())
+        .await;
+
     if let Err(e) = result {
         tracing::warn!("[Audit] Failed to log audit event: {}", e);
     }

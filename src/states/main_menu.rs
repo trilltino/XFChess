@@ -32,25 +32,27 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use std::sync::Arc;
 
-#[path = "main_menu/screens.rs"]
-mod screens;
-#[path = "main_menu/modals.rs"]
-mod modals;
-#[path = "main_menu/new_menu.rs"]
-pub mod new_menu;
 #[path = "main_menu/board_animation.rs"]
 mod board_animation;
 #[path = "main_menu/cinematic.rs"]
 mod cinematic;
+#[path = "main_menu/modals.rs"]
+mod modals;
+#[path = "main_menu/music.rs"]
+mod music;
+#[path = "main_menu/new_menu.rs"]
+pub mod new_menu;
+#[path = "main_menu/screens.rs"]
+mod screens;
 
-use screens::*;
 use modals::{render_ai_setup_modal, render_controls_popup, render_pgn_input_modal};
+pub use new_menu::NewMenuPanel;
 use new_menu::{
     menu_escape_system, orbit_camera_system, purge_stale_lights, render_intro_overlay,
     render_new_style_panel, render_solana_splash, render_wallet_hud, setup_menu_fog,
     spawn_menu_bg_board, spawn_menu_bg_lights, spawn_menu_bg_pieces,
 };
-pub use new_menu::NewMenuPanel;
+use screens::*;
 
 /// Visual style marker — only the 3D board style exists now.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -70,44 +72,117 @@ pub struct MenuIntro {
 
 impl Default for MenuIntro {
     fn default() -> Self {
-        Self { awaiting_enter: true }
+        Self {
+            awaiting_enter: true,
+        }
     }
 }
 
-/// Run condition: true once the player has pressed Enter (menu "started").
-/// Gates the cinematic systems so they stay dormant during the attract loop.
-fn menu_started(intro: Res<MenuIntro>) -> bool {
-    !intro.awaiting_enter
+/// Drives the post-Enter transition: a full-screen black overlay that fades from
+/// opaque to clear over `MENU_INTRO_FADE_SECS`, so the splash dissolves smoothly
+/// into the live main menu instead of cutting instantly. `remaining` counts down
+/// each frame; the overlay is inactive at 0.
+#[derive(Resource, Default)]
+pub struct MenuIntroFade {
+    pub remaining: f32,
 }
 
-/// Attract-loop input: while awaiting, Enter leaves the intro and cuts straight
-/// into the Immortal Game cinematic (moment index 0).
+/// Duration of the splash → main-menu fade-in, in seconds.
+const MENU_INTRO_FADE_SECS: f32 = 3.0;
+
+/// Run condition: true during the pre-Enter attract loop. Gates the cinematic
+/// showcase so it plays on the attract screen, then goes dormant once the player
+/// presses Enter and the live menu (ambient board + orbit) takes over.
+fn menu_awaiting(intro: Res<MenuIntro>) -> bool {
+    intro.awaiting_enter
+}
+
+/// Attract-loop input: while awaiting, Enter stops the cinematic showcase, tears
+/// down its pieces, and hands the menu back to the ambient `MenuBg` board + orbit
+/// camera. The `xf_animate` mini board keeps running for the whole `MainMenu`
+/// state, so nothing there needs re-arming.
+#[allow(clippy::too_many_arguments)]
 fn menu_intro_enter_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut intro: ResMut<MenuIntro>,
+    mut fade: ResMut<MenuIntroFade>,
     mut cine: ResMut<cinematic::MenuCinematic>,
+    mut cine_board: ResMut<cinematic::CinematicBoard>,
+    mut anim: ResMut<board_animation::BoardAnimator>,
+    mut orbit: ResMut<new_menu::MenuCameraOrbit>,
+    mut commands: Commands,
+    cam: Res<crate::PersistentEguiCamera>,
+    cine_pieces_q: Query<Entity, With<cinematic::CinematicPiece>>,
+    mut ambient_q: Query<
+        (
+            Entity,
+            &board_animation::MenuBgPieceHome,
+            &mut Transform,
+            &mut Visibility,
+        ),
+        Without<cinematic::CinematicPiece>,
+    >,
+    mut projections: Query<&mut Projection, With<Camera3d>>,
 ) {
     if !intro.awaiting_enter {
         return;
     }
-    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
-        intro.awaiting_enter = false;
-        cine.enabled = true;
-        cine.moment_index = 0;
-        cine.phase = cinematic::CinematicPhase::FadeOut;
-        cine.timer = 0.3;
+    if !(keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter)) {
+        return;
+    }
+    intro.awaiting_enter = false;
+    // Begin the 3-second fade-in; the instant teardown below happens behind black.
+    fade.remaining = MENU_INTRO_FADE_SECS;
+
+    // 1) Tear down the cinematic showcase: despawn its pieces and go dormant so
+    //    `cinematic_fade_overlay`/`cinematic_camera_system` become no-ops.
+    for e in cine_pieces_q.iter() {
+        commands.entity(e).despawn();
+    }
+    cine_board.board = [[None; 8]; 8];
+    let last_cam_pos = cine.last_cam_pos;
+    *cine = cinematic::MenuCinematic::default();
+    cine.enabled = false; // do not re-arm the showcase once the live menu is up
+
+    // 2) Restore the ambient MenuBg board to its starting position, visible, and
+    //    rebuild the animator's entity map (mirrors the cinematic's own teardown).
+    anim.board = [[None; 8]; 8];
+    for (entity, home, mut transform, mut vis) in ambient_q.iter_mut() {
+        commands
+            .entity(entity)
+            .remove::<board_animation::MenuBgPieceAnim>();
+        transform.translation = Vec3::new(7.0 - home.file as f32, 0.05, home.rank as f32);
+        *vis = Visibility::Visible;
+        anim.board[home.rank as usize][home.file as usize] = Some(entity);
+    }
+    anim.ply_index = 0;
+    anim.move_timer = 3.0;
+    anim.end_pause = 0.0;
+    anim.active = true;
+
+    // 3) Hand the camera back to the orbit, continuing from the cinematic bearing
+    //    for a seamless cut, and restore the perspective projection.
+    orbit.ortho = false;
+    orbit.angle = (last_cam_pos.z - new_menu::BOARD_CENTER.z)
+        .atan2(last_cam_pos.x - new_menu::BOARD_CENTER.x);
+    if let Some(entity) = cam.entity {
+        if let Ok(mut proj) = projections.get_mut(entity) {
+            *proj = Projection::default();
+        }
     }
 }
 
-/// Reversed reveal: the board (and its pieces/lights, all tagged `MenuBg`) is
-/// hidden during the attract loop and rises into view only once Enter is
-/// pressed. Force-hides every frame while awaiting (to catch late-spawned
-/// pieces), then reveals once on the transition and hands control back to the
-/// cinematic / orbit systems.
+/// Reversed reveal of the ambient board *pieces* only. During the attract loop
+/// the Immortal Game cinematic plays on the menu board, so the board surface and
+/// the `MenuBg` lights must stay visible (otherwise the showcase renders in the
+/// dark — see `render_intro_overlay`'s "logo over the orbiting board"). We
+/// therefore hide just the ambient starting pieces (`MenuBgPieceHome`) — the
+/// cinematic spawns its own — and reveal them once Enter hands the menu back to
+/// the ambient board. Lights, board surface, and cinematic pieces are untouched.
 fn apply_intro_board_visibility(
     intro: Res<MenuIntro>,
     mut was_awaiting: Local<bool>,
-    mut q: Query<&mut Visibility, With<new_menu::MenuBg>>,
+    mut q: Query<&mut Visibility, With<board_animation::MenuBgPieceHome>>,
 ) {
     if intro.awaiting_enter {
         for mut v in &mut q {
@@ -120,6 +195,37 @@ fn apply_intro_board_visibility(
         }
         *was_awaiting = false;
     }
+}
+
+/// Full-screen black overlay that fades out over `MENU_INTRO_FADE_SECS` after the
+/// player presses Enter, dissolving the splash into the live main menu. Drawn on
+/// top of everything (including the menu UI) and self-disables when done.
+fn menu_intro_fade_overlay(
+    time: Res<Time>,
+    mut fade: ResMut<MenuIntroFade>,
+    mut contexts: EguiContexts,
+) {
+    if fade.remaining <= 0.0 {
+        return;
+    }
+    fade.remaining = (fade.remaining - time.delta_secs()).max(0.0);
+    let alpha = (fade.remaining / MENU_INTRO_FADE_SECS).clamp(0.0, 1.0);
+    let a = (alpha * 255.0) as u8;
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    egui::Area::new("menu_intro_fade".into())
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .fixed_pos(egui::pos2(0.0, 0.0))
+        .show(ctx, |ui| {
+            let r = ctx.screen_rect();
+            ui.painter().rect_filled(
+                r,
+                egui::CornerRadius::same(0),
+                egui::Color32::from_black_alpha(a),
+            );
+        });
 }
 
 /// Plugin for main menu state.
@@ -136,17 +242,34 @@ impl Plugin for MainMenuPlugin {
             .init_resource::<cinematic::MenuCinematic>()
             .init_resource::<cinematic::CinematicBoard>()
             .init_resource::<MenuIntro>()
+            .init_resource::<MenuIntroFade>()
+            .init_resource::<music::MenuMusic>()
             .init_resource::<WalletBridgePoller>()
             .init_resource::<FontsLoaded>()
             .add_systems(
                 OnEnter(GameState::MainMenu),
                 (
                     // Reset panel to Main every time we enter the menu (e.g. returning from a game)
-                    |mut panel: ResMut<new_menu::NewMenuPanel>, mut exit_confirm: ResMut<new_menu::MenuExitConfirm>, mut intro: ResMut<MenuIntro>| {
+                    |mut panel: ResMut<new_menu::NewMenuPanel>,
+                     mut exit_confirm: ResMut<new_menu::MenuExitConfirm>,
+                     intro: Res<MenuIntro>,
+                     mut cine: ResMut<cinematic::MenuCinematic>| {
                         *panel = new_menu::NewMenuPanel::default();
                         exit_confirm.visible = false;
-                        // Every entry to the menu re-arms the attract loop.
-                        intro.awaiting_enter = true;
+                        // Separation of concerns: the splash/attract cinematic is a
+                        // one-time startup screen. `awaiting_enter` is true only until
+                        // the first Enter; we never re-arm it, so returning from a game
+                        // lands straight on the live main menu. Kick the cinematic only
+                        // while still on the splash.
+                        if intro.awaiting_enter {
+                            cine.enabled = true;
+                            // usize::MAX so the first `Cut` wraps to moment 0 (the moment
+                            // index advances during the black Cut — see cinematic.rs).
+                            cine.moment_index = usize::MAX;
+                            cine.fade_alpha = 0.0;
+                            cine.phase = cinematic::CinematicPhase::FadeOut;
+                            cine.timer = 0.3;
+                        }
                     },
                     purge_stale_lights,
                     setup_menu_camera,
@@ -154,7 +277,8 @@ impl Plugin for MainMenuPlugin {
                     spawn_menu_bg_board,
                     spawn_menu_bg_lights,
                     setup_menu_fog,
-                ).chain(),
+                )
+                    .chain(),
             )
             .add_systems(
                 OnExit(GameState::MainMenu),
@@ -181,7 +305,11 @@ impl Plugin for MainMenuPlugin {
                     }
                 },
             )
-            .add_systems(OnExit(GameState::MainMenu), cinematic::reset_cinematic_on_exit)
+            .add_systems(
+                OnExit(GameState::MainMenu),
+                cinematic::reset_cinematic_on_exit,
+            )
+            .add_systems(OnEnter(GameState::MainMenu), music::start_menu_music)
             .init_resource::<BrandLogoState>()
             .init_resource::<SolanaLogoState>()
             .init_resource::<PlayerColorChoice>()
@@ -196,7 +324,11 @@ impl Plugin for MainMenuPlugin {
             .add_systems(
                 EguiPrimaryContextPass,
                 (
-                    main_menu_ui_wrapper.run_if(in_state(GameState::MainMenu)),
+                    // Draw the menu UI (incl. the attract-screen title + prompt) AFTER
+                    // the cinematic fade so the title stays on top of any black fade.
+                    main_menu_ui_wrapper
+                        .after(cinematic::cinematic_fade_overlay)
+                        .run_if(in_state(GameState::MainMenu)),
                     render_lobby_selection_popup
                         .run_if(in_state(crate::core::MenuState::LobbySelection))
                         .run_if(in_state(GameState::MainMenu)),
@@ -208,7 +340,12 @@ impl Plugin for MainMenuPlugin {
                         .after(main_menu_ui_wrapper)
                         .run_if(in_state(GameState::MainMenu)),
                     // Cinematic showcase: black fade overlay drawn over the board.
-                    cinematic::cinematic_fade_overlay
+                    cinematic::cinematic_fade_overlay.run_if(in_state(GameState::MainMenu)),
+                    // Discrete now-playing widget (track title / skip / mute).
+                    music::menu_music_widget.run_if(in_state(GameState::MainMenu)),
+                    // Post-Enter splash → menu fade, drawn on top of the menu UI.
+                    menu_intro_fade_overlay
+                        .after(main_menu_ui_wrapper)
                         .run_if(in_state(GameState::MainMenu)),
                 ),
             )
@@ -223,10 +360,13 @@ impl Plugin for MainMenuPlugin {
                     orbit_camera_system,
                     spawn_menu_bg_pieces,
                     try_setup_fonts,
-                    // The ambient Immortal-Zugzwang auto-play is disabled — the menu
-                    // board stays at the static starting position. `animate_menu_pieces`
-                    // stays: the cinematic showcase still uses it to slide its pieces.
+                    // `animate_menu_pieces` runs the slide tween for both the cinematic
+                    // showcase pieces and the ambient board pieces.
                     board_animation::animate_menu_pieces,
+                    // Ambient Immortal-Zugzwang replay on the full-size MenuBg board,
+                    // active only after Enter (the cinematic owns the attract screen).
+                    board_animation::animate_ambient_board
+                        .run_if(|intro: Res<MenuIntro>| !intro.awaiting_enter),
                     menu_escape_system,
                     // Attract loop: wait for Enter, then hand off to the cinematic.
                     menu_intro_enter_system,
@@ -234,12 +374,15 @@ impl Plugin for MainMenuPlugin {
                     apply_intro_board_visibility,
                     // Cinematic showcase: advance the timeline, then drive the camera
                     // (after the orbit system, which yields while a cinematic is active).
-                    // Both gated off during the pre-Enter attract loop.
-                    cinematic::cinematic_director.run_if(menu_started),
+                    // Both run ONLY during the pre-Enter attract loop; Enter tears the
+                    // showcase down and hands the camera to the orbit.
+                    cinematic::cinematic_director.run_if(menu_awaiting),
                     cinematic::cinematic_camera_system
                         .after(orbit_camera_system)
                         .after(cinematic::cinematic_director)
-                        .run_if(menu_started),
+                        .run_if(menu_awaiting),
+                    // Menu playlist: fades between tracks, advances on end / skip.
+                    music::drive_menu_music,
                 )
                     .run_if(in_state(GameState::MainMenu)),
             )
@@ -267,7 +410,9 @@ pub fn wallet_connect_overlay_system(
     if !poller.show_connect_overlay {
         return;
     }
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
     let ctx = ctx.clone();
 
     let screen_rect = ctx.screen_rect();
@@ -288,8 +433,16 @@ pub fn wallet_connect_overlay_system(
         fill: egui::Color32::from_rgba_unmultiplied(18, 18, 24, 255),
         inner_margin: egui::Margin::same(32),
         corner_radius: egui::CornerRadius::same(12),
-        stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(100, 140, 255, 80)),
-        shadow: egui::Shadow { blur: 40, spread: 8, color: egui::Color32::from_black_alpha(200), offset: [0, 6] },
+        stroke: egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(100, 140, 255, 80),
+        ),
+        shadow: egui::Shadow {
+            blur: 40,
+            spread: 8,
+            color: egui::Color32::from_black_alpha(200),
+            offset: [0, 6],
+        },
         ..egui::Frame::NONE
     };
 
@@ -322,17 +475,23 @@ pub fn wallet_connect_overlay_system(
                         .family(egui::FontFamily::Proportional),
                 );
                 ui.add_space(20.0);
-                if ui.add_sized(
-                    [120.0, 34.0],
-                    egui::Button::new(
-                        egui::RichText::new("Cancel")
-                            .size(11.0)
-                            .color(egui::Color32::from_rgb(180, 180, 200)),
+                if ui
+                    .add_sized(
+                        [120.0, 34.0],
+                        egui::Button::new(
+                            egui::RichText::new("Cancel")
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(180, 180, 200)),
+                        )
+                        .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
+                        .corner_radius(6.0)
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                        )),
                     )
-                    .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
-                    .corner_radius(6.0)
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30))),
-                ).clicked() {
+                    .clicked()
+                {
                     cancelled = true;
                 }
             });
@@ -367,7 +526,10 @@ pub struct PlayerColorChoice {
 
 impl Default for PlayerColorChoice {
     fn default() -> Self {
-        Self { play_as_white: true, selected: true }
+        Self {
+            play_as_white: true,
+            selected: true,
+        }
     }
 }
 
@@ -567,20 +729,27 @@ fn poll_wallet_bridge(
                 }
                 player_identity.can_wager = me.can_wager;
                 player_identity.has_onchain_profile = me.has_onchain_profile;
-                info!("[WalletBridge] /auth/me: {} ELO {} can_wager={} onchain={}",
+                info!(
+                    "[WalletBridge] /auth/me: {} ELO {} can_wager={} onchain={}",
                     player_identity.username.as_deref().unwrap_or("?"),
                     player_identity.elo.unwrap_or(0),
                     player_identity.can_wager,
-                    player_identity.has_onchain_profile);
+                    player_identity.has_onchain_profile
+                );
             }
             Ok(Err(e)) => {
                 // JWT unavailable — fall back to raw VPS profile endpoint
-                info!("[WalletBridge] /auth/me unavailable ({}), falling back to VPS", e);
+                info!(
+                    "[WalletBridge] /auth/me unavailable ({}), falling back to VPS",
+                    e
+                );
                 poller.me_rx = None;
                 poller.profile_retry_timer = 0.0;
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
-            Err(_) => { poller.me_rx = None; }
+            Err(_) => {
+                poller.me_rx = None;
+            }
         }
     }
 
@@ -597,7 +766,10 @@ fn poll_wallet_bridge(
                 if !profile.country.is_empty() {
                     player_identity.country = Some(profile.country);
                 }
-                info!("[WalletBridge] VPS profile fallback: {} ELO {}", profile.username, profile.elo);
+                info!(
+                    "[WalletBridge] VPS profile fallback: {} ELO {}",
+                    profile.username, profile.elo
+                );
                 player_identity.pending_profile_rx = None;
             }
             Ok(Err(e)) => {
@@ -606,7 +778,9 @@ fn poll_wallet_bridge(
                 poller.profile_retry_timer = 0.0;
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
-            Err(_) => { player_identity.pending_profile_rx = None; }
+            Err(_) => {
+                player_identity.pending_profile_rx = None;
+            }
         }
     }
 
@@ -618,7 +792,9 @@ fn poll_wallet_bridge(
                 poller.show_connect_overlay = false;
                 // Always update username from bridge if we have one
                 if let Some(ref uname) = username_opt {
-                    if !uname.is_empty() && player_identity.username.as_deref() != Some(uname.as_str()) {
+                    if !uname.is_empty()
+                        && player_identity.username.as_deref() != Some(uname.as_str())
+                    {
                         info!("[WalletBridge] Username from bridge: {}", uname);
                         player_identity.username = Some(uname.clone());
                     }
@@ -644,10 +820,12 @@ fn poll_wallet_bridge(
                 if poller.me_rx.is_none() && player_identity.jwt_token.is_none() {
                     let (tx, rx) = crossbeam_channel::bounded(1);
                     poller.me_rx = Some(rx);
-                    bevy::tasks::IoTaskPool::get().spawn(async move {
-                        let res = fetch_bridge_me();
-                        let _ = tx.send(res);
-                    }).detach();
+                    bevy::tasks::IoTaskPool::get()
+                        .spawn(async move {
+                            let res = fetch_bridge_me();
+                            let _ = tx.send(res);
+                        })
+                        .detach();
                 }
 
                 // Fallback: kick off raw VPS profile fetch if JWT path is unavailable
@@ -661,10 +839,15 @@ fn poll_wallet_bridge(
                     let (tx, rx) = crossbeam_channel::bounded(1);
                     player_identity.pending_profile_rx = Some(rx);
                     let pk2 = pk.clone();
-                    bevy::tasks::IoTaskPool::get().spawn(async move {
-                        let res = crate::multiplayer::network::vps::identity::fetch_player_profile(&pk2);
-                        let _ = tx.send(res);
-                    }).detach();
+                    bevy::tasks::IoTaskPool::get()
+                        .spawn(async move {
+                            let res =
+                                crate::multiplayer::network::vps::identity::fetch_player_profile(
+                                    &pk2,
+                                );
+                            let _ = tx.send(res);
+                        })
+                        .detach();
                 }
 
                 // Trigger balance fetch on new pubkey or when Refresh was clicked (balance_rx is None)
@@ -672,15 +855,21 @@ fn poll_wallet_bridge(
                     let (btx, brx) = crossbeam_channel::bounded(1);
                     poller.balance_rx = Some(brx);
                     let data_arc = poller.data.clone();
-                    bevy::tasks::IoTaskPool::get().spawn(async move {
-                        let (sol, usd_per_sol, gbp_per_sol) = fetch_sol_rates(&pk);
-                        let _ = btx.send((sol, usd_per_sol, gbp_per_sol));
-                        let mut d = data_arc.lock().unwrap();
-                        d.sol_balance = sol;
-                        d.usd_balance = if usd_per_sol > 0.0 { Some(sol * usd_per_sol) } else { None };
-                        d.sol_usd_rate = usd_per_sol;
-                        d.sol_gbp_rate = gbp_per_sol;
-                    }).detach();
+                    bevy::tasks::IoTaskPool::get()
+                        .spawn(async move {
+                            let (sol, usd_per_sol, gbp_per_sol) = fetch_sol_rates(&pk);
+                            let _ = btx.send((sol, usd_per_sol, gbp_per_sol));
+                            let mut d = data_arc.lock().unwrap();
+                            d.sol_balance = sol;
+                            d.usd_balance = if usd_per_sol > 0.0 {
+                                Some(sol * usd_per_sol)
+                            } else {
+                                None
+                            };
+                            d.sol_usd_rate = usd_per_sol;
+                            d.sol_gbp_rate = gbp_per_sol;
+                        })
+                        .detach();
                 }
             }
         }
@@ -692,7 +881,11 @@ fn poll_wallet_bridge(
             poller.balance_rx = None;
             let mut d = poller.data.lock().unwrap();
             d.sol_balance = sol;
-            d.usd_balance = if usd_per_sol > 0.0 { Some(sol * usd_per_sol) } else { None };
+            d.usd_balance = if usd_per_sol > 0.0 {
+                Some(sol * usd_per_sol)
+            } else {
+                None
+            };
             d.sol_usd_rate = usd_per_sol;
             d.sol_gbp_rate = gbp_per_sol;
         }
@@ -704,10 +897,12 @@ fn poll_wallet_bridge(
         poller.timer = 0.0;
         let (tx, rx) = crossbeam_channel::bounded(1);
         poller.status_rx = Some(rx);
-        bevy::tasks::IoTaskPool::get().spawn(async move {
-            let result = fetch_bridge_status();
-            let _ = tx.send(result);
-        }).detach();
+        bevy::tasks::IoTaskPool::get()
+            .spawn(async move {
+                let result = fetch_bridge_status();
+                let _ = tx.send(result);
+            })
+            .detach();
     }
 
     // --- retry /auth/me every 10s while connected but profile incomplete ---
@@ -724,17 +919,22 @@ fn poll_wallet_bridge(
             if player_identity.jwt_token.is_none() {
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 poller.me_rx = Some(rx);
-                bevy::tasks::IoTaskPool::get().spawn(async move {
-                    let _ = tx.send(fetch_bridge_me());
-                }).detach();
+                bevy::tasks::IoTaskPool::get()
+                    .spawn(async move {
+                        let _ = tx.send(fetch_bridge_me());
+                    })
+                    .detach();
             } else {
                 let pk = poller.known_pubkey.clone().unwrap();
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 player_identity.pending_profile_rx = Some(rx);
-                bevy::tasks::IoTaskPool::get().spawn(async move {
-                    let res = crate::multiplayer::network::vps::identity::fetch_player_profile(&pk);
-                    let _ = tx.send(res);
-                }).detach();
+                bevy::tasks::IoTaskPool::get()
+                    .spawn(async move {
+                        let res =
+                            crate::multiplayer::network::vps::identity::fetch_player_profile(&pk);
+                        let _ = tx.send(res);
+                    })
+                    .detach();
             }
         }
     } else {
@@ -747,11 +947,15 @@ fn poll_wallet_bridge(
 #[cfg(feature = "solana")]
 fn sync_bridge_pubkey_to_solana(
     poller: Res<WalletBridgePoller>,
-    mut solana_state: Option<ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>>,
+    mut solana_state: Option<
+        ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
 ) {
     use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
 
-    let Some(ref mut state) = solana_state else { return };
+    let Some(ref mut state) = solana_state else {
+        return;
+    };
 
     // Always keep balance in sync from the bridge poller (it has fresher data).
     let bridge_data = poller.data.lock().ok();
@@ -766,11 +970,18 @@ fn sync_bridge_pubkey_to_solana(
     drop(bridge_data);
 
     // Only set pubkey once — avoid overwriting if already set by other path.
-    if state.wallet_pubkey.is_some() { return; }
-    let Some(ref pubkey_str) = poller.known_pubkey else { return };
+    if state.wallet_pubkey.is_some() {
+        return;
+    }
+    let Some(ref pubkey_str) = poller.known_pubkey else {
+        return;
+    };
 
     if let Ok(pubkey) = pubkey_str.parse::<solana_sdk::pubkey::Pubkey>() {
-        info!("[WalletBridge] Syncing pubkey {} → SolanaIntegrationState", pubkey);
+        info!(
+            "[WalletBridge] Syncing pubkey {} → SolanaIntegrationState",
+            pubkey
+        );
         state.wallet_pubkey = Some(pubkey);
         if state.rpc_client.is_none() {
             state.rpc_client = Some(solana_client::rpc_client::RpcClient::new(
@@ -789,8 +1000,10 @@ fn fetch_bridge_status() -> (Option<String>, Option<String>) {
         Ok(c) => c,
         Err(_) => return (None, None),
     };
-    let port = std::env::var("XFCHESS_WALLET_PORT").ok()
-        .and_then(|v| v.parse::<u16>().ok()).unwrap_or(7454);
+    let port = std::env::var("XFCHESS_WALLET_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(7454);
     let resp = match client.get(format!("http://127.0.0.1:{port}/status")).send() {
         Ok(r) => r,
         Err(_) => return (None, None),
@@ -800,7 +1013,8 @@ fn fetch_bridge_status() -> (Option<String>, Option<String>) {
         Err(_) => return (None, None),
     };
     let pubkey = json["pubkey"].as_str().map(|s| s.to_string());
-    let username = json["username"].as_str()
+    let username = json["username"]
+        .as_str()
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
     (pubkey, username)
@@ -814,17 +1028,21 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let port = std::env::var("XFCHESS_WALLET_PORT").ok()
-        .and_then(|v| v.parse::<u16>().ok()).unwrap_or(7454);
+    let port = std::env::var("XFCHESS_WALLET_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(7454);
 
     // Step 1: fetch JWT from local bridge
     let token_resp = client
         .get(format!("http://127.0.0.1:{port}/token"))
         .send()
         .map_err(|e| format!("bridge /token: {e}"))?;
-    let token_json: serde_json::Value = token_resp.json()
+    let token_json: serde_json::Value = token_resp
+        .json()
         .map_err(|e| format!("bridge /token parse: {e}"))?;
-    let jwt = token_json["token"].as_str()
+    let jwt = token_json["token"]
+        .as_str()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "no JWT in bridge /token".to_string())?
         .to_string();
@@ -844,8 +1062,7 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
     // session/move calls (preferred per-user auth on the signing endpoints).
     crate::multiplayer::network::vps::set_auth_token(Some(jwt.clone()));
 
-    let me: serde_json::Value = me_resp.json()
-        .map_err(|e| format!("/auth/me parse: {e}"))?;
+    let me: serde_json::Value = me_resp.json().map_err(|e| format!("/auth/me parse: {e}"))?;
 
     Ok(BridgeMeResp {
         username: me["username"].as_str().unwrap_or_default().to_string(),
@@ -876,7 +1093,10 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
         "method": "getBalance",
         "params": [pubkey, { "commitment": "confirmed" }]
     });
-    let sol = client.post(rpc_url).json(&body).send()
+    let sol = client
+        .post(rpc_url)
+        .json(&body)
+        .send()
         .ok()
         .and_then(|r| r.json::<serde_json::Value>().ok())
         .and_then(|j| j["result"]["value"].as_u64())
@@ -894,11 +1114,14 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
         .ok()
         .and_then(|r| r.json::<serde_json::Value>().ok());
 
-    let usd_per_sol = rates_json.as_ref()
+    let usd_per_sol = rates_json
+        .as_ref()
         .and_then(|j| j["rates"]["usd"].as_f64())
         .or_else(|| {
-            client.get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
-                .send().ok()
+            client
+                .get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
+                .send()
+                .ok()
                 .and_then(|r| r.json::<serde_json::Value>().ok())
                 .and_then(|j| j["solana"]["usd"].as_f64())
         })
@@ -906,7 +1129,13 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
 
     let gbp_per_sol = rates_json
         .and_then(|j| j["rates"]["gbp"].as_f64())
-        .unwrap_or_else(|| if usd_per_sol > 0.0 { usd_per_sol * 0.787 } else { 0.0 });
+        .unwrap_or_else(|| {
+            if usd_per_sol > 0.0 {
+                usd_per_sol * 0.787
+            } else {
+                0.0
+            }
+        });
 
     (sol, usd_per_sol, gbp_per_sol)
 }
@@ -929,7 +1158,11 @@ pub struct PlayerIdentity {
     /// True once backend confirms an on-chain PlayerProfile PDA exists
     pub has_onchain_profile: bool,
     /// Receiver for an in-flight profile fetch from VPS
-    pub pending_profile_rx: Option<crossbeam_channel::Receiver<Result<crate::multiplayer::network::vps::identity::PlayerProfile, String>>>,
+    pub pending_profile_rx: Option<
+        crossbeam_channel::Receiver<
+            Result<crate::multiplayer::network::vps::identity::PlayerProfile, String>,
+        >,
+    >,
 }
 
 impl PlayerIdentity {
@@ -952,7 +1185,9 @@ impl PlayerIdentity {
 
     /// Returns the ELO string for display, e.g. "1420" or "—".
     pub fn display_elo(&self) -> String {
-        self.elo.map(|e| e.to_string()).unwrap_or_else(|| "—".to_string())
+        self.elo
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "—".to_string())
     }
 }
 
@@ -973,8 +1208,7 @@ pub struct SolanaLogoState {
 
 const SOLANA_LOGO1_PATH: &str =
     r"C:\Users\isich\Pictures\Camera Roll\Screenshots\Screenshot 2026-05-20 211643.png";
-const SOLANA_LOGO2_PATH: &str =
-    r"C:\Users\isich\Downloads\solanaLogo.png";
+const SOLANA_LOGO2_PATH: &str = r"C:\Users\isich\Downloads\solanaLogo.png";
 
 pub(super) fn ensure_solana_logos(ctx: &egui::Context, logos: &mut SolanaLogoState) {
     if logos.loaded {
@@ -998,7 +1232,10 @@ pub(super) fn ensure_solana_logos(ctx: &egui::Context, logos: &mut SolanaLogoSta
         };
         let rgba = img.to_rgba8();
         let size = [rgba.width() as usize, rgba.height() as usize];
-        Some(egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()))
+        Some(egui::ColorImage::from_rgba_unmultiplied(
+            size,
+            rgba.as_raw(),
+        ))
     };
 
     if let Some(ci) = load(SOLANA_LOGO1_PATH) {
@@ -1021,7 +1258,10 @@ const BRAND_LOGO_PATH: &str = "assets/xfchess-title.png";
 /// Grey bezel border color shared by popups and modals.
 const BEZEL_GREY: egui::Color32 = egui::Color32::from_rgb(100, 100, 100);
 
-pub(super) fn ensure_brand_logo_texture(ctx: &egui::Context, logo: &mut BrandLogoState) -> Option<egui::TextureId> {
+pub(super) fn ensure_brand_logo_texture(
+    ctx: &egui::Context,
+    logo: &mut BrandLogoState,
+) -> Option<egui::TextureId> {
     if let Some(texture) = logo.texture.as_ref() {
         return Some(texture.id());
     }
@@ -1030,12 +1270,29 @@ pub(super) fn ensure_brand_logo_texture(ctx: &egui::Context, logo: &mut BrandLog
     }
     logo.loaded = true;
 
-    let Ok(bytes) = std::fs::read(BRAND_LOGO_PATH) else {
-        warn!("[MAIN_MENU] Failed to read brand logo image at {}", BRAND_LOGO_PATH);
+    // Try several locations (mirrors the font loader): CWD-relative both with and
+    // without a leading "./", then next to the executable for packaged builds.
+    let mut candidates: Vec<std::path::PathBuf> = vec![
+        BRAND_LOGO_PATH.into(),
+        format!("./{}", BRAND_LOGO_PATH).into(),
+    ];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(BRAND_LOGO_PATH));
+        }
+    }
+    let Some(bytes) = candidates.iter().find_map(|p| std::fs::read(p).ok()) else {
+        warn!(
+            "[MAIN_MENU] Failed to read brand logo image; tried {:?}",
+            candidates
+        );
         return None;
     };
     let Ok(decoded) = image::load_from_memory(&bytes) else {
-        warn!("[MAIN_MENU] Failed to decode brand logo image at {}", BRAND_LOGO_PATH);
+        warn!(
+            "[MAIN_MENU] Failed to decode brand logo image at {}",
+            BRAND_LOGO_PATH
+        );
         return None;
     };
 
@@ -1051,10 +1308,14 @@ pub(super) fn ensure_brand_logo_texture(ctx: &egui::Context, logo: &mut BrandLog
     let rgba = decoded.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-    let texture = ctx.load_texture("brand_logo_screenshot", color_image, egui::TextureOptions {
-        mipmap_mode: Some(egui::TextureFilter::Linear),
-        ..egui::TextureOptions::LINEAR
-    });
+    let texture = ctx.load_texture(
+        "brand_logo_screenshot",
+        color_image,
+        egui::TextureOptions {
+            mipmap_mode: Some(egui::TextureFilter::Linear),
+            ..egui::TextureOptions::LINEAR
+        },
+    );
     let texture_id = texture.id();
     logo.texture = Some(texture);
     Some(texture_id)
@@ -1064,17 +1325,17 @@ pub(super) fn ensure_brand_logo_texture(ctx: &egui::Context, logo: &mut BrandLog
 fn setup_menu_camera(
     mut commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
-    mut camera_query: Query<
-        &mut Transform,
-        (With<Camera3d>, Without<MenuCamera>),
-    >,
+    mut camera_query: Query<&mut Transform, (With<Camera3d>, Without<MenuCamera>)>,
 ) {
     debug!("[MAIN_MENU] Setting up menu camera for egui launcher");
 
     if let Some(camera_entity) = persistent_camera.entity {
         match camera_query.get_mut(camera_entity) {
             Ok(mut transform) => {
-                info!("[MAIN_MENU] Setting up menu camera entity: {:?}", camera_entity);
+                info!(
+                    "[MAIN_MENU] Setting up menu camera entity: {:?}",
+                    camera_entity
+                );
                 *transform = Transform::from_translation(new_menu::BOARD_CAM)
                     .looking_at(new_menu::BOARD_CENTER, Vec3::Y);
                 commands.entity(camera_entity).insert(MenuCamera);
@@ -1095,10 +1356,7 @@ fn setup_menu_camera(
 /// camera was created (which can happen for the default state).
 fn ensure_menu_camera_setup(
     persistent_camera: Res<crate::PersistentEguiCamera>,
-    mut camera_query: Query<
-        &mut Transform,
-        (With<Camera3d>, Without<MenuCamera>),
-    >,
+    mut camera_query: Query<&mut Transform, (With<Camera3d>, Without<MenuCamera>)>,
     mut commands: Commands,
     menu_camera_query: Query<Entity, With<MenuCamera>>,
 ) {
@@ -1142,7 +1400,12 @@ fn main_menu_ui(ctx: &mut MainMenuUIContext) -> Result<(), bevy::ecs::query::Que
         outer_margin: egui::Margin::ZERO,
         corner_radius: egui::CornerRadius::same(8),
         stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(80, 80, 100, 180)),
-        shadow: egui::Shadow { blur: 24, spread: 4, color: egui::Color32::from_black_alpha(180), offset: [0, 4] },
+        shadow: egui::Shadow {
+            blur: 24,
+            spread: 4,
+            color: egui::Color32::from_black_alpha(180),
+            offset: [0, 4],
+        },
     };
 
     if current_substate == crate::core::MenuState::BraidLobby {
@@ -1243,7 +1506,10 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
     ];
     for path in &cinzel_paths {
         if let Ok(data) = std::fs::read(path) {
-            fonts.font_data.insert("Cinzel".to_owned(), Arc::new(egui::FontData::from_owned(data)));
+            fonts.font_data.insert(
+                "Cinzel".to_owned(),
+                Arc::new(egui::FontData::from_owned(data)),
+            );
             info!("[MAIN_MENU] Loaded Cinzel font from {}", path);
             break;
         }
@@ -1256,7 +1522,10 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
     ];
     for path in &cinzel_bold_paths {
         if let Ok(data) = std::fs::read(path) {
-            fonts.font_data.insert("CinzelBold".to_owned(), Arc::new(egui::FontData::from_owned(data)));
+            fonts.font_data.insert(
+                "CinzelBold".to_owned(),
+                Arc::new(egui::FontData::from_owned(data)),
+            );
             info!("[MAIN_MENU] Loaded Cinzel Bold font from {}", path);
             break;
         }
@@ -1270,7 +1539,10 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
     let mut body_loaded = false;
     for path in &opensans_paths {
         if let Ok(data) = std::fs::read(path) {
-            fonts.font_data.insert("OpenSans".to_owned(), Arc::new(egui::FontData::from_owned(data)));
+            fonts.font_data.insert(
+                "OpenSans".to_owned(),
+                Arc::new(egui::FontData::from_owned(data)),
+            );
             info!("[MAIN_MENU] Loaded OpenSans font from {}", path);
             body_loaded = true;
             break;
@@ -1279,13 +1551,20 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
 
     // Proportional family: Cinzel first (gives egui::FontFamily::Proportional a Cinzel default),
     // then OpenSans as fallback for characters Cinzel doesn't cover.
-    let proportional = fonts.families.entry(egui::FontFamily::Proportional).or_default();
+    let proportional = fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default();
     if fonts.font_data.contains_key("Cinzel") {
         proportional.insert(0, "Cinzel".to_owned());
     }
     if body_loaded {
         // OpenSans sits after Cinzel for fallback coverage
-        let pos = if fonts.font_data.contains_key("Cinzel") { 1 } else { 0 };
+        let pos = if fonts.font_data.contains_key("Cinzel") {
+            1
+        } else {
+            0
+        };
         proportional.insert(pos, "OpenSans".to_owned());
     }
 
@@ -1347,7 +1626,12 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
         } else {
             Vec::new()
         };
-        render_spectator_popup(ctx, &mut ctx_menu.competitive_menu, &cached_games, &mut ctx_menu.spectate_events);
+        render_spectator_popup(
+            ctx,
+            &mut ctx_menu.competitive_menu,
+            &cached_games,
+            &mut ctx_menu.spectate_events,
+        );
     }
 
     if ctx_menu.competitive_menu.show_controls_popup {
@@ -1363,17 +1647,22 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
             &mut ctx_menu.commands,
         );
     }
-
 }
 
 /// Sync `PlayerIdentity` with the on-chain wallet profile when a wallet is connected.
 #[cfg(feature = "solana")]
 fn sync_player_identity_from_wallet(
     mut player_identity: ResMut<PlayerIdentity>,
-    solana_state: Option<Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>>,
+    solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
 ) {
-    let Some(ref solana_state) = solana_state else { return };
-    let Some(pubkey) = solana_state.wallet_pubkey else { return };
+    let Some(ref solana_state) = solana_state else {
+        return;
+    };
+    let Some(pubkey) = solana_state.wallet_pubkey else {
+        return;
+    };
 
     // Check if we already have a pending fetch
     if let Some(ref rx) = player_identity.pending_profile_rx {
@@ -1382,7 +1671,10 @@ fn sync_player_identity_from_wallet(
                 player_identity.username = Some(profile.username.clone());
                 player_identity.elo = Some(profile.elo);
                 player_identity.country = Some(profile.country);
-                info!("[PROFILE] Fetched profile for {} — ELO {}", profile.username, profile.elo);
+                info!(
+                    "[PROFILE] Fetched profile for {} — ELO {}",
+                    profile.username, profile.elo
+                );
                 player_identity.pending_profile_rx = None;
             }
             Ok(Err(e)) => {
@@ -1406,10 +1698,12 @@ fn sync_player_identity_from_wallet(
     let (tx, rx) = crossbeam_channel::bounded(1);
     player_identity.pending_profile_rx = Some(rx);
 
-    bevy::tasks::IoTaskPool::get().spawn(async move {
-        let res = crate::multiplayer::network::vps::identity::fetch_player_profile(&pk);
-        let _ = tx.send(res);
-    }).detach();
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            let res = crate::multiplayer::network::vps::identity::fetch_player_profile(&pk);
+            let _ = tx.send(res);
+        })
+        .detach();
 }
 
 #[cfg(not(feature = "solana"))]

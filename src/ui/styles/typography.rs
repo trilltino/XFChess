@@ -69,4 +69,3 @@ impl TextSize {
     /// Small text (hints, captions)
     pub const CAPTION: f32 = 12.0;
 }
-

@@ -354,10 +354,18 @@ impl PieceMeshes {
 
     pub fn all_ids(&self) -> [bevy::asset::AssetId<Mesh>; 12] {
         [
-            self.white_king.id(), self.white_queen.id(), self.white_rook.id(),
-            self.white_bishop.id(), self.white_knight.id(), self.white_pawn.id(),
-            self.black_king.id(), self.black_queen.id(), self.black_rook.id(),
-            self.black_bishop.id(), self.black_knight.id(), self.black_pawn.id(),
+            self.white_king.id(),
+            self.white_queen.id(),
+            self.white_rook.id(),
+            self.white_bishop.id(),
+            self.white_knight.id(),
+            self.white_pawn.id(),
+            self.black_king.id(),
+            self.black_queen.id(),
+            self.black_rook.id(),
+            self.black_bishop.id(),
+            self.black_knight.id(),
+            self.black_pawn.id(),
         ]
     }
 }
@@ -374,17 +382,17 @@ fn load_sprite_handles_for_set(asset_server: &AssetServer, piece_set: u8) -> Pie
     let folder = piece_set_folder(piece_set);
     PieceSpriteHandles {
         white_bishop: asset_server.load(format!("pieces/2d/{}/wb.png", folder)),
-        white_king:   asset_server.load(format!("pieces/2d/{}/wk.png", folder)),
+        white_king: asset_server.load(format!("pieces/2d/{}/wk.png", folder)),
         white_knight: asset_server.load(format!("pieces/2d/{}/wn.png", folder)),
-        white_pawn:   asset_server.load(format!("pieces/2d/{}/wp.png", folder)),
-        white_queen:  asset_server.load(format!("pieces/2d/{}/wq.png", folder)),
-        white_rook:   asset_server.load(format!("pieces/2d/{}/wr.png", folder)),
+        white_pawn: asset_server.load(format!("pieces/2d/{}/wp.png", folder)),
+        white_queen: asset_server.load(format!("pieces/2d/{}/wq.png", folder)),
+        white_rook: asset_server.load(format!("pieces/2d/{}/wr.png", folder)),
         black_bishop: asset_server.load(format!("pieces/2d/{}/bb.png", folder)),
-        black_king:   asset_server.load(format!("pieces/2d/{}/bk.png", folder)),
+        black_king: asset_server.load(format!("pieces/2d/{}/bk.png", folder)),
         black_knight: asset_server.load(format!("pieces/2d/{}/bn.png", folder)),
-        black_pawn:   asset_server.load(format!("pieces/2d/{}/bp.png", folder)),
-        black_queen:  asset_server.load(format!("pieces/2d/{}/bq.png", folder)),
-        black_rook:   asset_server.load(format!("pieces/2d/{}/br.png", folder)),
+        black_pawn: asset_server.load(format!("pieces/2d/{}/bp.png", folder)),
+        black_queen: asset_server.load(format!("pieces/2d/{}/bq.png", folder)),
+        black_rook: asset_server.load(format!("pieces/2d/{}/br.png", folder)),
     }
 }
 
@@ -394,32 +402,34 @@ pub fn reload_piece_sprites(
     asset_server: Res<AssetServer>,
     mut commands: Commands,
 ) {
-    if !settings.is_changed() { return; }
+    if !settings.is_changed() {
+        return;
+    }
     let sprites = load_sprite_handles_for_set(&asset_server, settings.piece_set);
     commands.insert_resource(sprites);
 }
 
 fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
     info!("[PIECES] Loading piece meshes from wooden_chess_board.glb");
-    
+
     // Correct mapping from reference ENGINE_TO_MODEL:
     //   Bishop=Mesh0/18, King=Mesh2/20, Knight=Mesh3/21,
     //   Pawn=Mesh5/23, Queen=Mesh13/31, Rook=Mesh14/32
     let meshes = PieceMeshes {
         white_bishop: asset_server.load("models/wooden_chess_board.glb#Mesh18/Primitive0"),
-        white_king:   asset_server.load("models/wooden_chess_board.glb#Mesh20/Primitive0"),
+        white_king: asset_server.load("models/wooden_chess_board.glb#Mesh20/Primitive0"),
         white_knight: asset_server.load("models/wooden_chess_board.glb#Mesh21/Primitive0"),
-        white_pawn:   asset_server.load("models/wooden_chess_board.glb#Mesh23/Primitive0"),
-        white_queen:  asset_server.load("models/wooden_chess_board.glb#Mesh31/Primitive0"),
-        white_rook:   asset_server.load("models/wooden_chess_board.glb#Mesh32/Primitive0"),
+        white_pawn: asset_server.load("models/wooden_chess_board.glb#Mesh23/Primitive0"),
+        white_queen: asset_server.load("models/wooden_chess_board.glb#Mesh31/Primitive0"),
+        white_rook: asset_server.load("models/wooden_chess_board.glb#Mesh32/Primitive0"),
         black_bishop: asset_server.load("models/wooden_chess_board.glb#Mesh0/Primitive0"),
-        black_king:   asset_server.load("models/wooden_chess_board.glb#Mesh2/Primitive0"),
+        black_king: asset_server.load("models/wooden_chess_board.glb#Mesh2/Primitive0"),
         black_knight: asset_server.load("models/wooden_chess_board.glb#Mesh3/Primitive0"),
-        black_pawn:   asset_server.load("models/wooden_chess_board.glb#Mesh5/Primitive0"),
-        black_queen:  asset_server.load("models/wooden_chess_board.glb#Mesh13/Primitive0"),
-        black_rook:   asset_server.load("models/wooden_chess_board.glb#Mesh14/Primitive0"),
+        black_pawn: asset_server.load("models/wooden_chess_board.glb#Mesh5/Primitive0"),
+        black_queen: asset_server.load("models/wooden_chess_board.glb#Mesh13/Primitive0"),
+        black_rook: asset_server.load("models/wooden_chess_board.glb#Mesh14/Primitive0"),
     };
-    
+
     commands.insert_resource(meshes);
 
     info!("[PIECES] Loading 2D piece sprites from assets/pieces/2d/");
@@ -478,22 +488,70 @@ pub fn spawn_piece_at(
     // Handle is Clone (not Copy), need .clone() from shared ref
     match piece_type {
         PieceType::King => spawn_king(
-            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            offset,
+            file,
+            rank,
+            sprite_handles,
         ),
         PieceType::Queen => spawn_queen(
-            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            offset,
+            file,
+            rank,
+            sprite_handles,
         ),
         PieceType::Rook => spawn_rook(
-            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            offset,
+            file,
+            rank,
+            sprite_handles,
         ),
         PieceType::Bishop => spawn_bishop(
-            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            offset,
+            file,
+            rank,
+            sprite_handles,
         ),
         PieceType::Knight => spawn_knight(
-            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            offset,
+            file,
+            rank,
+            sprite_handles,
         ),
         PieceType::Pawn => spawn_pawn(
-            commands, material, color, world_pos, meshes, offset, file, rank, sprite_handles,
+            commands,
+            material,
+            color,
+            world_pos,
+            meshes,
+            offset,
+            file,
+            rank,
+            sprite_handles,
         ),
     }
 
@@ -876,16 +934,18 @@ fn on_piece_added(
     assets: Option<Res<PiecePickingAssets>>,
 ) {
     let Some(assets) = assets else { return };
-    commands.entity(trigger.event_target()).with_children(|parent| {
-        parent.spawn((
-            Mesh3d(assets.mesh_2d.clone()),
-            MeshMaterial3d(assets.matl.clone()),
-            Transform::from_xyz(0.0, 0.06, 0.0),
-            PiecePickingProxy2D,
-            bevy::picking::Pickable::IGNORE, // activated by view_mode_rendering_toggle_system
-            Name::new("Piece Picking Proxy 2D"),
-        ));
-    });
+    commands
+        .entity(trigger.event_target())
+        .with_children(|parent| {
+            parent.spawn((
+                Mesh3d(assets.mesh_2d.clone()),
+                MeshMaterial3d(assets.matl.clone()),
+                Transform::from_xyz(0.0, 0.06, 0.0),
+                PiecePickingProxy2D,
+                bevy::picking::Pickable::IGNORE, // activated by view_mode_rendering_toggle_system
+                Name::new("Piece Picking Proxy 2D"),
+            ));
+        });
 }
 
 pub struct PiecePlugin;
@@ -896,12 +956,15 @@ impl Plugin for PiecePlugin {
         app.add_systems(Startup, (load_piece_meshes, init_piece_picking_assets));
         app.add_systems(Update, create_pieces.run_if(in_state(GameState::InGame)));
         app.add_systems(OnExit(GameState::InGame), reset_pieces_spawned);
-        app.add_systems(Update, view_mode_rendering_toggle_system.run_if(
-            in_state(GameState::InGame).and(
-                resource_changed::<crate::game::view_mode::ViewMode>
-                    .or(resource_changed::<PiecesSpawned>)
-            )
-        ));
+        app.add_systems(
+            Update,
+            view_mode_rendering_toggle_system.run_if(
+                in_state(GameState::InGame).and(
+                    resource_changed::<crate::game::view_mode::ViewMode>
+                        .or(resource_changed::<PiecesSpawned>),
+                ),
+            ),
+        );
         app.add_observer(on_piece_added);
     }
 }
@@ -913,7 +976,10 @@ pub fn view_mode_rendering_toggle_system(
         (With<Piece3DVisual>, Without<Piece2DVisual>),
     >,
     mut piece_2d_query: Query<&mut Visibility, (With<Piece2DVisual>, Without<Piece3DVisual>)>,
-    mut proxy_2d_query: Query<&mut bevy::picking::Pickable, (With<PiecePickingProxy2D>, Without<Piece3DVisual>)>,
+    mut proxy_2d_query: Query<
+        &mut bevy::picking::Pickable,
+        (With<PiecePickingProxy2D>, Without<Piece3DVisual>),
+    >,
 ) {
     let mode = *view_mode;
     let (show_3d, show_2d) = match mode {
@@ -924,15 +990,31 @@ pub fn view_mode_rendering_toggle_system(
     };
 
     for (mut vis, mut pick) in piece_3d_query.iter_mut() {
-        *vis = if show_3d { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show_3d {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         // In 2D mode disable 3D mesh picking so only the flat 2D proxy receives clicks.
-        *pick = if show_3d { bevy::picking::Pickable::default() } else { bevy::picking::Pickable::IGNORE };
+        *pick = if show_3d {
+            bevy::picking::Pickable::default()
+        } else {
+            bevy::picking::Pickable::IGNORE
+        };
     }
     for mut vis in piece_2d_query.iter_mut() {
-        *vis = if show_2d { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show_2d {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut pick in proxy_2d_query.iter_mut() {
-        *pick = if show_2d { bevy::picking::Pickable::default() } else { bevy::picking::Pickable::IGNORE };
+        *pick = if show_2d {
+            bevy::picking::Pickable::default()
+        } else {
+            bevy::picking::Pickable::IGNORE
+        };
     }
 }
 

@@ -36,7 +36,10 @@ impl IntoResponse for AppError {
             AppError::UnsupportedTournamentFormat(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::WebSocketSubscriptionError(msg) => (StatusCode::BAD_GATEWAY, msg),
             AppError::ConfigurationError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            AppError::TournamentNotFound(id) => (StatusCode::NOT_FOUND, format!("Tournament {} not found", id)),
+            AppError::TournamentNotFound(id) => (
+                StatusCode::NOT_FOUND,
+                format!("Tournament {} not found", id),
+            ),
             AppError::InvalidTournamentStatus(msg) => (StatusCode::CONFLICT, msg),
         };
 

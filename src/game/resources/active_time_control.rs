@@ -1,8 +1,8 @@
 //! Active time control resource — stores the time control chosen before
 //! the game started so that `game_init` can seed `GameTimer` correctly.
 
-use bevy::prelude::*;
 use crate::game::time_control::TimeControl;
+use bevy::prelude::*;
 
 /// Resource inserted at game-start with the chosen time control.
 ///

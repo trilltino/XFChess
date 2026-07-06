@@ -2,11 +2,14 @@
 
 use clap::{Parser, ValueEnum};
 use er_cu_benchmark::{
-    base_client, er_client,
-    cost_reporter::{generate_cost_report, print_cost_report, export_json},
+    base_client,
+    cost_reporter::{export_json, generate_cost_report, print_cost_report},
     cu_logger::CuLogger,
+    er_client,
     game_flows::{run_1v1_game_flow, run_swiss_tournament_flow},
-    keygen::{fund_children, generate_child_keypairs, load_or_generate_master_keypair, reclaim_surplus},
+    keygen::{
+        fund_children, generate_child_keypairs, load_or_generate_master_keypair, reclaim_surplus,
+    },
     moves::generate_100_move_sequence,
     PROGRAM_ID,
 };
@@ -81,7 +84,10 @@ async fn main() -> anyhow::Result<()> {
 
     let master = load_or_generate_master_keypair()?;
     let master_balance = base_client().get_balance(&master.pubkey())?;
-    println!("   Master balance: {} SOL", master_balance as f64 / 1_000_000_000.0);
+    println!(
+        "   Master balance: {} SOL",
+        master_balance as f64 / 1_000_000_000.0
+    );
 
     if master_balance < 50_000_000 {
         println!();
@@ -141,8 +147,15 @@ async fn run_1v1_test(
 
     let mut logger = CuLogger::new();
     let total_cu = run_1v1_game_flow(
-        &base_rpc, &er_rpc, program_id, master, white, black, &mut logger,
-    ).await?;
+        &base_rpc,
+        &er_rpc,
+        program_id,
+        master,
+        white,
+        black,
+        &mut logger,
+    )
+    .await?;
 
     logger.print_summary();
     let report = generate_cost_report(&logger, "1v1_game");
@@ -178,7 +191,9 @@ async fn run_swiss_test(
     let valid_sizes = [8u16, 16, 32, 64, 128, 256];
     if !valid_sizes.contains(&size) {
         return Err(anyhow::anyhow!(
-            "Invalid size: {}. Must be one of: {:?}", size, valid_sizes
+            "Invalid size: {}. Must be one of: {:?}",
+            size,
+            valid_sizes
         ));
     }
 
@@ -190,8 +205,15 @@ async fn run_swiss_test(
 
     let mut logger = CuLogger::new();
     let total_cu = run_swiss_tournament_flow(
-        &base_rpc, &er_rpc, program_id, master, &children, size, &mut logger,
-    ).await?;
+        &base_rpc,
+        &er_rpc,
+        program_id,
+        master,
+        &children,
+        size,
+        &mut logger,
+    )
+    .await?;
 
     logger.print_summary();
     let report = generate_cost_report(&logger, &format!("swiss_{}_players", size));
@@ -208,7 +230,10 @@ async fn run_swiss_test(
         reclaim_surplus(&base_rpc, master, &children).await?;
     }
 
-    println!("\n   Swiss {}-player test complete. Total CU: {}", size, total_cu);
+    println!(
+        "\n   Swiss {}-player test complete. Total CU: {}",
+        size, total_cu
+    );
     Ok(())
 }
 

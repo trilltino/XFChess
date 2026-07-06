@@ -1,8 +1,8 @@
-pub mod manager;
 pub mod bridge;
-pub mod session_keys;
 pub mod magicblock;
+pub mod manager;
 pub mod mvp_plugin;
+pub mod session_keys;
 
-pub use manager::*;
 pub use magicblock::*;
+pub use manager::*;

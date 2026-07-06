@@ -27,17 +27,17 @@ impl RequestContext {
             start_time: Instant::now(),
         }
     }
-    
+
     pub fn with_wallet(mut self, pubkey: impl Into<String>) -> Self {
         self.wallet_pubkey = Some(pubkey.into());
         self
     }
-    
+
     pub fn with_game_id(mut self, game_id: u64) -> Self {
         self.game_id = Some(game_id);
         self
     }
-    
+
     pub fn elapsed_ms(&self) -> u64 {
         self.start_time.elapsed().as_millis() as u64
     }
@@ -79,7 +79,7 @@ impl StructuredLogger {
             message
         );
     }
-    
+
     /// Log error with context
     pub fn error(ctx: &RequestContext, message: &str, error: &dyn std::error::Error) {
         tracing::error!(
@@ -93,7 +93,7 @@ impl StructuredLogger {
             message
         );
     }
-    
+
     /// Log warning with context
     pub fn warn(ctx: &RequestContext, message: &str) {
         tracing::warn!(
@@ -106,7 +106,7 @@ impl StructuredLogger {
             message
         );
     }
-    
+
     /// Log transaction event
     pub fn transaction(
         ctx: &RequestContext,
@@ -171,19 +171,13 @@ pub fn format_log_entry(
     context: Option<&RequestContext>,
 ) -> String {
     let timestamp = chrono::Utc::now().to_rfc3339();
-    
+
     match context {
         Some(ctx) => {
-            format!(
-                "{} [{}] {} {} - {}",
-                timestamp, level, target, ctx, message
-            )
+            format!("{} [{}] {} {} - {}", timestamp, level, target, ctx, message)
         }
         None => {
-            format!(
-                "{} [{}] {} - {}",
-                timestamp, level, target, message
-            )
+            format!("{} [{}] {} - {}", timestamp, level, target, message)
         }
     }
 }
@@ -191,22 +185,23 @@ pub fn format_log_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_request_context_display() {
         let ctx = RequestContext::new("/api/test")
             .with_wallet("7xKXtg2CW85dKr9YTCB")
             .with_game_id(12345);
-        
+
         let display = format!("{}", ctx);
         assert!(display.contains("endpoint=/api/test"));
         assert!(display.contains("game=12345"));
         assert!(display.contains("wallet=7xKXtg2C..."));
     }
-    
+
     #[test]
     fn test_pii_scrubbing() {
-        let input = "User 7xKXtg2CW85dKr9YTCBz53b8fPFCJeGVsREjW2Qe5P logged in with email test@example.com";
+        let input =
+            "User 7xKXtg2CW85dKr9YTCBz53b8fPFCJeGVsREjW2Qe5P logged in with email test@example.com";
         let scrubbed = scrub_pii(input);
         assert!(scrubbed.contains("<WALLET>"));
         assert!(scrubbed.contains("<EMAIL>"));

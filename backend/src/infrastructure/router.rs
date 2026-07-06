@@ -3,21 +3,21 @@
 //! This module centralizes all router construction logic, combining
 //! signing, tournament, and matchmaking routers into a single application router.
 
-use axum::{extract::State, middleware, Router};
-use crate::signing::{AppState, build_router};
-use crate::signing::swiss::handlers::{swiss_admin_routes, swiss_read_routes};
-use crate::signing::routes::tournament as tournament_routes;
-use crate::signing::routes::matchmaking::matchmaking_routes;
-use crate::signing::routes::mailer::mailer_routes;
-use crate::signing::routes::kyc::kyc_routes;
-use crate::signing::routes::history::history_routes;
-use crate::signing::routes::puzzle::{puzzle_routes, puzzle_admin_routes};
-use crate::signing::routes::dispute::{dispute_routes, admin_dispute_routes};
-use crate::signing::routes::archive::archive_routes;
-use crate::signing::routes::admin::admin_routes;
-use crate::signing::routes::chat::routes as chat_routes;
-use crate::signing::social::routes::social_routes;
 use crate::infrastructure::auth_middleware::require_api_key;
+use crate::signing::routes::admin::admin_routes;
+use crate::signing::routes::archive::archive_routes;
+use crate::signing::routes::chat::routes as chat_routes;
+use crate::signing::routes::dispute::{admin_dispute_routes, dispute_routes};
+use crate::signing::routes::history::history_routes;
+use crate::signing::routes::kyc::kyc_routes;
+use crate::signing::routes::mailer::mailer_routes;
+use crate::signing::routes::matchmaking::matchmaking_routes;
+use crate::signing::routes::puzzle::{puzzle_admin_routes, puzzle_routes};
+use crate::signing::routes::tournament as tournament_routes;
+use crate::signing::social::routes::social_routes;
+use crate::signing::swiss::handlers::{swiss_admin_routes, swiss_read_routes};
+use crate::signing::{build_router, AppState};
+use axum::{extract::State, middleware, Router};
 
 /// Builds the complete application router by merging all sub-routers.
 ///
@@ -26,9 +26,7 @@ use crate::infrastructure::auth_middleware::require_api_key;
 ///
 /// # Returns
 /// A merged Axum Router with all route handlers registered
-pub fn build_app_router(
-    signing_state: AppState,
-) -> Router<AppState> {
+pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
     // Build signing router (includes tournament routes via build_router)
     let signing_router = build_router(signing_state.clone());
 
@@ -42,18 +40,18 @@ pub fn build_app_router(
         .nest("/tournaments", tournament_routes::tournaments_routes())
         .nest("/tournament", tournament_routes::tournament_routes())
         .nest("/tournament", swiss_read_routes())
-        .nest("/admin/tournament", swiss_admin_routes()
-            .layer(middleware::from_fn(require_api_key))
+        .nest(
+            "/admin/tournament",
+            swiss_admin_routes().layer(middleware::from_fn(require_api_key)),
         )
-        .nest("/admin/tournament",
+        .nest(
+            "/admin/tournament",
             tournament_routes::admin_tournament_routes()
-                .layer(middleware::from_fn(require_api_key))
+                .layer(middleware::from_fn(require_api_key)),
         );
 
     // Build matchmaking router — state provided by parent .with_state()
-    let matchmaking_router = base
-        .clone()
-        .nest("/matchmaking", matchmaking_routes());
+    let matchmaking_router = base.clone().nest("/matchmaking", matchmaking_routes());
 
     // Build mailer router (no auth required for signup / waitlist)
     let mail_router = mailer_routes();
@@ -65,29 +63,27 @@ pub fn build_app_router(
     let history_router = history_routes();
 
     // Build dispute router
-    let dispute_router = base
-        .clone()
-        .nest("/dispute", dispute_routes())
-        .nest("/admin/dispute",
-            admin_dispute_routes()
-                .layer(middleware::from_fn(require_api_key))
-        );
+    let dispute_router = base.clone().nest("/dispute", dispute_routes()).nest(
+        "/admin/dispute",
+        admin_dispute_routes().layer(middleware::from_fn(require_api_key)),
+    );
 
     // Build metrics endpoint — core HTTP/RPC metrics plus the background-worker
     // and anti-cheat/linkage counters (settlement, prize distribution, blur,
     // think-time discards, Sybil linkage).
-    let metrics_router = base
-        .clone()
-        .route("/metrics", axum::routing::get(|State(app_state): State<AppState>| async move {
+    let metrics_router = base.clone().route(
+        "/metrics",
+        axum::routing::get(|State(app_state): State<AppState>| async move {
             let mut out = app_state.metrics.export_prometheus_format();
             out.push('\n');
             out.push_str(&crate::telemetry::worker_metrics::render_prometheus());
             out
-        }));
+        }),
+    );
 
     // Social (friends, presence, lobby invites)
-    let social_router = social_routes(signing_state.invite_store.clone())
-        .with_state(signing_state.clone());
+    let social_router =
+        social_routes(signing_state.invite_store.clone()).with_state(signing_state.clone());
 
     // Merge all routers and add CORS
     signing_router
@@ -99,9 +95,21 @@ pub fn build_app_router(
         .merge(puzzle_routes())
         .merge(dispute_router)
         .merge(metrics_router)
-        .merge(archive_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
-        .merge(admin_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
-        .merge(puzzle_admin_routes().with_state(signing_state.clone()).layer(middleware::from_fn(require_api_key)))
+        .merge(
+            archive_routes()
+                .with_state(signing_state.clone())
+                .layer(middleware::from_fn(require_api_key)),
+        )
+        .merge(
+            admin_routes()
+                .with_state(signing_state.clone())
+                .layer(middleware::from_fn(require_api_key)),
+        )
+        .merge(
+            puzzle_admin_routes()
+                .with_state(signing_state.clone())
+                .layer(middleware::from_fn(require_api_key)),
+        )
         .merge(chat_routes().with_state(signing_state.clone()))
         .merge(social_router)
         .layer(cors_layer())

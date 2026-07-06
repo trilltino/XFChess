@@ -29,8 +29,8 @@ pub struct TournamentMatch {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum MatchStatus {
-    Pending,    // Players assigned, game not yet started
-    Active,     // Game PDA created, in progress
-    Completed,  // Winner recorded
-    Bye,        // Player advances without playing (unused in 4-player, reserved)
+    Pending,   // Players assigned, game not yet started
+    Active,    // Game PDA created, in progress
+    Completed, // Winner recorded
+    Bye,       // Player advances without playing (unused in 4-player, reserved)
 }

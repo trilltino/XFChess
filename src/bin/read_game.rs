@@ -25,7 +25,7 @@ struct Game {
     pub game_id: u64,
     pub white: Pubkey,
     pub black: Pubkey,
-    pub status: u8,          // GameStatus enum variant index
+    pub status: u8, // GameStatus enum variant index
     pub result: GameResult,
     pub fen: String,
     pub move_count: u16,
@@ -34,7 +34,7 @@ struct Game {
     pub updated_at: i64,
     pub wager_amount: u64,
     pub wager_token: Option<Pubkey>,
-    pub game_type: u8,       // GameType enum variant index
+    pub game_type: u8, // GameType enum variant index
     pub bump: u8,
 }
 
@@ -70,12 +70,26 @@ fn main() {
     // --- Game account ---
     match rpc.get_account(&game_pda) {
         Ok(acc) => {
-            println!("game account: {} bytes, owner: {}", acc.data.len(), acc.owner);
+            println!(
+                "game account: {} bytes, owner: {}",
+                acc.data.len(),
+                acc.owner
+            );
             if acc.data.len() > 8 {
                 // skip 8-byte Anchor discriminator
                 match Game::deserialize(&mut &acc.data[8..]) {
                     Ok(game) => {
-                        let status = ["WaitingForOpponent","Active","Inactive","Disputed","Cancelled","Finished","Expired"].get(game.status as usize).unwrap_or(&"Unknown");
+                        let status = [
+                            "WaitingForOpponent",
+                            "Active",
+                            "Inactive",
+                            "Disputed",
+                            "Cancelled",
+                            "Finished",
+                            "Expired",
+                        ]
+                        .get(game.status as usize)
+                        .unwrap_or(&"Unknown");
                         let result = match &game.result {
                             GameResult::None => "None".to_string(),
                             GameResult::Winner(pk) => format!("Winner({})", pk),
@@ -100,7 +114,9 @@ fn main() {
             print!("game account NOT FOUND on devnet");
             // Check if it's still delegated (owned by delegation program on ER)
             match er_rpc.get_account(&game_pda) {
-                Ok(acc) if acc.owner == delegation_prog => println!(" — still delegated on ER (state not yet committed to L1)"),
+                Ok(acc) if acc.owner == delegation_prog => {
+                    println!(" — still delegated on ER (state not yet committed to L1)")
+                }
                 Ok(acc) => println!(" — found on ER, owner: {}", acc.owner),
                 Err(_) => println!(" — not found on ER either (undelegation may have failed)"),
             }
@@ -112,7 +128,11 @@ fn main() {
     // --- MoveLog account (devnet) ---
     match rpc.get_account(&move_log_pda) {
         Ok(acc) => {
-            println!("move_log (devnet): {} bytes, owner: {}", acc.data.len(), acc.owner);
+            println!(
+                "move_log (devnet): {} bytes, owner: {}",
+                acc.data.len(),
+                acc.owner
+            );
             if acc.data.len() > 8 {
                 match MoveLog::deserialize(&mut &acc.data[8..]) {
                     Ok(log) => {
@@ -133,7 +153,11 @@ fn main() {
             print!("move_log NOT FOUND on devnet");
             match er_rpc.get_account(&move_log_pda) {
                 Ok(acc) => {
-                    println!(" — found on ER ({} bytes, owner: {})", acc.data.len(), acc.owner);
+                    println!(
+                        " — found on ER ({} bytes, owner: {})",
+                        acc.data.len(),
+                        acc.owner
+                    );
                     if acc.data.len() > 8 {
                         match MoveLog::deserialize(&mut &acc.data[8..]) {
                             Ok(log) => {

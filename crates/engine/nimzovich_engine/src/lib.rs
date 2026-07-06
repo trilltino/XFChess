@@ -221,7 +221,6 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-
 pub mod api;
 mod bitset;
 mod board;
@@ -232,11 +231,11 @@ mod evaluation;
 mod hash;
 pub mod move_gen;
 #[cfg(feature = "search")]
+pub mod perft;
+#[cfg(feature = "search")]
 mod search;
 #[cfg(feature = "search")]
 mod see;
-#[cfg(feature = "search")]
-pub mod perft;
 pub mod types;
 mod utils;
 
@@ -252,33 +251,37 @@ mod pgn;
 pub mod book;
 
 // Re-export public API
-#[cfg(feature = "std")]
-pub use api::{game_from_fen, game_to_fen, new_game, reset_game, set_game_from_fen, set_tt_size_mb};
-pub use api::{do_move, do_move_with_promo, get_game_state, is_legal_move};
 #[cfg(feature = "search")]
 pub use api::reply;
+pub use api::{do_move, do_move_with_promo, get_game_state, is_legal_move};
 #[cfg(feature = "std")]
-pub use evaluation::evaluate_position;
-#[cfg(feature = "std")]
-pub use pgn::{
-    move_to_san, PgnAssembler, PgnResult, parse_pgn, parse_pgn_annotated,
-    san_to_move, ParsedPgnGame, PgnParseError, MoveQuality, PerPlyAnnotation,
+pub use api::{
+    game_from_fen, game_to_fen, new_game, reset_game, set_game_from_fen, set_tt_size_mb,
 };
 pub use error::{ChessEngineError, ChessEngineResult};
+#[cfg(feature = "std")]
+pub use evaluation::evaluate_position;
 pub use move_gen::{generate_pseudo_legal_moves, is_in_check};
+#[cfg(feature = "std")]
+pub use pgn::{
+    move_to_san, parse_pgn, parse_pgn_annotated, san_to_move, MoveQuality, ParsedPgnGame,
+    PerPlyAnnotation, PgnAssembler, PgnParseError, PgnResult,
+};
 
 // Re-export types
 pub use types::{Board, Color, Game, Move, Position, KK};
 
 // Re-export constants
 pub use constants::{
-    BISHOP_VALUE, COLOR_BLACK, COLOR_WHITE, FLAG_CAPTURE, FLAG_EP, FLAG_PLAIN, FLAG_PROCAP,
-    FLAG_PROMOTION, KING_VALUE, KING_VALUE_DIV_2, KNIGHT_VALUE, PAWN_VALUE, QUEEN_VALUE,
-    ROOK_VALUE, STATE_CHECKMATE, STATE_PLAYING, STATE_STALEMATE, SURE_CHECKMATE,
-    PAWN_ID, KNIGHT_ID, BISHOP_ID, ROOK_ID, QUEEN_ID, KING_ID,
+    BISHOP_ID, BISHOP_VALUE, COLOR_BLACK, COLOR_WHITE, FLAG_CAPTURE, FLAG_EP, FLAG_PLAIN,
+    FLAG_PROCAP, FLAG_PROMOTION, KING_ID, KING_VALUE, KING_VALUE_DIV_2, KNIGHT_ID, KNIGHT_VALUE,
+    PAWN_ID, PAWN_VALUE, QUEEN_ID, QUEEN_VALUE, ROOK_ID, ROOK_VALUE, STATE_CHECKMATE,
+    STATE_PLAYING, STATE_STALEMATE, SURE_CHECKMATE,
 };
 
 // Re-export on-chain validation API
 pub use on_chain::{CompactBoard, OnChainGame, CASTLE_BK, CASTLE_BQ, CASTLE_WK, CASTLE_WQ};
 pub use on_chain_attack::{bishop_attacks, is_in_check_fast, queen_attacks, rook_attacks};
-pub use on_chain_moves::{has_any_legal_move, parse_uci, validate_and_apply, validate_and_apply_sq, MoveOutcome};
+pub use on_chain_moves::{
+    has_any_legal_move, parse_uci, validate_and_apply, validate_and_apply_sq, MoveOutcome,
+};

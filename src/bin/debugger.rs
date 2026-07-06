@@ -202,11 +202,7 @@ fn monitor_simulation(
         if pretty_print {
             println!(
                 "{} Game {} | Batch: {}... | Moves: {} | Time: {}",
-                color_code,
-                game_id,
-                &batch_hash,
-                10,
-                timestamp
+                color_code, game_id, &batch_hash, 10, timestamp
             );
         } else {
             println!(
@@ -256,10 +252,8 @@ fn start_websocket_server(port: u16, entries: Arc<Mutex<Vec<LogEntry>>>) {
                 match stream {
                     Ok(mut stream) => {
                         let entries = entries.lock().unwrap();
-                        let response = format!(
-                            "HTTP/1.1 200 OK\r\n\r\nTotal events: {}\r\n",
-                            entries.len()
-                        );
+                        let response =
+                            format!("HTTP/1.1 200 OK\r\n\r\nTotal events: {}\r\n", entries.len());
                         use std::io::Write;
                         stream.write_all(response.as_bytes()).ok();
                     }
@@ -282,4 +276,3 @@ fn current_timestamp() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
-

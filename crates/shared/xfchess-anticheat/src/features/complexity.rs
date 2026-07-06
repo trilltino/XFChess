@@ -18,9 +18,20 @@ mod tests {
     use super::*;
     use crate::config::AcConfig;
 
-    fn cfg() -> AcConfig { AcConfig::default() }
+    fn cfg() -> AcConfig {
+        AcConfig::default()
+    }
 
-    #[test] fn forced() { assert_eq!(classify(100, 95, &cfg()), Complexity::Forced); }
-    #[test] fn simple() { assert_eq!(classify(100, 65, &cfg()), Complexity::Simple); }
-    #[test] fn complex() { assert_eq!(classify(100, 40, &cfg()), Complexity::Complex); }
+    #[test]
+    fn forced() {
+        assert_eq!(classify(100, 95, &cfg()), Complexity::Forced);
+    }
+    #[test]
+    fn simple() {
+        assert_eq!(classify(100, 65, &cfg()), Complexity::Simple);
+    }
+    #[test]
+    fn complex() {
+        assert_eq!(classify(100, 40, &cfg()), Complexity::Complex);
+    }
 }

@@ -10,8 +10,8 @@ pub mod network_move;
 pub mod picking_debug;
 pub mod promotion;
 pub mod shared;
-pub mod visual;
 pub mod spectate_sync;
+pub mod visual;
 
 // Re-export all public systems for convenience
 

@@ -3,12 +3,7 @@
 //! Provides cached SOL rates for multiple fiat currencies (USD, GBP, EUR, CAD, BRL)
 //! so the frontend can display accurate wager tiers and dashboard metrics.
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,7 +46,9 @@ impl RateCache {
     pub async fn gbp_to_lamports(&self, gbp: f64) -> Option<u64> {
         let rates = self.get().await.ok()?;
         let gbp_per_sol = rates.get("gbp")?;
-        if *gbp_per_sol <= 0.0 { return None; }
+        if *gbp_per_sol <= 0.0 {
+            return None;
+        }
         let sol_amount = gbp / gbp_per_sol;
         Some((sol_amount * 1_000_000_000.0).round() as u64)
     }
@@ -71,7 +68,10 @@ impl RateCache {
         // Slow path: attempt fetch
         match fetch_sol_rates_from_coingecko().await {
             Ok(rates) => {
-                let cached = CachedRates { rates: rates.clone(), fetched_at: Instant::now() };
+                let cached = CachedRates {
+                    rates: rates.clone(),
+                    fetched_at: Instant::now(),
+                };
                 *self.inner.write().await = Some(cached);
                 Ok(rates)
             }
@@ -105,7 +105,10 @@ async fn fetch_sol_rates_from_coingecko() -> Result<HashMap<String, f64>, String
         rates.insert(currency.to_lowercase(), sol_usd * usd_per_unit);
     }
 
-    info!("[RATES] Fetched SOL rates via Helius+Frankfurter: {:?}", rates);
+    info!(
+        "[RATES] Fetched SOL rates via Helius+Frankfurter: {:?}",
+        rates
+    );
     Ok(rates)
 }
 
@@ -126,14 +129,19 @@ async fn fetch_sol_usd_helius(client: &reqwest::Client) -> Result<f64, String> {
             });
 
             let helius_result: Result<f64, String> = async {
-                let resp = client.post(&url).json(&body).send().await
+                let resp = client
+                    .post(&url)
+                    .json(&body)
+                    .send()
+                    .await
                     .map_err(|e| format!("Helius RPC: {e}"))?;
-                let json: serde_json::Value = resp.json().await
-                    .map_err(|e| format!("Helius json: {e}"))?;
+                let json: serde_json::Value =
+                    resp.json().await.map_err(|e| format!("Helius json: {e}"))?;
                 json.pointer("/result/token_info/price_info/price_per_token")
                     .and_then(|p| p.as_f64())
                     .ok_or_else(|| "Helius RPC: no price_per_token".to_string())
-            }.await;
+            }
+            .await;
 
             if let Ok(price) = helius_result {
                 return Ok(price);
@@ -147,9 +155,12 @@ async fn fetch_sol_usd_helius(client: &reqwest::Client) -> Result<f64, String> {
         .send()
         .await
         .map_err(|e| format!("CoinGecko: {e}"))?;
-    let cg_json: serde_json::Value = cg_resp.json().await
+    let cg_json: serde_json::Value = cg_resp
+        .json()
+        .await
         .map_err(|e| format!("CoinGecko json: {e}"))?;
-    cg_json.pointer("/solana/usd")
+    cg_json
+        .pointer("/solana/usd")
         .and_then(|p| p.as_f64())
         .ok_or_else(|| "CoinGecko: missing solana/usd".to_string())
 }
@@ -171,7 +182,10 @@ async fn fetch_usd_fx_rates(client: &reqwest::Client) -> Result<HashMap<String, 
         return Err(format!("Frankfurter error {status}: {body}"));
     }
 
-    let json: serde_json::Value = resp.json().await.map_err(|e| format!("Frankfurter json: {e}"))?;
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Frankfurter json: {e}"))?;
 
     let rates_obj = json
         .get("rates")
@@ -208,7 +222,7 @@ async fn get_all_rates(
             for (currency, rate) in &rates {
                 sol_per_fiat.insert(currency.clone(), 1.0 / rate);
             }
-            
+
             Ok(Json(ExchangeRatesResponse {
                 rates,
                 sol_per_fiat,

@@ -19,7 +19,11 @@ use shakmaty::uci::UciMove;
 use shakmaty::{CastlingMode, Chess, EnPassantMode, Position};
 
 fn fen_color(fen: &str) -> Color {
-    if fen.split_whitespace().nth(1) == Some("w") { 1 } else { -1 }
+    if fen.split_whitespace().nth(1) == Some("w") {
+        1
+    } else {
+        -1
+    }
 }
 
 fn our_perft(fen: &str, depth: u32) -> u64 {
@@ -62,7 +66,14 @@ fn mv_to_uci(src: i8, dst: i8, promo_id: i8) -> String {
         2 => "n",
         _ => "",
     };
-    format!("{}{}{}{}{}", file(src), rank(src), file(dst), rank(dst), promo)
+    format!(
+        "{}{}{}{}{}",
+        file(src),
+        rank(src),
+        file(dst),
+        rank(dst),
+        promo
+    )
 }
 
 /// Reference legal moves as (uci, child_fen) pairs.
@@ -90,10 +101,16 @@ fn drill(fen: &str, depth: u32, path: &str) -> bool {
         return false;
     }
 
-    println!("\nDIVERGENCE at depth {depth} (path: {})", if path.is_empty() { "<root>" } else { path });
+    println!(
+        "\nDIVERGENCE at depth {depth} (path: {})",
+        if path.is_empty() { "<root>" } else { path }
+    );
     println!("  fen:   {fen}");
     println!("  ours:  {ours}");
-    println!("  ref:   {theirs}  (delta {:+})", ours as i64 - theirs as i64);
+    println!(
+        "  ref:   {theirs}  (delta {:+})",
+        ours as i64 - theirs as i64
+    );
 
     // Compare legal move sets at this node.
     let ref_mvs = ref_moves(fen);
@@ -118,13 +135,19 @@ fn drill(fen: &str, depth: u32, path: &str) -> bool {
             let our_child = our_perft(child_fen, depth - 1);
             let ref_child = ref_perft(child_fen, depth - 1);
             if our_child != ref_child {
-                let new_path = if path.is_empty() { uci.clone() } else { format!("{path} {uci}") };
+                let new_path = if path.is_empty() {
+                    uci.clone()
+                } else {
+                    format!("{path} {uci}")
+                };
                 return drill(child_fen, depth - 1, &new_path);
             }
         }
         // Children all match after FEN round-trip, but this node's count differs:
         // the bug is state carried through make/unmake, not move generation.
-        println!("  All children match via FEN re-import → make/unmake state corruption at this node.");
+        println!(
+            "  All children match via FEN re-import → make/unmake state corruption at this node."
+        );
         return true;
     }
 
@@ -135,12 +158,21 @@ fn drill(fen: &str, depth: u32, path: &str) -> bool {
 #[ignore = "diagnostic — run with --ignored --nocapture to locate movegen divergences"]
 fn locate_divergences() {
     let cases: &[(&str, u32)] = &[
-        ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 5),
-        ("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 4),
+        (
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            5,
+        ),
+        (
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            4,
+        ),
         ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 4),
         // Open Sicilian after 1.e4 c5 2.Nf3 Nc6 3.d4 cxd4 4.Nxd4 g6 — engine
         // generated illegal e7d8 here in UCI match play (knight on d4).
-        ("r1bqkbnr/pp1ppp1p/2n3p1/8/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 0 5", 2),
+        (
+            "r1bqkbnr/pp1ppp1p/2n3p1/8/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 0 5",
+            2,
+        ),
     ];
 
     let mut found = false;
@@ -149,7 +181,10 @@ fn locate_divergences() {
         if drill(fen, *depth, "") {
             found = true;
         } else {
-            println!("  OK — matches reference ({} nodes)", ref_perft(fen, *depth));
+            println!(
+                "  OK — matches reference ({} nodes)",
+                ref_perft(fen, *depth)
+            );
         }
     }
     assert!(!found, "divergences found — see output above");

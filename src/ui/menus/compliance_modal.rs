@@ -50,10 +50,7 @@ impl Plugin for CompliancePlugin {
     }
 }
 
-fn draw_compliance_modal(
-    mut contexts: EguiContexts,
-    mut state: ResMut<ComplianceState>,
-) {
+fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<ComplianceState>) {
     if !state.show {
         return;
     }
@@ -208,4 +205,3 @@ fn draw_compliance_modal(
             }
         });
 }
-

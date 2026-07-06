@@ -1,21 +1,21 @@
 use bevy::prelude::*;
+use braid_chess;
+use braid_core::{Update, Version};
+use braid_iroh::{BraidIrohConfig, BraidIrohNode, DiscoveryConfig};
+use futures_lite::StreamExt;
 use iroh::{EndpointId, SecretKey};
 use iroh_gossip::api::Event as IrohEvent;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::time::Instant;
-use futures_lite::StreamExt;
-use braid_iroh::{BraidIrohConfig, BraidIrohNode, DiscoveryConfig};
-use braid_core::{Update, Version};
-use braid_chess;
 
-use crate::multiplayer::types::*;
-use crate::multiplayer::network::protocol::{NetworkMessage, SignedNetworkMessage};
 use crate::game::events::ResignEvent;
+use crate::multiplayer::network::protocol::{NetworkMessage, SignedNetworkMessage};
+use crate::multiplayer::types::*;
 use crate::multiplayer::TokioRuntime;
 
 #[cfg(feature = "solana")]
-use crate::game::events::{MoveMadeEvent, GameEndedEvent};
+use crate::game::events::{GameEndedEvent, MoveMadeEvent};
 #[cfg(feature = "solana")]
 use crate::game::resources::history::game_over::GameOverState;
 #[cfg(feature = "solana")]
@@ -25,7 +25,7 @@ pub const GAME_TOPIC: &str = "/xfchess-game";
 
 /// Initializes the Braid/Iroh networking layer in a background Tokio task.
 pub fn initialize_braid_network(
-    mut network_state: ResMut<BraidNetworkState>,
+    mut network_state: ResMut<OnlineNetworkState>,
     tokio_runtime: Res<TokioRuntime>,
 ) {
     if network_state.connected {
@@ -38,6 +38,7 @@ pub fn initialize_braid_network(
     let (sub_tx, mut sub_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     network_state.event_receiver = Some(event_rx);
+    network_state.event_sender = Some(event_tx.clone()); // relay bridge injects incoming here
     network_state.message_sender = Some(msg_tx);
     network_state.bootstrap_sender = Some(bootstrap_tx);
     network_state.subscription_sender = Some(sub_tx);
@@ -70,14 +71,19 @@ pub fn initialize_braid_network(
             Ok(n) => n,
             Err(e) => {
                 error!("❌ Failed to spawn BraidIrohNode: {}", e);
-                event_tx_clone.send(NetworkEvent::PeerDisconnected(format!("Spawn failed: {}", e))).ok();
+                event_tx_clone
+                    .send(NetworkEvent::PeerDisconnected(format!(
+                        "Spawn failed: {}",
+                        e
+                    )))
+                    .ok();
                 return;
             }
         };
 
         let node_id = node.node_id();
         info!("[NET] BraidIrohNode spawned successfully (ID: {})", node_id);
-        
+
         event_tx_clone
             .send(NetworkEvent::NetworkInitialized {
                 node_id,
@@ -104,9 +110,9 @@ pub fn initialize_braid_network(
             while let Some(msg) = msg_rx.recv().await {
                 // Determine topic before msg is potentially consumed by signing.
                 let topic = match &msg {
-                    NetworkMessage::GameInvite { .. } |
-                    NetworkMessage::InviteResponse { .. } |
-                    NetworkMessage::GameStart { .. } => GAME_TOPIC.to_string(),
+                    NetworkMessage::GameInvite { .. }
+                    | NetworkMessage::InviteResponse { .. }
+                    | NetworkMessage::GameStart { .. } => GAME_TOPIC.to_string(),
                     _ => format!("{}/{}", GAME_TOPIC, msg.game_id()),
                 };
 
@@ -144,7 +150,12 @@ pub fn initialize_braid_network(
                 let update = Update::snapshot(version, payload_bytes);
                 if let Err(e) = node_send.put(&topic, update).await {
                     error!("Failed to broadcast message to {}: {}", topic, e);
-                    event_tx_error.send(NetworkEvent::PeerDisconnected(format!("Broadcast error: {}", e))).ok();
+                    event_tx_error
+                        .send(NetworkEvent::PeerDisconnected(format!(
+                            "Broadcast error: {}",
+                            e
+                        )))
+                        .ok();
                 }
             }
         });
@@ -206,31 +217,36 @@ async fn process_gossip_stream(
             Ok(IrohEvent::NeighborUp(peer_id)) => {
                 info!("GOSSIP NeighborUp: {}", peer_id);
                 let bs58_id = bs58::encode(peer_id.as_bytes()).into_string();
-                event_tx.send(NetworkEvent::PeerConnected(bs58_id.clone())).ok();
+                event_tx
+                    .send(NetworkEvent::PeerConnected(bs58_id.clone()))
+                    .ok();
 
-                event_tx.send(NetworkEvent::PeerDiscovered(PeerInfo {
-                    node_id: bs58_id.clone(),
-                    wallet_address: format!("sol:{}...", &bs58_id[..8]),
-                    game_preferences: GamePreferences {
-                        stake_amount: 0.5,
-                        time_control: TimeControl {
-                            base_time_seconds: 600,
-                            increment_seconds: 2,
+                event_tx
+                    .send(NetworkEvent::PeerDiscovered(PeerInfo {
+                        node_id: bs58_id.clone(),
+                        wallet_address: format!("sol:{}...", &bs58_id[..8]),
+                        game_preferences: GamePreferences {
+                            stake_amount: 0.5,
+                            time_control: TimeControl {
+                                base_time_seconds: 600,
+                                increment_seconds: 2,
+                            },
+                            variant: ChessVariant::Standard,
                         },
-                        variant: ChessVariant::Standard,
-                    },
-                    last_seen: Instant::now(),
-                    role: NodeRole::Player,
-                    connected_game: None,
-                })).ok();
+                        last_seen: Instant::now(),
+                        role: NodeRole::Player,
+                        connected_game: None,
+                    }))
+                    .ok();
             }
             Ok(IrohEvent::Received(msg)) => {
                 // Helper to extract bytes from either an Update wrapper or raw content.
-                let body_bytes: Option<Vec<u8>> = if let Ok(update) = serde_json::from_slice::<Update>(&msg.content) {
-                    update.body.map(|b| b.to_vec())
-                } else {
-                    Some(msg.content.to_vec())
-                };
+                let body_bytes: Option<Vec<u8>> =
+                    if let Ok(update) = serde_json::from_slice::<Update>(&msg.content) {
+                        update.body.map(|b| b.to_vec())
+                    } else {
+                        Some(msg.content.to_vec())
+                    };
 
                 if let Some(body) = body_bytes {
                     if body.is_empty() {
@@ -239,16 +255,25 @@ async fn process_gossip_stream(
                     match body[0] {
                         // Version 0x02: bincode-encoded SignedNetworkMessage
                         0x02 => {
-                            if let Ok(signed) = bincode::deserialize::<SignedNetworkMessage>(&body[1..]) {
+                            if let Ok(signed) =
+                                bincode::deserialize::<SignedNetworkMessage>(&body[1..])
+                            {
                                 if signed.verify() {
-                                    event_tx.send(NetworkEvent::MessageReceived(bind_identity(signed))).ok();
+                                    event_tx
+                                        .send(NetworkEvent::MessageReceived(bind_identity(signed)))
+                                        .ok();
                                 } else {
                                     let game_id = signed.msg.game_id();
-                                    event_tx.send(NetworkEvent::InvalidMoveRejected {
-                                        game_id,
-                                        reason: "signature verification failed".to_string(),
-                                    }).ok();
-                                    warn!("[NET] Dropped message with invalid signature for game {}", game_id);
+                                    event_tx
+                                        .send(NetworkEvent::InvalidMoveRejected {
+                                            game_id,
+                                            reason: "signature verification failed".to_string(),
+                                        })
+                                        .ok();
+                                    warn!(
+                                        "[NET] Dropped message with invalid signature for game {}",
+                                        game_id
+                                    );
                                 }
                             } else {
                                 warn!("[NET] Failed to bincode-decode signed message");
@@ -257,18 +282,29 @@ async fn process_gossip_stream(
                         // Version 0x01 or anything else: JSON fallback (legacy path)
                         _ => {
                             // Try signed JSON first
-                            if let Ok(signed) = serde_json::from_slice::<SignedNetworkMessage>(&body) {
+                            if let Ok(signed) =
+                                serde_json::from_slice::<SignedNetworkMessage>(&body)
+                            {
                                 if signed.verify() {
-                                    event_tx.send(NetworkEvent::MessageReceived(bind_identity(signed))).ok();
+                                    event_tx
+                                        .send(NetworkEvent::MessageReceived(bind_identity(signed)))
+                                        .ok();
                                 } else {
                                     let game_id = signed.msg.game_id();
-                                    event_tx.send(NetworkEvent::InvalidMoveRejected {
-                                        game_id,
-                                        reason: "signature verification failed".to_string(),
-                                    }).ok();
-                                    warn!("[NET] Dropped message with invalid signature for game {}", game_id);
+                                    event_tx
+                                        .send(NetworkEvent::InvalidMoveRejected {
+                                            game_id,
+                                            reason: "signature verification failed".to_string(),
+                                        })
+                                        .ok();
+                                    warn!(
+                                        "[NET] Dropped message with invalid signature for game {}",
+                                        game_id
+                                    );
                                 }
-                            } else if let Ok(net_msg) = serde_json::from_slice::<NetworkMessage>(&body) {
+                            } else if let Ok(net_msg) =
+                                serde_json::from_slice::<NetworkMessage>(&body)
+                            {
                                 // Plain unsigned legacy message. A3: rejected by
                                 // default — accepting it would let a peer bypass
                                 // authentication entirely by sending plaintext.
@@ -281,10 +317,13 @@ async fn process_gossip_stream(
                                 #[cfg(not(feature = "allow-unsigned-p2p"))]
                                 {
                                     let game_id = net_msg.game_id();
-                                    event_tx.send(NetworkEvent::InvalidMoveRejected {
-                                        game_id,
-                                        reason: "unsigned messages are not accepted".to_string(),
-                                    }).ok();
+                                    event_tx
+                                        .send(NetworkEvent::InvalidMoveRejected {
+                                            game_id,
+                                            reason: "unsigned messages are not accepted"
+                                                .to_string(),
+                                        })
+                                        .ok();
                                     warn!("[NET] Dropped unsigned message for game {}", game_id);
                                 }
                             }
@@ -304,7 +343,7 @@ async fn process_gossip_stream(
 
 /// Polling system to read NetworkEvents from the background task and write them as Bevy events.
 pub fn handle_network_events(
-    mut network_state: ResMut<BraidNetworkState>,
+    mut network_state: ResMut<OnlineNetworkState>,
     mut causal: ResMut<crate::multiplayer::types::CausalChainState>,
     mut network_events: MessageWriter<NetworkEvent>,
     mut resign_events: MessageWriter<ResignEvent>,
@@ -343,7 +382,9 @@ pub fn handle_network_events(
                 }
             }
             NetworkEvent::GameInviteReceived(node_id, prefs) => {
-                network_state.pending_invites.insert(node_id.clone(), prefs.clone());
+                network_state
+                    .pending_invites
+                    .insert(node_id.clone(), prefs.clone());
             }
             NetworkEvent::GameInviteAccepted(_) => {
                 if let Some(session) = &mut network_state.active_session {
@@ -352,10 +393,16 @@ pub fn handle_network_events(
                 }
             }
             NetworkEvent::MessageReceived(msg) => {
-                // P2P-layer replay protection: reject moves/resigns with stale nonce
+                // Online-transport replay protection: reject moves/resigns with stale nonce
                 let game_id = msg.game_id();
-                if let NetworkMessage::Move { nonce, .. } | NetworkMessage::Resign { nonce, .. } = msg {
-                    let expected = network_state.expected_nonces.get(&game_id).copied().unwrap_or(1);
+                if let NetworkMessage::Move { nonce, .. } | NetworkMessage::Resign { nonce, .. } =
+                    msg
+                {
+                    let expected = network_state
+                        .expected_nonces
+                        .get(&game_id)
+                        .copied()
+                        .unwrap_or(1);
                     if *nonce < expected {
                         warn!(
                             "[NET] Replayed move/resign for game {}: nonce {} < expected {}",
@@ -368,13 +415,20 @@ pub fn handle_network_events(
                         continue;
                     }
                     // Accept and advance expected nonce
-                    network_state.expected_nonces.insert(game_id, nonce.saturating_add(1));
+                    network_state
+                        .expected_nonces
+                        .insert(game_id, nonce.saturating_add(1));
                 }
 
                 // A2: build the per-game roster of allowed signer keys from
                 // SessionInfo (broadcast only after the VPS confirms a session is
                 // active). Capped at two — the two participants.
-                if let NetworkMessage::SessionInfo { game_id: sg, session_pubkey, .. } = msg {
+                if let NetworkMessage::SessionInfo {
+                    game_id: sg,
+                    session_pubkey,
+                    ..
+                } = msg
+                {
                     #[cfg(feature = "solana")]
                     let key = session_pubkey.to_bytes().to_vec();
                     #[cfg(not(feature = "solana"))]
@@ -430,7 +484,11 @@ pub fn handle_network_events(
                             );
                             network_events.write(NetworkEvent::InvalidMoveRejected {
                                 game_id,
-                                reason: format!("causal seq gap: got {} expected {}", seq, last + 1),
+                                reason: format!(
+                                    "causal seq gap: got {} expected {}",
+                                    seq,
+                                    last + 1
+                                ),
                             });
                             continue;
                         }
@@ -444,7 +502,11 @@ pub fn handle_network_events(
                         // forking our local head. Verified by the TLA+ model in
                         // specs/CausalChain.tla (CC_byzantine_current = fork,
                         // CC_byzantine_fixed = safe across 15.2M states).
-                        let our_head = causal.head_version.get(&agent_key).cloned().unwrap_or_default();
+                        let our_head = causal
+                            .head_version
+                            .get(&agent_key)
+                            .cloned()
+                            .unwrap_or_default();
                         if !our_head.is_empty() && parent_version != &our_head {
                             warn!(
                                 "[NET] Equivocation detected for game {}: \
@@ -581,14 +643,16 @@ pub fn handle_network_events(
 pub fn feed_local_moves_to_rollup(
     mut move_events: MessageReader<MoveMadeEvent>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
     if network_state.active_session.is_none() {
         return;
     }
 
     for event in move_events.read() {
-        if event.remote { continue; }
+        if event.remote {
+            continue;
+        }
 
         let from_col = (b'a' + event.from.0) as char;
         let from_row = event.from.1 + 1;
@@ -616,10 +680,14 @@ pub fn feed_local_moves_to_rollup(
 pub fn feed_remote_moves_to_rollup(
     mut remote_events: MessageReader<crate::game::events::RemoteMoveApplied>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
-    if network_state.active_session.is_none() { return; }
-    if !rollup_manager.is_creator { return; }
+    if network_state.active_session.is_none() {
+        return;
+    }
+    if !rollup_manager.is_creator {
+        return;
+    }
 
     for event in remote_events.read() {
         rollup_manager.add_local_move(event.uci.clone(), event.next_fen.clone());
@@ -631,7 +699,9 @@ pub fn handle_session_info_from_network(
     mut network_events: MessageReader<NetworkEvent>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
     mut session_key_manager: ResMut<crate::multiplayer::rollup::session_keys::SessionKeyManager>,
-    mut solana_state: Option<ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>>,
+    mut solana_state: Option<
+        ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
 ) {
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(NetworkMessage::SessionInfo {
@@ -641,7 +711,9 @@ pub fn handle_session_info_from_network(
             ..
         }) = event
         {
-            if game_id != &rollup_manager.game_id { continue; }
+            if game_id != &rollup_manager.game_id {
+                continue;
+            }
             if let Some(ref mut state) = solana_state {
                 state.opponent_pubkey = Some(*player_pubkey);
             }
@@ -667,16 +739,20 @@ pub fn finalize_game_on_end(
     mut game_end_events: MessageReader<GameEndedEvent>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
     mut rollup_events: MessageWriter<crate::multiplayer::rollup::manager::RollupEvent>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
     for _event in game_end_events.read() {
-        if network_state.active_session.is_none() { continue; }
+        if network_state.active_session.is_none() {
+            continue;
+        }
         if let Some((moves, next_fens)) = rollup_manager.force_flush() {
-            rollup_events.write(crate::multiplayer::rollup::manager::RollupEvent::GameEndBatch {
-                game_id: rollup_manager.game_id,
-                moves,
-                next_fens,
-            });
+            rollup_events.write(
+                crate::multiplayer::rollup::manager::RollupEvent::GameEndBatch {
+                    game_id: rollup_manager.game_id,
+                    moves,
+                    next_fens,
+                },
+            );
         }
     }
 }
@@ -692,7 +768,9 @@ pub fn emit_game_ended_event(
         *emitted = false;
         return;
     }
-    if *emitted { return; }
+    if *emitted {
+        return;
+    }
     let game_id = match competitive.as_ref().and_then(|c| c.game_id) {
         Some(id) => id,
         None => return,
@@ -720,17 +798,20 @@ pub fn emit_game_ended_event(
 
 /// Convert `NetworkEvent::MessageReceived(NetworkMessage::Move)` into `NetworkMoveEvent`
 /// so that `handle_network_moves` can apply opponent moves to the local board.
-/// Runs for both Iroh-gossip and Braid-HTTP sourced move messages.
+/// Runs for move messages from both direct gossip and relay-backed transport.
 pub fn dispatch_remote_moves(
     mut network_events: MessageReader<NetworkEvent>,
     mut move_events: MessageWriter<crate::game::events::NetworkMoveEvent>,
     game_mode: Res<crate::core::states::GameMode>,
 ) {
-    if *game_mode != crate::core::states::GameMode::BraidMultiplayer {
+    if *game_mode != crate::core::states::GameMode::OnlineMultiplayer {
         return;
     }
     for event in network_events.read() {
-        if let NetworkEvent::MessageReceived(NetworkMessage::Move { move_uci, next_fen, .. }) = event {
+        if let NetworkEvent::MessageReceived(NetworkMessage::Move {
+            move_uci, next_fen, ..
+        }) = event
+        {
             if move_uci.len() >= 4 {
                 let bytes = move_uci.as_bytes();
                 let from_file = bytes[0].wrapping_sub(b'a');
@@ -738,7 +819,10 @@ pub fn dispatch_remote_moves(
                 let to_file = bytes[2].wrapping_sub(b'a');
                 let to_rank = bytes[3].wrapping_sub(b'1');
                 let promotion = move_uci.get(4..5).and_then(|s| s.chars().next());
-                info!("[NET] Dispatching remote move {} as NetworkMoveEvent", move_uci);
+                info!(
+                    "[NET] Dispatching remote move {} as NetworkMoveEvent",
+                    move_uci
+                );
                 move_events.write(crate::game::events::NetworkMoveEvent {
                     from: (from_file, from_rank),
                     to: (to_file, to_rank),
@@ -762,18 +846,20 @@ pub fn handle_resync_response(
 ) {
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(NetworkMessage::ResyncResponse {
-            committed_fen,
-            ..
+            committed_fen, ..
         }) = event
         {
-            warn!("[NET] Applying ResyncResponse — overwriting local engine with FEN: {}", committed_fen);
+            warn!(
+                "[NET] Applying ResyncResponse — overwriting local engine with FEN: {}",
+                committed_fen
+            );
             let _ = engine.set_from_fen(committed_fen);
             *selection = crate::game::resources::Selection::default();
         }
     }
 }
 
-/// Route inbound draw, timeout, rematch, pause/resume, and ping/pong messages into Bevy events.
+/// Route inbound draw, timeout, rematch, and ping/pong messages into Bevy events.
 pub fn handle_game_control_messages(
     mut network_events: MessageReader<NetworkEvent>,
     mut draw_offer: MessageWriter<crate::game::events::DrawOfferEvent>,
@@ -781,13 +867,15 @@ pub fn handle_game_control_messages(
     mut rematch_offer: MessageWriter<crate::game::events::RematchOfferEvent>,
     mut rematch_response: MessageWriter<crate::game::events::RematchResponseEvent>,
     mut flag_timeout: MessageWriter<crate::game::events::FlagTimeoutEvent>,
-    network_state: Res<BraidNetworkState>,
-    mut game_timer: Option<ResMut<crate::game::resources::GameTimer>>,
+    network_state: Res<OnlineNetworkState>,
+    session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
 ) {
     use crate::multiplayer::network::protocol::NetworkMessage;
 
     for event in network_events.read() {
-        let NetworkEvent::MessageReceived(msg) = event else { continue };
+        let NetworkEvent::MessageReceived(msg) = event else {
+            continue;
+        };
 
         match msg {
             NetworkMessage::DrawOffer { player, .. } => {
@@ -796,7 +884,9 @@ pub fn handle_game_control_messages(
                     remote: true,
                 });
             }
-            NetworkMessage::DrawResponse { player, accepted, .. } => {
+            NetworkMessage::DrawResponse {
+                player, accepted, ..
+            } => {
                 draw_response.write(crate::game::events::DrawResponseEvent {
                     player: player.clone(),
                     accepted: *accepted,
@@ -815,32 +905,39 @@ pub fn handle_game_control_messages(
                     remote: true,
                 });
             }
-            NetworkMessage::RematchResponse { player, accepted, .. } => {
+            NetworkMessage::RematchResponse {
+                player, accepted, ..
+            } => {
                 rematch_response.write(crate::game::events::RematchResponseEvent {
                     player: player.clone(),
                     accepted: *accepted,
                     remote: true,
                 });
             }
-            NetworkMessage::PauseRequest { .. } => {
-                if let Some(ref mut timer) = game_timer {
-                    timer.is_running = false;
-                    info!("[NET] Clocks paused by remote player");
+            NetworkMessage::Ping {
+                game_id,
+                timestamp_ms,
+            } => {
+                // Reply with Pong immediately, over both transports.
+                let pong = NetworkMessage::Pong {
+                    game_id: *game_id,
+                    timestamp_ms: *timestamp_ms,
+                };
+                if let (Some(sess), Some(node_b58)) = (
+                    session.as_ref(),
+                    network_state
+                        .node_id
+                        .as_ref()
+                        .map(|id| bs58::encode(id.as_bytes()).into_string()),
+                ) {
+                    crate::multiplayer::network::relay_bridge::relay_send(
+                        &sess.game_id,
+                        &node_b58,
+                        &pong,
+                    );
                 }
-            }
-            NetworkMessage::ResumeRequest { .. } => {
-                if let Some(ref mut timer) = game_timer {
-                    timer.is_running = true;
-                    info!("[NET] Clocks resumed by remote player");
-                }
-            }
-            NetworkMessage::Ping { game_id, timestamp_ms } => {
-                // Reply with Pong immediately.
                 if let Some(tx) = &network_state.message_sender {
-                    let _ = tx.send(NetworkMessage::Pong {
-                        game_id: *game_id,
-                        timestamp_ms: *timestamp_ms,
-                    });
+                    let _ = tx.send(pong);
                 }
             }
             _ => {}
@@ -855,8 +952,8 @@ pub fn send_local_draw_events(
     mut local_rematch_offers: MessageReader<crate::game::events::RematchOfferEvent>,
     mut local_rematch_responses: MessageReader<crate::game::events::RematchResponseEvent>,
     mut local_flag_timeouts: MessageReader<crate::game::events::FlagTimeoutEvent>,
-    network_state: Res<BraidNetworkState>,
-    session: Option<Res<crate::multiplayer::network::braid_pvp::BraidPvpSession>>,
+    network_state: Res<OnlineNetworkState>,
+    session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
 ) {
     use crate::multiplayer::network::protocol::NetworkMessage;
 
@@ -864,14 +961,23 @@ pub fn send_local_draw_events(
         .as_ref()
         .and_then(|s| s.game_id.parse::<u64>().ok())
         .unwrap_or(0);
-    let Some(tx) = &network_state.message_sender else { return };
+    let Some(tx) = &network_state.message_sender else {
+        return;
+    };
 
     for ev in local_draw_offers.read() {
-        if ev.remote { continue; }
-        let _ = tx.send(NetworkMessage::DrawOffer { game_id, player: ev.player.clone() });
+        if ev.remote {
+            continue;
+        }
+        let _ = tx.send(NetworkMessage::DrawOffer {
+            game_id,
+            player: ev.player.clone(),
+        });
     }
     for ev in local_draw_responses.read() {
-        if ev.remote { continue; }
+        if ev.remote {
+            continue;
+        }
         let _ = tx.send(NetworkMessage::DrawResponse {
             game_id,
             player: ev.player.clone(),
@@ -879,11 +985,18 @@ pub fn send_local_draw_events(
         });
     }
     for ev in local_rematch_offers.read() {
-        if ev.remote { continue; }
-        let _ = tx.send(NetworkMessage::RematchOffer { game_id, player: ev.player.clone() });
+        if ev.remote {
+            continue;
+        }
+        let _ = tx.send(NetworkMessage::RematchOffer {
+            game_id,
+            player: ev.player.clone(),
+        });
     }
     for ev in local_rematch_responses.read() {
-        if ev.remote { continue; }
+        if ev.remote {
+            continue;
+        }
         let _ = tx.send(NetworkMessage::RematchResponse {
             game_id,
             player: ev.player.clone(),
@@ -891,7 +1004,9 @@ pub fn send_local_draw_events(
         });
     }
     for ev in local_flag_timeouts.read() {
-        if ev.remote { continue; }
+        if ev.remote {
+            continue;
+        }
         let _ = tx.send(NetworkMessage::FlagTimeout {
             game_id,
             flagged_player: ev.flagged_player.clone(),
@@ -904,7 +1019,7 @@ pub fn send_local_draw_events(
 pub fn handle_resync_request(
     mut network_events: MessageReader<NetworkEvent>,
     engine: Res<crate::engine::board_state::ChessEngine>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(NetworkMessage::ResyncRequest { game_id }) = event {
@@ -928,8 +1043,8 @@ pub fn handle_resync_request(
 pub fn tick_heartbeat(
     time: Res<Time>,
     mut heartbeat: ResMut<HeartbeatState>,
-    network_state: Res<BraidNetworkState>,
-    session: Option<Res<crate::multiplayer::network::braid_pvp::BraidPvpSession>>,
+    network_state: Res<OnlineNetworkState>,
+    session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
     game_mode: Res<crate::core::states::GameMode>,
     mut game_over: ResMut<crate::game::resources::history::game_over::GameOverState>,
     mut next_state: ResMut<NextState<crate::core::GameState>>,
@@ -937,7 +1052,7 @@ pub fn tick_heartbeat(
     use crate::core::states::GameMode;
     use crate::multiplayer::network::protocol::NetworkMessage;
 
-    if *game_mode != GameMode::BraidMultiplayer {
+    if *game_mode != GameMode::OnlineMultiplayer {
         return;
     }
     if heartbeat.timed_out {
@@ -954,23 +1069,48 @@ pub fn tick_heartbeat(
         let jitter = (std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .subsec_millis() % 1000) as f32 / 1000.0 - 0.5;
+            .subsec_millis()
+            % 1000) as f32
+            / 1000.0
+            - 0.5;
         heartbeat.ping_interval = 5.0 + jitter;
         heartbeat.since_last_ping = 0.0;
-        if let (Some(tx), Some(sess)) = (&network_state.message_sender, session.as_ref()) {
+        if let Some(sess) = session.as_ref() {
             let game_id = sess.game_id.parse::<u64>().unwrap_or(0);
             let ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
-            let _ = tx.send(NetworkMessage::Ping { game_id, timestamp_ms: ts });
+            let ping = NetworkMessage::Ping {
+                game_id,
+                timestamp_ms: ts,
+            };
+            // Dual transport: relay keeps the heartbeat alive when gossip isn't linked,
+            // so a relay-only game isn't falsely declared a disconnect.
+            if let Some(node_b58) = network_state
+                .node_id
+                .as_ref()
+                .map(|id| bs58::encode(id.as_bytes()).into_string())
+            {
+                crate::multiplayer::network::relay_bridge::relay_send(
+                    &sess.game_id,
+                    &node_b58,
+                    &ping,
+                );
+            }
+            if let Some(tx) = &network_state.message_sender {
+                let _ = tx.send(ping);
+            }
         }
     }
 
     // Declare disconnect if pong is overdue.
     if heartbeat.since_last_pong >= heartbeat.timeout_secs {
         heartbeat.timed_out = true;
-        warn!("[NET] Heartbeat timeout — opponent disconnected after {:.0}s silence", heartbeat.since_last_pong);
+        warn!(
+            "[NET] Heartbeat timeout — opponent disconnected after {:.0}s silence",
+            heartbeat.since_last_pong
+        );
         // Treat as a win for the local player (opponent abandoned).
         // The game-over screen will show the appropriate message.
         *game_over = crate::game::resources::history::game_over::GameOverState::Stalemate;
@@ -985,8 +1125,9 @@ pub fn handle_pong(
 ) {
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(
-            crate::multiplayer::network::protocol::NetworkMessage::Pong { .. }
-        ) = event {
+            crate::multiplayer::network::protocol::NetworkMessage::Pong { .. },
+        ) = event
+        {
             heartbeat.since_last_pong = 0.0;
         }
     }
@@ -1062,8 +1203,14 @@ mod auth_tests {
         let bound = bind_identity(signed);
         match bound {
             NetworkMessage::Move { agent_id, .. } => {
-                assert_eq!(agent_id, attacker_pub, "agent_id must be the verified signer");
-                assert_ne!(agent_id, victim_id, "the forged victim identity must be discarded");
+                assert_eq!(
+                    agent_id, attacker_pub,
+                    "agent_id must be the verified signer"
+                );
+                assert_ne!(
+                    agent_id, victim_id,
+                    "the forged victim identity must be discarded"
+                );
             }
             _ => panic!("expected Move"),
         }
@@ -1075,6 +1222,9 @@ mod auth_tests {
         let sk = [7u8; 32];
         let msg = NetworkMessage::ResyncRequest { game_id: 42 };
         let signed = SignedNetworkMessage::sign(msg, &sk);
-        assert!(matches!(bind_identity(signed), NetworkMessage::ResyncRequest { game_id: 42 }));
+        assert!(matches!(
+            bind_identity(signed),
+            NetworkMessage::ResyncRequest { game_id: 42 }
+        ));
     }
 }

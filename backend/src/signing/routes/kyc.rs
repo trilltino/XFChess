@@ -14,8 +14,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::signing::AppState;
 use crate::signing::storage::vault::{KycInput, VaultStore};
+use crate::signing::AppState;
 
 /// Country-specific tax ID validation patterns.
 fn get_tax_id_pattern(country: &str) -> Option<Regex> {
@@ -73,7 +73,11 @@ pub async fn submit_kyc(
     // Validate tax ID format for supported countries
     if let Some(pattern) = get_tax_id_pattern(&req.country) {
         if !pattern.is_match(&req.tax_id) {
-            tracing::warn!("[kyc] Invalid tax ID format for country {}: {}", req.country, req.tax_id);
+            tracing::warn!(
+                "[kyc] Invalid tax ID format for country {}: {}",
+                req.country,
+                req.tax_id
+            );
             return Err(StatusCode::BAD_REQUEST);
         }
     }
@@ -96,16 +100,21 @@ pub async fn submit_kyc(
         })?;
 
     // Mark as pending in users_v2 (self-submitted; no on-chain verification yet).
-    let _ = state.store.set_kyc_status(&req.wallet_pubkey, "pending").await;
+    let _ = state
+        .store
+        .set_kyc_status(&req.wallet_pubkey, "pending")
+        .await;
 
     // Persist CACF as under_review until an admin approves.
-    let _ = vault.save_cacf(
-        &req.wallet_pubkey,
-        &req.country,
-        "under_review",
-        false,
-        None,
-    ).await;
+    let _ = vault
+        .save_cacf(
+            &req.wallet_pubkey,
+            &req.country,
+            "under_review",
+            false,
+            None,
+        )
+        .await;
 
     Ok(Json(OkResponse { ok: true }))
 }
@@ -131,7 +140,11 @@ pub async fn user_status(
     let has_wallet_account = user_row.is_some();
 
     // kyc_status from users_v2 ('none' | 'pending' | 'approved')
-    let kyc_status = user_row.as_ref().map(|r| r.3.as_str()).unwrap_or("none").to_string();
+    let kyc_status = user_row
+        .as_ref()
+        .map(|r| r.3.as_str())
+        .unwrap_or("none")
+        .to_string();
 
     // CACF: check persisted record for the user's country (derive from kyc_records).
     let kyc_country = vault.get_kyc(&pubkey).await.map(|r| r.country);

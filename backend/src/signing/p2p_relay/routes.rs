@@ -51,14 +51,17 @@ pub async fn announce_game(
     Json(req): Json<AnnounceGameRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
     let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut games = relay_state
+        .write()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let game_id_clone = req.game_id.clone();
     let host_node_id_clone = req.host_node_id.clone();
 
-    let password_hash = req.password.as_deref().map(|p| {
-        bcrypt::hash(p, 10).unwrap_or_default()
-    });
+    let password_hash = req
+        .password
+        .as_deref()
+        .map(|p| bcrypt::hash(p, 10).unwrap_or_default());
 
     let announcement = super::types::P2PGameAnnouncement {
         game_id: req.game_id,
@@ -87,7 +90,11 @@ pub async fn announce_game(
 
     games.insert(game_id_clone.clone(), active_game);
 
-    tracing::info!("P2P game announced: {} by {}", game_id_clone, host_node_id_clone);
+    tracing::info!(
+        "P2P game announced: {} by {}",
+        game_id_clone,
+        host_node_id_clone
+    );
 
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
@@ -98,7 +105,9 @@ pub async fn list_games(
     Query(filter): Query<LobbyFilter>,
 ) -> Result<AxumJson<Vec<GameListing>>, StatusCode> {
     let relay_state = state.p2p_relay.clone();
-    let games = relay_state.read().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let games = relay_state
+        .read()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let now = Utc::now();
 
     let mut listings: Vec<GameListing> = games
@@ -107,19 +116,20 @@ pub async fn list_games(
         .filter(|g| {
             // time_control filter
             let t = g.announcement.base_time_seconds;
-            filter.time_min.map_or(true, |mn| t >= mn) &&
-            filter.time_max.map_or(true, |mx| t <= mx)
+            filter.time_min.map_or(true, |mn| t >= mn) && filter.time_max.map_or(true, |mx| t <= mx)
         })
         .filter(|g| {
             let s = g.announcement.stake_amount;
-            filter.stake_min.map_or(true, |mn| s >= mn) &&
-            filter.stake_max.map_or(true, |mx| s <= mx)
+            filter.stake_min.map_or(true, |mn| s >= mn)
+                && filter.stake_max.map_or(true, |mx| s <= mx)
         })
         .filter(|g| {
-            if filter.elo_min.is_none() && filter.elo_max.is_none() { return true; }
+            if filter.elo_min.is_none() && filter.elo_max.is_none() {
+                return true;
+            }
             let elo = g.announcement.elo.unwrap_or(1200);
-            filter.elo_min.map_or(true, |mn| elo >= mn) &&
-            filter.elo_max.map_or(true, |mx| elo <= mx)
+            filter.elo_min.map_or(true, |mn| elo >= mn)
+                && filter.elo_max.map_or(true, |mx| elo <= mx)
         })
         .map(|g| {
             let elapsed = now.signed_duration_since(g.last_activity).num_seconds();
@@ -145,12 +155,20 @@ pub async fn list_games(
 
     // Sort
     match filter.sort.as_deref().unwrap_or("newest") {
-        "elo_asc"    => listings.sort_by_key(|l| l.elo.unwrap_or(0)),
-        "elo_desc"   => listings.sort_by(|a, b| b.elo.unwrap_or(0).cmp(&a.elo.unwrap_or(0))),
-        "stake_asc"  => listings.sort_by(|a, b| a.stake_amount.partial_cmp(&b.stake_amount).unwrap_or(std::cmp::Ordering::Equal)),
-        "stake_desc" => listings.sort_by(|a, b| b.stake_amount.partial_cmp(&a.stake_amount).unwrap_or(std::cmp::Ordering::Equal)),
-        "time_asc"   => listings.sort_by_key(|l| l.base_time_seconds),
-        _            => listings.sort_by(|a, b| b.ttl_seconds.cmp(&a.ttl_seconds)), // newest first
+        "elo_asc" => listings.sort_by_key(|l| l.elo.unwrap_or(0)),
+        "elo_desc" => listings.sort_by(|a, b| b.elo.unwrap_or(0).cmp(&a.elo.unwrap_or(0))),
+        "stake_asc" => listings.sort_by(|a, b| {
+            a.stake_amount
+                .partial_cmp(&b.stake_amount)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        "stake_desc" => listings.sort_by(|a, b| {
+            b.stake_amount
+                .partial_cmp(&a.stake_amount)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        "time_asc" => listings.sort_by_key(|l| l.base_time_seconds),
+        _ => listings.sort_by(|a, b| b.ttl_seconds.cmp(&a.ttl_seconds)), // newest first
     }
 
     Ok(AxumJson(listings))
@@ -162,17 +180,25 @@ pub async fn join_game(
     Json(req): Json<JoinGameRequest>,
 ) -> Result<AxumJson<JoinGameResponse>, StatusCode> {
     let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut games = relay_state
+        .write()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let game_id_clone = req.game_id.clone();
     let joiner_node_id_clone = req.joiner_node_id.clone();
 
     let Some(game) = games.get_mut(&req.game_id) else {
-        return Ok(AxumJson(JoinGameResponse { success: false, host_node_id: None }));
+        return Ok(AxumJson(JoinGameResponse {
+            success: false,
+            host_node_id: None,
+        }));
     };
 
     if game.announcement.status != GameStatus::Open {
-        return Ok(AxumJson(JoinGameResponse { success: false, host_node_id: None }));
+        return Ok(AxumJson(JoinGameResponse {
+            success: false,
+            host_node_id: None,
+        }));
     }
 
     // Password check for private rooms
@@ -182,7 +208,10 @@ pub async fn join_game(
             Ok(true) => {}
             _ => {
                 tracing::warn!("Wrong password for game {}", req.game_id);
-                return Ok(AxumJson(JoinGameResponse { success: false, host_node_id: None }));
+                return Ok(AxumJson(JoinGameResponse {
+                    success: false,
+                    host_node_id: None,
+                }));
             }
         }
     }
@@ -211,7 +240,9 @@ pub async fn accept_join(
     Json(req): Json<AcceptJoinReq>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
     let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut games = relay_state
+        .write()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let game_id_for_log = req.game_id.clone();
 
@@ -243,7 +274,9 @@ pub async fn leave_game(
     Json(req): Json<LeaveGameRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
     let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut games = relay_state
+        .write()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if let Some(game) = games.get_mut(&req.game_id) {
         if game.announcement.host_node_id == req.node_id {
@@ -267,7 +300,9 @@ pub async fn send_message(
     Json(req): Json<SendMessageRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
     let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut games = relay_state
+        .write()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let Some(game) = games.get_mut(&req.game_id) else {
         return Ok(AxumJson(AnnounceGameResponse { success: false }));
@@ -294,7 +329,9 @@ pub async fn poll_messages(
     Json(req): Json<PollMessagesRequest>,
 ) -> Result<AxumJson<PollMessagesResponse>, StatusCode> {
     let relay_state = state.p2p_relay.clone();
-    let games = relay_state.read().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let games = relay_state
+        .read()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let Some(game) = games.get(&req.game_id) else {
         return Ok(AxumJson(PollMessagesResponse {
@@ -327,7 +364,9 @@ pub async fn heartbeat_game(
     Json(req): Json<HeartbeatRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
     let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut games = relay_state
+        .write()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if let Some(game) = games.get_mut(&req.game_id) {
         if game.announcement.host_node_id == req.host_node_id {
@@ -344,11 +383,11 @@ pub async fn get_region() -> AxumJson<serde_json::Value> {
     let region = std::env::var("XFCHESS_REGION").unwrap_or_else(|_| "unknown".to_string());
     let label = match region.as_str() {
         "eu-central" | "eu" => "EU (Frankfurt)",
-        "us-east"    | "us" => "US East (New York)",
-        "us-west"           => "US West (Los Angeles)",
-        "ap-southeast"      => "Asia (Singapore)",
-        "ap-northeast"      => "Asia (Tokyo)",
-        _                   => "Unknown Region",
+        "us-east" | "us" => "US East (New York)",
+        "us-west" => "US West (Los Angeles)",
+        "ap-southeast" => "Asia (Singapore)",
+        "ap-northeast" => "Asia (Tokyo)",
+        _ => "Unknown Region",
     };
     AxumJson(serde_json::json!({ "region": region, "label": label }))
 }

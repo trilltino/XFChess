@@ -1,9 +1,6 @@
-use axum::{
-    routing::get,
-    Router, Json, extract::State,
-};
 use crate::error::AppError;
 use crate::signing::AppState;
+use axum::{extract::State, routing::get, Json, Router};
 use serde_json::{json, Value};
 use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
@@ -35,7 +32,9 @@ impl TEERelayer {
     pub async fn get_public_key(&self) -> Result<Pubkey, AppError> {
         // TODO: Fetch actual TEE relayer public key from attestation service
         // For now, return an error since default pubkey is meaningless
-        Err(AppError::Internal("TEE relayer public key not yet implemented".to_string()))
+        Err(AppError::Internal(
+            "TEE relayer public key not yet implemented".to_string(),
+        ))
     }
 
     /// Fetches the current TEE attestation quote
@@ -46,18 +45,14 @@ impl TEERelayer {
 }
 
 /// Returns the TEE relayer public key
-async fn get_tee_pubkey(
-    State(_state): State<AppState>,
-) -> Json<Value> {
+async fn get_tee_pubkey(State(_state): State<AppState>) -> Json<Value> {
     // Placeholder for actual TEE public key
     let tee_pubkey = "PlaceholderTEEPubkey";
     Json(json!({ "pubkey": tee_pubkey }))
 }
 
 /// Returns the current TEE attestation quote
-async fn get_tee_attestation(
-    State(_state): State<AppState>,
-) -> Json<Value> {
+async fn get_tee_attestation(State(_state): State<AppState>) -> Json<Value> {
     // Placeholder for actual attestation quote
     let attestation = "PlaceholderTEEAttestation";
     Json(json!({ "attestation": attestation }))

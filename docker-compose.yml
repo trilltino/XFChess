@@ -9,8 +9,10 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: xfchess-backend
+    # Bind to localhost only — Docker's iptables rules bypass UFW, so a bare
+    # "8090:8090" would expose the port publicly on a VPS. Reach it via nginx.
     ports:
-      - "8090:8090"
+      - "127.0.0.1:8090:8090"
     environment:
       - RUST_LOG=info
       - DATABASE_URL=sqlite:///data/sessions.db?mode=rwc
@@ -35,7 +37,7 @@ services:
     image: prom/prometheus:v2.47.0
     container_name: xfchess-prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -54,14 +56,14 @@ services:
     image: grafana/grafana:10.1.0
     container_name: xfchess-grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3000
     restart: unless-stopped

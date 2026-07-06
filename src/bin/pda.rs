@@ -14,8 +14,7 @@ fn main() {
     let program_id = Pubkey::from_str(PROGRAM_ID).unwrap();
     let id_bytes = game_id.to_le_bytes();
 
-    let (game_pda, game_bump) =
-        Pubkey::find_program_address(&[b"game", &id_bytes], &program_id);
+    let (game_pda, game_bump) = Pubkey::find_program_address(&[b"game", &id_bytes], &program_id);
 
     let (move_log_pda, log_bump) =
         Pubkey::find_program_address(&[b"move_log", &id_bytes], &program_id);
@@ -27,12 +26,21 @@ fn main() {
     println!("Program : {}", program_id);
     println!();
     println!("game PDA              : {} (bump {})", game_pda, game_bump);
-    println!("move_log PDA          : {} (bump {})", move_log_pda, log_bump);
-    println!("session_delegation PDA: {} (bump {})", session_del_pda, sess_bump);
+    println!(
+        "move_log PDA          : {} (bump {})",
+        move_log_pda, log_bump
+    );
+    println!(
+        "session_delegation PDA: {} (bump {})",
+        session_del_pda, sess_bump
+    );
     println!();
     println!("Solscan (devnet):");
     println!("  https://solscan.io/account/{}?cluster=devnet", game_pda);
-    println!("  https://solscan.io/account/{}?cluster=devnet", move_log_pda);
+    println!(
+        "  https://solscan.io/account/{}?cluster=devnet",
+        move_log_pda
+    );
     println!();
     println!("MagicBlock Explorer:");
     println!("  https://explorer.magicblock.app/account/{}", game_pda);

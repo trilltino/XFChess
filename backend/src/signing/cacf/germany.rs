@@ -1,7 +1,7 @@
 //! Germany CACF compliance requirements.
 
-use serde::{Deserialize, Serialize};
 use super::types::CacfComplianceStatus;
+use serde::{Deserialize, Serialize};
 
 /// Germany CACF compliance requirements
 #[derive(Debug, Clone, Serialize, Deserialize)]

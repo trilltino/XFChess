@@ -35,15 +35,15 @@ pub async fn spawn_node(
     };
 
     let proxy_port = port.unwrap_or(8080);
-    
+
     tracing::info!("[INIT] Spawning Node: {} | Port: {}", name, proxy_port);
 
     #[cfg(feature = "proxy")]
     let proxy_config = Some(crate::node::ProxyConfig {
         listen_addr: format!("127.0.0.1:{}", proxy_port).parse().unwrap(),
-        default_peer: iroh::EndpointId::from_bytes(&[0u8; 32]).expect("Invalid placeholder key"), 
+        default_peer: iroh::EndpointId::from_bytes(&[0u8; 32]).expect("Invalid placeholder key"),
     });
-    
+
     #[cfg(not(feature = "proxy"))]
     let proxy_config = None;
 
@@ -57,7 +57,7 @@ pub async fn spawn_node(
 
     let peer = Arc::new(peer);
     let peer_id = peer.node_id();
-    
+
     tracing::info!("[INIT] Node ID: {}", peer_id);
 
     // Initial default subscription (generic, no bootsrap peers yet)
@@ -83,7 +83,7 @@ pub async fn get_or_create_secret_key(name: &str) -> iroh::SecretKey {
     if name == "bob" {
         return iroh::SecretKey::from_bytes(&[2u8; 32]);
     }
-    
+
     let hash = blake3::hash(name.as_bytes());
     iroh::SecretKey::from_bytes(hash.as_bytes())
 }

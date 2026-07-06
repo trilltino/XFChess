@@ -20,3 +20,22 @@ solana-transaction-status = "=2.2.1"
 sha2 = "0.10"
 nimzovich_engine = { path = "../../engine/nimzovich_engine" }
 ephemeral-rollups-sdk = { version = "0.13.0" }
+# Async HTTP for the raw-JSON-RPC load test (precise 429 detection + concurrency).
+reqwest.workspace = true
+# StreamExt for the WebSocket pubsub stream probe (pure Rust, no toolchain).
+tokio-stream = "0.1"
+
+# Geyser gRPC probe — optional, behind the `geyser` feature so the default suite
+# always compiles even if these versions need bumping to match your Triton tier.
+# 6.x targets solana-sdk 2.2.x (matches the workspace pin).
+yellowstone-grpc-client = { version = "6.1.0", optional = true }
+yellowstone-grpc-proto = { version = "6.1.0", optional = true }
+futures = { version = "0.3", optional = true }
+
+[features]
+default = []
+geyser = ["dep:yellowstone-grpc-client", "dep:yellowstone-grpc-proto", "dep:futures"]
+
+[[bin]]
+name = "triton-bench"
+path = "src/bin/triton_bench.rs"

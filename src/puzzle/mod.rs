@@ -181,7 +181,11 @@ fn fetch_next(base: &str, mode: PuzzleMode, wallet: &str) -> NetMsg {
         Err(e) => return NetMsg::Error(e),
     };
     // Base58 pubkeys are URL-safe (alphanumeric, no +/=), so no encoding needed.
-    let url = format!("{base}/puzzle/next?mode={}&wallet={}", mode.as_str(), wallet);
+    let url = format!(
+        "{base}/puzzle/next?mode={}&wallet={}",
+        mode.as_str(),
+        wallet
+    );
     match cl.get(&url).send().and_then(|r| r.json::<PuzzleData>()) {
         Ok(d) => NetMsg::Loaded(d),
         Err(e) => NetMsg::Error(e.to_string()),
@@ -197,7 +201,9 @@ fn poll_net(
     mut game_mode: ResMut<GameMode>,
     mut net_moves: MessageWriter<NetworkMoveEvent>,
 ) {
-    let Some(rx) = session.rx.as_ref() else { return };
+    let Some(rx) = session.rx.as_ref() else {
+        return;
+    };
     let msg = match rx.try_recv() {
         Ok(m) => m,
         Err(_) => return,
@@ -317,7 +323,9 @@ fn capture_player_move(
         }
     }
     let Some(uci) = chosen else { return };
-    let Some(active) = session.active.clone() else { return };
+    let Some(active) = session.active.clone() else {
+        return;
+    };
 
     session.moves.push(uci.clone());
     session.phase = PuzzlePhase::AwaitingServer;
@@ -339,7 +347,12 @@ fn post_move(base: &str, nonce: &str, uci: &str) -> NetMsg {
     };
     let url = format!("{base}/puzzle/move");
     let body = serde_json::json!({ "nonce": nonce, "uci": uci });
-    match cl.post(&url).json(&body).send().and_then(|r| r.json::<MoveOutcome>()) {
+    match cl
+        .post(&url)
+        .json(&body)
+        .send()
+        .and_then(|r| r.json::<MoveOutcome>())
+    {
         Ok(o) => NetMsg::Move(o),
         Err(e) => NetMsg::Error(e.to_string()),
     }

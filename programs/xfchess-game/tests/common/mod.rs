@@ -33,7 +33,11 @@ pub fn game_pda(game_id: u64) -> (Pubkey, u8) {
 
 pub fn sd_pda(game_id: u64, player: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(
-        &[b"session_delegation", &game_id.to_le_bytes(), player.as_ref()],
+        &[
+            b"session_delegation",
+            &game_id.to_le_bytes(),
+            player.as_ref(),
+        ],
         &xfchess_game::ID,
     )
 }
@@ -96,9 +100,32 @@ pub fn game_account(
     white: Pubkey,
     black: Pubkey,
     board_state: [u8; 68],
-    turn: u8,
+    turn: u16,
     nonce: u64,
     status: GameStatus,
+) -> (Pubkey, Account) {
+    game_account_with_delegation(
+        game_id,
+        white,
+        black,
+        board_state,
+        turn,
+        nonce,
+        status,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn game_account_with_delegation(
+    game_id: u64,
+    white: Pubkey,
+    black: Pubkey,
+    board_state: [u8; 68],
+    turn: u16,
+    nonce: u64,
+    status: GameStatus,
+    is_delegated: bool,
 ) -> (Pubkey, Account) {
     let (pda, bump) = game_pda(game_id);
     let g = Game {
@@ -111,7 +138,7 @@ pub fn game_account(
         fee_payer: white,
         result: GameResult::None,
         board_state,
-        move_count: turn.saturating_sub(1) as u16,
+        move_count: turn.saturating_sub(1),
         halfmove_clock: 0,
         turn,
         created_at: 0,
@@ -124,11 +151,21 @@ pub fn game_account(
         base_time_seconds: 0,
         increment_seconds: 0,
         bump,
-        is_delegated: true,
+        is_delegated,
         tournament_id: None,
         nonce,
     };
     (pda, program_account(&g, 8 + Game::INIT_SPACE))
+}
+
+pub fn system_account(lamports: u64) -> Account {
+    Account {
+        lamports,
+        data: Vec::new(),
+        owner: solana_sdk::system_program::ID,
+        executable: false,
+        rent_epoch: 0,
+    }
 }
 
 /// Build a `SessionDelegation` linking `session_key` → `player` for a game.
@@ -190,7 +227,11 @@ pub fn record_move_ix(
         parent_nonce,
     }
     .data();
-    Instruction { program_id: xfchess_game::ID, accounts, data }
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data,
+    }
 }
 
 /// `undelegate_game` instruction with caller-chosen magic accounts (for
@@ -209,7 +250,39 @@ pub fn undelegate_ix(
     }
     .to_account_metas(None);
     let data = xfchess_game::instruction::UndelegateGame { game_id }.data();
-    Instruction { program_id: xfchess_game::ID, accounts, data }
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data,
+    }
+}
+
+pub fn resign_ix(game_id: u64, player: Pubkey) -> Instruction {
+    let accounts = xfchess_game::__client_accounts_resign_game::ResignGame {
+        game: game_pda(game_id).0,
+        player,
+    }
+    .to_account_metas(None);
+    let data = xfchess_game::instruction::Resign { game_id }.data();
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data,
+    }
+}
+
+pub fn claim_timeout_ix(game_id: u64, caller: Pubkey) -> Instruction {
+    let accounts = xfchess_game::__client_accounts_claim_timeout::ClaimTimeout {
+        game: game_pda(game_id).0,
+        caller,
+    }
+    .to_account_metas(None);
+    let data = xfchess_game::instruction::ClaimTimeout { game_id }.data();
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data,
+    }
 }
 
 /// Send one instruction, fee-paid + signed by the test payer plus `extra` signers.

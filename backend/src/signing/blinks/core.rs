@@ -11,11 +11,9 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 
-use crate::signing::storage::tournament::TournamentStore;
 use crate::signing::solana;
-use crate::signing::solana::{
-    claim_prize_ix, initialize_match_ix, start_tournament_ix,
-};
+use crate::signing::solana::{claim_prize_ix, initialize_match_ix, start_tournament_ix};
+use crate::signing::storage::tournament::TournamentStore;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 
@@ -98,9 +96,10 @@ pub async fn get_action_metadata(
     tournament_id: u64,
     store: &TournamentStore,
 ) -> Result<ActionMetadata> {
-    let tournament = store.get(tournament_id).await.ok_or_else(|| {
-        anyhow::anyhow!("Tournament {} not found", tournament_id)
-    })?;
+    let tournament = store
+        .get(tournament_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
     let entry_fee_sol = tournament.entry_fee_lamports as f64 / 1_000_000_000.0;
     let prize_pool_sol = tournament.prize_pool as f64 / 1_000_000_000.0;
@@ -110,9 +109,7 @@ pub async fn get_action_metadata(
         title: tournament.name.clone(),
         description: format!(
             "{}-Player Tournament. Entry: {} SOL. Prize Pool: {} SOL. Register now to compete!",
-            tournament.max_players,
-            entry_fee_sol,
-            prize_pool_sol
+            tournament.max_players, entry_fee_sol, prize_pool_sol
         ),
         label: "Join Tournament".to_string(),
         links: ActionLinks {
@@ -136,25 +133,32 @@ pub async fn build_register_transaction(
     program_id: &Pubkey,
     fee_payer: &Keypair,
 ) -> Result<TransactionResponse> {
-    let tournament = store.get(tournament_id).await.ok_or_else(|| {
-        anyhow::anyhow!("Tournament {} not found", tournament_id)
-    })?;
+    let tournament = store
+        .get(tournament_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
-    let tournament_pda    = super::pda::derive_tournament_pda(tournament_id, program_id)?;
-    let escrow_pda        = super::pda::derive_escrow_pda(tournament_id, program_id)?;
-    let player_profile    = super::pda::derive_player_profile_pda(wallet_pubkey, program_id)?;
-    let shard_0           = super::pda::derive_shard_pda(0, tournament_id, program_id)?;
+    let tournament_pda = super::pda::derive_tournament_pda(tournament_id, program_id)?;
+    let escrow_pda = super::pda::derive_escrow_pda(tournament_id, program_id)?;
+    let player_profile = super::pda::derive_player_profile_pda(wallet_pubkey, program_id)?;
+    let shard_0 = super::pda::derive_shard_pda(0, tournament_id, program_id)?;
 
     // Shards 1–3 are only present for larger tournaments
     let shard_1 = if tournament.max_players > 64 {
         Some(super::pda::derive_shard_pda(1, tournament_id, program_id)?)
-    } else { None };
+    } else {
+        None
+    };
     let shard_2 = if tournament.max_players > 128 {
         Some(super::pda::derive_shard_pda(2, tournament_id, program_id)?)
-    } else { None };
+    } else {
+        None
+    };
     let shard_3 = if tournament.max_players >= 256 {
         Some(super::pda::derive_shard_pda(3, tournament_id, program_id)?)
-    } else { None };
+    } else {
+        None
+    };
 
     let instruction = build_register_player_instruction(
         program_id,
@@ -195,22 +199,30 @@ pub async fn build_claim_prize_transaction(
     program_id: &Pubkey,
     fee_payer: &Keypair,
 ) -> Result<TransactionResponse> {
-    let tournament = store.get(tournament_id).await.ok_or_else(|| {
-        anyhow::anyhow!("Tournament {} not found", tournament_id)
-    })?;
+    let tournament = store
+        .get(tournament_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
     let claimant_str = claimant.to_string();
     let prize_bps = [
-        tournament.winner.as_deref()       == Some(&claimant_str),
+        tournament.winner.as_deref() == Some(&claimant_str),
         tournament.second_place.as_deref() == Some(&claimant_str),
-        tournament.third_place.as_deref()  == Some(&claimant_str),
+        tournament.third_place.as_deref() == Some(&claimant_str),
         tournament.fourth_place.as_deref() == Some(&claimant_str),
-        tournament.fifth_place.as_deref()  == Some(&claimant_str),
-    ].iter().position(|&m| m)
-        .map(|i| tournament.prize_shares[i])
-        .unwrap_or(0);
+        tournament.fifth_place.as_deref() == Some(&claimant_str),
+    ]
+    .iter()
+    .position(|&m| m)
+    .map(|i| tournament.prize_shares[i])
+    .unwrap_or(0);
 
-    anyhow::ensure!(prize_bps > 0, "Wallet {} is not a prize winner in tournament {}", claimant_str, tournament_id);
+    anyhow::ensure!(
+        prize_bps > 0,
+        "Wallet {} is not a prize winner in tournament {}",
+        claimant_str,
+        tournament_id
+    );
 
     let instruction = claim_prize_ix(program_id, tournament_id, claimant);
 
@@ -245,16 +257,22 @@ pub async fn build_start_tournament_transactions(
     authority: &Keypair,
     host_treasury: &Pubkey,
 ) -> Result<Vec<String>> {
-    let tournament = store.get(tournament_id).await.ok_or_else(|| {
-        anyhow::anyhow!("Tournament {} not found", tournament_id)
-    })?;
+    let tournament = store
+        .get(tournament_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
     let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
     let mut out = Vec::new();
 
     // Tx 1: start_tournament
     {
-        let ix = start_tournament_ix(program_id, tournament_id, &authority.pubkey(), host_treasury);
+        let ix = start_tournament_ix(
+            program_id,
+            tournament_id,
+            &authority.pubkey(),
+            host_treasury,
+        );
         let bh = rpc.get_latest_blockhash()?;
         use solana_sdk::{message::Message, transaction::Transaction};
         let msg = Message::new(&[ix], Some(&authority.pubkey()));
@@ -266,24 +284,29 @@ pub async fn build_start_tournament_transactions(
     let total_matches = tournament.max_players as usize - 1;
     let mut match_idx = 0u16;
 
-    for chunk in std::iter::repeat(()).take((total_matches + 19) / 20).zip(0..) {
+    for chunk in std::iter::repeat(())
+        .take((total_matches + 19) / 20)
+        .zip(0..)
+    {
         let _ = chunk;
         let end = ((match_idx as usize + 20).min(total_matches)) as u16;
-        let ixs: Vec<_> = (match_idx..end).map(|idx| {
-            // Derive round from match index for single-elimination bracket
-            let round = (idx as f32).log2() as u8;
-            initialize_match_ix(
-                program_id,
-                tournament_id,
-                idx,
-                round,
-                None, // players filled by start_tournament on-chain
-                None,
-                if idx == 0 { None } else { Some((idx - 1) / 2) },
-                (idx % 2) as u8,
-                &authority.pubkey(),
-            )
-        }).collect();
+        let ixs: Vec<_> = (match_idx..end)
+            .map(|idx| {
+                // Derive round from match index for single-elimination bracket
+                let round = (idx as f32).log2() as u8;
+                initialize_match_ix(
+                    program_id,
+                    tournament_id,
+                    idx,
+                    round,
+                    None, // players filled by start_tournament on-chain
+                    None,
+                    if idx == 0 { None } else { Some((idx - 1) / 2) },
+                    (idx % 2) as u8,
+                    &authority.pubkey(),
+                )
+            })
+            .collect();
 
         let bh = rpc.get_latest_blockhash()?;
         use solana_sdk::{message::Message, transaction::Transaction};
@@ -292,7 +315,9 @@ pub async fn build_start_tournament_transactions(
         out.push(BASE64_STANDARD.encode(bincode::serialize(&tx)?));
 
         match_idx = end;
-        if match_idx as usize >= total_matches { break; }
+        if match_idx as usize >= total_matches {
+            break;
+        }
     }
 
     Ok(out)
@@ -304,9 +329,10 @@ pub async fn check_wallet_balance(
     tournament_id: u64,
     store: &TournamentStore,
 ) -> Result<BalanceResult> {
-    let tournament = store.get(tournament_id).await.ok_or_else(|| {
-        anyhow::anyhow!("Tournament {} not found", tournament_id)
-    })?;
+    let tournament = store
+        .get(tournament_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
     let rpc = solana::make_rpc("https://api.devnet.solana.com");
     let balance = rpc.get_balance(wallet_pubkey)?;
@@ -338,9 +364,10 @@ pub async fn validate_registration(
     _identity_vault: &crate::signing::IdentityVault,
     ip_address: Option<String>,
 ) -> Result<ValidationResult> {
-    let tournament = store.get(tournament_id).await.ok_or_else(|| {
-        anyhow::anyhow!("Tournament {} not found", tournament_id)
-    })?;
+    let tournament = store
+        .get(tournament_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
     // Check tournament capacity
     if tournament.players.len() >= tournament.max_players as usize {
@@ -361,7 +388,11 @@ pub async fn validate_registration(
     }
 
     // Check if already registered
-    if tournament.players.iter().any(|p| p == &wallet_pubkey.to_string()) {
+    if tournament
+        .players
+        .iter()
+        .any(|p| p == &wallet_pubkey.to_string())
+    {
         return Ok(ValidationResult {
             valid: false,
             error: Some("Already registered for this tournament".to_string()),
@@ -400,7 +431,8 @@ pub async fn validate_registration(
 
     // IP-based pattern detection (if IP provided)
     if let Some(ip) = ip_address {
-        if let Some(pattern_error) = super::anti_cheat::check_ip_patterns(&ip, tournament_id).await {
+        if let Some(pattern_error) = super::anti_cheat::check_ip_patterns(&ip, tournament_id).await
+        {
             return Ok(ValidationResult {
                 valid: false,
                 error: Some(pattern_error),
@@ -413,7 +445,10 @@ pub async fn validate_registration(
     Ok(ValidationResult {
         valid: true,
         error: None,
-        next_action: Some(format!("/api/actions/tournament/{}/register", tournament_id)),
+        next_action: Some(format!(
+            "/api/actions/tournament/{}/register",
+            tournament_id
+        )),
     })
 }
 
@@ -453,10 +488,23 @@ fn build_register_player_instruction(
         AccountMeta::new(*escrow_pda, false),
         AccountMeta::new(*shard_0, false),
     ];
-    if let Some(s1) = shard_1 { accounts.push(AccountMeta::new(*s1, false)); }
-    if let Some(s2) = shard_2 { accounts.push(AccountMeta::new(*s2, false)); }
-    if let Some(s3) = shard_3 { accounts.push(AccountMeta::new(*s3, false)); }
-    accounts.push(AccountMeta::new_readonly(solana_sdk::system_program::id(), false));
+    if let Some(s1) = shard_1 {
+        accounts.push(AccountMeta::new(*s1, false));
+    }
+    if let Some(s2) = shard_2 {
+        accounts.push(AccountMeta::new(*s2, false));
+    }
+    if let Some(s3) = shard_3 {
+        accounts.push(AccountMeta::new(*s3, false));
+    }
+    accounts.push(AccountMeta::new_readonly(
+        solana_sdk::system_program::id(),
+        false,
+    ));
 
-    Ok(Instruction { program_id: *program_id, accounts, data })
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
 }

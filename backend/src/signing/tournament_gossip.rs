@@ -63,7 +63,7 @@ impl TournamentGossipService {
                 message_json TEXT NOT NULL,
                 timestamp INTEGER NOT NULL,
                 INDEX idx_tournament_round (tournament_id, round)
-            )"#
+            )"#,
         )
         .execute(&pool)
         .await
@@ -74,11 +74,7 @@ impl TournamentGossipService {
     }
 
     /// Register a topic for a tournament with a live gossip sender
-    pub async fn register_topic(
-        &self,
-        tournament_id: u64,
-        sender: iroh_gossip::api::GossipSender,
-    ) {
+    pub async fn register_topic(&self, tournament_id: u64, sender: iroh_gossip::api::GossipSender) {
         let handle = TopicHandle {
             sender: Some(sender),
             tournament_id,
@@ -101,7 +97,10 @@ impl TournamentGossipService {
                 subscriber_count: AtomicUsize::new(0),
             };
             topics.insert(tournament_id, handle);
-            info!("[gossip] Ensured placeholder topic for tournament {}", tournament_id);
+            info!(
+                "[gossip] Ensured placeholder topic for tournament {}",
+                tournament_id
+            );
         }
     }
 
@@ -232,7 +231,10 @@ impl TournamentGossipService {
 
     /// Check if a topic exists for a tournament
     pub async fn has_topic(&self, tournament_id: u64) -> bool {
-        self.tournament_topics.read().await.contains_key(&tournament_id)
+        self.tournament_topics
+            .read()
+            .await
+            .contains_key(&tournament_id)
     }
 
     /// Remove a topic for a tournament

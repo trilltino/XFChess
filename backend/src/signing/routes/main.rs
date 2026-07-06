@@ -16,14 +16,14 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signer;
 use std::str::FromStr;
 use tracing::{error, info, warn};
-use sha2::{Digest, Sha256};
 
-use crate::signing::{AppState, solana};
 use crate::db::repository::GameRepository;
+use crate::signing::{solana, AppState};
 
 // ── Request / Response types ─────────────────────────────────────────────────
 
@@ -130,8 +130,6 @@ pub struct PlayerProfileResp {
     pub username: String,
 }
 
-
-
 /// Public main API routes — reads and player-initiated writes that carry their
 /// own validation. No relay-secret required.
 pub fn routes() -> Router<AppState> {
@@ -160,7 +158,6 @@ pub fn protected_routes() -> Router<AppState> {
         .route("/game/finalize", post(finalize_game))
 }
 
-
 // ── Auth ──────────────────────────────────────────────────────────────────────
 //
 // NOTE: the former `POST /auth/issue` endpoint was removed. It issued a valid
@@ -186,13 +183,22 @@ pub async fn create_session(
     }
     let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
     let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
-        error!("[VPS] Failed to create session for game {}: {}", req.game_id, e);
+        error!(
+            "[VPS] Failed to create session for game {}: {}",
+            req.game_id, e
+        );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     // 10p per player × 2 players = 20p GBP total platform fee per game
     let platform_fee_lamports = state.rate_cache.gbp_to_lamports(0.20).await.unwrap_or(0);
-    info!("[VPS] Created session for game {} → {} (fee: {} lamports)", req.game_id, session_pubkey, platform_fee_lamports);
-    Ok(Json(CreateSessionResp { session_pubkey: session_pubkey.to_string(), platform_fee_lamports }))
+    info!(
+        "[VPS] Created session for game {} → {} (fee: {} lamports)",
+        req.game_id, session_pubkey, platform_fee_lamports
+    );
+    Ok(Json(CreateSessionResp {
+        session_pubkey: session_pubkey.to_string(),
+        platform_fee_lamports,
+    }))
 }
 
 /// POST /session/activate - Activates a session with wallet-signed setup TX.
@@ -203,8 +209,13 @@ pub async fn activate_session(
     // Idempotency: if the session is already active the TX already landed.
     // Return success without re-submitting to avoid GameAlreadyFull on retries.
     if state.store.is_active(req.game_id).await {
-        info!("[VPS] Session for game {} already active — idempotent success", req.game_id);
-        return Ok(Json(SigResp { sig: "already-active".to_string() }));
+        info!(
+            "[VPS] Session for game {} already active — idempotent success",
+            req.game_id
+        );
+        return Ok(Json(SigResp {
+            sig: "already-active".to_string(),
+        }));
     }
 
     let tx_bytes = base64::Engine::decode(
@@ -219,14 +230,20 @@ pub async fn activate_session(
     // The create_game / join_game instructions require BOTH the player wallet
     // signature (already in tx_bytes) and the session key signature (fee_payer).
     let entry = state.store.get(req.game_id).await.ok_or_else(|| {
-        error!("[VPS] No session found for game {} — call /session/create first", req.game_id);
+        error!(
+            "[VPS] No session found for game {} — call /session/create first",
+            req.game_id
+        );
         StatusCode::NOT_FOUND
     })?;
     let session_keypair = entry.keypair();
 
     // Submit the wallet-signed TX, adding the session key co-signature.
     let sig = solana::cosign_and_submit_tx(&rpc, &session_keypair, &tx_bytes).map_err(|e| {
-        error!("[VPS] Failed to submit setup TX for game {}: {e}", req.game_id);
+        error!(
+            "[VPS] Failed to submit setup TX for game {}: {e}",
+            req.game_id
+        );
         StatusCode::BAD_GATEWAY
     })?;
     info!("[VPS] Setup TX confirmed for game {}: {sig}", req.game_id);
@@ -235,14 +252,23 @@ pub async fn activate_session(
     state.store.activate(req.game_id).await;
 
     // Fund session key from fee-payer pool
-    let entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let entry = state
+        .store
+        .get(req.game_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
     let fee_payer = state.feepayer.next();
     const FUND_LAMPORTS: u64 = 10_000_000; // 0.01 SOL covers ~2000 TXs
     if let Err(e) = solana::fund_account(&rpc, fee_payer, &entry.session_pubkey(), FUND_LAMPORTS) {
-        warn!("[VPS] Could not fund session key for game {}: {e}", req.game_id);
+        warn!(
+            "[VPS] Could not fund session key for game {}: {e}",
+            req.game_id
+        );
     }
 
-    Ok(Json(SigResp { sig: sig.to_string() }))
+    Ok(Json(SigResp {
+        sig: sig.to_string(),
+    }))
 }
 
 /// GET /session/status/:game_id - Gets session status.
@@ -267,7 +293,11 @@ pub async fn record_move(
     State(state): State<AppState>,
     Json(req): Json<RecordMoveReq>,
 ) -> Result<Json<SigResp>, StatusCode> {
-    let entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let entry = state
+        .store
+        .get(req.game_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
     if !entry.active {
         return Err(StatusCode::PRECONDITION_FAILED);
     }
@@ -277,10 +307,14 @@ pub async fn record_move(
     let repo = GameRepository::new(pool.clone());
 
     let prev_fen = if let Ok(moves) = repo.get_moves(&req.game_id.to_string()).await {
-        moves.iter().max_by_key(|m| m.move_number).and_then(|m| m.fen_after.clone())
+        moves
+            .iter()
+            .max_by_key(|m| m.move_number)
+            .and_then(|m| m.fen_after.clone())
     } else {
         None
-    }.unwrap_or_else(|| "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
+    }
+    .unwrap_or_else(|| "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
 
     let mut game = nimzovich_engine::on_chain::CompactBoard::from_fen(&prev_fen).to_on_chain_game();
 
@@ -292,17 +326,19 @@ pub async fn record_move(
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
     // Derive next FEN from the engine (discard client-provided next_fen)
+    let next_board = game.to_compact_board().to_bytes();
     let derived_next_fen = game.to_compact_board().to_fen();
 
-    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let program_id = Pubkey::from_str(&state.config.program_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let session_pk = entry.session_pubkey();
     let session_kp = entry.keypair();
 
     // Internal signing for data-level replay protection
     let mut hasher = Sha256::new();
     hasher.update(req.game_id.to_le_bytes());
-    hasher.update(req.move_uci.as_bytes());
-    hasher.update(derived_next_fen.as_bytes());
+    hasher.update(mv_bytes);
+    hasher.update(next_board);
     hasher.update(req.nonce.to_le_bytes());
     let hash = hasher.finalize();
     let sig_bytes = session_kp.sign_message(&hash).as_ref().to_vec();
@@ -312,21 +348,29 @@ pub async fn record_move(
         &session_pk,
         &entry.wallet_pubkey,
         req.game_id,
-        &req.move_uci,
-        &derived_next_fen,
+        mv_bytes,
+        next_board,
         req.nonce,
         Some(sig_bytes),
-    ).map_err(|e| {
-        error!("[VPS] Failed to build record_move instruction for game {}: {}", req.game_id, e);
+        req.nonce.checked_sub(1),
+    )
+    .map_err(|e| {
+        error!(
+            "[VPS] Failed to build record_move instruction for game {}: {}",
+            req.game_id, e
+        );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let er_rpc = solana::make_rpc(&state.config.er_rpc_url);
+    let er_rpc = solana::make_rpc(&state.config.magic_router_rpc_url);
 
     let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
         error!("[VPS] record_move failed for game {}: {e}", req.game_id);
         StatusCode::BAD_GATEWAY
     })?;
-    info!("[VPS] record_move game {} move {} sig {}", req.game_id, req.move_uci, sig);
+    info!(
+        "[VPS] record_move game {} move {} sig {}",
+        req.game_id, req.move_uci, sig
+    );
 
     // Fire-and-forget DB write with derived FEN
     let game_id_str = req.game_id.to_string();
@@ -341,14 +385,28 @@ pub async fn record_move(
         }
         let move_number = repo.get_next_move_number(&game_id_str).await.unwrap_or(1) as i32;
 
-        let san = generate_san(&repo, &game_id_str, &move_uci, move_number).await.ok();
+        let san = generate_san(&repo, &game_id_str, &move_uci, move_number)
+            .await
+            .ok();
 
-        if let Err(e) = repo.add_move_simple(&game_id_str, move_number, &move_uci, san.as_deref(), Some(&next_fen), &player_wallet).await {
+        if let Err(e) = repo
+            .add_move_simple(
+                &game_id_str,
+                move_number,
+                &move_uci,
+                san.as_deref(),
+                Some(&next_fen),
+                &player_wallet,
+            )
+            .await
+        {
             error!("[DB] Failed to insert move for game {}: {}", game_id_str, e);
         }
     });
 
-    Ok(Json(SigResp { sig: sig.to_string() }))
+    Ok(Json(SigResp {
+        sig: sig.to_string(),
+    }))
 }
 
 /// Upper bound on a single move's think time (ms). Anything larger is a
@@ -369,12 +427,20 @@ pub async fn report_blur_telemetry(
     Json(req): Json<BlurTelemetryReq>,
 ) -> Result<StatusCode, StatusCode> {
     // Only accept telemetry for games this server is actually relaying.
-    state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
+    state
+        .store
+        .get(req.game_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     if req.move_number == 0 {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let expected_color = if req.move_number % 2 == 1 { "white" } else { "black" };
+    let expected_color = if req.move_number % 2 == 1 {
+        "white"
+    } else {
+        "black"
+    };
     if req.color != expected_color {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -393,7 +459,10 @@ pub async fn report_blur_telemetry(
     .execute(&state.store.pool())
     .await
     .map_err(|e| {
-        error!("[telemetry] blur insert failed for game {}: {}", req.game_id, e);
+        error!(
+            "[telemetry] blur insert failed for game {}: {}",
+            req.game_id, e
+        );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -416,16 +485,24 @@ pub async fn undelegate_game(
     State(state): State<AppState>,
     Json(req): Json<UndelegateGameReq>,
 ) -> Result<Json<SigResp>, StatusCode> {
-    let entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
-    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let entry = state
+        .store
+        .get(req.game_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let program_id = Pubkey::from_str(&state.config.program_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let session_kp = entry.keypair();
     let session_pk = entry.session_pubkey();
 
     let ix = solana::undelegate_game_ix(&program_id, &session_pk, req.game_id).map_err(|e| {
-        error!("[VPS] Failed to build undelegate_game instruction for game {}: {}", req.game_id, e);
+        error!(
+            "[VPS] Failed to build undelegate_game instruction for game {}: {}",
+            req.game_id, e
+        );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let er_rpc = solana::make_rpc(&state.config.er_rpc_url);
+    let er_rpc = solana::make_rpc(&state.config.magic_router_rpc_url);
 
     let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
         error!("[VPS] undelegate_game failed for game {}: {e}", req.game_id);
@@ -433,7 +510,9 @@ pub async fn undelegate_game(
     })?;
     info!("[VPS] undelegate_game game {} sig {}", req.game_id, sig);
 
-    Ok(Json(SigResp { sig: sig.to_string() }))
+    Ok(Json(SigResp {
+        sig: sig.to_string(),
+    }))
 }
 
 /// POST /game/finalize - Finalizes a game on devnet.
@@ -441,8 +520,13 @@ pub async fn finalize_game(
     State(state): State<AppState>,
     Json(req): Json<FinalizeGameReq>,
 ) -> Result<Json<FinalizeResp>, StatusCode> {
-    let entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
-    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let entry = state
+        .store
+        .get(req.game_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let program_id = Pubkey::from_str(&state.config.program_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let session_kp = entry.keypair();
 
     let white = Pubkey::from_str(&req.white_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -455,12 +539,14 @@ pub async fn finalize_game(
     let ix = solana::finalize_game_ix(&program_id, req.game_id, &white, &black, winner, &fee_payer);
     let rpc = solana::make_rpc(&state.config.solana_rpc_url);
 
-    // Submit through ER relayer for transaction fee reimbursement
-    let sig = solana::sign_and_submit_er(&rpc, &session_kp, &[ix]).map_err(|e| {
+    let sig = solana::sign_and_submit(&rpc, &session_kp, &[ix]).map_err(|e| {
         error!("[VPS] finalize_game failed for game {}: {e}", req.game_id);
         StatusCode::BAD_GATEWAY
     })?;
-    info!("[VPS] finalize_game game {} winner={:?} sig {}", req.game_id, req.winner, sig);
+    info!(
+        "[VPS] finalize_game game {} winner={:?} sig {}",
+        req.game_id, req.winner, sig
+    );
 
     // Fire-and-forget DB write (log errors but don't fail the HTTP response)
     let game_id_str = req.game_id.to_string();
@@ -479,17 +565,20 @@ pub async fn finalize_game(
         let white_username = repo.get_username(&white).await.ok();
         let black_username = repo.get_username(&black).await.ok();
         // Finalize the game record
-        if let Err(e) = repo.complete_game(
-            &game_id_str,
-            Some(&white),
-            Some(&black),
-            white_username.as_deref(),
-            black_username.as_deref(),
-            winner.as_deref(),
-            None, // final_fen (not provided in request)
-            &sig_str,
-            0.0, // stake_amount (not provided in request)
-        ).await {
+        if let Err(e) = repo
+            .complete_game(
+                &game_id_str,
+                Some(&white),
+                Some(&black),
+                white_username.as_deref(),
+                black_username.as_deref(),
+                winner.as_deref(),
+                None, // final_fen (not provided in request)
+                &sig_str,
+                0.0, // stake_amount (not provided in request)
+            )
+            .await
+        {
             error!("[DB] Failed to finalize game {}: {}", game_id_str, e);
         }
 
@@ -546,7 +635,7 @@ pub async fn finalize_game(
     // Fee breakdown mirroring the on-chain contract constants.
     // COUNTRY_FEE = 1% of pot, ELO_FEE = 1% of pot, both deducted from winner payout.
     const COUNTRY_FEE_BPS: u64 = 100; // 1%
-    const ELO_FEE_BPS: u64 = 100;     // 1%
+    const ELO_FEE_BPS: u64 = 100; // 1%
     let pot = req.wager_lamports.saturating_mul(2);
     let country_fee = pot.saturating_mul(COUNTRY_FEE_BPS) / 10_000;
     let elo_fee = pot.saturating_mul(ELO_FEE_BPS) / 10_000;
@@ -578,7 +667,10 @@ pub async fn get_player_profile(
             }));
         }
         Err(e) => {
-            warn!("[profile] On-chain lookup failed for {}: {} — falling back to DB", pubkey, e);
+            warn!(
+                "[profile] On-chain lookup failed for {}: {} — falling back to DB",
+                pubkey, e
+            );
         }
     }
 
@@ -604,7 +696,7 @@ pub struct UndelegateGameReq {
 #[derive(Deserialize, Serialize)]
 pub struct FinalizeGameReq {
     pub game_id: u64,
-    pub winner: Option<String>,   // "white" | "black" | null (draw)
+    pub winner: Option<String>, // "white" | "black" | null (draw)
     pub white_pubkey: String,
     pub black_pubkey: String,
     /// Per-player wager in lamports (optional; 0 for free games).
@@ -627,19 +719,23 @@ pub async fn sign_tx(
 ) -> Result<Json<SigResp>, StatusCode> {
     use solana_sdk::transaction::Transaction;
 
-    let entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let entry = state
+        .store
+        .get(req.game_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
 
-    let tx_bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        &req.tx_b64,
-    )
-    .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let tx_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &req.tx_b64)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    let mut tx: Transaction = bincode::deserialize(&tx_bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mut tx: Transaction =
+        bincode::deserialize(&tx_bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
     let session_kp = entry.keypair();
 
     let rpc = solana::make_rpc(&state.config.solana_rpc_url);
-    let blockhash = rpc.get_latest_blockhash().map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let blockhash = rpc
+        .get_latest_blockhash()
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
     tx.partial_sign(&[&session_kp], blockhash);
 
     let sig = rpc.send_and_confirm_transaction(&tx).map_err(|e| {
@@ -647,7 +743,9 @@ pub async fn sign_tx(
         StatusCode::BAD_GATEWAY
     })?;
 
-    Ok(Json(SigResp { sig: sig.to_string() }))
+    Ok(Json(SigResp {
+        sig: sig.to_string(),
+    }))
 }
 
 /// POST /session/tee_auth - Verifies wallet ownership for TEE-backed private game state.
@@ -675,19 +773,35 @@ pub async fn tee_auth(
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let sig = Signature::try_from(sig_bytes.as_slice()).map_err(|_| {
-        warn!("[TEE-AUTH] Bad signature length ({} bytes) for game {}", sig_bytes.len(), req.game_id);
+        warn!(
+            "[TEE-AUTH] Bad signature length ({} bytes) for game {}",
+            sig_bytes.len(),
+            req.game_id
+        );
         StatusCode::BAD_REQUEST
     })?;
 
     if !sig.verify(wallet.as_ref(), TEE_AUTH_MESSAGE) {
-        warn!("[TEE-AUTH] Signature mismatch — wallet {} game {}", req.wallet_pubkey, req.game_id);
+        warn!(
+            "[TEE-AUTH] Signature mismatch — wallet {} game {}",
+            req.wallet_pubkey, req.game_id
+        );
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let _entry = state.store.get(req.game_id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let _entry = state
+        .store
+        .get(req.game_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
 
-    info!("[TEE-AUTH] Wallet {} authenticated for game {}", req.wallet_pubkey, req.game_id);
-    Ok(Json(SigResp { sig: "tee-auth-ok".to_string() }))
+    info!(
+        "[TEE-AUTH] Wallet {} authenticated for game {}",
+        req.wallet_pubkey, req.game_id
+    );
+    Ok(Json(SigResp {
+        sig: "tee-auth-ok".to_string(),
+    }))
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -727,7 +841,7 @@ async fn generate_san(
     move_uci: &str,
     move_number: i32,
 ) -> anyhow::Result<String> {
-    use nimzovich_engine::{game_from_fen, do_move, move_to_san};
+    use nimzovich_engine::{do_move, game_from_fen, move_to_san};
 
     // Get previous FEN: last move's fen_after, or start position
     let prev_fen = if move_number <= 1 {
@@ -738,7 +852,9 @@ async fn generate_san(
             .iter()
             .find(|m| m.move_number == move_number - 1)
             .and_then(|m| m.fen_after.clone())
-            .unwrap_or_else(|| "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string())
+            .unwrap_or_else(|| {
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
+            })
     };
 
     let mut game = game_from_fen(&prev_fen);
@@ -753,8 +869,14 @@ async fn generate_san(
     let dst_file = (bytes[2].wrapping_sub(b'a')) as i8;
     let dst_rank = (bytes[3].wrapping_sub(b'1')) as i8;
 
-    if src_file < 0 || src_file > 7 || src_rank < 0 || src_rank > 7
-        || dst_file < 0 || dst_file > 7 || dst_rank < 0 || dst_rank > 7
+    if src_file < 0
+        || src_file > 7
+        || src_rank < 0
+        || src_rank > 7
+        || dst_file < 0
+        || dst_file > 7
+        || dst_rank < 0
+        || dst_rank > 7
     {
         return Err(anyhow::anyhow!("Invalid UCI move: {}", move_uci));
     }
@@ -812,32 +934,44 @@ pub async fn update_free_rated_result(
 
     // Upsert the game record (idempotent if create_game was never called).
     if let Err(e) = repo.upsert_game(&game_id_str).await {
-        error!("[ratings/update] Failed to upsert game {}: {}", req.game_id, e);
+        error!(
+            "[ratings/update] Failed to upsert game {}: {}",
+            req.game_id, e
+        );
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     let white_username = repo.get_username(&req.white_pubkey).await.ok();
     let black_username = repo.get_username(&req.black_pubkey).await.ok();
 
-    if let Err(e) = repo.complete_game(
-        &game_id_str,
-        Some(&req.white_pubkey),
-        Some(&req.black_pubkey),
-        white_username.as_deref(),
-        black_username.as_deref(),
-        winner,
-        None,
-        "",
-        0.0,
-    ).await {
-        error!("[ratings/update] Failed to complete game {}: {}", req.game_id, e);
+    if let Err(e) = repo
+        .complete_game(
+            &game_id_str,
+            Some(&req.white_pubkey),
+            Some(&req.black_pubkey),
+            white_username.as_deref(),
+            black_username.as_deref(),
+            winner,
+            None,
+            "",
+            0.0,
+        )
+        .await
+    {
+        error!(
+            "[ratings/update] Failed to complete game {}: {}",
+            req.game_id, e
+        );
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     state.elo_cache.invalidate(&req.white_pubkey);
     state.elo_cache.invalidate(&req.black_pubkey);
 
-    info!("[ratings/update] Free-rated game {} result recorded (winner={:?})", req.game_id, req.winner);
+    info!(
+        "[ratings/update] Free-rated game {} result recorded (winner={:?})",
+        req.game_id, req.winner
+    );
     Ok(StatusCode::OK)
 }
 
@@ -855,7 +989,9 @@ pub async fn submit_dispute(
         req.disputing_player, req.game_id
     );
     // Return a stub sig so the client can display "dispute submitted".
-    Ok(Json(SigResp { sig: format!("dispute-{}-pending", req.game_id) }))
+    Ok(Json(SigResp {
+        sig: format!("dispute-{}-pending", req.game_id),
+    }))
 }
 
 #[cfg(test)]
@@ -932,9 +1068,7 @@ mod tests {
 
     #[test]
     fn test_undelegate_game_req_serialization() {
-        let req = UndelegateGameReq {
-            game_id: 12345,
-        };
+        let req = UndelegateGameReq { game_id: 12345 };
 
         let json = serde_json::to_string(&req);
         assert!(json.is_ok());

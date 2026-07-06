@@ -17,6 +17,8 @@ pub struct SigningConfig {
     pub solana_rpc_url: String,
     /// MagicBlock Execution Rollup RPC URL (default: devnet EU endpoint)
     pub er_rpc_url: String,
+    /// Magic Router RPC URL. Falls back to ER_RPC_URL when unset.
+    pub magic_router_rpc_url: String,
     /// XFChess program ID on Solana
     pub program_id: String,
     /// Secret key for JWT token signing
@@ -74,6 +76,12 @@ impl SigningConfig {
                 .unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
             er_rpc_url: env::var("ER_RPC_URL")
                 .unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into()),
+            magic_router_rpc_url: env::var("MAGIC_ROUTER_RPC_URL")
+                .or_else(|_| env::var("MAGIC_ROUTER_URL"))
+                .unwrap_or_else(|_| {
+                    env::var("ER_RPC_URL")
+                        .unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into())
+                }),
             // Canonical program ID — matches `declare_id!` in programs/xfchess-game
             // and the deployed devnet program. Override with PROGRAM_ID for other
             // clusters/deployments.
@@ -81,8 +89,9 @@ impl SigningConfig {
                 .unwrap_or_else(|_| "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into()),
             jwt_secret: env::var("JWT_SECRET")
                 .expect("JWT_SECRET must be set — generate with: openssl rand -hex 32"),
-            identity_encryption_key: env::var("IDENTITY_ENCRYPTION_KEY")
-                .expect("IDENTITY_ENCRYPTION_KEY must be set — generate with: openssl rand -hex 32"),
+            identity_encryption_key: env::var("IDENTITY_ENCRYPTION_KEY").expect(
+                "IDENTITY_ENCRYPTION_KEY must be set — generate with: openssl rand -hex 32",
+            ),
             identity_salt: env::var("IDENTITY_SALT")
                 .expect("IDENTITY_SALT must be set — generate with: openssl rand -hex 32"),
             fee_payer_keys: env::var("FEE_PAYER_KEYS")
@@ -99,8 +108,7 @@ impl SigningConfig {
                 .unwrap_or_else(|_| "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string()),
             usdc_mint_pubkey: env::var("USDC_MINT")
                 .unwrap_or_else(|_| "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".to_string()),
-            lichess_client_id: env::var("LICHESS_CLIENT_ID")
-                .unwrap_or_default(),
+            lichess_client_id: env::var("LICHESS_CLIENT_ID").unwrap_or_default(),
         }
     }
 
@@ -121,18 +129,44 @@ impl SigningConfig {
         let is_hex64 = |s: &str| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit());
 
         let checks: Vec<(bool, &str)> = vec![
-            (self.jwt_secret.len() >= 32, "JWT_SECRET too short (need >= 32 chars; openssl rand -hex 32)"),
-            (self.jwt_secret != zero64, "JWT_SECRET is the all-zeros dev placeholder — generate a real one"),
-            (is_hex64(&self.identity_encryption_key), "IDENTITY_ENCRYPTION_KEY must be 64 hex chars (openssl rand -hex 32)"),
-            (self.identity_encryption_key != zero64, "IDENTITY_ENCRYPTION_KEY is the all-zeros dev placeholder"),
-            (is_hex64(&self.identity_salt), "IDENTITY_SALT must be 64 hex chars (openssl rand -hex 32)"),
-            (self.identity_salt != one64, "IDENTITY_SALT is the all-ones dev placeholder"),
-            (self.solana_rpc_url.starts_with("http"), "SOLANA_RPC_URL must be an http(s) URL"),
+            (
+                self.jwt_secret.len() >= 32,
+                "JWT_SECRET too short (need >= 32 chars; openssl rand -hex 32)",
+            ),
+            (
+                self.jwt_secret != zero64,
+                "JWT_SECRET is the all-zeros dev placeholder — generate a real one",
+            ),
+            (
+                is_hex64(&self.identity_encryption_key),
+                "IDENTITY_ENCRYPTION_KEY must be 64 hex chars (openssl rand -hex 32)",
+            ),
+            (
+                self.identity_encryption_key != zero64,
+                "IDENTITY_ENCRYPTION_KEY is the all-zeros dev placeholder",
+            ),
+            (
+                is_hex64(&self.identity_salt),
+                "IDENTITY_SALT must be 64 hex chars (openssl rand -hex 32)",
+            ),
+            (
+                self.identity_salt != one64,
+                "IDENTITY_SALT is the all-ones dev placeholder",
+            ),
+            (
+                self.solana_rpc_url.starts_with("http"),
+                "SOLANA_RPC_URL must be an http(s) URL",
+            ),
         ];
 
-        let mut problems: Vec<&str> = checks.into_iter().filter(|(ok, _)| !ok).map(|(_, m)| m).collect();
+        let mut problems: Vec<&str> = checks
+            .into_iter()
+            .filter(|(ok, _)| !ok)
+            .map(|(_, m)| m)
+            .collect();
         if prod && self.fee_payer_keys.is_empty() {
-            problems.push("FEE_PAYER_KEYS empty — backend cannot pay transaction fees in production");
+            problems
+                .push("FEE_PAYER_KEYS empty — backend cannot pay transaction fees in production");
         }
 
         if problems.is_empty() {

@@ -1,28 +1,30 @@
 //! Contains all global Anchor account structs defining the program's on-chain database layout.
 
-pub mod game;
-pub mod player_profile;
 pub mod dispute;
-pub mod username_record;
+pub mod friendship;
+pub mod game;
+pub mod global_session;
+pub mod platform_fee_vault;
+pub mod player_profile;
+pub mod player_session;
 pub mod tournament;
 pub mod tournament_match;
-pub mod platform_fee_vault;
-pub mod player_session;
 pub mod tournament_session;
 pub mod treasury_vault;
-pub mod global_session;
+pub mod username_record;
 
-pub use game::*;
-pub use player_profile::*;
 pub use dispute::*;
-pub use username_record::*;
+pub use friendship::*;
+pub use game::*;
+pub use global_session::*;
+pub use platform_fee_vault::*;
+pub use player_profile::*;
+pub use player_session::*;
 pub use tournament::*;
 pub use tournament_match::*;
-pub use platform_fee_vault::*;
-pub use player_session::*;
 pub use tournament_session::*;
 pub use treasury_vault::*;
-pub use global_session::*;
+pub use username_record::*;
 
 // Re-export tournament types for use in instructions
 pub use tournament::TournamentType;

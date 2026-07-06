@@ -15,9 +15,9 @@
 
 #![allow(dead_code)]
 
-use std::io::{self, Write};
-use std::env;
 use serde::{Deserialize, Serialize};
+use std::env;
+use std::io::{self, Write};
 
 const VPS_DEFAULT_URL: &str = "https://unrejuvenated-philologically-trudi.ngrok-free.app";
 
@@ -25,7 +25,10 @@ fn vps_base() -> String {
     match env::var("SIGNING_SERVICE_URL") {
         Ok(url) => url,
         Err(e) => {
-            eprintln!("SIGNING_SERVICE_URL error: {:?}, using default: {}", e, VPS_DEFAULT_URL);
+            eprintln!(
+                "SIGNING_SERVICE_URL error: {:?}, using default: {}",
+                e, VPS_DEFAULT_URL
+            );
             VPS_DEFAULT_URL.to_string()
         }
     }
@@ -37,19 +40,28 @@ fn get_api_key() -> String {
 
 fn client() -> reqwest::blocking::Client {
     let api_key = get_api_key();
-    
+
     let mut h = reqwest::header::HeaderMap::new();
-    h.insert("ngrok-skip-browser-warning", reqwest::header::HeaderValue::from_static("true"));
-    h.insert("Content-Type", reqwest::header::HeaderValue::from_static("application/json"));
-    
+    h.insert(
+        "ngrok-skip-browser-warning",
+        reqwest::header::HeaderValue::from_static("true"),
+    );
+    h.insert(
+        "Content-Type",
+        reqwest::header::HeaderValue::from_static("application/json"),
+    );
+
     match reqwest::header::HeaderValue::from_str(&api_key) {
         Ok(val) => h.insert("X-API-Key", val),
         Err(e) => {
-            eprintln!("Invalid API key format: {:?}. API key must be valid HTTP header value.", e);
+            eprintln!(
+                "Invalid API key format: {:?}. API key must be valid HTTP header value.",
+                e
+            );
             panic!("Cannot create client with invalid API key");
         }
     };
-    
+
     reqwest::blocking::Client::builder()
         .default_headers(h)
         .timeout(std::time::Duration::from_secs(120))
@@ -214,49 +226,48 @@ fn confirm(prompt: &str) -> bool {
 
 fn list_tournaments() {
     println!("\n[LIST] Fetching tournaments...\n");
-    
-    match client()
-        .get(format!("{}/tournaments", vps_base()))
-        .send()
-    {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<Vec<TournamentSummary>>() {
-                Ok(tournaments) => {
-                    if tournaments.is_empty() {
-                        println!("  No tournaments found.");
-                        return;
-                    }
-                    
-                    println!("┌────────────┬─────────────────────────┬──────────┬─────────────┬───────────────┬────────────────┐");
-                    println!("│ ID         │ Name                    │ Status   │ Players     │ Entry Fee     │ Prize Pool     │");
-                    println!("├────────────┼─────────────────────────┼──────────┼─────────────┼───────────────┼────────────────┤");
-                    
-                    for t in tournaments {
-                        let fee_display = if t.entry_fee_lamports == 0 {
-                            "FREE".to_string()
-                        } else {
-                            format!("{:>6.3} SOL", t.entry_fee_lamports as f64 / 1_000_000_000.0)
-                        };
-                        let prize_display = if t.entry_fee_lamports == 0 {
-                            "N/A".to_string()
-                        } else {
-                            format!("{:>8.3} SOL", (t.registered as u64 * t.entry_fee_lamports) as f64 / 1_000_000_000.0)
-                        };
-                        println!("│ {:<10} │ {:<23} │ {:<8} │ {:>3}/{:<3}     │ {:<13} │ {:<14} │",
-                            t.tournament_id,
-                            &t.name[..t.name.len().min(23)],
-                            t.status,
-                            t.registered,
-                            t.max_players,
-                            fee_display,
-                            prize_display
-                        );
-                    }
-                    println!("└────────────┴─────────────────────────┴──────────┴─────────────┴───────────────┴────────────────┘");
+
+    match client().get(format!("{}/tournaments", vps_base())).send() {
+        Ok(resp) if resp.status().is_success() => match resp.json::<Vec<TournamentSummary>>() {
+            Ok(tournaments) => {
+                if tournaments.is_empty() {
+                    println!("  No tournaments found.");
+                    return;
                 }
-                Err(e) => println!("  [ERROR] Error parsing response: {}", e),
+
+                println!("┌────────────┬─────────────────────────┬──────────┬─────────────┬───────────────┬────────────────┐");
+                println!("│ ID         │ Name                    │ Status   │ Players     │ Entry Fee     │ Prize Pool     │");
+                println!("├────────────┼─────────────────────────┼──────────┼─────────────┼───────────────┼────────────────┤");
+
+                for t in tournaments {
+                    let fee_display = if t.entry_fee_lamports == 0 {
+                        "FREE".to_string()
+                    } else {
+                        format!("{:>6.3} SOL", t.entry_fee_lamports as f64 / 1_000_000_000.0)
+                    };
+                    let prize_display = if t.entry_fee_lamports == 0 {
+                        "N/A".to_string()
+                    } else {
+                        format!(
+                            "{:>8.3} SOL",
+                            (t.registered as u64 * t.entry_fee_lamports) as f64 / 1_000_000_000.0
+                        )
+                    };
+                    println!(
+                        "│ {:<10} │ {:<23} │ {:<8} │ {:>3}/{:<3}     │ {:<13} │ {:<14} │",
+                        t.tournament_id,
+                        &t.name[..t.name.len().min(23)],
+                        t.status,
+                        t.registered,
+                        t.max_players,
+                        fee_display,
+                        prize_display
+                    );
+                }
+                println!("└────────────┴─────────────────────────┴──────────┴─────────────┴───────────────┴────────────────┘");
             }
-        }
+            Err(e) => println!("  [ERROR] Error parsing response: {}", e),
+        },
         Ok(resp) => println!("  [ERROR] HTTP error: {}", resp.status()),
         Err(e) => println!("  [ERROR] Request failed: {}", e),
     }
@@ -264,10 +275,10 @@ fn list_tournaments() {
 
 fn create_tournament() {
     println!("\n[CREATE] Create New Tournament\n");
-    
+
     let tournament_id = read_u64("Tournament ID (unique number)");
     let name = read_string("Tournament name");
-    
+
     println!("\nEntry fee options:");
     println!("  0          = FREE tournament (practice, no prizes)");
     println!("  10000000   = 0.01 SOL (example: ~2 GBP at 200 GBP/SOL)");
@@ -275,7 +286,7 @@ fn create_tournament() {
     println!("  500000000  = 0.5 SOL");
     let entry_fee_lamports = read_u64("Entry fee (lamports, 1 SOL = 1_000_000_000)");
     let is_free = entry_fee_lamports == 0;
-    
+
     println!("\nPlayer count options: 8, 16, 32, 64, 128");
     let max_players = loop {
         let n = read_u16("Max players");
@@ -284,13 +295,16 @@ fn create_tournament() {
         }
         println!("  Invalid choice. Must be 8, 16, 32, 64, or 128.");
     };
-    
+
     // Default prize shares
     let prize_shares: [u16; 4] = if is_free {
         println!("\n[FREE] No prize distribution for free tournaments.");
         [0, 0, 0, 0]
     } else if max_players >= 16 {
-        println!("\nDefault prize distribution for {} players: 50%/30%/15%/5%", max_players);
+        println!(
+            "\nDefault prize distribution for {} players: 50%/30%/15%/5%",
+            max_players
+        );
         if confirm("Use custom prize shares?") {
             let first = read_u16("1st place (basis points, 10000 = 100%)") as u16;
             let second = read_u16("2nd place (basis points)") as u16;
@@ -304,7 +318,7 @@ fn create_tournament() {
         println!("\n8-player tournament: Winner-take-all (100%)");
         [10000, 0, 0, 0]
     };
-    
+
     let req = CreateTournamentReq {
         tournament_id,
         name: name.clone(),
@@ -312,7 +326,7 @@ fn create_tournament() {
         max_players,
         prize_shares: Some(prize_shares),
     };
-    
+
     println!("\n[SENDING] Creating tournament...");
     match client()
         .post(format!("{}/admin/tournament/create", vps_base()))
@@ -326,8 +340,12 @@ fn create_tournament() {
             if is_free {
                 println!("     Entry Fee: FREE (Practice Tournament)");
             } else {
-                println!("     Entry Fee: {:.6} SOL", entry_fee_lamports as f64 / 1_000_000_000.0);
-                println!("     Prize Pool: {:.3} SOL ({} x {:.6} SOL)",
+                println!(
+                    "     Entry Fee: {:.6} SOL",
+                    entry_fee_lamports as f64 / 1_000_000_000.0
+                );
+                println!(
+                    "     Prize Pool: {:.3} SOL ({} x {:.6} SOL)",
                     (max_players as f64 * entry_fee_lamports as f64) / 1_000_000_000.0,
                     max_players,
                     entry_fee_lamports as f64 / 1_000_000_000.0
@@ -346,9 +364,9 @@ fn create_tournament() {
 
 fn view_tournament() {
     let id = read_u64("Tournament ID");
-    
+
     println!("\n[VIEW] Fetching tournament {}...\n", id);
-    
+
     match client()
         .get(format!("{}/tournament/{}", vps_base(), id))
         .send()
@@ -359,13 +377,21 @@ fn view_tournament() {
                     // Calculate actual prize pool from entry fees (on-chain model)
                     let actual_prize_pool = t.entry_fee_lamports * t.players.len() as u64;
                     let is_free = t.entry_fee_lamports == 0;
-                    
+
                     println!("┌─────────────────────────────────────────────────────────────────┐");
-                    println!("│ TOURNAMENT #{} {:<48}│", t.tournament_id, &t.name[..t.name.len().min(48)]);
+                    println!(
+                        "│ TOURNAMENT #{} {:<48}│",
+                        t.tournament_id,
+                        &t.name[..t.name.len().min(48)]
+                    );
                     println!("├─────────────────────────────────────────────────────────────────┤");
                     println!("│ Status:     {:<50}│", t.status);
-                    println!("│ Players:    {:>3}/{:<47}│", t.players.len(), t.max_players);
-                    
+                    println!(
+                        "│ Players:    {:>3}/{:<47}│",
+                        t.players.len(),
+                        t.max_players
+                    );
+
                     if is_free {
                         println!("│ Entry Fee:  FREE (Practice Tournament){:>25}│", "");
                         println!("│ Prize Pool: N/A (No prizes){:>37}│", "");
@@ -373,18 +399,24 @@ fn view_tournament() {
                         let fee_sol = t.entry_fee_lamports as f64 / 1_000_000_000.0;
                         let pool_sol = actual_prize_pool as f64 / 1_000_000_000.0;
                         println!("│ Entry Fee:  {:>10.6} SOL per player{:>25}│", fee_sol, "");
-                        println!("│ Prize Pool: {:>10.3} SOL ({} players x {:.6} SOL){:>10}│", 
-                            pool_sol, t.players.len(), fee_sol, "");
+                        println!(
+                            "│ Prize Pool: {:>10.3} SOL ({} players x {:.6} SOL){:>10}│",
+                            pool_sol,
+                            t.players.len(),
+                            fee_sol,
+                            ""
+                        );
                     }
-                    
-                    println!("│ Prize Dist: {:>4}/{:>4}/{:>4}/{:>4} % (1st/2nd/3rd/4th){:>13}│",
+
+                    println!(
+                        "│ Prize Dist: {:>4}/{:>4}/{:>4}/{:>4} % (1st/2nd/3rd/4th){:>13}│",
                         t.prize_shares[0] / 100,
                         t.prize_shares[1] / 100,
                         t.prize_shares[2] / 100,
                         t.prize_shares[3] / 100,
                         ""
                     );
-                    
+
                     if let Some(ref w) = t.winner {
                         println!("│ Winner:     {:<50}│", &w[..w.len().min(50)]);
                     }
@@ -397,21 +429,22 @@ fn view_tournament() {
                     if let Some(ref t4) = t.fourth_place {
                         println!("│ 4th Place:  {:<50}│", &t4[..t4.len().min(50)]);
                     }
-                    
+
                     println!("├─────────────────────────────────────────────────────────────────┤");
                     println!("│ REGISTERED PLAYERS (sorted by ELO):                             │");
                     println!("├─────────────────────────────────────────────────────────────────┤");
-                    
-                    for (i, (player, elo)) in t.players.iter().zip(t.player_elos.iter()).enumerate() {
+
+                    for (i, (player, elo)) in t.players.iter().zip(t.player_elos.iter()).enumerate()
+                    {
                         let seed = i + 1;
                         let short_id = if player.len() > 40 {
-                            format!("{}...{}", &player[..20], &player[player.len()-17..])
+                            format!("{}...{}", &player[..20], &player[player.len() - 17..])
                         } else {
                             player.clone()
                         };
                         println!("│ #{} {:<6} ELO: {:<5} {:<43}│", seed, "", elo, short_id);
                     }
-                    
+
                     println!("└─────────────────────────────────────────────────────────────────┘");
                 }
                 Err(e) => println!("  [ERROR] Error parsing: {}", e),
@@ -425,63 +458,70 @@ fn view_tournament() {
 
 fn view_matches() {
     let id = read_u64("Tournament ID");
-    
+
     println!("\n[MATCHES] Fetching matches for tournament {}...\n", id);
-    
+
     match client()
         .get(format!("{}/tournament/{}/bracket", vps_base(), id))
         .send()
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<TournamentDetail>() {
-                Ok(t) => {
-                    if t.matches.is_empty() {
-                        println!("  No matches yet. Tournament may not have started.");
-                        return;
-                    }
-                    
-                    println!("┌─────────────────────────────────────────────────────────────────────────────────┐");
-                    println!("│ MATCHES                                                                          │");
-                    println!("├──────┬───────┬────────────────────────────────┬────────────────────────────────┤");
-                    println!("│ Idx  │ Round │ White                          │ Black                          │");
-                    println!("├──────┼───────┼────────────────────────────────┼────────────────────────────────┤");
-                    
-                    for (i, m_opt) in t.matches.iter().enumerate() {
-                        if let Some(ref m) = m_opt {
-                            let white = m.player_white.as_ref()
-                                .map(|p| format!("{:.20}...", p))
-                                .unwrap_or_else(|| "TBD".to_string());
-                            let black = m.player_black.as_ref()
-                                .map(|p| format!("{:.20}...", p))
-                                .unwrap_or_else(|| "TBD".to_string());
-                            
-                            let status_marker = if m.winner.is_some() {
-                                "[DONE]"
-                            } else if m.game_id.is_some() {
-                                "[ACTIVE]"
-                            } else {
-                                "[PENDING]"
-                            };
-                            
-                            println!("│ {:>3}{} │ {:>5} │ {:<30} │ {:<30} │",
-                                m.match_index, status_marker, m.round, white, black);
-                            
-                            if let Some(ref winner) = m.winner {
-                                println!("│      │       │ Winner: {:<54} │", &winner[..winner.len().min(54)]);
-                            }
-                            if let Some(game_id) = m.game_id {
-                                println!("│      │       │ Game ID: {:<53} │", game_id);
-                            }
-                        } else {
-                            println!("│ {:>3}  │ TBD   │ {:<30} │ {:<30} │", i, "-", "-");
-                        }
-                    }
-                    println!("└──────┴───────┴────────────────────────────────┴────────────────────────────────┘");
-                    println!("\nLegend: [PENDING] = Pending, [ACTIVE] = Active, [DONE] = Complete");
+        Ok(resp) if resp.status().is_success() => match resp.json::<TournamentDetail>() {
+            Ok(t) => {
+                if t.matches.is_empty() {
+                    println!("  No matches yet. Tournament may not have started.");
+                    return;
                 }
-                Err(e) => println!("  [ERROR] Error parsing: {}", e),
+
+                println!("┌─────────────────────────────────────────────────────────────────────────────────┐");
+                println!("│ MATCHES                                                                          │");
+                println!("├──────┬───────┬────────────────────────────────┬────────────────────────────────┤");
+                println!("│ Idx  │ Round │ White                          │ Black                          │");
+                println!("├──────┼───────┼────────────────────────────────┼────────────────────────────────┤");
+
+                for (i, m_opt) in t.matches.iter().enumerate() {
+                    if let Some(ref m) = m_opt {
+                        let white = m
+                            .player_white
+                            .as_ref()
+                            .map(|p| format!("{:.20}...", p))
+                            .unwrap_or_else(|| "TBD".to_string());
+                        let black = m
+                            .player_black
+                            .as_ref()
+                            .map(|p| format!("{:.20}...", p))
+                            .unwrap_or_else(|| "TBD".to_string());
+
+                        let status_marker = if m.winner.is_some() {
+                            "[DONE]"
+                        } else if m.game_id.is_some() {
+                            "[ACTIVE]"
+                        } else {
+                            "[PENDING]"
+                        };
+
+                        println!(
+                            "│ {:>3}{} │ {:>5} │ {:<30} │ {:<30} │",
+                            m.match_index, status_marker, m.round, white, black
+                        );
+
+                        if let Some(ref winner) = m.winner {
+                            println!(
+                                "│      │       │ Winner: {:<54} │",
+                                &winner[..winner.len().min(54)]
+                            );
+                        }
+                        if let Some(game_id) = m.game_id {
+                            println!("│      │       │ Game ID: {:<53} │", game_id);
+                        }
+                    } else {
+                        println!("│ {:>3}  │ TBD   │ {:<30} │ {:<30} │", i, "-", "-");
+                    }
+                }
+                println!("└──────┴───────┴────────────────────────────────┴────────────────────────────────┘");
+                println!("\nLegend: [PENDING] = Pending, [ACTIVE] = Active, [DONE] = Complete");
             }
-        }
+            Err(e) => println!("  [ERROR] Error parsing: {}", e),
+        },
         Ok(resp) if resp.status() == 404 => println!("  [ERROR] Tournament not found."),
         Ok(resp) => println!("  [ERROR] HTTP error: {}", resp.status()),
         Err(e) => println!("  [ERROR] Request failed: {}", e),
@@ -493,17 +533,21 @@ fn record_result() {
     let match_index = read_usize("Match index");
     let winner = read_string("Winner pubkey (base58)");
     let loser = read_string("Loser pubkey (base58)");
-    
+
     let req = RecordResultReq {
         match_index,
         winner: winner.clone(),
         loser: loser.clone(),
     };
-    
+
     println!("\n[RECORD] Recording result for match {}...", match_index);
-    
+
     match client()
-        .post(format!("{}/admin/tournament/{}/record-result", vps_base(), tournament_id))
+        .post(format!(
+            "{}/admin/tournament/{}/record-result",
+            vps_base(),
+            tournament_id
+        ))
         .json(&req)
         .send()
     {
@@ -531,15 +575,25 @@ fn set_match_game_id() {
         game_id,
     };
 
-    println!("\n[LINK] Setting game ID {} for match {}...", game_id, match_index);
+    println!(
+        "\n[LINK] Setting game ID {} for match {}...",
+        game_id, match_index
+    );
 
     match client()
-        .post(format!("{}/admin/tournament/{}/set-match-game-id", vps_base(), tournament_id))
+        .post(format!(
+            "{}/admin/tournament/{}/set-match-game-id",
+            vps_base(),
+            tournament_id
+        ))
         .json(&req)
         .send()
     {
         Ok(resp) if resp.status().is_success() => {
-            println!("  [OK] Game ID set! Match {} is now linked to game {}.", match_index, game_id);
+            println!(
+                "  [OK] Game ID set! Match {} is now linked to game {}.",
+                match_index, game_id
+            );
         }
         Ok(resp) => {
             let status = resp.status();
@@ -559,78 +613,98 @@ fn calculate_prizes() {
         .get(format!("{}/tournament/{}", vps_base(), id))
         .send()
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<TournamentDetail>() {
-                Ok(t) => {
-                    let is_free = t.entry_fee_lamports == 0;
-                    let actual_prize_pool = t.entry_fee_lamports * t.players.len() as u64;
-                    let pool_sol = actual_prize_pool as f64 / 1_000_000_000.0;
+        Ok(resp) if resp.status().is_success() => match resp.json::<TournamentDetail>() {
+            Ok(t) => {
+                let is_free = t.entry_fee_lamports == 0;
+                let actual_prize_pool = t.entry_fee_lamports * t.players.len() as u64;
+                let pool_sol = actual_prize_pool as f64 / 1_000_000_000.0;
 
-                    println!("┌─────────────────────────────────────────────────────────────────┐");
-                    println!("│ PRIZE BREAKDOWN                                                │");
+                println!("┌─────────────────────────────────────────────────────────────────┐");
+                println!("│ PRIZE BREAKDOWN                                                │");
+                println!("├─────────────────────────────────────────────────────────────────┤");
+
+                if is_free {
+                    println!("│ This is a FREE practice tournament.                             │");
+                    println!("│ No monetary prizes - play for fun and bragging rights!        │");
                     println!("├─────────────────────────────────────────────────────────────────┤");
-
-                    if is_free {
-                        println!("│ This is a FREE practice tournament.                             │");
-                        println!("│ No monetary prizes - play for fun and bragging rights!        │");
-                        println!("├─────────────────────────────────────────────────────────────────┤");
-                        println!("│ Places:                                                         │");
-                        println!("│   1st: {}                                                       │",
-                            t.winner.as_ref().map(|w| &w[..w.len().min(58)])
-                                .unwrap_or("TBD"));
-                        println!("│   2nd: {}                                                       │",
-                            t.second_place.as_ref().map(|w| &w[..w.len().min(58)])
-                                .unwrap_or("TBD"));
-                        if t.third_place.is_some() {
-                            println!("│   3rd: {}                                                       │",
-                                t.third_place.as_ref().map(|w| &w[..w.len().min(58)])
-                                    .unwrap_or("TBD"));
-                        }
-                        if t.fourth_place.is_some() {
-                            println!("│   4th: {}                                                       │",
-                                t.fourth_place.as_ref().map(|w| &w[..w.len().min(58)])
-                                    .unwrap_or("TBD"));
-                        }
-                        println!("└─────────────────────────────────────────────────────────────────┘");
-                        return;
+                    println!("│ Places:                                                         │");
+                    println!(
+                        "│   1st: {}                                                       │",
+                        t.winner
+                            .as_ref()
+                            .map(|w| &w[..w.len().min(58)])
+                            .unwrap_or("TBD")
+                    );
+                    println!(
+                        "│   2nd: {}                                                       │",
+                        t.second_place
+                            .as_ref()
+                            .map(|w| &w[..w.len().min(58)])
+                            .unwrap_or("TBD")
+                    );
+                    if t.third_place.is_some() {
+                        println!(
+                            "│   3rd: {}                                                       │",
+                            t.third_place
+                                .as_ref()
+                                .map(|w| &w[..w.len().min(58)])
+                                .unwrap_or("TBD")
+                        );
                     }
+                    if t.fourth_place.is_some() {
+                        println!(
+                            "│   4th: {}                                                       │",
+                            t.fourth_place
+                                .as_ref()
+                                .map(|w| &w[..w.len().min(58)])
+                                .unwrap_or("TBD")
+                        );
+                    }
+                    println!("└─────────────────────────────────────────────────────────────────┘");
+                    return;
+                }
 
-                    println!("│ Total Prize Pool: {:>10.3} SOL                                 │", pool_sol);
-                    println!("│ Distribution:     {:>4}.{:>02}% / {:>4}.{:>02}% / {:>4}.{:>02}% / {:>4}.{:>02}%          │",
+                println!(
+                    "│ Total Prize Pool: {:>10.3} SOL                                 │",
+                    pool_sol
+                );
+                println!("│ Distribution:     {:>4}.{:>02}% / {:>4}.{:>02}% / {:>4}.{:>02}% / {:>4}.{:>02}%          │",
                         t.prize_shares[0] / 100, t.prize_shares[0] % 100,
                         t.prize_shares[1] / 100, t.prize_shares[1] % 100,
                         t.prize_shares[2] / 100, t.prize_shares[2] % 100,
                         t.prize_shares[3] / 100, t.prize_shares[3] % 100,
                     );
-                    println!("├─────────────────────────────────────────────────────────────────┤");
+                println!("├─────────────────────────────────────────────────────────────────┤");
 
-                    let prizes = [
-                        ("1st Place", t.prize_shares[0], t.winner.as_ref()),
-                        ("2nd Place", t.prize_shares[1], t.second_place.as_ref()),
-                        ("3rd Place", t.prize_shares[2], t.third_place.as_ref()),
-                        ("4th Place", t.prize_shares[3], t.fourth_place.as_ref()),
-                    ];
+                let prizes = [
+                    ("1st Place", t.prize_shares[0], t.winner.as_ref()),
+                    ("2nd Place", t.prize_shares[1], t.second_place.as_ref()),
+                    ("3rd Place", t.prize_shares[2], t.third_place.as_ref()),
+                    ("4th Place", t.prize_shares[3], t.fourth_place.as_ref()),
+                ];
 
-                    for (place, share, winner) in prizes {
-                        if share > 0 {
-                            let amount = (actual_prize_pool as u128 * share as u128 / 10000) as f64 / 1_000_000_000.0;
-                            let recipient = winner.map(|w| {
+                for (place, share, winner) in prizes {
+                    if share > 0 {
+                        let amount = (actual_prize_pool as u128 * share as u128 / 10000) as f64
+                            / 1_000_000_000.0;
+                        let recipient = winner
+                            .map(|w| {
                                 if w.len() > 44 {
-                                    format!("{}...{}", &w[..20], &w[w.len()-21..])
+                                    format!("{}...{}", &w[..20], &w[w.len() - 21..])
                                 } else {
                                     w.to_string()
                                 }
-                            }).unwrap_or_else(|| "TBD".to_string());
+                            })
+                            .unwrap_or_else(|| "TBD".to_string());
 
-                            println!("│ {:<10} │ {:>8.3} SOL │ {:<46}│", place, amount, recipient);
-                        }
+                        println!("│ {:<10} │ {:>8.3} SOL │ {:<46}│", place, amount, recipient);
                     }
-
-                    println!("└─────────────────────────────────────────────────────────────────┘");
                 }
-                Err(e) => println!("  [ERROR] Error parsing: {}", e),
+
+                println!("└─────────────────────────────────────────────────────────────────┘");
             }
-        }
+            Err(e) => println!("  [ERROR] Error parsing: {}", e),
+        },
         Ok(resp) if resp.status() == 404 => println!("  [ERROR] Tournament not found."),
         Ok(resp) => println!("  [ERROR] HTTP error: {}", resp.status()),
         Err(e) => println!("  [ERROR] Request failed: {}", e),
@@ -639,21 +713,23 @@ fn calculate_prizes() {
 
 fn cancel_tournament() {
     let id = read_u64("Tournament ID to cancel");
-    
+
     println!("\n[WARNING] This will cancel the tournament and refund all entry fees!");
-    
+
     if !confirm("Are you sure you want to cancel?") {
         println!("  Cancelled.");
         return;
     }
-    
+
     println!("\n[CANCEL] Cancelling tournament {}...", id);
-    
+
     // Note: Cancel requires on-chain transaction with authority signature
     // This is a placeholder - actual implementation needs wallet integration
     println!("  [WARNING] Cancel requires on-chain authority signature.");
     println!("     Use the Solana CLI or game client with authority wallet:");
-    println!("     `solana program invoke --program-id <PROGRAM_ID> cancel_tournament <TOURNAMENT_ID>`");
+    println!(
+        "     `solana program invoke --program-id <PROGRAM_ID> cancel_tournament <TOURNAMENT_ID>`"
+    );
 }
 
 fn fund_prize() {
@@ -673,7 +749,10 @@ fn fund_prize() {
     };
     let lamports = (sol * 1e9) as u64;
 
-    println!("\n[FUND] This locks {} SOL ({} lamports) as the FIXED prize for tournament {}.", sol, lamports, id);
+    println!(
+        "\n[FUND] This locks {} SOL ({} lamports) as the FIXED prize for tournament {}.",
+        sol, lamports, id
+    );
     println!("       The amount cannot be changed afterwards and does not grow with entries.");
     println!("       Players cannot register on a paid tournament until this is done.");
 
@@ -689,8 +768,14 @@ fn fund_prize() {
     {
         Ok(resp) if resp.status().is_success() => {
             let body: serde_json::Value = resp.json().unwrap_or_default();
-            println!("  [OK] Prize locked. Signature: {}", body["signature"].as_str().unwrap_or("?"));
-            println!("       Verify escrow: GET /admin/tournament/{}/escrow-balance", id);
+            println!(
+                "  [OK] Prize locked. Signature: {}",
+                body["signature"].as_str().unwrap_or("?")
+            );
+            println!(
+                "       Verify escrow: GET /admin/tournament/{}/escrow-balance",
+                id
+            );
         }
         Ok(resp) => {
             let status = resp.status();
@@ -705,10 +790,10 @@ fn fund_prize() {
 
 fn main() {
     print_header();
-    
+
     loop {
         print_menu();
-        
+
         match read_line().as_str() {
             "1" => list_tournaments(),
             "2" => create_tournament(),
@@ -725,7 +810,7 @@ fn main() {
             }
             _ => println!("\n  Invalid choice. Please try again."),
         }
-        
+
         println!();
     }
 }

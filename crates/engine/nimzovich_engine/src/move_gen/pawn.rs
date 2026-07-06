@@ -9,7 +9,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-
 use crate::board::*;
 use crate::constants::*;
 use crate::types::*;
@@ -17,7 +16,11 @@ use crate::types::*;
 /// Returns `true` if this pawn move reaches the promotion rank.
 #[inline]
 fn is_promotion(dst: i8, color: Color) -> bool {
-    if color > 0 { dst / 8 == 7 } else { dst / 8 == 0 }
+    if color > 0 {
+        dst / 8 == 7
+    } else {
+        dst / 8 == 0
+    }
 }
 
 /// Push a move (or 4 promotion variants) onto `moves`.
@@ -25,7 +28,12 @@ fn push_move(moves: &mut Vec<KK>, mv: KK, color: Color) {
     if is_promotion(mv.dst, color) {
         // Encode promotion piece in the high nibble of nxt_dir_idx (bits 4-7).
         // Piece IDs: QUEEN=5, ROOK=4, BISHOP=3, KNIGHT=2
-        for promo in [QUEEN_ID as u8, ROOK_ID as u8, BISHOP_ID as u8, KNIGHT_ID as u8] {
+        for promo in [
+            QUEEN_ID as u8,
+            ROOK_ID as u8,
+            BISHOP_ID as u8,
+            KNIGHT_ID as u8,
+        ] {
             moves.push(KK {
                 nxt_dir_idx: mv.nxt_dir_idx | (promo << 4),
                 ..mv

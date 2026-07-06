@@ -3,19 +3,16 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 //! tournament_test — Full 4-player tournament simulation
-//! 
+//!
 //! Simulates a complete single-elimination tournament on Solana devnet,
 //! including profile creation, registration, match play, and result recording.
-//! 
+//!
 //! Usage: cargo run --features solana --bin tournament_test
 
 use clap::Parser;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
+    commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
 use std::time::Duration;
@@ -73,24 +70,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Args::parse();
     let rpc = RpcClient::new_with_commitment(DEVNET_RPC, CommitmentConfig::confirmed());
-    
+
     // Load admin keypair
     let admin_keypair = read_keypair_file(&args.keypair)
         .map_err(|_| format!("Failed to read admin keypair from {}", args.keypair))?;
-    
+
     println!(" Admin: {}", admin_keypair.pubkey());
-    
+
     // Check admin balance
     let admin_balance = rpc.get_account(&admin_keypair.pubkey())?.lamports;
-    println!(" Admin balance: {} SOL", admin_balance as f64 / 1_000_000_000.0);
-    
+    println!(
+        " Admin balance: {} SOL",
+        admin_balance as f64 / 1_000_000_000.0
+    );
+
     if admin_balance < 10_000_000_000 {
         println!("?  Admin balance low - please fund with devnet SOL");
     }
 
     // Create 4 test players
     let players = create_players().await?;
-    
+
     // Airdrop SOL to each player
     println!("\n Airdropping 1 SOL to each player...");
     for player in &players {
@@ -124,17 +124,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Play matches
     let mut results = Vec::new();
-    
+
     // SF1: Magnus vs Vidit
     println!("\n SF1: Magnus vs Vidit");
     let sf1_result = play_match(&rpc, &players[0], &players[3], "SF1").await?;
     results.push(sf1_result);
-    
+
     // SF2: Fabiano vs Anish
     println!("\n SF2: Fabiano vs Anish");
     let sf2_result = play_match(&rpc, &players[1], &players[2], "SF2").await?;
     results.push(sf2_result);
-    
+
     // Final: Winner SF1 vs Winner SF2
     println!("\n Final: {} vs {}", results[0].winner, results[1].winner);
     let final_result = play_final(&rpc, &results).await?;
@@ -254,20 +254,23 @@ async fn play_match(
     player2: &Player,
     round: &str,
 ) -> Result<MatchResult, Box<dyn std::error::Error>> {
-    println!("   Playing {} match: {} vs {}", round, player1.name, player2.name);
-    
+    println!(
+        "   Playing {} match: {} vs {}",
+        round, player1.name, player2.name
+    );
+
     // Simulate match play
     sleep(Duration::from_secs(3)).await;
-    
+
     // Determine winner (simplified - higher ELO wins)
     let winner = if player1.elo > player2.elo {
         &player1.name
     } else {
         &player2.name
     };
-    
+
     let game_id = rand::random::<u64>();
-    
+
     Ok(MatchResult {
         round: round.to_string(),
         player1: player1.name.clone(),
@@ -277,13 +280,16 @@ async fn play_match(
     })
 }
 
-async fn play_final(rpc: &RpcClient, semifinal_results: &[MatchResult]) -> Result<MatchResult, Box<dyn std::error::Error>> {
+async fn play_final(
+    rpc: &RpcClient,
+    semifinal_results: &[MatchResult],
+) -> Result<MatchResult, Box<dyn std::error::Error>> {
     let sf1_winner = &semifinal_results[0].winner;
     let sf2_winner = &semifinal_results[1].winner;
-    
+
     println!("   Playing Final: {} vs {}", sf1_winner, sf2_winner);
     sleep(Duration::from_secs(3)).await;
-    
+
     // Simplified - first semifinal winner wins
     Ok(MatchResult {
         round: "Final".to_string(),
@@ -320,17 +326,22 @@ async fn generate_html_report(result: &TournamentResult) -> Result<(), Box<dyn s
 </html>
         "#,
         result.champion,
-        result.matches.iter().map(|m| {
-            format!(
-                r#"<div class="match">
+        result
+            .matches
+            .iter()
+            .map(|m| {
+                format!(
+                    r#"<div class="match">
                     <strong>{}</strong><br>
                     {} vs {}<br>
                     <span class="winner">Winner: {}</span><br>
                     Game ID: {}
                 </div>"#,
-                m.round, m.player1, m.player2, m.winner, m.game_id
-            )
-        }).collect::<Vec<_>>().join("\n"),
+                    m.round, m.player1, m.player2, m.winner, m.game_id
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
     );
 
@@ -342,4 +353,3 @@ fn read_keypair_file(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> 
     let data = std::fs::read(path)?;
     Ok(Keypair::from_bytes(&data)?)
 }
-

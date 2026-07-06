@@ -13,7 +13,9 @@ fn main() {
     let mut total = 0u64;
     let mut count = 0usize;
     for bytes in &arr {
-        if bytes.len() != 64 { continue; }
+        if bytes.len() != 64 {
+            continue;
+        }
         let kp = Keypair::from_bytes(bytes).unwrap();
         let bal = rpc.get_balance(&kp.pubkey()).unwrap_or(0);
         if bal > 0 {
@@ -21,5 +23,10 @@ fn main() {
             count += 1;
         }
     }
-    println!("Found {} children with balance, total: {} lamports ({} SOL)", count, total, total as f64 / 1_000_000_000.0);
+    println!(
+        "Found {} children with balance, total: {} lamports ({} SOL)",
+        count,
+        total,
+        total as f64 / 1_000_000_000.0
+    );
 }

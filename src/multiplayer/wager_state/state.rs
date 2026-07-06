@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use crate::GameConfig;
+use bevy::prelude::*;
 
 /// Resource that holds wager information passed from Web UI
 #[derive(Resource, Debug, Clone)]
@@ -53,8 +53,8 @@ impl WagerState {
             game_pda: config.game_pda.clone(),
             is_loaded: config.wager_amount.is_some(),
             country_fee: None, // Will be fetched from on-chain game account
-            elo_fee: None,    // Will be fetched from on-chain game account
-            match_type: None, // Will be fetched from on-chain game account
+            elo_fee: None,     // Will be fetched from on-chain game account
+            match_type: None,  // Will be fetched from on-chain game account
         }
     }
 

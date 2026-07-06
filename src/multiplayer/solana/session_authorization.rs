@@ -3,16 +3,16 @@
 //! This module handles on-chain session key authorization via the CreateSession instruction.
 //! This authorizes the session key to sign transactions on behalf of the wallet.
 
+use anyhow::Result;
 use solana_client::rpc_client::RpcClient;
+#[allow(deprecated)]
+use solana_sdk::system_program;
 use solana_sdk::{
+    instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
-    instruction::Instruction,
 };
-#[allow(deprecated)]
-use solana_sdk::system_program;
-use anyhow::Result;
 
 /// Program ID for XFChess
 pub const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
@@ -36,38 +36,43 @@ pub fn create_session_instruction(
     max_wager: Option<u64>,
 ) -> Result<Instruction> {
     use sha2::{Digest, Sha256};
-    
+
     // Compute Anchor discriminator for "create_session"
     let mut hasher = Sha256::new();
     hasher.update(b"global:create_session");
     let hash = hasher.finalize();
     let mut disc = [0u8; 8];
     disc.copy_from_slice(&hash[..8]);
-    
+
     // Build instruction data
     let mut data = disc.to_vec();
     data.extend_from_slice(session_key.as_ref());
-    
+
     // Duration (i64)
     let duration = duration_hours.unwrap_or(24);
     data.extend_from_slice(&duration.to_le_bytes());
-    
+
     // Spending limit (u64)
     let limit = spending_limit.unwrap_or(500_000_000); // 0.5 SOL
     data.extend_from_slice(&limit.to_le_bytes());
-    
+
     // Max wager (u64)
     let wager = max_wager.unwrap_or(10_000_000_000); // 10 SOL
     data.extend_from_slice(&wager.to_le_bytes());
-    
+
     // Derive PlayerSession PDA
     let program_id = PROGRAM_ID
         .parse::<Pubkey>()
         .map_err(|e| anyhow::anyhow!("Invalid PROGRAM_ID: {}", e))?;
     let session_pda = Pubkey::find_program_address(
-        &[b"player_session", &payer.to_bytes(), &session_key.to_bytes()],
+        &[
+            b"player_session",
+            &payer.to_bytes(),
+            &session_key.to_bytes(),
+        ],
         &program_id,
-    ).0;
+    )
+    .0;
 
     Ok(Instruction {
         program_id,
@@ -107,7 +112,7 @@ pub async fn authorize_session_on_chain(
         spending_limit,
         max_wager,
     )?;
-    
+
     let recent_blockhash = rpc_client.get_latest_blockhash()?;
     let transaction = Transaction::new_signed_with_payer(
         &[instruction],
@@ -115,7 +120,7 @@ pub async fn authorize_session_on_chain(
         &[payer],
         recent_blockhash,
     );
-    
+
     let signature = rpc_client.send_and_confirm_transaction(&transaction)?;
     Ok(signature.to_string())
 }
@@ -135,20 +140,27 @@ pub async fn revoke_session_on_chain(
     session_key: &Pubkey,
 ) -> Result<String> {
     use sha2::{Digest, Sha256};
-    
+
     // Compute Anchor discriminator for "revoke_session"
     let mut hasher = Sha256::new();
     hasher.update(b"global:revoke_session");
     let hash = hasher.finalize();
     let mut disc = [0u8; 8];
     disc.copy_from_slice(&hash[..8]);
-    
+
     // Derive PlayerSession PDA
-    let program_id = PROGRAM_ID.parse::<Pubkey>().map_err(|e| anyhow::anyhow!("Invalid PROGRAM_ID: {}", e))?;
+    let program_id = PROGRAM_ID
+        .parse::<Pubkey>()
+        .map_err(|e| anyhow::anyhow!("Invalid PROGRAM_ID: {}", e))?;
     let session_pda = Pubkey::find_program_address(
-        &[b"player_session", &payer.to_bytes(), &session_key.to_bytes()],
+        &[
+            b"player_session",
+            &payer.to_bytes(),
+            &session_key.to_bytes(),
+        ],
         &program_id,
-    ).0;
+    )
+    .0;
 
     let instruction = Instruction {
         program_id,
@@ -159,7 +171,7 @@ pub async fn revoke_session_on_chain(
         ],
         data: disc.to_vec(),
     };
-    
+
     let recent_blockhash = rpc_client.get_latest_blockhash()?;
     let transaction = Transaction::new_signed_with_payer(
         &[instruction],
@@ -167,7 +179,7 @@ pub async fn revoke_session_on_chain(
         &[payer],
         recent_blockhash,
     );
-    
+
     let signature = rpc_client.send_and_confirm_transaction(&transaction)?;
     Ok(signature.to_string())
 }

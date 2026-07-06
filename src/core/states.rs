@@ -39,7 +39,7 @@ pub enum GameMode {
     SinglePlayer,
     MultiplayerLocal,
     MultiplayerCompetitive,
-    BraidMultiplayer,
+    OnlineMultiplayer,
     Spectator,
     PgnReplay,
 }
@@ -84,7 +84,7 @@ pub enum MenuState {
 
     /// Tournament browser
     Tournaments,
-    
+
     /// P2P Hosting Configuration
     HostConfig,
 
@@ -135,8 +135,6 @@ impl ComputedStates for InGameplay {
 pub fn in_gameplay(state: Res<State<GameState>>) -> bool {
     InGameplay::compute(*state.get()).is_some()
 }
-
-
 
 /// Resource tracking which menu the player navigated from.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Reflect)]

@@ -17,7 +17,7 @@ Two specs, each mapped line-for-line to real code:
 
 | Spec | Models | Source code |
 |---|---|---|
-| `CausalChain.tla` | P2P move gossip: seq continuity, equivocation guard, identity binding | `src/multiplayer/network/braid_pvp.rs:127` (send), `src/multiplayer/systems.rs` (`bind_identity` + causal/roster block) |
+| `CausalChain.tla` | Online move transport: seq continuity, equivocation guard, identity binding | `src/multiplayer/network/online_game_session.rs:127` (send), `src/multiplayer/systems.rs` (`bind_identity` + causal/roster block) |
 | `SolanaFinality.tla` | On-chain settlement: nonce + parent_nonce checks; N replica submitters | `programs/xfchess-game/src/moves_ix/record.rs:64-71` |
 
 The model has three switches that select which version of the protocol is being
@@ -233,14 +233,13 @@ registered in the on-chain `session_delegation` for the game.
   is sound. A 3+ participant topic (e.g. a shared spectator channel that also
   accepted moves) would make that slot flip between senders — out of scope here
   and worth a separate model if the topology ever changes.
-- **Impersonation IS modelled (as of the scope-completion pass).** An earlier
-  version of this doc disclaimed message authentication. That is no longer
-  accurate: the `Adversary` action (`EnableAdversary`) models a forging third
-  node injecting moves under another peer's `agent_id`, and `AuthBinding` models
-  the `bind_identity` + roster fix. See Finding 3. The remaining authentication
-  abstraction is that signatures are modelled as a single `authentic` boolean,
-  not as concrete keys/crypto — sound for the identity-binding property, but it
-  does not model signature forgery via key compromise.
+- **Impersonation IS modelled.** The `Adversary` action (`EnableAdversary`)
+  models a forging third node injecting moves under another peer's `agent_id`,
+  and `AuthBinding` models the `bind_identity` + roster fix. See Finding 3. The
+  remaining authentication abstraction is that signatures are modelled as a
+  single `authentic` boolean, not as concrete keys/crypto — sound for the
+  identity-binding property, but it does not model signature forgery via key
+  compromise.
 - **Bounded.** TLC checks finite instances (`MaxSeq`/`MaxNonce` = 2–3). This is
   exhaustive within the bound, not a proof for unbounded games. Phase 5 (TLAPS
   deductive proof) in the plan would lift the bound; it is not done here.

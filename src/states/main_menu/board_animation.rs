@@ -6,6 +6,7 @@
 //! components and the slide tween.
 
 use bevy::prelude::*;
+use std::sync::OnceLock;
 
 /// Stores the original starting square for a menu background piece.
 /// Used to reset positions when the animation loops back without despawning.
@@ -83,3 +84,171 @@ pub(super) const ZUGZWANG_PGN: &str = "
 21. Qxh5 Rxf2 22. Qg5 Raf8 23. Kh1 R8f5 24. Qe3 Bd3 25. Rce1 h6
 0-1
 ";
+
+// ── Ambient board auto-play (post-Enter) ──────────────────────────────────────
+//
+// Replays ZUGZWANG_PGN on the full-size `MenuBg` board once the player presses
+// Enter. Captured pieces are *hidden* (not despawned) so the whole game can loop
+// without re-spawning: at the trailing pause every piece is snapped back to its
+// `MenuBgPieceHome` and revealed.
+
+/// World position of a square on the `MenuBg` board (x = 7 − file, z = rank).
+/// Matches `spawn_menu_bg_pieces` and the cinematic's `square_to_world`.
+#[inline]
+fn sq_world(file: usize, rank: usize) -> Vec3 {
+    Vec3::new(7.0 - file as f32, 0.05, rank as f32)
+}
+
+/// One pre-resolved ply: where the piece moves, plus capture / castling / en
+/// passant side-effects. Pure data (no `Entity`) so it can be cached globally.
+#[derive(Clone, Copy)]
+struct AmbientStep {
+    from: (u8, u8),
+    to: (u8, u8),
+    /// A piece sits on the destination square and must be hidden.
+    capture: bool,
+    /// En-passant: square of the pawn to hide (file, rank).
+    ep_capture: Option<(u8, u8)>,
+    /// Castling: rook (from_file, to_file) on the king's rank.
+    castle_rook: Option<(u8, u8)>,
+}
+
+static AMBIENT_PLAN: OnceLock<Vec<AmbientStep>> = OnceLock::new();
+
+/// Parse ZUGZWANG_PGN once into a flat list of resolved plies, computed lazily.
+fn ambient_plan() -> &'static [AmbientStep] {
+    AMBIENT_PLAN.get_or_init(zugzwang_steps).as_slice()
+}
+
+fn zugzwang_steps() -> Vec<AmbientStep> {
+    use nimzovich_engine::{do_move, new_game, parse_pgn, san_to_move};
+    let Ok(parsed) = parse_pgn(ZUGZWANG_PGN) else {
+        return Vec::new();
+    };
+    let mut game = new_game();
+    let mut steps = Vec::with_capacity(parsed.moves.len());
+    for san in &parsed.moves {
+        let Ok((s, d, _promo)) = san_to_move(&mut game, san) else {
+            break;
+        };
+        let (su, du) = (s as usize, d as usize);
+        let (sf, sr) = (su % 8, su / 8);
+        let (df, dr) = (du % 8, du / 8);
+        let mover = game.board[su];
+        let is_pawn = mover.abs() == 1;
+        let is_king = mover.abs() == 6;
+        let dest_occupied = game.board[du] != 0;
+        // Pawn moving diagonally onto an empty square ⇒ en passant.
+        let ep_capture = if is_pawn && sf != df && !dest_occupied {
+            Some((df as u8, sr as u8))
+        } else {
+            None
+        };
+        // King moving two files ⇒ castling; slide the matching rook too.
+        let castle_rook = if is_king && (df as i32 - sf as i32).abs() == 2 {
+            if df == 6 {
+                Some((7u8, 5u8))
+            } else {
+                Some((0u8, 3u8))
+            }
+        } else {
+            None
+        };
+        steps.push(AmbientStep {
+            from: (sf as u8, sr as u8),
+            to: (df as u8, dr as u8),
+            capture: dest_occupied,
+            ep_capture,
+            castle_rook,
+        });
+        do_move(&mut game, s, d, true);
+    }
+    steps
+}
+
+/// Drives the Immortal-Zugzwang replay on the ambient `MenuBg` board. Gated by
+/// the caller to run only after Enter (the cinematic owns the attract screen).
+pub fn animate_ambient_board(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut anim: ResMut<BoardAnimator>,
+    mut reset_q: Query<(Entity, &MenuBgPieceHome, &mut Transform, &mut Visibility)>,
+) {
+    if !anim.active {
+        return;
+    }
+    let plan = ambient_plan();
+    if plan.is_empty() {
+        return;
+    }
+
+    // Trailing pause after the final ply, then snap everything home and loop.
+    if anim.end_pause > 0.0 {
+        anim.end_pause -= time.delta_secs();
+        if anim.end_pause <= 0.0 {
+            anim.board = [[None; 8]; 8];
+            for (e, home, mut t, mut v) in reset_q.iter_mut() {
+                commands.entity(e).remove::<MenuBgPieceAnim>();
+                t.translation = sq_world(home.file as usize, home.rank as usize);
+                *v = Visibility::Visible;
+                anim.board[home.rank as usize][home.file as usize] = Some(e);
+            }
+            anim.ply_index = 0;
+            anim.move_timer = 2.0;
+        }
+        return;
+    }
+
+    if anim.ply_index >= plan.len() {
+        anim.end_pause = 4.0;
+        return;
+    }
+
+    anim.move_timer -= time.delta_secs();
+    if anim.move_timer > 0.0 {
+        return;
+    }
+    anim.move_timer = 1.6;
+
+    let step = plan[anim.ply_index];
+    apply_ambient_step(&mut commands, &mut anim, step);
+    anim.ply_index += 1;
+}
+
+/// Applies one ply to `anim.board`: hides captures and inserts slide tweens.
+fn apply_ambient_step(commands: &mut Commands, anim: &mut BoardAnimator, step: AmbientStep) {
+    let (sf, sr) = (step.from.0 as usize, step.from.1 as usize);
+    let (df, dr) = (step.to.0 as usize, step.to.1 as usize);
+
+    if step.capture {
+        if let Some(cap) = anim.board[dr][df].take() {
+            commands.entity(cap).insert(Visibility::Hidden);
+        }
+    }
+    if let Some((ef, er)) = step.ep_capture {
+        if let Some(cap) = anim.board[er as usize][ef as usize].take() {
+            commands.entity(cap).insert(Visibility::Hidden);
+        }
+    }
+    if let Some(e) = anim.board[sr][sf].take() {
+        anim.board[dr][df] = Some(e);
+        commands.entity(e).insert(MenuBgPieceAnim {
+            start: sq_world(sf, sr),
+            end: sq_world(df, dr),
+            elapsed: 0.0,
+            duration: 1.2,
+        });
+    }
+    if let Some((rf, rt)) = step.castle_rook {
+        let (rf, rt) = (rf as usize, rt as usize);
+        if let Some(re) = anim.board[sr][rf].take() {
+            anim.board[sr][rt] = Some(re);
+            commands.entity(re).insert(MenuBgPieceAnim {
+                start: sq_world(rf, sr),
+                end: sq_world(rt, sr),
+                elapsed: 0.0,
+                duration: 1.2,
+            });
+        }
+    }
+}

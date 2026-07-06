@@ -34,14 +34,20 @@ pub struct FundSolPrize<'info> {
 
 pub fn handler(ctx: Context<FundSolPrize>, tournament_id: u64, amount: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
-    require!(tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
+    require!(
+        tournament.tournament_id == tournament_id,
+        GameErrorCode::UnauthorizedAccess
+    );
     require!(amount > 0, GameErrorCode::InvalidArgument);
     require!(
         tournament.status == TournamentStatus::Registration,
         GameErrorCode::TournamentNotInRegistration
     );
     // The guarantee is locked exactly once, before the first registration.
-    require!(tournament.prize_pool == 0, GameErrorCode::PrizeAlreadyFunded);
+    require!(
+        tournament.prize_pool == 0,
+        GameErrorCode::PrizeAlreadyFunded
+    );
     require!(
         tournament.num_registered_players == 0,
         GameErrorCode::PrizeAlreadyFunded
@@ -60,6 +66,10 @@ pub fn handler(ctx: Context<FundSolPrize>, tournament_id: u64, amount: u64) -> R
 
     tournament.prize_pool = amount;
 
-    msg!("Guaranteed SOL prize of {} lamports locked for tournament {}", amount, tournament_id);
+    msg!(
+        "Guaranteed SOL prize of {} lamports locked for tournament {}",
+        amount,
+        tournament_id
+    );
     Ok(())
 }

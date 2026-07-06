@@ -4,10 +4,10 @@
 //! Players who have waited the longest get priority when two tickets could
 //! pair with the same opponent.
 
-use crate::signing::routes::matchmaking::{SharedMatchmakingState, MatchResult};
+use crate::signing::routes::matchmaking::{MatchResult, SharedMatchmakingState};
+use std::collections::HashSet;
 use tracing::error;
 use tracing::info;
-use std::collections::HashSet;
 
 /// How often the matching loop fires (seconds).
 pub const MATCHMAKING_INTERVAL_SECONDS: u64 = 5;
@@ -34,7 +34,8 @@ fn elo_window(wait_secs: u64) -> u32 {
 /// other's current ELO window. Both players' windows must include the other
 /// (the narrower window wins to keep games fair).
 pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(MATCHMAKING_INTERVAL_SECONDS));
+    let mut interval =
+        tokio::time::interval(std::time::Duration::from_secs(MATCHMAKING_INTERVAL_SECONDS));
 
     loop {
         interval.tick().await;
@@ -96,7 +97,9 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
         }
 
         // Rebuild queue without matched players.
-        let new_queue = queue.iter().enumerate()
+        let new_queue = queue
+            .iter()
+            .enumerate()
             .filter(|(idx, _)| !matched_indices.contains(idx))
             .map(|(_, t)| t.clone())
             .collect();
@@ -112,16 +115,22 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
                 }
             };
             for (p1, p2, game_id) in new_matches {
-                matches.insert(p1.pubkey.clone(), MatchResult {
-                    game_id,
-                    opponent: p2.pubkey.clone(),
-                    is_white: true,
-                });
-                matches.insert(p2.pubkey.clone(), MatchResult {
-                    game_id,
-                    opponent: p1.pubkey.clone(),
-                    is_white: false,
-                });
+                matches.insert(
+                    p1.pubkey.clone(),
+                    MatchResult {
+                        game_id,
+                        opponent: p2.pubkey.clone(),
+                        is_white: true,
+                    },
+                );
+                matches.insert(
+                    p2.pubkey.clone(),
+                    MatchResult {
+                        game_id,
+                        opponent: p1.pubkey.clone(),
+                        is_white: false,
+                    },
+                );
             }
         }
     }

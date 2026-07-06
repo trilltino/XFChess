@@ -11,6 +11,7 @@
 
 pub mod debug;
 pub mod instructions;
+pub mod routing;
 pub mod rpc;
 pub mod telemetry;
 pub mod transactions;
@@ -18,13 +19,15 @@ pub mod transactions;
 pub use debug::{debug_transaction, format_debug_info, parse_program_error, TransactionDebugInfo};
 pub use instructions::{
     claim_fees_ix, claim_prize_ix, distribute_tournament_prizes_ix, finalize_game_ix,
-    fund_sol_prize_ix, initialize_escrow_ix,
-    initialize_match_ix, initialize_shards_ix, initialize_tournament_ix, leave_tournament_ix,
-    link_external_elo_ix, record_move_ix, record_result_ix, start_tournament_ix,
-    undelegate_game_ix, verify_profile_ix,
+    fund_sol_prize_ix, initialize_escrow_ix, initialize_match_ix, initialize_shards_ix,
+    initialize_tournament_ix, leave_tournament_ix, link_external_elo_ix, record_move_ix,
+    record_result_ix, start_tournament_ix, undelegate_game_ix, verify_profile_ix,
 };
+pub use routing::{magic_router_url, route_for_game_write, routed_rpc, TxRoute};
 pub use rpc::{fallback_rpc_url, make_rpc, read_with_failover, redact_url, rpc_url_or_devnet};
-pub use telemetry::{submit_er_with_telemetry, submit_with_telemetry, TxErrorCategory, TxErrorDetail};
+pub use telemetry::{
+    submit_er_with_telemetry, submit_with_telemetry, TxErrorCategory, TxErrorDetail,
+};
 pub use transactions::{
     cosign_and_submit_tx, fund_account, sign_and_submit, sign_and_submit_er, submit_signed_tx,
 };

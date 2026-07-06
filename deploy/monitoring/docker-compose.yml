@@ -8,8 +8,9 @@ services:
   prometheus:
     image: prom/prometheus:v2.47.0
     container_name: xfchess-prometheus
+    # Localhost-only: Docker publish rules bypass UFW. Reach via SSH tunnel.
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -28,16 +29,17 @@ services:
     image: grafana/grafana:10.1.0
     container_name: xfchess-grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://178.104.55.19:3000
+      # Reach Grafana via SSH tunnel (ssh -L 3000:127.0.0.1:3000 SERVER), not a public URL.
+      - GF_SERVER_ROOT_URL=http://localhost:3000
     restart: unless-stopped
     networks:
       - monitoring
@@ -48,7 +50,7 @@ services:
     image: prom/node-exporter:v1.6.1
     container_name: xfchess-node-exporter
     ports:
-      - "9100:9100"
+      - "127.0.0.1:9100:9100"
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
@@ -66,7 +68,7 @@ services:
     image: prom/alertmanager:v0.26.0
     container_name: xfchess-alertmanager
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/config.yml:ro
       - alertmanager-data:/alertmanager

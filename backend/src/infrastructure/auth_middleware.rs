@@ -11,8 +11,8 @@ use axum::{
 };
 use std::env;
 
-use crate::signing::AppState;
 use crate::signing::auth::AuthedWallet;
+use crate::signing::AppState;
 
 /// Middleware function that validates the X-API-Key header.
 ///
@@ -23,10 +23,7 @@ use crate::signing::auth::AuthedWallet;
 /// # Returns
 /// Response with 401 Unauthorized if API key is missing or invalid,
 /// otherwise passes through to the next handler.
-pub async fn require_api_key(
-    request: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+pub async fn require_api_key(request: Request, next: Next) -> Result<Response, StatusCode> {
     let expected_key = match env::var("ADMIN_API_KEY") {
         Ok(key) => key,
         Err(env::VarError::NotPresent) => {
@@ -46,21 +43,21 @@ pub async fn require_api_key(
             return Err(StatusCode::SERVICE_UNAVAILABLE);
         }
     };
-    
+
     // Extract X-API-Key header
     let provided_key = request
         .headers()
         .get("X-API-Key")
-        .and_then(|v| v.to_str().ok())  
+        .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .unwrap_or_default();
-    
+
     // Validate key using constant-time comparison
     if !constant_time_eq(&provided_key, &expected_key) {
         tracing::debug!("[auth] Invalid API key provided");
         return Err(StatusCode::UNAUTHORIZED);
     }
-    
+
     tracing::debug!("[auth] API key validated successfully");
     Ok(next.run(request).await)
 }
@@ -75,10 +72,7 @@ pub async fn require_api_key(
 /// working while a one-time warning flags that they're relying on the network
 /// boundary alone. Set `RELAY_SHARED_SECRET` (and the matching client value) to
 /// add application-layer auth.
-pub async fn require_relay_secret(
-    request: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+pub async fn require_relay_secret(request: Request, next: Next) -> Result<Response, StatusCode> {
     use std::sync::Once;
     static UNSET_WARNING: Once = Once::new();
 
@@ -178,12 +172,12 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    
+
     let mut result = 0u8;
     for (x, y) in a.bytes().zip(b.bytes()) {
         result |= x ^ y;
     }
-    
+
     result == 0
 }
 
@@ -204,17 +198,17 @@ mod tests {
         assert!(constant_time_eq("secret123", "secret123"));
         assert!(constant_time_eq("", ""));
         assert!(constant_time_eq("a", "a"));
-        
+
         // Inequality
         assert!(!constant_time_eq("secret123", "secret124"));
         assert!(!constant_time_eq("secret", "secret123"));
         assert!(!constant_time_eq("", "secret"));
         assert!(!constant_time_eq("secret", ""));
-        
+
         // Different lengths
         assert!(!constant_time_eq("short", "longer"));
         assert!(!constant_time_eq("a", "ab"));
-        
+
         // Same length, different content
         assert!(!constant_time_eq("abc", "def"));
         assert!(!constant_time_eq("123", "456"));
@@ -231,12 +225,7 @@ mod tests {
             .layer(axum::middleware::from_fn(require_api_key));
 
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/test")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -296,12 +285,7 @@ mod tests {
             .layer(axum::middleware::from_fn(require_api_key));
 
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/test")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
             .await
             .unwrap();
 

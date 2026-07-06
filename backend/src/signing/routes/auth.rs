@@ -10,19 +10,19 @@
 //! - `GET  /auth/check-username/:u`  — Check username availability
 //! - `POST /auth/delete`             — GDPR right-to-erasure (wallet signature required)
 
+use crate::signing::AppState;
 use axum::{
     extract::State,
     http::StatusCode,
-    Json, Router,
     routing::{get, post},
+    Json, Router,
 };
 use borsh::BorshDeserialize;
 use serde::{Deserialize, Serialize};
-use tracing::info;
-use crate::signing::AppState;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::info;
 
 /// Maximum age (seconds) a signed `timestamp` may have before the signature is
 /// rejected. Without this bound a captured signature is replayable forever,
@@ -56,13 +56,24 @@ fn verify_wallet_sig(
         ));
     }
 
-    let pk = Pubkey::from_str(wallet)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet address".to_string()))?;
-    let sig = Signature::from_str(signature)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signature format".to_string()))?;
+    let pk = Pubkey::from_str(wallet).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid wallet address".to_string(),
+        )
+    })?;
+    let sig = Signature::from_str(signature).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid signature format".to_string(),
+        )
+    })?;
     let msg = format!("xfchess:{}:{}", action, timestamp);
     if !sig.verify(pk.as_ref(), msg.as_bytes()) {
-        return Err((StatusCode::UNAUTHORIZED, "Signature verification failed".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Signature verification failed".to_string(),
+        ));
     }
     Ok(pk)
 }
@@ -78,15 +89,23 @@ async fn authed_wallet(
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(crate::signing::auth::extract_bearer)
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "Missing Authorization header".to_string(),
+        ))?;
 
-    let claims = state
-        .jwt
-        .verify(token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
+    let claims = state.jwt.verify(token).map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "Invalid or expired token".to_string(),
+        )
+    })?;
 
     if state.store.token_is_revoked(&claims.sub, claims.iat).await {
-        return Err((StatusCode::UNAUTHORIZED, "Token revoked — please log in again".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Token revoked — please log in again".to_string(),
+        ));
     }
 
     Ok(claims.sub)
@@ -144,7 +163,10 @@ async fn register(
     verify_wallet_sig(&req.wallet, &req.signature, "register", req.timestamp)?;
 
     if state.store.find_user_by_wallet(&req.wallet).await.is_some() {
-        return Err((StatusCode::CONFLICT, "Wallet already registered".to_string()));
+        return Err((
+            StatusCode::CONFLICT,
+            "Wallet already registered".to_string(),
+        ));
     }
     if state.store.username_taken(&req.username).await {
         return Err((StatusCode::CONFLICT, "Username already taken".to_string()));
@@ -156,11 +178,17 @@ async fn register(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let token = state.jwt.issue(&req.wallet)
+    let token = state
+        .jwt
+        .issue(&req.wallet)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!("[Auth] Registered wallet: {}", req.wallet);
-    Ok(Json(AuthResp { token, username: req.username, wallet: req.wallet }))
+    Ok(Json(AuthResp {
+        token,
+        username: req.username,
+        wallet: req.wallet,
+    }))
 }
 
 // ── Login ──────────────────────────────────────────────────────────────────────
@@ -181,14 +209,22 @@ async fn login(
 ) -> Result<Json<AuthResp>, (StatusCode, String)> {
     verify_wallet_sig(&req.wallet, &req.signature, "login", req.timestamp)?;
 
-    let user = state.store.find_user_by_wallet(&req.wallet).await
-        .ok_or((StatusCode::UNAUTHORIZED, "Wallet not registered. Please create an account first.".to_string()))?;
+    let user = state.store.find_user_by_wallet(&req.wallet).await.ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Wallet not registered. Please create an account first.".to_string(),
+    ))?;
 
-    let token = state.jwt.issue(&req.wallet)
+    let token = state
+        .jwt
+        .issue(&req.wallet)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!("[Auth] Login: {}", req.wallet);
-    Ok(Json(AuthResp { token, username: user.1, wallet: req.wallet }))
+    Ok(Json(AuthResp {
+        token,
+        username: user.1,
+        wallet: req.wallet,
+    }))
 }
 
 // ── Email/Password Auth ────────────────────────────────────────────────────────
@@ -228,11 +264,17 @@ async fn register_email(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let token = state.jwt.issue(&format!("email:{}", req.email))
+    let token = state
+        .jwt
+        .issue(&format!("email:{}", req.email))
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!("[Auth] Registered email user: {}", req.email);
-    Ok(Json(AuthResp { token, username: req.username, wallet: "".to_string() }))
+    Ok(Json(AuthResp {
+        token,
+        username: req.username,
+        wallet: "".to_string(),
+    }))
 }
 
 #[derive(Deserialize)]
@@ -245,17 +287,27 @@ async fn login_email(
     State(state): State<AppState>,
     Json(req): Json<LoginEmailReq>,
 ) -> Result<Json<AuthResp>, (StatusCode, String)> {
-    let user = state.store.find_user_by_email(&req.email).await
-        .ok_or((StatusCode::UNAUTHORIZED, "Invalid email or password".to_string()))?;
+    let user = state.store.find_user_by_email(&req.email).await.ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Invalid email or password".to_string(),
+    ))?;
 
-    let stored_hash = user.4.ok_or((StatusCode::UNAUTHORIZED, "This account does not have a password. Please login with wallet.".to_string()))?;
+    let stored_hash = user.4.ok_or((
+        StatusCode::UNAUTHORIZED,
+        "This account does not have a password. Please login with wallet.".to_string(),
+    ))?;
 
     use argon2::{password_hash::PasswordHash, password_hash::PasswordVerifier, Argon2};
     let parsed_hash = PasswordHash::new(&stored_hash)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Argon2::default()
         .verify_password(req.password.as_bytes(), &parsed_hash)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid email or password".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "Invalid email or password".to_string(),
+            )
+        })?;
 
     let identity = if !user.0.is_empty() {
         user.0.clone()
@@ -263,11 +315,17 @@ async fn login_email(
         format!("email:{}", req.email)
     };
 
-    let token = state.jwt.issue(&identity)
+    let token = state
+        .jwt
+        .issue(&identity)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!("[Auth] Login email: {}", req.email);
-    Ok(Json(AuthResp { token, username: user.1, wallet: user.0 }))
+    Ok(Json(AuthResp {
+        token,
+        username: user.1,
+        wallet: user.0,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -287,19 +345,32 @@ async fn link_wallet(
     verify_wallet_sig(&req.wallet, &req.signature, "link", req.timestamp)?;
 
     // 2. Verify Email/Password
-    let user = state.store.find_user_by_email(&req.email).await
-        .ok_or((StatusCode::UNAUTHORIZED, "Invalid email or password".to_string()))?;
+    let user = state.store.find_user_by_email(&req.email).await.ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Invalid email or password".to_string(),
+    ))?;
 
-    let stored_hash = user.4.ok_or((StatusCode::BAD_REQUEST, "Account has no password".to_string()))?;
+    let stored_hash = user.4.ok_or((
+        StatusCode::BAD_REQUEST,
+        "Account has no password".to_string(),
+    ))?;
     use argon2::{password_hash::PasswordHash, password_hash::PasswordVerifier, Argon2};
     let parsed_hash = PasswordHash::new(&stored_hash)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Argon2::default()
         .verify_password(req.password.as_bytes(), &parsed_hash)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid email or password".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "Invalid email or password".to_string(),
+            )
+        })?;
 
     // 3. Link Wallet
-    state.store.link_wallet(&req.email, &req.wallet).await
+    state
+        .store
+        .link_wallet(&req.email, &req.wallet)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!("[Auth] Linked wallet {} to email {}", req.wallet, req.email);
@@ -334,7 +405,10 @@ async fn me(
 ) -> Result<Json<MeResp>, (StatusCode, String)> {
     let wallet = authed_wallet(&state, &headers).await?;
 
-    let user = state.store.find_user_by_wallet(&wallet).await
+    let user = state
+        .store
+        .find_user_by_wallet(&wallet)
+        .await
         .ok_or((StatusCode::UNAUTHORIZED, "Account not found".to_string()))?;
 
     let wallet_linked = !user.0.is_empty();
@@ -373,7 +447,10 @@ async fn me(
 
     // Pull ELO from on-chain cache (non-fatal if missing or no profile yet).
     let cached_elo = state.elo_cache.get_elo(&wallet).await.ok();
-    let elo = cached_elo.as_ref().map(|e| e.elo_rating as u32).unwrap_or(0);
+    let elo = cached_elo
+        .as_ref()
+        .map(|e| e.elo_rating as u32)
+        .unwrap_or(0);
     let country = kyc_country.unwrap_or_default();
 
     Ok(Json(MeResp {
@@ -405,14 +482,20 @@ async fn add_email(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let wallet = authed_wallet(&state, &headers).await?;
 
-    state.store.find_user_by_wallet(&wallet).await
+    state
+        .store
+        .find_user_by_wallet(&wallet)
+        .await
         .ok_or((StatusCode::UNAUTHORIZED, "Account not found".to_string()))?;
 
     if state.store.find_user_by_email(&req.email).await.is_some() {
         return Err((StatusCode::CONFLICT, "Email already in use".to_string()));
     }
 
-    state.store.set_email(&wallet, &req.email).await
+    state
+        .store
+        .set_email(&wallet, &req.email)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!("[Auth] Added email {} to wallet {}", req.email, wallet);
@@ -425,31 +508,31 @@ async fn add_email(
 /// Field order MUST match the Anchor account definition exactly.
 #[derive(borsh::BorshDeserialize)]
 struct ProfileOnChain {
-    pub _authority:       [u8; 32],
-    pub _country:         String,
-    pub _wins:            u32,
-    pub _losses:          u32,
-    pub _draws:           u32,
-    pub _games_played:    u32,
-    pub _elo_rating:      f64,
-    pub _rd:              f64,
-    pub _volatility:      f64,
-    pub _last_played:     i64,
-    pub _win_streak:      u32,
-    pub _best_streak:     u32,
+    pub _authority: [u8; 32],
+    pub _country: String,
+    pub _wins: u32,
+    pub _losses: u32,
+    pub _draws: u32,
+    pub _games_played: u32,
+    pub _elo_rating: f64,
+    pub _rd: f64,
+    pub _volatility: f64,
+    pub _last_played: i64,
+    pub _win_streak: u32,
+    pub _best_streak: u32,
     pub _tournament_wins: u32,
-    pub _ranked_games:    u32,
-    pub _total_wagered:   u64,
-    pub _total_won:       u64,
-    pub _created_at:      i64,
-    pub _last_game_at:    i64,
-    pub _is_verified:     bool,
+    pub _ranked_games: u32,
+    pub _total_wagered: u64,
+    pub _total_won: u64,
+    pub _created_at: i64,
+    pub _last_game_at: i64,
+    pub _is_verified: bool,
     pub _annual_wins_gbp: u64,
     pub _annual_wins_brl: u64,
     pub _annual_wins_cad: u64,
     pub _annual_wins_eur: u64,
-    pub username:         String,
-    pub username_set:     bool,
+    pub username: String,
+    pub username_set: bool,
 }
 
 /// POST /auth/sync-profile — reads the caller's on-chain PlayerProfile PDA,
@@ -464,38 +547,65 @@ async fn sync_profile(
     let wallet = &wallet;
 
     // 2. Derive PlayerProfile PDA  (seeds: ["profile", wallet_bytes])
-    let wallet_pk = Pubkey::from_str(wallet)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet in token".to_string()))?;
-    let program_id = Pubkey::from_str(&state.config.program_id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Invalid PROGRAM_ID config".to_string()))?;
+    let wallet_pk = Pubkey::from_str(wallet).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid wallet in token".to_string(),
+        )
+    })?;
+    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Invalid PROGRAM_ID config".to_string(),
+        )
+    })?;
     let (profile_pda, _) = solana_sdk::pubkey::Pubkey::find_program_address(
         &[b"profile", wallet_pk.as_ref()],
         &program_id,
     );
 
     // 3. Fetch account data from Solana RPC (uses SOLANA_RPC_URL — correct in prod)
-    let rpc = solana_client::nonblocking::rpc_client::RpcClient::new(
-        state.config.solana_rpc_url.clone(),
-    );
-    let account = rpc.get_account(&profile_pda).await
-        .map_err(|_| (StatusCode::NOT_FOUND, "On-chain profile not found. Create one first.".to_string()))?;
+    let rpc =
+        solana_client::nonblocking::rpc_client::RpcClient::new(state.config.solana_rpc_url.clone());
+    let account = rpc.get_account(&profile_pda).await.map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            "On-chain profile not found. Create one first.".to_string(),
+        )
+    })?;
 
     // 4. Borsh-decode: skip 8-byte Anchor discriminator then deserialise
     if account.data.len() < 9 {
-        return Err((StatusCode::UNPROCESSABLE_ENTITY, "Account data too short".to_string()));
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Account data too short".to_string(),
+        ));
     }
-    let profile = ProfileOnChain::try_from_slice(&account.data[8..])
-        .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, format!("Failed to decode profile: {e}")))?;
+    let profile = ProfileOnChain::try_from_slice(&account.data[8..]).map_err(|e| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("Failed to decode profile: {e}"),
+        )
+    })?;
 
     if !profile.username_set || profile.username.is_empty() {
-        return Err((StatusCode::UNPROCESSABLE_ENTITY, "No username set on-chain yet".to_string()));
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "No username set on-chain yet".to_string(),
+        ));
     }
 
     // 5. Update SQLite — this is now the canonical username
-    state.store.update_username(wallet, &profile.username).await
+    state
+        .store
+        .update_username(wallet, &profile.username)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    info!("[Auth] Synced on-chain username '{}' for {}", profile.username, wallet);
+    info!(
+        "[Auth] Synced on-chain username '{}' for {}",
+        profile.username, wallet
+    );
     Ok(Json(serde_json::json!({ "username": profile.username })))
 }
 
@@ -525,22 +635,29 @@ async fn init_profile_tx(
     headers: axum::http::HeaderMap,
     Json(req): Json<InitProfileTxReq>,
 ) -> Result<Json<InitProfileTxResp>, (StatusCode, String)> {
-    use solana_sdk::{
-        instruction::{AccountMeta, Instruction},
-        transaction::Transaction,
-        system_program,
-    };
     use base64::engine::general_purpose;
     use base64::Engine as _;
+    use solana_sdk::{
+        instruction::{AccountMeta, Instruction},
+        system_program,
+        transaction::Transaction,
+    };
 
     // Validate JWT → wallet pubkey
     let wallet = authed_wallet(&state, &headers).await?;
-    let wallet_pk = Pubkey::from_str(&wallet)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet in token".to_string()))?;
+    let wallet_pk = Pubkey::from_str(&wallet).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid wallet in token".to_string(),
+        )
+    })?;
 
     // Validate inputs
     if req.username.len() < 3 || req.username.len() > 20 {
-        return Err((StatusCode::BAD_REQUEST, "Username must be 3–20 chars".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Username must be 3–20 chars".to_string(),
+        ));
     }
     let min_dob = chrono::Utc::now().timestamp() - 567_648_000; // 18 years
     if req.date_of_birth <= 0 || req.date_of_birth > min_dob {
@@ -550,14 +667,10 @@ async fn init_profile_tx(
     let program_id = state.program_id;
 
     // Derive PDAs
-    let (profile_pda, _) = Pubkey::find_program_address(
-        &[b"profile", wallet_pk.as_ref()],
-        &program_id,
-    );
-    let (username_record_pda, _) = Pubkey::find_program_address(
-        &[b"username", req.username.as_bytes()],
-        &program_id,
-    );
+    let (profile_pda, _) =
+        Pubkey::find_program_address(&[b"profile", wallet_pk.as_ref()], &program_id);
+    let (username_record_pda, _) =
+        Pubkey::find_program_address(&[b"username", req.username.as_bytes()], &program_id);
 
     // Build instruction data: discriminator + borsh(username, country, date_of_birth)
     // Borsh string: 4-byte LE length prefix + UTF-8 bytes
@@ -583,25 +696,32 @@ async fn init_profile_tx(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    let ix = Instruction { program_id, accounts, data };
+    let ix = Instruction {
+        program_id,
+        accounts,
+        data,
+    };
 
     // Fetch a recent blockhash so the transaction is immediately broadcastable.
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
-    let recent_blockhash = tokio::task::spawn_blocking(move || {
-        rpc.get_latest_blockhash()
-    })
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC blockhash: {e}")))?;
+    let recent_blockhash = tokio::task::spawn_blocking(move || rpc.get_latest_blockhash())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC blockhash: {e}")))?;
 
-    let tx = Transaction::new_unsigned(
-        solana_sdk::message::Message::new_with_blockhash(&[ix], Some(&wallet_pk), &recent_blockhash)
-    );
+    let tx = Transaction::new_unsigned(solana_sdk::message::Message::new_with_blockhash(
+        &[ix],
+        Some(&wallet_pk),
+        &recent_blockhash,
+    ));
     let tx_bytes = bincode::serialize(&tx)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {e}")))?;
     let tx_b64 = general_purpose::STANDARD.encode(&tx_bytes);
 
-    info!("[Auth] Built init_profile_tx for {} username={}", wallet_pk, req.username);
+    info!(
+        "[Auth] Built init_profile_tx for {} username={}",
+        wallet_pk, req.username
+    );
     Ok(Json(InitProfileTxResp {
         tx_b64,
         profile_pda: profile_pda.to_string(),
@@ -629,11 +749,12 @@ async fn broadcast_tx(
 ) -> Result<Json<BroadcastTxResp>, (StatusCode, String)> {
     use base64::engine::general_purpose;
     use base64::Engine as _;
-    use solana_sdk::transaction::Transaction;
     use solana_client::rpc_config::RpcSendTransactionConfig;
     use solana_sdk::commitment_config::CommitmentConfig;
+    use solana_sdk::transaction::Transaction;
 
-    let tx_bytes = general_purpose::STANDARD.decode(&req.tx_b64)
+    let tx_bytes = general_purpose::STANDARD
+        .decode(&req.tx_b64)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("base64 decode: {e}")))?;
 
     let tx: Transaction = bincode::deserialize(&tx_bytes)
@@ -644,7 +765,10 @@ async fn broadcast_tx(
         rpc.send_and_confirm_transaction_with_spinner_and_config(
             &tx,
             CommitmentConfig::confirmed(),
-            RpcSendTransactionConfig { skip_preflight: false, ..Default::default() },
+            RpcSendTransactionConfig {
+                skip_preflight: false,
+                ..Default::default()
+            },
         )
     })
     .await
@@ -652,7 +776,9 @@ async fn broadcast_tx(
     .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC broadcast: {e}")))?;
 
     info!("[Auth] Broadcast tx: {sig}");
-    Ok(Json(BroadcastTxResp { signature: sig.to_string() }))
+    Ok(Json(BroadcastTxResp {
+        signature: sig.to_string(),
+    }))
 }
 
 // ── PATCH /auth/username ──────────────────────────────────────────────────────
@@ -672,17 +798,26 @@ async fn set_username(
     let wallet = authed_wallet(&state, &headers).await?;
 
     if req.username.len() < 3 || req.username.len() > 20 {
-        return Err((StatusCode::BAD_REQUEST, "Username must be 3-20 characters".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Username must be 3-20 characters".to_string(),
+        ));
     }
 
     if state.store.username_taken(&req.username).await {
         return Err((StatusCode::CONFLICT, "Username already taken".to_string()));
     }
 
-    state.store.update_username(&wallet, &req.username).await
+    state
+        .store
+        .update_username(&wallet, &req.username)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    info!("[Auth] Username updated to '{}' for {}", req.username, wallet);
+    info!(
+        "[Auth] Username updated to '{}' for {}",
+        req.username, wallet
+    );
     Ok(Json(serde_json::json!({ "username": req.username })))
 }
 
@@ -698,7 +833,10 @@ async fn logout(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let wallet = authed_wallet(&state, &headers).await?;
     let now = chrono::Utc::now().timestamp();
-    state.store.revoke_tokens_before(&wallet, now).await
+    state
+        .store
+        .revoke_tokens_before(&wallet, now)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     info!("[Auth] Logout — revoked tokens for {}", wallet);
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -723,7 +861,9 @@ async fn check_wallet(
     let user = state.store.find_user_by_wallet(&wallet).await;
     let registered = user.is_some();
     if registered {
-        Ok(Json(serde_json::json!({ "registered": true, "username": user.unwrap().1 })))
+        Ok(Json(
+            serde_json::json!({ "registered": true, "username": user.unwrap().1 }),
+        ))
     } else {
         Err((StatusCode::NOT_FOUND, "Wallet not registered".to_string()))
     }
@@ -748,22 +888,32 @@ async fn delete_account(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     verify_wallet_sig(&req.wallet, &req.signature, "delete", req.timestamp)?;
 
-    state.store.find_user_by_wallet(&req.wallet).await
+    state
+        .store
+        .find_user_by_wallet(&req.wallet)
+        .await
         .ok_or((StatusCode::NOT_FOUND, "Wallet not registered".to_string()))?;
 
     // 1. Erase auth record
-    state.store.erase_user(&req.wallet).await
+    state
+        .store
+        .erase_user(&req.wallet)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 2. Erase KYC PII from vault and write audit trail
     let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
     let _ = vault.erase_kyc(&req.wallet).await;
-    let _ = vault.log_deletion_request(&req.wallet, None, req.reason.as_deref()).await;
+    let _ = vault
+        .log_deletion_request(&req.wallet, None, req.reason.as_deref())
+        .await;
     let _ = vault.complete_deletion_request(&req.wallet).await;
     vault.write_audit(&req.wallet, "account_deleted").await;
 
     info!("[Auth] GDPR erasure: {}", req.wallet);
-    Ok(Json(serde_json::json!({ "ok": true, "message": "Account and KYC data erased." })))
+    Ok(Json(
+        serde_json::json!({ "ok": true, "message": "Account and KYC data erased." }),
+    ))
 }
 
 // ── SIWS (Sign-In With Solana) ─────────────────────────────────────────────────
@@ -793,16 +943,22 @@ async fn siws_challenge(
     State(state): State<AppState>,
     Json(req): Json<SiwsChallengeReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    Pubkey::from_str(&req.wallet)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet address".to_string()))?;
+    Pubkey::from_str(&req.wallet).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid wallet address".to_string(),
+        )
+    })?;
 
     let nonce = uuid::Uuid::new_v4().to_string();
     let expires_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs() + 300; // 5 minutes
+        .as_secs()
+        + 300; // 5 minutes
 
-    state.siws_nonces
+    state
+        .siws_nonces
         .lock()
         .await
         .insert(nonce.clone(), (req.wallet.clone(), expires_at));
@@ -824,25 +980,43 @@ async fn siws_verify(
     // Validate and consume the nonce
     let (nonce_wallet, expires_at) = {
         let mut map = state.siws_nonces.lock().await;
-        map.remove(&req.nonce)
-            .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unknown or already-used nonce".to_string()))?
+        map.remove(&req.nonce).ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "Unknown or already-used nonce".to_string(),
+            )
+        })?
     };
 
     if now > expires_at {
         return Err((StatusCode::UNAUTHORIZED, "Nonce expired".to_string()));
     }
     if nonce_wallet != req.wallet {
-        return Err((StatusCode::UNAUTHORIZED, "Wallet mismatch for nonce".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Wallet mismatch for nonce".to_string(),
+        ));
     }
 
     // Verify signature over `xfchess:siws:<nonce>`
-    let pk = Pubkey::from_str(&req.wallet)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid wallet address".to_string()))?;
-    let sig = Signature::from_str(&req.signature)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signature format".to_string()))?;
+    let pk = Pubkey::from_str(&req.wallet).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid wallet address".to_string(),
+        )
+    })?;
+    let sig = Signature::from_str(&req.signature).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid signature format".to_string(),
+        )
+    })?;
     let msg = format!("xfchess:siws:{}", req.nonce);
     if !sig.verify(pk.as_ref(), msg.as_bytes()) {
-        return Err((StatusCode::UNAUTHORIZED, "Signature verification failed".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Signature verification failed".to_string(),
+        ));
     }
 
     // Ensure account exists (auto-create if first time)
@@ -850,13 +1024,22 @@ async fn siws_verify(
         user.1
     } else {
         let default_username = req.wallet[..8.min(req.wallet.len())].to_string();
-        let _ = state.store.create_wallet_user(&req.wallet, &default_username, None).await;
+        let _ = state
+            .store
+            .create_wallet_user(&req.wallet, &default_username, None)
+            .await;
         default_username
     };
 
-    let token = state.jwt.issue(&req.wallet)
+    let token = state
+        .jwt
+        .issue(&req.wallet)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!("[SIWS] verified + JWT issued for {}", req.wallet);
-    Ok(Json(AuthResp { token, username, wallet: req.wallet }))
+    Ok(Json(AuthResp {
+        token,
+        username,
+        wallet: req.wallet,
+    }))
 }

@@ -121,7 +121,7 @@ impl CinematicSequence {
     /// Create the default elaborate cinematic sequence
     fn create_default_sequence() -> Vec<CinematicKeyFrame> {
         let board_center = Vec3::new(3.5, 0.0, 3.5);
-        
+
         vec![
             // Phase 1: Low sweep from white side (kingside to queenside)
             CinematicKeyFrame {

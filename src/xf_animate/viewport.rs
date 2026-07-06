@@ -72,9 +72,10 @@ pub fn sync_learn_viewport(
         return;
     };
 
-    let window_size = windows.single().ok().map(|w| {
-        UVec2::new(w.physical_width(), w.physical_height())
-    });
+    let window_size = windows
+        .single()
+        .ok()
+        .map(|w| UVec2::new(w.physical_width(), w.physical_height()));
 
     let clamped = match (viewport_rect.rect_px, window_size) {
         (Some(rect), Some(ws)) if ws.x > 0 && ws.y > 0 => {

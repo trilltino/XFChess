@@ -7,19 +7,15 @@
 //!   Host: announces → waits → polls relay for JOIN_ACK → starts game
 //!   Joiner: sees listing → clicks join → sends JOIN_ACK → starts game immediately
 
-
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
-use crate::multiplayer::{
-    vps_client,
-    BraidNetworkState,
-};
+use crate::core::states::GameState;
+use crate::game::events::GameStartedEvent;
 use crate::multiplayer::network::p2p::{
     ConnectToPeerEvent, P2PConnectionState, P2PConnectionStatus,
 };
-use crate::game::events::GameStartedEvent;
-use crate::core::states::GameState;
+use crate::multiplayer::{vps_client, OnlineNetworkState};
 
 use crossbeam_channel::{Receiver, Sender};
 
@@ -59,9 +55,25 @@ pub struct P2PVpsState {
     /// the JoinerDetected handler so the host can be routed to the Solana
     /// contract creation flow before entering InGame.
     pub hosting_stake_amount: f64,
+    /// Time control chosen when hosting, carried into JoinerDetected so the host's
+    /// clock reflects the selected mode (not the default). 0 base = Unlimited.
+    pub hosting_base_secs: u32,
+    pub hosting_inc: u16,
     /// Joiner who has sent JOIN_ACK but the game hasn't yet started.
     /// Used by the waiting screen to show who is about to join.
     pub pending_joiner: Option<PendingJoinerInfo>,
+}
+
+/// Build a `TimeControl` from base/increment seconds (0 base = unlimited).
+fn tc_from_secs(base_secs: u32, inc: u16) -> crate::game::time_control::TimeControl {
+    if base_secs == 0 {
+        crate::game::time_control::TimeControl::Unlimited
+    } else {
+        crate::game::time_control::TimeControl::Custom {
+            base_seconds: base_secs,
+            increment_seconds: inc,
+        }
+    }
 }
 
 impl Default for P2PVpsState {
@@ -79,6 +91,8 @@ impl Default for P2PVpsState {
             hosting_node_id: None,
             host_poll_last: None,
             hosting_stake_amount: 0.0,
+            hosting_base_secs: 0,
+            hosting_inc: 0,
             pending_joiner: None,
         }
     }
@@ -141,8 +155,14 @@ fn sync_vps_relay_settings(
 ) {
     if settings.use_vps_relay != vps_state.use_vps_relay {
         vps_state.use_vps_relay = settings.use_vps_relay;
-        info!("[P2P VPS] Relay mode updated from settings: {}",
-            if vps_state.use_vps_relay { "enabled" } else { "disabled" });
+        info!(
+            "[P2P VPS] Relay mode updated from settings: {}",
+            if vps_state.use_vps_relay {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
     }
 }
 
@@ -164,10 +184,12 @@ fn poll_vps_game_list(mut vps_state: ResMut<P2PVpsState>) {
     vps_state.last_poll = Some(std::time::Instant::now());
 
     let tx = vps_state.response_tx.clone();
-    std::thread::spawn(move || {
-        match vps_client::p2p_list_games() {
-            Ok(games) => { let _ = tx.send(VpsResponse::GameList(games)); }
-            Err(e)    => { let _ = tx.send(VpsResponse::Error(e)); }
+    std::thread::spawn(move || match vps_client::p2p_list_games() {
+        Ok(games) => {
+            let _ = tx.send(VpsResponse::GameList(games));
+        }
+        Err(e) => {
+            let _ = tx.send(VpsResponse::Error(e));
         }
     });
 }
@@ -184,7 +206,8 @@ fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
         None => return,
     };
 
-    let should_poll = vps_state.host_poll_last
+    let should_poll = vps_state
+        .host_poll_last
         .map(|t| t.elapsed().as_secs() >= 2)
         .unwrap_or(true);
 
@@ -205,7 +228,10 @@ fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
                         let joiner_node_id = parts.next().unwrap_or(payload).to_string();
                         let joiner_display = parts.next().unwrap_or("Guest").to_string();
                         let joiner_elo = parts.next().unwrap_or("—").to_string();
-                        info!("[P2P VPS] JOIN_ACK received from {} ({} ELO {})", joiner_node_id, joiner_display, joiner_elo);
+                        info!(
+                            "[P2P VPS] JOIN_ACK received from {} ({} ELO {})",
+                            joiner_node_id, joiner_display, joiner_elo
+                        );
                         let _ = tx.send(VpsResponse::JoinerDetected {
                             game_id,
                             joiner_node_id,
@@ -228,15 +254,19 @@ fn handle_vps_responses(
     mut connect_events: MessageWriter<ConnectToPeerEvent>,
     mut core_mode: ResMut<crate::core::GameMode>,
     mut ai_config: ResMut<crate::game::ai::ChessAIResource>,
-    #[allow(unused_mut, unused_variables)] mut menu_state: ResMut<NextState<crate::core::MenuState>>,
+    #[allow(unused_mut, unused_variables)] mut menu_state: ResMut<
+        NextState<crate::core::MenuState>,
+    >,
     mut next_game_state: ResMut<NextState<GameState>>,
     mut game_started: MessageWriter<GameStartedEvent>,
     mut p2p_conn: ResMut<P2PConnectionState>,
-    #[cfg(feature = "solana")]
-    mut solana_lobby: Option<ResMut<crate::multiplayer::solana::lobby::SolanaLobbyState>>,
-    mut braid_pvp_session: ResMut<crate::multiplayer::network::braid_pvp::BraidPvpSession>,
+    #[cfg(feature = "solana")] mut solana_lobby: Option<
+        ResMut<crate::multiplayer::solana::lobby::SolanaLobbyState>,
+    >,
+    mut online_session: ResMut<crate::multiplayer::network::online_game_session::OnlineGameSession>,
     network_config: Res<crate::multiplayer::types::NetworkConfig>,
-    network_state: Res<crate::multiplayer::BraidNetworkState>,
+    network_state: Res<crate::multiplayer::OnlineNetworkState>,
+    mut active_tc: ResMut<crate::game::resources::active_time_control::ActiveTimeControl>,
 ) {
     while let Ok(response) = vps_state.response_rx.try_recv() {
         match response {
@@ -259,21 +289,45 @@ fn handle_vps_responses(
                         is_private: g.is_private,
                     })
                     .collect();
-                trace!("[P2P VPS] Updated cached games: {} found", vps_state.cached_games.len());
+                trace!(
+                    "[P2P VPS] Updated cached games: {} found",
+                    vps_state.cached_games.len()
+                );
             }
 
-            VpsResponse::JoinResult { game_id, host_node_id, stake_amount } => {
+            VpsResponse::JoinResult {
+                game_id,
+                host_node_id,
+                stake_amount,
+            } => {
                 if let Some(host_id) = host_node_id {
-                    info!("[P2P VPS] Joined game {} (stake={}). Host node: {}", game_id, stake_amount, host_id);
+                    info!(
+                        "[P2P VPS] Joined game {} (stake={}). Host node: {}",
+                        game_id, stake_amount, host_id
+                    );
+
+                    // Adopt the host's time control (from the cached lobby listing) so the
+                    // joiner's clock matches the chosen mode instead of the default.
+                    if let Some(listing) =
+                        vps_state.cached_games.iter().find(|g| g.game_id == game_id)
+                    {
+                        active_tc.control =
+                            tc_from_secs(listing.base_time_seconds, listing.increment_seconds);
+                        active_tc.ai_game = false;
+                        info!(
+                            "[P2P VPS] Joiner time control: {}",
+                            active_tc.control.short_label()
+                        );
+                    }
 
                     // Opportunistically try Iroh P2P (dual transport — OK if it fails)
                     connect_events.write(ConnectToPeerEvent {
                         peer_node_id: host_id.clone(),
                     });
 
-                    // Start Braid-HTTP relay session for reliable move transport
-                    crate::multiplayer::network::braid_pvp::start_session(
-                        &mut braid_pvp_session,
+                    // Start online game session for reliable move transport
+                    crate::multiplayer::network::online_game_session::start_session(
+                        &mut online_session,
                         network_config.vps_base_url.clone(),
                         game_id.clone(),
                         stake_amount,
@@ -285,7 +339,11 @@ fn handle_vps_responses(
                     // On reconnect this restores the current mid-game position.
                     let gid = parse_game_id_u64(&game_id);
                     if let Some(tx) = &network_state.message_sender {
-                        let _ = tx.send(crate::multiplayer::network::protocol::NetworkMessage::ResyncRequest { game_id: gid });
+                        let _ = tx.send(
+                            crate::multiplayer::network::protocol::NetworkMessage::ResyncRequest {
+                                game_id: gid,
+                            },
+                        );
                         info!("[P2P VPS] Sent ResyncRequest to host for game {gid}");
                     }
 
@@ -303,7 +361,7 @@ fn handle_vps_responses(
                     } else {
                         // Start game immediately on joiner side (Black)
                         ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
-                        *core_mode = crate::core::GameMode::BraidMultiplayer;
+                        *core_mode = crate::core::GameMode::OnlineMultiplayer;
                         p2p_conn.is_host = false;
                         p2p_conn.player_color = Some(crate::rendering::pieces::PieceColor::Black);
                         p2p_conn.status = P2PConnectionStatus::InGame;
@@ -318,9 +376,23 @@ fn handle_vps_responses(
                 }
             }
 
-            VpsResponse::JoinerDetected { game_id, joiner_node_id, joiner_display, joiner_elo } => {
+            VpsResponse::JoinerDetected {
+                game_id,
+                joiner_node_id,
+                joiner_display,
+                joiner_elo,
+            } => {
                 let stake = vps_state.hosting_stake_amount;
                 info!("[P2P VPS] Joiner {} ({} / {}) connected to {} (stake={:.3} SOL). Starting as host (White).", joiner_node_id, joiner_display, joiner_elo, game_id, stake);
+
+                // Apply the host's chosen time control so the clock matches the mode.
+                active_tc.control =
+                    tc_from_secs(vps_state.hosting_base_secs, vps_state.hosting_inc);
+                active_tc.ai_game = false;
+                info!(
+                    "[P2P VPS] Host time control: {}",
+                    active_tc.control.short_label()
+                );
 
                 // Store pending joiner info so the waiting screen can display it briefly.
                 vps_state.pending_joiner = Some(PendingJoinerInfo {
@@ -334,9 +406,9 @@ fn handle_vps_responses(
                 vps_state.hosting_node_id = None;
                 vps_state.hosting_stake_amount = 0.0;
 
-                // Start Braid-HTTP relay session with the correct stake amount.
-                crate::multiplayer::network::braid_pvp::start_session(
-                    &mut braid_pvp_session,
+                // Start online game session with the correct stake amount.
+                crate::multiplayer::network::online_game_session::start_session(
+                    &mut online_session,
                     network_config.vps_base_url.clone(),
                     game_id.clone(),
                     stake,
@@ -368,7 +440,7 @@ fn handle_vps_responses(
                     {
                         warn!("[P2P VPS] Wagered game requested but solana feature not enabled — starting as free game.");
                         ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
-                        *core_mode = crate::core::GameMode::BraidMultiplayer;
+                        *core_mode = crate::core::GameMode::OnlineMultiplayer;
                         p2p_conn.status = P2PConnectionStatus::InGame;
                         let gid = parse_game_id_u64(&game_id);
                         game_started.write(GameStartedEvent { game_id: gid });
@@ -377,11 +449,14 @@ fn handle_vps_responses(
                 } else {
                     // Free game — start immediately.
                     ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
-                    *core_mode = crate::core::GameMode::BraidMultiplayer;
+                    *core_mode = crate::core::GameMode::OnlineMultiplayer;
                     p2p_conn.status = P2PConnectionStatus::InGame;
                     let gid = parse_game_id_u64(&game_id);
                     game_started.write(GameStartedEvent { game_id: gid });
                     next_game_state.set(GameState::InGame);
+                    // Leave the P2P waiting lobby so the "Waiting for opponent" overlay
+                    // dismisses the moment the joiner is detected.
+                    menu_state.set(crate::core::MenuState::Main);
                     info!("[P2P VPS] Free game started (host/White) via HTTP relay");
                 }
             }
@@ -397,7 +472,7 @@ fn handle_vps_responses(
 fn send_vps_messages(
     mut vps_state: ResMut<P2PVpsState>,
     _p2p_state: Res<P2PConnectionState>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
 ) {
     if !vps_state.use_vps_relay {
         return;
@@ -437,5 +512,8 @@ pub fn queue_vps_message(vps_state: &mut P2PVpsState, game_id: String, message: 
 /// Toggle VPS relay mode
 pub fn set_vps_relay_mode(vps_state: &mut P2PVpsState, enabled: bool) {
     vps_state.use_vps_relay = enabled;
-    info!("[P2P VPS] Relay mode: {}", if enabled { "enabled" } else { "disabled" });
+    info!(
+        "[P2P VPS] Relay mode: {}",
+        if enabled { "enabled" } else { "disabled" }
+    );
 }

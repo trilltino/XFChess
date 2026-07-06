@@ -9,8 +9,8 @@ use std::time::Instant;
 use tracing::info;
 
 use crate::multiplayer::network::vps::{
-    SocialContact, SocialFriendRequest, SocialPresence, LobbyInvite,
-    get_contacts, get_pending_requests, get_online, poll_social, update_presence,
+    get_contacts, get_online, get_pending_requests, poll_social, update_presence, LobbyInvite,
+    SocialContact, SocialFriendRequest, SocialPresence,
 };
 use crate::multiplayer::types::NetworkEvent;
 
@@ -122,7 +122,9 @@ impl Default for LobbyChatSession {
 
 impl LobbyChatSession {
     pub fn activate(&mut self, game_id: String, base_url: String, display: String) {
-        if self.active && self.game_id == game_id { return; }
+        if self.active && self.game_id == game_id {
+            return;
+        }
 
         let (tx_in, rx_in) = bounded::<LobbyMsg>(64);
         let (tx_out, _rx_out) = bounded::<LobbyMsg>(64);
@@ -160,7 +162,9 @@ impl LobbyChatSession {
                             text: p.text,
                             timestamp_ms: p.timestamp_ms,
                         };
-                        if sender.send(lobby_msg).is_err() { break; }
+                        if sender.send(lobby_msg).is_err() {
+                            break;
+                        }
                     }
                 }
             })
@@ -201,12 +205,12 @@ pub enum LobbySort {
 impl LobbySort {
     pub fn as_str(&self) -> &'static str {
         match self {
-            LobbySort::Newest    => "newest",
-            LobbySort::EloAsc    => "elo_asc",
-            LobbySort::EloDesc   => "elo_desc",
-            LobbySort::StakeAsc  => "stake_asc",
+            LobbySort::Newest => "newest",
+            LobbySort::EloAsc => "elo_asc",
+            LobbySort::EloDesc => "elo_desc",
+            LobbySort::StakeAsc => "stake_asc",
             LobbySort::StakeDesc => "stake_desc",
-            LobbySort::TimeAsc   => "time_asc",
+            LobbySort::TimeAsc => "time_asc",
         }
     }
 }
@@ -242,14 +246,17 @@ impl Plugin for SocialPlugin {
             .init_resource::<LobbyFetchState>()
             .init_resource::<BackendRegion>()
             .init_resource::<OnlinePlayersState>()
-            .add_systems(Update, (
-                sync_node_id_from_network,
-                poll_friends_fetch,
-                drain_lobby_chat,
-                tick_friends_sync,
-                tick_presence_sync,
-                fetch_backend_region_once,
-            ));
+            .add_systems(
+                Update,
+                (
+                    sync_node_id_from_network,
+                    poll_friends_fetch,
+                    drain_lobby_chat,
+                    tick_friends_sync,
+                    tick_presence_sync,
+                    fetch_backend_region_once,
+                ),
+            );
     }
 }
 
@@ -284,7 +291,11 @@ fn poll_friends_fetch(mut state: ResMut<FriendsState>) {
         state.pending_requests = result.pending_requests;
         // Append new invites (don't duplicate)
         for inv in result.invites {
-            if !state.pending_invites.iter().any(|e| e.game_id == inv.game_id && e.from_node_id == inv.from_node_id) {
+            if !state
+                .pending_invites
+                .iter()
+                .any(|e| e.game_id == inv.game_id && e.from_node_id == inv.from_node_id)
+            {
                 state.pending_invites.push(inv);
             }
         }
@@ -297,7 +308,9 @@ fn poll_friends_fetch(mut state: ResMut<FriendsState>) {
 
 /// Drain inbound lobby chat messages into LobbyChatSession.messages.
 fn drain_lobby_chat(mut chat: ResMut<LobbyChatSession>) {
-    if !chat.active { return; }
+    if !chat.active {
+        return;
+    }
     let msgs: Vec<LobbyMsg> = if let Some(ref rx) = chat.rx {
         std::iter::from_fn(|| rx.try_recv().ok()).collect()
     } else {
@@ -308,12 +321,23 @@ fn drain_lobby_chat(mut chat: ResMut<LobbyChatSession>) {
 
 /// Every 15 seconds, kick off a background friends + social poll if our node_id is known.
 fn tick_friends_sync(mut state: ResMut<FriendsState>) {
-    if state.loading { return; }
-    if state.fetch_rx.is_some() { return; }
-    let Some(ref node_id) = state.our_node_id.clone() else { return; };
+    if state.loading {
+        return;
+    }
+    if state.fetch_rx.is_some() {
+        return;
+    }
+    let Some(ref node_id) = state.our_node_id.clone() else {
+        return;
+    };
 
-    let elapsed = state.last_sync.map(|t| t.elapsed().as_secs()).unwrap_or(u64::MAX);
-    if elapsed < 15 { return; }
+    let elapsed = state
+        .last_sync
+        .map(|t| t.elapsed().as_secs())
+        .unwrap_or(u64::MAX);
+    if elapsed < 15 {
+        return;
+    }
 
     state.loading = true;
 
@@ -327,10 +351,13 @@ fn tick_friends_sync(mut state: ResMut<FriendsState>) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
             let contacts = get_contacts(&node_id, pubkey.as_deref()).unwrap_or_default();
-            let pending_requests = get_pending_requests(&node_id, pubkey.as_deref()).unwrap_or_default();
-            let poll_resp = poll_social(&node_id, poll_index).unwrap_or_else(|_| crate::multiplayer::vps_client::SocialPollResponse {
-                invites: vec![],
-                next_index: poll_index,
+            let pending_requests =
+                get_pending_requests(&node_id, pubkey.as_deref()).unwrap_or_default();
+            let poll_resp = poll_social(&node_id, poll_index).unwrap_or_else(|_| {
+                crate::multiplayer::vps_client::SocialPollResponse {
+                    invites: vec![],
+                    next_index: poll_index,
+                }
             });
             let _ = tx.send(FriendsFetchResult {
                 contacts,
@@ -345,10 +372,7 @@ fn tick_friends_sync(mut state: ResMut<FriendsState>) {
 /// Every ~15s: send our presence heartbeat (`PUT /presence`) so we count as
 /// online, then fetch the current online count (`GET /presence`). Both run on a
 /// background IO task; the count is drained into [`OnlinePlayersState`].
-fn tick_presence_sync(
-    friends: Res<FriendsState>,
-    mut online: ResMut<OnlinePlayersState>,
-) {
+fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlayersState>) {
     // Drain any in-flight result first.
     if let Some(rx) = online.fetch_rx.as_ref() {
         if let Ok(count) = rx.try_recv() {
@@ -358,12 +382,21 @@ fn tick_presence_sync(
         }
     }
 
-    if online.fetch_rx.is_some() { return; }
-    let elapsed = online.last_sync.map(|t| t.elapsed().as_secs()).unwrap_or(u64::MAX);
-    if elapsed < 15 { return; }
+    if online.fetch_rx.is_some() {
+        return;
+    }
+    let elapsed = online
+        .last_sync
+        .map(|t| t.elapsed().as_secs())
+        .unwrap_or(u64::MAX);
+    if elapsed < 15 {
+        return;
+    }
 
     // Need a stable identity before we can announce presence.
-    let Some(node_id) = friends.our_node_id.clone() else { return; };
+    let Some(node_id) = friends.our_node_id.clone() else {
+        return;
+    };
     let pubkey = friends.our_pubkey.clone();
     let display = friends.our_display.clone();
 

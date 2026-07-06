@@ -6,11 +6,9 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use super::{
-    CapturedPieces, CurrentGamePhase, CurrentTurn, GameOverState,
-};
-use crate::game::resources::player::selection::Selection;
+use super::{CapturedPieces, CurrentGamePhase, CurrentTurn, GameOverState};
 use crate::engine::board_state::ChessEngine;
+use crate::game::resources::player::selection::Selection;
 
 /// System parameter grouping game state resources
 ///

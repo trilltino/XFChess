@@ -35,12 +35,11 @@ use crate::game::components::{
 };
 
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
-use crate::ui::game_ui::{
-    reset_in_game_hud_visibility, toggle_in_game_hud,
-    IncrementFlash, InGameHudVisibility,
-};
 use crate::ui::game_2d::Board2DTheme;
-use bevy::input::common_conditions::{input_toggle_active, input_just_pressed};
+use crate::ui::game_ui::{
+    reset_in_game_hud_visibility, toggle_in_game_hud, InGameHudVisibility, IncrementFlash,
+};
+use bevy::input::common_conditions::{input_just_pressed, input_toggle_active};
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 
@@ -204,14 +203,10 @@ impl Plugin for GamePlugin {
                 camera_mode_cycle_system.in_set(GameSystems::Input),
                 camera_rotate_on_turn_detection_system
                     .in_set(GameSystems::Input)
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    }),
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 camera_rotate_on_turn_system
                     .in_set(GameSystems::Input)
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    }),
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 // Validation set: Sync board state before validation (disabled in TempleOS)
 
                 // Execution set: Update game state (disabled in TempleOS)
@@ -225,47 +220,37 @@ impl Plugin for GamePlugin {
                 // is empty and needs to be built for the first time.
                 update_game_phase
                     .in_set(GameSystems::Execution)
-                    .run_if(|ct: Res<CurrentTurn>,
-                             engine: Res<crate::engine::board_state::ChessEngine>,
-                             game_over: Res<super::resources::GameOverState>| {
-                        ct.is_changed()
-                            || (!engine.has_legal_moves() && !game_over.is_game_over())
-                    })
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    }),
-                start_timer_when_ready.in_set(GameSystems::Execution).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    },
-                ),
-                update_game_timer.in_set(GameSystems::Execution).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    },
-                ),
+                    .run_if(
+                        |ct: Res<CurrentTurn>,
+                         engine: Res<crate::engine::board_state::ChessEngine>,
+                         game_over: Res<super::resources::GameOverState>| {
+                            ct.is_changed()
+                                || (!engine.has_legal_moves() && !game_over.is_game_over())
+                        },
+                    )
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
+                start_timer_when_ready
+                    .in_set(GameSystems::Execution)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
+                update_game_timer
+                    .in_set(GameSystems::Execution)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 // check_game_over_state is gated on GameOverState changing so it
                 // doesn't poll every frame — it only fires when a move sets a
                 // terminal condition (checkmate, stalemate, timeout, resign).
                 check_game_over_state
                     .in_set(GameSystems::Execution)
                     .run_if(|go: Res<GameOverState>| go.is_changed())
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    }),
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 crate::game::systems::network_move::handle_resign_events
                     .in_set(GameSystems::Execution),
                 // Promotion detection and handling (disabled in TempleOS)
-                detect_pawn_promotion.in_set(GameSystems::Execution).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    },
-                ),
-                apply_pawn_promotion.in_set(GameSystems::Execution).run_if(
-                    |view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    },
-                ),
+                detect_pawn_promotion
+                    .in_set(GameSystems::Execution)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
+                apply_pawn_promotion
+                    .in_set(GameSystems::Execution)
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 // Network Move Verification/Execution
                 crate::game::systems::network_move::handle_network_moves
                     .in_set(GameSystems::Execution),
@@ -276,9 +261,7 @@ impl Plugin for GamePlugin {
                 highlight_possible_moves
                     .in_set(GameSystems::Visual)
                     .run_if(|sel: Res<Selection>| sel.is_changed())
-                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| {
-                        !view_mode.is_templeos()
-                    }),
+                    .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 // animate_piece_movement is skipped entirely when no piece has a
                 // PieceMoveAnimation component (archetype cache lookup — zero cost).
                 animate_piece_movement.in_set(GameSystems::Visual),
@@ -298,7 +281,6 @@ impl Plugin for GamePlugin {
                 crate::ui::game::game_ui::draw_offer_ui,
                 crate::ui::game::game_ui::rematch_offer_ui,
                 crate::ui::game::game_ui::post_game_overlay,
-                crate::ui::game::game_ui::pause_resume_ui,
                 crate::ui::game_2d::render_2d_board,
                 crate::ui::game::promotion_ui::promotion_ui_system,
                 crate::ui::game::game_2d::blunder_indicator_ui,
@@ -314,14 +296,12 @@ impl Plugin for GamePlugin {
         app.init_resource::<crate::ui::game::game_2d::PieceAnim2D>();
         app.add_systems(
             Update,
-            crate::ui::game::game_2d::trigger_piece_anim_2d
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_2d::trigger_piece_anim_2d.run_if(in_state(GameState::InGame)),
         );
 
         app.add_systems(
             Update,
-            super::systems::camera::update_game_viewport
-                .run_if(in_state(GameState::InGame)),
+            super::systems::camera::update_game_viewport.run_if(in_state(GameState::InGame)),
         );
 
         // Eval bar resources and update system
@@ -331,11 +311,15 @@ impl Plugin for GamePlugin {
         app.init_resource::<crate::ui::game::game_2d::BoardFocus>();
         app.init_resource::<crate::ui::game::game_2d::CheckmateFlashState>();
         app.init_resource::<crate::ui::game::game_2d::BoardFadeState>();
-        app.add_systems(Update, (
-            crate::ui::game::game_2d::trigger_checkmate_flash,
-            crate::ui::game::game_2d::tick_checkmate_flash,
-            crate::ui::game::game_2d::board_fade_system,
-        ).run_if(in_state(GameState::InGame)));
+        app.add_systems(
+            Update,
+            (
+                crate::ui::game::game_2d::trigger_checkmate_flash,
+                crate::ui::game::game_2d::tick_checkmate_flash,
+                crate::ui::game::game_2d::board_fade_system,
+            )
+                .run_if(in_state(GameState::InGame)),
+        );
         app.add_systems(
             Update,
             (
@@ -347,66 +331,72 @@ impl Plugin for GamePlugin {
         );
 
         // Sync Board2DTheme and eval bar visibility from GameSettings on settings change
-        app.add_systems(Update, crate::ui::game::game_2d::sync_board_theme_from_settings);
+        app.add_systems(
+            Update,
+            crate::ui::game::game_2d::sync_board_theme_from_settings,
+        );
         app.add_systems(Update, crate::ui::game::game_2d::sync_eval_bar_visibility);
-        app.add_systems(Update, crate::rendering::pieces::pieces::reload_piece_sprites);
+        app.add_systems(
+            Update,
+            crate::rendering::pieces::pieces::reload_piece_sprites,
+        );
+
+        // Keep the board fill light on the camera so pieces stay evenly lit from
+        // the viewer's side as the camera orbits/zooms (even lighting at any angle).
+        app.add_systems(
+            Update,
+            super::systems::visual::update_board_fill_light
+                .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
+        );
 
         // Ping chip (online games only)
         app.add_systems(
             bevy_egui::EguiPrimaryContextPass,
-            crate::ui::game::game_ui::ping_chip_ui
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::ping_chip_ui.run_if(in_state(GameState::InGame)),
         );
 
         // Opponent disconnect popup + countdown
         app.init_resource::<crate::ui::game::game_ui::OpponentDisconnectState>();
         app.add_systems(
             bevy_egui::EguiPrimaryContextPass,
-            crate::ui::game::game_ui::opponent_disconnect_ui
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::opponent_disconnect_ui.run_if(in_state(GameState::InGame)),
         );
 
         // Timeout hourglass — tracks FlagTimeoutEvent and drives animated ⧖ in timer chip
         app.add_systems(
             Update,
-            crate::ui::game::game_ui::timeout_hourglass_system
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::timeout_hourglass_system.run_if(in_state(GameState::InGame)),
         );
 
         // Player avatar fetch — background HTTP → Bevy Image asset
         app.add_systems(
             Update,
-            crate::ui::game::game_ui::avatar_fetch_system
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::avatar_fetch_system.run_if(in_state(GameState::InGame)),
         );
 
         // Check sound cue
         app.add_systems(
             Update,
-            crate::ui::game::game_ui::play_check_sound_system
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::play_check_sound_system.run_if(in_state(GameState::InGame)),
         );
 
         // Blindfold toggle — Ctrl+B
         app.add_systems(
             Update,
-            crate::ui::game::game_ui::toggle_blindfold_system
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::toggle_blindfold_system.run_if(in_state(GameState::InGame)),
         );
 
         // Tournament sidebar widget — shown when active_tournament_id is set
         #[cfg(feature = "solana")]
         app.add_systems(
             bevy_egui::EguiPrimaryContextPass,
-            crate::ui::game::game_ui::tournament_sidebar_widget
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::tournament_sidebar_widget.run_if(in_state(GameState::InGame)),
         );
 
         // Increment flash tick — pulses +Xs label after each move
         app.add_systems(
             Update,
-            crate::ui::game::game_ui::increment_flash_system
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::increment_flash_system.run_if(in_state(GameState::InGame)),
         );
 
         // Chat panel runs separately (shares EguiContexts with the chain above;
@@ -423,8 +413,7 @@ impl Plugin for GamePlugin {
         #[cfg(feature = "solana")]
         app.add_systems(
             bevy_egui::EguiPrimaryContextPass,
-            crate::ui::game::game_ui::session_expiry_banner
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_ui::session_expiry_banner.run_if(in_state(GameState::InGame)),
         );
 
         // Disconnect recovery banner (online modes only)
@@ -522,11 +511,7 @@ impl Plugin for GamePlugin {
         // Conditional 3D visibility system
         app.add_systems(
             Update,
-            (
-                toggle_3d_visibility,
-                toggle_in_game_hud,
-                confirm_exit_game,
-            )
+            (toggle_3d_visibility, toggle_in_game_hud, confirm_exit_game)
                 .run_if(in_state(GameState::InGame)),
         );
 
@@ -590,11 +575,15 @@ impl Plugin for GamePlugin {
 }
 
 /// Run condition: current game mode matches `mode`.
-pub fn in_mode(mode: crate::core::states::GameMode) -> impl Fn(Res<crate::core::states::GameMode>) -> bool {
+pub fn in_mode(
+    mode: crate::core::states::GameMode,
+) -> impl Fn(Res<crate::core::states::GameMode>) -> bool {
     move |game_mode: Res<crate::core::states::GameMode>| *game_mode == mode
 }
 
 /// Run condition: current game mode is NOT `mode`.
-pub fn not_in_mode(mode: crate::core::states::GameMode) -> impl Fn(Res<crate::core::states::GameMode>) -> bool {
+pub fn not_in_mode(
+    mode: crate::core::states::GameMode,
+) -> impl Fn(Res<crate::core::states::GameMode>) -> bool {
     move |game_mode: Res<crate::core::states::GameMode>| *game_mode != mode
 }

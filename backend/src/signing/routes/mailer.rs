@@ -13,13 +13,13 @@
 //!                       (defaults to Resend's shared test sender)
 //! - `RESEND_API_URL`  — overridable for testing
 
-use axum::{extract::State, http::StatusCode, Json, Router, routing::post};
+use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::env;
 use std::io::Write;
 use std::path::PathBuf;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 // ── Requests ────────────────────────────────────────────────────────────────
 
@@ -128,7 +128,9 @@ fn shell(heading: &str, body_html: &str) -> String {
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 // ── Core send (the only provider-specific code) ─────────────────────────────
@@ -144,10 +146,10 @@ pub async fn send_email(to: &str, kind: EmailKind<'_>) -> Result<bool, String> {
         }
     };
 
-    let from = env::var("MAIL_FROM")
-        .unwrap_or_else(|_| "XFChess <onboarding@resend.dev>".to_string());
-    let url = env::var("RESEND_API_URL")
-        .unwrap_or_else(|_| "https://api.resend.com/emails".to_string());
+    let from =
+        env::var("MAIL_FROM").unwrap_or_else(|_| "XFChess <onboarding@resend.dev>".to_string());
+    let url =
+        env::var("RESEND_API_URL").unwrap_or_else(|_| "https://api.resend.com/emails".to_string());
 
     let payload = json!({
         "from": from,
@@ -187,18 +189,33 @@ fn append_jsonl(file: &str, value: &impl Serialize) {
     }
     let line = match serde_json::to_string(value) {
         Ok(s) => s,
-        Err(e) => { warn!("[mailer] serialize failed: {}", e); return; }
+        Err(e) => {
+            warn!("[mailer] serialize failed: {}", e);
+            return;
+        }
     };
-    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-        Ok(mut f) => { let _ = writeln!(f, "{}", line); }
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut f) => {
+            let _ = writeln!(f, "{}", line);
+        }
         Err(e) => warn!("[mailer] open {} failed: {}", path.display(), e),
     }
 }
 
 fn valid_email(email: &str) -> bool {
     let e = email.trim();
-    e.len() >= 3 && e.len() <= 254 && e.contains('@') && e.split('@').count() == 2
-        && e.split('@').nth(1).map(|d| d.contains('.')).unwrap_or(false)
+    e.len() >= 3
+        && e.len() <= 254
+        && e.contains('@')
+        && e.split('@').count() == 2
+        && e.split('@')
+            .nth(1)
+            .map(|d| d.contains('.'))
+            .unwrap_or(false)
 }
 
 // ── Durable delivery (job queue) ────────────────────────────────────────────
@@ -211,7 +228,11 @@ async fn enqueue_email(
     email: &str,
     name: Option<String>,
 ) -> bool {
-    let job = MailJob { email: email.to_string(), template: template.to_string(), name };
+    let job = MailJob {
+        email: email.to_string(),
+        template: template.to_string(),
+        name,
+    };
     let day = chrono::Utc::now().format("%Y-%m-%d");
     let dedupe = format!("email:{template}:{email}:{day}");
     match crate::tasks::queue::enqueue(pool, "email.send", &job, Some(&dedupe)).await {
@@ -233,9 +254,9 @@ async fn enqueue_email(
 pub async fn handle_email_job(job: crate::tasks::queue::Job) -> Result<(), String> {
     let mail: MailJob = job.parse().map_err(|e| format!("bad payload: {e}"))?;
     let kind = match mail.template.as_str() {
-        "confirmation" => {
-            EmailKind::Confirmation { name: mail.name.as_deref().unwrap_or("Player") }
-        }
+        "confirmation" => EmailKind::Confirmation {
+            name: mail.name.as_deref().unwrap_or("Player"),
+        },
         "waitlist" => EmailKind::Waitlist,
         other => return Err(format!("unknown email template '{other}'")),
     };
@@ -307,7 +328,9 @@ mod tests {
 
     #[test]
     fn templates_render_non_empty() {
-        assert!(EmailKind::Confirmation { name: "Ada" }.html().contains("Ada"));
+        assert!(EmailKind::Confirmation { name: "Ada" }
+            .html()
+            .contains("Ada"));
         assert!(!EmailKind::Waitlist.html().is_empty());
         assert!(EmailKind::Waitlist.subject().contains("waitlist"));
     }

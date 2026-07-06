@@ -42,6 +42,36 @@ path = "tests/er_move_tests.rs"
 name = "er_delegation_tests"
 path = "tests/er_delegation_tests.rs"
 
+# Treasury-withdrawal and close_tournament fixes. Seeds account state directly
+# and runs the built .so via solana-program-test.
+[[test]]
+name = "treasury_tests"
+path = "tests/treasury_tests.rs"
+
+[[test]]
+name = "game_settlement_tests"
+path = "tests/game_settlement_tests.rs"
+
+[[test]]
+name = "profile_session_tests"
+path = "tests/profile_session_tests.rs"
+
+[[test]]
+name = "dispute_tests"
+path = "tests/dispute_tests.rs"
+
+[[test]]
+name = "tournament_registration_tests"
+path = "tests/tournament_registration_tests.rs"
+
+[[test]]
+name = "tournament_match_tests"
+path = "tests/tournament_match_tests.rs"
+
+[[test]]
+name = "tournament_prize_tests"
+path = "tests/tournament_prize_tests.rs"
+
 [dev-dependencies]
 tokio = { version = "=1", features = ["full"] }
 solana-program-test = "=2.2.1"

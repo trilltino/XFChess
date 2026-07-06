@@ -14,15 +14,17 @@
 
 use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
 use crate::signing::tournament_gossip::TournamentGossipService;
+use braid_iroh::{
+    MatchResult as SwissMessageResult, SwissMessage, SwissPairing, SwissStandingsEntry,
+};
 use xfchess_braid_server::{bridge, ResourceHub};
-use braid_iroh::{MatchResult as SwissMessageResult, SwissMessage, SwissPairing, SwissStandingsEntry};
 // Note: bytes crate not available, using Vec<u8> instead
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use swiss_pairing::{
     calculate_standings, generate_pairings, Color, ManualPairing, MatchResult, PairingConfig,
-    SwissPlayer, SwissRound, StandingsEntry,
+    StandingsEntry, SwissPlayer, SwissRound,
 };
 use tracing::{info, warn};
 
@@ -83,7 +85,10 @@ impl SwissService {
         tournament_id: u64,
         rounds: u8,
     ) -> Result<(), SwissServiceError> {
-        info!("Initializing Swiss tournament {} with {} rounds", tournament_id, rounds);
+        info!(
+            "Initializing Swiss tournament {} with {} rounds",
+            tournament_id, rounds
+        );
 
         self.store
             .update(tournament_id, |t| {
@@ -162,7 +167,8 @@ impl SwissService {
         );
 
         // Broadcast round started via gossip
-        self.broadcast_round_started(tournament_id, next_round, &round).await;
+        self.broadcast_round_started(tournament_id, next_round, &round)
+            .await;
 
         // Push pairings to Braid subscribers
         if let Some(hub) = &self.braid_hub {
@@ -212,7 +218,9 @@ impl SwissService {
         swiss_data.results.push((round, board, result));
 
         // Rebuild player scores and calculate standings
-        let players = self.build_swiss_players_with_results(&tournament, &swiss_data).await?;
+        let players = self
+            .build_swiss_players_with_results(&tournament, &swiss_data)
+            .await?;
         let standings = calculate_standings(&players, &swiss_data.rounds, &swiss_data.results);
 
         // Update stored standings
@@ -265,8 +273,10 @@ impl SwissService {
         }
 
         // Broadcast result and standings via gossip
-        self.broadcast_result_recorded(tournament_id, round, board, &result).await;
-        self.broadcast_standings_updated(tournament_id, &standings).await;
+        self.broadcast_result_recorded(tournament_id, round, board, &result)
+            .await;
+        self.broadcast_standings_updated(tournament_id, &standings)
+            .await;
 
         // Push standings to Braid subscribers
         if let Some(hub) = &self.braid_hub {
@@ -278,7 +288,12 @@ impl SwissService {
     }
 
     /// Broadcast round started message via gossip
-    async fn broadcast_round_started(&self, tournament_id: u64, round: u8, swiss_round: &SwissRound) {
+    async fn broadcast_round_started(
+        &self,
+        tournament_id: u64,
+        round: u8,
+        swiss_round: &SwissRound,
+    ) {
         let Some(gossip) = &self.gossip else { return };
         let Some(sender) = gossip.get_topic(tournament_id).await else {
             warn!("[swiss] No gossip topic for tournament {}", tournament_id);
@@ -312,7 +327,10 @@ impl SwissService {
         if let Err(e) = sender.broadcast(bytes.into()).await {
             warn!("[swiss] Failed to broadcast RoundStarted: {}", e);
         } else {
-            info!("[swiss] Broadcast RoundStarted for tournament {} round {}", tournament_id, round);
+            info!(
+                "[swiss] Broadcast RoundStarted for tournament {} round {}",
+                tournament_id, round
+            );
         }
     }
 
@@ -362,7 +380,10 @@ impl SwissService {
         if let Err(e) = sender.broadcast(bytes.into()).await {
             warn!("[swiss] Failed to broadcast ResultRecorded: {}", e);
         } else {
-            info!("[swiss] Broadcast ResultRecorded for tournament {} round {} board {}", tournament_id, round, board);
+            info!(
+                "[swiss] Broadcast ResultRecorded for tournament {} round {} board {}",
+                tournament_id, round, board
+            );
         }
     }
 
@@ -399,7 +420,11 @@ impl SwissService {
         if let Err(e) = sender.broadcast(bytes.into()).await {
             warn!("[swiss] Failed to broadcast StandingsUpdated: {}", e);
         } else {
-            info!("[swiss] Broadcast StandingsUpdated for tournament {} ({} entries)", tournament_id, standings.len());
+            info!(
+                "[swiss] Broadcast StandingsUpdated for tournament {} ({} entries)",
+                tournament_id,
+                standings.len()
+            );
         }
     }
 
@@ -596,7 +621,9 @@ impl SwissService {
             .iter()
             .find(|r| r.round == round)
             .and_then(|r| {
-                r.pairings.iter().find(|p| p.white == player_id || p.black == player_id)
+                r.pairings
+                    .iter()
+                    .find(|p| p.white == player_id || p.black == player_id)
             })
             .map(|p| {
                 let result = if p.white == player_id {
@@ -654,7 +681,11 @@ impl SwissService {
             .rounds
             .iter()
             .find(|r| r.round == current_round)
-            .map(|r| r.pairings.iter().any(|p| p.white == player_id || p.black == player_id))
+            .map(|r| {
+                r.pairings
+                    .iter()
+                    .any(|p| p.white == player_id || p.black == player_id)
+            })
             .unwrap_or(false);
 
         self.store
@@ -698,7 +729,10 @@ impl SwissService {
             .clone()
             .ok_or(SwissServiceError::NotSwissFormat)?;
 
-        if swiss_data.withdrawn_players.contains(&player_id.to_string()) {
+        if swiss_data
+            .withdrawn_players
+            .contains(&player_id.to_string())
+        {
             return Err(SwissServiceError::PlayerWithdrawn);
         }
         if !tournament.players.contains(&player_id.to_string()) {
@@ -830,7 +864,9 @@ impl SwissService {
         }
 
         // Recompute standings from scratch
-        let players = self.build_swiss_players_with_results(&tournament, &swiss_data).await?;
+        let players = self
+            .build_swiss_players_with_results(&tournament, &swiss_data)
+            .await?;
         let standings = calculate_standings(&players, &swiss_data.rounds, &swiss_data.results);
         swiss_data.standings = standings.clone();
 
@@ -844,7 +880,8 @@ impl SwissService {
             .await;
 
         // Broadcast updated standings
-        self.broadcast_standings_updated(tournament_id, &standings).await;
+        self.broadcast_standings_updated(tournament_id, &standings)
+            .await;
 
         if let Some(hub) = &self.braid_hub {
             let standings_json = serde_json::to_value(&standings).unwrap_or_default();

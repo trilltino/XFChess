@@ -4,9 +4,9 @@
 //! supporting standard headers, body content, and multi-patch formats.
 
 use crate::error::Result;
-use crate::protocol::constants::headers;
 use crate::protocol;
-use crate::types::{Update, Patch};
+use crate::protocol::constants::headers;
+use crate::types::{Patch, Update};
 use bytes::{Bytes, BytesMut};
 
 /// Format an Update into Braid protocol message bytes.
@@ -26,11 +26,19 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
 
     // Format headers
     if !update.version.is_empty() {
-        write_header(&mut buffer, headers::VERSION.as_str(), &protocol::format_version_header(&update.version));
+        write_header(
+            &mut buffer,
+            headers::VERSION.as_str(),
+            &protocol::format_version_header(&update.version),
+        );
     }
 
     if !update.parents.is_empty() {
-        write_header(&mut buffer, headers::PARENTS.as_str(), &protocol::format_version_header(&update.parents));
+        write_header(
+            &mut buffer,
+            headers::PARENTS.as_str(),
+            &protocol::format_version_header(&update.parents),
+        );
     }
 
     if let Some(merge_type) = &update.merge_type {
@@ -43,7 +51,11 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
 
     // Body or Patches
     if let Some(body) = &update.body {
-        write_header(&mut buffer, headers::CONTENT_LENGTH.as_str(), &body.len().to_string());
+        write_header(
+            &mut buffer,
+            headers::CONTENT_LENGTH.as_str(),
+            &body.len().to_string(),
+        );
         if let Some(ct) = &update.content_type {
             write_header(&mut buffer, headers::CONTENT_TYPE.as_str(), ct);
         }
@@ -51,16 +63,20 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
         buffer.extend_from_slice(body);
     } else if let Some(patches) = &update.patches {
         if !patches.is_empty() {
-             write_header(&mut buffer, headers::PATCHES.as_str(), &patches.len().to_string());
-             buffer.extend_from_slice(b"\r\n"); // End of message headers
-             
-             // Format each patch
-             for patch in patches {
-                 format_patch(&mut buffer, patch)?;
-             }
+            write_header(
+                &mut buffer,
+                headers::PATCHES.as_str(),
+                &patches.len().to_string(),
+            );
+            buffer.extend_from_slice(b"\r\n"); // End of message headers
+
+            // Format each patch
+            for patch in patches {
+                format_patch(&mut buffer, patch)?;
+            }
         } else {
-             write_header(&mut buffer, headers::CONTENT_LENGTH.as_str(), "0");
-             buffer.extend_from_slice(b"\r\n");
+            write_header(&mut buffer, headers::CONTENT_LENGTH.as_str(), "0");
+            buffer.extend_from_slice(b"\r\n");
         }
     } else {
         // Empty body
@@ -79,14 +95,18 @@ fn write_header(buffer: &mut BytesMut, key: &str, value: &str) {
 }
 
 fn format_patch(buffer: &mut BytesMut, patch: &Patch) -> Result<()> {
-    write_header(buffer, headers::CONTENT_LENGTH.as_str(), &patch.content.len().to_string());
-    
+    write_header(
+        buffer,
+        headers::CONTENT_LENGTH.as_str(),
+        &patch.content.len().to_string(),
+    );
+
     let content_range = format!("{} {}", patch.unit, patch.range);
     write_header(buffer, headers::CONTENT_RANGE.as_str(), &content_range);
-    
+
     buffer.extend_from_slice(b"\r\n"); // End of patch headers
     buffer.extend_from_slice(&patch.content);
-    
+
     Ok(())
 }
 
@@ -100,7 +120,7 @@ mod tests {
         let update = Update::snapshot(Version::new("v1"), "data");
         let bytes = format_update(&update).unwrap();
         let s = std::str::from_utf8(&bytes).unwrap();
-        
+
         assert!(s.contains("version: \"v1\""));
         assert!(s.contains("content-length: 4"));
         assert!(s.ends_with("\r\ndata"));

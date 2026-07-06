@@ -14,7 +14,11 @@ use nimzovich_engine::perft::perft;
 use nimzovich_engine::Color;
 
 fn fen_color(fen: &str) -> Color {
-    if fen.split_whitespace().nth(1) == Some("w") { 1 } else { -1 }
+    if fen.split_whitespace().nth(1) == Some("w") {
+        1
+    } else {
+        -1
+    }
 }
 
 fn perft_count(fen: &str, depth: u32) -> u64 {
@@ -86,8 +90,14 @@ fn perft_known_counts() {
 #[ignore = "slow: run with --ignored or in nightly CI"]
 fn perft_known_counts_deep() {
     check(&[
-        ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", &[(5, 4865609)]),
-        ("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", &[(4, 4085603)]),
+        (
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            &[(5, 4865609)],
+        ),
+        (
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            &[(4, 4085603)],
+        ),
         ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", &[(5, 674624)]),
     ]);
 }

@@ -13,5 +13,7 @@ pub use cancel::CancelTournament;
 pub use close_tournament::CloseTournament;
 pub use initialize::InitializeTournament;
 pub use initialize_escrow::InitializeTournamentEscrow;
-pub use initialize_shards::{InitializeTournamentShards, InitializeShardsSmall, InitializeShardsMedium};
+pub use initialize_shards::{
+    InitializeShardsMedium, InitializeShardsSmall, InitializeTournamentShards,
+};
 pub use start::StartTournament;

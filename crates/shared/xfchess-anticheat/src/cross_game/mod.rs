@@ -21,27 +21,38 @@ impl PlayerStats {
     }
 
     pub fn rolling_avg_cpl(&self) -> f64 {
-        if self.last_30_cpls.is_empty() { return f64::MAX; }
+        if self.last_30_cpls.is_empty() {
+            return f64::MAX;
+        }
         self.last_30_cpls.iter().sum::<f64>() / self.last_30_cpls.len() as f64
     }
 
     pub fn rolling_avg_t1(&self) -> f64 {
-        if self.last_30_t1s.is_empty() { return 0.0; }
+        if self.last_30_t1s.is_empty() {
+            return 0.0;
+        }
         self.last_30_t1s.iter().sum::<f64>() / self.last_30_t1s.len() as f64
     }
 
     pub fn rolling_cpl_stddev(&self) -> f64 {
-        if self.last_30_cpls.len() < 2 { return f64::MAX; }
+        if self.last_30_cpls.len() < 2 {
+            return f64::MAX;
+        }
         let mean = self.rolling_avg_cpl();
-        let var = self.last_30_cpls.iter()
+        let var = self
+            .last_30_cpls
+            .iter()
             .map(|c| (c - mean).powi(2))
-            .sum::<f64>() / self.last_30_cpls.len() as f64;
+            .sum::<f64>()
+            / self.last_30_cpls.len() as f64;
         var.sqrt()
     }
 
     pub fn game_z_score(&self, game_cpl: f64) -> f64 {
         let stddev = self.rolling_cpl_stddev();
-        if stddev < 1.0 { return 0.0; }
+        if stddev < 1.0 {
+            return 0.0;
+        }
         (self.rolling_avg_cpl() - game_cpl) / stddev
     }
 }
@@ -50,7 +61,7 @@ pub async fn load_stats(pool: &SqlitePool, pubkey: &str) -> PlayerStats {
     let row: Option<(i64, f64, String, String, i64, i64)> = sqlx::query_as(
         "SELECT games_analysed, lifetime_cpl, last_30_cpls, last_30_t1s,
                 flags_received, reviews_received
-         FROM player_anticheat_stats WHERE pubkey = ?"
+         FROM player_anticheat_stats WHERE pubkey = ?",
     )
     .bind(pubkey)
     .fetch_optional(pool)
@@ -84,7 +95,7 @@ pub async fn update_stats(pool: &SqlitePool, side: &SideAnalysis) {
     let mut stats = load_stats(pool, pubkey).await;
 
     let game_cpl = side.signals.avg_cpl;
-    let game_t1  = side.signals.t1_rate;
+    let game_t1 = side.signals.t1_rate;
 
     stats.games_analysed += 1;
     stats.lifetime_cpl = (stats.lifetime_cpl * (stats.games_analysed - 1) as f64 + game_cpl)
@@ -96,13 +107,13 @@ pub async fn update_stats(pool: &SqlitePool, side: &SideAnalysis) {
     stats.last_30_t1s.truncate(30);
 
     match side.verdict {
-        Verdict::Flag   => stats.flags_received += 1,
+        Verdict::Flag => stats.flags_received += 1,
         Verdict::Review => stats.reviews_received += 1,
-        Verdict::Clean  => {}
+        Verdict::Clean => {}
     }
 
     let cpls_json = serde_json::to_string(&stats.last_30_cpls).unwrap_or_default();
-    let t1s_json  = serde_json::to_string(&stats.last_30_t1s).unwrap_or_default();
+    let t1s_json = serde_json::to_string(&stats.last_30_t1s).unwrap_or_default();
 
     let result = sqlx::query(
         r#"INSERT INTO player_anticheat_stats
@@ -116,7 +127,7 @@ pub async fn update_stats(pool: &SqlitePool, side: &SideAnalysis) {
                last_30_t1s      = excluded.last_30_t1s,
                flags_received   = excluded.flags_received,
                reviews_received = excluded.reviews_received,
-               last_updated     = excluded.last_updated"#
+               last_updated     = excluded.last_updated"#,
     )
     .bind(&stats.pubkey)
     .bind(stats.games_analysed as i64)

@@ -50,7 +50,17 @@ pub(crate) fn alphabeta(
     beta: i16,
     color: Color,
 ) -> ChessEngineResult<i16> {
-    search(game, NodeType::Pv, depth, alpha, beta, color, false, 0, false)
+    search(
+        game,
+        NodeType::Pv,
+        depth,
+        alpha,
+        beta,
+        color,
+        false,
+        0,
+        false,
+    )
 }
 
 /// Recursive negamax search with PVS and all pruning guards.
@@ -134,7 +144,7 @@ fn search(
                 let s = tt_score_from(entry.score, ply);
                 match entry.bound_type {
                     TT_EXACT => return Ok(s),
-                    TT_LOWER if s >= beta  => return Ok(s),
+                    TT_LOWER if s >= beta => return Ok(s),
                     TT_UPPER if s <= alpha => return Ok(s),
                     _ => {}
                 }
@@ -168,24 +178,18 @@ fn search(
     // ── Pruning guards (before move loop) ──
 
     // Reverse Futility Pruning (RFP)
-    if !pv_node
-        && depth <= SP.rfp_depth
-        && !in_check
-        && eval < 2000
-    {
-        let margin = (depth * SP.rfp_mul + SP.rfp_base + SP.rfp_improving * improving as i32) as i16;
+    if !pv_node && depth <= SP.rfp_depth && !in_check && eval < 2000 {
+        let margin =
+            (depth * SP.rfp_mul + SP.rfp_base + SP.rfp_improving * improving as i32) as i16;
         if eval - margin >= beta {
             return Ok(eval);
         }
     }
 
     // Razoring
-    let razor_margin = (SP.razor_base + depth * SP.razor_mul + SP.razor_improving * improving as i32) as i16;
-    if !pv_node
-        && depth <= SP.razor_depth
-        && !in_check
-        && eval + razor_margin < alpha
-    {
+    let razor_margin =
+        (SP.razor_base + depth * SP.razor_mul + SP.razor_improving * improving as i32) as i16;
+    if !pv_node && depth <= SP.razor_depth && !in_check && eval + razor_margin < alpha {
         let q = quiescence_search(game, alpha, alpha + 1, color)?;
         if q < alpha {
             return Ok(q);
@@ -227,7 +231,11 @@ fn search(
     let moves = generate_pseudo_legal_moves(game, color);
     if moves.is_empty() {
         // Mated: prefer shorter mates (higher score for the mating side).
-        return Ok(if in_check { -(KING_VALUE - ply as i16) } else { 0 });
+        return Ok(if in_check {
+            -(KING_VALUE - ply as i16)
+        } else {
+            0
+        });
     }
 
     let mut picker = build_picker(game, moves, depth, tt_move);
@@ -336,7 +344,11 @@ fn search(
             // Full window (PV node or first move)
             score = -search(
                 game,
-                if pv_node { NodeType::Pv } else { NodeType::NonPv },
+                if pv_node {
+                    NodeType::Pv
+                } else {
+                    NodeType::NonPv
+                },
                 new_depth - 1,
                 -beta,
                 -alpha,
@@ -382,7 +394,10 @@ fn search(
             best_move = mv;
             #[cfg(feature = "salewskiChessDebug")]
             if ply == 0 {
-                eprintln!("[root] best now {}->{} score {} (legal_moves={})", mv.src, mv.dst, score, legal_moves);
+                eprintln!(
+                    "[root] best now {}->{} score {} (legal_moves={})",
+                    mv.src, mv.dst, score, legal_moves
+                );
             }
 
             if score > alpha {
@@ -402,7 +417,11 @@ fn search(
 
     // Checkmate / stalemate
     if legal_moves == 0 {
-        return Ok(if in_check { -(KING_VALUE - ply as i16) } else { 0 });
+        return Ok(if in_check {
+            -(KING_VALUE - ply as i16)
+        } else {
+            0
+        });
     }
 
     // Update history heuristics on beta cutoff
@@ -412,7 +431,16 @@ fn search(
 
     // Store in transposition table (don't pollute it with aborted results)
     if !game.abort_search.load(Ordering::Relaxed) {
-        store_tt_entry(game, hash, depth, ply, best_score, best_move, original_alpha, beta);
+        store_tt_entry(
+            game,
+            hash,
+            depth,
+            ply,
+            best_score,
+            best_move,
+            original_alpha,
+            beta,
+        );
     }
 
     Ok(best_score)
@@ -492,9 +520,9 @@ fn update_histories(game: &mut Game, depth: i32, best_move: KK, searched_quiets:
     let captured = game.board[dst];
     if captured == 0 && (best_move.nxt_dir_idx >> 4) == 0 {
         if d_idx <= MAX_DEPTH {
-            if game.killer_moves[d_idx][0].map_or(true, |k| {
-                k.src != best_move.src || k.dst != best_move.dst
-            }) {
+            if game.killer_moves[d_idx][0]
+                .map_or(true, |k| k.src != best_move.src || k.dst != best_move.dst)
+            {
                 game.killer_moves[d_idx][1] = game.killer_moves[d_idx][0];
                 game.killer_moves[d_idx][0] = Some(best_move);
             }
@@ -526,4 +554,3 @@ fn update_histories(game: &mut Game, depth: i32, best_move: KK, searched_quiets:
         }
     }
 }
-

@@ -27,13 +27,21 @@ async fn make_pool(url: &str) -> Result<SqlitePool, sqlx::Error> {
         .after_connect(|conn, _meta| {
             Box::pin(async move {
                 // WAL mode: concurrent reads + single writer, no contention
-                sqlx::query("PRAGMA journal_mode = WAL").execute(&mut *conn).await?;
+                sqlx::query("PRAGMA journal_mode = WAL")
+                    .execute(&mut *conn)
+                    .await?;
                 // NORMAL sync is safe with WAL (only risks losing the last tx on OS crash)
-                sqlx::query("PRAGMA synchronous = NORMAL").execute(&mut *conn).await?;
+                sqlx::query("PRAGMA synchronous = NORMAL")
+                    .execute(&mut *conn)
+                    .await?;
                 // Enforce FK constraints
-                sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *conn).await?;
+                sqlx::query("PRAGMA foreign_keys = ON")
+                    .execute(&mut *conn)
+                    .await?;
                 // Wait up to 5s on a locked write instead of returning SQLITE_BUSY
-                sqlx::query("PRAGMA busy_timeout = 5000").execute(&mut *conn).await?;
+                sqlx::query("PRAGMA busy_timeout = 5000")
+                    .execute(&mut *conn)
+                    .await?;
                 Ok(())
             })
         })
@@ -72,7 +80,11 @@ pub async fn initialize_pools(
 /// * `pools` - Database pools to run migrations on
 pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     // Helper to run a semicolon-separated SQL script on a pool
-    async fn run_script(pool: &sqlx::SqlitePool, script: &str, name: &str) -> Result<(), sqlx::Error> {
+    async fn run_script(
+        pool: &sqlx::SqlitePool,
+        script: &str,
+        name: &str,
+    ) -> Result<(), sqlx::Error> {
         // Strip comments to avoid breaking on semicolons inside comments
         let mut clean_script = String::new();
         for line in script.lines() {
@@ -95,7 +107,12 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
                 if err_msg.contains("duplicate column") || err_msg.contains("already exists") {
                     continue;
                 }
-                tracing::error!("Migration {} failed on statement: {}: {}", name, statement, e);
+                tracing::error!(
+                    "Migration {} failed on statement: {}: {}",
+                    name,
+                    statement,
+                    e
+                );
                 return Err(e);
             }
         }

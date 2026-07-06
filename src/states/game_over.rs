@@ -26,10 +26,7 @@ impl Plugin for GameOverPlugin {
         );
 
         // Reset camera when leaving GameOver
-        app.add_systems(
-            OnExit(GameState::GameOver),
-            reset_camera_on_exit,
-        );
+        app.add_systems(OnExit(GameState::GameOver), reset_camera_on_exit);
     }
 }
 
@@ -82,7 +79,9 @@ fn reset_camera_on_exit(
 
     // Also try to remove from persistent camera if it exists
     if let Some(camera_entity) = persistent_camera.entity {
-        commands.entity(camera_entity).remove::<AutoCinematicMarker>();
+        commands
+            .entity(camera_entity)
+            .remove::<AutoCinematicMarker>();
     }
 
     info!("[GAME_OVER] Camera reset complete");
@@ -103,4 +102,3 @@ fn record_game_stats(
         winner, moves
     );
 }
-

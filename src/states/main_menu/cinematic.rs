@@ -18,10 +18,10 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+use super::board_animation::{BoardAnimator, MenuBgPieceAnim, MenuBgPieceHome};
+use super::new_menu::{MenuBg, MenuCameraOrbit, BOARD_CENTER};
 use crate::core::GameState;
 use crate::rendering::pieces::{PieceColor, PieceMeshes, PieceType};
-use super::board_animation::{BoardAnimator, MenuBgPieceAnim, MenuBgPieceHome};
-use super::new_menu::{MenuCameraOrbit, MenuBg, BOARD_CENTER};
 
 // ── Tunables ────────────────────────────────────────────────────────────────
 
@@ -145,28 +145,61 @@ fn moments() -> &'static [CinematicMoment] {
     &[
         // ── Immortal Game (PGN replay — guaranteed legal positions) ──
         CinematicMoment {
-            angle: TopDownTilted, source: MomentSource::Pgn { pgn: IMMORTAL_GAME_PGN, ply: 35 },
-            move_secs: 3.0, hold_secs: 1.5 },
+            angle: TopDownTilted,
+            source: MomentSource::Pgn {
+                pgn: IMMORTAL_GAME_PGN,
+                ply: 35,
+            },
+            move_secs: 3.0,
+            hold_secs: 1.5,
+        },
         CinematicMoment {
-            angle: HeroShot, source: MomentSource::Pgn { pgn: IMMORTAL_GAME_PGN, ply: 44 },
-            move_secs: 2.5, hold_secs: 3.0 },
+            angle: HeroShot,
+            source: MomentSource::Pgn {
+                pgn: IMMORTAL_GAME_PGN,
+                ply: 44,
+            },
+            move_secs: 2.5,
+            hold_secs: 3.0,
+        },
         // ── The Immortal Zugzwang Game — the same game the ambient board plays ──
         CinematicMoment {
-            angle: CornerCloseup, source: MomentSource::Pgn { pgn: super::board_animation::ZUGZWANG_PGN, ply: 49 },
-            move_secs: 2.5, hold_secs: 2.5 },
+            angle: CornerCloseup,
+            source: MomentSource::Pgn {
+                pgn: super::board_animation::ZUGZWANG_PGN,
+                ply: 49,
+            },
+            move_secs: 2.5,
+            hold_secs: 2.5,
+        },
         // ── Hand-set positions (FEN) ──
         CinematicMoment {
             angle: HeroShot,
-            source: MomentSource::Fen { fen: "r1bqk2r/ppp2ppp/2n5/3np3/2B5/5N2/PPPP1PPP/RNBQ1RK1 w kq - 0 1", mv: "f3g5" },
-            move_secs: 2.5, hold_secs: 1.5 },
+            source: MomentSource::Fen {
+                fen: "r1bqk2r/ppp2ppp/2n5/3np3/2B5/5N2/PPPP1PPP/RNBQ1RK1 w kq - 0 1",
+                mv: "f3g5",
+            },
+            move_secs: 2.5,
+            hold_secs: 1.5,
+        },
         CinematicMoment {
             angle: KingsideLow,
-            source: MomentSource::Fen { fen: "rnbqk2r/pppp1ppp/5n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1", mv: "e1g1" },
-            move_secs: 2.0, hold_secs: 1.5 },
+            source: MomentSource::Fen {
+                fen: "rnbqk2r/pppp1ppp/5n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1",
+                mv: "e1g1",
+            },
+            move_secs: 2.0,
+            hold_secs: 1.5,
+        },
         CinematicMoment {
             angle: HeroShot,
-            source: MomentSource::Fen { fen: "4k3/4P3/8/8/8/8/8/4K3 w - - 0 1", mv: "e7e8q" },
-            move_secs: 2.5, hold_secs: 2.0 },
+            source: MomentSource::Fen {
+                fen: "4k3/4P3/8/8/8/8/8/4K3 w - - 0 1",
+                mv: "e7e8q",
+            },
+            move_secs: 2.5,
+            hold_secs: 2.0,
+        },
     ]
 }
 
@@ -185,7 +218,12 @@ fn resolve(moment: &CinematicMoment) -> Option<ResolvedMove> {
         MomentSource::Fen { fen, mv } => {
             let cb = nimzovich_engine::CompactBoard::from_fen(fen);
             let (src, dst, promo) = parse_uci(mv)?;
-            Some(ResolvedMove { board: cb.squares, src, dst, promo })
+            Some(ResolvedMove {
+                board: cb.squares,
+                src,
+                dst,
+                promo,
+            })
         }
         MomentSource::Pgn { pgn, ply } => {
             use nimzovich_engine::{do_move, new_game, parse_pgn, san_to_move};
@@ -204,7 +242,12 @@ fn resolve(moment: &CinematicMoment) -> Option<ResolvedMove> {
                 *slot = game.board[i];
             }
             let (s, d, promo) = san_to_move(&mut game, &parsed.moves[*ply]).ok()?;
-            Some(ResolvedMove { board, src: s as usize, dst: d as usize, promo })
+            Some(ResolvedMove {
+                board,
+                src: s as usize,
+                dst: d as usize,
+                promo,
+            })
         }
     }
 }
@@ -241,7 +284,11 @@ fn square_to_world(file: usize, rank: usize) -> Vec3 {
 }
 
 fn type_from_code(code: i8) -> Option<(PieceType, PieceColor)> {
-    let color = if code > 0 { PieceColor::White } else { PieceColor::Black };
+    let color = if code > 0 {
+        PieceColor::White
+    } else {
+        PieceColor::Black
+    };
     let pt = match code.abs() {
         1 => PieceType::Pawn,
         2 => PieceType::Knight,
@@ -283,13 +330,22 @@ fn spawn_piece(
     visible: bool,
 ) -> Option<Entity> {
     let (pt, color) = type_from_code(code)?;
-    let mat = if color == PieceColor::White { white_mat } else { black_mat };
-    let vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+    let mat = if color == PieceColor::White {
+        white_mat
+    } else {
+        black_mat
+    };
+    let vis = if visible {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
     let e = commands
         .spawn((
             Mesh3d(pm.get(pt, color)),
             MeshMaterial3d(mat.clone()),
-            Transform::from_translation(square_to_world(file, rank)).with_rotation(rotation_for(pt, color)),
+            Transform::from_translation(square_to_world(file, rank))
+                .with_rotation(rotation_for(pt, color)),
             vis,
             MenuBg,
             DespawnOnExit(GameState::MainMenu),
@@ -312,7 +368,10 @@ pub fn cinematic_director(
     mut commands: Commands,
     piece_meshes: Option<Res<PieceMeshes>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut ambient_q: Query<(Entity, &MenuBgPieceHome, &mut Transform, &mut Visibility), Without<CinematicPiece>>,
+    mut ambient_q: Query<
+        (Entity, &MenuBgPieceHome, &mut Transform, &mut Visibility),
+        Without<CinematicPiece>,
+    >,
     cine_pieces_q: Query<Entity, With<CinematicPiece>>,
 ) {
     // Press C to toggle the cinematic showcase. Disabling lets the current shot
@@ -339,8 +398,14 @@ pub fn cinematic_director(
             }
         }
         CinematicPhase::Cut => {
-            // Everything here happens during the fully-black frame.
-            let Some(pm) = piece_meshes.as_deref() else { return; };
+            // Everything here happens during the fully-black frame — including the
+            // moment advance, so the camera never visibly snaps between shots. The
+            // previous phases (Hold → FadeOut) keep the camera on the CURRENT shot
+            // while it fades to black; only here, under full black, do we move on.
+            let Some(pm) = piece_meshes.as_deref() else {
+                return;
+            };
+            cine.moment_index = cine.moment_index.wrapping_add(1);
             let all = moments();
             let moment = &all[cine.moment_index % all.len()];
 
@@ -367,7 +432,16 @@ pub fn cinematic_director(
                         continue;
                     }
                     let (file, rank) = (sq % 8, sq / 8);
-                    if let Some(e) = spawn_piece(&mut commands, pm, &white_mat, &black_mat, code, file, rank, true) {
+                    if let Some(e) = spawn_piece(
+                        &mut commands,
+                        pm,
+                        &white_mat,
+                        &black_mat,
+                        code,
+                        file,
+                        rank,
+                        true,
+                    ) {
                         cine_board.board[rank][file] = Some(e);
                     }
                 }
@@ -376,7 +450,16 @@ pub fn cinematic_director(
                 cine.focus = Vec3::new(7.0 - (rm.dst % 8) as f32, 0.5, (rm.dst / 8) as f32);
 
                 // 4) Queue the featured move (animated over move_secs).
-                queue_move(&mut commands, &mut cine, &mut cine_board, pm, &white_mat, &black_mat, &rm, moment.move_secs);
+                queue_move(
+                    &mut commands,
+                    &mut cine,
+                    &mut cine_board,
+                    pm,
+                    &white_mat,
+                    &black_mat,
+                    &rm,
+                    moment.move_secs,
+                );
 
                 cine.timer = moment.move_secs;
             } else {
@@ -387,7 +470,9 @@ pub fn cinematic_director(
             cine.phase = CinematicPhase::AnimateMove;
         }
         CinematicPhase::AnimateMove => {
-            let total = moments()[cine.moment_index % moments().len()].move_secs.max(0.01);
+            let total = moments()[cine.moment_index % moments().len()]
+                .move_secs
+                .max(0.01);
             let elapsed = total - cine.timer.max(0.0);
             // Fade in from black over the first part of the move.
             cine.fade_alpha = (1.0 - elapsed / MOVE_FADE_IN_SECS).clamp(0.0, 1.0);
@@ -408,10 +493,10 @@ pub fn cinematic_director(
             cine.shot_t = (cine.shot_t + dt * 0.05).min(1.0);
             if cine.timer <= 0.0 {
                 if cine.enabled {
-                    // Continuous loop: advance to the next moment and fade straight
-                    // into it. The ambient board is NOT restored between shots — the
-                    // showcase runs position-to-position until toggled off.
-                    cine.moment_index = cine.moment_index.wrapping_add(1);
+                    // Continuous loop: fade the CURRENT shot to black, then advance
+                    // (the moment index is bumped in `Cut`, under full black). The
+                    // ambient board is NOT restored between shots — the showcase runs
+                    // position-to-position until toggled off.
                     cine.phase = CinematicPhase::FadeOut;
                     cine.timer = FADE_OUT_SECS;
                 } else {
@@ -449,7 +534,8 @@ pub fn cinematic_director(
 
                 cine.fade_alpha = 0.0;
                 cine.phase = CinematicPhase::Idle;
-                cine.moment_index = cine.moment_index.wrapping_add(1);
+                // The moment index advances in `Cut` (under full black), so a later
+                // Idle → FadeOut → Cut shows the next shot without skipping one here.
                 // 10 / 12.5 / 15s, cycling — no rng dependency.
                 cine.timer = 10.0 + (cine.moment_index % 3) as f32 * 2.5;
             }
@@ -482,7 +568,11 @@ fn queue_move(
     }
     // En passant: pawn moves diagonally onto an empty square.
     if is_pawn && sf != df && rm.board[rm.dst] == 0 {
-        let ep_rank = if mover > 0 { dr.wrapping_sub(1) } else { dr + 1 };
+        let ep_rank = if mover > 0 {
+            dr.wrapping_sub(1)
+        } else {
+            dr + 1
+        };
         if ep_rank < 8 {
             if let Some(cap) = cine_board.board[ep_rank][df].take() {
                 commands.entity(cap).despawn();
@@ -504,7 +594,9 @@ fn queue_move(
         // director swaps pawn → promoted when the slide finishes.
         if rm.promo != 0 {
             let promo_code = if mover > 0 { rm.promo } else { -rm.promo };
-            if let Some(pe) = spawn_piece(commands, pm, white_mat, black_mat, promo_code, df, dr, false) {
+            if let Some(pe) = spawn_piece(
+                commands, pm, white_mat, black_mat, promo_code, df, dr, false,
+            ) {
                 cine.pending_promo = Some((e, pe));
                 cine_board.board[dr][df] = Some(pe);
             }
@@ -513,7 +605,11 @@ fn queue_move(
 
     // Castling: king moved two files → slide the rook too (same rank).
     if is_king && (df as i32 - sf as i32).abs() == 2 {
-        let (rsf, rdf) = if df == 6 { (7usize, 5usize) } else { (0usize, 3usize) };
+        let (rsf, rdf) = if df == 6 {
+            (7usize, 5usize)
+        } else {
+            (0usize, 3usize)
+        };
         if let Some(re) = cine_board.board[sr][rsf].take() {
             cine_board.board[sr][rdf] = Some(re);
             commands.entity(re).insert(MenuBgPieceAnim {
@@ -537,7 +633,9 @@ pub fn cinematic_camera_system(
         return;
     }
     let Some(entity) = cam.entity else { return };
-    let Ok((mut t, mut proj)) = query.get_mut(entity) else { return };
+    let Ok((mut t, mut proj)) = query.get_mut(entity) else {
+        return;
+    };
 
     let all = moments();
     let moment = &all[cine.moment_index % all.len()];
@@ -550,7 +648,9 @@ pub fn cinematic_camera_system(
     if ortho {
         if !matches!(*proj, Projection::Orthographic(_)) {
             *proj = Projection::from(OrthographicProjection {
-                scaling_mode: bevy::camera::ScalingMode::FixedVertical { viewport_height: 12.0 },
+                scaling_mode: bevy::camera::ScalingMode::FixedVertical {
+                    viewport_height: 12.0,
+                },
                 ..OrthographicProjection::default_3d()
             });
         }
@@ -568,7 +668,9 @@ pub fn cinematic_fade_overlay(mut contexts: EguiContexts, cine: Res<MenuCinemati
     if cine.fade_alpha <= 0.001 {
         return;
     }
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
     let a = (cine.fade_alpha.clamp(0.0, 1.0) * 255.0) as u8;
     egui::Area::new("cinematic_fade".into())
         .order(egui::Order::Foreground)
@@ -576,7 +678,11 @@ pub fn cinematic_fade_overlay(mut contexts: EguiContexts, cine: Res<MenuCinemati
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
             let r = ctx.screen_rect();
-            ui.painter().rect_filled(r, egui::CornerRadius::same(0), egui::Color32::from_black_alpha(a));
+            ui.painter().rect_filled(
+                r,
+                egui::CornerRadius::same(0),
+                egui::Color32::from_black_alpha(a),
+            );
         });
 }
 

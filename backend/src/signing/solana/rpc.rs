@@ -156,7 +156,10 @@ mod tests {
 
     #[test]
     fn redact_leaves_plain_host() {
-        assert_eq!(redact_url("https://api.devnet.solana.com"), "https://api.devnet.solana.com");
+        assert_eq!(
+            redact_url("https://api.devnet.solana.com"),
+            "https://api.devnet.solana.com"
+        );
     }
 
     #[test]
@@ -166,7 +169,10 @@ mod tests {
         for _ in 0..BREAKER_THRESHOLD {
             record_primary_failure();
         }
-        assert!(breaker_is_open(), "breaker should be open after threshold failures");
+        assert!(
+            breaker_is_open(),
+            "breaker should be open after threshold failures"
+        );
         record_primary_success();
         // success resets the counter (breaker window still elapses on its own)
         assert_eq!(PRIMARY_FAILURES.load(Ordering::Relaxed), 0);

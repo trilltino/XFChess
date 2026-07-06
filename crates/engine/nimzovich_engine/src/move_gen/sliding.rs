@@ -15,7 +15,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-
 use crate::board::*;
 use crate::types::*;
 
@@ -45,7 +44,9 @@ pub fn generate_sliding_moves(
     for dir_idx in dir_start..dir_end {
         let mask_set = game.sliding_attack_masks[from as usize][dir_idx];
         let mask = mask_set.0;
-        if mask == 0 { continue; }
+        if mask == 0 {
+            continue;
+        }
 
         let blockers = occupancy & mask;
         if blockers == 0 {
@@ -72,12 +73,20 @@ pub fn generate_sliding_moves(
                 // Remove squares LESS than blocker_sq
                 // Mask for squares >= blocker_sq: !((1 << blocker_sq) - 1)
                 // Using u64 for safety
-                let lower_mask = if blocker_sq == 0 { 0 } else { (1u64 << blocker_sq) - 1 };
+                let lower_mask = if blocker_sq == 0 {
+                    0
+                } else {
+                    (1u64 << blocker_sq) - 1
+                };
                 valid_mask &= !lower_mask;
             } else {
                 // Remove squares GREATER than blocker_sq
                 // Mask for squares <= blocker_sq: (1 << (blocker_sq + 1)) - 1
-                let upper_mask = if blocker_sq == 63 { 0xFFFFFFFFFFFFFFFFu64 } else { (1u64 << (blocker_sq + 1)) - 1 };
+                let upper_mask = if blocker_sq == 63 {
+                    0xFFFFFFFFFFFFFFFFu64
+                } else {
+                    (1u64 << (blocker_sq + 1)) - 1
+                };
                 valid_mask &= upper_mask;
             }
 

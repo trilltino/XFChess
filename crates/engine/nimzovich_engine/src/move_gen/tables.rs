@@ -21,7 +21,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-
 use crate::bitset::BitSet;
 use crate::board::*;
 use crate::constants::*;

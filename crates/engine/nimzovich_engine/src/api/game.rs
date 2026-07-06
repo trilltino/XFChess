@@ -119,7 +119,7 @@ pub fn set_tt_size_mb(game: &mut Game, mb: usize) {
     let bytes = mb * 1024 * 1024;
     // Round down to power-of-two bucket count for cheap modulo in hash_to_index
     let raw = (bytes / entry_size).max(1);
-    let capacity = raw.next_power_of_two() / 2;  // floor to previous power of two
+    let capacity = raw.next_power_of_two() / 2; // floor to previous power of two
     let capacity = capacity.max(1);
 
     game.tt.resize_with(capacity, TTE::default);
@@ -127,7 +127,11 @@ pub fn set_tt_size_mb(game: &mut Game, mb: usize) {
 
     game.tt_capacity = capacity;
     game.cache_size_bytes = entry_size * capacity;
-    eprintln!("[TT] Resized to {} entries ({} MB)", capacity, capacity * entry_size / (1024 * 1024));
+    eprintln!(
+        "[TT] Resized to {} entries ({} MB)",
+        capacity,
+        capacity * entry_size / (1024 * 1024)
+    );
 }
 
 /// Reset the game to starting position
@@ -146,7 +150,7 @@ pub fn reset_game(game: &mut Game) {
     game.calls = 0;
     game.cut = 0;
     game.tte_hit = 0;
-    
+
     #[cfg(feature = "search")]
     init_zobrist(game);
 
@@ -154,7 +158,8 @@ pub fn reset_game(game: &mut Game) {
     init_bitboards(game);
 
     #[cfg(feature = "search")]
-    game.abort_search.store(false, core::sync::atomic::Ordering::Relaxed);
+    game.abort_search
+        .store(false, core::sync::atomic::Ordering::Relaxed);
 }
 
 /// Create a game from a FEN string
@@ -172,7 +177,9 @@ pub fn game_from_fen(fen: &str) -> Game {
 #[cfg(feature = "std")]
 pub fn set_game_from_fen(game: &mut Game, fen: &str) {
     let parts: Vec<&str> = fen.split_whitespace().collect();
-    if parts.is_empty() { return; }
+    if parts.is_empty() {
+        return;
+    }
 
     // 1. Piece placement
     let mut board = [0i8; 64];
@@ -186,8 +193,18 @@ pub fn set_game_from_fen(game: &mut Game, fen: &str) {
             } else {
                 let sq = (rank * 8 + file) as usize;
                 board[sq] = match c {
-                    'P' => 1, 'N' => 2, 'B' => 3, 'R' => 4, 'Q' => 5, 'K' => 6,
-                    'p' => -1, 'n' => -2, 'b' => -3, 'r' => -4, 'q' => -5, 'k' => -6,
+                    'P' => 1,
+                    'N' => 2,
+                    'B' => 3,
+                    'R' => 4,
+                    'Q' => 5,
+                    'K' => 6,
+                    'p' => -1,
+                    'n' => -2,
+                    'b' => -3,
+                    'r' => -4,
+                    'q' => -5,
+                    'k' => -6,
                     _ => 0,
                 };
                 file += 1;
@@ -286,11 +303,21 @@ pub fn game_to_fen(game: &Game) -> String {
 
     // 3. Castling rights
     let mut castling = String::new();
-    if !game.white_king_has_moved && !game.white_rook_7_has_moved { castling.push('K'); }
-    if !game.white_king_has_moved && !game.white_rook_0_has_moved { castling.push('Q'); }
-    if !game.black_king_has_moved && !game.black_rook_63_has_moved { castling.push('k'); }
-    if !game.black_king_has_moved && !game.black_rook_56_has_moved { castling.push('q'); }
-    if castling.is_empty() { castling.push('-'); }
+    if !game.white_king_has_moved && !game.white_rook_7_has_moved {
+        castling.push('K');
+    }
+    if !game.white_king_has_moved && !game.white_rook_0_has_moved {
+        castling.push('Q');
+    }
+    if !game.black_king_has_moved && !game.black_rook_63_has_moved {
+        castling.push('k');
+    }
+    if !game.black_king_has_moved && !game.black_rook_56_has_moved {
+        castling.push('q');
+    }
+    if castling.is_empty() {
+        castling.push('-');
+    }
 
     // 4. En passant target
     let ep = match game.en_passant_target {

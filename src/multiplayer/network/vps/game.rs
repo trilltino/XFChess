@@ -88,7 +88,13 @@ pub fn report_blur(
 ) -> Result<(), String> {
     let response = client()?
         .post(format!("{}/telemetry/blur", vps_base()))
-        .json(&BlurTelemetryReq { game_id, move_number, color, blurred, think_ms })
+        .json(&BlurTelemetryReq {
+            game_id,
+            move_number,
+            color,
+            blurred,
+            think_ms,
+        })
         .send()
         .map_err(|e| format!("vps report_blur: {e}"))?;
     if !response.status().is_success() {
@@ -98,10 +104,20 @@ pub fn report_blur(
 }
 
 /// Ask VPS to build, sign, and submit a `record_move` instruction on the ER.
-pub fn record_move(game_id: u64, move_uci: &str, next_fen: &str, nonce: u64) -> Result<String, String> {
+pub fn record_move(
+    game_id: u64,
+    move_uci: &str,
+    next_fen: &str,
+    nonce: u64,
+) -> Result<String, String> {
     let response = client()?
         .post(format!("{}/move/record", vps_base()))
-        .json(&RecordMoveReq { game_id, move_uci, next_fen, nonce })
+        .json(&RecordMoveReq {
+            game_id,
+            move_uci,
+            next_fen,
+            nonce,
+        })
         .send()
         .map_err(|e| format!("vps record_move: {e}"))?;
     if !response.status().is_success() {
@@ -145,7 +161,13 @@ pub fn vps_finalize_game(
 ) -> Result<FinalizeResult, String> {
     let response = client()?
         .post(format!("{}/game/finalize", vps_base()))
-        .json(&FinalizeGameReq { game_id, winner, white_pubkey, black_pubkey, wager_lamports })
+        .json(&FinalizeGameReq {
+            game_id,
+            winner,
+            white_pubkey,
+            black_pubkey,
+            wager_lamports,
+        })
         .send()
         .map_err(|e| format!("vps finalize_game: {e}"))?;
     if !response.status().is_success() {
@@ -173,7 +195,12 @@ pub fn vps_submit_free_rated_result(
 ) -> Result<(), String> {
     let response = client()?
         .post(format!("{}/ratings/update", vps_base()))
-        .json(&FreeRatedResultReq { game_id, winner, white_pubkey, black_pubkey })
+        .json(&FreeRatedResultReq {
+            game_id,
+            winner,
+            white_pubkey,
+            black_pubkey,
+        })
         .send()
         .map_err(|e| format!("ratings/update: {e}"))?;
     if !response.status().is_success() {
@@ -188,7 +215,9 @@ pub fn vps_submit_free_rated_result(
 /// Returns the *next* nonce to use (on-chain stored nonce + 1).
 pub fn vps_fetch_move_nonce(game_id: u64) -> Result<u64, String> {
     #[derive(Deserialize)]
-    struct NonceResp { nonce: u64 }
+    struct NonceResp {
+        nonce: u64,
+    }
     let response = client()?
         .get(format!("{}/game/{}/nonce", vps_base(), game_id))
         .send()
@@ -231,9 +260,13 @@ pub fn get_active_game_for_wallet(wallet_pubkey: &str) -> Result<Option<u64>, St
 /// Returns a list of UCI strings in order.
 pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String> {
     #[derive(Deserialize)]
-    struct MoveEntry { move_uci: String }
+    struct MoveEntry {
+        move_uci: String,
+    }
     #[derive(Deserialize)]
-    struct MovesResp { moves: Vec<MoveEntry> }
+    struct MovesResp {
+        moves: Vec<MoveEntry>,
+    }
 
     let response = client()?
         .get(format!("{}/games/moves/{}", vps_base(), game_id))
@@ -254,14 +287,19 @@ pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String
 /// delay means the only permitted public source is the delay-gated HTTP feed.
 pub fn get_broadcast_delay(game_id: &str) -> Result<u64, String> {
     #[derive(Deserialize)]
-    struct DelayResp { delay_secs: i64 }
+    struct DelayResp {
+        delay_secs: i64,
+    }
 
     let response = client()?
         .get(format!("{}/games/{}/broadcast-delay", vps_base(), game_id))
         .send()
         .map_err(|e| format!("spectator get_broadcast_delay: {e}"))?;
     if !response.status().is_success() {
-        return Err(format!("spectator get_broadcast_delay: HTTP {}", response.status()));
+        return Err(format!(
+            "spectator get_broadcast_delay: HTTP {}",
+            response.status()
+        ));
     }
     let resp = response
         .json::<DelayResp>()
@@ -282,7 +320,9 @@ pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, Str
         player: Option<String>,
     }
     #[derive(serde::Deserialize)]
-    struct MovesResp { moves: Vec<MoveEntry> }
+    struct MovesResp {
+        moves: Vec<MoveEntry>,
+    }
 
     let response = client()?
         .get(format!("{}/games/{}/moves", vps_base(), game_id))
@@ -295,14 +335,17 @@ pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, Str
     let resp = response
         .json::<MovesResp>()
         .map_err(|e| format!("fetch_move_log parse: {e}"))?;
-    Ok(resp.moves
+    Ok(resp
+        .moves
         .into_iter()
-        .map(|m| braid_chess::MovePayload::from_uci(
-            m.move_uci,
-            m.fen_after,
-            m.move_number,
-            m.player.unwrap_or_default(),
-        ))
+        .map(|m| {
+            braid_chess::MovePayload::from_uci(
+                m.move_uci,
+                m.fen_after,
+                m.move_number,
+                m.player.unwrap_or_default(),
+            )
+        })
         .collect())
 }
 
@@ -311,7 +354,10 @@ pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, Str
 pub fn vps_submit_dispute(game_id: u64, disputing_player: &str) -> Result<String, String> {
     let response = client()?
         .post(format!("{}/dispute/submit", vps_base()))
-        .json(&DisputeReq { game_id, disputing_player })
+        .json(&DisputeReq {
+            game_id,
+            disputing_player,
+        })
         .send()
         .map_err(|e| format!("dispute/submit: {e}"))?;
     if !response.status().is_success() {

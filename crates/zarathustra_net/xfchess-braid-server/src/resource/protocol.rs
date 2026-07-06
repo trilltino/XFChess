@@ -27,11 +27,21 @@ pub struct BraidUpdate {
 
 impl BraidUpdate {
     pub fn snapshot(version: Version, body: serde_json::Value) -> Self {
-        Self { version, parents: Vec::new(), body, is_snapshot: true }
+        Self {
+            version,
+            parents: Vec::new(),
+            body,
+            is_snapshot: true,
+        }
     }
 
     pub fn patch(version: Version, parent: Version, patches: serde_json::Value) -> Self {
-        Self { version, parents: vec![parent], body: patches, is_snapshot: false }
+        Self {
+            version,
+            parents: vec![parent],
+            body: patches,
+            is_snapshot: false,
+        }
     }
 }
 
@@ -62,7 +72,11 @@ pub fn format_chunk(boundary: &str, update: &BraidUpdate) -> bytes::Bytes {
 
     if !update.parents.is_empty() {
         buf.extend_from_slice(b"Parents: ");
-        let parents: Vec<String> = update.parents.iter().map(|p| format!("\"{}\"", p)).collect();
+        let parents: Vec<String> = update
+            .parents
+            .iter()
+            .map(|p| format!("\"{}\"", p))
+            .collect();
         buf.extend_from_slice(parents.join(", ").as_bytes());
         buf.extend_from_slice(b"\r\n");
     }

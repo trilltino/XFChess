@@ -11,10 +11,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `shared` | Bevy + serde types | Game client, backend |
 | `backend-types` | Serde-only, no Bevy | Backend, web frontend (via JSON) |
 | `solana-chess-client` | Anchor + Solana SDK | Game client (`--features solana`) |
-| `braid-core` | HTTP-209 Braid protocol primitives | All braid-* crates |
-| `braid-http` | reqwest-based Braid client | Game client |
+| `braid-core` | Thin HTTP-209 Braid facade over `braid-http` | All braid-* crates |
+| `braid-http` | reqwest-based Braid-HTTP 209 client (Rust port of braid.org JS) | Game client |
 | `braid-iroh` | Iroh QUIC transport for Braid | Game client, backend |
-| `braid_uri` | Typed URIs + move messages | Game client, backend |
+| `braid_chess` | Typed chess messages + resources + publish/subscribe (was `braid_uri`) | Game client, backend |
 | `iroh-gossip` | Gossip broadcast over Iroh | Backend relay |
 | `iroh-h3`, `iroh-h3-axum`, `iroh-h3-client` | HTTP/3 layer over Iroh | Backend |
 | `xfchess-braid-server` | Axum integration for HTTP-209 subscribe | Backend |
@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **`nimzovich_engine` has two personalities**: With `features = ["std", "search"]` it runs full alpha-beta search. Without `std` it provides only move generation (used on-chain). Keep the feature boundary clean.
 
-**Braid protocol**: HTTP-209 is a streaming subscribe protocol. `braid-core` holds the codec; `braid-http` wraps reqwest for clients; `braid-iroh` tunnels it over QUIC. Do not conflate HTTP-209 subscriptions with WebSocket connections — they serve different roles (Braid for board state sync, WebSocket for auth/signaling).
+**Braid protocol**: HTTP-209 is a streaming subscribe protocol (a Rust port of the braid.org JS reference). `braid-http` holds the protocol codec + reqwest/WASM client; `braid-core` is a thin re-export facade over it; `braid-iroh` tunnels the same protocol over QUIC; `xfchess-braid-server` is the Axum-native server/fan-out hub. Note the upstream CRDT/OT merge engine was removed — XFChess is server-authoritative (JSON Patch for tournament docs, append-log for moves). Do not conflate HTTP-209 subscriptions with WebSocket connections — they serve different roles (Braid for board/tournament state sync, WebSocket for auth/signaling).
 
 **`swiss-pairing` networking**: The `network` feature adds Axum handlers to the crate. Only enable it in the backend, not in the game client.
 

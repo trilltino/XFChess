@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
-use super::chains::{ActionChain, complete_step, create_onboarding_chain};
+use super::chains::{complete_step, create_onboarding_chain, ActionChain};
 use super::core::BalanceResult;
 
 /// Onboarding state for a user.
@@ -16,7 +16,10 @@ pub enum OnboardingState {
     /// User has no wallet
     NoWallet,
     /// User has wallet but insufficient funds
-    InsufficientFunds { balance_lamports: u64, required_lamports: u64 },
+    InsufficientFunds {
+        balance_lamports: u64,
+        required_lamports: u64,
+    },
     /// User is ready to register (has wallet and sufficient funds)
     ReadyToRegister,
     /// User has completed registration
@@ -81,7 +84,10 @@ impl OnboardingStateMachine {
             created_at: chrono::Utc::now(),
         };
 
-        self.sessions.write().await.insert(session_id.clone(), session.clone());
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.clone(), session.clone());
         session
     }
 
@@ -125,7 +131,11 @@ impl OnboardingStateMachine {
     }
 
     /// Marks validation as failed.
-    pub async fn mark_validation_failed(&self, session_id: &str, error: String) -> Result<(), String> {
+    pub async fn mark_validation_failed(
+        &self,
+        session_id: &str,
+        error: String,
+    ) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;
         let session = sessions.get_mut(session_id).ok_or("Session not found")?;
 
@@ -164,19 +174,23 @@ impl OnboardingStateMachine {
             }
             OnboardingState::ReadyToRegister => {
                 // Return registration endpoint
-                Some(format!("/api/actions/tournament/{}/register", session.tournament_id))
+                Some(format!(
+                    "/api/actions/tournament/{}/register",
+                    session.tournament_id
+                ))
             }
             OnboardingState::Registered => {
                 // Return view match endpoint
                 if let Some(wallet) = &session.wallet {
-                    Some(format!("/tournament/{}/my-match?player={}", session.tournament_id, wallet))
+                    Some(format!(
+                        "/tournament/{}/my-match?player={}",
+                        session.tournament_id, wallet
+                    ))
                 } else {
                     Some(format!("/tournament/{}/my-match", session.tournament_id))
                 }
             }
-            OnboardingState::ValidationFailed { error } => {
-                Some(format!("error:{}", error))
-            }
+            OnboardingState::ValidationFailed { error } => Some(format!("error:{}", error)),
         }
     }
 
@@ -196,7 +210,8 @@ impl Default for OnboardingStateMachine {
 }
 
 /// Global onboarding state machine instance.
-static ONBOARDING_MACHINE: once_cell::sync::OnceCell<OnboardingStateMachine> = once_cell::sync::OnceCell::new();
+static ONBOARDING_MACHINE: once_cell::sync::OnceCell<OnboardingStateMachine> =
+    once_cell::sync::OnceCell::new();
 
 /// Gets the global onboarding state machine instance.
 pub fn get_onboarding_machine() -> &'static OnboardingStateMachine {
@@ -210,7 +225,9 @@ mod tests {
     #[tokio::test]
     async fn test_start_session_no_wallet() {
         let machine = OnboardingStateMachine::new();
-        let session = machine.start_session("test_session".to_string(), 1, None, 0.5).await;
+        let session = machine
+            .start_session("test_session".to_string(), 1, None, 0.5)
+            .await;
 
         assert!(matches!(session.state, OnboardingState::NoWallet));
         assert_eq!(session.tournament_id, 1);
@@ -220,16 +237,31 @@ mod tests {
     async fn test_start_session_with_wallet() {
         let machine = OnboardingStateMachine::new();
         let session = machine
-            .start_session("test_session".to_string(), 1, Some("wallet".to_string()), 0.5)
+            .start_session(
+                "test_session".to_string(),
+                1,
+                Some("wallet".to_string()),
+                0.5,
+            )
             .await;
 
-        assert!(matches!(session.state, OnboardingState::InsufficientFunds { .. }));
+        assert!(matches!(
+            session.state,
+            OnboardingState::InsufficientFunds { .. }
+        ));
     }
 
     #[tokio::test]
     async fn test_update_with_balance_sufficient() {
         let machine = OnboardingStateMachine::new();
-        machine.start_session("test_session".to_string(), 1, Some("wallet".to_string()), 0.5).await;
+        machine
+            .start_session(
+                "test_session".to_string(),
+                1,
+                Some("wallet".to_string()),
+                0.5,
+            )
+            .await;
 
         let balance = BalanceResult {
             wallet: "wallet".to_string(),
@@ -238,7 +270,10 @@ mod tests {
             required_lamports: 500_000_000,
         };
 
-        machine.update_with_balance("test_session", &balance).await.unwrap();
+        machine
+            .update_with_balance("test_session", &balance)
+            .await
+            .unwrap();
         let session = machine.get_session("test_session").await.unwrap();
 
         assert!(matches!(session.state, OnboardingState::ReadyToRegister));
@@ -247,7 +282,14 @@ mod tests {
     #[tokio::test]
     async fn test_mark_registered() {
         let machine = OnboardingStateMachine::new();
-        machine.start_session("test_session".to_string(), 1, Some("wallet".to_string()), 0.5).await;
+        machine
+            .start_session(
+                "test_session".to_string(),
+                1,
+                Some("wallet".to_string()),
+                0.5,
+            )
+            .await;
 
         machine.mark_registered("test_session").await.unwrap();
         let session = machine.get_session("test_session").await.unwrap();

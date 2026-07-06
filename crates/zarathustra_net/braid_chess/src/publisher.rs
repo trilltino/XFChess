@@ -104,7 +104,8 @@ impl ChessPublisher {
             text: text.to_string(),
             timestamp_ms,
         });
-        self.put(ChessResource::chat(&self.game_id), msg, new_version).await
+        self.put(ChessResource::chat(&self.game_id), msg, new_version)
+            .await
     }
 
     /// PUT a clock state snapshot onto the clock sub-resource.
@@ -117,7 +118,8 @@ impl ChessPublisher {
             0,
         ));
         let msg = ChessMessage::Clock(state.clone());
-        self.put(ChessResource::clock(&self.game_id), msg, new_version).await
+        self.put(ChessResource::clock(&self.game_id), msg, new_version)
+            .await
     }
 
     /// PUT a Stockfish engine hint onto the engine sub-resource.

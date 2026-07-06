@@ -3,8 +3,8 @@ use crate::game::components::{
     FadingCapture, HasMoved, MoveRecord, Piece, PieceColor, PieceMoveAnimation, PieceType,
 };
 use crate::game::events::MoveMadeEvent;
-use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
 use crate::game::resources::turn::CurrentTurn;
+use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
 use crate::game::sync::board_state::{BoardMove, BoardStateSync, ChessEngineExt};
 use crate::rendering::pieces::PIECE_ON_BOARD_Y;
 use bevy::audio::{AudioPlayer, AudioSource};
@@ -93,7 +93,7 @@ pub fn apply_capture(
     // We use the move direction but flatten it to the board plane
     let mut knockback = move_dir.normalize_or_zero();
     knockback.y = 0.0;
-    
+
     // If move_dir was vertical (unlikely in chess), fallback to a default direction
     if knockback.length_squared() < 0.001 {
         knockback = Vec3::new(1.0, 0.0, 0.5).normalize();
@@ -165,9 +165,7 @@ pub fn update_piece_state(
 }
 
 fn is_castling_move(piece_type: PieceType, from: (u8, u8), to: (u8, u8)) -> bool {
-    piece_type == PieceType::King
-        && from.1 == to.1
-        && from.0.abs_diff(to.0) == 2
+    piece_type == PieceType::King && from.1 == to.1 && from.0.abs_diff(to.0) == 2
 }
 
 fn castling_rook_move(from: (u8, u8), to: (u8, u8)) -> Option<((u8, u8), (u8, u8))> {
@@ -210,14 +208,19 @@ fn apply_castling_rook_move(
         return;
     };
 
-    if let Ok((_, mut rook_piece_component, mut rook_has_moved)) = pieces_query.get_mut(rook_entity) {
+    if let Ok((_, mut rook_piece_component, mut rook_has_moved)) = pieces_query.get_mut(rook_entity)
+    {
         rook_piece_component.x = rook_to.0;
         rook_piece_component.y = rook_to.1;
         rook_has_moved.moved = true;
         rook_has_moved.move_count += 1;
 
         commands.entity(rook_entity).insert(PieceMoveAnimation::new(
-            Vec3::new(7.0 - rook_from.0 as f32, PIECE_ON_BOARD_Y, rook_from.1 as f32),
+            Vec3::new(
+                7.0 - rook_from.0 as f32,
+                PIECE_ON_BOARD_Y,
+                rook_from.1 as f32,
+            ),
             Vec3::new(7.0 - rook_to.0 as f32, PIECE_ON_BOARD_Y, rook_to.1 as f32),
             0.25,
         ));
@@ -256,12 +259,9 @@ pub fn execute_move(
     if let Some(target_cap) = ctx.capture {
         // The captured piece stands on ctx.target — derive world position
         // using the same formula as piece spawning (x=file, z=rank, y=board surface).
-        let cap_world_pos = Vec3::new(
-            ctx.target.0 as f32,
-            PIECE_ON_BOARD_Y,
-            ctx.target.1 as f32,
-        );
-        let move_dir = cap_world_pos - Vec3::new(from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32);
+        let cap_world_pos = Vec3::new(ctx.target.0 as f32, PIECE_ON_BOARD_Y, ctx.target.1 as f32);
+        let move_dir =
+            cap_world_pos - Vec3::new(from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32);
         apply_capture(
             commands,
             captured_pieces,

@@ -54,8 +54,7 @@ pub fn evaluate_position(game: &Game) -> i16 {
             let (lf, lr) = (loser_k % 8, loser_k / 8);
             let centre_dist = (2 * lf - 7).abs() / 2 + (2 * lr - 7).abs() / 2;
             // Proximity of the two kings (winner wants to close in).
-            let king_dist =
-                ((wk % 8) - (bk % 8)).abs().max(((wk / 8) - (bk / 8)).abs());
+            let king_dist = ((wk % 8) - (bk % 8)).abs().max(((wk / 8) - (bk / 8)).abs());
             let mop = 10 * centre_dist + 4 * (7 - king_dist);
             score += if score > 0 { mop } else { -mop };
         }
@@ -80,7 +79,10 @@ mod tests {
     fn extra_queen_is_decisive() {
         // White queen vs nothing extra for black
         let game = game_from_fen("rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-        assert!(evaluate_position(&game) > 800, "missing black queen should be ~+9");
+        assert!(
+            evaluate_position(&game) > 800,
+            "missing black queen should be ~+9"
+        );
     }
 
     #[test]

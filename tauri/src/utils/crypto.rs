@@ -57,9 +57,21 @@ mod tests {
 
   #[test]
   fn test_token_validation_boundaries() {
-    assert!(!validate_token_format(&"a".repeat(31)), "31 chars must be rejected");
-    assert!(validate_token_format(&"a".repeat(32)), "32 chars (min) must pass");
-    assert!(validate_token_format(&"a".repeat(1024)), "1024 chars (max) must pass");
-    assert!(!validate_token_format(&"a".repeat(1025)), "1025 chars must be rejected");
+    assert!(
+      !validate_token_format(&"a".repeat(31)),
+      "31 chars must be rejected"
+    );
+    assert!(
+      validate_token_format(&"a".repeat(32)),
+      "32 chars (min) must pass"
+    );
+    assert!(
+      validate_token_format(&"a".repeat(1024)),
+      "1024 chars (max) must pass"
+    );
+    assert!(
+      !validate_token_format(&"a".repeat(1025)),
+      "1025 chars must be rejected"
+    );
   }
 }

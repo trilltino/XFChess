@@ -57,18 +57,19 @@ pub fn promotion_ui_system(
 
                 ui.horizontal(|ui| {
                     // Piece options
-                    let is_white = pending_promotion.color == Some(crate::rendering::pieces::PieceColor::White);
+                    let is_white = pending_promotion.color
+                        == Some(crate::rendering::pieces::PieceColor::White);
                     let pieces = if is_white {
                         [
-                            (PieceType::Queen,  "\u{2655}", "Queen"),
-                            (PieceType::Rook,   "\u{2656}", "Rook"),
+                            (PieceType::Queen, "\u{2655}", "Queen"),
+                            (PieceType::Rook, "\u{2656}", "Rook"),
                             (PieceType::Bishop, "\u{2657}", "Bishop"),
                             (PieceType::Knight, "\u{2658}", "Knight"),
                         ]
                     } else {
                         [
-                            (PieceType::Queen,  "\u{265B}", "Queen"),
-                            (PieceType::Rook,   "\u{265C}", "Rook"),
+                            (PieceType::Queen, "\u{265B}", "Queen"),
+                            (PieceType::Rook, "\u{265C}", "Rook"),
                             (PieceType::Bishop, "\u{265D}", "Bishop"),
                             (PieceType::Knight, "\u{265E}", "Knight"),
                         ]
@@ -98,4 +99,3 @@ pub fn promotion_ui_system(
             });
         });
 }
-

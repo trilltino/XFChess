@@ -54,13 +54,18 @@ impl CuLogger {
             signature,
         };
         self.entries.push(entry.clone());
-        self.groups.entry(group.to_string()).or_default().push(entry);
+        self.groups
+            .entry(group.to_string())
+            .or_default()
+            .push(entry);
     }
 
     /// Aggregate stats for a specific group.
     pub fn group_stats(&self, group: &str) -> Option<CuStats> {
         let entries = self.groups.get(group)?;
-        if entries.is_empty() { return None; }
+        if entries.is_empty() {
+            return None;
+        }
         let total: u64 = entries.iter().map(|e| e.cu_consumed).sum();
         let count = entries.len() as u64;
         Some(CuStats {
@@ -95,20 +100,31 @@ impl CuLogger {
         println!();
         let mut groups: Vec<_> = self.groups.keys().collect();
         groups.sort();
-        println!("{:<30} {:>10} {:>10} {:>10} {:>10}", "Group", "Total CU", "Count", "Avg CU", "Success %");
+        println!(
+            "{:<30} {:>10} {:>10} {:>10} {:>10}",
+            "Group", "Total CU", "Count", "Avg CU", "Success %"
+        );
         println!("{}", "─".repeat(80));
         for group in groups {
             if let Some(stats) = self.group_stats(group) {
                 let success_pct = if stats.count > 0 {
                     (stats.success_count as f64 / stats.count as f64) * 100.0
-                } else { 0.0 };
-                println!("{:<30} {:>10} {:>10} {:>10.0} {:>9.1}%",
-                    group, stats.total_cu, stats.count, stats.avg_cu, success_pct);
+                } else {
+                    0.0
+                };
+                println!(
+                    "{:<30} {:>10} {:>10} {:>10.0} {:>9.1}%",
+                    group, stats.total_cu, stats.count, stats.avg_cu, success_pct
+                );
             }
         }
         println!("{}", "─".repeat(80));
-        println!("   Grand Total: {} CU | Success: {} | Failures: {}",
-            self.total_cu(), self.success_count(), self.failure_count());
+        println!(
+            "   Grand Total: {} CU | Success: {} | Failures: {}",
+            self.total_cu(),
+            self.success_count(),
+            self.failure_count()
+        );
         println!();
     }
 

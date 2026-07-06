@@ -45,7 +45,7 @@ pub fn create_board(
         double_sided: true,
         ..default()
     });
-    
+
     // Lichess-style colors for 2D board
     // Light: #f0d9b5, Dark: #b58863
     let mat_2d_light = materials.add(StandardMaterial {
@@ -61,7 +61,7 @@ pub fn create_board(
 
     // Use SquareMaterials resource for consistent 3D coloring
     let mat_light = square_materials.white_color.clone(); // White squares use Green (standard terminology might be flipped)
-    let mat_dark = square_materials.black_color.clone();  // Black squares use Cream
+    let mat_dark = square_materials.black_color.clone(); // Black squares use Cream
 
     let squares: Vec<_> = (0..8)
         .flat_map(|rank| {
@@ -78,21 +78,41 @@ pub fn create_board(
                 let square = Square::new(file, rank);
                 let is_white_square = square.is_white();
 
-                let base_mat_3d = if is_white_square { mat_light_row.clone() } else { mat_dark_row.clone() };
-                let base_mat_2d = if is_white_square { mat_2d_light_row.clone() } else { mat_2d_dark_row.clone() };
+                let base_mat_3d = if is_white_square {
+                    mat_light_row.clone()
+                } else {
+                    mat_dark_row.clone()
+                };
+                let base_mat_2d = if is_white_square {
+                    mat_2d_light_row.clone()
+                } else {
+                    mat_2d_dark_row.clone()
+                };
 
                 let file_char = (b'a' + file) as char;
                 let square_name = format!("Square {}{}", file_char, rank + 1);
                 let world_pos = Vec3::new(7.0 - file as f32, 0., rank as f32);
 
-                (Transform::from_translation(world_pos), square, Board, Name::new(square_name),
-                 DespawnOnExit(GameState::InGame), mesh_3d.clone(), base_mat_3d, mesh_2d.clone(), base_mat_2d,
-                 mesh_hit.clone(), mat_hit_row.clone())
+                (
+                    Transform::from_translation(world_pos),
+                    square,
+                    Board,
+                    Name::new(square_name),
+                    DespawnOnExit(GameState::InGame),
+                    mesh_3d.clone(),
+                    base_mat_3d,
+                    mesh_2d.clone(),
+                    base_mat_2d,
+                    mesh_hit.clone(),
+                    mat_hit_row.clone(),
+                )
             })
         })
         .collect();
 
-    for (transform, square, board, name, exit, m3d, mat3d, m2d, mat2d, m_hit, mat_hit_cell) in squares {
+    for (transform, square, board, name, exit, m3d, mat3d, m2d, mat2d, m_hit, mat_hit_cell) in
+        squares
+    {
         commands
             .spawn((
                 transform,
@@ -142,18 +162,32 @@ pub fn create_board(
 
 pub fn board_view_mode_toggle_system(
     view_mode: Res<ViewMode>,
-    mut board_3d_query: Query<&mut Visibility, (With<BoardSquare3DVisual>, Without<BoardSquare2DVisual>)>,
-    mut board_2d_query: Query<&mut Visibility, (With<BoardSquare2DVisual>, Without<BoardSquare3DVisual>)>,
+    mut board_3d_query: Query<
+        &mut Visibility,
+        (With<BoardSquare3DVisual>, Without<BoardSquare2DVisual>),
+    >,
+    mut board_2d_query: Query<
+        &mut Visibility,
+        (With<BoardSquare2DVisual>, Without<BoardSquare3DVisual>),
+    >,
 ) {
     let mode = *view_mode;
     let show_3d = mode == ViewMode::Standard3D || mode.is_templeos();
     let show_2d = mode == ViewMode::Standard2D;
 
     for mut vis in board_3d_query.iter_mut() {
-        *vis = if show_3d { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show_3d {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut vis in board_2d_query.iter_mut() {
-        *vis = if show_2d { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show_2d {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -162,24 +196,25 @@ pub struct BoardPlugin;
 impl Plugin for BoardPlugin {
     fn build(&self, app: &mut App) {
         use crate::core::GameState;
+        use crate::rendering::effects::{init_arrow_assets, update_check_highlight_system};
         use crate::rendering::update_last_move_highlight_system;
         use crate::rendering::update_move_hints_system;
-        use crate::rendering::effects::{init_arrow_assets, update_check_highlight_system};
         app.add_systems(Startup, init_arrow_assets)
-        .add_systems(OnEnter(GameState::InGame), create_board)
-        .add_systems(
-            Update,
-            (
-                update_move_hints_system.run_if(in_state(GameState::InGame)),
-                update_last_move_highlight_system.run_if(in_state(GameState::InGame)),
-                update_check_highlight_system.run_if(in_state(GameState::InGame)),
-                board_view_mode_toggle_system.run_if(
-                    in_state(GameState::InGame).and(resource_changed::<crate::game::view_mode::ViewMode>)
+            .add_systems(OnEnter(GameState::InGame), create_board)
+            .add_systems(
+                Update,
+                (
+                    update_move_hints_system.run_if(in_state(GameState::InGame)),
+                    update_last_move_highlight_system.run_if(in_state(GameState::InGame)),
+                    update_check_highlight_system.run_if(in_state(GameState::InGame)),
+                    board_view_mode_toggle_system.run_if(
+                        in_state(GameState::InGame)
+                            .and(resource_changed::<crate::game::view_mode::ViewMode>),
+                    ),
+                    crate::game::systems::debug_transform::debug_log_transforms
+                        .run_if(in_state(GameState::InGame)),
                 ),
-                crate::game::systems::debug_transform::debug_log_transforms
-                    .run_if(in_state(GameState::InGame)),
-            ),
-        );
+            );
 
         // TempleOS tribute theme — dev builds only (`--features templeos`).
         #[cfg(feature = "templeos")]
@@ -193,8 +228,7 @@ impl Plugin for BoardPlugin {
         )
         .add_systems(
             Update,
-            crate::rendering::templeos_camera_movement_system
-                .run_if(in_state(GameState::InGame)),
+            crate::rendering::templeos_camera_movement_system.run_if(in_state(GameState::InGame)),
         );
         // Debug markers removed - they were showing colored spheres on the board corners
         // app.add_systems(

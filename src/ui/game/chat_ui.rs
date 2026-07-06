@@ -1,16 +1,15 @@
-//! In-game P2P chat panel — rendered as a collapsible egui side panel.
+//! In-game online chat panel rendered as a collapsible egui side panel.
 //!
 //! Systems:
-//!  - `drain_chat_messages`  — drains `BraidPvpSession.chat_rx` → `ChatState.history` each frame
-//!  - `chat_panel_ui`        — renders the egui floating panel; fires `PublishBraidChat` on send
+//!  - `drain_chat_messages` - drains `OnlineChatMessage` events into `ChatState.history`
+//!  - `chat_panel_ui` - renders the egui floating panel; fires `PublishOnlineChat` on send
 
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-use crate::multiplayer::network::{BraidPvpSession, PublishBraidChat};
-use crate::multiplayer::network::braid_pvp::BraidChatMessage;
-use crate::multiplayer::traits::MessageReader;
 use crate::core::states::GameMode;
+use crate::multiplayer::network::{OnlineChatMessage, OnlineGameSession, PublishOnlineChat};
+use crate::multiplayer::traits::MessageReader;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -55,10 +54,10 @@ impl ChatState {
 
 // ── Systems ───────────────────────────────────────────────────────────────────
 
-/// Drain inbound `BraidChatMessage` events into `ChatState`.
+/// Drain inbound `OnlineChatMessage` events into `ChatState`.
 pub fn drain_chat_messages(
-    session: Option<Res<BraidPvpSession>>,
-    mut chat_events: MessageReader<BraidChatMessage>,
+    session: Option<Res<OnlineGameSession>>,
+    mut chat_events: MessageReader<OnlineChatMessage>,
     mut chat_state: ResMut<ChatState>,
 ) {
     let Some(session) = session else {
@@ -74,19 +73,19 @@ pub fn drain_chat_messages(
     }
 }
 
-/// Render the chat panel overlay. Fires `PublishBraidChat` when the user submits.
+/// Render the chat panel overlay. Fires `PublishOnlineChat` when the user submits.
 pub fn chat_panel_ui(
     mut contexts: bevy_egui::EguiContexts,
-    session: Option<Res<BraidPvpSession>>,
+    session: Option<Res<OnlineGameSession>>,
     mut chat_state: ResMut<ChatState>,
     game_mode: Res<GameMode>,
     player_name: Option<Res<crate::states::main_menu::PlayerIdentity>>,
-    mut chat_writer: MessageWriter<PublishBraidChat>,
+    mut chat_writer: MessageWriter<PublishOnlineChat>,
 ) {
-    // Only render during P2P/Braid multiplayer sessions.
+    // Only render during online multiplayer sessions.
     if !matches!(
         *game_mode,
-        GameMode::BraidMultiplayer | GameMode::MultiplayerCompetitive
+        GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
     ) {
         return;
     }
@@ -170,11 +169,12 @@ pub fn chat_panel_ui(
                     // Clone to avoid borrow conflict
                     let entries: Vec<_> = chat_state.history.iter().cloned().collect();
                     for entry in &entries {
-                        let name_color = if entry.player.contains("white") || entry.player.contains("host") {
-                            egui::Color32::from_rgb(180, 200, 255)
-                        } else {
-                            egui::Color32::from_rgb(255, 200, 150)
-                        };
+                        let name_color =
+                            if entry.player.contains("white") || entry.player.contains("host") {
+                                egui::Color32::from_rgb(180, 200, 255)
+                            } else {
+                                egui::Color32::from_rgb(255, 200, 150)
+                            };
                         ui.horizontal_wrapped(|ui| {
                             ui.label(
                                 egui::RichText::new(format!("{}:", entry.player))
@@ -213,11 +213,10 @@ pub fn chat_panel_ui(
                         .font(egui::TextStyle::Body),
                 );
 
-                let can_send = !chat_state.input.trim().is_empty()
-                    && chat_state.input.len() <= 500;
+                let can_send = !chat_state.input.trim().is_empty() && chat_state.input.len() <= 500;
 
-                let send_pressed = response.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let send_pressed =
+                    response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                 let btn_clicked = ui
                     .add_enabled(
@@ -250,7 +249,7 @@ pub fn chat_panel_ui(
                         timestamp_ms,
                     });
 
-                    chat_writer.write(PublishBraidChat {
+                    chat_writer.write(PublishOnlineChat {
                         player,
                         text,
                         timestamp_ms,

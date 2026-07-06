@@ -1,20 +1,20 @@
-﻿use super::state::{BalanceRefreshTimer, SolanaIntegrationState, DEVNET_RPC_URL};
-use bevy::prelude::{debug, error, info, warn, Local, Res, ResMut, Time, Commands};
+use super::state::{BalanceRefreshTimer, SolanaIntegrationState, DEVNET_RPC_URL};
+use crate::core::GameState;
+use crate::game::events::GameStartedEvent;
+use crate::multiplayer::solana::session_key_manager::SessionKeyManager;
+use crate::multiplayer::solana::tournament::TournamentClientState;
+use crate::multiplayer::vps_client::UserStatus;
+use crate::multiplayer::{NetworkMessage, OnlineNetworkState};
 use bevy::ecs::message::MessageReader;
+use bevy::prelude::{debug, error, info, warn, Commands, Local, Res, ResMut, Time};
+use directories::ProjectDirs;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
-use crate::game::events::GameStartedEvent;
-use crate::core::GameState;
-use crate::multiplayer::{BraidNetworkState, NetworkMessage};
-use crate::multiplayer::solana::session_key_manager::SessionKeyManager;
-use crate::multiplayer::solana::tournament::TournamentClientState;
-use crate::multiplayer::vps_client::UserStatus;
-use std::sync::Arc;
-use directories::ProjectDirs;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Solana RPC configuration with relayer fee payer
 #[derive(Clone, Debug, bevy::prelude::Resource)]
@@ -39,7 +39,7 @@ pub fn initialize_solana_integration(
         match receiver.try_recv() {
             Ok(Some(pubkey_str)) => {
                 *rx = None;
-                
+
                 // 1. Handle sentinel/non-pubkey strings first to avoid Base58 parsing noise
                 let trimmed = pubkey_str.trim();
                 if trimmed.is_empty() || trimmed == "undefined" || trimmed == "null" {
@@ -72,8 +72,13 @@ pub fn initialize_solana_integration(
                             // Try to load existing session key
                             match SessionKeyManager::load_session(&pubkey) {
                                 Ok(session_manager) => {
-                                    info!("[SESSION] Loaded existing session key: {}", session_manager.pubkey());
-                                    match solana_sdk::signature::Keypair::from_bytes(&session_manager.signer().to_bytes()) {
+                                    info!(
+                                        "[SESSION] Loaded existing session key: {}",
+                                        session_manager.pubkey()
+                                    );
+                                    match solana_sdk::signature::Keypair::from_bytes(
+                                        &session_manager.signer().to_bytes(),
+                                    ) {
                                         Ok(kp) => solana_state.session_keypair = Some(kp),
                                         Err(e) => {
                                             error!("[SESSION] Failed to convert session manager to Keypair: {}", e);
@@ -85,20 +90,22 @@ pub fn initialize_solana_integration(
                                     // Create new session key
                                     let session_manager = SessionKeyManager::new(&pubkey);
                                     let session_pubkey = session_manager.pubkey();
-                                    match solana_sdk::signature::Keypair::from_bytes(&session_manager.signer().to_bytes()) {
+                                    match solana_sdk::signature::Keypair::from_bytes(
+                                        &session_manager.signer().to_bytes(),
+                                    ) {
                                         Ok(kp) => solana_state.session_keypair = Some(kp),
                                         Err(e) => {
                                             error!("[SESSION] Failed to convert session manager to Keypair: {}", e);
                                         }
                                     }
-                                    
+
                                     // Save session data (24 hour default)
                                     if let Err(e) = session_manager.save_session(&pubkey, 24) {
                                         warn!("[SESSION] Failed to save session key: {}", e);
                                     }
-                                    
+
                                     info!("[SESSION] Created new session key: {}", session_pubkey);
-                                    
+
                                     // Authorize session key on-chain (async)
                                     let _rpc_client = RpcClient::new(DEVNET_RPC_URL.to_string());
                                     let _session_pubkey_clone = session_pubkey;
@@ -112,7 +119,10 @@ pub fn initialize_solana_integration(
                             }
                         }
                         Err(e) => {
-                            warn!("[WALLET] Invalid pubkey from Tauri: {} (Raw: '{}')", e, trimmed);
+                            warn!(
+                                "[WALLET] Invalid pubkey from Tauri: {} (Raw: '{}')",
+                                e, trimmed
+                            );
                             *retry_secs = 2.0;
                         }
                     }
@@ -120,13 +130,13 @@ pub fn initialize_solana_integration(
             }
             Ok(None) => {
                 *rx = None;
-                *retry_secs = 2.0; 
+                *retry_secs = 2.0;
             }
             Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 *rx = None;
                 *retry_secs = 3.0; // Wait longer on host failure
             }
-            Err(crossbeam_channel::TryRecvError::Empty) => {} 
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
         }
         return;
     }
@@ -158,7 +168,9 @@ pub fn query_wallet_pubkey_from_tauri() -> Option<String> {
             Ok(s) => s,
             Err(_) => continue,
         };
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .ok();
         let _ = stream.write_all(b"PKEY");
         let mut len_buf = [0u8; 4];
         if stream.read_exact(&mut len_buf).is_err() {
@@ -166,7 +178,7 @@ pub fn query_wallet_pubkey_from_tauri() -> Option<String> {
         }
         let len = u32::from_le_bytes(len_buf) as usize;
         if len == 0 {
-            return None; 
+            return None;
         }
         let mut buf = vec![0u8; len];
         if stream.read_exact(&mut buf).is_err() {
@@ -185,9 +197,10 @@ pub fn update_wallet_balance(
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
-    let (Some(ref pubkey), Some(ref rpc_client)) =
-        (solana_state.wallet_pubkey.as_ref(), solana_state.rpc_client.as_ref())
-    else {
+    let (Some(ref pubkey), Some(ref rpc_client)) = (
+        solana_state.wallet_pubkey.as_ref(),
+        solana_state.rpc_client.as_ref(),
+    ) else {
         return;
     };
     match rpc_client.get_balance(*pubkey) {
@@ -243,9 +256,11 @@ pub fn update_wallet_usd_rate(
     let (tx, receiver) = crossbeam_channel::bounded(1);
     *rx = Some(receiver);
 
-    bevy::tasks::IoTaskPool::get().spawn(async move {
-        let _ = tx.send(fetch_sol_usd_rate().await);
-    }).detach();
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            let _ = tx.send(fetch_sol_usd_rate().await);
+        })
+        .detach();
 }
 
 const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
@@ -256,7 +271,7 @@ async fn fetch_sol_usd_rate() -> Result<f64, String> {
         .build()
         .map_err(|e| format!("HTTP client build error: {}", e))?;
 
-    // Jupiter price API â€” no key required, returns derived price from on-chain liquidity
+    // Jupiter price API — no key required, returns derived price from on-chain liquidity
     let url = format!("https://api.jup.ag/price/v2?ids={}", SOL_MINT);
 
     let resp = client
@@ -312,12 +327,18 @@ pub fn monitor_network_handshakes(
             let wallet_pubkey = match solana_state.wallet_pubkey {
                 Some(pk) => pk,
                 None => {
-                    warn!("[HANDSHAKE] Wallet not connected â€” cannot join game {} on-chain", game_id_owned);
+                    warn!(
+                        "[HANDSHAKE] Wallet not connected — cannot join game {} on-chain",
+                        game_id_owned
+                    );
                     continue;
                 }
             };
 
-            info!("[HANDSHAKE] Wager handshake for game {} â€” joining on-chain via Phantom", game_id_owned);
+            info!(
+                "[HANDSHAKE] Wager handshake for game {} — joining on-chain via Phantom",
+                game_id_owned
+            );
 
             let program_id = solana_state.program_id;
 
@@ -328,8 +349,8 @@ pub fn monitor_network_handshakes(
                 let ix = join_game_ix(
                     program_id,
                     wallet_pubkey,
-                    wallet_pubkey, // white_player â€” will be resolved properly via lobby flow
-                    wallet_pubkey, // fee_payer â€” placeholder; session key used in real path
+                    wallet_pubkey, // white_player — will be resolved properly via lobby flow
+                    wallet_pubkey, // fee_payer — placeholder; session key used in real path
                     game_id_owned,
                 )
                 .map_err(|e| format!("build join_game_ix: {}", e))?;
@@ -349,7 +370,7 @@ pub fn monitor_network_handshakes(
 /// all outgoing gossip messages are cryptographically signed.
 pub fn sync_session_key_to_network(
     solana_state: Res<SolanaIntegrationState>,
-    mut network_state: ResMut<BraidNetworkState>,
+    mut network_state: ResMut<OnlineNetworkState>,
 ) {
     if network_state.session_signing_key.is_some() {
         return;
@@ -391,7 +412,7 @@ pub fn handle_pending_solana_tasks(mut solana_state: ResMut<SolanaIntegrationSta
 pub fn authorize_session_key_on_game_start(
     mut game_start_events: MessageReader<GameStartedEvent>,
     solana_state: Res<SolanaIntegrationState>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
     rollup_manager: Res<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
 ) {
     for _event in game_start_events.read() {
@@ -425,7 +446,10 @@ pub fn authorize_session_key_on_game_start(
                                 Ok(pk) => pk,
                                 Err(_) => break,
                             };
-                            info!("[SESSION] VPS session active for game {} ({})", game_id, session_pubkey);
+                            info!(
+                                "[SESSION] VPS session active for game {} ({})",
+                                game_id, session_pubkey
+                            );
 
                             let expires_at = chrono::Utc::now().timestamp() + 3600;
                             if let Some(ref tx) = msg_sender {
@@ -447,7 +471,10 @@ pub fn authorize_session_key_on_game_start(
                     }
                 }
                 if !active {
-                    error!("[SESSION] VPS session never became active for game {}", game_id);
+                    error!(
+                        "[SESSION] VPS session never became active for game {}",
+                        game_id
+                    );
                 }
             })
             .detach();
@@ -490,7 +517,7 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
     // Generate new keypair if loading failed or file didn't exist
     info!("[WALLET] Generating new local hot wallet...");
     let new_kp = Keypair::new();
-    
+
     // Save to disk
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -523,15 +550,21 @@ pub fn fetch_user_status_async(
         match receiver.try_recv() {
             Ok(Some(status)) => {
                 if let Some(ref mut w) = solana_wallet {
-                    info!("[USER_STATUS] profile={} email={} kyc={} can_wager={}",
-                        status.has_profile, status.has_email, status.has_kyc, status.can_wager);
+                    info!(
+                        "[USER_STATUS] profile={} email={} kyc={} can_wager={}",
+                        status.has_profile, status.has_email, status.has_kyc, status.can_wager
+                    );
                     w.user_status = Some(status);
                 }
                 *rx = None;
             }
-            Ok(None) => { *rx = None; }
+            Ok(None) => {
+                *rx = None;
+            }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
-            Err(_) => { *rx = None; }
+            Err(_) => {
+                *rx = None;
+            }
         }
     }
 
@@ -550,7 +583,9 @@ pub fn fetch_user_status_async(
     let (tx, new_rx) = crossbeam_channel::bounded::<Option<UserStatus>>(1);
     *rx = Some(new_rx);
     tokio_runtime.0.spawn(async move {
-        let result = crate::multiplayer::vps_client::get_user_status_async(pubkey).await.ok();
+        let result = crate::multiplayer::vps_client::get_user_status_async(pubkey)
+            .await
+            .ok();
         let _ = tx.send(result);
     });
 }
@@ -561,8 +596,16 @@ pub fn sync_player_profiles(
     mut profile: ResMut<crate::multiplayer::solana::addon::SolanaProfile>,
     solana_state: Res<SolanaIntegrationState>,
     tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
-    mut own_rx: Local<Option<crossbeam_channel::Receiver<Option<crate::multiplayer::network::vps::PlayerProfile>>>>,
-    mut opp_rx: Local<Option<crossbeam_channel::Receiver<Option<crate::multiplayer::network::vps::PlayerProfile>>>>,
+    mut own_rx: Local<
+        Option<
+            crossbeam_channel::Receiver<Option<crate::multiplayer::network::vps::PlayerProfile>>,
+        >,
+    >,
+    mut opp_rx: Local<
+        Option<
+            crossbeam_channel::Receiver<Option<crate::multiplayer::network::vps::PlayerProfile>>,
+        >,
+    >,
     mut last_game_id: Local<Option<u64>>,
     mut last_opp_pk: Local<Option<Pubkey>>,
 ) {
@@ -577,7 +620,8 @@ pub fn sync_player_profiles(
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 let pk_str = pk.to_string();
                 tokio_runtime.0.spawn(async move {
-                    let _ = tx.send(crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok());
+                    let _ = tx
+                        .send(crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok());
                 });
                 *own_rx = Some(rx);
             }
@@ -587,7 +631,8 @@ pub fn sync_player_profiles(
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 let pk_str = pk.to_string();
                 tokio_runtime.0.spawn(async move {
-                    let _ = tx.send(crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok());
+                    let _ = tx
+                        .send(crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok());
                 });
                 *opp_rx = Some(rx);
             }
@@ -604,7 +649,10 @@ pub fn sync_player_profiles(
                 profile.elo = p.elo;
                 profile.username = p.username;
                 profile.country = p.country;
-                info!("[PROFILES] Updated own profile: {} ({} ELO)", profile.username, profile.elo);
+                info!(
+                    "[PROFILES] Updated own profile: {} ({} ELO)",
+                    profile.username, profile.elo
+                );
             }
             *own_rx = None;
         }
@@ -616,16 +664,17 @@ pub fn sync_player_profiles(
                 competitive.opponent_elo = p.elo;
                 competitive.opponent_username = p.username;
                 competitive.opponent_country = p.country;
-                info!("[PROFILES] Updated opponent profile: {} ({} ELO)", competitive.opponent_username, competitive.opponent_elo);
+                info!(
+                    "[PROFILES] Updated opponent profile: {} ({} ELO)",
+                    competitive.opponent_username, competitive.opponent_elo
+                );
             }
             *opp_rx = None;
         }
     }
 }
 
-pub fn setup_solana_system(
-    mut commands: Commands,
-) {
+pub fn setup_solana_system(mut commands: Commands) {
     // Placeholder for fetching relayer_pubkey from backend or environment
     let relayer_pubkey = "PlaceholderRelayerPubkey";
     commands.insert_resource(SolanaRpc {
@@ -634,10 +683,7 @@ pub fn setup_solana_system(
     });
 }
 
-pub fn handle_game_transactions(
-    _game_state: ResMut<GameState>,
-    _solana_rpc: Res<SolanaRpc>,
-) {
+pub fn handle_game_transactions(_game_state: ResMut<GameState>, _solana_rpc: Res<SolanaRpc>) {
     // Use solana_rpc.fee_payer for transactions
     // Placeholder for transaction logic
 }
@@ -671,14 +717,20 @@ pub fn check_session_expiry_on_game_start(
             Some(pk) => pk,
             None => continue,
         };
-        let expires_at = match crate::multiplayer::solana::session_key_manager::SessionKeyManager::expires_at(&wallet) {
-            Some(t) => t,
-            None => continue,
-        };
+        let expires_at =
+            match crate::multiplayer::solana::session_key_manager::SessionKeyManager::expires_at(
+                &wallet,
+            ) {
+                Some(t) => t,
+                None => continue,
+            };
         let remaining_secs = expires_at - chrono::Utc::now().timestamp();
         if remaining_secs < 86_400 {
             let expires_in_hours = (remaining_secs.max(0) / 3600) as u32;
-            warn!("[SESSION_EXPIRY] Session expires in {} h for game {}", expires_in_hours, ev.game_id);
+            warn!(
+                "[SESSION_EXPIRY] Session expires in {} h for game {}",
+                expires_in_hours, ev.game_id
+            );
             commands.insert_resource(SessionExpiryWarning {
                 game_id: ev.game_id,
                 expires_in_hours,
@@ -723,11 +775,17 @@ pub fn verify_global_session_on_menu_enter(
         use crate::multiplayer::vps_client;
         match vps_client::verify_global_session(&wallet) {
             Ok(Some(session_pubkey)) => {
-                info!("[GLOBAL_SESSION] VPS confirmed active session {} for {}", session_pubkey, wallet);
+                info!(
+                    "[GLOBAL_SESSION] VPS confirmed active session {} for {}",
+                    session_pubkey, wallet
+                );
                 let _ = tx.send(Some(session_pubkey));
             }
             Ok(None) => {
-                info!("[GLOBAL_SESSION] No active global session on VPS for {}", wallet);
+                info!(
+                    "[GLOBAL_SESSION] No active global session on VPS for {}",
+                    wallet
+                );
                 let _ = tx.send(None);
             }
             Err(e) => {

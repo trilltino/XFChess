@@ -2,6 +2,8 @@
 
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
+#[allow(deprecated)]
+use solana_sdk::system_instruction;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     instruction::Instruction,
@@ -11,8 +13,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::{Transaction, VersionedTransaction},
 };
-#[allow(deprecated)]
-use solana_sdk::system_instruction;
 use tracing::warn;
 
 /// Funds `dest` with `lamports` from `payer`, submit to `rpc_url`.
@@ -29,15 +29,16 @@ pub fn fund_account(
 }
 
 /// Signs `ix` with `signer` (fee-payer = signer) and submits to `rpc_url`.
-pub fn sign_and_submit(rpc: &RpcClient, signer: &Keypair, instructions: &[Instruction]) -> Result<Signature> {
+pub fn sign_and_submit(
+    rpc: &RpcClient,
+    signer: &Keypair,
+    instructions: &[Instruction],
+) -> Result<Signature> {
     let blockhash = rpc.get_latest_blockhash()?;
     let msg = Message::new(instructions, Some(&signer.pubkey()));
     let tx = Transaction::new(&[signer], msg, blockhash);
-    rpc.send_and_confirm_transaction_with_spinner_and_commitment(
-        &tx,
-        CommitmentConfig::confirmed(),
-    )
-    .map_err(|e| anyhow!(e))
+    rpc.send_and_confirm_transaction_with_spinner_and_commitment(&tx, CommitmentConfig::confirmed())
+        .map_err(|e| anyhow!(e))
 }
 
 /// Signs and submits to the MagicBlock ER with `skip_preflight = true`.
@@ -46,7 +47,11 @@ pub fn sign_and_submit(rpc: &RpcClient, signer: &Keypair, instructions: &[Instru
 /// ("Attempt to load a program that does not exist") because the XFChess
 /// program is not in its preflight cache. Skipping preflight lets the TX land.
 /// After sending, we poll for confirmation (ER confirms in sub-second to ~5 s).
-pub fn sign_and_submit_er(rpc: &RpcClient, signer: &Keypair, instructions: &[Instruction]) -> Result<Signature> {
+pub fn sign_and_submit_er(
+    rpc: &RpcClient,
+    signer: &Keypair,
+    instructions: &[Instruction],
+) -> Result<Signature> {
     use solana_client::rpc_config::RpcSendTransactionConfig;
     use std::time::{Duration, Instant};
 
@@ -86,11 +91,8 @@ pub fn sign_and_submit_er(rpc: &RpcClient, signer: &Keypair, instructions: &[Ins
 /// and `VersionedTransaction` (v0). Uses `confirmed` commitment.
 pub fn submit_signed_tx(rpc: &RpcClient, tx_bytes: &[u8]) -> Result<Signature> {
     let tx: VersionedTransaction = bincode::deserialize(tx_bytes).map_err(|e| anyhow!(e))?;
-    rpc.send_and_confirm_transaction_with_spinner_and_commitment(
-        &tx,
-        CommitmentConfig::confirmed(),
-    )
-    .map_err(|e| anyhow!(e))
+    rpc.send_and_confirm_transaction_with_spinner_and_commitment(&tx, CommitmentConfig::confirmed())
+        .map_err(|e| anyhow!(e))
 }
 
 /// Co-signs a wallet-signed legacy transaction with the provided session keypair,
@@ -103,13 +105,10 @@ pub fn cosign_and_submit_tx(
     session_keypair: &Keypair,
     tx_bytes: &[u8],
 ) -> Result<Signature> {
-    let mut tx: Transaction = bincode::deserialize(tx_bytes)
-        .map_err(|e| anyhow!("deserialize tx: {e}"))?;
+    let mut tx: Transaction =
+        bincode::deserialize(tx_bytes).map_err(|e| anyhow!("deserialize tx: {e}"))?;
     let blockhash = tx.message.recent_blockhash;
     tx.partial_sign(&[session_keypair], blockhash);
-    rpc.send_and_confirm_transaction_with_spinner_and_commitment(
-        &tx,
-        CommitmentConfig::confirmed(),
-    )
-    .map_err(|e| anyhow!(e))
+    rpc.send_and_confirm_transaction_with_spinner_and_commitment(&tx, CommitmentConfig::confirmed())
+        .map_err(|e| anyhow!(e))
 }

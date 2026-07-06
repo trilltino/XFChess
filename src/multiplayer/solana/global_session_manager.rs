@@ -7,23 +7,23 @@
 //! Storage: `<data-dir>/global_session_key.enc`  (AES-256-GCM, same pattern as
 //! [`SessionKeyManager`](super::session_key_manager::SessionKeyManager)).
 
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce,
+};
+use base64::{engine::general_purpose, Engine as _};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+#[allow(deprecated)]
+use solana_sdk::system_program;
 use solana_sdk::{
     instruction::AccountMeta,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
-#[allow(deprecated)]
-use solana_sdk::system_program;
 use std::path::PathBuf;
 use std::sync::Arc;
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce,
-};
-use base64::{Engine as _, engine::general_purpose};
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 
 /// PDA seed prefix matching [`GlobalSessionDelegation::SEED`] on-chain.
 const SEED: &[u8] = b"global_session";
@@ -97,17 +97,16 @@ impl GlobalSessionKeyManager {
             expires_at: Utc::now().timestamp() + duration_days * 86_400,
             created_at: Utc::now(),
         };
-        let json = serde_json::to_string(&data)
-            .map_err(|e| format!("serialize: {e}"))?;
-        let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
-            .map_err(|e| format!("cipher: {e}"))?;
+        let json = serde_json::to_string(&data).map_err(|e| format!("serialize: {e}"))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(&self.encryption_key).map_err(|e| format!("cipher: {e}"))?;
         #[allow(deprecated)]
         let nonce = Nonce::from_slice(b"xfchess glob"); // 12 bytes
-        let encrypted = cipher.encrypt(nonce, json.as_bytes())
+        let encrypted = cipher
+            .encrypt(nonce, json.as_bytes())
             .map_err(|e| format!("encrypt: {e}"))?;
         let encoded = general_purpose::STANDARD.encode(encrypted);
-        std::fs::create_dir_all(&self.data_dir)
-            .map_err(|e| format!("mkdir: {e}"))?;
+        std::fs::create_dir_all(&self.data_dir).map_err(|e| format!("mkdir: {e}"))?;
         std::fs::write(self.data_dir.join("global_session_key.enc"), encoded)
             .map_err(|e| format!("write: {e}"))
     }
@@ -120,19 +119,19 @@ impl GlobalSessionKeyManager {
         if !path.exists() {
             return Err("no file".into());
         }
-        let encoded = std::fs::read_to_string(&path)
-            .map_err(|e| format!("read: {e}"))?;
-        let encrypted = general_purpose::STANDARD.decode(encoded)
+        let encoded = std::fs::read_to_string(&path).map_err(|e| format!("read: {e}"))?;
+        let encrypted = general_purpose::STANDARD
+            .decode(encoded)
             .map_err(|e| format!("base64: {e}"))?;
         let key = Self::derive_key(wallet);
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| format!("cipher: {e}"))?;
+        let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("cipher: {e}"))?;
         #[allow(deprecated)]
         let nonce = Nonce::from_slice(b"xfchess glob");
-        let decrypted = cipher.decrypt(nonce, encrypted.as_ref())
+        let decrypted = cipher
+            .decrypt(nonce, encrypted.as_ref())
             .map_err(|e| format!("decrypt: {e}"))?;
-        let data: GlobalSessionKeyData = serde_json::from_slice(&decrypted)
-            .map_err(|e| format!("deserialize: {e}"))?;
+        let data: GlobalSessionKeyData =
+            serde_json::from_slice(&decrypted).map_err(|e| format!("deserialize: {e}"))?;
         if data.wallet_pubkey != wallet.to_string() {
             return Err("wallet mismatch".into());
         }
@@ -142,8 +141,7 @@ impl GlobalSessionKeyManager {
         let bytes = bs58::decode(&data.session_private_key)
             .into_vec()
             .map_err(|e| format!("decode key: {e}"))?;
-        let kp = Keypair::from_bytes(&bytes)
-            .map_err(|e| format!("keypair: {e}"))?;
+        let kp = Keypair::from_bytes(&bytes).map_err(|e| format!("keypair: {e}"))?;
         Ok(Self {
             keypair: Arc::new(kp),
             encryption_key: key,
@@ -201,7 +199,11 @@ pub fn build_authorize_global_session_ix(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    solana_sdk::instruction::Instruction { program_id: *program_id, accounts, data }
+    solana_sdk::instruction::Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
 }
 
 /// Build a `revoke_global_session` instruction.
@@ -260,7 +262,11 @@ pub fn build_global_create_game_ix(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    solana_sdk::instruction::Instruction { program_id: *program_id, accounts, data }
+    solana_sdk::instruction::Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
 }
 
 /// Build a `global_join_game` instruction.
@@ -292,7 +298,11 @@ pub fn build_global_join_game_ix(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    solana_sdk::instruction::Instruction { program_id: *program_id, accounts, data }
+    solana_sdk::instruction::Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
 }
 
 /// Build a transaction: `init_profile` (if needed) + `authorize_global_session`
@@ -325,21 +335,30 @@ pub fn build_first_time_auth_tx(
 
 fn push_option_i64(buf: &mut Vec<u8>, v: Option<i64>) {
     match v {
-        Some(x) => { buf.push(1); buf.extend_from_slice(&x.to_le_bytes()); }
+        Some(x) => {
+            buf.push(1);
+            buf.extend_from_slice(&x.to_le_bytes());
+        }
         None => buf.push(0),
     }
 }
 
 fn push_option_u64(buf: &mut Vec<u8>, v: Option<u64>) {
     match v {
-        Some(x) => { buf.push(1); buf.extend_from_slice(&x.to_le_bytes()); }
+        Some(x) => {
+            buf.push(1);
+            buf.extend_from_slice(&x.to_le_bytes());
+        }
         None => buf.push(0),
     }
 }
 
 fn push_option_u16(buf: &mut Vec<u8>, v: Option<u16>) {
     match v {
-        Some(x) => { buf.push(1); buf.extend_from_slice(&x.to_le_bytes()); }
+        Some(x) => {
+            buf.push(1);
+            buf.extend_from_slice(&x.to_le_bytes());
+        }
         None => buf.push(0),
     }
 }

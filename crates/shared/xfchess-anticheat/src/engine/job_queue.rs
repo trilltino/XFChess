@@ -2,10 +2,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
+use crate::analyse_game;
 use crate::config::AcConfig;
 use crate::error::AcResult;
 use crate::types::GameRecord;
-use crate::analyse_game;
 
 pub type JobId = String;
 
@@ -65,23 +65,25 @@ pub fn spawn_workers(cfg: Arc<AcConfig>, pool: sqlx::SqlitePool) -> AnalysisQueu
                             crate::metrics::ANALYSIS_MILLIS_LAST
                                 .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
                             match &outcome {
-                                Ok(_) => crate::metrics::ANALYSES_TOTAL.fetch_add(1, Ordering::Relaxed),
-                                Err(_) => {
-                                    crate::metrics::ANALYSIS_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed)
+                                Ok(_) => {
+                                    crate::metrics::ANALYSES_TOTAL.fetch_add(1, Ordering::Relaxed)
                                 }
+                                Err(_) => crate::metrics::ANALYSIS_FAILURES_TOTAL
+                                    .fetch_add(1, Ordering::Relaxed),
                             };
                         }
                         match outcome {
                             Ok(report) => {
-                                if let Err(e) = crate::report::store::save_report(&pool, &report, &cfg).await {
+                                if let Err(e) =
+                                    crate::report::store::save_report(&pool, &report, &cfg).await
+                                {
                                     error!("[anticheat worker {worker_id}] save_report failed for {game_id}: {e}");
                                 }
-                                let _ = sqlx::query(
-                                    "DELETE FROM anticheat_queue WHERE game_id = ?"
-                                )
-                                .bind(&game_id)
-                                .execute(&pool)
-                                .await;
+                                let _ =
+                                    sqlx::query("DELETE FROM anticheat_queue WHERE game_id = ?")
+                                        .bind(&game_id)
+                                        .execute(&pool)
+                                        .await;
                             }
                             Err(e) => {
                                 warn!("[anticheat worker {worker_id}] analysis failed for {game_id}: {e}");

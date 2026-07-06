@@ -73,7 +73,10 @@ impl DynamicLightingSettings {
             [1.0, 0.95, 0.85],
             [0.95, 1.0, 0.88],
         ];
-        let rgb = self.colors.get(index).copied()
+        let rgb = self
+            .colors
+            .get(index)
+            .copied()
             .unwrap_or(DEFAULTS[index % DEFAULTS.len()]);
         bevy::prelude::Color::srgb(rgb[0], rgb[1], rgb[2])
     }
@@ -167,7 +170,9 @@ impl Default for GameSettings {
     }
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 /// Resource for tracking game statistics
 #[derive(Resource, Debug, Clone, Default, Reflect)]

@@ -3,7 +3,7 @@
 
 /// XFChess main entry point for decentralized chess on Solana
 use clap::Parser;
-use xfchess::{GameConfig, PlayerColor, build_app};
+use xfchess::{build_app, GameConfig, PlayerColor};
 
 fn main() {
     // Initialize telemetry / crash reporting
@@ -79,10 +79,7 @@ fn main() {
         println!();
     }
 
-
     // Build and run the Bevy application
     let mut app = build_app(game_config);
     app.run();
 }
-
-

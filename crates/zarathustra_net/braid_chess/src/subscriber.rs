@@ -74,28 +74,32 @@ impl ChessSubscriber {
     pub async fn subscribe_moves(
         &self,
     ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidChessError> {
-        self.subscribe_inner(ChessResource::moves(&self.game_id)).await
+        self.subscribe_inner(ChessResource::moves(&self.game_id))
+            .await
     }
 
     /// Subscribe to engine hint stream (`/game/{id}/engine`).
     pub async fn subscribe_engine(
         &self,
     ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidChessError> {
-        self.subscribe_inner(ChessResource::engine(&self.game_id)).await
+        self.subscribe_inner(ChessResource::engine(&self.game_id))
+            .await
     }
 
     /// Subscribe to clock state stream (`/game/{id}/clock`).
     pub async fn subscribe_clock(
         &self,
     ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidChessError> {
-        self.subscribe_inner(ChessResource::clock(&self.game_id)).await
+        self.subscribe_inner(ChessResource::clock(&self.game_id))
+            .await
     }
 
     /// Subscribe to the chat stream (`/game/{id}/chat`).
     pub async fn subscribe_chat(
         &self,
     ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidChessError> {
-        self.subscribe_inner(ChessResource::chat(&self.game_id)).await
+        self.subscribe_inner(ChessResource::chat(&self.game_id))
+            .await
     }
 
     // ─── Internal ────────────────────────────────────────────────────────────

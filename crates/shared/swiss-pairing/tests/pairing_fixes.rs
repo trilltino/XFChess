@@ -36,12 +36,7 @@ fn rematch_transposition_in_bottom_half() {
     p1.opponents.push("p3".into());
     p3.opponents.push("p1".into());
 
-    let players = vec![
-        p1,
-        player("p2", 1900, 2.0),
-        p3,
-        player("p4", 1700, 2.0),
-    ];
+    let players = vec![p1, player("p2", 1900, 2.0), p3, player("p4", 1700, 2.0)];
 
     let round = generate_pairings(2, &players, 5, &cfg()).unwrap();
 
@@ -67,7 +62,10 @@ fn forced_bye_on_odd_leftover_after_float() {
     let round = generate_pairings(3, &[p1, p2, p3], 5, &cfg()).unwrap();
 
     let total = round.pairings.len() * 2 + round.byes.len();
-    assert_eq!(total, 3, "all 3 players must be accounted for (no silent drop)");
+    assert_eq!(
+        total, 3,
+        "all 3 players must be accounted for (no silent drop)"
+    );
     assert!(!round.byes.is_empty(), "at least one forced bye expected");
 }
 
@@ -87,12 +85,16 @@ fn five_round_bye_rotation_no_double_bye() {
         base_player("e", 1600),
     ];
 
-    let mut seen_byes: std::collections::HashMap<String, u8> =
-        std::collections::HashMap::new();
+    let mut seen_byes: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
 
     for round_num in 1u8..=5 {
         let round = generate_pairings(round_num, &current_players, 5, &cfg()).unwrap();
-        assert_eq!(round.byes.len(), 1, "round {}: expected exactly 1 bye", round_num);
+        assert_eq!(
+            round.byes.len(),
+            1,
+            "round {}: expected exactly 1 bye",
+            round_num
+        );
 
         let bye_id = round.byes[0].clone();
         *seen_byes.entry(bye_id.clone()).or_insert(0) += 1;

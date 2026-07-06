@@ -4,9 +4,9 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::core::GameState;
-use crate::ui::styles::*;
 use crate::game::components::piece_types::PieceColor;
 use crate::game::resources::{GameOverState, MoveHistory};
+use crate::ui::styles::*;
 
 // ── Payout resource ───────────────────────────────────────────────────────────
 
@@ -61,7 +61,9 @@ impl GameOverPayoutInfo {
 
     pub fn player_winnings(&self) -> u64 {
         if self.is_draw {
-            self.wager_amount.saturating_sub(self.country_fee / 2).saturating_sub(self.elo_fee / 2)
+            self.wager_amount
+                .saturating_sub(self.country_fee / 2)
+                .saturating_sub(self.elo_fee / 2)
         } else {
             self.winning_prize
         }
@@ -76,11 +78,15 @@ impl GameOverPayoutInfo {
 
     /// Seconds since on-chain settlement was initiated.
     pub fn settlement_elapsed(&self) -> u64 {
-        self.settlement_started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0)
+        self.settlement_started_at
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0)
     }
 
     pub fn elo_delta(&self) -> i32 {
-        if self.elo_before == 0 || self.elo_after == 0 { return 0; }
+        if self.elo_before == 0 || self.elo_after == 0 {
+            return 0;
+        }
         self.elo_after as i32 - self.elo_before as i32
     }
 }
@@ -126,7 +132,7 @@ pub fn cache_pgn_on_game_over(
     let pgn_result = match game_over.winner() {
         Some(PieceColor::White) => "1-0",
         Some(PieceColor::Black) => "0-1",
-        None                    => "1/2-1/2",
+        None => "1/2-1/2",
     };
     let pgn = build_pgn(&history, pgn_result);
     cached.pgn_string = pgn_to_string(&pgn);
@@ -139,8 +145,8 @@ pub fn cache_pgn_on_game_over(
 
 /// Replay all moves and return the final position as a FEN string.
 fn build_final_fen(history: &MoveHistory) -> String {
-    use nimzovich_engine::{do_move_with_promo, game_to_fen, new_game};
     use crate::game::components::PieceType;
+    use nimzovich_engine::{do_move_with_promo, game_to_fen, new_game};
 
     let mut game = new_game();
     for rec in &history.moves {
@@ -156,14 +162,14 @@ fn build_final_fen(history: &MoveHistory) -> String {
 /// Return the name of the ELO tier that an ELO value falls into.
 fn elo_tier(elo: u32) -> Option<&'static str> {
     match elo {
-        0..=1199    => None,
+        0..=1199 => None,
         1200..=1399 => Some("Beginner"),
         1400..=1599 => Some("Intermediate"),
         1600..=1799 => Some("Advanced"),
         1800..=1999 => Some("Expert"),
         2000..=2199 => Some("Master"),
         2200..=2399 => Some("International Master"),
-        _           => Some("Grandmaster"),
+        _ => Some("Grandmaster"),
     }
 }
 
@@ -171,8 +177,8 @@ fn elo_tier(elo: u32) -> Option<&'static str> {
 /// to derive proper SAN notation.  Promotions default to Queen because
 /// MoveRecord doesn't store the promoted-to piece.
 fn build_pgn(history: &MoveHistory, result_str: &str) -> nimzovich_engine::ParsedPgnGame {
-    use nimzovich_engine::{do_move_with_promo, move_to_san, new_game};
     use crate::game::components::PieceType;
+    use nimzovich_engine::{do_move_with_promo, move_to_san, new_game};
     use std::collections::BTreeMap;
 
     let mut game = new_game();
@@ -196,7 +202,12 @@ fn build_pgn(history: &MoveHistory, result_str: &str) -> nimzovich_engine::Parse
     tags.insert("Date".to_string(), chrono_or_unknown());
     tags.insert("Result".to_string(), result_str.to_string());
 
-    nimzovich_engine::ParsedPgnGame { tags, moves: san_moves, result: result_str.to_string(), per_ply_annotations: Vec::new() }
+    nimzovich_engine::ParsedPgnGame {
+        tags,
+        moves: san_moves,
+        result: result_str.to_string(),
+        per_ply_annotations: Vec::new(),
+    }
 }
 
 fn chrono_or_unknown() -> String {
@@ -274,12 +285,12 @@ pub fn game_over_popup_system(
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
     // ── colour palette ────────────────────────────────────────────────────────
-    let text_primary  = egui::Color32::from_rgba_unmultiplied(240, 240, 240, alpha);
-    let text_secondary= egui::Color32::from_rgba_unmultiplied(160, 160, 160, alpha);
-    let text_gold     = egui::Color32::from_rgba_unmultiplied(244, 187, 68, alpha);
-    let text_green    = egui::Color32::from_rgba_unmultiplied(80, 220, 120, alpha);
-    let text_red      = egui::Color32::from_rgba_unmultiplied(255, 100, 100, alpha);
-    let text_blue     = egui::Color32::from_rgba_unmultiplied(100, 180, 255, alpha);
+    let text_primary = egui::Color32::from_rgba_unmultiplied(240, 240, 240, alpha);
+    let text_secondary = egui::Color32::from_rgba_unmultiplied(160, 160, 160, alpha);
+    let text_gold = egui::Color32::from_rgba_unmultiplied(244, 187, 68, alpha);
+    let text_green = egui::Color32::from_rgba_unmultiplied(80, 220, 120, alpha);
+    let text_red = egui::Color32::from_rgba_unmultiplied(255, 100, 100, alpha);
+    let text_blue = egui::Color32::from_rgba_unmultiplied(100, 180, 255, alpha);
 
     let frame = StyledPanel::popup_alpha(alpha);
 
@@ -287,25 +298,26 @@ pub fn game_over_popup_system(
     let player_color = payout_info.as_ref().and_then(|p| p.player_color);
     let (headline, headline_color) = match (game_over.winner(), player_color) {
         (Some(w), Some(pc)) if w == pc => ("You Won", text_gold),
-        (Some(_), Some(_))             => ("You Lost", text_red),
-        (None, _)                      => ("Draw", text_secondary),
-        (Some(PieceColor::White), None)=> ("White Wins", text_primary),
-        (Some(PieceColor::Black), None)=> ("Black Wins", text_secondary),
+        (Some(_), Some(_)) => ("You Lost", text_red),
+        (None, _) => ("Draw", text_secondary),
+        (Some(PieceColor::White), None) => ("White Wins", text_primary),
+        (Some(PieceColor::Black), None) => ("Black Wins", text_secondary),
     };
 
     let termination = game_over.termination_text();
 
-    let mut trigger_dispute  = false;
-    let mut trigger_review   = false;
-    let mut trigger_analyze  = false;
-    let mut save_pgn         = false;
-    let mut play_again_bot   = false;
-    let mut go_to_bracket    = false;
-    let mut trigger_rematch  = false;
+    let mut trigger_dispute = false;
+    let mut trigger_review = false;
+    let mut trigger_analyze = false;
+    let mut save_pgn = false;
+    let mut play_again_bot = false;
+    let mut go_to_bracket = false;
+    let mut trigger_rematch = false;
 
     let is_single_player = matches!(*game_mode, crate::core::GameMode::SinglePlayer);
-    let _is_online = matches!(*game_mode,
-        crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive
+    let _is_online = matches!(
+        *game_mode,
+        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
     );
 
     egui::Window::new("")
@@ -318,26 +330,36 @@ pub fn game_over_popup_system(
         .show(ctx, |ui| {
             ui.set_width(348.0);
             ui.vertical_centered(|ui| {
-
                 // ── Result ───────────────────────────────────────────────────
-                ui.label(TextStyle::popup_title("GAME OVER").color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)));
+                ui.label(
+                    TextStyle::popup_title("GAME OVER")
+                        .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)),
+                );
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(headline)
-                    .size(22.0)
-                    .family(egui::FontFamily::Name("CinzelBold".into()))
-                    .color(headline_color));
+                ui.label(
+                    egui::RichText::new(headline)
+                        .size(22.0)
+                        .family(egui::FontFamily::Name("CinzelBold".into()))
+                        .color(headline_color),
+                );
                 if !termination.is_empty() {
-                    ui.label(egui::RichText::new(termination)
-                        .size(13.0).italics().color(text_secondary));
+                    ui.label(
+                        egui::RichText::new(termination)
+                            .size(13.0)
+                            .italics()
+                            .color(text_secondary),
+                    );
                 }
-
 
                 // ── ELO / rating ─────────────────────────────────────────────
                 if let Some(info) = payout_info.as_ref() {
                     if !info.is_rated {
                         ui.add_space(6.0);
-                        ui.label(egui::RichText::new("Practice game — no rating change")
-                            .size(11.0).color(text_secondary));
+                        ui.label(
+                            egui::RichText::new("Practice game — no rating change")
+                                .size(11.0)
+                                .color(text_secondary),
+                        );
                     } else {
                         let delta = info.elo_delta();
                         if info.elo_before > 0 {
@@ -349,17 +371,34 @@ pub fn game_over_popup_system(
                                     format!("{}", delta)
                                 };
                                 let delta_color = if delta >= 0 { text_green } else { text_red };
-                                ui.label(egui::RichText::new(
-                                    format!("Rating: {} → {}", info.elo_before, info.elo_after)
-                                ).size(13.0).color(text_primary));
-                                ui.label(egui::RichText::new(delta_text)
-                                    .size(13.0).strong().color(delta_color));
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Rating: {} → {}",
+                                        info.elo_before, info.elo_after
+                                    ))
+                                    .size(13.0)
+                                    .color(text_primary),
+                                );
+                                ui.label(
+                                    egui::RichText::new(delta_text)
+                                        .size(13.0)
+                                        .strong()
+                                        .color(delta_color),
+                                );
                                 if info.win_streak >= 3 {
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.label(egui::RichText::new(
-                                            format!("{}-game streak!", info.win_streak)
-                                        ).size(11.0).color(text_gold));
-                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{}-game streak!",
+                                                    info.win_streak
+                                                ))
+                                                .size(11.0)
+                                                .color(text_gold),
+                                            );
+                                        },
+                                    );
                                 }
                             });
                             // Tier-up badge
@@ -369,8 +408,12 @@ pub fn game_over_popup_system(
                                 if let Some(tier) = new_tier {
                                     ui.add_space(4.0);
                                     ui.horizontal_centered(|ui| {
-                                        ui.label(egui::RichText::new(format!("Tier Up!  {}", tier))
-                                            .size(14.0).strong().color(text_gold));
+                                        ui.label(
+                                            egui::RichText::new(format!("Tier Up!  {}", tier))
+                                                .size(14.0)
+                                                .strong()
+                                                .color(text_gold),
+                                        );
                                     });
                                 }
                             }
@@ -384,28 +427,42 @@ pub fn game_over_popup_system(
                         ui.add_space(10.0);
                         ui.separator();
                         ui.add_space(6.0);
-                        ui.label(egui::RichText::new("Payout Details")
-                            .size(13.0).strong().color(text_gold));
+                        ui.label(
+                            egui::RichText::new("Payout Details")
+                                .size(13.0)
+                                .strong()
+                                .color(text_gold),
+                        );
                         ui.add_space(6.0);
 
                         // Fee rows
                         let rows: &[(&str, i64, bool)] = &[
                             ("Pot (2× wager)", (info.wager_amount * 2) as i64, true),
-                            ("Treasury fee",   -(info.country_fee as i64), false),
-                            ("ELO fee",        -(info.elo_fee as i64), false),
-                            ("Rent returned",  info.rent_return as i64, true),
+                            ("Treasury fee", -(info.country_fee as i64), false),
+                            ("ELO fee", -(info.elo_fee as i64), false),
+                            ("Rent returned", info.rent_return as i64, true),
                         ];
                         for (label, lamports, is_positive) in rows {
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(*label)
-                                    .size(11.0).color(text_secondary));
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    let sign = if *lamports < 0 { "- " } else { "+ " };
-                                    let color = if *is_positive { text_green } else { text_red };
-                                    let sol = GameOverPayoutInfo::format_sol((*lamports).unsigned_abs());
-                                    ui.label(egui::RichText::new(format!("{}{}", sign, sol))
-                                        .size(11.0).color(color));
-                                });
+                                ui.label(
+                                    egui::RichText::new(*label).size(11.0).color(text_secondary),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let sign = if *lamports < 0 { "- " } else { "+ " };
+                                        let color =
+                                            if *is_positive { text_green } else { text_red };
+                                        let sol = GameOverPayoutInfo::format_sol(
+                                            (*lamports).unsigned_abs(),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!("{}{}", sign, sol))
+                                                .size(11.0)
+                                                .color(color),
+                                        );
+                                    },
+                                );
                             });
                         }
 
@@ -413,33 +470,70 @@ pub fn game_over_popup_system(
                         ui.separator();
                         ui.add_space(4.0);
 
-                        let prize_label = if info.is_draw { "Returned:" } else { "You Won:" };
+                        let prize_label = if info.is_draw {
+                            "Returned:"
+                        } else {
+                            "You Won:"
+                        };
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(prize_label)
-                                .size(14.0).strong().color(text_gold));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                // USDC prize path
-                                if let (Some(_mint), Some(usdc)) = (&info.usdc_mint, info.usdc_prize_usdc) {
-                                    let usdc_fmt = format!("{:.2} USDC", usdc as f64 / 1_000_000.0);
-                                    ui.label(egui::RichText::new(usdc_fmt)
-                                        .size(16.0).strong().color(text_gold));
-                                } else {
-                                    ui.label(egui::RichText::new(
-                                        GameOverPayoutInfo::format_sol(info.player_winnings())
-                                    ).size(16.0).strong().color(text_gold));
-                                }
-                            });
+                            ui.label(
+                                egui::RichText::new(prize_label)
+                                    .size(14.0)
+                                    .strong()
+                                    .color(text_gold),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    // USDC prize path
+                                    if let (Some(_mint), Some(usdc)) =
+                                        (&info.usdc_mint, info.usdc_prize_usdc)
+                                    {
+                                        let usdc_fmt =
+                                            format!("{:.2} USDC", usdc as f64 / 1_000_000.0);
+                                        ui.label(
+                                            egui::RichText::new(usdc_fmt)
+                                                .size(16.0)
+                                                .strong()
+                                                .color(text_gold),
+                                        );
+                                    } else {
+                                        ui.label(
+                                            egui::RichText::new(GameOverPayoutInfo::format_sol(
+                                                info.player_winnings(),
+                                            ))
+                                            .size(16.0)
+                                            .strong()
+                                            .color(text_gold),
+                                        );
+                                    }
+                                },
+                            );
                         });
                         if info.is_draw {
-                            if let (Some(_mint), Some(usdc)) = (&info.usdc_mint, info.usdc_prize_usdc) {
+                            if let (Some(_mint), Some(usdc)) =
+                                (&info.usdc_mint, info.usdc_prize_usdc)
+                            {
                                 let usdc_fmt = format!("{:.2} USDC", usdc as f64 / 1_000_000.0);
-                                ui.label(egui::RichText::new(
-                                    format!("Both players receive: {}", usdc_fmt)
-                                ).size(11.0).italics().color(text_secondary));
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Both players receive: {}",
+                                        usdc_fmt
+                                    ))
+                                    .size(11.0)
+                                    .italics()
+                                    .color(text_secondary),
+                                );
                             } else {
-                                ui.label(egui::RichText::new(
-                                    format!("Both players receive: {}", GameOverPayoutInfo::format_sol(info.player_winnings()))
-                                ).size(11.0).italics().color(text_secondary));
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Both players receive: {}",
+                                        GameOverPayoutInfo::format_sol(info.player_winnings())
+                                    ))
+                                    .size(11.0)
+                                    .italics()
+                                    .color(text_secondary),
+                                );
                             }
                         }
 
@@ -447,37 +541,70 @@ pub fn game_over_popup_system(
                         // Settlement status row
                         if info.payout_confirmed {
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("Prize claimed  ✓")
-                                    .size(12.0).color(text_green));
+                                ui.label(
+                                    egui::RichText::new("Prize claimed  ✓")
+                                        .size(12.0)
+                                        .color(text_green),
+                                );
                                 if let Some(sig) = &info.finalize_sig {
                                     let short = format!("{}...", &sig[..8.min(sig.len())]);
-                                    let url = format!("https://solscan.io/tx/{}?cluster=devnet", sig);
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.link(egui::RichText::new(short)
-                                            .size(11.0).color(text_secondary)).clicked()
-                                        {
-                                            open_url(&url);
-                                        }
-                                    });
+                                    let url =
+                                        format!("https://solscan.io/tx/{}?cluster=devnet", sig);
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .link(
+                                                    egui::RichText::new(short)
+                                                        .size(11.0)
+                                                        .color(text_secondary),
+                                                )
+                                                .clicked()
+                                            {
+                                                open_url(&url);
+                                            }
+                                        },
+                                    );
                                 }
                             });
                         } else {
                             let elapsed = info.settlement_elapsed();
                             if elapsed < 60 {
-                                let dots = match elapsed % 3 { 0 => ".", 1 => "..", _ => "..." };
-                                ui.label(egui::RichText::new(
-                                    format!("Settling on-chain{} ({}s)", dots, elapsed)
-                                ).size(11.0).italics().color(text_secondary));
+                                let dots = match elapsed % 3 {
+                                    0 => ".",
+                                    1 => "..",
+                                    _ => "...",
+                                };
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Settling on-chain{} ({}s)",
+                                        dots, elapsed
+                                    ))
+                                    .size(11.0)
+                                    .italics()
+                                    .color(text_secondary),
+                                );
                             } else {
-                                let url = info.finalize_sig.as_deref()
+                                let url = info
+                                    .finalize_sig
+                                    .as_deref()
                                     .map(|s| format!("https://solscan.io/tx/{}?cluster=devnet", s))
                                     .unwrap_or_default();
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("Taking longer than expected — ")
-                                        .size(11.0).color(text_red));
-                                    if !url.is_empty() && ui.link(
-                                        egui::RichText::new("check Solscan").size(11.0).color(text_blue)
-                                    ).clicked() {
+                                    ui.label(
+                                        egui::RichText::new("Taking longer than expected — ")
+                                            .size(11.0)
+                                            .color(text_red),
+                                    );
+                                    if !url.is_empty()
+                                        && ui
+                                            .link(
+                                                egui::RichText::new("check Solscan")
+                                                    .size(11.0)
+                                                    .color(text_blue),
+                                            )
+                                            .clicked()
+                                    {
                                         open_url(&url);
                                     }
                                 });
@@ -488,17 +615,23 @@ pub fn game_over_popup_system(
                         let is_loser = matches!(
                             (game_over.winner(), player_color),
                             (Some(PieceColor::White), Some(PieceColor::Black))
-                            | (Some(PieceColor::Black), Some(PieceColor::White))
+                                | (Some(PieceColor::Black), Some(PieceColor::White))
                         );
                         if is_loser && info.payout_confirmed && info.dispute_window_open() {
                             ui.add_space(4.0);
                             if let Some(sig) = &info.dispute_sig {
-                                ui.label(egui::RichText::new(
-                                    format!("Dispute submitted ({}...)", &sig[..8.min(sig.len())])
-                                ).size(11.0).color(text_secondary));
-                            } else if ui.button(
-                                egui::RichText::new("Dispute Result").size(12.0)
-                            ).clicked() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Dispute submitted ({}...)",
+                                        &sig[..8.min(sig.len())]
+                                    ))
+                                    .size(11.0)
+                                    .color(text_secondary),
+                                );
+                            } else if ui
+                                .button(egui::RichText::new("Dispute Result").size(12.0))
+                                .clicked()
+                            {
                                 trigger_dispute = true;
                             }
                         }
@@ -523,32 +656,50 @@ pub fn game_over_popup_system(
                         ui.spacing_mut().item_spacing.x = spacing;
                         let pgn_loading = !cached_pgn.braid_pgn_ready && cached_pgn.pgn.is_some();
                         let review_label = if pgn_loading { "Review ⟳" } else { "Review" };
-                        let save_label   = if pgn_loading { "Save ⟳" }   else { "Save PGN" };
+                        let save_label = if pgn_loading { "Save ⟳" } else { "Save PGN" };
                         let dim = if pgn_loading {
                             egui::Color32::from_rgba_unmultiplied(40, 40, 44, 120)
                         } else {
                             dark_btn
                         };
-                        let resp_review = ui.add_sized([btn_w, 26.0], egui::Button::new(
-                            egui::RichText::new(review_label).size(11.0)
-                        ).fill(dim));
-                        if pgn_loading { resp_review.on_hover_text("Fetching authoritative game record…"); }
-                        else if resp_review.clicked() { trigger_review = true; }
+                        let resp_review = ui.add_sized(
+                            [btn_w, 26.0],
+                            egui::Button::new(egui::RichText::new(review_label).size(11.0))
+                                .fill(dim),
+                        );
+                        if pgn_loading {
+                            resp_review.on_hover_text("Fetching authoritative game record…");
+                        } else if resp_review.clicked() {
+                            trigger_review = true;
+                        }
 
-                        let resp_analyze = ui.add_sized([btn_w, 26.0], egui::Button::new(
-                            egui::RichText::new("Analyze").size(11.0)
-                        ).fill(dark_btn));
-                        if resp_analyze.clicked() { trigger_analyze = true; }
+                        let resp_analyze = ui.add_sized(
+                            [btn_w, 26.0],
+                            egui::Button::new(egui::RichText::new("Analyze").size(11.0))
+                                .fill(dark_btn),
+                        );
+                        if resp_analyze.clicked() {
+                            trigger_analyze = true;
+                        }
 
-                        let resp_save = ui.add_sized([btn_w, 26.0], egui::Button::new(
-                            egui::RichText::new(save_label).size(11.0)
-                        ).fill(dim));
-                        if pgn_loading { resp_save.on_hover_text("Fetching authoritative game record…"); }
-                        else if resp_save.clicked() { save_pgn = true; }
+                        let resp_save = ui.add_sized(
+                            [btn_w, 26.0],
+                            egui::Button::new(egui::RichText::new(save_label).size(11.0)).fill(dim),
+                        );
+                        if pgn_loading {
+                            resp_save.on_hover_text("Fetching authoritative game record…");
+                        } else if resp_save.clicked() {
+                            save_pgn = true;
+                        }
                         if has_rematch {
-                            if ui.add_sized([btn_w, 26.0], egui::Button::new(
-                                egui::RichText::new("Rematch").size(11.0)
-                            ).fill(dark_btn)).clicked() {
+                            if ui
+                                .add_sized(
+                                    [btn_w, 26.0],
+                                    egui::Button::new(egui::RichText::new("Rematch").size(11.0))
+                                        .fill(dark_btn),
+                                )
+                                .clicked()
+                            {
                                 trigger_rematch = true;
                             }
                         }
@@ -566,21 +717,44 @@ pub fn game_over_popup_system(
                     ui.horizontal(|ui| {
                         ui.add_space(pad);
                         ui.spacing_mut().item_spacing.x = spacing;
-                        let play_label = if is_single_player { "Play Again" } else { "New Game" };
-                        if ui.add_sized([btn_w, 32.0], egui::Button::new(
-                            egui::RichText::new(play_label).size(12.0).strong()
-                                .color(egui::Color32::from_rgb(20, 18, 10))
-                        ).fill(egui::Color32::from_rgba_unmultiplied(244, 187, 68, 220))).clicked() {
-                            if is_single_player { play_again_bot = true; } else { next_state.set(GameState::InGame); }
-                        }
-                        let back_label = if payout_info.as_ref().and_then(|p| p.tournament_id).is_some() {
-                            "Back to Bracket"
+                        let play_label = if is_single_player {
+                            "Play Again"
                         } else {
-                            "Main Menu"
+                            "New Game"
                         };
-                        if ui.add_sized([btn_w, 32.0], egui::Button::new(
-                            egui::RichText::new(back_label).size(12.0)
-                        ).fill(egui::Color32::from_rgba_unmultiplied(40, 40, 44, 200))).clicked() {
+                        if ui
+                            .add_sized(
+                                [btn_w, 32.0],
+                                egui::Button::new(
+                                    egui::RichText::new(play_label)
+                                        .size(12.0)
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(20, 18, 10)),
+                                )
+                                .fill(egui::Color32::from_rgba_unmultiplied(244, 187, 68, 220)),
+                            )
+                            .clicked()
+                        {
+                            if is_single_player {
+                                play_again_bot = true;
+                            } else {
+                                next_state.set(GameState::InGame);
+                            }
+                        }
+                        let back_label =
+                            if payout_info.as_ref().and_then(|p| p.tournament_id).is_some() {
+                                "Back to Bracket"
+                            } else {
+                                "Main Menu"
+                            };
+                        if ui
+                            .add_sized(
+                                [btn_w, 32.0],
+                                egui::Button::new(egui::RichText::new(back_label).size(12.0))
+                                    .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 44, 200)),
+                            )
+                            .clicked()
+                        {
                             if payout_info.as_ref().and_then(|p| p.tournament_id).is_some() {
                                 go_to_bracket = true;
                             } else {
@@ -594,13 +768,21 @@ pub fn game_over_popup_system(
 
     // ── deferred actions ──────────────────────────────────────────────────────
     if trigger_dispute {
-        commands.insert_resource(PendingDispute { game_id: 0, sig_rx: None });
+        commands.insert_resource(PendingDispute {
+            game_id: 0,
+            sig_rx: None,
+        });
     }
 
     if trigger_review {
         if let Some(pgn) = cached_pgn.pgn.clone() {
             *game_mode = crate::core::GameMode::PgnReplay;
-            commands.insert_resource(crate::game::replay::ParsedPgnGameResource { inner: pgn, show_eval_graph: false, puzzle_mode: false, puzzle_revealed: false });
+            commands.insert_resource(crate::game::replay::ParsedPgnGameResource {
+                inner: pgn,
+                show_eval_graph: false,
+                puzzle_mode: false,
+                puzzle_revealed: false,
+            });
             next_state.set(GameState::InGame);
         }
     }
@@ -608,7 +790,12 @@ pub fn game_over_popup_system(
     if trigger_analyze {
         if let Some(pgn) = cached_pgn.pgn.clone() {
             *game_mode = crate::core::GameMode::PgnReplay;
-            commands.insert_resource(crate::game::replay::ParsedPgnGameResource { inner: pgn, show_eval_graph: true, puzzle_mode: false, puzzle_revealed: false });
+            commands.insert_resource(crate::game::replay::ParsedPgnGameResource {
+                inner: pgn,
+                show_eval_graph: true,
+                puzzle_mode: false,
+                puzzle_revealed: false,
+            });
             next_state.set(GameState::InGame);
         }
     }
@@ -616,8 +803,7 @@ pub fn game_over_popup_system(
     if save_pgn {
         let pgn_text = cached_pgn.pgn_string.clone();
         std::thread::spawn(move || {
-            let base = dirs::document_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let base = dirs::document_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
             let dir = base.join("xfchess");
             let _ = std::fs::create_dir_all(&dir);
             let timestamp = std::time::SystemTime::now()
@@ -664,7 +850,9 @@ pub fn spectator_game_over_overlay(
     mut anim: ResMut<PopupAnimState>,
     time: Res<Time>,
 ) {
-    if !game_over.is_game_over() { return; }
+    if !game_over.is_game_over() {
+        return;
+    }
 
     anim.elapsed += time.delta_secs();
     let t = anim.t();
@@ -672,22 +860,22 @@ pub fn spectator_game_over_overlay(
 
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
-    let text_p  = egui::Color32::from_rgba_unmultiplied(240, 240, 240, alpha);
-    let text_s  = egui::Color32::from_rgba_unmultiplied(160, 160, 160, alpha);
-    let text_g  = egui::Color32::from_rgba_unmultiplied(244, 187, 68, alpha);
+    let text_p = egui::Color32::from_rgba_unmultiplied(240, 240, 240, alpha);
+    let text_s = egui::Color32::from_rgba_unmultiplied(160, 160, 160, alpha);
+    let text_g = egui::Color32::from_rgba_unmultiplied(244, 187, 68, alpha);
 
     let frame = StyledPanel::popup_alpha(alpha);
 
     let headline = match game_over.winner() {
         Some(PieceColor::White) => ("White Wins!", text_p),
         Some(PieceColor::Black) => ("Black Wins!", text_s),
-        None                    => ("Draw",        text_s),
+        None => ("Draw", text_s),
     };
     let termination = game_over.termination_text();
     let pgn_result = match game_over.winner() {
         Some(PieceColor::White) => "1-0",
         Some(PieceColor::Black) => "0-1",
-        None                    => "1/2-1/2",
+        None => "1/2-1/2",
     };
 
     let mut trigger_review = false;
@@ -702,40 +890,74 @@ pub fn spectator_game_over_overlay(
         .show(ctx, |ui| {
             ui.set_width(300.0);
             ui.vertical_centered(|ui| {
-                ui.label(TextStyle::popup_body("SPECTATING").color(egui::Color32::from_rgba_unmultiplied(155, 158, 175, alpha)));
+                ui.label(
+                    TextStyle::popup_body("SPECTATING")
+                        .color(egui::Color32::from_rgba_unmultiplied(155, 158, 175, alpha)),
+                );
                 ui.add_space(4.0);
-                ui.label(TextStyle::popup_title("GAME OVER").color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)));
+                ui.label(
+                    TextStyle::popup_title("GAME OVER")
+                        .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)),
+                );
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(headline.0).size(22.0)
-                    .family(egui::FontFamily::Name("CinzelBold".into()))
-                    .color(headline.1));
+                ui.label(
+                    egui::RichText::new(headline.0)
+                        .size(22.0)
+                        .family(egui::FontFamily::Name("CinzelBold".into()))
+                        .color(headline.1),
+                );
                 if !termination.is_empty() {
-                    ui.label(egui::RichText::new(termination).size(12.0).italics().color(text_s));
+                    ui.label(
+                        egui::RichText::new(termination)
+                            .size(12.0)
+                            .italics()
+                            .color(text_s),
+                    );
                 }
                 ui.add_space(16.0);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
-                    if ui.add_sized([130.0, 38.0], egui::Button::new(
-                        egui::RichText::new("Review Game").size(13.0).strong()
-                    ).fill(egui::Color32::from_rgb(30, 60, 100))).clicked() {
+                    if ui
+                        .add_sized(
+                            [130.0, 38.0],
+                            egui::Button::new(
+                                egui::RichText::new("Review Game").size(13.0).strong(),
+                            )
+                            .fill(egui::Color32::from_rgb(30, 60, 100)),
+                        )
+                        .clicked()
+                    {
                         trigger_review = true;
                     }
-                    if ui.add_sized([100.0, 38.0], egui::Button::new(
-                        egui::RichText::new("Leave").size(13.0)
-                    ).fill(egui::Color32::from_rgb(60, 30, 30))).clicked() {
+                    if ui
+                        .add_sized(
+                            [100.0, 38.0],
+                            egui::Button::new(egui::RichText::new("Leave").size(13.0))
+                                .fill(egui::Color32::from_rgb(60, 30, 30)),
+                        )
+                        .clicked()
+                    {
                         next_state.set(GameState::MainMenu);
                     }
                 });
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new(format!("Result: {}", pgn_result))
-                    .size(10.0).color(text_g));
+                ui.label(
+                    egui::RichText::new(format!("Result: {}", pgn_result))
+                        .size(10.0)
+                        .color(text_g),
+                );
             });
         });
 
     if trigger_review {
         if let Some(pgn) = cached_pgn.pgn.clone() {
             *game_mode = crate::core::GameMode::PgnReplay;
-            commands.insert_resource(crate::game::replay::ParsedPgnGameResource { inner: pgn, show_eval_graph: false, puzzle_mode: false, puzzle_revealed: false });
+            commands.insert_resource(crate::game::replay::ParsedPgnGameResource {
+                inner: pgn,
+                show_eval_graph: false,
+                puzzle_mode: false,
+                puzzle_revealed: false,
+            });
             next_state.set(GameState::InGame);
         }
     }
@@ -753,11 +975,14 @@ pub struct PendingDispute {
 pub fn apply_dispute_trigger(
     mut commands: Commands,
     mut dispute: Option<ResMut<PendingDispute>>,
-    #[cfg(feature = "solana")]
-    rollup: Option<Res<crate::multiplayer::rollup::manager::EphemeralRollupManager>>,
+    #[cfg(feature = "solana")] rollup: Option<
+        Res<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
+    >,
     mut payout_info: Option<ResMut<GameOverPayoutInfo>>,
 ) {
-    let Some(ref mut dispute) = dispute else { return };
+    let Some(ref mut dispute) = dispute else {
+        return;
+    };
 
     if let Some(ref rx) = dispute.sig_rx {
         if let Ok(sig) = rx.try_recv() {
@@ -773,7 +998,11 @@ pub fn apply_dispute_trigger(
 
     #[cfg(feature = "solana")]
     let game_id = if let Some(mgr) = rollup {
-        if mgr.game_id != 0 { mgr.game_id } else { dispute.game_id }
+        if mgr.game_id != 0 {
+            mgr.game_id
+        } else {
+            dispute.game_id
+        }
     } else {
         dispute.game_id
     };
@@ -784,7 +1013,9 @@ pub fn apply_dispute_trigger(
         commands.remove_resource::<PendingDispute>();
         return;
     };
-    if info.dispute_pending { return; }
+    if info.dispute_pending {
+        return;
+    }
     info.dispute_pending = true;
     let player = info.local_player_pubkey.clone().unwrap_or_default();
 
@@ -794,8 +1025,10 @@ pub fn apply_dispute_trigger(
     std::thread::spawn(move || {
         use crate::multiplayer::vps_client;
         match vps_client::vps_submit_dispute(game_id, &player) {
-            Ok(sig)  => { let _ = sig_tx.send(sig); }
-            Err(e)   => error!("[DISPUTE] Failed for game {}: {e}", game_id),
+            Ok(sig) => {
+                let _ = sig_tx.send(sig);
+            }
+            Err(e) => error!("[DISPUTE] Failed for game {}: {e}", game_id),
         }
     });
 }
@@ -810,7 +1043,9 @@ pub fn fetch_game_payout_info(
     mut payout_info: ResMut<GameOverPayoutInfo>,
     current_turn: Option<Res<crate::game::resources::CurrentTurn>>,
 ) {
-    if !game_over.is_game_over() { return; }
+    if !game_over.is_game_over() {
+        return;
+    }
 
     *payout_info = GameOverPayoutInfo::default();
 
@@ -846,7 +1081,9 @@ fn open_url(url: &str) {
     let url = url.to_string();
     std::thread::spawn(move || {
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("cmd").args(["/c", "start", "", &url]).spawn();
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", "", &url])
+            .spawn();
         #[cfg(target_os = "macos")]
         let _ = std::process::Command::new("open").arg(&url).spawn();
         #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
@@ -864,24 +1101,23 @@ impl Plugin for GameOverPopupPlugin {
         app.init_resource::<PopupAnimState>();
         app.init_resource::<CachedGamePgn>();
 
-        app.add_systems(OnEnter(GameState::GameOver), (setup_popup_anim, cache_pgn_on_game_over));
+        app.add_systems(
+            OnEnter(GameState::GameOver),
+            (setup_popup_anim, cache_pgn_on_game_over),
+        );
 
         app.add_systems(
             bevy_egui::EguiPrimaryContextPass,
             game_over_popup_system
                 .run_if(in_state(GameState::GameOver))
-                .run_if(|gm: Res<crate::core::GameMode>| {
-                    *gm != crate::core::GameMode::Spectator
-                }),
+                .run_if(|gm: Res<crate::core::GameMode>| *gm != crate::core::GameMode::Spectator),
         );
 
         app.add_systems(
             bevy_egui::EguiPrimaryContextPass,
             spectator_game_over_overlay
                 .run_if(in_state(GameState::GameOver))
-                .run_if(|gm: Res<crate::core::GameMode>| {
-                    *gm == crate::core::GameMode::Spectator
-                }),
+                .run_if(|gm: Res<crate::core::GameMode>| *gm == crate::core::GameMode::Spectator),
         );
 
         app.add_systems(Update, apply_dispute_trigger);

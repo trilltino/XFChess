@@ -14,8 +14,8 @@ use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, PieceMoveAnimation};
 use crate::game::replay_shorts::{PuzzleOverlay, ReplayAnnotations, ScreenshotRequested};
 use crate::game::shorts_state::{ContentTier, HookStyle, HookText, ShortsState};
-use crate::multiplayer::traits::MessageWriter;
 use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
+use crate::multiplayer::traits::MessageWriter;
 use crate::rendering::pieces::{
     Piece, Piece2DVisual, Piece3DVisual, PieceColor, PieceMeshes, PieceSpriteHandles, PieceType,
     PiecesSpawned, PIECE_ON_BOARD_Y,
@@ -84,7 +84,9 @@ impl Default for PgnReplayState {
     fn default() -> Self {
         Self {
             engine: new_game(),
-            fen_snapshots: vec!["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()],
+            fen_snapshots: vec![
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
+            ],
             current_ply: 0,
             paused: true,
             speed: 1.0,
@@ -127,7 +129,10 @@ pub fn setup_replay(
         return;
     };
 
-    info!("[REPLAY] Setting up replay: {} moves", pgn.inner.moves.len());
+    info!(
+        "[REPLAY] Setting up replay: {} moves",
+        pgn.inner.moves.len()
+    );
 
     // Reset replay state
     *replay = PgnReplayState::default();
@@ -136,7 +141,9 @@ pub fn setup_replay(
     // Pre-generate all FEN snapshots by applying moves sequentially
     let mut temp_engine = new_game();
     replay.fen_snapshots.clear();
-    replay.fen_snapshots.push("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
+    replay
+        .fen_snapshots
+        .push("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
 
     for (i, san) in pgn.inner.moves.iter().enumerate() {
         match san_to_move(&mut temp_engine, san) {
@@ -146,7 +153,12 @@ pub fn setup_replay(
                 replay.fen_snapshots.push(fen);
             }
             Err(e) => {
-                warn!("[REPLAY] Failed to resolve move {} '{}': {:?}", i + 1, san, e);
+                warn!(
+                    "[REPLAY] Failed to resolve move {} '{}': {:?}",
+                    i + 1,
+                    san,
+                    e
+                );
                 break;
             }
         }
@@ -241,10 +253,7 @@ pub fn replay_apply_move_system(
 
 /// Sync the replay engine to the main ChessEngine resource so the board
 /// rendering (2D and 3D) sees the correct position.
-pub fn replay_sync_engine_system(
-    replay: Res<PgnReplayState>,
-    mut engine: ResMut<ChessEngine>,
-) {
+pub fn replay_sync_engine_system(replay: Res<PgnReplayState>, mut engine: ResMut<ChessEngine>) {
     let fen = engine_to_fen(&replay.engine);
     if engine.fen != fen {
         engine.set_from_fen(&fen).ok();
@@ -305,7 +314,11 @@ pub fn replay_spawn_pieces_system(
         }
         let file = (sq % 8) as u8;
         let rank = (sq / 8) as u8;
-        let color = if piece_id > 0 { PieceColor::White } else { PieceColor::Black };
+        let color = if piece_id > 0 {
+            PieceColor::White
+        } else {
+            PieceColor::Black
+        };
         let piece_type = engine_id_to_piece_type(piece_id.abs());
 
         let piece_material = if color == PieceColor::White {
@@ -345,15 +358,13 @@ pub fn replay_spawn_pieces_system(
             }
         }
         if let (Some(src), Some(dst)) = (src_sq, dst_sq) {
-            let src_world = Vec3::new(
-                (src % 8) as f32, PIECE_ON_BOARD_Y, (src / 8) as f32,
-            );
-            let dst_world = Vec3::new(
-                (dst % 8) as f32, PIECE_ON_BOARD_Y, (dst / 8) as f32,
-            );
+            let src_world = Vec3::new((src % 8) as f32, PIECE_ON_BOARD_Y, (src / 8) as f32);
+            let dst_world = Vec3::new((dst % 8) as f32, PIECE_ON_BOARD_Y, (dst / 8) as f32);
             if let Some(&ent) = entity_at_sq.get(&dst) {
                 let duration = 0.3 / slow_factor.max(0.05);
-                commands.entity(ent).insert(PieceMoveAnimation::new(src_world, dst_world, duration));
+                commands
+                    .entity(ent)
+                    .insert(PieceMoveAnimation::new(src_world, dst_world, duration));
             }
         }
     }
@@ -507,12 +518,18 @@ pub fn replay_ui_system(
                         let bar_w = (avail / n as f32).max(2.0).min(12.0);
                         let total_w = bar_w * n as f32;
                         let height = 40.0;
-                        let (rect, _) = ui.allocate_exact_size(egui::Vec2::new(total_w, height), egui::Sense::hover());
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::Vec2::new(total_w, height),
+                            egui::Sense::hover(),
+                        );
                         let painter = ui.painter();
                         let mid_y = rect.center().y;
 
                         painter.line_segment(
-                            [egui::Pos2::new(rect.left(), mid_y), egui::Pos2::new(rect.right(), mid_y)],
+                            [
+                                egui::Pos2::new(rect.left(), mid_y),
+                                egui::Pos2::new(rect.right(), mid_y),
+                            ],
                             egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
                         );
 
@@ -539,10 +556,16 @@ pub fn replay_ui_system(
                         }
 
                         // Current ply marker
-                        let cur = replay.current_ply.saturating_sub(1).min(n.saturating_sub(1));
+                        let cur = replay
+                            .current_ply
+                            .saturating_sub(1)
+                            .min(n.saturating_sub(1));
                         let cx = rect.left() + cur as f32 * bar_w + bar_w / 2.0;
                         painter.line_segment(
-                            [egui::Pos2::new(cx, rect.top()), egui::Pos2::new(cx, rect.bottom())],
+                            [
+                                egui::Pos2::new(cx, rect.top()),
+                                egui::Pos2::new(cx, rect.bottom()),
+                            ],
                             egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255)),
                         );
                     });
@@ -606,7 +629,9 @@ pub fn replay_ui_system(
                     if let Some(ref pgn_res) = parsed_pgn {
                         if replay.current_ply < pgn_res.inner.moves.len() {
                             // In puzzle mode don't advance past puzzle ply unless revealed
-                            let blocked = puzzle.enabled && !puzzle.revealed && replay.current_ply >= puzzle.puzzle_ply;
+                            let blocked = puzzle.enabled
+                                && !puzzle.revealed
+                                && replay.current_ply >= puzzle.puzzle_ply;
                             if !blocked {
                                 replay.current_ply += 1;
                                 replay.position_dirty = true;
@@ -634,7 +659,11 @@ pub fn replay_ui_system(
                 ui.add_space(12.0);
 
                 // Speed slider
-                ui.label(egui::RichText::new("Speed:").size(12.0).color(egui::Color32::LIGHT_GRAY));
+                ui.label(
+                    egui::RichText::new("Speed:")
+                        .size(12.0)
+                        .color(egui::Color32::LIGHT_GRAY),
+                );
                 let mut speed_label = replay.speed;
                 ui.add_sized(
                     [100.0, 20.0],
@@ -755,7 +784,11 @@ pub fn replay_ui_system(
                 ui.separator();
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("FEN:").size(11.0).color(egui::Color32::LIGHT_GRAY));
+                    ui.label(
+                        egui::RichText::new("FEN:")
+                            .size(11.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
                     let resp = ui.add_sized(
                         [ui.available_width() - 70.0, 22.0],
                         egui::TextEdit::singleline(&mut puzzle.fen_input)
@@ -763,7 +796,9 @@ pub fn replay_ui_system(
                             .font(egui::FontId::monospace(11.0)),
                     );
                     if (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                        || ui.add_sized([60.0, 22.0], egui::Button::new("Load")).clicked()
+                        || ui
+                            .add_sized([60.0, 22.0], egui::Button::new("Load"))
+                            .clicked()
                     {
                         use nimzovich_engine::game_from_fen;
                         let fen = puzzle.fen_input.trim().to_string();
@@ -946,8 +981,16 @@ pub fn replay_ui_system(
 
                     // Puzzle mode status indicator in move list
                     if puzzle.enabled {
-                        let status = if puzzle.revealed { "✅ Revealed" } else { "🧩 Puzzle" };
-                        ui.label(egui::RichText::new(status).size(10.0).color(egui::Color32::from_rgb(255, 220, 60)));
+                        let status = if puzzle.revealed {
+                            "✅ Revealed"
+                        } else {
+                            "🧩 Puzzle"
+                        };
+                        ui.label(
+                            egui::RichText::new(status)
+                                .size(10.0)
+                                .color(egui::Color32::from_rgb(255, 220, 60)),
+                        );
                     }
 
                     ui.label(
@@ -961,7 +1004,12 @@ pub fn replay_ui_system(
                     ui.add(egui::Separator::default().spacing(4.0));
 
                     // Content tier selector
-                    ui.label(egui::RichText::new("Content Tier").size(10.0).color(egui::Color32::from_gray(160)).strong());
+                    ui.label(
+                        egui::RichText::new("Content Tier")
+                            .size(10.0)
+                            .color(egui::Color32::from_gray(160))
+                            .strong(),
+                    );
                     ui.horizontal_wrapped(|ui| {
                         for tier in [
                             ContentTier::None,
@@ -976,12 +1024,15 @@ pub fn replay_ui_system(
                             } else {
                                 egui::Color32::from_rgba_unmultiplied(50, 50, 50, 200)
                             };
-                            if ui.add_sized(
-                                [ui.available_width().min(88.0), 20.0],
-                                egui::Button::new(egui::RichText::new(tier.label()).size(10.0))
-                                    .fill(col)
-                                    .corner_radius(3.0),
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [ui.available_width().min(88.0), 20.0],
+                                    egui::Button::new(egui::RichText::new(tier.label()).size(10.0))
+                                        .fill(col)
+                                        .corner_radius(3.0),
+                                )
+                                .clicked()
+                            {
                                 shorts.content_tier = tier;
                                 // Apply preset hook text if none already set for ply 0
                                 let default_hook = tier.default_hook();
@@ -995,13 +1046,20 @@ pub fn replay_ui_system(
                     ui.add_space(4.0);
 
                     // Hook text editor
-                    let hook_btn_label = if shorts.show_hook_editor { "▲ Hook Text" } else { "▼ Hook Text" };
-                    if ui.add_sized(
-                        [ui.available_width(), 20.0],
-                        egui::Button::new(egui::RichText::new(hook_btn_label).size(10.0))
-                            .fill(egui::Color32::from_rgba_unmultiplied(40, 60, 40, 200))
-                            .corner_radius(3.0),
-                    ).clicked() {
+                    let hook_btn_label = if shorts.show_hook_editor {
+                        "▲ Hook Text"
+                    } else {
+                        "▼ Hook Text"
+                    };
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 20.0],
+                            egui::Button::new(egui::RichText::new(hook_btn_label).size(10.0))
+                                .fill(egui::Color32::from_rgba_unmultiplied(40, 60, 40, 200))
+                                .corner_radius(3.0),
+                        )
+                        .clicked()
+                    {
                         shorts.show_hook_editor = !shorts.show_hook_editor;
                         if shorts.show_hook_editor {
                             // Pre-fill with existing hook for this ply
@@ -1019,19 +1077,38 @@ pub fn replay_ui_system(
                                 .font(egui::FontId::proportional(10.0)),
                         );
                         ui.horizontal(|ui| {
-                            if ui.add_sized([50.0, 18.0], egui::Button::new(egui::RichText::new("Save").size(10.0)).fill(egui::Color32::from_rgb(40, 120, 40)).corner_radius(3.0)).clicked() {
+                            if ui
+                                .add_sized(
+                                    [50.0, 18.0],
+                                    egui::Button::new(egui::RichText::new("Save").size(10.0))
+                                        .fill(egui::Color32::from_rgb(40, 120, 40))
+                                        .corner_radius(3.0),
+                                )
+                                .clicked()
+                            {
                                 let text = shorts.hook_input.trim().to_string();
                                 if text.is_empty() {
                                     shorts.hook_texts.remove(&replay.current_ply);
                                 } else {
-                                    shorts.hook_texts.insert(replay.current_ply, HookText {
-                                        text,
-                                        style: HookStyle::TopBold,
-                                    });
+                                    shorts.hook_texts.insert(
+                                        replay.current_ply,
+                                        HookText {
+                                            text,
+                                            style: HookStyle::TopBold,
+                                        },
+                                    );
                                 }
                                 shorts.show_hook_editor = false;
                             }
-                            if ui.add_sized([50.0, 18.0], egui::Button::new(egui::RichText::new("Clear").size(10.0)).fill(egui::Color32::from_rgb(100, 40, 40)).corner_radius(3.0)).clicked() {
+                            if ui
+                                .add_sized(
+                                    [50.0, 18.0],
+                                    egui::Button::new(egui::RichText::new("Clear").size(10.0))
+                                        .fill(egui::Color32::from_rgb(100, 40, 40))
+                                        .corner_radius(3.0),
+                                )
+                                .clicked()
+                            {
                                 shorts.hook_texts.remove(&replay.current_ply);
                                 shorts.hook_input.clear();
                             }
@@ -1041,18 +1118,34 @@ pub fn replay_ui_system(
                     // Beat marker toggle for current ply
                     ui.add_space(4.0);
                     let has_beat = shorts.beat_markers.contains_key(&replay.current_ply);
-                    let beat_col = if has_beat { egui::Color32::from_rgb(200, 140, 20) } else { egui::Color32::from_rgba_unmultiplied(50, 50, 50, 200) };
-                    if ui.add_sized(
-                        [ui.available_width(), 18.0],
-                        egui::Button::new(egui::RichText::new(if has_beat { "♩ Beat marked" } else { "♩ Mark beat" }).size(10.0))
+                    let beat_col = if has_beat {
+                        egui::Color32::from_rgb(200, 140, 20)
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(50, 50, 50, 200)
+                    };
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 18.0],
+                            egui::Button::new(
+                                egui::RichText::new(if has_beat {
+                                    "♩ Beat marked"
+                                } else {
+                                    "♩ Mark beat"
+                                })
+                                .size(10.0),
+                            )
                             .fill(beat_col)
                             .corner_radius(3.0),
-                    ).clicked() {
+                        )
+                        .clicked()
+                    {
                         if has_beat {
                             shorts.beat_markers.remove(&replay.current_ply);
                         } else {
                             let next_beat = shorts.beat_markers.len() + 1;
-                            shorts.beat_markers.insert(replay.current_ply, format!("beat_{}", next_beat));
+                            shorts
+                                .beat_markers
+                                .insert(replay.current_ply, format!("beat_{}", next_beat));
                         }
                     }
 
@@ -1060,56 +1153,120 @@ pub fn replay_ui_system(
                     ui.add_space(4.0);
                     let capturing = shorts.capture_mode.is_some();
                     if !capturing {
-                        if ui.add_sized(
-                            [ui.available_width(), 18.0],
-                            egui::Button::new(egui::RichText::new("🎬 Capture Sequence").size(10.0))
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), 18.0],
+                                egui::Button::new(
+                                    egui::RichText::new("🎬 Capture Sequence").size(10.0),
+                                )
                                 .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 80, 220))
                                 .corner_radius(3.0),
-                        ).clicked() {
+                            )
+                            .clicked()
+                        {
                             shorts.show_beat_export = !shorts.show_beat_export;
                         }
                         if shorts.show_beat_export {
                             ui.add_space(2.0);
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("From:").size(9.0).color(egui::Color32::LIGHT_GRAY));
-                                ui.add_sized([36.0, 16.0], egui::TextEdit::singleline(&mut shorts.capture_from_input).font(egui::FontId::monospace(9.0)));
-                                ui.label(egui::RichText::new("To:").size(9.0).color(egui::Color32::LIGHT_GRAY));
-                                ui.add_sized([36.0, 16.0], egui::TextEdit::singleline(&mut shorts.capture_to_input).font(egui::FontId::monospace(9.0)));
+                                ui.label(
+                                    egui::RichText::new("From:")
+                                        .size(9.0)
+                                        .color(egui::Color32::LIGHT_GRAY),
+                                );
+                                ui.add_sized(
+                                    [36.0, 16.0],
+                                    egui::TextEdit::singleline(&mut shorts.capture_from_input)
+                                        .font(egui::FontId::monospace(9.0)),
+                                );
+                                ui.label(
+                                    egui::RichText::new("To:")
+                                        .size(9.0)
+                                        .color(egui::Color32::LIGHT_GRAY),
+                                );
+                                ui.add_sized(
+                                    [36.0, 16.0],
+                                    egui::TextEdit::singleline(&mut shorts.capture_to_input)
+                                        .font(egui::FontId::monospace(9.0)),
+                                );
                             });
-                            if ui.add_sized([ui.available_width(), 18.0], egui::Button::new(egui::RichText::new("Start").size(10.0)).fill(egui::Color32::from_rgb(40, 100, 160)).corner_radius(3.0)).clicked() {
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), 18.0],
+                                    egui::Button::new(egui::RichText::new("Start").size(10.0))
+                                        .fill(egui::Color32::from_rgb(40, 100, 160))
+                                        .corner_radius(3.0),
+                                )
+                                .clicked()
+                            {
                                 let from = shorts.capture_from_input.parse::<usize>().unwrap_or(0);
                                 let to = shorts.capture_to_input.parse::<usize>().unwrap_or(total);
                                 let pictures = std::env::var("USERPROFILE")
                                     .or_else(|_| std::env::var("HOME"))
                                     .map(|h| std::path::PathBuf::from(h).join("Pictures"))
                                     .unwrap_or_else(|_| std::path::PathBuf::from("."));
-                                let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                                let ts = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
                                 let dir = pictures.join(format!("xfchess_sequence_{}", ts));
                                 replay.current_ply = from;
                                 replay.position_dirty = true;
                                 replay.paused = true;
-                                shorts.capture_mode = Some(crate::game::shorts_state::CaptureSequence {
-                                    from_ply: from, to_ply: to, current: from,
-                                    delay_secs: replay.speed + 0.15,
-                                    timer: 0.0, output_dir: dir,
-                                });
+                                shorts.capture_mode =
+                                    Some(crate::game::shorts_state::CaptureSequence {
+                                        from_ply: from,
+                                        to_ply: to,
+                                        current: from,
+                                        delay_secs: replay.speed + 0.15,
+                                        timer: 0.0,
+                                        output_dir: dir,
+                                    });
                                 shorts.show_beat_export = false;
                                 info!("[SHORTS] Capture sequence started: ply {}–{}", from, to);
                             }
                         }
                     } else {
                         let seq = shorts.capture_mode.as_ref().unwrap();
-                        ui.label(egui::RichText::new(format!("📷 Capturing {}/{}", seq.current, seq.to_ply)).size(10.0).color(egui::Color32::from_rgb(100, 200, 255)));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "📷 Capturing {}/{}",
+                                seq.current, seq.to_ply
+                            ))
+                            .size(10.0)
+                            .color(egui::Color32::from_rgb(100, 200, 255)),
+                        );
                     }
 
                     // Annotation legend in side panel
                     ui.add_space(8.0);
                     ui.add(egui::Separator::default().spacing(4.0));
-                    ui.label(egui::RichText::new("Annotations").size(10.0).color(egui::Color32::from_gray(120)).strong());
-                    ui.label(egui::RichText::new("Right-drag = arrow").size(9.0).color(egui::Color32::from_gray(90)));
-                    ui.label(egui::RichText::new("+Shift = orange").size(9.0).color(egui::Color32::from_rgb(200, 110, 0)));
-                    ui.label(egui::RichText::new("+Alt = blue").size(9.0).color(egui::Color32::from_rgb(80, 140, 220)));
-                    ui.label(egui::RichText::new("Right-click = clear").size(9.0).color(egui::Color32::from_gray(90)));
+                    ui.label(
+                        egui::RichText::new("Annotations")
+                            .size(10.0)
+                            .color(egui::Color32::from_gray(120))
+                            .strong(),
+                    );
+                    ui.label(
+                        egui::RichText::new("Right-drag = arrow")
+                            .size(9.0)
+                            .color(egui::Color32::from_gray(90)),
+                    );
+                    ui.label(
+                        egui::RichText::new("+Shift = orange")
+                            .size(9.0)
+                            .color(egui::Color32::from_rgb(200, 110, 0)),
+                    );
+                    ui.label(
+                        egui::RichText::new("+Alt = blue")
+                            .size(9.0)
+                            .color(egui::Color32::from_rgb(80, 140, 220)),
+                    );
+                    ui.label(
+                        egui::RichText::new("Right-click = clear")
+                            .size(9.0)
+                            .color(egui::Color32::from_gray(90)),
+                    );
                 });
         });
 }

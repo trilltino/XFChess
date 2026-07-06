@@ -3,14 +3,14 @@
 //! Displays:
 //! - "Spectating game {id}" label
 //! - Live white/black clocks (interpolated locally between Braid broadcasts)
-//! - A rolling chat log fed by `BraidChatMessage` events
+//! - A rolling chat log fed by `OnlineChatMessage` events
 
-use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
 use crate::core::states::GameMode;
+use crate::multiplayer::network::online_game_session::OnlineChatMessage;
 use crate::multiplayer::spectator::{SpectatorClockState, SpectatorSession};
 use crate::multiplayer::traits::MessageReader;
-use crate::multiplayer::network::braid_pvp::BraidChatMessage;
+use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
 
 const CHAT_MAX: usize = 8;
 
@@ -24,16 +24,15 @@ pub struct SpectatorOverlayPlugin;
 
 impl Plugin for SpectatorOverlayPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SpectatorChatLog>()
-            .add_systems(Update, (
-                drain_braid_chat_to_spectator_log,
-                spectator_hud_system,
-            ));
+        app.init_resource::<SpectatorChatLog>().add_systems(
+            Update,
+            (drain_braid_chat_to_spectator_log, spectator_hud_system),
+        );
     }
 }
 
 fn drain_braid_chat_to_spectator_log(
-    mut chat_events: MessageReader<BraidChatMessage>,
+    mut chat_events: MessageReader<OnlineChatMessage>,
     mut log: ResMut<SpectatorChatLog>,
     game_mode: Res<GameMode>,
 ) {
@@ -58,7 +57,9 @@ pub fn spectator_hud_system(
     if *game_mode != GameMode::Spectator {
         return;
     }
-    let Some(ref game_id) = session.game_id else { return };
+    let Some(ref game_id) = session.game_id else {
+        return;
+    };
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
     egui::TopBottomPanel::bottom("spectator_hud")

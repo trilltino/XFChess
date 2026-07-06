@@ -10,8 +10,8 @@ use crate::game::components::HasMoved;
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
 use nimzovich_engine::{
-    game_from_fen, generate_pseudo_legal_moves, is_legal_move, set_game_from_fen, Game,
-    BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID,
+    game_from_fen, generate_pseudo_legal_moves, is_legal_move, set_game_from_fen, Game, BISHOP_ID,
+    KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID,
 };
 use std::collections::HashMap;
 
@@ -65,7 +65,7 @@ impl MoveWrapper {
 pub struct UciSquare(pub (u8, u8));
 impl ToString for UciSquare {
     fn to_string(&self) -> String {
-        ChessEngine::coords_to_uci(self.0.0, self.0.1)
+        ChessEngine::coords_to_uci(self.0 .0, self.0 .1)
     }
 }
 
@@ -144,15 +144,10 @@ impl ChessEngine {
             .map(|(e, p, h)| (e, *p, *h))
             .collect();
 
-        self.sync_ecs_to_engine_impl(
-            pieces_data.iter().map(|(e, p, h)| (*e, p, h)),
-        );
+        self.sync_ecs_to_engine_impl(pieces_data.iter().map(|(e, p, h)| (*e, p, h)));
     }
 
-    pub fn sync_ecs_to_engine(
-        &mut self,
-        pieces_query: &Query<(Entity, &Piece, &HasMoved)>,
-    ) {
+    pub fn sync_ecs_to_engine(&mut self, pieces_query: &Query<(Entity, &Piece, &HasMoved)>) {
         self.sync_ecs_to_engine_impl(pieces_query.iter());
     }
 
@@ -160,9 +155,7 @@ impl ChessEngine {
         &mut self,
         pieces_query: &Query<(Entity, &Piece, &HasMoved, &Transform)>,
     ) {
-        self.sync_ecs_to_engine_impl(
-            pieces_query.iter().map(|(e, p, h, _)| (e, p, h)),
-        );
+        self.sync_ecs_to_engine_impl(pieces_query.iter().map(|(e, p, h, _)| (e, p, h)));
     }
 
     pub fn sync_ecs_to_engine_impl<'a>(
@@ -269,11 +262,18 @@ impl ChessEngine {
         }
         let from_str = &uci[0..2];
         let to_str = &uci[2..4];
-        let Some(from) = Self::uci_to_coords(from_str) else { return false; };
-        let Some(to) = Self::uci_to_coords(to_str) else { return false; };
+        let Some(from) = Self::uci_to_coords(from_str) else {
+            return false;
+        };
+        let Some(to) = Self::uci_to_coords(to_str) else {
+            return false;
+        };
 
         if !self.move_cache.is_empty() {
-            return self.move_cache.get(&from).map_or(false, |dsts| dsts.contains(&to));
+            return self
+                .move_cache
+                .get(&from)
+                .map_or(false, |dsts| dsts.contains(&to));
         }
 
         // Fallback: single legality check without cache
@@ -297,10 +297,9 @@ impl ChessEngine {
     }
 
     pub fn legal_moves(&self) -> Vec<MoveWrapper> {
-        self.move_cache.iter()
-            .flat_map(|(&from, dsts)| {
-                dsts.iter().map(move |&to| MoveWrapper { from, to })
-            })
+        self.move_cache
+            .iter()
+            .flat_map(|(&from, dsts)| dsts.iter().map(move |&to| MoveWrapper { from, to }))
             .collect()
     }
 
@@ -315,7 +314,10 @@ impl ChessEngine {
 
         format!(
             "{} {} {} {} {} {}",
-            self.fen.split_whitespace().next().unwrap_or("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"),
+            self.fen
+                .split_whitespace()
+                .next()
+                .unwrap_or("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"),
             side,
             self.castling_rights,
             en_passant_str,
@@ -331,16 +333,24 @@ impl ChessEngine {
     pub fn set_from_fen(&mut self, fen_str: &str) -> Result<(), String> {
         set_game_from_fen(&mut self.game, fen_str);
         self.fen = fen_str.to_string();
-        
+
         let parts: Vec<&str> = fen_str.split_whitespace().collect();
         if parts.len() >= 6 {
-            self.current_turn = if parts[1] == "w" { PieceColor::White } else { PieceColor::Black };
+            self.current_turn = if parts[1] == "w" {
+                PieceColor::White
+            } else {
+                PieceColor::Black
+            };
             self.castling_rights = parts[2].to_string();
-            self.en_passant = if parts[3] == "-" { None } else { Some(parts[3].to_string()) };
+            self.en_passant = if parts[3] == "-" {
+                None
+            } else {
+                Some(parts[3].to_string())
+            };
             self.halfmove_clock = parts[4].parse().unwrap_or(0);
             self.fullmove_counter = parts[5].parse().unwrap_or(1);
         }
-        
+
         Ok(())
     }
 }
@@ -386,7 +396,11 @@ fn board_to_piece_placement(board: &[i8; 64]) -> String {
             KING_ID => 'k',
             _ => '?',
         };
-        if id > 0 { ch.to_ascii_uppercase() } else { ch }
+        if id > 0 {
+            ch.to_ascii_uppercase()
+        } else {
+            ch
+        }
     };
 
     let mut ranks = Vec::with_capacity(8);

@@ -28,9 +28,9 @@ pub async fn initiate_game_on_chain(
         game_id,
         wager_amount,
         if wager_amount > 0 { 2 } else { 0 }, // match_type: Free=0, Wager=2
-        0u64, // platform_fee: unknown at this call site, set to 0
-        300, // base_time_seconds: Blitz 5+0
-        0,   // increment_seconds
+        0u64,                                 // platform_fee: unknown at this call site, set to 0
+        300,                                  // base_time_seconds: Blitz 5+0
+        0,                                    // increment_seconds
     )
     .map_err(|e| format!("build create_game_ix: {}", e))?;
 
@@ -77,8 +77,14 @@ pub async fn join_game_on_chain(
     let white_player = Pubkey::from(white_bytes);
 
     // fee_payer = same keypair in this hot-wallet path
-    let ix = join_game_ix(program_id, keypair.pubkey(), white_player, keypair.pubkey(), game_id)
-        .map_err(|e| format!("build join_game_ix: {}", e))?;
+    let ix = join_game_ix(
+        program_id,
+        keypair.pubkey(),
+        white_player,
+        keypair.pubkey(),
+        game_id,
+    )
+    .map_err(|e| format!("build join_game_ix: {}", e))?;
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()

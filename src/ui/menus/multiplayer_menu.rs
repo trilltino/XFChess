@@ -14,7 +14,7 @@ pub struct SolanaWallet {
     pub pubkey: Option<String>,
 }
 
-// use crate::multiplayer::BraidNetworkState; // Temporarily disabled
+// use crate::multiplayer::OnlineNetworkState; // Temporarily disabled
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TournamentSummary {
@@ -55,7 +55,7 @@ impl Plugin for MultiplayerMenuPlugin {
 #[derive(SystemParam)]
 pub struct MultiplayerMenu<'w> {
     game_states: ResMut<'w, NextState<GameState>>,
-    // braid_network: ResMut<'w, BraidNetworkState>, // Temporarily disabled
+    // braid_network: ResMut<'w, OnlineNetworkState>, // Temporarily disabled
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

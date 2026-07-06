@@ -3,11 +3,11 @@
 //! The session key co-signs the join; wager funds come from the
 //! [`GlobalSessionDelegation`] vault — no wallet popup for the joiner.
 
-use crate::constants::{GAME_SEED, PROFILE_SEED, WAGER_ESCROW_SEED, CREATE_GAME_COST};
+use crate::account_ix::session_guards;
+use crate::constants::{GAME_SEED, JOIN_GAME_COST, PROFILE_SEED, WAGER_ESCROW_SEED};
 use crate::errors::GameErrorCode;
 use crate::state::{Game, GameStatus, GameType, GlobalSessionDelegation, PlayerProfile};
 use anchor_lang::prelude::*;
-
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
@@ -52,12 +52,18 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
     let session = &ctx.accounts.session_delegation;
     let game = &ctx.accounts.game;
 
-    require!(session.is_valid(now), GameErrorCode::SessionExpiredOrDisabled);
+    require!(
+        session.is_valid(now),
+        GameErrorCode::SessionExpiredOrDisabled
+    );
     require!(
         session.games_remaining > 0,
         GameErrorCode::GlobalSessionNoGamesRemaining
     );
-    require!(game.game_type == GameType::PvP, GameErrorCode::GameAlreadyFull);
+    require!(
+        game.game_type == GameType::PvP,
+        GameErrorCode::GameAlreadyFull
+    );
     require!(
         game.status == GameStatus::WaitingForOpponent,
         GameErrorCode::GameAlreadyFull
@@ -98,7 +104,7 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
 
     // Update session bookkeeping
     let session = &mut ctx.accounts.session_delegation;
-    session.total_spent = session.total_spent.saturating_add(wager);
+    session.total_spent = session_guards::checked_session_total(session.total_spent, wager)?;
     session.games_remaining = session.games_remaining.saturating_sub(1);
 
     // Update game
@@ -106,7 +112,11 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
     game.black = ctx.accounts.player.key();
     game.status = GameStatus::Active;
     // country_fee was set at creation time from live SOL/GBP rate — no recalculation needed.
-    game.fees_advanced = game.fees_advanced.checked_add(CREATE_GAME_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
+    game.fees_advanced = game
+        .fees_advanced
+        .checked_add(JOIN_GAME_COST)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
+    game.last_move_timestamp = now;
     game.updated_at = now;
 
     Ok(())

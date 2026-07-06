@@ -6,7 +6,9 @@
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 
-use crate::multiplayer::solana::integration::state::{ProfileStatus, SolanaIntegrationState, DEVNET_RPC_URL};
+use crate::multiplayer::solana::integration::state::{
+    ProfileStatus, SolanaIntegrationState, DEVNET_RPC_URL,
+};
 use crate::multiplayer::TokioRuntime;
 use anchor_lang::AccountDeserialize;
 use xfchess_game::state::PlayerProfile;
@@ -34,7 +36,10 @@ pub fn check_profile_on_connect(
     solana_state.checking_profile = true;
     solana_state.profile_status = ProfileStatus::Unknown;
 
-    info!("[PROFILE] Spawning async profile check for wallet: {}", wallet_pubkey);
+    info!(
+        "[PROFILE] Spawning async profile check for wallet: {}",
+        wallet_pubkey
+    );
 
     let rpc_url = DEVNET_RPC_URL.to_string();
     let profile_pda = solana_state.get_profile_pda(&wallet_pubkey);
@@ -62,7 +67,9 @@ pub fn check_profile_on_connect(
                     Err(e) => {
                         let e_str = e.to_string();
                         if e_str.contains("3003") || e_str.contains("AccountDidNotDeserialize") {
-                            warn!("[PROFILE] Legacy profile detected (3003). Treating as NoProfile.");
+                            warn!(
+                                "[PROFILE] Legacy profile detected (3003). Treating as NoProfile."
+                            );
                             Ok((ProfileStatus::NoProfile, None, None))
                         } else {
                             Err(format!("Failed to deserialize profile: {}", e))
@@ -79,9 +86,7 @@ pub fn check_profile_on_connect(
 
 /// System to handle the results of the async profile check.
 /// Populates cached_elo and cached_display_name; redirects to ProfileCreation when needed.
-pub fn handle_profile_check_tasks(
-    mut solana_state: ResMut<SolanaIntegrationState>,
-) {
+pub fn handle_profile_check_tasks(mut solana_state: ResMut<SolanaIntegrationState>) {
     if let Some(task) = solana_state.pending_profile_check.take() {
         if task.is_finished() {
             let result = futures_lite::future::block_on(async {
@@ -105,7 +110,9 @@ pub fn handle_profile_check_tasks(
                         solana_state.cached_display_name = display_name;
                     }
 
-                    if status == ProfileStatus::NoProfile || status == ProfileStatus::HasProfileNoUsername {
+                    if status == ProfileStatus::NoProfile
+                        || status == ProfileStatus::HasProfileNoUsername
+                    {
                         // Profile creation is handled in the Tauri popup — open it via bridge.
                         info!("[PROFILE] Profile incomplete — opening Tauri profile step");
                         std::thread::spawn(|| {
@@ -127,10 +134,12 @@ pub fn handle_profile_check_tasks(
 }
 
 /// System to auto-initialize profile when entering ProfileCreation without one
-pub fn auto_init_profile(
-    solana_state: ResMut<SolanaIntegrationState>,
-) {
-    if solana_state.wallet_pubkey.is_none() { return; }
-    if solana_state.profile_status != ProfileStatus::NoProfile { return; }
+pub fn auto_init_profile(solana_state: ResMut<SolanaIntegrationState>) {
+    if solana_state.wallet_pubkey.is_none() {
+        return;
+    }
+    if solana_state.profile_status != ProfileStatus::NoProfile {
+        return;
+    }
     info!("[PROFILE] Auto-init profile called — would submit init_profile tx");
 }

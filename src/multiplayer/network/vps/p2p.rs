@@ -78,8 +78,12 @@ pub struct P2PGameListing {
     pub is_private: bool,
 }
 
-fn default_capacity() -> u8 { 2 }
-fn default_one() -> u8 { 1 }
+fn default_capacity() -> u8 {
+    2
+}
+fn default_one() -> u8 {
+    1
+}
 
 #[derive(Deserialize)]
 struct P2PJoinResp {
@@ -106,8 +110,19 @@ pub fn p2p_announce_game(
     elo: Option<u16>,
     region: Option<String>,
 ) -> Result<(), String> {
-    p2p_announce_game_private(game_id, host_node_id, display_name, stake_amount,
-        game_type, base_time_seconds, increment_seconds, username, elo, region, None)
+    p2p_announce_game_private(
+        game_id,
+        host_node_id,
+        display_name,
+        stake_amount,
+        game_type,
+        base_time_seconds,
+        increment_seconds,
+        username,
+        elo,
+        region,
+        None,
+    )
 }
 
 /// Announce a password-protected P2P game.
@@ -124,8 +139,19 @@ pub fn p2p_announce_game_with_password(
     region: Option<String>,
     password: String,
 ) -> Result<(), String> {
-    p2p_announce_game_private(game_id, host_node_id, display_name, stake_amount,
-        game_type, base_time_seconds, increment_seconds, username, elo, region, Some(password))
+    p2p_announce_game_private(
+        game_id,
+        host_node_id,
+        display_name,
+        stake_amount,
+        game_type,
+        base_time_seconds,
+        increment_seconds,
+        username,
+        elo,
+        region,
+        Some(password),
+    )
 }
 
 fn p2p_announce_game_private(
@@ -180,14 +206,32 @@ pub fn p2p_list_games_filtered(filter: &P2PListFilter) -> Result<Vec<P2PGameList
     let base = vps_base();
     tracing::trace!("[P2P] polling games from {}", base);
     let mut params: Vec<String> = Vec::new();
-    if let Some(v) = filter.time_min { params.push(format!("time_min={}", v)); }
-    if let Some(v) = filter.time_max { params.push(format!("time_max={}", v)); }
-    if let Some(v) = filter.stake_min { params.push(format!("stake_min={}", v)); }
-    if let Some(v) = filter.stake_max { params.push(format!("stake_max={}", v)); }
-    if let Some(v) = filter.elo_min { params.push(format!("elo_min={}", v)); }
-    if let Some(v) = filter.elo_max { params.push(format!("elo_max={}", v)); }
-    if let Some(ref s) = filter.sort { params.push(format!("sort={}", s)); }
-    let qs = if params.is_empty() { String::new() } else { format!("?{}", params.join("&")) };
+    if let Some(v) = filter.time_min {
+        params.push(format!("time_min={}", v));
+    }
+    if let Some(v) = filter.time_max {
+        params.push(format!("time_max={}", v));
+    }
+    if let Some(v) = filter.stake_min {
+        params.push(format!("stake_min={}", v));
+    }
+    if let Some(v) = filter.stake_max {
+        params.push(format!("stake_max={}", v));
+    }
+    if let Some(v) = filter.elo_min {
+        params.push(format!("elo_min={}", v));
+    }
+    if let Some(v) = filter.elo_max {
+        params.push(format!("elo_max={}", v));
+    }
+    if let Some(ref s) = filter.sort {
+        params.push(format!("sort={}", s));
+    }
+    let qs = if params.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", params.join("&"))
+    };
     let resp = client()?
         .get(format!("{}/p2p/games{}", base, qs))
         .send()
@@ -207,7 +251,11 @@ pub fn p2p_join_game(game_id: String, joiner_node_id: &str) -> Result<Option<Str
 }
 
 /// Join a password-protected P2P game.
-pub fn p2p_join_game_with_password(game_id: String, joiner_node_id: &str, password: Option<String>) -> Result<Option<String>, String> {
+pub fn p2p_join_game_with_password(
+    game_id: String,
+    joiner_node_id: &str,
+    password: Option<String>,
+) -> Result<Option<String>, String> {
     let resp = client()?
         .post(format!("{}/p2p/join", vps_base()))
         .json(&P2PJoinReq {
@@ -254,11 +302,17 @@ pub fn p2p_send_message(game_id: String, from_node_id: &str, message: &str) -> R
     }
 
     #[derive(serde::Deserialize)]
-    struct SendResp { success: bool }
-    let body: SendResp = resp.json()
+    struct SendResp {
+        success: bool,
+    }
+    let body: SendResp = resp
+        .json()
         .map_err(|e| format!("vps p2p_send_message parse: {e}"))?;
     if !body.success {
-        return Err("vps p2p_send_message: server rejected message (game not found or node_id mismatch)".to_string());
+        return Err(
+            "vps p2p_send_message: server rejected message (game not found or node_id mismatch)"
+                .to_string(),
+        );
     }
 
     Ok(())

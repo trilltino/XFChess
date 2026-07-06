@@ -8,7 +8,14 @@
       "Bash(grep -nE \"pub fn|deprecated|pub mod|module|^//!\")",
       "WebFetch(domain:stripe.com)",
       "WebFetch(domain:www.coinbase.com)",
-      "WebFetch(domain:transak.com)"
+      "WebFetch(domain:transak.com)",
+      "WebFetch(domain:www.moonpay.com)",
+      "Bash(curl -s https://xfsoluti-solanad-d155.devnet.rpcpool.com/df802762-dc54-4d8d-a6b8-06f18774cf06 -X POST -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getHealth\"}')",
+      "Bash(mkdir -p assets/audio/menu)",
+      "Bash(cp \"/c/Users/isich/Music/Erik Satie_ Gymnopedie No 1.mp3\"          assets/audio/menu/gymnopedie_no1.mp3)",
+      "Bash(cp \"/c/Users/isich/Music/Gnossienne-no-1.mp3\"                      assets/audio/menu/gnossienne_no1.mp3)",
+      "Bash(cp \"/c/Users/isich/Music/Preludes, Op. 28 - No. 4 'Suffocation'.mp3\" assets/audio/menu/chopin_prelude_no4.mp3)",
+      "Bash(cp \"/c/Users/isich/Music/Preludes, Op. 28 - Nos. 1, 2, 3.mp3\"      assets/audio/menu/chopin_preludes_1_2_3.mp3)"
     ]
   }
 }

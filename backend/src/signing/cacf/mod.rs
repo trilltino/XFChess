@@ -48,31 +48,55 @@ impl CacfComplianceManager {
 
     /// Gets or creates UK compliance record for a wallet
     pub fn get_uk_compliance(&mut self, wallet: &str) -> &mut UKCompliance {
-        self.uk_records.entry(wallet.to_string()).or_insert_with(UKCompliance::new)
+        self.uk_records
+            .entry(wallet.to_string())
+            .or_insert_with(UKCompliance::new)
     }
 
     /// Gets or creates Brazil compliance record for a wallet
     pub fn get_brazil_compliance(&mut self, wallet: &str) -> &mut BrazilCompliance {
-        self.brazil_records.entry(wallet.to_string()).or_insert_with(BrazilCompliance::new)
+        self.brazil_records
+            .entry(wallet.to_string())
+            .or_insert_with(BrazilCompliance::new)
     }
 
     /// Gets or creates Germany compliance record for a wallet
     pub fn get_germany_compliance(&mut self, wallet: &str) -> &mut GermanyCompliance {
-        self.germany_records.entry(wallet.to_string()).or_insert_with(GermanyCompliance::new)
+        self.germany_records
+            .entry(wallet.to_string())
+            .or_insert_with(GermanyCompliance::new)
     }
 
     /// Gets or creates Canada compliance record for a wallet
     pub fn get_canada_compliance(&mut self, wallet: &str) -> &mut CanadaCompliance {
-        self.canada_records.entry(wallet.to_string()).or_insert_with(CanadaCompliance::new)
+        self.canada_records
+            .entry(wallet.to_string())
+            .or_insert_with(CanadaCompliance::new)
     }
 
     /// Gets compliance status for a wallet and country
     pub fn get_compliance_status(&self, wallet: &str, country_code: &str) -> CacfComplianceStatus {
         match country_code {
-            "GB" => self.uk_records.get(wallet).map(|c| c.status.clone()).unwrap_or(CacfComplianceStatus::NotCompliant),
-            "BR" => self.brazil_records.get(wallet).map(|c| c.status.clone()).unwrap_or(CacfComplianceStatus::NotCompliant),
-            "DE" => self.germany_records.get(wallet).map(|c| c.status.clone()).unwrap_or(CacfComplianceStatus::NotCompliant),
-            "CA" => self.canada_records.get(wallet).map(|c| c.status.clone()).unwrap_or(CacfComplianceStatus::NotCompliant),
+            "GB" => self
+                .uk_records
+                .get(wallet)
+                .map(|c| c.status.clone())
+                .unwrap_or(CacfComplianceStatus::NotCompliant),
+            "BR" => self
+                .brazil_records
+                .get(wallet)
+                .map(|c| c.status.clone())
+                .unwrap_or(CacfComplianceStatus::NotCompliant),
+            "DE" => self
+                .germany_records
+                .get(wallet)
+                .map(|c| c.status.clone())
+                .unwrap_or(CacfComplianceStatus::NotCompliant),
+            "CA" => self
+                .canada_records
+                .get(wallet)
+                .map(|c| c.status.clone())
+                .unwrap_or(CacfComplianceStatus::NotCompliant),
             _ => CacfComplianceStatus::FullyCompliant, // Other countries don't require compliance
         }
     }
@@ -80,7 +104,10 @@ impl CacfComplianceManager {
     /// Checks if a wallet can participate in wager games based on compliance
     pub fn can_participate_in_wagers(&self, wallet: &str, country_code: &str) -> bool {
         let status = self.get_compliance_status(wallet, country_code);
-        matches!(status, CacfComplianceStatus::FullyCompliant | CacfComplianceStatus::PartiallyCompliant)
+        matches!(
+            status,
+            CacfComplianceStatus::FullyCompliant | CacfComplianceStatus::PartiallyCompliant
+        )
     }
 }
 

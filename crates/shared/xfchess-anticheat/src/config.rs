@@ -84,10 +84,22 @@ impl Default for AcConfig {
 impl AcConfig {
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
-        if let Ok(p) = std::env::var("STOCKFISH_PATH") { cfg.stockfish_path = p; }
-        if let Ok(d) = std::env::var("AC_DEPTH").and_then(|v| v.parse().map_err(|_| std::env::VarError::NotPresent)) { cfg.analysis_depth = d; }
-        if let Ok(w) = std::env::var("AC_WORKERS").and_then(|v| v.parse().map_err(|_| std::env::VarError::NotPresent)) { cfg.worker_count = w; }
-        if let Ok(r) = std::env::var("AC_REPORTS_DIR") { cfg.reports_dir = r; }
+        if let Ok(p) = std::env::var("STOCKFISH_PATH") {
+            cfg.stockfish_path = p;
+        }
+        if let Ok(d) = std::env::var("AC_DEPTH")
+            .and_then(|v| v.parse().map_err(|_| std::env::VarError::NotPresent))
+        {
+            cfg.analysis_depth = d;
+        }
+        if let Ok(w) = std::env::var("AC_WORKERS")
+            .and_then(|v| v.parse().map_err(|_| std::env::VarError::NotPresent))
+        {
+            cfg.worker_count = w;
+        }
+        if let Ok(r) = std::env::var("AC_REPORTS_DIR") {
+            cfg.reports_dir = r;
+        }
         cfg
     }
 }

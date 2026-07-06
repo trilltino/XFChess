@@ -15,7 +15,13 @@ pub fn do_move(game: &mut Game, src: i8, dst: i8, update_flags: bool) -> bool {
 }
 
 /// Like `do_move` but accepts an explicit promotion piece ID.
-pub fn do_move_with_promo(game: &mut Game, src: i8, dst: i8, update_flags: bool, promo: i8) -> bool {
+pub fn do_move_with_promo(
+    game: &mut Game,
+    src: i8,
+    dst: i8,
+    update_flags: bool,
+    promo: i8,
+) -> bool {
     if src < 0 || src >= 64 || dst < 0 || dst >= 64 {
         return false;
     }
@@ -42,11 +48,21 @@ pub fn do_move_with_promo(game: &mut Game, src: i8, dst: i8, update_flags: bool,
     if piece_type == KING_ID {
         if (dst - src).abs() == 2 {
             if color > 0 {
-                if dst == 6 { game.board[7] = 0; game.board[5] = W_ROOK; }
-                else if dst == 2 { game.board[0] = 0; game.board[3] = W_ROOK; }
+                if dst == 6 {
+                    game.board[7] = 0;
+                    game.board[5] = W_ROOK;
+                } else if dst == 2 {
+                    game.board[0] = 0;
+                    game.board[3] = W_ROOK;
+                }
             } else {
-                if dst == 62 { game.board[63] = 0; game.board[61] = B_ROOK; }
-                else if dst == 58 { game.board[56] = 0; game.board[59] = B_ROOK; }
+                if dst == 62 {
+                    game.board[63] = 0;
+                    game.board[61] = B_ROOK;
+                } else if dst == 58 {
+                    game.board[56] = 0;
+                    game.board[59] = B_ROOK;
+                }
             }
         }
     }
@@ -60,19 +76,19 @@ pub fn do_move_with_promo(game: &mut Game, src: i8, dst: i8, update_flags: bool,
     // 4. Update Castling Flags
     if update_flags {
         match src {
-            0  => game.white_rook_0_has_moved  = true,
-            4  => game.white_king_has_moved     = true,
-            7  => game.white_rook_7_has_moved   = true,
-            56 => game.black_rook_56_has_moved  = true,
-            60 => game.black_king_has_moved      = true,
-            63 => game.black_rook_63_has_moved  = true,
+            0 => game.white_rook_0_has_moved = true,
+            4 => game.white_king_has_moved = true,
+            7 => game.white_rook_7_has_moved = true,
+            56 => game.black_rook_56_has_moved = true,
+            60 => game.black_king_has_moved = true,
+            63 => game.black_rook_63_has_moved = true,
             _ => {}
         }
         match dst {
-            0  => game.white_rook_0_has_moved  = true,
-            7  => game.white_rook_7_has_moved   = true,
-            56 => game.black_rook_56_has_moved  = true,
-            63 => game.black_rook_63_has_moved  = true,
+            0 => game.white_rook_0_has_moved = true,
+            7 => game.white_rook_7_has_moved = true,
+            56 => game.black_rook_56_has_moved = true,
+            63 => game.black_rook_63_has_moved = true,
             _ => {}
         }
     }
@@ -81,13 +97,18 @@ pub fn do_move_with_promo(game: &mut Game, src: i8, dst: i8, update_flags: bool,
     let final_piece = if piece_type == PAWN_ID && (dst / 8 == 0 || dst / 8 == 7) {
         // Use caller-specified piece, defaulting to queen
         let promo_type = if promo != 0 { promo.abs() } else { QUEEN_ID };
-        if color > 0 { promo_type } else { -promo_type }
+        if color > 0 {
+            promo_type
+        } else {
+            -promo_type
+        }
     } else {
         piece
     };
 
     // 6. Update halfmove clock
-    let is_capture = game.board[dst as usize] != 0 || (piece_type == PAWN_ID && Some(dst) == game.en_passant_target);
+    let is_capture = game.board[dst as usize] != 0
+        || (piece_type == PAWN_ID && Some(dst) == game.en_passant_target);
     if piece_type == PAWN_ID || is_capture {
         game.halfmove_clock = 0;
     } else {
@@ -132,18 +153,66 @@ mod tests {
         for sq in 0usize..64 {
             let piece = game.board[sq];
             let bit: u64 = 1 << sq;
-            assert_eq!((game.white_pawns.0   & bit) != 0, piece ==  1, "white_pawns sq {sq}");
-            assert_eq!((game.white_knights.0 & bit) != 0, piece ==  2, "white_knights sq {sq}");
-            assert_eq!((game.white_bishops.0 & bit) != 0, piece ==  3, "white_bishops sq {sq}");
-            assert_eq!((game.white_rooks.0   & bit) != 0, piece ==  4, "white_rooks sq {sq}");
-            assert_eq!((game.white_queens.0  & bit) != 0, piece ==  5, "white_queens sq {sq}");
-            assert_eq!((game.white_kings.0   & bit) != 0, piece ==  6, "white_kings sq {sq}");
-            assert_eq!((game.black_pawns.0   & bit) != 0, piece == -1, "black_pawns sq {sq}");
-            assert_eq!((game.black_knights.0 & bit) != 0, piece == -2, "black_knights sq {sq}");
-            assert_eq!((game.black_bishops.0 & bit) != 0, piece == -3, "black_bishops sq {sq}");
-            assert_eq!((game.black_rooks.0   & bit) != 0, piece == -4, "black_rooks sq {sq}");
-            assert_eq!((game.black_queens.0  & bit) != 0, piece == -5, "black_queens sq {sq}");
-            assert_eq!((game.black_kings.0   & bit) != 0, piece == -6, "black_kings sq {sq}");
+            assert_eq!(
+                (game.white_pawns.0 & bit) != 0,
+                piece == 1,
+                "white_pawns sq {sq}"
+            );
+            assert_eq!(
+                (game.white_knights.0 & bit) != 0,
+                piece == 2,
+                "white_knights sq {sq}"
+            );
+            assert_eq!(
+                (game.white_bishops.0 & bit) != 0,
+                piece == 3,
+                "white_bishops sq {sq}"
+            );
+            assert_eq!(
+                (game.white_rooks.0 & bit) != 0,
+                piece == 4,
+                "white_rooks sq {sq}"
+            );
+            assert_eq!(
+                (game.white_queens.0 & bit) != 0,
+                piece == 5,
+                "white_queens sq {sq}"
+            );
+            assert_eq!(
+                (game.white_kings.0 & bit) != 0,
+                piece == 6,
+                "white_kings sq {sq}"
+            );
+            assert_eq!(
+                (game.black_pawns.0 & bit) != 0,
+                piece == -1,
+                "black_pawns sq {sq}"
+            );
+            assert_eq!(
+                (game.black_knights.0 & bit) != 0,
+                piece == -2,
+                "black_knights sq {sq}"
+            );
+            assert_eq!(
+                (game.black_bishops.0 & bit) != 0,
+                piece == -3,
+                "black_bishops sq {sq}"
+            );
+            assert_eq!(
+                (game.black_rooks.0 & bit) != 0,
+                piece == -4,
+                "black_rooks sq {sq}"
+            );
+            assert_eq!(
+                (game.black_queens.0 & bit) != 0,
+                piece == -5,
+                "black_queens sq {sq}"
+            );
+            assert_eq!(
+                (game.black_kings.0 & bit) != 0,
+                piece == -6,
+                "black_kings sq {sq}"
+            );
         }
     }
 
@@ -155,7 +224,10 @@ mod tests {
         // e2–e4: white pawn from sq 12 to sq 28
         do_move(&mut game, 12, 28, true);
         bitboards_match_mailbox(&game);
-        assert!((game.white_pawns.0 & (1 << 28)) != 0, "pawn should be on e4");
+        assert!(
+            (game.white_pawns.0 & (1 << 28)) != 0,
+            "pawn should be on e4"
+        );
         assert!((game.white_pawns.0 & (1 << 12)) == 0, "e2 should be empty");
     }
 
@@ -173,9 +245,9 @@ mod tests {
         assert!((game.white_kings.0 & (1 << 6)) != 0, "king on g1");
         assert!((game.white_rooks.0 & (1 << 5)) != 0, "rook on f1");
         assert!((game.white_rooks.0 & (1 << 7)) == 0, "h1 empty");
-        assert_eq!(game.board[6],  6, "king piece on g1");
-        assert_eq!(game.board[5],  4, "rook piece on f1");
-        assert_eq!(game.board[7],  0, "h1 empty mailbox");
+        assert_eq!(game.board[6], 6, "king piece on g1");
+        assert_eq!(game.board[5], 4, "rook piece on f1");
+        assert_eq!(game.board[7], 0, "h1 empty mailbox");
     }
 
     #[test]
@@ -185,7 +257,7 @@ mod tests {
         game.board[62] = 0;
         crate::board::init_bitboards(&mut game);
         game.move_counter = 1; // black's turn
-        // King e8(60) → g8(62)
+                               // King e8(60) → g8(62)
         do_move(&mut game, 60, 62, true);
         bitboards_match_mailbox(&game);
         assert!((game.black_kings.0 & (1 << 62)) != 0, "black king on g8");
@@ -205,13 +277,13 @@ mod tests {
         // Now white pawn d4(27) captures e4 pawn? No — let's use a cleaner capture:
         // Put white knight on f3(21), black pawn on e5(36)
         let mut game2 = new_game();
-        game2.board[21] = 2;  // white knight on f3
+        game2.board[21] = 2; // white knight on f3
         game2.board[36] = -1; // black pawn on e5
         crate::board::init_bitboards(&mut game2);
         do_move(&mut game2, 21, 36, false); // Nxe5
         bitboards_match_mailbox(&game2);
         assert!((game2.white_knights.0 & (1 << 36)) != 0);
-        assert!((game2.black_pawns.0   & (1 << 36)) == 0);
+        assert!((game2.black_pawns.0 & (1 << 36)) == 0);
     }
 
     #[test]
@@ -223,8 +295,11 @@ mod tests {
         crate::board::init_bitboards(&mut game);
         do_move(&mut game, 48, 56, false); // a7-a8=Q
         bitboards_match_mailbox(&game);
-        assert!((game.white_queens.0 & (1 << 56)) != 0, "promoted queen on a8");
-        assert!((game.white_pawns.0  & (1 << 56)) == 0);
+        assert!(
+            (game.white_queens.0 & (1 << 56)) != 0,
+            "promoted queen on a8"
+        );
+        assert!((game.white_pawns.0 & (1 << 56)) == 0);
     }
 
     // ── is_legal_move restore correctness ────────────────────────────────────
@@ -238,8 +313,8 @@ mod tests {
         let snap_wp = game.white_pawns.0;
         is_legal_move(&mut game, 12, 28, COLOR_WHITE); // e2-e4 legal check
         assert_eq!(game.board, snap_board, "mailbox should be restored");
-        assert_eq!(game.white_kings.0,  snap_wk, "bitboard should be restored");
-        assert_eq!(game.white_pawns.0,  snap_wp, "bitboard should be restored");
+        assert_eq!(game.white_kings.0, snap_wk, "bitboard should be restored");
+        assert_eq!(game.white_pawns.0, snap_wp, "bitboard should be restored");
     }
 
     // ── PGN / SAN tests using real game moves ─────────────────────────────────
@@ -252,8 +327,8 @@ mod tests {
         use crate::pgn::san_to_move;
         let mut game = new_game();
         let moves = [
-            "d4","Nf6","c4","e6","Nf3","b6","g3","Bb7",
-            "Bg2","Be7","Nc3","O-O","O-O","d5",
+            "d4", "Nf6", "c4", "e6", "Nf3", "b6", "g3", "Bb7", "Bg2", "Be7", "Nc3", "O-O", "O-O",
+            "d5",
         ];
         for san in &moves {
             let (src, dst, _) = san_to_move(&mut game, san)
@@ -262,7 +337,11 @@ mod tests {
         }
         // Move 15: Ne5 — this previously returned IllegalMove
         let result = san_to_move(&mut game, "Ne5");
-        assert!(result.is_ok(), "Ne5 must be legal after O-O O-O, got: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Ne5 must be legal after O-O O-O, got: {:?}",
+            result
+        );
         let (src, dst, _) = result.unwrap();
         assert_eq!(src, 21, "knight should be on f3 (sq 21)");
         assert_eq!(dst, 36, "knight should move to e5 (sq 36)");

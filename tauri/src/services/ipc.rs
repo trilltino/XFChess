@@ -98,13 +98,7 @@ pub fn close_tournament_admin(app: AppHandle) {
 
 #[tauri::command]
 pub fn show_notification(title: String, body: String, app: AppHandle) {
-  if let Err(e) = app
-    .notification()
-    .builder()
-    .title(title)
-    .body(body)
-    .show()
-  {
+  if let Err(e) = app.notification().builder().title(title).body(body).show() {
     tracing::warn!("[ipc] show_notification failed: {e}");
   }
 }

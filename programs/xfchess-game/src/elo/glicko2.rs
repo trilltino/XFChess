@@ -3,8 +3,8 @@
 //! Ratings are stored at ×100 centiscale (1200 Elo → 120000 stored).
 //! K=32 → K_SCALED=3200; standard 400-point divisor → 40000 in centiscale.
 
-const K_SCALED: f64 = 3200.0;   // K=32 × 100
-const DIVISOR: f64 = 40000.0;   // 400 × 100
+const K_SCALED: f64 = 3200.0; // K=32 × 100
+const DIVISOR: f64 = 40000.0; // 400 × 100
 const ELO_FLOOR: f64 = 10000.0; // 100 Elo minimum (× 100)
 
 /// Calculate K=32 Elo update for two players.
@@ -31,7 +31,11 @@ mod tests {
         let (w, b) = calculate_elo_update(120000.0, 120000.0, 1.0);
         assert!(w > 120000.0);
         assert!(b < 120000.0);
-        assert!((w - 121600.0).abs() < 1.0, "expected +1600 centiscale (+16 Elo): got {}", w);
+        assert!(
+            (w - 121600.0).abs() < 1.0,
+            "expected +1600 centiscale (+16 Elo): got {}",
+            w
+        );
     }
 
     #[test]

@@ -28,7 +28,7 @@ pub async fn telemetry_middleware(
     let start = Instant::now();
     let endpoint = format!("{} {}", request.method(), request.uri().path());
     let context = RequestContext::new(&endpoint);
-    
+
     // Log request start
     tracing::info!(
         request_id = %context.request_id,
@@ -36,21 +36,21 @@ pub async fn telemetry_middleware(
         path = %request.uri().path(),
         "request_started"
     );
-    
+
     // Process request
     let response = next.run(request).await;
-    
+
     // Calculate duration
     let duration = start.elapsed();
     let duration_ms = duration.as_millis() as f64;
     let status = response.status().as_u16();
-    
+
     // Record metrics
     {
         let mut metrics_guard = metrics.write().await;
         metrics_guard.record_http_request(&endpoint, status, duration_ms);
     }
-    
+
     // Log request completion
     if status as u16 >= HTTP_STATUS_SERVER_ERROR {
         tracing::error!(
@@ -80,18 +80,15 @@ pub async fn telemetry_middleware(
             "request_completed"
         );
     }
-    
+
     response
 }
 
 /// Middleware that extracts wallet/game info from JWT/auth headers
-pub async fn extract_context_middleware(
-    request: Request<Body>,
-    next: Next,
-) -> Response {
+pub async fn extract_context_middleware(request: Request<Body>, next: Next) -> Response {
     // Try to extract wallet pubkey from Authorization header or JWT
     // This is a placeholder - actual implementation depends on your auth structure
-    
+
     // For now, just pass through
     next.run(request).await
 }
@@ -99,7 +96,7 @@ pub async fn extract_context_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_request_context_creation() {
         let ctx = RequestContext::new("GET /api/test");

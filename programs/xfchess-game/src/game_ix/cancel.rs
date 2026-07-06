@@ -30,6 +30,7 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
     let player = ctx.accounts.player.key();
 
     let black_has_joined = game.black != Pubkey::default();
+    crate::lifecycle::guards::require_undelegated(game)?;
 
     match game.status {
         GameStatus::WaitingForOpponent => {

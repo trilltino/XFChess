@@ -38,10 +38,7 @@ pub struct InitializeTournamentEscrow<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
-    _ctx: Context<InitializeTournamentEscrow>,
-    _tournament_id: u64,
-) -> Result<()> {
+pub fn handler(_ctx: Context<InitializeTournamentEscrow>, _tournament_id: u64) -> Result<()> {
     msg!("Tournament escrow initialized");
     Ok(())
 }

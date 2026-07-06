@@ -32,7 +32,9 @@ pub enum GameStatus {
 }
 
 impl Default for GameStatus {
-    fn default() -> Self { GameStatus::Open }
+    fn default() -> Self {
+        GameStatus::Open
+    }
 }
 
 /// Public game listing (hides internal node IDs)

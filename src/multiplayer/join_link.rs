@@ -4,9 +4,9 @@
 //! In Tauri they are also registered as a custom protocol so the OS can open
 //! the app directly when the link is clicked.
 
-use bevy::prelude::*;
-use crate::multiplayer::traits::{Message, MessageReader, MessageWriter};
 use crate::multiplayer::spectator::{parse_spectate_link, SpectateViaLinkEvent};
+use crate::multiplayer::traits::{Message, MessageReader, MessageWriter};
+use bevy::prelude::*;
 
 /// Generate a join link for the given game + host node.
 pub fn make_join_link(game_id: &str, host_node_id_b58: &str) -> String {
@@ -19,7 +19,9 @@ pub fn parse_join_link(url: &str) -> Option<(String, String)> {
     let mut parts = path.splitn(2, '/');
     let game_id = parts.next()?.to_string();
     let node_id = parts.next()?.to_string();
-    if game_id.is_empty() || node_id.is_empty() { return None; }
+    if game_id.is_empty() || node_id.is_empty() {
+        return None;
+    }
     Some((game_id, node_id))
 }
 
@@ -46,7 +48,11 @@ fn handle_join_via_link(
     mut connect_events: MessageWriter<crate::multiplayer::network::p2p::ConnectToPeerEvent>,
 ) {
     for event in link_events.read() {
-        tracing::info!("[join-link] Joining game {} via host {}", event.game_id, event.host_node_id);
+        tracing::info!(
+            "[join-link] Joining game {} via host {}",
+            event.game_id,
+            event.host_node_id
+        );
         connect_events.write(crate::multiplayer::network::p2p::ConnectToPeerEvent {
             peer_node_id: event.host_node_id.clone(),
         });
@@ -60,7 +66,10 @@ pub fn dispatch_deep_link(
     spectate_events: &mut impl FnMut(SpectateViaLinkEvent),
 ) {
     if let Some((game_id, node_id)) = parse_join_link(url) {
-        join_events(JoinViaLinkEvent { game_id, host_node_id: node_id });
+        join_events(JoinViaLinkEvent {
+            game_id,
+            host_node_id: node_id,
+        });
     } else if let Some(game_id) = parse_spectate_link(url) {
         spectate_events(SpectateViaLinkEvent { game_id });
     }

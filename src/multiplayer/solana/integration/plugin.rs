@@ -1,16 +1,17 @@
 use bevy::prelude::*;
 
 use super::profile_check::{check_profile_on_connect, handle_profile_check_tasks};
-use super::state::{SolanaIntegrationState, BalanceRefreshTimer};
+use super::state::{BalanceRefreshTimer, SolanaIntegrationState};
 use super::systems::*;
+use crate::core::states::MenuState;
+use crate::ui::account::profile_view::{
+    fetch_profile_history, poll_profile_history, profile_view_ui, ProfileViewState,
+};
 use crate::ui::profile_creation::{
     despawn_profile_creation_ui, handle_profile_submission, profile_creation_ui_system,
-    spawn_profile_creation_ui, validate_username_system, ProfileCreationState, ProfileSubmissionEvent
+    spawn_profile_creation_ui, validate_username_system, ProfileCreationState,
+    ProfileSubmissionEvent,
 };
-use crate::ui::account::profile_view::{
-    ProfileViewState, fetch_profile_history, poll_profile_history, profile_view_ui,
-};
-use crate::core::states::MenuState;
 
 // Plugin for Solana integration
 pub struct SolanaIntegrationPlugin;
@@ -39,15 +40,30 @@ impl Plugin for SolanaIntegrationPlugin {
         app.add_systems(Update, handle_profile_check_tasks);
         app.add_systems(Update, fetch_user_status_async);
         app.add_systems(Update, sync_player_profiles);
-        
+
         // Profile creation UI systems
-        app.add_systems(OnEnter(MenuState::ProfileCreation), spawn_profile_creation_ui);
-        app.add_systems(Update, (profile_creation_ui_system).run_if(in_state(MenuState::ProfileCreation)));
-        app.add_systems(Update, (validate_username_system).run_if(in_state(MenuState::ProfileCreation)));
+        app.add_systems(
+            OnEnter(MenuState::ProfileCreation),
+            spawn_profile_creation_ui,
+        );
+        app.add_systems(
+            Update,
+            (profile_creation_ui_system).run_if(in_state(MenuState::ProfileCreation)),
+        );
+        app.add_systems(
+            Update,
+            (validate_username_system).run_if(in_state(MenuState::ProfileCreation)),
+        );
         app.add_systems(Update, handle_profile_submission);
-        app.add_systems(OnExit(MenuState::ProfileCreation), despawn_profile_creation_ui);
+        app.add_systems(
+            OnExit(MenuState::ProfileCreation),
+            despawn_profile_creation_ui,
+        );
 
         // Profile view overlay
-        app.add_systems(Update, (fetch_profile_history, poll_profile_history, profile_view_ui));
+        app.add_systems(
+            Update,
+            (fetch_profile_history, poll_profile_history, profile_view_ui),
+        );
     }
 }

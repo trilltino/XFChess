@@ -26,7 +26,12 @@ Helpers for extracting and validating Braid-specific headers (Version, Parents, 
 
 Most users will interact with this module through the `BraidClient` re-exported at the crate root.
 
-```rust
-let client = BraidClient::new(Config::default());
-let (update_stream, subscription_handle) = client.subscribe("/my-resource").await?;
+```rust,no_run
+use braid_http::{BraidClient, types::BraidRequest};
+
+let client = BraidClient::new()?;                       // no args; returns Result
+let mut sub = client
+    .subscribe("http://host/my-resource", BraidRequest::new().subscribe())
+    .await?;
+while let Some(update) = sub.next().await { /* handle Result<Update> */ }
 ```

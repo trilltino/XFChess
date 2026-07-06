@@ -36,7 +36,6 @@ pub struct GameEndedEvent {
     pub reason: String,
 }
 
-
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
 pub struct NetworkMoveEvent {
     pub from: (u8, u8),

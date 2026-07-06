@@ -64,17 +64,25 @@ pub fn handler(
     result: SwissMatchResult,
 ) -> Result<()> {
     let t = &mut ctx.accounts.tournament;
-    require!(t.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
+    require!(
+        t.tournament_id == tournament_id,
+        GameErrorCode::UnauthorizedAccess
+    );
     let player = ctx.accounts.player.key();
     let opponent = ctx.accounts.opponent.key();
 
-    require!(t.status == TournamentStatus::Active, GameErrorCode::InvalidGameStatus);
+    require!(
+        t.status == TournamentStatus::Active,
+        GameErrorCode::InvalidGameStatus
+    );
     require!(
         matches!(t.tournament_type, TournamentType::Swiss { .. }),
         GameErrorCode::InvalidGameStatus
     );
     require!(round == t.current_round, GameErrorCode::InvalidGameStatus);
     require!(round <= t.total_rounds, GameErrorCode::InvalidGameStatus);
+    let boards_per_round = t.num_registered_players.max(2) / 2;
+    require!(board < boards_per_round, GameErrorCode::InvalidArgument);
 
     // Collect all shards to search for players
     let mut shards = [
@@ -100,7 +108,8 @@ pub fn handler(
     }
 
     let (player_shard_id, player_idx) = player_shard_idx.ok_or(GameErrorCode::PlayerNotFound)?;
-    let (opponent_shard_id, opponent_idx) = opponent_shard_idx.ok_or(GameErrorCode::PlayerNotFound)?;
+    let (opponent_shard_id, opponent_idx) =
+        opponent_shard_idx.ok_or(GameErrorCode::PlayerNotFound)?;
 
     // Get scores before updating
     let player_score_before = shards[player_shard_id].swiss_standings[player_idx].score;
@@ -110,7 +119,7 @@ pub fn handler(
     if player_shard_id == opponent_shard_id {
         // Same shard - use single mutable reference
         let shard = &mut shards[player_shard_id];
-        
+
         // Update scores based on result
         match result {
             SwissMatchResult::Win => {
@@ -155,7 +164,15 @@ pub fn handler(
                 } else {
                     (&mut s1[0], &mut s0[0])
                 };
-                update_shards(player_shard, opponent_shard, player_idx, opponent_idx, result, player_score_before, opponent_score_before);
+                update_shards(
+                    player_shard,
+                    opponent_shard,
+                    player_idx,
+                    opponent_idx,
+                    result,
+                    player_score_before,
+                    opponent_score_before,
+                );
             }
             (0, 2) | (2, 0) => {
                 let (s0, s2) = shards.split_at_mut(2);
@@ -164,7 +181,15 @@ pub fn handler(
                 } else {
                     (&mut s2[0], &mut s0[0])
                 };
-                update_shards(player_shard, opponent_shard, player_idx, opponent_idx, result, player_score_before, opponent_score_before);
+                update_shards(
+                    player_shard,
+                    opponent_shard,
+                    player_idx,
+                    opponent_idx,
+                    result,
+                    player_score_before,
+                    opponent_score_before,
+                );
             }
             (0, 3) | (3, 0) => {
                 let (s0, s3) = shards.split_at_mut(3);
@@ -173,7 +198,15 @@ pub fn handler(
                 } else {
                     (&mut s3[0], &mut s0[0])
                 };
-                update_shards(player_shard, opponent_shard, player_idx, opponent_idx, result, player_score_before, opponent_score_before);
+                update_shards(
+                    player_shard,
+                    opponent_shard,
+                    player_idx,
+                    opponent_idx,
+                    result,
+                    player_score_before,
+                    opponent_score_before,
+                );
             }
             (1, 2) | (2, 1) => {
                 let (s1, s2) = shards.split_at_mut(2);
@@ -182,7 +215,15 @@ pub fn handler(
                 } else {
                     (&mut s2[0], &mut s1[0])
                 };
-                update_shards(player_shard, opponent_shard, player_idx, opponent_idx, result, player_score_before, opponent_score_before);
+                update_shards(
+                    player_shard,
+                    opponent_shard,
+                    player_idx,
+                    opponent_idx,
+                    result,
+                    player_score_before,
+                    opponent_score_before,
+                );
             }
             (1, 3) | (3, 1) => {
                 let (s1, s3) = shards.split_at_mut(3);
@@ -191,7 +232,15 @@ pub fn handler(
                 } else {
                     (&mut s3[0], &mut s1[0])
                 };
-                update_shards(player_shard, opponent_shard, player_idx, opponent_idx, result, player_score_before, opponent_score_before);
+                update_shards(
+                    player_shard,
+                    opponent_shard,
+                    player_idx,
+                    opponent_idx,
+                    result,
+                    player_score_before,
+                    opponent_score_before,
+                );
             }
             (2, 3) | (3, 2) => {
                 let (s2, s3) = shards.split_at_mut(3);
@@ -200,24 +249,30 @@ pub fn handler(
                 } else {
                     (&mut s3[0], &mut s2[0])
                 };
-                update_shards(player_shard, opponent_shard, player_idx, opponent_idx, result, player_score_before, opponent_score_before);
+                update_shards(
+                    player_shard,
+                    opponent_shard,
+                    player_idx,
+                    opponent_idx,
+                    result,
+                    player_score_before,
+                    opponent_score_before,
+                );
             }
             _ => return Err(GameErrorCode::PlayerNotFound.into()),
         }
     }
 
-    // Auto-advance round when the last board of the current round is recorded
-    let boards_per_round = t.max_players / 2;
-    if board == boards_per_round - 1 {
-        if t.current_round < t.total_rounds {
-            t.current_round += 1;
-        } else {
-            t.status = TournamentStatus::Completed;
-            t.completed_at = Some(Clock::get()?.unix_timestamp);
-        }
-    }
+    // Round advancement is deliberately not inferred from board index. The
+    // backend/authority must advance rounds only after every board result for
+    // the round is known; otherwise a forged last-board call can skip results.
 
-    msg!("Swiss result recorded: player {} vs opponent {} result {:?}", player, opponent, result);
+    msg!(
+        "Swiss result recorded: player {} vs opponent {} result {:?}",
+        player,
+        opponent,
+        result
+    );
 
     Ok(())
 }

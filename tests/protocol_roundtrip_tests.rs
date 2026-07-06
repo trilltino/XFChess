@@ -37,7 +37,10 @@ fn network_message_json_roundtrip_is_stable() {
     let back: NetworkMessage = serde_json::from_str(&json).expect("deserialize");
     // No PartialEq — assert the re-serialization is identical (structural equality).
     let json2 = serde_json::to_string(&back).expect("re-serialize");
-    assert_eq!(json, json2, "NetworkMessage did not survive a JSON round-trip");
+    assert_eq!(
+        json, json2,
+        "NetworkMessage did not survive a JSON round-trip"
+    );
     assert_eq!(back.game_id(), 42);
 }
 

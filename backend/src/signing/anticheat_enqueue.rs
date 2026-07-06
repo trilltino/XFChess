@@ -41,7 +41,16 @@ pub async fn enqueue_game_analysis(state: &AppState, game: FinalizedGame) {
     let pool = state.store.pool();
     let game_id_str = game.game_id.to_string();
 
-    type RawMove = (i64, String, Option<String>, String, i64, i64, Option<i64>, Option<i64>);
+    type RawMove = (
+        i64,
+        String,
+        Option<String>,
+        String,
+        i64,
+        i64,
+        Option<i64>,
+        Option<i64>,
+    );
     let raw_moves: Vec<RawMove> = sqlx::query_as(
         "SELECT m.move_number, m.move_uci, m.fen_after, m.player, m.timestamp,
                 COALESCE(t.blurred, 0), t.think_ms, t.reported_at
@@ -61,15 +70,17 @@ pub async fn enqueue_game_analysis(state: &AppState, game: FinalizedGame) {
 
     let mut rows: Vec<MoveRow> = raw_moves
         .iter()
-        .map(|(move_number, move_uci, fen_after, player, timestamp, blurred, think_ms, _)| MoveRow {
-            move_number: *move_number,
-            move_uci: move_uci.clone(),
-            fen_after: fen_after.clone(),
-            player: player.clone(),
-            timestamp: *timestamp,
-            blurred: *blurred != 0,
-            think_ms: think_ms.map(|t| t.max(0) as u32),
-        })
+        .map(
+            |(move_number, move_uci, fen_after, player, timestamp, blurred, think_ms, _)| MoveRow {
+                move_number: *move_number,
+                move_uci: move_uci.clone(),
+                fen_after: fen_after.clone(),
+                player: player.clone(),
+                timestamp: *timestamp,
+                blurred: *blurred != 0,
+                think_ms: think_ms.map(|t| t.max(0) as u32),
+            },
+        )
         .collect();
 
     // Audit client think times against the server-observed wall clock before
@@ -96,7 +107,11 @@ pub async fn enqueue_game_analysis(state: &AppState, game: FinalizedGame) {
         tournament_round,
         winner: game.winner.clone(),
         end_time: Some(chrono::Utc::now().timestamp()),
-        time_base_sec: if game.base_time_seconds == 0 { 600 } else { game.base_time_seconds },
+        time_base_sec: if game.base_time_seconds == 0 {
+            600
+        } else {
+            game.base_time_seconds
+        },
         time_inc_sec: game.increment_seconds,
     };
 

@@ -151,9 +151,15 @@ mod tests {
     #[test]
     fn to_url_combines_origin() {
         let res = ChessResource::moves("ABCD42");
-        assert_eq!(res.to_url("http://localhost:3000"), "http://localhost:3000/game/ABCD42/moves");
+        assert_eq!(
+            res.to_url("http://localhost:3000"),
+            "http://localhost:3000/game/ABCD42/moves"
+        );
         // Trailing slash on base is tolerated.
-        assert_eq!(res.to_url("http://localhost:3000/"), "http://localhost:3000/game/ABCD42/moves");
+        assert_eq!(
+            res.to_url("http://localhost:3000/"),
+            "http://localhost:3000/game/ABCD42/moves"
+        );
     }
 
     #[test]

@@ -13,9 +13,9 @@ mod common;
 
 use common::*;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signer;
+use solana_sdk::signature::{Keypair, Signer};
 use std::str::FromStr;
-use xfchess_game::state::GameStatus;
+use xfchess_game::state::{GameResult, GameStatus};
 
 const GAME_ID: u64 = 7;
 
@@ -43,7 +43,7 @@ async fn undelegate_rejects_spoofed_magic_context() {
     let ix = undelegate_ix(
         GAME_ID,
         payer,
-        Pubkey::new_unique(),                  // spoofed magic_context
+        Pubkey::new_unique(), // spoofed magic_context
         Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
     );
 
@@ -84,5 +84,97 @@ async fn undelegate_rejects_spoofed_magic_program() {
         custom_code(&err),
         Some(anchor_constraint_address()),
         "wrong magic_program must be rejected by the address constraint"
+    );
+}
+
+#[tokio::test]
+async fn undelegate_rejects_not_delegated_game_before_cpi() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+
+    let mut ctx = start(vec![game_account_with_delegation(
+        GAME_ID,
+        white,
+        black,
+        start_board(),
+        1,
+        0,
+        GameStatus::Active,
+        false,
+    )])
+    .await;
+
+    let payer = ctx.payer.pubkey();
+    let ix = undelegate_ix(
+        GAME_ID,
+        payer,
+        Pubkey::from_str(MAGIC_CONTEXT).unwrap(),
+        Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
+    );
+
+    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(xfchess_game::errors::GameErrorCode::GameNotDelegated)),
+        "non-delegated games must reject before MagicBlock CPI"
+    );
+}
+
+#[tokio::test]
+async fn resign_mutates_only_game_even_when_delegated() {
+    let white = Keypair::new();
+    let black = Pubkey::new_unique();
+
+    let mut ctx = start(vec![
+        game_account(
+            GAME_ID,
+            white.pubkey(),
+            black,
+            start_board(),
+            1,
+            0,
+            GameStatus::Active,
+        ),
+        (white.pubkey(), system_account(1_000_000)),
+    ])
+    .await;
+
+    let ix = resign_ix(GAME_ID, white.pubkey());
+    send(&mut ctx, ix, &[&white]).await.unwrap();
+
+    let game = fetch_game(&mut ctx, GAME_ID).await;
+    assert_eq!(game.status, GameStatus::Finished);
+    assert_eq!(game.result, GameResult::Winner(black));
+    assert!(
+        game.is_delegated,
+        "terminal ER transition must not undelegate"
+    );
+}
+
+#[tokio::test]
+async fn claim_timeout_mutates_only_game_even_when_delegated() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+
+    let mut ctx = start(vec![game_account(
+        GAME_ID,
+        white,
+        black,
+        start_board(),
+        1,
+        0,
+        GameStatus::Active,
+    )])
+    .await;
+
+    let ix = claim_timeout_ix(GAME_ID, ctx.payer.pubkey());
+    send(&mut ctx, ix, &[]).await.unwrap();
+
+    let game = fetch_game(&mut ctx, GAME_ID).await;
+    assert_eq!(game.status, GameStatus::Finished);
+    assert_eq!(game.result, GameResult::Winner(black));
+    assert!(
+        game.is_delegated,
+        "terminal ER transition must not undelegate"
     );
 }

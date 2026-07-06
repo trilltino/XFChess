@@ -92,8 +92,12 @@ async fn init_oauth(
     Query(req): Query<InitRequest>,
 ) -> Result<Json<InitResponse>, (StatusCode, String)> {
     // Validate wallet pubkey
-    let _ = Pubkey::from_str(&req.wallet_pubkey)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid wallet_pubkey: {}", e)))?;
+    let _ = Pubkey::from_str(&req.wallet_pubkey).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid wallet_pubkey: {}", e),
+        )
+    })?;
 
     let client_id = &state.config.lichess_client_id;
     if client_id.is_empty() {
@@ -110,7 +114,9 @@ async fn init_oauth(
 
     // Store PKCE state with wallet binding and 10-minute TTL
     {
-        let mut store = PKCE_STATES.lock().expect("PKCE mutex should not be poisoned");
+        let mut store = PKCE_STATES
+            .lock()
+            .expect("PKCE mutex should not be poisoned");
         store.insert(
             state_param.clone(),
             PkceState {
@@ -154,9 +160,14 @@ async fn exchange_code(
 ) -> Result<Json<ExchangeResponse>, (StatusCode, String)> {
     // Retrieve and validate PKCE state
     let pkce_state = {
-        let mut store = PKCE_STATES.lock().expect("PKCE mutex should not be poisoned");
+        let mut store = PKCE_STATES
+            .lock()
+            .expect("PKCE mutex should not be poisoned");
         let entry = store.remove(&req.state).ok_or_else(|| {
-            (StatusCode::BAD_REQUEST, "Invalid or expired state parameter".to_string())
+            (
+                StatusCode::BAD_REQUEST,
+                "Invalid or expired state parameter".to_string(),
+            )
         })?;
         if entry.created_at.elapsed() > Duration::from_secs(600) {
             return Err((StatusCode::BAD_REQUEST, "State expired".to_string()));
@@ -199,23 +210,42 @@ async fn exchange_code(
         ])
         .send()
         .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Token request failed: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                format!("Token request failed: {}", e),
+            )
+        })?;
 
     if !token_resp.status().is_success() {
         let body = token_resp.text().await.unwrap_or_default();
-        return Err((StatusCode::BAD_GATEWAY, format!("Lichess token error: {}", body)));
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Lichess token error: {}", body),
+        ));
     }
 
     let token_data: serde_json::Value = token_resp.json().await.map_err(|e| {
-        (StatusCode::BAD_GATEWAY, format!("Failed to parse token response: {}", e))
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to parse token response: {}", e),
+        )
     })?;
 
     let access_token = token_data
         .get("access_token")
         .and_then(|t| t.as_str())
-        .ok_or_else(|| (StatusCode::BAD_GATEWAY, "Missing access_token in response".to_string()))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "Missing access_token in response".to_string(),
+            )
+        })?;
 
-    info!("[LichessOAuth] Got access token for wallet {}", req.wallet_pubkey);
+    info!(
+        "[LichessOAuth] Got access token for wallet {}",
+        req.wallet_pubkey
+    );
 
     // ── Step 2: Fetch authenticated user profile ─────────────────────────────
     let profile_resp = client
@@ -223,23 +253,42 @@ async fn exchange_code(
         .bearer_auth(access_token)
         .send()
         .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Profile request failed: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                format!("Profile request failed: {}", e),
+            )
+        })?;
 
     if !profile_resp.status().is_success() {
         let body = profile_resp.text().await.unwrap_or_default();
-        return Err((StatusCode::BAD_GATEWAY, format!("Lichess profile error: {}", body)));
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Lichess profile error: {}", body),
+        ));
     }
 
     let profile: serde_json::Value = profile_resp.json().await.map_err(|e| {
-        (StatusCode::BAD_GATEWAY, format!("Failed to parse profile response: {}", e))
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to parse profile response: {}", e),
+        )
     })?;
 
     let username = profile
         .get("username")
         .and_then(|u| u.as_str())
-        .ok_or_else(|| (StatusCode::BAD_GATEWAY, "Profile missing username".to_string()))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "Profile missing username".to_string(),
+            )
+        })?;
 
-    let perfs = profile.get("perfs").cloned().unwrap_or(serde_json::Value::Null);
+    let perfs = profile
+        .get("perfs")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
 
     let extract_rating = |key: &str| -> u32 {
         perfs
@@ -259,8 +308,12 @@ async fn exchange_code(
     );
 
     // ── Step 3: Build and submit on-chain link_external_elo instruction ────
-    let player_pk = Pubkey::from_str(&req.wallet_pubkey)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid wallet_pubkey: {}", e)))?;
+    let player_pk = Pubkey::from_str(&req.wallet_pubkey).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid wallet_pubkey: {}", e),
+        )
+    })?;
     let program_id = state.program_id;
     let link_authority = &state.link_authority;
 
@@ -380,7 +433,7 @@ async fn store_link_in_db(
             bullet_rating = excluded.bullet_rating,
             last_sync_at = excluded.last_sync_at,
             on_chain_tx = excluded.on_chain_tx
-        "#
+        "#,
     )
     .bind(pubkey)
     .bind(username)

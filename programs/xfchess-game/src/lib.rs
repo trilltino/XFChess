@@ -4,6 +4,7 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::cpi::undelegate_account;
 
 pub mod account_ix;
+pub mod common;
 pub mod constants;
 #[cfg(feature = "cranks")]
 pub mod crank_ix;
@@ -13,32 +14,42 @@ pub mod errors;
 pub mod events;
 pub mod game_ix;
 pub mod governance_ix;
+pub mod lifecycle;
+pub mod magicblock;
 pub mod moves_ix;
 pub mod state;
 pub mod tournament_ix;
 
 // Re-export account structs at crate root so Anchor's generated __private::__global handlers
 // can find them via their `use super::*` chain.
-pub use account_ix::{InitProfile, VerifyProfile, SetUsername, WithdrawExpiredWager,
-    InitializeFeeVault, CollectFee, ClaimFees, CreateSession, RevokeSession, UpdateElo,
-    AuthorizeGlobalSessionCtx, RevokeGlobalSessionCtx, AuthorizeGlobalSessionArgs,
-    LinkExternalElo};
+pub use account_ix::{
+    AcceptFriendRequest, AuthorizeGlobalSessionArgs, AuthorizeGlobalSessionCtx, BlockUser,
+    ClaimFees, CloseFriendship, CollectFee, CreateSession, InitProfile, InitializeFeeVault,
+    LinkExternalElo, RevokeGlobalSessionCtx, RevokeSession, SendFriendRequest, SetUsername,
+    UpdateElo, VerifyProfile, WithdrawExpiredWager, WithdrawGlobalSessionCtx, WithdrawTreasury,
+};
 #[cfg(feature = "cranks")]
-pub use crank_ix::{ScheduleTimeCheck, CrankTimeCheck, ScheduleTimeCheckArgs, crank_time_check, schedule_time_check_crank, crank_time_check::CrankTimeCheckData};
+pub use crank_ix::{
+    crank_time_check, crank_time_check::CrankTimeCheckData, schedule_time_check_crank,
+    CrankTimeCheck, ScheduleTimeCheck, ScheduleTimeCheckArgs,
+};
 pub use delegation_ix::{
     AuthorizeSessionCtx, DelegateGameCtx, InitializeAfterUndelegation, RevokeSessionCtx,
     UndelegateGameCtx,
 };
-pub use game_ix::{CancelGame, CreateGame, EndGame, JoinGame, ResignGame, ClaimTimeout,
-    GlobalCreateGame, GlobalJoinGame};
+pub use game_ix::{
+    CancelGame, ClaimTimeout, CreateGame, EndGame, GlobalCreateGame, GlobalJoinGame, JoinGame,
+    ResignGame,
+};
 pub use governance_ix::{ClaimStaleDispute, DisputeGame, ResolveDispute};
 pub use moves_ix::RecordMove;
 pub use tournament_ix::{
-    AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
-    CancelTournament, ClaimTournamentPrize, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize, InitializeMatch, InitializeTournament,
-    InitializeTournamentEscrow, InitializeTournamentShards, InitializeShardsSmall, InitializeShardsMedium,
-    RecordMatchResult, RecordSwissResult, RegisterPlayer, LeaveTournament,
-    RevokeTournamentSessionCtx, SessionCreateGame, SessionJoinGame, StartTournament, SwissMatchResult,
+    AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx, CancelTournament,
+    ClaimTournamentPrize, CloseTournament, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize,
+    InitializeMatch, InitializeShardsMedium, InitializeShardsSmall, InitializeTournament,
+    InitializeTournamentEscrow, InitializeTournamentShards, LeaveTournament, RecordMatchResult,
+    RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx, SessionCreateGame,
+    SessionJoinGame, StartTournament, SwissMatchResult,
 };
 
 // Anchor 0.32 #[program] generates `pub use crate::__client_accounts_<snake>::*` at the crate
@@ -59,6 +70,18 @@ pub mod __client_accounts_withdraw_expired_wager {
 }
 pub mod __client_accounts_link_external_elo {
     pub use crate::account_ix::link_external_elo::__client_accounts_link_external_elo::*;
+}
+pub mod __client_accounts_send_friend_request {
+    pub use crate::account_ix::friends_ix::__client_accounts_send_friend_request::*;
+}
+pub mod __client_accounts_accept_friend_request {
+    pub use crate::account_ix::friends_ix::__client_accounts_accept_friend_request::*;
+}
+pub mod __client_accounts_close_friendship {
+    pub use crate::account_ix::friends_ix::__client_accounts_close_friendship::*;
+}
+pub mod __client_accounts_block_user {
+    pub use crate::account_ix::friends_ix::__client_accounts_block_user::*;
 }
 pub mod __client_accounts_delegate_game_ctx {
     pub use crate::delegation_ix::delegate::__client_accounts_delegate_game_ctx::*;
@@ -144,6 +167,9 @@ pub mod __client_accounts_distribute_tournament_prizes {
 pub mod __client_accounts_cancel_tournament {
     pub use crate::tournament_ix::lifecycle::cancel::__client_accounts_cancel_tournament::*;
 }
+pub mod __client_accounts_close_tournament {
+    pub use crate::tournament_ix::lifecycle::close_tournament::__client_accounts_close_tournament::*;
+}
 pub mod __client_accounts_fund_usdc_prize {
     pub use crate::tournament_ix::prizes::fund_prize::__client_accounts_fund_usdc_prize::*;
 }
@@ -174,6 +200,9 @@ pub mod __client_accounts_collect_fee {
 pub mod __client_accounts_claim_fees {
     pub use crate::account_ix::fee_vault_ix::__client_accounts_claim_fees::*;
 }
+pub mod __client_accounts_withdraw_treasury {
+    pub use crate::account_ix::treasury::__client_accounts_withdraw_treasury::*;
+}
 pub mod __client_accounts_create_session {
     pub use crate::account_ix::fee_vault_ix::__client_accounts_create_session::*;
 }
@@ -200,6 +229,9 @@ pub mod __client_accounts_authorize_global_session_ctx {
 pub mod __client_accounts_revoke_global_session_ctx {
     pub use crate::account_ix::global_session_ix::__client_accounts_revoke_global_session_ctx::*;
 }
+pub mod __client_accounts_withdraw_global_session_ctx {
+    pub use crate::account_ix::global_session_ix::__client_accounts_withdraw_global_session_ctx::*;
+}
 pub mod __client_accounts_global_create_game {
     pub use crate::game_ix::global_create::__client_accounts_global_create_game::*;
 }
@@ -216,7 +248,12 @@ declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
 pub mod xfchess_game {
     use super::*;
 
-    pub fn init_profile(ctx: Context<InitProfile>, username: String, country: String, date_of_birth: i64) -> Result<()> {
+    pub fn init_profile(
+        ctx: Context<InitProfile>,
+        username: String,
+        country: String,
+        date_of_birth: i64,
+    ) -> Result<()> {
         crate::account_ix::profile::handler(ctx, username, country, date_of_birth)
     }
 
@@ -235,7 +272,31 @@ pub mod xfchess_game {
         rapid_rating: u32,
         bullet_rating: u32,
     ) -> Result<()> {
-        crate::account_ix::link_external_elo::handler(ctx, username, blitz_rating, rapid_rating, bullet_rating)
+        crate::account_ix::link_external_elo::handler(
+            ctx,
+            username,
+            blitz_rating,
+            rapid_rating,
+            bullet_rating,
+        )
+    }
+
+    // ── Solana Friends ────────────────────────────────────────────────────────
+
+    pub fn send_friend_request(ctx: Context<SendFriendRequest>) -> Result<()> {
+        crate::account_ix::friends_ix::send_request(ctx)
+    }
+
+    pub fn accept_friend_request(ctx: Context<AcceptFriendRequest>) -> Result<()> {
+        crate::account_ix::friends_ix::accept_request(ctx)
+    }
+
+    pub fn close_friendship(ctx: Context<CloseFriendship>) -> Result<()> {
+        crate::account_ix::friends_ix::close_friendship(ctx)
+    }
+
+    pub fn block_user(ctx: Context<BlockUser>) -> Result<()> {
+        crate::account_ix::friends_ix::block_user(ctx)
     }
 
     pub fn create_game(
@@ -258,14 +319,8 @@ pub mod xfchess_game {
         )
     }
 
-    pub fn join_game(
-        ctx: Context<JoinGame>,
-        game_id: u64,
-    ) -> Result<()> {
-        crate::game_ix::join::handler(
-            ctx,
-            game_id,
-        )
+    pub fn join_game(ctx: Context<JoinGame>, game_id: u64) -> Result<()> {
+        crate::game_ix::join::handler(ctx, game_id)
     }
 
     pub fn record_move(
@@ -335,11 +390,7 @@ pub mod xfchess_game {
         game_id: u64,
         session_pubkey: Pubkey,
     ) -> Result<()> {
-        crate::delegation_ix::session::handler_authorize_session_key(
-            ctx,
-            game_id,
-            session_pubkey,
-        )
+        crate::delegation_ix::session::handler_authorize_session_key(ctx, game_id, session_pubkey)
     }
 
     pub fn revoke_session_key(ctx: Context<RevokeSessionCtx>, game_id: u64) -> Result<()> {
@@ -458,12 +509,22 @@ pub mod xfchess_game {
         next_match_slot: u8,
     ) -> Result<()> {
         crate::tournament_ix::matches::initialize_match::handler(
-            ctx, tournament_id, match_index, round, player_white, player_black,
-            next_match_for_winner, next_match_slot
+            ctx,
+            tournament_id,
+            match_index,
+            round,
+            player_white,
+            player_black,
+            next_match_for_winner,
+            next_match_slot,
         )
     }
 
-    pub fn register_player(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Result<()> {
+    pub fn register_player(
+        ctx: Context<RegisterPlayer>,
+        tournament_id: u64,
+        elo: u32,
+    ) -> Result<()> {
         crate::tournament_ix::registration::register::handler(ctx, tournament_id, elo)
     }
 
@@ -482,7 +543,13 @@ pub mod xfchess_game {
         winner: Pubkey,
         loser: Pubkey,
     ) -> Result<()> {
-        crate::tournament_ix::matches::record_result::handler(ctx, tournament_id, match_index, winner, loser)
+        crate::tournament_ix::matches::record_result::handler(
+            ctx,
+            tournament_id,
+            match_index,
+            winner,
+            loser,
+        )
     }
 
     pub fn advance_winner(
@@ -491,7 +558,11 @@ pub mod xfchess_game {
         source_match_index: u16,
         _target_match_index: u16,
     ) -> Result<()> {
-        crate::tournament_ix::matches::record_result::handler_advance_winner(ctx, tournament_id, source_match_index)
+        crate::tournament_ix::matches::record_result::handler_advance_winner(
+            ctx,
+            tournament_id,
+            source_match_index,
+        )
     }
 
     pub fn claim_tournament_prize(
@@ -513,6 +584,14 @@ pub mod xfchess_game {
         tournament_id: u64,
     ) -> Result<()> {
         crate::tournament_ix::lifecycle::cancel::handler(ctx, tournament_id)
+    }
+
+    /// Finalize a completed tournament: transition it to `Closed` and sweep any
+    /// residual escrow to the platform treasury. Payouts happen exclusively via
+    /// `distribute_tournament_prizes` / `claim_tournament_prize`; this refuses to
+    /// run until every funded prize place has already been claimed.
+    pub fn close_tournament(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> {
+        crate::tournament_ix::lifecycle::close_tournament::handler(ctx, tournament_id)
     }
 
     pub fn fund_usdc_prize(
@@ -538,7 +617,13 @@ pub mod xfchess_game {
         board: u16,
         result: SwissMatchResult,
     ) -> Result<()> {
-        crate::tournament_ix::matches::record_swiss_result::handler(ctx, tournament_id, round, board, result)
+        crate::tournament_ix::matches::record_swiss_result::handler(
+            ctx,
+            tournament_id,
+            round,
+            board,
+            result,
+        )
     }
 
     // ── Tournament-scoped session delegation ───────────────────────────────
@@ -623,6 +708,11 @@ pub mod xfchess_game {
         crate::account_ix::global_session_ix::handler_revoke_global_session(ctx)
     }
 
+    /// Return the unspent balance of the global-session vault to the player.
+    pub fn withdraw_global_session(ctx: Context<WithdrawGlobalSessionCtx>) -> Result<()> {
+        crate::account_ix::global_session_ix::handler_withdraw_global_session(ctx)
+    }
+
     /// Session-signed `create_game`. The session key co-signs; wager and rent
     /// are drawn from the [`GlobalSessionDelegation`] vault — zero wallet popup.
     pub fn global_create_game(
@@ -635,7 +725,13 @@ pub mod xfchess_game {
         increment_seconds: u16,
     ) -> Result<()> {
         crate::game_ix::global_create::handler(
-            ctx, game_id, wager_amount, match_type, platform_fee, base_time_seconds, increment_seconds,
+            ctx,
+            game_id,
+            wager_amount,
+            match_type,
+            platform_fee,
+            base_time_seconds,
+            increment_seconds,
         )
     }
 
@@ -662,6 +758,12 @@ pub mod xfchess_game {
         crate::account_ix::fee_vault_ix::handler_claim_fees(ctx)
     }
 
+    /// Withdraw accumulated platform fees from the treasury vault to a
+    /// destination wallet. Only the treasury authority may call this.
+    pub fn withdraw_treasury(ctx: Context<WithdrawTreasury>, amount: u64) -> Result<()> {
+        crate::account_ix::treasury::handler(ctx, amount)
+    }
+
     // ── Player Session ────────────────────────────────────────────────────────
 
     pub fn create_session(
@@ -672,7 +774,11 @@ pub mod xfchess_game {
         max_wager: Option<u64>,
     ) -> Result<()> {
         crate::account_ix::fee_vault_ix::handler_create_session(
-            ctx, session_key, duration, spending_limit, max_wager,
+            ctx,
+            session_key,
+            duration,
+            spending_limit,
+            max_wager,
         )
     }
 
@@ -692,7 +798,13 @@ pub mod xfchess_game {
         won_amount: u64,
     ) -> Result<()> {
         crate::account_ix::fee_vault_ix::handler_update_elo(
-            ctx, opponent_rating, opponent_rd, outcome, is_ranked, wager, won_amount,
+            ctx,
+            opponent_rating,
+            opponent_rd,
+            outcome,
+            is_ranked,
+            wager,
+            won_amount,
         )
     }
 

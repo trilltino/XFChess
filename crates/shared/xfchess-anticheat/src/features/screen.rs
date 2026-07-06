@@ -88,7 +88,10 @@ fn side_score(game: &GameRecord, parity: usize) -> f64 {
 
                 // No snap moves at all: even strong humans bang out recaptures
                 // and forced replies; an engine relay round-trips every move.
-                let snaps = latencies.iter().filter(|l| **l < SNAP_MOVE_MS as f64).count();
+                let snaps = latencies
+                    .iter()
+                    .filter(|l| **l < SNAP_MOVE_MS as f64)
+                    .count();
                 if snaps == 0 {
                     score += 0.3;
                 }
@@ -141,9 +144,18 @@ mod tests {
         GameRecord {
             game_id: "t".into(),
             context: GameContext::Pvp { wager_sol: 0.0 },
-            white: PlayerRef { pubkey: "w".into(), elo: 1500 },
-            black: PlayerRef { pubkey: "b".into(), elo: 1500 },
-            time_control: TimeControl { base_sec: 600, inc_sec: 0 },
+            white: PlayerRef {
+                pubkey: "w".into(),
+                elo: 1500,
+            },
+            black: PlayerRef {
+                pubkey: "b".into(),
+                elo: 1500,
+            },
+            time_control: TimeControl {
+                base_sec: 600,
+                inc_sec: 0,
+            },
             start_fen: String::new(),
             moves,
             result: GameResult::Draw,
@@ -154,7 +166,11 @@ mod tests {
     #[test]
     fn metronome_play_is_suspicious() {
         // White moves every ~8s like clockwork and never snaps; black varies.
-        let g = game(60, &[7_900, 8_000, 8_100], &[500, 3_000, 12_000, 25_000, 1_000]);
+        let g = game(
+            60,
+            &[7_900, 8_000, 8_100],
+            &[500, 3_000, 12_000, 25_000, 1_000],
+        );
         let r = t0_screen(&g);
         assert!(r.white_score >= SUSPICIOUS_SCORE, "white {}", r.white_score);
         assert!(r.black_score < SUSPICIOUS_SCORE, "black {}", r.black_score);
@@ -166,7 +182,11 @@ mod tests {
         let human = &[800, 2_500, 15_000, 4_000, 600, 30_000, 9_000, 1_200];
         let g = game(60, human, human);
         let r = t0_screen(&g);
-        assert!(!r.suspicious, "white {} black {}", r.white_score, r.black_score);
+        assert!(
+            !r.suspicious,
+            "white {} black {}",
+            r.white_score, r.black_score
+        );
     }
 
     #[test]
@@ -182,7 +202,11 @@ mod tests {
         // Uniformly fast play is normal blitz behavior, not metronoming.
         let g = game(60, &[900, 1_000, 1_100], &[900, 1_000, 1_100]);
         let r = t0_screen(&g);
-        assert!(!r.suspicious, "white {} black {}", r.white_score, r.black_score);
+        assert!(
+            !r.suspicious,
+            "white {} black {}",
+            r.white_score, r.black_score
+        );
     }
 
     #[test]
@@ -211,7 +235,11 @@ mod tests {
             m.signed_at_ms = base + i as u64 * 5; // ~5ms apart: implausible
         }
         let r = t0_screen(&g);
-        assert!(!r.suspicious, "white {} black {}", r.white_score, r.black_score);
+        assert!(
+            !r.suspicious,
+            "white {} black {}",
+            r.white_score, r.black_score
+        );
     }
 
     #[test]

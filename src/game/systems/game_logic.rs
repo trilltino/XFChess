@@ -12,11 +12,10 @@
 //! rendering changes.
 
 use crate::engine::board_state::ChessEngine;
-use crate::game::components::{GamePhase, PieceMoveAnimation, FadingCapture};
+use crate::game::components::{FadingCapture, GamePhase, PieceMoveAnimation};
 use crate::game::resources::*;
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
-
 
 /// System to update game phase (check, checkmate, etc.)
 ///
@@ -191,7 +190,11 @@ pub fn update_game_timer(
                     current_turn.move_number
                 );
                 // Notify opponent in multiplayer
-                if matches!(*game_mode, crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive) {
+                if matches!(
+                    *game_mode,
+                    crate::core::GameMode::OnlineMultiplayer
+                        | crate::core::GameMode::MultiplayerCompetitive
+                ) {
                     flag_timeout.write(crate::game::events::FlagTimeoutEvent {
                         flagged_player: "white".to_string(),
                         remote: false,
@@ -225,7 +228,11 @@ pub fn update_game_timer(
                     current_turn.move_number
                 );
                 // Notify opponent in multiplayer
-                if matches!(*game_mode, crate::core::GameMode::BraidMultiplayer | crate::core::GameMode::MultiplayerCompetitive) {
+                if matches!(
+                    *game_mode,
+                    crate::core::GameMode::OnlineMultiplayer
+                        | crate::core::GameMode::MultiplayerCompetitive
+                ) {
                     flag_timeout.write(crate::game::events::FlagTimeoutEvent {
                         flagged_player: "black".to_string(),
                         remote: false,
@@ -249,10 +256,10 @@ pub fn check_game_over_state(
 ) {
     // Only transition if we are currently InGame and the game is effectively over
     // Wait for active animations and capture fades to finish so the final move is visible
-    if *state.get() == crate::core::GameState::InGame 
-        && game_over.is_game_over() 
-        && animations.is_empty() 
-        && fades.is_empty() 
+    if *state.get() == crate::core::GameState::InGame
+        && game_over.is_game_over()
+        && animations.is_empty()
+        && fades.is_empty()
     {
         info!(
             "[GAME] Game over condition met ({:?}) - transitioning to GameOver state",

@@ -41,6 +41,14 @@ pub fn handler(
     rapid_rating: u32,
     bullet_rating: u32,
 ) -> Result<()> {
+    // Guard against an unconfigured authority: the placeholder key is all-zeros
+    // and must be replaced with the real backend signer before this instruction
+    // is usable (no one can sign as the default pubkey, but fail loudly anyway).
+    require!(
+        crate::constants::link_authority::ID != Pubkey::default(),
+        GameErrorCode::UnauthorizedAccess
+    );
+
     let profile = &mut ctx.accounts.player_profile;
 
     // Ensure the profile belongs to the player
@@ -54,13 +62,16 @@ pub fn handler(
         !username.is_empty() && username.len() <= 30,
         GameErrorCode::InvalidUsername
     );
+    let blitz_centiscale = crate::elo::rating::external_to_centiscale(blitz_rating)?;
+    let rapid_centiscale = crate::elo::rating::external_to_centiscale(rapid_rating)?;
+    let bullet_centiscale = crate::elo::rating::external_to_centiscale(bullet_rating)?;
 
     // Store Lichess linkage data
     profile.lichess_username = username;
     profile.lichess_verified = true;
-    profile.lichess_blitz = blitz_rating;
-    profile.lichess_rapid = rapid_rating;
-    profile.lichess_bullet = bullet_rating;
+    profile.lichess_blitz = blitz_centiscale;
+    profile.lichess_rapid = rapid_centiscale;
+    profile.lichess_bullet = bullet_centiscale;
     profile.lichess_last_sync = Clock::get()?.unix_timestamp;
     profile.external_elo_source = 1; // 1 = Lichess
 
@@ -72,7 +83,7 @@ pub fn handler(
         } else {
             rapid_rating
         };
-        profile.elo_rating = seed_rating as f64;
+        profile.elo_rating = crate::elo::rating::external_to_centiscale(seed_rating)? as f64;
         profile.seeded_from_external = true;
     }
 

@@ -86,7 +86,7 @@ pub fn validate_color_assignment(players: &[SwissPlayer]) -> bool {
 /// Get preferred color for a player (the one they need more)
 pub fn preferred_color(player: &SwissPlayer) -> Option<Color> {
     let balance = calculate_balance(&player.color_history);
-    
+
     if balance > 0 {
         Some(Color::White) // Needs white
     } else if balance < 0 {
@@ -126,10 +126,10 @@ mod tests {
     fn test_should_swap_colors() {
         // White needs white more
         assert!(!should_swap_colors(2, 0, &[], &[]));
-        
+
         // Black needs white more
         assert!(should_swap_colors(0, 2, &[], &[]));
-        
+
         // White would violate
         let white_hist = vec![Color::White, Color::White];
         assert!(should_swap_colors(0, 0, &white_hist, &[]));
@@ -138,37 +138,33 @@ mod tests {
     #[test]
     fn test_validate_color_assignment() {
         // Valid assignment
-        let players = vec![
-            SwissPlayer {
-                id: "p1".to_string(),
-                rating: 2000,
-                score: 0.0,
-                color_history: vec![Color::White, Color::Black, Color::White],
-                opponents: vec![],
-                bye_rounds: Vec::new(),
-                float_history: Vec::new(),
-                absent: false,
-                withdrawn: false,
-                forfeit_round: None,
-            },
-        ];
+        let players = vec![SwissPlayer {
+            id: "p1".to_string(),
+            rating: 2000,
+            score: 0.0,
+            color_history: vec![Color::White, Color::Black, Color::White],
+            opponents: vec![],
+            bye_rounds: Vec::new(),
+            float_history: Vec::new(),
+            absent: false,
+            withdrawn: false,
+            forfeit_round: None,
+        }];
         assert!(validate_color_assignment(&players));
 
         // Invalid - three in a row
-        let players = vec![
-            SwissPlayer {
-                id: "p2".to_string(),
-                rating: 2000,
-                score: 0.0,
-                color_history: vec![Color::White, Color::White, Color::White],
-                opponents: vec![],
-                bye_rounds: Vec::new(),
-                float_history: Vec::new(),
-                absent: false,
-                withdrawn: false,
-                forfeit_round: None,
-            },
-        ];
+        let players = vec![SwissPlayer {
+            id: "p2".to_string(),
+            rating: 2000,
+            score: 0.0,
+            color_history: vec![Color::White, Color::White, Color::White],
+            opponents: vec![],
+            bye_rounds: Vec::new(),
+            float_history: Vec::new(),
+            absent: false,
+            withdrawn: false,
+            forfeit_round: None,
+        }];
         assert!(!validate_color_assignment(&players));
     }
 }

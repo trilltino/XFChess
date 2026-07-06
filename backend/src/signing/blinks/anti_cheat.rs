@@ -57,7 +57,9 @@ impl IpPatternDetector {
         {
             let mut tracker = self.rate_limit_tracker.write().await;
             let now = Instant::now();
-            let attempts = tracker.entry(ip_address.to_string()).or_insert_with(Vec::new);
+            let attempts = tracker
+                .entry(ip_address.to_string())
+                .or_insert_with(Vec::new);
 
             // Remove old attempts outside the window
             attempts.retain(|t| now.duration_since(*t) < self.rate_limit_window);
@@ -112,7 +114,9 @@ pub fn get_ip_detector() -> &'static IpPatternDetector {
 ///
 /// This is a convenience function that uses the singleton instance.
 pub async fn check_ip_patterns(ip_address: &str, _tournament_id: u64) -> Option<String> {
-    get_ip_detector().check_ip_patterns(ip_address, _tournament_id).await
+    get_ip_detector()
+        .check_ip_patterns(ip_address, _tournament_id)
+        .await
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::prizes::ledger;
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -55,18 +56,7 @@ pub fn handler<'a, 'b, 'c, 'info>(
         GameErrorCode::NoPrizeToClaim
     );
 
-    let places: [Option<Pubkey>; 10] = [
-        tournament.winner,
-        tournament.second_place,
-        tournament.third_place,
-        tournament.fourth_place,
-        tournament.fifth_place,
-        tournament.sixth_place,
-        tournament.seventh_place,
-        tournament.eighth_place,
-        tournament.ninth_place,
-        tournament.tenth_place,
-    ];
+    let places = ledger::places(tournament);
 
     // The escrow account must stay rent-exempt until close_tournament reclaims it.
     let rent_min = Rent::get()?.minimum_balance(ctx.accounts.escrow_pda.data_len());
@@ -78,7 +68,7 @@ pub fn handler<'a, 'b, 'c, 'info>(
         if share_bps == 0 {
             continue;
         }
-        let place_bit = 1u16 << i;
+        let place_bit = ledger::place_bit(i)?;
         if tournament.prizes_claimed & place_bit != 0 {
             continue;
         }
@@ -90,11 +80,7 @@ pub fn handler<'a, 'b, 'c, 'info>(
             continue;
         };
 
-        let prize = (tournament.prize_pool as u128)
-            .checked_mul(share_bps as u128)
-            .and_then(|v| v.checked_div(10_000))
-            .map(|v| v as u64)
-            .unwrap_or(0);
+        let prize = ledger::prize_amount(tournament.prize_pool, share_bps)?;
         if prize == 0 {
             continue;
         }

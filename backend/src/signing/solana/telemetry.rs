@@ -5,9 +5,7 @@
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    signature::Signature,
-    transaction::Transaction,
+    commitment_config::CommitmentConfig, signature::Signature, transaction::Transaction,
 };
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -41,12 +39,12 @@ pub enum TxErrorCategory {
     InsufficientFunds,
     AccountNotFound,
     ProgramError(u32), // Custom program error code
-    
+
     // Server/transient errors (retry)
     RpcTimeout,
     RpcRateLimit,
     BlockhashExpired,
-    
+
     // Infrastructure errors (alert ops)
     FeePayerExhausted,
     RpcUnavailable,
@@ -79,19 +77,19 @@ pub async fn submit_with_telemetry(
 ) -> Result<TransactionTelemetry> {
     let start = Instant::now();
     let method = "send_and_confirm_transaction";
-    
+
     // Attempt submission
     let result = rpc.send_and_confirm_transaction_with_spinner_and_commitment(
         tx,
         CommitmentConfig::confirmed(),
     );
-    
+
     let duration = start.elapsed();
-    
+
     match result {
         Ok(sig) => {
             let confirmation_time_ms = duration.as_millis() as u64;
-            
+
             info!(
                 request_id = %ctx.request_id,
                 signature = %sig,
@@ -100,7 +98,7 @@ pub async fn submit_with_telemetry(
                 game_id = ctx.game_id.unwrap_or(0),
                 "transaction_confirmed"
             );
-            
+
             Ok(TransactionTelemetry {
                 signature: sig,
                 method: method.to_string(),
@@ -112,7 +110,7 @@ pub async fn submit_with_telemetry(
         Err(e) => {
             let error_detail = classify_error(&e);
             let error_str = e.to_string();
-            
+
             error!(
                 request_id = %ctx.request_id,
                 error = %error_str,
@@ -122,7 +120,7 @@ pub async fn submit_with_telemetry(
                 game_id = ctx.game_id.unwrap_or(0),
                 "transaction_failed"
             );
-            
+
             Err(anyhow!("Transaction failed: {}", error_str))
         }
     }
@@ -135,15 +133,15 @@ pub async fn submit_er_with_telemetry(
     ctx: &RequestContext,
 ) -> Result<TransactionTelemetry> {
     use solana_client::rpc_config::RpcSendTransactionConfig;
-    
+
     let start = Instant::now();
     let method = "send_transaction_er";
-    
+
     let config = RpcSendTransactionConfig {
         skip_preflight: true,
         ..Default::default()
     };
-    
+
     // Send transaction
     let send_start = Instant::now();
     let sig = match rpc.send_transaction_with_config(tx, config) {
@@ -159,19 +157,19 @@ pub async fn submit_er_with_telemetry(
             return Err(anyhow!("ER send failed: {}", e));
         }
     };
-    
+
     info!(
         request_id = %ctx.request_id,
         signature = %sig,
         send_latency_ms = send_start.elapsed().as_millis() as u64,
         "er_transaction_sent"
     );
-    
+
     // Poll for confirmation
     let confirm_start = Instant::now();
     let commitment = CommitmentConfig::confirmed();
     let deadline = Instant::now() + Duration::from_secs(30);
-    
+
     loop {
         if Instant::now() > deadline {
             error!(
@@ -182,11 +180,11 @@ pub async fn submit_er_with_telemetry(
             );
             return Err(anyhow!("ER confirmation timeout for {sig}"));
         }
-        
+
         match rpc.get_signature_status_with_commitment(&sig, commitment) {
             Ok(Some(Ok(()))) => {
                 let confirmation_time_ms = confirm_start.elapsed().as_millis() as u64;
-                
+
                 info!(
                     request_id = %ctx.request_id,
                     signature = %sig,
@@ -194,7 +192,7 @@ pub async fn submit_er_with_telemetry(
                     total_time_ms = start.elapsed().as_millis() as u64,
                     "er_transaction_confirmed"
                 );
-                
+
                 return Ok(TransactionTelemetry {
                     signature: sig,
                     method: method.to_string(),
@@ -233,7 +231,7 @@ pub async fn submit_er_with_telemetry(
 /// Classify an RPC error into categories
 fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDetail {
     let error_str = error.to_string();
-    
+
     // Check for specific error patterns
     if error_str.contains("insufficient funds") {
         return TxErrorDetail {
@@ -243,7 +241,7 @@ fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDe
             logs: vec![],
         };
     }
-    
+
     if error_str.contains("blockhash not found") || error_str.contains("Blockhash not found") {
         return TxErrorDetail {
             category: TxErrorCategory::BlockhashExpired,
@@ -252,7 +250,7 @@ fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDe
             logs: vec![],
         };
     }
-    
+
     if error_str.contains("rate limit") || error_str.contains("429") {
         return TxErrorDetail {
             category: TxErrorCategory::RpcRateLimit,
@@ -261,7 +259,7 @@ fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDe
             logs: vec![],
         };
     }
-    
+
     if error_str.contains("timeout") {
         return TxErrorDetail {
             category: TxErrorCategory::RpcTimeout,
@@ -270,7 +268,7 @@ fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDe
             logs: vec![],
         };
     }
-    
+
     if error_str.contains("unavailable") || error_str.contains("connection") {
         return TxErrorDetail {
             category: TxErrorCategory::RpcUnavailable,
@@ -279,7 +277,7 @@ fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDe
             logs: vec![],
         };
     }
-    
+
     // Default to unknown
     TxErrorDetail {
         category: TxErrorCategory::Unknown,
@@ -290,11 +288,9 @@ fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDe
 }
 
 /// Classify error from transaction status
-fn classify_error_from_status(
-    error: &solana_sdk::transaction::TransactionError,
-) -> TxErrorDetail {
+fn classify_error_from_status(error: &solana_sdk::transaction::TransactionError) -> TxErrorDetail {
     use solana_sdk::transaction::TransactionError;
-    
+
     let (category, code) = match error {
         TransactionError::InstructionError(_idx, err) => {
             // Try to extract program error code
@@ -309,7 +305,7 @@ fn classify_error_from_status(
         }
         _ => (TxErrorCategory::Unknown, None),
     };
-    
+
     TxErrorDetail {
         category,
         code,

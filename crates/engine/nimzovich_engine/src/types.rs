@@ -11,11 +11,11 @@
 use std::sync::Arc;
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-#[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 #[cfg(not(feature = "std"))]
 use alloc::sync::Arc;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 //
 // The `Game` struct represents the complete state of a chess engine instance, combining:
 // 1. **Current position** (`board: [i8; 64]`) - Piece placement
@@ -177,7 +177,6 @@ use alloc::sync::Arc;
 // - **Zobrist Hashing**: https://www.chessprogramming.org/Zobrist_Hashing
 // - **Move Ordering**: https://www.chessprogramming.org/Move_Ordering
 // - **Cache-Oriented Programming**: https://en.wikipedia.org/wiki/Data-oriented_design
-
 
 use super::bitset::BitSet;
 use super::constants::*;

@@ -49,10 +49,11 @@ impl JoinGame {
 #[instruction]
 pub struct RecordMove {
     pub game_id: u64,
-    pub move_str: String,
-    pub next_fen: String,
+    pub move_uci: [u8; 5],
+    pub next_board: [u8; 68],
     pub nonce: u64,
     pub signature: Option<Vec<u8>>,
+    pub parent_nonce: Option<u64>,
 }
 
 impl RecordMove {

@@ -1,10 +1,6 @@
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 use crate::solana::instructions::{
     GAME_SEED, MOVE_LOG_SEED, PROFILE_SEED, PROGRAM_ID as SOLANA_PROGRAM_ID,
@@ -49,7 +45,9 @@ pub struct SolanaIntegrationState {
     /// Whether profile check is in progress
     pub checking_profile: bool,
     /// Pending async profile check task — returns (status, elo, display_name)
-    pub pending_profile_check: Option<tokio::task::JoinHandle<Result<(ProfileStatus, Option<u16>, Option<String>), String>>>,
+    pub pending_profile_check: Option<
+        tokio::task::JoinHandle<Result<(ProfileStatus, Option<u16>, Option<String>), String>>,
+    >,
     /// Cached on-chain ELO (populated after profile lookup; 0 = unknown)
     pub cached_elo: u16,
     /// Cached display name from on-chain profile
@@ -68,7 +66,10 @@ pub enum ProfileStatus {
 impl std::fmt::Debug for SolanaIntegrationState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SolanaIntegrationState")
-            .field("session_keypair_pubkey", &self.session_keypair.as_ref().map(|k| k.pubkey()))
+            .field(
+                "session_keypair_pubkey",
+                &self.session_keypair.as_ref().map(|k| k.pubkey()),
+            )
             .field("global_session_active", &self.global_session_active)
             .field("balance", &self.balance)
             .field("handshake_completed", &self.handshake_completed)

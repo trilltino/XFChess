@@ -13,7 +13,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-
 use crate::board::*;
 use crate::types::*;
 

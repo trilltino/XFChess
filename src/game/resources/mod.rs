@@ -54,8 +54,8 @@
 // Submodules
 pub mod active_time_control;
 pub mod history;
-pub mod player;
 pub mod menu_sounds;
+pub mod player;
 pub mod sounds;
 pub mod turn;
 
@@ -70,8 +70,8 @@ mod tests;
 pub use active_time_control::*;
 pub use debug::*;
 pub use history::*;
-pub use player::*;
 pub use menu_sounds::*;
+pub use player::*;
 pub use sounds::*;
 pub use system_params::*;
 pub use turn::*;

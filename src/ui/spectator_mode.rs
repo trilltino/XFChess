@@ -162,25 +162,25 @@ fn spectator_ui_system(
 fn render_simple_board(ui: &mut egui::Ui, fen: &str) {
     // Parse FEN and render basic board
     let board_part = fen.split_whitespace().next().unwrap_or("");
-    
+
     ui.monospace("+-------------------------------+");
-    
+
     for rank in (0..8).rev() {
         let mut row_str = String::from("¦");
-        
+
         for file in 0..8 {
             // Find piece at this position
             let square = get_square_from_fen(board_part, file, rank);
             row_str.push_str(&format!(" {} ¦", square));
         }
-        
+
         ui.monospace(&row_str);
-        
+
         if rank > 0 {
             ui.monospace("+---+---+---+---+---+---+---+---¦");
         }
     }
-    
+
     ui.monospace("+-------------------------------+");
     ui.monospace("  a   b   c   d   e   f   g   h");
 }
@@ -191,10 +191,10 @@ fn get_square_from_fen(fen_board: &str, file: usize, rank: usize) -> String {
     if rank >= ranks.len() {
         return " ".to_string();
     }
-    
+
     let rank_str = ranks[rank];
     let mut current_file = 0;
-    
+
     for c in rank_str.chars() {
         if c.is_ascii_digit() {
             let empty_squares = c.to_digit(10).unwrap_or(0) as usize;
@@ -209,7 +209,7 @@ fn get_square_from_fen(fen_board: &str, file: usize, rank: usize) -> String {
             current_file += 1;
         }
     }
-    
+
     " ".to_string()
 }
 
@@ -240,7 +240,7 @@ pub fn spectator_menu_ui(
     mut spectator: ResMut<SpectatorMode>,
     mut next_state: ResMut<NextState<crate::core::GameState>>,
     mut game_mode: ResMut<crate::core::states::GameMode>,
-    braid_network: Res<crate::multiplayer::BraidNetworkState>,
+    braid_network: Res<crate::multiplayer::OnlineNetworkState>,
 ) {
     // Show join dialog only when spectator mode is not yet active
     if spectator.active {
@@ -251,7 +251,7 @@ pub fn spectator_menu_ui(
         Ok(ctx) => ctx,
         Err(_) => return,
     };
-    
+
     egui::Window::new("Spectate Game")
         .collapsible(false)
         .resizable(false)
@@ -313,4 +313,3 @@ pub fn spectator_menu_ui(
             }
         });
 }
-

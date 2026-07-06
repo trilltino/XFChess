@@ -152,12 +152,21 @@ pub fn require_wager_eligibility(wallet_pubkey: &str) -> Result<(), String> {
         return Ok(());
     }
     let mut missing = Vec::new();
-    if !status.has_profile { missing.push("profile"); }
-    if !status.has_email   { missing.push("email"); }
-    if !status.has_kyc     { missing.push("KYC"); }
+    if !status.has_profile {
+        missing.push("profile");
+    }
+    if !status.has_email {
+        missing.push("email");
+    }
+    if !status.has_kyc {
+        missing.push("KYC");
+    }
     if missing.is_empty() {
         // can_wager=false but all sub-flags are set — account suspended or region-blocked
-        return Err("Wagered play is not available for this account. Visit your Profile page for details.".to_string());
+        return Err(
+            "Wagered play is not available for this account. Visit your Profile page for details."
+                .to_string(),
+        );
     }
     Err(format!(
         "Wagered play blocked — missing: {}. Complete setup on your Profile page.",

@@ -21,6 +21,7 @@ use axum::{
     routing::{delete, post},
     Router,
 };
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     pubkey::Pubkey,
@@ -28,7 +29,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use std::str::FromStr;
-use base64::{Engine as _, engine::general_purpose};
 use tracing::{info, warn};
 
 use crate::signing::AppState;
@@ -37,8 +37,7 @@ use crate::signing::AppState;
 
 /// Public: game client calls this to check whether a session exists.
 pub fn global_session_public_routes() -> Router<AppState> {
-    Router::new()
-        .route("/{wallet}/verify", axum::routing::get(verify))
+    Router::new().route("/{wallet}/verify", axum::routing::get(verify))
 }
 
 /// Protected: require admin API key — prepare/activate/revoke mutate server-held keypairs.
@@ -58,7 +57,9 @@ pub struct PrepareReq {
     #[serde(default = "default_deposit")]
     pub deposit_lamports: u64,
 }
-fn default_deposit() -> u64 { 100_000_000 } // 0.1 SOL
+fn default_deposit() -> u64 {
+    100_000_000
+} // 0.1 SOL
 
 #[derive(Serialize)]
 pub struct PrepareResp {
@@ -98,10 +99,8 @@ async fn prepare(
     let session_pubkey = session_kp.pubkey();
 
     let program_id = state.program_id;
-    let (session_pda, _bump) = Pubkey::find_program_address(
-        &[b"global_session", wallet.as_ref()],
-        &program_id,
-    );
+    let (session_pda, _bump) =
+        Pubkey::find_program_address(&[b"global_session", wallet.as_ref()], &program_id);
 
     // Build unsigned authorize_global_session instruction
     let discriminator: [u8; 8] = [0x15, 0xd3, 0x8a, 0x6c, 0xf2, 0x71, 0x4e, 0xb2];
@@ -165,18 +164,17 @@ async fn activate(
     let wallet = Pubkey::from_str(&req.wallet_pubkey)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid pubkey: {e}")))?;
 
-    let tx_bytes = general_purpose::STANDARD.decode(&req.signed_tx_b64)
+    let tx_bytes = general_purpose::STANDARD
+        .decode(&req.signed_tx_b64)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("base64: {e}")))?;
     let tx: Transaction = bincode::deserialize(&tx_bytes)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("deserialize tx: {e}")))?;
 
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
-    let sig = tokio::task::spawn_blocking(move || {
-        rpc.send_and_confirm_transaction(&tx)
-    })
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC send: {e}")))?;
+    let sig = tokio::task::spawn_blocking(move || rpc.send_and_confirm_transaction(&tx))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC send: {e}")))?;
 
     // Promote from pending → active
     let session_kp = {
@@ -198,7 +196,10 @@ async fn activate(
     }
 
     info!("global_session activated: wallet={wallet} sig={sig}");
-    Ok(Json(ActivateResp { sig: sig.to_string(), session_pubkey }))
+    Ok(Json(ActivateResp {
+        sig: sig.to_string(),
+        session_pubkey,
+    }))
 }
 
 /// GET /global-session/:wallet/verify
@@ -232,10 +233,8 @@ async fn revoke(
     let wallet = Pubkey::from_str(&wallet_str)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid pubkey: {e}")))?;
 
-    let (session_pda, _) = Pubkey::find_program_address(
-        &[b"global_session", wallet.as_ref()],
-        &state.program_id,
-    );
+    let (session_pda, _) =
+        Pubkey::find_program_address(&[b"global_session", wallet.as_ref()], &state.program_id);
 
     // The revoke instruction is wallet-signed — we only need to tell the client
     // the accounts it must include. The actual revoke tx is built client-side.

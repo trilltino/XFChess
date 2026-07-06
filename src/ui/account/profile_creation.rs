@@ -8,9 +8,9 @@ use bevy_egui::EguiContexts;
 use crate::core::states::{DespawnOnExit, MenuState};
 use crate::multiplayer::solana::addon::SolanaWallet;
 use crate::multiplayer::solana::tauri_signer;
-use crate::multiplayer::TokioRuntime;
-use crate::solana::instructions::{init_profile_ix, get_program_id};
 use crate::multiplayer::vps_client;
+use crate::multiplayer::TokioRuntime;
+use crate::solana::instructions::{get_program_id, init_profile_ix};
 use base64::Engine;
 
 /// Resource tracking profile creation state
@@ -20,9 +20,9 @@ pub struct ProfileCreationState {
     pub availability_status: UsernameAvailability,
     pub is_validating: bool,
     pub error_message: Option<String>,
-    pub country_code: String,           // ISO 3166-1 alpha-2 (e.g., "GB", "BR", "CA", "DE")
-    pub tax_id: String,                 // Country-specific tax ID
-    pub tax_id_valid: bool,            // Tax ID format validation status
+    pub country_code: String, // ISO 3166-1 alpha-2 (e.g., "GB", "BR", "CA", "DE")
+    pub tax_id: String,       // Country-specific tax ID
+    pub tax_id_valid: bool,   // Tax ID format validation status
     pub email: String,
     pub dob: String,
     pub address: String,
@@ -116,33 +116,41 @@ fn is_valid_username_format(username: &str) -> bool {
     if len < 3 || len > 20 {
         return false;
     }
-    
+
     // Check valid characters
     for ch in username.chars() {
         if !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-' {
             return false;
         }
     }
-    
+
     // Check reserved names
     let lower = username.to_lowercase();
-    let reserved = ["admin", "system", "support", "official", "moderator",
-                    "xf", "xfchess", "chess", "test", "dev", "null"];
+    let reserved = [
+        "admin",
+        "system",
+        "support",
+        "official",
+        "moderator",
+        "xf",
+        "xfchess",
+        "chess",
+        "test",
+        "dev",
+        "null",
+    ];
     for r in reserved {
         if lower == r || lower.starts_with(r) {
             return false;
         }
     }
-    
+
     true
 }
 
 /// Validate tax ID format based on country code
 pub fn spawn_profile_creation_ui(mut commands: Commands) {
-    commands.spawn((
-        ProfileCreationUi,
-        DespawnOnExit(MenuState::ProfileCreation),
-    ));
+    commands.spawn((ProfileCreationUi, DespawnOnExit(MenuState::ProfileCreation)));
 }
 
 /// System to handle profile submission events (async)
@@ -154,12 +162,15 @@ pub fn handle_profile_submission(
     mut menu_state: ResMut<NextState<MenuState>>,
     mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
     auth_state: Res<crate::ui::account::auth::AuthState>,
-    mut solana_state: ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    mut solana_state: ResMut<
+        crate::multiplayer::solana::integration::state::SolanaIntegrationState,
+    >,
 ) {
     for event in events.read() {
         // Optimistically cache the chosen username so the lobby can use it immediately
         solana_state.cached_display_name = Some(event.username.clone());
-        solana_state.profile_status = crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername;
+        solana_state.profile_status =
+            crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername;
 
         // Push "Check Wallet" notification
         popup_queue.push(crate::ui::menus::popup::GamePopup {
@@ -178,11 +189,11 @@ pub fn handle_profile_submission(
         let _email = event.email.clone();
         let dob = event.dob.clone();
         let address = event.address.clone();
-        
+
         // Credentials for linking
         let auth_email = auth_state.email.clone();
         let auth_password = auth_state.password.clone();
-        
+
         let wallet_pubkey = match wallet.pubkey {
             Some(pk) => pk,
             None => {
@@ -193,7 +204,7 @@ pub fn handle_profile_submission(
         };
 
         info!("[PROFILE] Starting async submission for {}", username);
-        
+
         tokio.0.spawn(async move {
             // 1. Sign and send on-chain transaction (Username + Country ONLY, no PII)
             let program_id = match get_program_id() {
@@ -204,7 +215,8 @@ pub fn handle_profile_submission(
                 }
             };
             // Parse DOB string "YYYY-MM-DD" to Unix timestamp for on-chain age gate.
-            let dob_unix: i64 = dob.split('-')
+            let dob_unix: i64 = dob
+                .split('-')
                 .collect::<Vec<_>>()
                 .as_slice()
                 .chunks_exact(3)
@@ -214,15 +226,23 @@ pub fn handle_profile_submission(
                     let m: i64 = parts[1].parse().ok()?;
                     let d: i64 = parts[2].parse().ok()?;
                     // Simplified Gregorian → Unix (accurate enough for 18+ check)
-                    let days = (y - 1970) * 365 + (y - 1969) / 4 - (y - 1901) / 100 + (y - 1601) / 400
+                    let days = (y - 1970) * 365 + (y - 1969) / 4 - (y - 1901) / 100
+                        + (y - 1601) / 400
                         + [0i64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
                             [(m as usize).saturating_sub(1)]
-                        + d - 1;
+                        + d
+                        - 1;
                     Some(days * 86400)
                 })
                 .unwrap_or(0);
 
-            let ix = match init_profile_ix(program_id, wallet_pubkey, username.clone(), country.clone(), dob_unix) {
+            let ix = match init_profile_ix(
+                program_id,
+                wallet_pubkey,
+                username.clone(),
+                country.clone(),
+                dob_unix,
+            ) {
                 Ok(ix) => ix,
                 Err(e) => {
                     error!("[PROFILE] Failed to build IX: {}", e);
@@ -231,7 +251,12 @@ pub fn handle_profile_submission(
             };
 
             info!("[PROFILE] Sending on-chain transaction...");
-            match tauri_signer::sign_and_send_via_tauri("https://api.devnet.solana.com", wallet_pubkey, &[ix], &[]) {
+            match tauri_signer::sign_and_send_via_tauri(
+                "https://api.devnet.solana.com",
+                wallet_pubkey,
+                &[ix],
+                &[],
+            ) {
                 Ok(sig) => info!("[PROFILE] On-chain success: {}", sig),
                 Err(e) => {
                     error!("[PROFILE] On-chain failed: {}", e);
@@ -242,14 +267,15 @@ pub fn handle_profile_submission(
 
             // 2. Register with backend
             info!("[PROFILE] Registering with backend...");
-            let timestamp = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            let timestamp = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            {
                 Ok(duration) => duration.as_secs(),
                 Err(e) => {
                     error!("[PROFILE] Failed to compute timestamp: {}", e);
                     return;
                 }
             };
-            
+
             let auth_msg = format!("xfchess:register:{}", timestamp);
             let signature = match tauri_signer::sign_message_via_tauri(&auth_msg) {
                 Ok(sig) => sig,
@@ -258,7 +284,7 @@ pub fn handle_profile_submission(
                     return;
                 }
             };
-            
+
             let sig_str = base64::engine::general_purpose::STANDARD.encode(&signature);
             let reg_req = vps_client::RegisterReq {
                 wallet: wallet_pubkey.to_string(),
@@ -273,7 +299,10 @@ pub fn handle_profile_submission(
 
             // 2.5 Link wallet if account was created via email
             if !auth_email.is_empty() {
-                info!("[PROFILE] Linking wallet to email account {}...", auth_email);
+                info!(
+                    "[PROFILE] Linking wallet to email account {}...",
+                    auth_email
+                );
                 let link_msg = format!("xfchess:link:{}", timestamp);
                 let link_sig = match tauri_signer::sign_message_via_tauri(&link_msg) {
                     Ok(sig) => sig,
@@ -328,7 +357,7 @@ pub fn handle_profile_submission(
 
             info!("[PROFILE] All steps completed for {}", username);
         });
-        
+
         // Optimistically return to main menu
         menu_state.set(MenuState::Main);
     }
@@ -343,4 +372,3 @@ pub fn despawn_profile_creation_ui(
         commands.entity(entity).despawn();
     }
 }
-

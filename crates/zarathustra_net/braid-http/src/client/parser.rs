@@ -69,14 +69,14 @@ impl MessageParser {
         let mut parser = MessageParser::new();
         parser.headers = headers.clone();
         parser.expected_body_length = content_length;
-        
+
         // Check for chunked transfer encoding
         let is_chunked = headers
             .get("transfer-encoding")
             .map(|v| v.to_lowercase().contains("chunked"))
             .unwrap_or(false);
         parser.is_chunked = is_chunked;
-        
+
         // For chunked encoding in subscriptions, the body contains braid protocol messages.
         // Each message starts with headers like "Version:", "Content-Length:" etc.
         // So we need to parse headers from the stream, not treat it as raw body.
@@ -86,19 +86,26 @@ impl MessageParser {
         } else {
             parser.state = ParseState::WaitingForBody;
         }
-        
+
         parser
     }
 
     pub fn feed(&mut self, data: &[u8]) -> Result<Vec<Message>> {
-        tracing::debug!("[Parser] feed() called with {} bytes, state: {:?}", data.len(), self.state);
+        tracing::debug!(
+            "[Parser] feed() called with {} bytes, state: {:?}",
+            data.len(),
+            self.state
+        );
         self.buffer.extend_from_slice(data);
         let mut messages = Vec::new();
 
         loop {
             match self.state {
                 ParseState::WaitingForHeaders => {
-                    tracing::debug!("[Parser] WaitingForHeaders, buffer len: {}", self.buffer.len());
+                    tracing::debug!(
+                        "[Parser] WaitingForHeaders, buffer len: {}",
+                        self.buffer.len()
+                    );
                     while !self.buffer.is_empty()
                         && (self.buffer[0] == b'\r' || self.buffer[0] == b'\n')
                     {
@@ -119,8 +126,11 @@ impl MessageParser {
                     if let Some(pos) = self.find_header_end() {
                         tracing::debug!("[Parser] Found header end at pos {}", pos);
                         self.parse_headers(pos)?;
-                        tracing::debug!("[Parser] Headers parsed, content-length: {}, patches: {}", 
-                            self.expected_body_length, self.expected_patches);
+                        tracing::debug!(
+                            "[Parser] Headers parsed, content-length: {}, patches: {}",
+                            self.expected_body_length,
+                            self.expected_patches
+                        );
                         self.state = ParseState::WaitingForBody;
                     } else {
                         tracing::debug!("[Parser] Header end not found, waiting for more data");
@@ -128,15 +138,21 @@ impl MessageParser {
                     }
                 }
                 ParseState::WaitingForBody => {
-                    tracing::debug!("[Parser] WaitingForBody, expected_body_length: {}, buffer len: {}", 
-                        self.expected_body_length, self.buffer.len());
+                    tracing::debug!(
+                        "[Parser] WaitingForBody, expected_body_length: {}, buffer len: {}",
+                        self.expected_body_length,
+                        self.buffer.len()
+                    );
                     if self.expected_patches > 0 {
                         tracing::debug!("[Parser] Have {} patches to parse", self.expected_patches);
                         self.state = ParseState::WaitingForPatchHeaders;
                     } else if self.try_parse_body()? {
                         tracing::debug!("[Parser] Body parsed successfully, finalizing message");
                         if let Some(msg) = self.finalize_message()? {
-                            tracing::debug!("[Parser] Message finalized with {} bytes body", msg.body.len());
+                            tracing::debug!(
+                                "[Parser] Message finalized with {} bytes body",
+                                msg.body.len()
+                            );
                             messages.push(msg);
                         }
                         self.reset();
@@ -333,7 +349,7 @@ impl MessageParser {
             // No body expected (e.g., HEAD request or empty response with explicit 0 length)
             return Ok(true);
         }
-        
+
         let remaining = self.expected_body_length - self.read_body_length;
         if self.buffer.len() >= remaining {
             let body_chunk = self.buffer.split_to(remaining);

@@ -6,9 +6,9 @@ use crate::game::resources::{
     Selection,
 };
 use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
-use crate::multiplayer::BraidNetworkState;
-use crate::multiplayer::network::braid_pvp::BraidPvpSession;
+use crate::multiplayer::network::online_game_session::OnlineGameSession;
 use crate::multiplayer::network::protocol::NetworkMessage;
+use crate::multiplayer::OnlineNetworkState;
 use bevy::prelude::*;
 
 /// Handle network move events by executing them on the local board
@@ -24,8 +24,8 @@ pub fn handle_network_moves(
     game_sounds: Option<Res<GameSounds>>,
     current_turn: Res<CurrentTurn>,
     mut remote_applied: MessageWriter<RemoteMoveApplied>,
-    network_state: Option<Res<BraidNetworkState>>,
-    session: Option<Res<BraidPvpSession>>,
+    network_state: Option<Res<OnlineNetworkState>>,
+    session: Option<Res<OnlineGameSession>>,
 ) {
     for event in events.read() {
         info!(
@@ -155,7 +155,10 @@ pub fn handle_network_moves(
                     }
                 }
 
-                remote_applied.write(RemoteMoveApplied { uci, next_fen: fen_after });
+                remote_applied.write(RemoteMoveApplied {
+                    uci,
+                    next_fen: fen_after,
+                });
             }
 
             // 6. Update Selection (Clear if we moved selected piece)
@@ -208,10 +211,16 @@ pub fn handle_draw_response_events(
 ) {
     for ev in events.read() {
         if ev.accepted {
-            info!("[DRAW] Draw accepted by {} (remote={})", ev.player, ev.remote);
+            info!(
+                "[DRAW] Draw accepted by {} (remote={})",
+                ev.player, ev.remote
+            );
             *game_over = GameOverState::Stalemate; // Stalemate is the closest "draw" variant
         } else {
-            info!("[DRAW] Draw declined by {} (remote={})", ev.player, ev.remote);
+            info!(
+                "[DRAW] Draw declined by {} (remote={})",
+                ev.player, ev.remote
+            );
         }
         // Either way, clear the pending offer.
         pending.from_player = None;
@@ -240,15 +249,17 @@ pub fn handle_resign_events(
             "white" => GameOverState::WhiteWonByResignation,
             "black" => GameOverState::BlackWonByResignation,
             winner => {
-                warn!("[RESIGN] Unknown winner '{}', ignoring resign event", winner);
+                warn!(
+                    "[RESIGN] Unknown winner '{}', ignoring resign event",
+                    winner
+                );
                 continue;
             }
         };
 
         info!(
             "[RESIGN] Applied {} resignation result (remote={})",
-            event.winner,
-            event.remote
+            event.winner, event.remote
         );
     }
 }

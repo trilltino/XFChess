@@ -6,16 +6,13 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use crate::game::events::{GameEndedEvent, GameStartedEvent};
-use crate::game::replay::{ParsedPgnGameResource};
-use crate::multiplayer::{
-    MagicBlockEvent, MagicBlockResolver,
-    calculate_batch_hash, NetworkMessage,
-    EphemeralRollupManager, GameStateStatus, RollupEvent,
-    BraidNetworkState,
-    NetworkEvent,
-};
+use crate::game::replay::ParsedPgnGameResource;
 use crate::multiplayer::rollup::magicblock::DelegationStatus;
 use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
+use crate::multiplayer::{
+    calculate_batch_hash, EphemeralRollupManager, GameStateStatus, MagicBlockEvent,
+    MagicBlockResolver, NetworkEvent, NetworkMessage, OnlineNetworkState, RollupEvent,
+};
 use crate::solana::instructions::PROGRAM_ID as SOLANA_PROGRAM_ID;
 use crate::ui::menus::game_over_popup::GameOverPayoutInfo;
 
@@ -107,9 +104,7 @@ impl Plugin for RollupNetworkBridgePlugin {
         app.insert_resource(RollupNetworkBridge::new());
 
         let mut resolver = MagicBlockResolver::default();
-        resolver.set_solana_rpc(Arc::new(RpcClient::new(
-            "https://api.devnet.solana.com",
-        )));
+        resolver.set_solana_rpc(Arc::new(RpcClient::new("https://api.devnet.solana.com")));
         app.insert_resource(resolver);
 
         app.init_resource::<RecentTransactions>();
@@ -141,7 +136,7 @@ impl Plugin for RollupNetworkBridgePlugin {
     }
 }
 
-fn send_network_msg(state: &BraidNetworkState, msg: NetworkMessage) {
+fn send_network_msg(state: &OnlineNetworkState, msg: NetworkMessage) {
     if let Some(tx) = &state.message_sender {
         if let Err(e) = tx.send(msg) {
             warn!("Failed to send NetworkMessage: {}", e);
@@ -151,7 +146,7 @@ fn send_network_msg(state: &BraidNetworkState, msg: NetworkMessage) {
 
 fn handle_rollup_to_network_events(
     mut rollup_events: MessageReader<RollupEvent>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
     mut bridge: ResMut<RollupNetworkBridge>,
     rollup_manager: Res<EphemeralRollupManager>,
 ) {
@@ -199,15 +194,21 @@ fn handle_rollup_to_network_events(
                 let fens_owned = next_fens.clone();
                 info!(
                     "[VPS] Game-end direct submit: {} moves for game {}",
-                    moves_owned.len(), gid
+                    moves_owned.len(),
+                    gid
                 );
                 bevy::tasks::IoTaskPool::get()
                     .spawn(async move {
                         use crate::multiplayer::vps_client;
-                        for (i, (mv, fen)) in moves_owned.iter().zip(fens_owned.iter()).enumerate() {
+                        for (i, (mv, fen)) in moves_owned.iter().zip(fens_owned.iter()).enumerate()
+                        {
                             match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
-                                Ok(sig) => info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig),
-                                Err(e) => error!("[VPS] record_move failed {} game {}: {}", mv, gid, e),
+                                Ok(sig) => {
+                                    info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig)
+                                }
+                                Err(e) => {
+                                    error!("[VPS] record_move failed {} game {}: {}", mv, gid, e)
+                                }
                             }
                         }
                     })
@@ -227,7 +228,7 @@ fn handle_rollup_to_network_events(
 
 fn handle_network_to_rollup_events(
     mut network_events: MessageReader<NetworkEvent>,
-    network_state: Res<BraidNetworkState>,
+    network_state: Res<OnlineNetworkState>,
     mut rollup_events: MessageWriter<RollupEvent>,
     mut rollup_manager: ResMut<EphemeralRollupManager>,
     mut bridge: ResMut<RollupNetworkBridge>,
@@ -284,7 +285,10 @@ fn handle_network_to_rollup_events(
                     },
                 );
 
-                info!("Peer batch validated for game {} — peer will submit via record_move", game_id);
+                info!(
+                    "Peer batch validated for game {} — peer will submit via record_move",
+                    game_id
+                );
             }
 
             NetworkMessage::BatchAccept {
@@ -299,7 +303,8 @@ fn handle_network_to_rollup_events(
                     bridge.awaiting_commit_confirmation = false;
                 }
                 // Submit the accepted batch via VPS record_move on the ER.
-                if let Some((moves, next_fens)) = bridge.pending_batches.remove(batch_hash.as_str()) {
+                if let Some((moves, next_fens)) = bridge.pending_batches.remove(batch_hash.as_str())
+                {
                     let gid = *game_id;
                     let base_nonce = bridge.move_nonce;
                     bridge.move_nonce += moves.len() as u64;
@@ -308,8 +313,13 @@ fn handle_network_to_rollup_events(
                             use crate::multiplayer::vps_client;
                             for (i, (mv, fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
                                 match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
-                                    Ok(sig) => info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig),
-                                    Err(e) => error!("[VPS] record_move failed {} game {}: {}", mv, gid, e),
+                                    Ok(sig) => {
+                                        info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig)
+                                    }
+                                    Err(e) => error!(
+                                        "[VPS] record_move failed {} game {}: {}",
+                                        mv, gid, e
+                                    ),
                                 }
                             }
                         })
@@ -384,7 +394,10 @@ fn handle_network_to_rollup_events(
             // A reconnecting peer sends BraidResyncRequest with the version hash
             // of the last move it applied.  We look up our local Braid move log
             // and replay every update that came after that version.
-            NetworkMessage::BraidResyncRequest { game_id, since_version } => {
+            NetworkMessage::BraidResyncRequest {
+                game_id,
+                since_version,
+            } => {
                 let gid = *game_id;
                 let since = since_version.clone();
                 let msg_tx = network_state.message_sender.clone();
@@ -396,8 +409,8 @@ fn handle_network_to_rollup_events(
 
                         // Fetch the move log from the VPS (authoritative archive).
                         // Falls back to an empty list if unavailable.
-                        let all_moves: Vec<MovePayload> = vps_client::fetch_move_log(gid)
-                            .unwrap_or_default();
+                        let all_moves: Vec<MovePayload> =
+                            vps_client::fetch_move_log(gid).unwrap_or_default();
 
                         // Find the position of since_version in the log and return everything after.
                         let since_ver = since.clone();
@@ -415,7 +428,12 @@ fn handle_network_to_rollup_events(
                             return;
                         }
 
-                        info!("[RESYNC] Sending {} missed moves for game {} since {}", missed.len(), gid, since);
+                        info!(
+                            "[RESYNC] Sending {} missed moves for game {} since {}",
+                            missed.len(),
+                            gid,
+                            since
+                        );
                         if let Some(tx) = msg_tx {
                             let _ = tx.send(NetworkMessage::BraidResyncResponse {
                                 game_id: gid,
@@ -428,10 +446,17 @@ fn handle_network_to_rollup_events(
 
             // A peer sent us missed moves in response to our BraidResyncRequest.
             // Replay each one through the normal NetworkEvent path.
-            NetworkMessage::BraidResyncResponse { game_id, move_payloads } => {
+            NetworkMessage::BraidResyncResponse {
+                game_id,
+                move_payloads,
+            } => {
                 use braid_chess::MovePayload;
                 let gid = *game_id;
-                info!("[RESYNC] Received {} missed moves for game {}", move_payloads.len(), gid);
+                info!(
+                    "[RESYNC] Received {} missed moves for game {}",
+                    move_payloads.len(),
+                    gid
+                );
                 for json in move_payloads {
                     if let Ok(p) = serde_json::from_str::<MovePayload>(json) {
                         rollup_events.write(RollupEvent::ResyncedMove {
@@ -447,19 +472,30 @@ fn handle_network_to_rollup_events(
             // A new peer joined the game gossip topic and broadcast their full
             // current game state.  If we are a spectator or have missed moves,
             // apply the snapshot to catch up.
-            NetworkMessage::GameSnapshot { game_id, fen, move_payloads, head_version } => {
+            NetworkMessage::GameSnapshot {
+                game_id,
+                fen,
+                move_payloads,
+                head_version,
+            } => {
                 use braid_chess::MovePayload;
                 let gid = *game_id;
                 if gid != rollup_manager.game_id {
                     // Not our game — ignore.
                 } else {
-                    info!("[SNAPSHOT] Received game snapshot for {} ({} moves, head {})", gid, move_payloads.len(), head_version);
+                    info!(
+                        "[SNAPSHOT] Received game snapshot for {} ({} moves, head {})",
+                        gid,
+                        move_payloads.len(),
+                        head_version
+                    );
                     // Emit a full-state resync event so the game layer can
                     // reconstruct position from the authoritative FEN.
                     rollup_events.write(RollupEvent::SnapshotReceived {
                         game_id: gid,
                         fen: fen.clone(),
-                        move_payloads: move_payloads.iter()
+                        move_payloads: move_payloads
+                            .iter()
                             .filter_map(|j| serde_json::from_str::<MovePayload>(j).ok())
                             .collect(),
                         head_version: head_version.clone(),
@@ -531,12 +567,18 @@ fn submit_moves_via_vps(
     for (i, (move_str, next_fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
         match vps_client::record_move(game_id, move_str, next_fen, base_nonce + i as u64) {
             Ok(sig) => {
-                info!("[VPS] Move {} recorded for game {}: {}", move_str, game_id, sig);
+                info!(
+                    "[VPS] Move {} recorded for game {}: {}",
+                    move_str, game_id, sig
+                );
                 recent_txs.push(move_str.clone(), sig.clone());
                 magicblock_events.write(MagicBlockEvent::TransactionRoutedToEr { signature: sig });
             }
             Err(e) => {
-                error!("[VPS] record_move failed for {} game {}: {}", move_str, game_id, e);
+                error!(
+                    "[VPS] record_move failed for {} game {}: {}",
+                    move_str, game_id, e
+                );
                 return;
             }
         }
@@ -572,11 +614,17 @@ fn handle_game_start_delegation(
         // If both players delegate simultaneously the second TX fails with
         // AccountOwnedByWrongProgram because the PDA owner changed after the first delegation.
         if !rollup_manager.is_creator {
-            info!("[DELEGATION] Game {} — joiner does not delegate; skipping", game_id);
+            info!(
+                "[DELEGATION] Game {} — joiner does not delegate; skipping",
+                game_id
+            );
             continue;
         }
 
-        info!("[DELEGATION] Game {} started - spawning ER delegation task", game_id);
+        info!(
+            "[DELEGATION] Game {} started - spawning ER delegation task",
+            game_id
+        );
 
         // Derive the game PDA using the Solana game_id
         let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
@@ -626,11 +674,17 @@ fn handle_game_start_delegation(
                 use crate::multiplayer::vps_client;
                 match vps_client::vps_fetch_move_nonce(game_id) {
                     Ok(next_nonce) => {
-                        info!("[NONCE] Resynced nonce for game {} → {}", game_id, next_nonce);
+                        info!(
+                            "[NONCE] Resynced nonce for game {} → {}",
+                            game_id, next_nonce
+                        );
                         let _ = nonce_tx.send(next_nonce);
                     }
                     Err(e) => {
-                        warn!("[NONCE] Failed to fetch nonce for game {}: {} — keeping local nonce", game_id, e);
+                        warn!(
+                            "[NONCE] Failed to fetch nonce for game {}: {} — keeping local nonce",
+                            game_id, e
+                        );
                     }
                 }
             })
@@ -666,11 +720,17 @@ async fn spawn_delegation_task(
 
     // The delegation instruction marks wallet_pubkey as is_signer:true, so the
     // wallet must sign — not the VPS session key. Route through Tauri (Phantom popup).
-    info!("[DELEGATION-TASK] Sending delegation TX via Tauri wallet for game {}", game_id);
+    info!(
+        "[DELEGATION-TASK] Sending delegation TX via Tauri wallet for game {}",
+        game_id
+    );
 
     match tauri_signer::sign_and_send_via_tauri(DEVNET_RPC_URL, wallet_pubkey, &[ix], &[]) {
         Ok(sig) => {
-            info!("[DELEGATION-TASK] SUCCESS for game {} sig: {}", game_id, sig);
+            info!(
+                "[DELEGATION-TASK] SUCCESS for game {} sig: {}",
+                game_id, sig
+            );
             Ok(game_pda)
         }
         Err(e) => {
@@ -759,13 +819,15 @@ fn retry_pending_delegation(
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            let result =
-                spawn_delegation_task(game_pda, game_id, wallet_pubkey, rpc_client).await;
+            let result = spawn_delegation_task(game_pda, game_id, wallet_pubkey, rpc_client).await;
             let _ = tx.send(result);
         })
         .detach();
 
-    info!("Retry delegation spawned for game {} PDA {}", game_id, game_pda);
+    info!(
+        "Retry delegation spawned for game {} PDA {}",
+        game_id, game_pda
+    );
 
     let _ = magicblock_events; // suppress unused warning
 }
@@ -794,17 +856,23 @@ fn handle_game_end_undelegation(
             event.game_id
         };
 
-        info!("[FINALIZE] Game {} ended (winner={:?} reason={}) — preparing on-chain finalization",
-            game_id, event.winner, event.reason);
+        info!(
+            "[FINALIZE] Game {} ended (winner={:?} reason={}) — preparing on-chain finalization",
+            game_id, event.winner, event.reason
+        );
 
         // Derive and log the move_log PDA so the user can look up moves on Solscan.
         let program_id: solana_sdk::pubkey::Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
         let move_log_pda = solana_sdk::pubkey::Pubkey::find_program_address(
             &[b"move_log", &game_id.to_le_bytes()],
             &program_id,
-        ).0;
+        )
+        .0;
         info!("[FINALIZE] move_log PDA: {}", move_log_pda);
-        info!("[FINALIZE] Solscan: https://solscan.io/account/{}?cluster=devnet", move_log_pda);
+        info!(
+            "[FINALIZE] Solscan: https://solscan.io/account/{}?cluster=devnet",
+            move_log_pda
+        );
 
         let is_delegated = magicblock_resolver.is_delegated();
         let game_pda = magicblock_resolver.get_delegated_game().unwrap_or_default();
@@ -822,7 +890,10 @@ fn handle_game_end_undelegation(
                 }
             }
             None => {
-                warn!("[FINALIZE] No wallet state — cannot finalize game {}", game_id);
+                warn!(
+                    "[FINALIZE] No wallet state — cannot finalize game {}",
+                    game_id
+                );
                 if is_delegated {
                     magicblock_events.write(MagicBlockEvent::UndelegationFailed {
                         game_pda,
@@ -834,8 +905,14 @@ fn handle_game_end_undelegation(
         };
 
         if white_pk == Pubkey::default() || black_pk == Pubkey::default() {
-            warn!("[FINALIZE] Opponent pubkey unavailable for game {} — deferring finalization", game_id);
-            let local_pk = solana_state.as_ref().and_then(|s| s.wallet_pubkey).unwrap_or_default();
+            warn!(
+                "[FINALIZE] Opponent pubkey unavailable for game {} — deferring finalization",
+                game_id
+            );
+            let local_pk = solana_state
+                .as_ref()
+                .and_then(|s| s.wallet_pubkey)
+                .unwrap_or_default();
             let wager = competitive.as_ref().map(|c| c.stake_amount).unwrap_or(0);
             bridge.pending_finalization = Some(PendingFinalization {
                 game_id,
@@ -858,7 +935,9 @@ fn handle_game_end_undelegation(
             bevy::tasks::IoTaskPool::get()
                 .spawn(async move {
                     use crate::multiplayer::vps_client;
-                    if let Err(e) = vps_client::vps_submit_free_rated_result(game_id, win.as_deref(), &w, &b) {
+                    if let Err(e) =
+                        vps_client::vps_submit_free_rated_result(game_id, win.as_deref(), &w, &b)
+                    {
                         error!("[FREE_RATED] ELO update failed for game {}: {e}", game_id);
                     } else {
                         info!("[FREE_RATED] ELO updated for game {}", game_id);
@@ -888,24 +967,26 @@ fn spawn_finalization_task(
 ) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            use crate::multiplayer::vps_client;
-            use solana_client::rpc_client::RpcClient;
             use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
+            use crate::multiplayer::vps_client;
             use crate::solana::instructions::PROGRAM_ID as SOLANA_PROGRAM_ID;
+            use solana_client::rpc_client::RpcClient;
 
             // Brief pause before undelegation so the final move batch lands first.
             std::thread::sleep(std::time::Duration::from_secs(2));
 
             match vps_client::vps_undelegate_game(game_id) {
                 Ok(sig) => info!("[UNDELEGATE] ER committed for game {} sig {}", game_id, sig),
-                Err(e) => error!("[UNDELEGATE] Failed for game {}: {e} — continuing to finalize", game_id),
+                Err(e) => error!(
+                    "[UNDELEGATE] Failed for game {}: {e} — continuing to finalize",
+                    game_id
+                ),
             }
 
             // Item 2: Poll devnet until game PDA owner returns to the program (not ER).
             let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
-            let game_pda = Pubkey::find_program_address(
-                &[b"game", &game_id.to_le_bytes()], &program_id,
-            ).0;
+            let game_pda =
+                Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &program_id).0;
             let rpc = RpcClient::new(DEVNET_RPC_URL.to_string());
             let deadline = std::time::Instant::now()
                 + std::time::Duration::from_secs(MAX_UNDELEGATE_WAIT_SECS);
@@ -913,15 +994,20 @@ fn spawn_finalization_task(
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 match rpc.get_account(&game_pda) {
                     Ok(acc) if acc.owner == program_id => {
-                        info!("[UNDELEGATE] Game {} PDA returned to devnet — proceeding to finalize", game_id);
+                        info!(
+                            "[UNDELEGATE] Game {} PDA returned to devnet — proceeding to finalize",
+                            game_id
+                        );
                         break;
                     }
-                    Ok(_) => {} // still owned by ER
+                    Ok(_) => {}  // still owned by ER
                     Err(_) => {} // transient RPC error — keep polling
                 }
                 if std::time::Instant::now() >= deadline {
-                    warn!("[UNDELEGATE] Game {} PDA did not return after {}s — finalizing anyway",
-                          game_id, MAX_UNDELEGATE_WAIT_SECS);
+                    warn!(
+                        "[UNDELEGATE] Game {} PDA did not return after {}s — finalizing anyway",
+                        game_id, MAX_UNDELEGATE_WAIT_SECS
+                    );
                     break;
                 }
             }
@@ -932,8 +1018,10 @@ fn spawn_finalization_task(
 
             match vps_client::vps_finalize_game(game_id, win_ref, &w_str, &b_str, wager_lamports) {
                 Ok(result) => {
-                    info!("[FINALIZE] Game {} finalized on-chain sig {} prize {} lam",
-                          game_id, result.sig, result.winner_lamports);
+                    info!(
+                        "[FINALIZE] Game {} finalized on-chain sig {} prize {} lam",
+                        game_id, result.sig, result.winner_lamports
+                    );
                     let _ = result_tx.send(FinalizationResult {
                         sig: result.sig,
                         winner_lamports: result.winner_lamports,
@@ -989,7 +1077,10 @@ fn retry_pending_finalization(
     };
 
     if white_pk == Pubkey::default() || black_pk == Pubkey::default() {
-        warn!("[FINALIZE] Resolved pubkeys still default for game {} — skipping", pending.game_id);
+        warn!(
+            "[FINALIZE] Resolved pubkeys still default for game {} — skipping",
+            pending.game_id
+        );
         return;
     }
 
@@ -999,7 +1090,14 @@ fn retry_pending_finalization(
     );
     let (fin_tx, fin_rx) = oneshot::channel::<FinalizationResult>();
     bridge.finalization_rx = Some(fin_rx);
-    spawn_finalization_task(pending.game_id, pending.winner, white_pk, black_pk, pending.wager_lamports, fin_tx);
+    spawn_finalization_task(
+        pending.game_id,
+        pending.winner,
+        white_pk,
+        black_pk,
+        pending.wager_lamports,
+        fin_tx,
+    );
 }
 
 /// Item 1: Reads the finalization result channel and updates GameOverPayoutInfo.
@@ -1027,7 +1125,9 @@ fn apply_finalization_result(
             }
         }
         Err(oneshot::error::TryRecvError::Empty) => {}
-        Err(_) => { bridge.finalization_rx = None; }
+        Err(_) => {
+            bridge.finalization_rx = None;
+        }
     }
 }
 
@@ -1044,7 +1144,9 @@ fn apply_nonce_resync(mut bridge: ResMut<RollupNetworkBridge>) {
             info!("[NONCE] Local move_nonce set to {}", next_nonce);
         }
         Err(oneshot::error::TryRecvError::Empty) => {}
-        Err(_) => { bridge.nonce_rx = None; }
+        Err(_) => {
+            bridge.nonce_rx = None;
+        }
     }
 }
 
@@ -1067,34 +1169,53 @@ fn handle_game_end_pgn_export(
             event.game_id
         };
 
-        let white_name = if rollup_manager.is_creator { "You" } else { "Opponent" }.to_string();
-        let black_name = if rollup_manager.is_creator { "Opponent" } else { "You" }.to_string();
+        let white_name = if rollup_manager.is_creator {
+            "You"
+        } else {
+            "Opponent"
+        }
+        .to_string();
+        let black_name = if rollup_manager.is_creator {
+            "Opponent"
+        } else {
+            "You"
+        }
+        .to_string();
         let result_str = match event.winner.as_deref() {
             Some("white") => "1-0",
             Some("black") => "0-1",
             _ => "1/2-1/2",
-        }.to_string();
+        }
+        .to_string();
 
         let (tx, rx) = oneshot::channel();
         bridge.pgn_rx = Some(rx);
 
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
-                use crate::multiplayer::vps_client;
                 use crate::game::replay_braid::braid_move_log_to_parsed_pgn;
+                use crate::multiplayer::vps_client;
 
                 let moves = match vps_client::fetch_move_log(game_id) {
                     Ok(m) => m,
                     Err(e) => {
-                        warn!("[PGN-EXPORT] fetch_move_log failed for game {}: {}", game_id, e);
+                        warn!(
+                            "[PGN-EXPORT] fetch_move_log failed for game {}: {}",
+                            game_id, e
+                        );
                         let _ = tx.send(None);
                         return;
                     }
                 };
 
-                let pgn = braid_move_log_to_parsed_pgn(&moves, &white_name, &black_name, &result_str);
+                let pgn =
+                    braid_move_log_to_parsed_pgn(&moves, &white_name, &black_name, &result_str);
                 if pgn.is_none() {
-                    warn!("[PGN-EXPORT] Failed to build PGN for game {} ({} moves)", game_id, moves.len());
+                    warn!(
+                        "[PGN-EXPORT] Failed to build PGN for game {} ({} moves)",
+                        game_id,
+                        moves.len()
+                    );
                 }
                 let _ = tx.send(pgn);
             })
@@ -1116,7 +1237,10 @@ fn apply_pgn_export_result(
     match rx.try_recv() {
         Ok(Some(pgn)) => {
             bridge.pgn_rx = None;
-            info!("[PGN-EXPORT] Inserting ParsedPgnGameResource ({} moves)", pgn.moves.len());
+            info!(
+                "[PGN-EXPORT] Inserting ParsedPgnGameResource ({} moves)",
+                pgn.moves.len()
+            );
 
             // Update CachedGamePgn with the authoritative VPS-fetched PGN so that
             // the Review / Analyze / Save PGN buttons use the full Braid move log.
@@ -1139,7 +1263,9 @@ fn apply_pgn_export_result(
             bridge.pgn_rx = None;
         }
         Err(oneshot::error::TryRecvError::Empty) => {}
-        Err(_) => { bridge.pgn_rx = None; }
+        Err(_) => {
+            bridge.pgn_rx = None;
+        }
     }
 }
 
@@ -1171,4 +1297,3 @@ fn handle_magic_block_events(mut magicblock_events: MessageReader<MagicBlockEven
         }
     }
 }
-

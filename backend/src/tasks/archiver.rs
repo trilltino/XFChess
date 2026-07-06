@@ -1,12 +1,12 @@
-use crate::db::repository::{GameRepository, GameRecord};
+use crate::db::repository::{GameRecord, GameRepository};
+use anyhow::{anyhow, Result};
 use sqlx::SqlitePool;
-use std::fs::{OpenOptions, File};
-use std::io::{Write, Read};
-use std::path::Path;
-use anyhow::{Result, anyhow};
-use tracing::{info, error};
-use std::time::Duration;
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::Path;
+use std::time::Duration;
+use tracing::{error, info};
 
 /// Path to the binary archive file
 const ARCHIVE_PATH: &str = "archive/games.xfg";
@@ -60,7 +60,7 @@ impl Archiver {
     }
 
     fn load_wallet_index(&mut self) -> Result<()> {
-// Fixed wallet index length method and match syntax
+        // Fixed wallet index length method and match syntax
         if Path::new(WALLET_INDEX_PATH).exists() {
             let mut file = File::open(WALLET_INDEX_PATH)?;
             let mut content = String::new();
@@ -72,7 +72,10 @@ impl Archiver {
                     self.wallets.push(wallet);
                 }
             }
-            info!("[Archiver] Loaded {} wallets from index", self.wallets.len());
+            info!(
+                "[Archiver] Loaded {} wallets from index",
+                self.wallets.len()
+            );
         }
         Ok(())
     }
@@ -91,7 +94,7 @@ impl Archiver {
             .append(true)
             .open(WALLET_INDEX_PATH)?;
         writeln!(file, "{}", wallet)?;
-        
+
         Ok(idx)
     }
 
@@ -126,8 +129,14 @@ impl Archiver {
     }
 
     async fn archive_game(&mut self, file: &mut File, game: &GameRecord) -> Result<()> {
-        let white_wallet = game.player_white.as_ref().ok_or_else(|| anyhow!("missing white wallet"))?;
-        let black_wallet = game.player_black.as_ref().ok_or_else(|| anyhow!("missing black wallet"))?;
+        let white_wallet = game
+            .player_white
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing white wallet"))?;
+        let black_wallet = game
+            .player_black
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing black wallet"))?;
 
         let white_idx = self.get_or_create_wallet_idx(white_wallet)?;
         let black_idx = self.get_or_create_wallet_idx(black_wallet)?;
@@ -160,10 +169,12 @@ impl Archiver {
 /// Packs a UCI move (e.g. "e2e4") into 16 bits
 /// Format: 6 bits FROM, 6 bits TO, 4 bits FLAGS
 fn pack_move(uci: &str) -> u16 {
-    if uci.len() < 4 { return 0; }
+    if uci.len() < 4 {
+        return 0;
+    }
     let from_sq = parse_sq(&uci[0..2]);
     let to_sq = parse_sq(&uci[2..4]);
-    
+
     let mut flags = 0;
     if uci.len() == 5 {
         // Promotion
@@ -180,7 +191,9 @@ fn pack_move(uci: &str) -> u16 {
 }
 
 fn parse_sq(sq: &str) -> u8 {
-    if sq.len() != 2 { return 0; }
+    if sq.len() != 2 {
+        return 0;
+    }
     let file = sq.as_bytes()[0] - b'a';
     let rank = sq.as_bytes()[1] - b'1';
     (rank * 8) + file

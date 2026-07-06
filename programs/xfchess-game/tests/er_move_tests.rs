@@ -34,7 +34,9 @@ async fn records_a_legal_move_and_advances_state() {
     let next = apply(&board, &mv);
     let ix = record_move_ix(GAME_ID, &white, &session.pubkey(), mv, next, 1, Some(0));
 
-    send(&mut ctx, ix, &[&session]).await.expect("legal move should succeed");
+    send(&mut ctx, ix, &[&session])
+        .await
+        .expect("legal move should succeed");
 
     let g = fetch_game(&mut ctx, GAME_ID).await;
     assert_eq!(g.nonce, 1, "nonce advances");
@@ -85,7 +87,10 @@ async fn rejects_parent_nonce_mismatch() {
     let ix = record_move_ix(GAME_ID, &white, &session.pubkey(), mv, next, 1, Some(5));
 
     let err = send(&mut ctx, ix, &[&session]).await.unwrap_err();
-    assert_eq!(custom_code(&err), Some(ec(GameErrorCode::ParentNonceMismatch)));
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(GameErrorCode::ParentNonceMismatch))
+    );
 }
 
 #[tokio::test]
@@ -102,7 +107,15 @@ async fn rejects_move_out_of_turn() {
     ])
     .await;
 
-    let ix = record_move_ix(GAME_ID, &black, &session.pubkey(), uci("e2e4"), board, 1, Some(0));
+    let ix = record_move_ix(
+        GAME_ID,
+        &black,
+        &session.pubkey(),
+        uci("e2e4"),
+        board,
+        1,
+        Some(0),
+    );
 
     let err = send(&mut ctx, ix, &[&session]).await.unwrap_err();
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::NotYourTurn)));
@@ -122,7 +135,15 @@ async fn rejects_illegal_move() {
     .await;
 
     // e2e5 is not a legal pawn move from the start position.
-    let ix = record_move_ix(GAME_ID, &white, &session.pubkey(), uci("e2e5"), board, 1, Some(0));
+    let ix = record_move_ix(
+        GAME_ID,
+        &white,
+        &session.pubkey(),
+        uci("e2e5"),
+        board,
+        1,
+        Some(0),
+    );
 
     let err = send(&mut ctx, ix, &[&session]).await.unwrap_err();
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidMove)));
@@ -170,7 +191,9 @@ async fn detects_checkmate_and_finishes_game() {
     let next = apply(&board, &mv);
     let ix = record_move_ix(GAME_ID, &black, &session.pubkey(), mv, next, 4, Some(3));
 
-    send(&mut ctx, ix, &[&session]).await.expect("mating move is legal");
+    send(&mut ctx, ix, &[&session])
+        .await
+        .expect("mating move is legal");
 
     let g = fetch_game(&mut ctx, GAME_ID).await;
     assert_eq!(g.status, GameStatus::Finished, "checkmate ends the game");

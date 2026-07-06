@@ -1,10 +1,10 @@
 pub mod addon;
+pub mod global_session_manager;
 pub mod integration;
 pub mod lobby;
-pub mod wager_rate;
 pub mod session_authorization;
 pub mod session_key_manager;
+pub mod tauri_signer;
 pub mod tournament;
 pub mod tournament_session;
-pub mod tauri_signer;
-pub mod global_session_manager;
+pub mod wager_rate;

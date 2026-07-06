@@ -1,5 +1,5 @@
 use axum::{
-    extract::{WebSocketUpgrade, State, ws::Message},
+    extract::{ws::Message, State, WebSocketUpgrade},
     response::IntoResponse,
 };
 use futures::{SinkExt, StreamExt};
@@ -32,35 +32,42 @@ pub async fn handle_auth_websocket(
                                 Ok(claims) => {
                                     is_authenticated = true;
                                     client_id = claims.sub;
-                                    info!("[WS_AUTH] Client {} authenticated successfully", client_id);
+                                    info!(
+                                        "[WS_AUTH] Client {} authenticated successfully",
+                                        client_id
+                                    );
                                     break;
                                 }
                                 Err(_) => {
                                     error!("[WS_AUTH] Invalid or expired token received");
-                                    let _ = write.send(Message::Text("Invalid token".to_string().into())).await;
+                                    let _ = write
+                                        .send(Message::Text("Invalid token".to_string().into()))
+                                        .await;
                                     let _ = write.close().await;
                                     return;
                                 }
                             }
                         }
                     }
-                },
+                }
                 Ok(Message::Close(_)) => {
                     info!("[WS_AUTH] Client closed connection during auth");
                     return;
-                },
+                }
                 Err(e) => {
                     error!("[WS_AUTH] Error during auth handshake: {}", e);
                     let _ = write.close().await;
                     return;
-                },
+                }
                 _ => {}
             }
         }
 
         if !is_authenticated {
             error!("[WS_AUTH] Unauthorized WebSocket connection attempt");
-            let _ = write.send(Message::Text("Unauthorized".to_string().into())).await;
+            let _ = write
+                .send(Message::Text("Unauthorized".to_string().into()))
+                .await;
             let _ = write.close().await;
             return;
         }
@@ -70,7 +77,8 @@ pub async fn handle_auth_websocket(
             "status": "connected",
             "message": "Authenticated successfully",
             "client_id": client_id
-        }).to_string();
+        })
+        .to_string();
         if let Err(e) = write.send(Message::Text(initial_data.into())).await {
             error!("[WS_AUTH] Failed to send initial data: {}", e);
             return;
@@ -86,7 +94,8 @@ pub async fn handle_auth_websocket(
                         "login_status": true,
                         "token": "updated_token",
                         "wallet_pubkey": "updated_pubkey"
-                    }).to_string();
+                    })
+                    .to_string();
                     if let Err(e) = write.send(Message::Text(response.into())).await {
                         error!("[WS_AUTH] Failed to send response to {}: {}", client_id, e);
                         break;
@@ -104,6 +113,9 @@ pub async fn handle_auth_websocket(
             }
         }
 
-        info!("[WS_AUTH] WebSocket connection closed for client {}", client_id);
+        info!(
+            "[WS_AUTH] WebSocket connection closed for client {}",
+            client_id
+        );
     })
 }

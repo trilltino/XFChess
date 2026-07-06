@@ -88,8 +88,8 @@ struct PendingLink {
     created_at: Instant,
 }
 
-use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
+use std::sync::{Arc, Mutex};
 
 static PENDING_LINKS: Lazy<Arc<Mutex<std::collections::HashMap<String, PendingLink>>>> =
     Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
@@ -117,10 +117,20 @@ async fn link_start(
 
     // Validate username (Lichess: 2-30 chars, lowercase alphanumeric + hyphen/underscore)
     if req.username.len() < 2 || req.username.len() > 30 {
-        return Err((StatusCode::BAD_REQUEST, "Username must be 2-30 characters".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Username must be 2-30 characters".to_string(),
+        ));
     }
-    if !req.username.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_') {
-        return Err((StatusCode::BAD_REQUEST, "Username contains invalid characters".to_string()));
+    if !req
+        .username
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Username contains invalid characters".to_string(),
+        ));
     }
 
     let nonce = format!(
@@ -146,11 +156,16 @@ async fn link_start(
     };
 
     {
-        let mut links = PENDING_LINKS.lock().expect("Pending links mutex should not be poisoned");
+        let mut links = PENDING_LINKS
+            .lock()
+            .expect("Pending links mutex should not be poisoned");
         links.insert(link_id.clone(), pending);
     }
 
-    info!("[ExternalElo] Link start for {} -> Lichess user '{}' (nonce: {})", req.pubkey, req.username, nonce);
+    info!(
+        "[ExternalElo] Link start for {} -> Lichess user '{}' (nonce: {})",
+        req.pubkey, req.username, nonce
+    );
 
     Ok(Json(LinkStartResp {
         link_id,
@@ -166,13 +181,20 @@ async fn link_confirm(
     Json(req): Json<LinkConfirmReq>,
 ) -> Result<Json<LinkConfirmResp>, (StatusCode, String)> {
     let pending = {
-        let mut links = PENDING_LINKS.lock().expect("Pending links mutex should not be poisoned");
+        let mut links = PENDING_LINKS
+            .lock()
+            .expect("Pending links mutex should not be poisoned");
         links.remove(&req.link_id)
     };
 
     let pending = match pending {
         Some(p) => p,
-        None => return Err((StatusCode::NOT_FOUND, "Link ID not found or expired".to_string())),
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                "Link ID not found or expired".to_string(),
+            ))
+        }
     };
 
     if pending.created_at.elapsed() > Duration::from_secs(300) {
@@ -190,13 +212,18 @@ async fn link_confirm(
         .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Lichess API error: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err((StatusCode::BAD_GATEWAY, format!("Lichess API returned {}", response.status())));
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Lichess API returned {}", response.status()),
+        ));
     }
 
-    let lichess_data: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to parse Lichess response: {}", e)))?;
+    let lichess_data: serde_json::Value = response.json().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to parse Lichess response: {}", e),
+        )
+    })?;
 
     // Verify bio contains nonce
     let bio = lichess_data
@@ -214,7 +241,10 @@ async fn link_confirm(
 
     // Extract ratings
     let perfs = lichess_data.get("perfs").ok_or_else(|| {
-        (StatusCode::BAD_GATEWAY, "Lichess profile missing 'perfs' field".to_string())
+        (
+            StatusCode::BAD_GATEWAY,
+            "Lichess profile missing 'perfs' field".to_string(),
+        )
     })?;
 
     let extract_rating = |key: &str| -> u32 {
@@ -282,8 +312,14 @@ async fn link_confirm(
     let tx_sig = match solana::sign_and_submit(&rpc, link_authority, &[ix]) {
         Ok(sig) => sig.to_string(),
         Err(e) => {
-            error!("[ExternalElo] On-chain submission failed for {}: {}", pending.pubkey, e);
-            return Err((StatusCode::BAD_GATEWAY, format!("On-chain submission failed: {}", e)));
+            error!(
+                "[ExternalElo] On-chain submission failed for {}: {}",
+                pending.pubkey, e
+            );
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                format!("On-chain submission failed: {}", e),
+            ));
         }
     };
 
@@ -302,7 +338,9 @@ async fn link_confirm(
         rapid_rating,
         bullet_rating,
         &tx_sig,
-    ).await {
+    )
+    .await
+    {
         warn!("[ExternalElo] Failed to store link in DB: {}", e);
     }
 
@@ -348,7 +386,10 @@ async fn link_status(
 
     let lichess = if on_chain.lichess_verified || db_link.is_some() {
         Some(LichessStatus {
-            username: db_link.as_ref().map(|l| l.username.clone()).unwrap_or_default(),
+            username: db_link
+                .as_ref()
+                .map(|l| l.username.clone())
+                .unwrap_or_default(),
             verified: on_chain.lichess_verified,
             blitz: db_link.as_ref().map(|l| l.blitz_rating).unwrap_or(0),
             rapid: db_link.as_ref().map(|l| l.rapid_rating).unwrap_or(0),
@@ -387,7 +428,12 @@ async fn link_sync(
     let pool = state.store.pool();
     let db_link = fetch_link_from_db(pool.clone(), &req.pubkey)
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, format!("No linked Lichess account found: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("No linked Lichess account found: {}", e),
+            )
+        })?;
 
     // Poll Lichess API
     let lichess_url = format!("https://lichess.org/api/user/{}", db_link.username);
@@ -400,15 +446,22 @@ async fn link_sync(
         .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Lichess API error: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err((StatusCode::BAD_GATEWAY, format!("Lichess API returned {}", response.status())));
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Lichess API returned {}", response.status()),
+        ));
     }
 
-    let lichess_data: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to parse Lichess response: {}", e)))?;
+    let lichess_data: serde_json::Value = response.json().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to parse Lichess response: {}", e),
+        )
+    })?;
 
-    let perfs = lichess_data.get("perfs").unwrap_or(&serde_json::Value::Null);
+    let perfs = lichess_data
+        .get("perfs")
+        .unwrap_or(&serde_json::Value::Null);
     let extract_rating = |key: &str| -> u32 {
         perfs
             .get(key)
@@ -439,8 +492,14 @@ async fn link_sync(
     let tx_sig = match solana::sign_and_submit(&rpc, link_authority, &[ix]) {
         Ok(sig) => sig.to_string(),
         Err(e) => {
-            error!("[ExternalElo] Sync on-chain submission failed for {}: {}", req.pubkey, e);
-            return Err((StatusCode::BAD_GATEWAY, format!("On-chain submission failed: {}", e)));
+            error!(
+                "[ExternalElo] Sync on-chain submission failed for {}: {}",
+                req.pubkey, e
+            );
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                format!("On-chain submission failed: {}", e),
+            ));
         }
     };
 
@@ -453,8 +512,13 @@ async fn link_sync(
         rapid_rating,
         bullet_rating,
         &tx_sig,
-    ).await {
-        warn!("[ExternalElo] Failed to update link in DB during sync: {}", e);
+    )
+    .await
+    {
+        warn!(
+            "[ExternalElo] Failed to update link in DB during sync: {}",
+            e
+        );
     }
 
     state.elo_cache.invalidate(&req.pubkey);
@@ -511,7 +575,7 @@ async fn store_link_in_db(
             bullet_rating = excluded.bullet_rating,
             last_sync_at = excluded.last_sync_at,
             on_chain_tx = excluded.on_chain_tx
-        "#
+        "#,
     )
     .bind(pubkey)
     .bind(username)
@@ -536,7 +600,7 @@ async fn fetch_link_from_db(
         SELECT username, blitz_rating, rapid_rating, bullet_rating
         FROM external_elo_links
         WHERE pubkey = ? AND platform = 'lichess'
-        "#
+        "#,
     )
     .bind(pubkey)
     .fetch_one(&pool)

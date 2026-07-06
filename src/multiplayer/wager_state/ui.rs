@@ -1,6 +1,6 @@
+use super::state::WagerState;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use super::state::WagerState;
 
 /// UI system that displays wager info in-game
 pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts) {
@@ -54,7 +54,7 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                 if wager_state.match_type.as_deref() != Some("Free") {
                     ui.label(egui::RichText::new("Fee Breakdown").strong().size(13.0));
                     ui.add_space(4.0);
-                    
+
                     // Country fee
                     if let Some(country_fee) = wager_state.country_fee {
                         ui.horizontal(|ui| {
@@ -82,7 +82,8 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                     ui.separator();
 
                     // Total fees
-                    let total_fees = wager_state.country_fee.unwrap_or(0.0) + wager_state.elo_fee.unwrap_or(0.0);
+                    let total_fees =
+                        wager_state.country_fee.unwrap_or(0.0) + wager_state.elo_fee.unwrap_or(0.0);
                     if total_fees > 0.0 {
                         ui.horizontal(|ui| {
                             ui.label("Total Fees:");
@@ -121,4 +122,3 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
             });
         });
 }
-

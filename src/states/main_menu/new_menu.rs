@@ -6,7 +6,6 @@
 //!
 //! Press **K** to toggle back to the website-style (classic) menu.
 
-
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -32,8 +31,12 @@ pub(super) fn menu_click_sound(
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
-    let Some(sounds) = sounds else { return; };
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    let Some(sounds) = sounds else {
+        return;
+    };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
     if ctx.is_pointer_over_area() {
         commands.spawn(bevy::audio::AudioPlayer::new(sounds.menu_click.clone()));
     }
@@ -107,7 +110,13 @@ pub struct MenuCameraOrbit {
 
 impl Default for MenuCameraOrbit {
     fn default() -> Self {
-        Self { angle: 0.0, radius: 16.0, height: 14.0, speed: 0.10, ortho: false }
+        Self {
+            angle: 0.0,
+            radius: 16.0,
+            height: 14.0,
+            speed: 0.10,
+            ortho: false,
+        }
     }
 }
 
@@ -135,7 +144,11 @@ pub fn spawn_menu_bg_board(
 
     for rank in 0..8u8 {
         for file in 0..8u8 {
-            let mat = if (file + rank) % 2 == 0 { light.clone() } else { dark.clone() };
+            let mat = if (file + rank) % 2 == 0 {
+                light.clone()
+            } else {
+                dark.clone()
+            };
             commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat),
@@ -150,19 +163,25 @@ pub fn spawn_menu_bg_board(
 
 /// Spawn all 32 pieces in starting position for the menu background.
 /// Reuses the same [`PieceMeshes`] resource loaded at `Startup` by [`PiecePlugin`].
-/// Runs every frame until `PieceMeshes` is available, then spawns once.
+///
+/// Self-healing: the guard is the actual world (are any ambient pieces present?),
+/// not a one-shot bool. A bool flag can desync from reality — e.g. a transient
+/// `MainMenu` exit despawns the pieces via `DespawnOnExit` but the flag stays set,
+/// leaving the board empty forever. Keying off `MenuBgPieceHome` existence means
+/// the pieces are always (re)spawned whenever they're missing and meshes are ready.
 pub fn spawn_menu_bg_pieces(
     mut commands: Commands,
     piece_meshes: Option<Res<PieceMeshes>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut spawned: ResMut<MenuBgPiecesSpawned>,
     mut anim: ResMut<super::board_animation::BoardAnimator>,
+    existing: Query<(), With<super::board_animation::MenuBgPieceHome>>,
 ) {
-    if spawned.0 {
-        return;
+    if !existing.is_empty() {
+        return; // ambient pieces already present
     }
     let Some(pm) = piece_meshes else {
-        return; // retry next frame
+        return; // meshes not loaded yet — retry next frame
     };
 
     let white_mat = materials.add(crate::rendering::pieces::white_piece_material());
@@ -192,58 +211,71 @@ pub fn spawn_menu_bg_pieces(
             (rot_w, rot_b)
         };
         // White back rank 0
-        let ew = commands.spawn((
-            Mesh3d(pm.get(pt, PieceColor::White)),
-            MeshMaterial3d(white_mat.clone()),
-            Transform::from_xyz(7.0 - f as f32, 0.05, 0.0).with_rotation(wr),
-            Visibility::Visible,
-            MenuBg,
-            DespawnOnExit(GameState::MainMenu),
-            super::board_animation::MenuBgPieceHome { file, rank: 0 },
-        )).id();
+        let ew = commands
+            .spawn((
+                Mesh3d(pm.get(pt, PieceColor::White)),
+                MeshMaterial3d(white_mat.clone()),
+                Transform::from_xyz(7.0 - f as f32, 0.05, 0.0).with_rotation(wr),
+                Visibility::Visible,
+                MenuBg,
+                DespawnOnExit(GameState::MainMenu),
+                super::board_animation::MenuBgPieceHome { file, rank: 0 },
+            ))
+            .id();
         anim.board[0][f] = Some(ew);
 
         // Black back rank 7
-        let eb = commands.spawn((
-            Mesh3d(pm.get(pt, PieceColor::Black)),
-            MeshMaterial3d(black_mat.clone()),
-            Transform::from_xyz(7.0 - f as f32, 0.05, 7.0).with_rotation(br),
-            Visibility::Visible,
-            MenuBg,
-            DespawnOnExit(GameState::MainMenu),
-            super::board_animation::MenuBgPieceHome { file, rank: 7 },
-        )).id();
+        let eb = commands
+            .spawn((
+                Mesh3d(pm.get(pt, PieceColor::Black)),
+                MeshMaterial3d(black_mat.clone()),
+                Transform::from_xyz(7.0 - f as f32, 0.05, 7.0).with_rotation(br),
+                Visibility::Visible,
+                MenuBg,
+                DespawnOnExit(GameState::MainMenu),
+                super::board_animation::MenuBgPieceHome { file, rank: 7 },
+            ))
+            .id();
         anim.board[7][f] = Some(eb);
     }
 
     for f in 0..8usize {
         let file = f as u8;
         // White pawns rank 1
-        let ewp = commands.spawn((
-            Mesh3d(pm.get(PieceType::Pawn, PieceColor::White)),
-            MeshMaterial3d(white_mat.clone()),
-            Transform::from_xyz(7.0 - f as f32, 0.05, 1.0).with_rotation(rot_w),
-            Visibility::Visible,
-            MenuBg,
-            DespawnOnExit(GameState::MainMenu),
-            super::board_animation::MenuBgPieceHome { file, rank: 1 },
-        )).id();
+        let ewp = commands
+            .spawn((
+                Mesh3d(pm.get(PieceType::Pawn, PieceColor::White)),
+                MeshMaterial3d(white_mat.clone()),
+                Transform::from_xyz(7.0 - f as f32, 0.05, 1.0).with_rotation(rot_w),
+                Visibility::Visible,
+                MenuBg,
+                DespawnOnExit(GameState::MainMenu),
+                super::board_animation::MenuBgPieceHome { file, rank: 1 },
+            ))
+            .id();
         anim.board[1][f] = Some(ewp);
 
         // Black pawns rank 6
-        let ebp = commands.spawn((
-            Mesh3d(pm.get(PieceType::Pawn, PieceColor::Black)),
-            MeshMaterial3d(black_mat.clone()),
-            Transform::from_xyz(7.0 - f as f32, 0.05, 6.0).with_rotation(rot_b),
-            Visibility::Visible,
-            MenuBg,
-            DespawnOnExit(GameState::MainMenu),
-            super::board_animation::MenuBgPieceHome { file, rank: 6 },
-        )).id();
+        let ebp = commands
+            .spawn((
+                Mesh3d(pm.get(PieceType::Pawn, PieceColor::Black)),
+                MeshMaterial3d(black_mat.clone()),
+                Transform::from_xyz(7.0 - f as f32, 0.05, 6.0).with_rotation(rot_b),
+                Visibility::Visible,
+                MenuBg,
+                DespawnOnExit(GameState::MainMenu),
+                super::board_animation::MenuBgPieceHome { file, rank: 6 },
+            ))
+            .id();
         anim.board[6][f] = Some(ebp);
     }
 
     spawned.0 = true;
+    // Fresh starting position ⇒ reset the replay so a (re)spawn always starts the
+    // Immortal-Zugzwang sequence from move 1 rather than resuming a stale ply.
+    anim.ply_index = 0;
+    anim.end_pause = 0.0;
+    anim.move_timer = 2.5;
     anim.active = true;
 }
 
@@ -309,11 +341,7 @@ pub fn spawn_menu_bg_lights(
 // ── Camera & style systems ───────────────────────────────────────────────────
 
 /// No-op kept for API compatibility — volumetric fog removed for performance.
-pub fn setup_menu_fog(
-    _commands: Commands,
-    _cam: Res<crate::PersistentEguiCamera>,
-) {
-}
+pub fn setup_menu_fog(_commands: Commands, _cam: Res<crate::PersistentEguiCamera>) {}
 
 /// Continuously orbits the camera around BOARD_CENTER.
 /// Press **V** to toggle a fixed isometric orthographic view of the board
@@ -332,18 +360,25 @@ pub fn orbit_camera_system(
     }
     if keyboard.just_pressed(KeyCode::KeyV) {
         orbit.ortho = !orbit.ortho;
-        info!("[MENU] Toggled menu board view to {}", if orbit.ortho { "orthographic" } else { "orbit" });
+        info!(
+            "[MENU] Toggled menu board view to {}",
+            if orbit.ortho { "orthographic" } else { "orbit" }
+        );
     }
 
     let Some(entity) = cam.entity else { return };
-    let Ok((mut t, mut proj)) = query.get_mut(entity) else { return };
+    let Ok((mut t, mut proj)) = query.get_mut(entity) else {
+        return;
+    };
 
     if orbit.ortho {
         // Fixed isometric view — mirrors setup_templeos_camera: equal offsets on
         // X/Y/Z from the board centre with a FixedVertical orthographic projection.
         if !matches!(*proj, Projection::Orthographic(_)) {
             *proj = Projection::from(OrthographicProjection {
-                scaling_mode: bevy::camera::ScalingMode::FixedVertical { viewport_height: 16.0 },
+                scaling_mode: bevy::camera::ScalingMode::FixedVertical {
+                    viewport_height: 16.0,
+                },
                 ..OrthographicProjection::default_3d()
             });
         }
@@ -361,7 +396,8 @@ pub fn orbit_camera_system(
     let z = BOARD_CENTER.z + orbit.radius * orbit.angle.sin();
     // Look at the true board centre so the board is horizontally centred on
     // screen, symmetric with the centred title.
-    *t = Transform::from_translation(Vec3::new(x, orbit.height, z)).looking_at(BOARD_CENTER, Vec3::Y);
+    *t = Transform::from_translation(Vec3::new(x, orbit.height, z))
+        .looking_at(BOARD_CENTER, Vec3::Y);
 }
 
 /// Handle keyboard shortcuts on the main menu.
@@ -460,26 +496,42 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             })
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new("Are you sure you want to exit?").size(15.0).color(egui::Color32::WHITE).strong());
+                    ui.label(
+                        egui::RichText::new("Are you sure you want to exit?")
+                            .size(15.0)
+                            .color(egui::Color32::WHITE)
+                            .strong(),
+                    );
                     ui.add_space(18.0);
                     ui.horizontal(|ui| {
                         ui.add_space(20.0);
-                        if ui.add_sized(
-                            [110.0, 34.0],
-                            egui::Button::new(egui::RichText::new("Exit").size(13.0).color(egui::Color32::WHITE).strong())
+                        if ui
+                            .add_sized(
+                                [110.0, 34.0],
+                                egui::Button::new(
+                                    egui::RichText::new("Exit")
+                                        .size(13.0)
+                                        .color(egui::Color32::WHITE)
+                                        .strong(),
+                                )
                                 .fill(egui::Color32::from_rgb(160, 50, 50))
                                 .corner_radius(4.0),
-                        ).clicked() {
+                            )
+                            .clicked()
+                        {
                             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
                             std::process::exit(0);
                         }
                         ui.add_space(12.0);
-                        if ui.add_sized(
-                            [110.0, 34.0],
-                            egui::Button::new(egui::RichText::new("Cancel").size(13.0))
-                                .fill(egui::Color32::from_rgba_unmultiplied(70, 70, 70, 220))
-                                .corner_radius(4.0),
-                        ).clicked() {
+                        if ui
+                            .add_sized(
+                                [110.0, 34.0],
+                                egui::Button::new(egui::RichText::new("Cancel").size(13.0))
+                                    .fill(egui::Color32::from_rgba_unmultiplied(70, 70, 70, 220))
+                                    .corner_radius(4.0),
+                            )
+                            .clicked()
+                        {
                             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
                             cx.exit_confirm.visible = false;
                         }
@@ -522,10 +574,14 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
 /// 3D menu is active.
 fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     super::ensure_brand_logo_texture(ctx, &mut cx.brand_logo);
-    let Some(ref handle) = cx.brand_logo.texture else { return };
-    let [w, h] = handle.size();
-    let display_h = 150.0_f32;
-    let display_w = (w as f32 / h as f32) * display_h;
+
+    // Image when the asset loaded; otherwise fall back to styled text so the
+    // title is never blank if the logo file can't be found at runtime.
+    let image = cx.brand_logo.texture.as_ref().map(|handle| {
+        let [w, h] = handle.size();
+        let display_h = 150.0_f32;
+        (handle.id(), (w as f32 / h as f32) * display_h, display_h)
+    });
 
     let clicked_id = egui::Id::new("title_logo_clicked");
     let fade_id = egui::Id::new("title_logo_fade");
@@ -548,12 +604,30 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 20.0))
         .show(ctx, |ui| {
             ui.set_opacity(alpha);
-            let resp = ui
-                .add(egui::Image::new(egui::load::SizedTexture::new(
-                    handle.id(),
-                    [display_w, display_h],
-                )))
-                .interact(egui::Sense::click());
+            let resp = match image {
+                Some((id, display_w, display_h)) => ui
+                    .add(egui::Image::new(egui::load::SizedTexture::new(
+                        id,
+                        [display_w, display_h],
+                    )))
+                    .interact(egui::Sense::click()),
+                None => ui
+                    .vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new("XFCHESS")
+                                .size(60.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(235, 238, 245)),
+                        );
+                        ui.label(
+                            egui::RichText::new("COMPETITIVE CHESS SERVER")
+                                .size(15.0)
+                                .color(egui::Color32::from_rgba_unmultiplied(200, 205, 215, 200)),
+                        );
+                    })
+                    .response
+                    .interact(egui::Sense::click()),
+            };
 
             // A click starts the fade-out.
             if resp.clicked() {
@@ -575,11 +649,23 @@ fn render_hint_bar(ctx: &egui::Context) {
                 let size = 13.0;
                 let sep_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120);
 
-                ui.label(egui::RichText::new("H - Bring up Guide").size(size).color(hint_color));
+                ui.label(
+                    egui::RichText::new("H - Bring up Guide")
+                        .size(size)
+                        .color(hint_color),
+                );
                 ui.label(egui::RichText::new("|").size(size).color(sep_color));
-                ui.label(egui::RichText::new("G - In Game Settings").size(size).color(hint_color));
+                ui.label(
+                    egui::RichText::new("G - In Game Settings")
+                        .size(size)
+                        .color(hint_color),
+                );
                 ui.label(egui::RichText::new("|").size(size).color(sep_color));
-                ui.label(egui::RichText::new("ESC - Exit Game").size(size).color(hint_color));
+                ui.label(
+                    egui::RichText::new("ESC - Exit Game")
+                        .size(size)
+                        .color(hint_color),
+                );
             });
         });
 }
@@ -596,23 +682,33 @@ fn render_corner_logos(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                     let [w, h] = tex.size();
                     let dh = 32.0_f32;
                     let dw = (w as f32 / h as f32) * dh;
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(tex.id(), [dw, dh])));
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        tex.id(),
+                        [dw, dh],
+                    )));
                     ui.add_space(8.0);
                 }
                 if let Some(ref tex) = cx.solana_logos.texture2 {
                     let [w, h] = tex.size();
                     let dh = 32.0_f32;
                     let dw = (w as f32 / h as f32) * dh;
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(tex.id(), [dw, dh])));
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        tex.id(),
+                        [dw, dh],
+                    )));
                 }
             });
         });
 }
 
-/// Welcome card shown on the startup (main) menu. Starts docked to the far
-/// right of the screen but is draggable. Dismissable; stays closed for the rest
-/// of the session once the user hits ✕.
-fn render_welcome_panel(ctx: &egui::Context) {
+/// Alpha announcement card shown on the startup (main) menu. Starts docked to
+/// the far right of the screen, locked in place (not draggable). Dismissable;
+/// stays closed for the rest of the session once closed.
+fn render_welcome_panel(
+    ctx: &egui::Context,
+    _commands: &mut Commands,
+    _sounds: Option<&MenuSounds>,
+) {
     let welcome_closed_id = egui::Id::new("startup_welcome_closed");
     if ctx.data(|d| d.get_temp::<bool>(welcome_closed_id).unwrap_or(false)) {
         return;
@@ -621,26 +717,28 @@ fn render_welcome_panel(ctx: &egui::Context) {
     let panel_frame = egui::Frame {
         corner_radius: egui::CornerRadius::same(8),
         fill: egui::Color32::from_rgba_unmultiplied(8, 8, 12, 240),
-        stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 28)),
+        stroke: egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 28),
+        ),
         inner_margin: egui::Margin::symmetric(18, 16),
         ..egui::Frame::NONE
     };
-    // Start docked to the far right (vertically centred). No anchor + movable so
-    // egui lets the user drag it by its body (there is no title-bar drag handle).
-    let screen = ctx.screen_rect();
-    let default_pos = egui::pos2(screen.right() - 280.0 - 20.0, screen.center().y - 160.0);
+    // Pinned to the far right (vertically centred) and locked in place — the
+    // welcome card is anchored and not draggable.
     egui::Window::new("xfchess_welcome_panel")
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
-        .movable(true)
-        .default_pos(default_pos)
-        .fixed_size([280.0, 320.0])
+        .movable(false)
+        .anchor(egui::Align2::RIGHT_CENTER, egui::vec2(-20.0, 0.0))
+        .fixed_size([300.0, 380.0])
         .frame(panel_frame)
         .show(ctx, |ui| {
+            // Header: title + close button.
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("Welcome to XFChess")
+                    egui::RichText::new("XFChess Alpha")
                         .size(17.0)
                         .color(egui::Color32::from_rgb(100, 200, 255))
                         .strong(),
@@ -648,13 +746,17 @@ fn render_welcome_panel(ctx: &egui::Context) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let close = ui.add(
                         egui::Button::new(
-                            egui::RichText::new("✕").size(13.0).color(egui::Color32::from_rgb(180, 180, 180)),
+                            // Plain "X" — the menu fonts have no "✕" glyph.
+                            egui::RichText::new("X")
+                                .size(13.0)
+                                .color(egui::Color32::from_rgb(180, 180, 180)),
                         )
                         .fill(egui::Color32::TRANSPARENT)
                         .stroke(egui::Stroke::NONE),
                     );
                     if close.clicked() {
-                        ui.ctx().data_mut(|d| d.insert_temp(welcome_closed_id, true));
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(welcome_closed_id, true));
                     }
                     if close.hovered() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -662,25 +764,78 @@ fn render_welcome_panel(ctx: &egui::Context) {
                 });
             });
 
-            ui.add_space(3.0);
+            ui.add_space(2.0);
             ui.label(
-                egui::RichText::new("King_dev")
+                egui::RichText::new("Public alpha — now live")
                     .size(11.0)
                     .color(egui::Color32::from_rgb(80, 160, 100))
                     .italics(),
             );
 
-            ui.add_space(10.0);
+            ui.add_space(8.0);
             ui.add(egui::Separator::default().horizontal());
-            ui.add_space(10.0);
+            ui.add_space(8.0);
 
-            // Space for more text
+            // Scrollable body so longer copy (and images) never overflow the card.
+            egui::ScrollArea::vertical()
+                .max_height(270.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // A few short welcome paragraphs. `para` is a small local helper
+                    // for consistent body text + spacing.
+                    let para = |ui: &mut egui::Ui, text: &str| {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(210, 215, 225)),
+                        );
+                        ui.add_space(8.0);
+                    };
+
+                    para(
+                        ui,
+                        "Welcome to XFChess, and thank you for being one of the first to \
+                         play. You're stepping into a very early build — the alpha — so \
+                         you're seeing the game take shape in real time.",
+                    );
+                    para(
+                        ui,
+                        "XFChess is a competitive 3D chess server: play against the engine \
+                         or a friend, jump into online matches, and compete in tournaments. \
+                         The goal is a chess experience that feels fast, fair, and a little \
+                         more alive than the usual board.",
+                    );
+                    para(
+                        ui,
+                        "Things will break, move, and change as we go — that's the whole \
+                         point of an alpha. Your games and your feedback genuinely shape \
+                         what comes next, so don't be shy about telling us what feels off.",
+                    );
+
+                    ui.add_space(2.0);
+                    // ── Image slot ───────────────────────────────────────────────
+                    // Drop announcement screenshots here once their egui textures are
+                    // available (load them into a State resource like `SolanaLogoState`,
+                    // then render with:
+                    //   let [w, h] = tex.size();
+                    //   ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                    //       tex.id(), [width, width * h as f32 / w as f32])));
+                    // See `render_corner_logos` for the existing texture pattern.
+
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new("Pick a mode on the left to begin.")
+                            .size(12.0)
+                            .color(egui::Color32::from_rgb(100, 200, 255))
+                            .strong(),
+                    );
+                });
         });
 }
 
 fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     // Startup welcome card, pinned to the far right of the screen.
-    render_welcome_panel(ui.ctx());
+    render_welcome_panel(ui.ctx(), &mut cx.commands, cx.menu_sounds.as_deref());
 
     const W: f32 = 280.0;
     const SP: f32 = 6.0;
@@ -698,18 +853,21 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.painter().hline(
         sep_rect.left()..=sep_rect.left() + W,
         sep_y,
-        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60)),
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60),
+        ),
     );
     ui.add_space(10.0);
 
     // Live online-player count (refreshed every ~15s by the social subsystem).
     let online = cx.online_players.count;
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new("●")
-                .size(11.0)
-                .color(egui::Color32::from_rgb(120, 220, 140)),
-        );
+        // Paint the status dot directly — the menu fonts (Cinzel/OpenSans) have no
+        // "●" glyph, so a text bullet would render as a missing-glyph box.
+        let (dot, _) = ui.allocate_exact_size(egui::vec2(10.0, 11.0), egui::Sense::hover());
+        ui.painter()
+            .circle_filled(dot.center(), 4.0, egui::Color32::from_rgb(120, 220, 140));
         ui.label(
             egui::RichText::new(format!("{online} online"))
                 .size(11.0)
@@ -752,9 +910,10 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         if item(ui, "TempleOS", W) {
             play_click(&mut cx.commands, snd);
             *cx.view_mode = crate::game::view_mode::ViewMode::TempleOS;
-            cx.commands.insert_resource(crate::game::view_mode::PlayerViewPreferences {
-                local_view: crate::game::view_mode::ViewMode::TempleOS,
-            });
+            cx.commands
+                .insert_resource(crate::game::view_mode::PlayerViewPreferences {
+                    local_view: crate::game::view_mode::ViewMode::TempleOS,
+                });
             *cx.core_mode = GameMode::SinglePlayer;
             cx.next_state.set(GameState::InGame);
         }
@@ -776,15 +935,18 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     // Back arrow + "Play Online" label styled the same as the Main Menu header
     ui.horizontal(|ui| {
-        if ui.add(
-            egui::Button::new(
-                egui::RichText::new("‹ Back")
-                    .size(10.0)
-                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
             )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             *cx.new_menu_panel = NewMenuPanel::Main;
         }
@@ -801,7 +963,10 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.painter().hline(
         sep_rect.left()..=sep_rect.left() + W,
         sep_y,
-        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60)),
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60),
+        ),
     );
     ui.add_space(10.0);
 
@@ -847,15 +1012,18 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     // Back arrow + "Puzzles" header (matches the other sub-panels).
     ui.horizontal(|ui| {
-        if ui.add(
-            egui::Button::new(
-                egui::RichText::new("‹ Back")
-                    .size(10.0)
-                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
             )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             *cx.new_menu_panel = NewMenuPanel::Main;
         }
@@ -872,7 +1040,10 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.painter().hline(
         sep_rect.left()..=sep_rect.left() + W,
         sep_y,
-        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60)),
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60),
+        ),
     );
     ui.add_space(10.0);
 
@@ -889,10 +1060,11 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     if item(ui, "Solve Puzzles", W) {
         play_click(&mut cx.commands, snd);
         let wallet = cx.player_identity.pubkey_str.clone().unwrap_or_default();
-        cx.commands.insert_resource(crate::puzzle::PendingPuzzleRequest {
-            mode: crate::puzzle::PuzzleMode::Solve,
-            wallet,
-        });
+        cx.commands
+            .insert_resource(crate::puzzle::PendingPuzzleRequest {
+                mode: crate::puzzle::PuzzleMode::Solve,
+                wallet,
+            });
     }
     ui.add_space(SP * 2.0);
 
@@ -907,24 +1079,28 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     if item(ui, "Puzzles (Earn)", W) {
         play_click(&mut cx.commands, snd);
         let wallet = cx.player_identity.pubkey_str.clone().unwrap_or_default();
-        cx.commands.insert_resource(crate::puzzle::PendingPuzzleRequest {
-            mode: crate::puzzle::PuzzleMode::Earn,
-            wallet,
-        });
+        cx.commands
+            .insert_resource(crate::puzzle::PendingPuzzleRequest {
+                mode: crate::puzzle::PuzzleMode::Earn,
+                wallet,
+            });
     }
 }
 
 fn render_tournaments_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.horizontal(|ui| {
-        if ui.add(
-            egui::Button::new(
-                egui::RichText::new("‹ Back")
-                    .size(10.0)
-                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
             )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             *cx.new_menu_panel = NewMenuPanel::PlayOnline;
         }
@@ -941,7 +1117,10 @@ fn render_tournaments_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.painter().hline(
         sep_rect.left()..=sep_rect.left() + W,
         sep_y,
-        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60)),
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60),
+        ),
     );
     ui.add_space(10.0);
 
@@ -963,16 +1142,28 @@ fn render_tournaments_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
 fn render_how_to_play_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.horizontal(|ui| {
-        if ui.add(
-            egui::Button::new(egui::RichText::new("‹ Back").size(10.0).color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)))
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE),
-        ).clicked() {
+            )
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             *cx.new_menu_panel = NewMenuPanel::Main;
         }
         ui.add_space(6.0);
-        ui.label(egui::RichText::new("How to Play").size(16.5).color(egui::Color32::WHITE).strong());
+        ui.label(
+            egui::RichText::new("How to Play")
+                .size(16.5)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
     });
     ui.add_space(10.0);
 
@@ -983,10 +1174,16 @@ fn render_how_to_play_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             ui.set_width(280.0);
 
             section(ui, "XFChess Modes");
-            bullet(ui, "Play vs Computer — Choose difficulty 1–8 and time control.");
+            bullet(
+                ui,
+                "Play vs Computer — Choose difficulty 1–8 and time control.",
+            );
             bullet(ui, "Play Online — Host or join a P2P lobby with a friend.");
             bullet(ui, "Tournaments — Compete in Swiss-format brackets.");
-            bullet(ui, "Solana Multiplayer — Wager SOL on the outcome. Connect a wallet to unlock.");
+            bullet(
+                ui,
+                "Solana Multiplayer — Wager SOL on the outcome. Connect a wallet to unlock.",
+            );
 
             ui.add_space(8.0);
             section(ui, "Controls");
@@ -998,15 +1195,18 @@ fn render_how_to_play_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
 fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.horizontal(|ui| {
-        if ui.add(
-            egui::Button::new(
-                egui::RichText::new("‹ Back")
-                    .size(10.0)
-                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
             )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             *cx.new_menu_panel = NewMenuPanel::Main;
         }
@@ -1040,13 +1240,18 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         play_click(&mut cx.commands, snd);
         std::thread::spawn(|| {
             let port: u16 = std::env::var("XFCHESS_WALLET_PORT")
-                .ok().and_then(|v| v.parse().ok()).unwrap_or(7454);
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(7454);
             if let Ok(client) = reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(2))
                 .build()
             {
                 let _ = client
-                    .post(format!("http://127.0.0.1:{}/api/open-tournament-admin", port))
+                    .post(format!(
+                        "http://127.0.0.1:{}/api/open-tournament-admin",
+                        port
+                    ))
                     .send();
             }
         });
@@ -1065,8 +1270,16 @@ fn section(ui: &mut egui::Ui, title: &str) {
 
 fn bullet(ui: &mut egui::Ui, text: &str) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("·").size(9.8).color(egui::Color32::from_rgb(100, 140, 200)));
-        ui.label(egui::RichText::new(text).size(9.4).color(egui::Color32::from_rgb(200, 200, 210)));
+        ui.label(
+            egui::RichText::new("·")
+                .size(9.8)
+                .color(egui::Color32::from_rgb(100, 140, 200)),
+        );
+        ui.label(
+            egui::RichText::new(text)
+                .size(9.4)
+                .color(egui::Color32::from_rgb(200, 200, 210)),
+        );
     });
     ui.add_space(2.0);
 }
@@ -1074,15 +1287,18 @@ fn bullet(ui: &mut egui::Ui, text: &str) {
 fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     // Back button + header
     ui.horizontal(|ui| {
-        if ui.add(
-            egui::Button::new(
-                egui::RichText::new("‹ Back")
-                    .size(10.0)
-                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
             )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             *cx.new_menu_panel = NewMenuPanel::PlayOnline;
         }
@@ -1099,7 +1315,10 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.painter().hline(
         sep_rect.left()..=sep_rect.left() + W,
         sep_y,
-        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60)),
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60),
+        ),
     );
     ui.add_space(10.0);
 
@@ -1109,24 +1328,34 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     let wallet_connected = cx.player_identity.username.is_some();
 
     // Connect Wallet is always the first item
-    let connect_label = if wallet_connected { "Wallet Connected" } else { "Connect Wallet" };
-    if ui.add_sized(
-        [W, 40.0],
-        egui::Button::new(
-            egui::RichText::new(connect_label)
-                .size(11.6)
-                .color(egui::Color32::WHITE)
-                .strong()
-                .family(egui::FontFamily::Proportional),
+    let connect_label = if wallet_connected {
+        "Wallet Connected"
+    } else {
+        "Connect Wallet"
+    };
+    if ui
+        .add_sized(
+            [W, 40.0],
+            egui::Button::new(
+                egui::RichText::new(connect_label)
+                    .size(11.6)
+                    .color(egui::Color32::WHITE)
+                    .strong()
+                    .family(egui::FontFamily::Proportional),
+            )
+            .fill(if wallet_connected {
+                egui::Color32::from_rgb(30, 110, 60)
+            } else {
+                egui::Color32::from_rgb(50, 120, 200)
+            })
+            .corner_radius(6.0)
+            .stroke(egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40),
+            )),
         )
-        .fill(if wallet_connected {
-            egui::Color32::from_rgb(30, 110, 60)
-        } else {
-            egui::Color32::from_rgb(50, 120, 200)
-        })
-        .corner_radius(6.0)
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40))),
-    ).clicked() {
+        .clicked()
+    {
         play_click(&mut cx.commands, cx.menu_sounds.as_deref());
         // Clear stale receivers so poll fires immediately on next frame
         cx.wallet_bridge.status_rx = None;
@@ -1139,7 +1368,9 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             use std::io::Write;
             use std::net::TcpStream;
             let base: u16 = std::env::var("XFCHESS_WALLET_PORT")
-                .ok().and_then(|v| v.parse().ok()).unwrap_or(7454);
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(7454);
             for offset in 2u16..=11 {
                 let port = base.saturating_sub(offset);
                 if let Ok(mut s) = TcpStream::connect(format!("127.0.0.1:{}", port)) {
@@ -1194,15 +1425,18 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     // Header row
     ui.horizontal(|ui| {
-        if ui.add(
-            egui::Button::new(
-                egui::RichText::new("‹ Back")
-                    .size(10.0)
-                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
             )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             *cx.new_menu_panel = NewMenuPanel::Main;
         }
@@ -1237,26 +1471,56 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         // ELO
         let elo = cx.player_identity.display_elo();
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("ELO").size(9.0).color(egui::Color32::from_rgb(120, 140, 170)));
-            ui.label(egui::RichText::new(&elo).size(11.0).color(egui::Color32::from_rgb(200, 220, 255)).strong());
+            ui.label(
+                egui::RichText::new("ELO")
+                    .size(9.0)
+                    .color(egui::Color32::from_rgb(120, 140, 170)),
+            );
+            ui.label(
+                egui::RichText::new(&elo)
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(200, 220, 255))
+                    .strong(),
+            );
         });
         ui.add_space(2.0);
 
         // Country
         if let Some(ref country) = cx.player_identity.country {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Country").size(9.0).color(egui::Color32::from_rgb(120, 140, 170)));
-                ui.label(egui::RichText::new(country).size(11.0).color(egui::Color32::from_rgb(200, 210, 200)));
+                ui.label(
+                    egui::RichText::new("Country")
+                        .size(9.0)
+                        .color(egui::Color32::from_rgb(120, 140, 170)),
+                );
+                ui.label(
+                    egui::RichText::new(country)
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(200, 210, 200)),
+                );
             });
             ui.add_space(2.0);
         }
 
         // Wallet pubkey (shortened)
         if let Some(ref pk) = cx.wallet_bridge.known_pubkey.clone() {
-            let short = format!("{}...{}", &pk[..6.min(pk.len())], &pk[pk.len().saturating_sub(4)..]);
+            let short = format!(
+                "{}...{}",
+                &pk[..6.min(pk.len())],
+                &pk[pk.len().saturating_sub(4)..]
+            );
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Wallet").size(9.0).color(egui::Color32::from_rgb(120, 140, 170)));
-                ui.label(egui::RichText::new(&short).size(9.5).color(egui::Color32::from_rgb(160, 180, 160)).monospace());
+                ui.label(
+                    egui::RichText::new("Wallet")
+                        .size(9.0)
+                        .color(egui::Color32::from_rgb(120, 140, 170)),
+                );
+                ui.label(
+                    egui::RichText::new(&short)
+                        .size(9.5)
+                        .color(egui::Color32::from_rgb(160, 180, 160))
+                        .monospace(),
+                );
             });
         }
 
@@ -1265,7 +1529,11 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             let data = cx.wallet_bridge.data.lock().unwrap();
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Balance").size(9.0).color(egui::Color32::from_rgb(120, 140, 170)));
+                ui.label(
+                    egui::RichText::new("Balance")
+                        .size(9.0)
+                        .color(egui::Color32::from_rgb(120, 140, 170)),
+                );
                 let sol_text = format!("{:.4} SOL", data.sol_balance);
                 let sol_color = if data.sol_balance > 0.0 {
                     egui::Color32::from_rgb(140, 220, 140)
@@ -1275,7 +1543,11 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                 ui.label(egui::RichText::new(&sol_text).size(11.0).color(sol_color));
                 if let Some(usd) = data.usd_balance {
                     if usd > 0.0 {
-                        ui.label(egui::RichText::new(format!("(${:.2})", usd)).size(9.0).color(egui::Color32::from_rgb(140, 160, 140)));
+                        ui.label(
+                            egui::RichText::new(format!("(${:.2})", usd))
+                                .size(9.0)
+                                .color(egui::Color32::from_rgb(140, 160, 140)),
+                        );
                     }
                 }
             });
@@ -1284,17 +1556,20 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         ui.add_space(SP + 6.0);
 
         // Disconnect
-        if ui.add_sized(
-            [W, 34.0],
-            egui::Button::new(
-                egui::RichText::new("Disconnect Wallet")
-                    .size(10.8)
-                    .color(egui::Color32::WHITE)
-                    .family(egui::FontFamily::Proportional),
+        if ui
+            .add_sized(
+                [W, 34.0],
+                egui::Button::new(
+                    egui::RichText::new("Disconnect Wallet")
+                        .size(10.8)
+                        .color(egui::Color32::WHITE)
+                        .family(egui::FontFamily::Proportional),
+                )
+                .fill(egui::Color32::from_rgb(100, 40, 40))
+                .corner_radius(6.0),
             )
-            .fill(egui::Color32::from_rgb(100, 40, 40))
-            .corner_radius(6.0),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             cx.wallet_bridge.enabled = false;
             cx.wallet_bridge.known_pubkey = None;
@@ -1319,19 +1594,25 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                     .italics(),
             );
             ui.add_space(4.0);
-            if ui.add_sized(
-                [W, 34.0],
-                egui::Button::new(
-                    egui::RichText::new("Create Profile")
-                        .size(11.0)
-                        .color(egui::Color32::WHITE)
-                        .strong()
-                        .family(egui::FontFamily::Proportional),
+            if ui
+                .add_sized(
+                    [W, 34.0],
+                    egui::Button::new(
+                        egui::RichText::new("Create Profile")
+                            .size(11.0)
+                            .color(egui::Color32::WHITE)
+                            .strong()
+                            .family(egui::FontFamily::Proportional),
+                    )
+                    .fill(egui::Color32::from_rgb(130, 80, 20))
+                    .corner_radius(6.0)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_unmultiplied(255, 200, 80, 80),
+                    )),
                 )
-                .fill(egui::Color32::from_rgb(130, 80, 20))
-                .corner_radius(6.0)
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 200, 80, 80))),
-            ).clicked() {
+                .clicked()
+            {
                 play_click(&mut cx.commands, cx.menu_sounds.as_deref());
                 let _ = webbrowser::open("http://localhost:5174/create-profile");
             }
@@ -1339,17 +1620,20 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         }
 
         // Refresh balance
-        if ui.add_sized(
-            [W, 30.0],
-            egui::Button::new(
-                egui::RichText::new("Refresh")
-                    .size(10.0)
-                    .color(egui::Color32::from_rgb(180, 200, 220))
-                    .family(egui::FontFamily::Proportional),
+        if ui
+            .add_sized(
+                [W, 30.0],
+                egui::Button::new(
+                    egui::RichText::new("Refresh")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgb(180, 200, 220))
+                        .family(egui::FontFamily::Proportional),
+                )
+                .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 12))
+                .corner_radius(6.0),
             )
-            .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 12))
-            .corner_radius(6.0),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             // Force a status re-poll and clear balance_rx so balance is re-fetched too
             cx.wallet_bridge.timer = 5.0;
@@ -1376,18 +1660,24 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         );
         ui.add_space(SP + 4.0);
 
-        if ui.add_sized(
-            [W, 34.0],
-            egui::Button::new(
-                egui::RichText::new("Go to Solana Multiplayer →")
-                    .size(10.5)
-                    .color(egui::Color32::from_rgb(140, 180, 255))
-                    .family(egui::FontFamily::Proportional),
+        if ui
+            .add_sized(
+                [W, 34.0],
+                egui::Button::new(
+                    egui::RichText::new("Go to Solana Multiplayer →")
+                        .size(10.5)
+                        .color(egui::Color32::from_rgb(140, 180, 255))
+                        .family(egui::FontFamily::Proportional),
+                )
+                .fill(egui::Color32::from_rgba_unmultiplied(40, 80, 160, 60))
+                .corner_radius(6.0)
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgba_unmultiplied(80, 140, 255, 80),
+                )),
             )
-            .fill(egui::Color32::from_rgba_unmultiplied(40, 80, 160, 60))
-            .corner_radius(6.0)
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(80, 140, 255, 80))),
-        ).clicked() {
+            .clicked()
+        {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
             *cx.new_menu_panel = NewMenuPanel::PlayOnline;
         }
@@ -1403,15 +1693,18 @@ pub fn render_solana_splash(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
         .show(ctx, |ui| {
-            if ui.add(
-                egui::Button::new(
-                    egui::RichText::new("Back")
-                        .size(13.0)
-                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Back")
+                            .size(13.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                    )
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE),
                 )
-                .fill(egui::Color32::TRANSPARENT)
-                .stroke(egui::Stroke::NONE),
-            ).clicked() {
+                .clicked()
+            {
                 *cx.new_menu_panel = NewMenuPanel::Main;
             }
         });
@@ -1425,14 +1718,20 @@ pub fn render_solana_splash(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                     let [w, h] = tex.size();
                     let dh = 72.0_f32;
                     let dw = (w as f32 / h as f32) * dh;
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(tex.id(), [dw, dh])));
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        tex.id(),
+                        [dw, dh],
+                    )));
                     ui.add_space(16.0);
                 }
                 if let Some(ref tex) = cx.solana_logos.texture2 {
                     let [w, h] = tex.size();
                     let dh = 72.0_f32;
                     let dw = (w as f32 / h as f32) * dh;
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(tex.id(), [dw, dh])));
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        tex.id(),
+                        [dw, dh],
+                    )));
                 }
             });
         });
@@ -1447,10 +1746,19 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     #[cfg(feature = "solana")]
     let sol_balance = cx.solana_state.as_ref().map(|s| s.balance).unwrap_or(0.0);
     #[cfg(not(feature = "solana"))]
-    let sol_balance = cx.wallet_bridge.data.lock().map(|d| d.sol_balance).unwrap_or(0.0);
+    let sol_balance = cx
+        .wallet_bridge
+        .data
+        .lock()
+        .map(|d| d.sol_balance)
+        .unwrap_or(0.0);
 
     #[cfg(feature = "solana")]
-    let connected = cx.solana_state.as_ref().and_then(|s| s.wallet_pubkey).is_some();
+    let connected = cx
+        .solana_state
+        .as_ref()
+        .and_then(|s| s.wallet_pubkey)
+        .is_some();
     #[cfg(not(feature = "solana"))]
     let connected = false;
 
@@ -1458,7 +1766,10 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         return;
     }
 
-    let (sol_usd_rate, sol_gbp_rate) = cx.wallet_bridge.data.lock()
+    let (sol_usd_rate, sol_gbp_rate) = cx
+        .wallet_bridge
+        .data
+        .lock()
         .map(|d| (d.sol_usd_rate, d.sol_gbp_rate))
         .unwrap_or((0.0, 0.0));
 
@@ -1469,19 +1780,34 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     let (balance_text, balance_color) = match currency_mode {
         1 => {
             if sol_usd_rate > 0.0 {
-                (format!("${:.2}", sol_balance * sol_usd_rate), egui::Color32::from_rgb(20, 241, 149))
+                (
+                    format!("${:.2}", sol_balance * sol_usd_rate),
+                    egui::Color32::from_rgb(20, 241, 149),
+                )
             } else {
-                (format!("{:.3} SOL", sol_balance), egui::Color32::from_rgb(20, 241, 149))
+                (
+                    format!("{:.3} SOL", sol_balance),
+                    egui::Color32::from_rgb(20, 241, 149),
+                )
             }
         }
         2 => {
             if sol_gbp_rate > 0.0 {
-                (format!("£{:.2}", sol_balance * sol_gbp_rate), egui::Color32::from_rgb(20, 241, 149))
+                (
+                    format!("£{:.2}", sol_balance * sol_gbp_rate),
+                    egui::Color32::from_rgb(20, 241, 149),
+                )
             } else {
-                (format!("{:.3} SOL", sol_balance), egui::Color32::from_rgb(20, 241, 149))
+                (
+                    format!("{:.3} SOL", sol_balance),
+                    egui::Color32::from_rgb(20, 241, 149),
+                )
             }
         }
-        _ => (format!("{:.3} SOL", sol_balance), egui::Color32::from_rgb(20, 241, 149)),
+        _ => (
+            format!("{:.3} SOL", sol_balance),
+            egui::Color32::from_rgb(20, 241, 149),
+        ),
     };
 
     egui::Area::new("wallet_hud".into())
@@ -1490,7 +1816,10 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             egui::Frame {
                 corner_radius: egui::CornerRadius::same(8),
                 fill: egui::Color32::from_rgba_unmultiplied(20, 20, 25, 220),
-                stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30)),
+                stroke: egui::Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                ),
                 inner_margin: egui::Margin::symmetric(14, 10),
                 ..egui::Frame::NONE
             }
@@ -1544,28 +1873,34 @@ fn item_expandable(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
             egui::RichText::new(label)
                 .size(22.0)
                 .color(btn_text)
-                .family(egui::FontFamily::Proportional)
+                .family(egui::FontFamily::Proportional),
         )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE)
-            .min_size(egui::vec2(width, 46.0)),
+        .fill(egui::Color32::TRANSPARENT)
+        .stroke(egui::Stroke::NONE)
+        .min_size(egui::vec2(width, 46.0)),
     );
 
     let r = resp.rect;
     if resp.hovered() || resp.is_pointer_button_down_on() {
-        ui.painter().set(bg_idx, egui::Shape::rect_filled(
-            r.expand(1.0),
-            egui::CornerRadius::same(4),
-            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 11),
-        ));
-        ui.painter().set(accent_idx, egui::Shape::rect_filled(
-            egui::Rect::from_min_size(
-                egui::pos2(r.left(), r.center().y - 13.0),
-                egui::vec2(3.0, 26.0),
+        ui.painter().set(
+            bg_idx,
+            egui::Shape::rect_filled(
+                r.expand(1.0),
+                egui::CornerRadius::same(4),
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 11),
             ),
-            egui::CornerRadius::same(2),
-            egui::Color32::from_rgb(90, 160, 255),
-        ));
+        );
+        ui.painter().set(
+            accent_idx,
+            egui::Shape::rect_filled(
+                egui::Rect::from_min_size(
+                    egui::pos2(r.left(), r.center().y - 13.0),
+                    egui::vec2(3.0, 26.0),
+                ),
+                egui::CornerRadius::same(2),
+                egui::Color32::from_rgb(90, 160, 255),
+            ),
+        );
     }
 
     // Chevron always visible
@@ -1592,28 +1927,34 @@ fn item(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
             egui::RichText::new(label)
                 .size(22.0)
                 .color(btn_text)
-                .family(egui::FontFamily::Proportional)
+                .family(egui::FontFamily::Proportional),
         )
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE)
-            .min_size(egui::vec2(width, 46.0)),
+        .fill(egui::Color32::TRANSPARENT)
+        .stroke(egui::Stroke::NONE)
+        .min_size(egui::vec2(width, 46.0)),
     );
 
     let r = resp.rect;
     if resp.hovered() || resp.is_pointer_button_down_on() {
-        ui.painter().set(bg_idx, egui::Shape::rect_filled(
-            r.expand(1.0),
-            egui::CornerRadius::same(4),
-            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18),
-        ));
-        ui.painter().set(accent_idx, egui::Shape::rect_filled(
-            egui::Rect::from_min_size(
-                egui::pos2(r.left(), r.center().y - 13.0),
-                egui::vec2(3.0, 26.0),
+        ui.painter().set(
+            bg_idx,
+            egui::Shape::rect_filled(
+                r.expand(1.0),
+                egui::CornerRadius::same(4),
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18),
             ),
-            egui::CornerRadius::same(2),
-            egui::Color32::from_rgb(90, 160, 255),
-        ));
+        );
+        ui.painter().set(
+            accent_idx,
+            egui::Shape::rect_filled(
+                egui::Rect::from_min_size(
+                    egui::pos2(r.left(), r.center().y - 13.0),
+                    egui::vec2(3.0, 26.0),
+                ),
+                egui::CornerRadius::same(2),
+                egui::Color32::from_rgb(90, 160, 255),
+            ),
+        );
     }
 
     resp.clicked()

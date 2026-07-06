@@ -84,7 +84,10 @@ impl EloCache {
     pub async fn get_elo(&self, pubkey: &str) -> Result<CachedElo, String> {
         // Check cache first
         {
-            let cache = self.cache.lock().expect("ELO cache mutex should not be poisoned");
+            let cache = self
+                .cache
+                .lock()
+                .expect("ELO cache mutex should not be poisoned");
             if let Some(cached) = cache.get(pubkey) {
                 if cached.cached_at.elapsed() < self.ttl {
                     return Ok(cached.clone());
@@ -104,17 +107,15 @@ impl EloCache {
     /// # Returns
     /// Cached ELO data
     async fn fetch_elo(&self, pubkey: &str) -> Result<CachedElo, String> {
-        let pk = Pubkey::from_str(pubkey)
-            .map_err(|e| format!("Invalid pubkey: {}", e))?;
+        let pk = Pubkey::from_str(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
         // Derive PlayerProfile PDA
-        let (profile_pda, _bump) = Pubkey::find_program_address(
-            &[b"profile", pk.as_ref()],
-            &self.program_id,
-        );
+        let (profile_pda, _bump) =
+            Pubkey::find_program_address(&[b"profile", pk.as_ref()], &self.program_id);
 
         // Fetch account from RPC
-        let account = self.rpc
+        let account = self
+            .rpc
             .get_account(&profile_pda)
             .map_err(|e| format!("Failed to fetch profile: {}", e))?;
 
@@ -131,10 +132,14 @@ impl EloCache {
         // ...
         // username at variable offset after earlier fields
         // lichess fields are at the very end of the account data
-        let country = self.deserialize_string(&account.data, 40, 2).unwrap_or_default();
+        let country = self
+            .deserialize_string(&account.data, 40, 2)
+            .unwrap_or_default();
         let elo_rating = self.deserialize_f64(&account.data, 62).unwrap_or(120000.0);
         let rd = self.deserialize_f64(&account.data, 70).unwrap_or(0.0);
-        let username = self.deserialize_string(&account.data, 183, 20).unwrap_or_default();
+        let username = self
+            .deserialize_string(&account.data, 183, 20)
+            .unwrap_or_default();
 
         // Read lichess fields from the tail of the account data if present
         let data_len = account.data.len();
@@ -173,12 +178,17 @@ impl EloCache {
 
         // Update cache
         {
-            let mut cache = self.cache.lock().expect("ELO cache mutex should not be poisoned");
+            let mut cache = self
+                .cache
+                .lock()
+                .expect("ELO cache mutex should not be poisoned");
             cache.insert(pubkey.to_string(), cached.clone());
         }
 
-        info!("[ELO_CACHE] Fetched profile for {}: {} ELO, country: {}, username: {}",
-            pubkey, elo_rating, country, username);
+        info!(
+            "[ELO_CACHE] Fetched profile for {}: {} ELO, country: {}, username: {}",
+            pubkey, elo_rating, country, username
+        );
 
         Ok(cached)
     }
@@ -192,14 +202,18 @@ impl EloCache {
     /// Map of pubkey to ELO data
     pub async fn batch_get_elo(&self, pubkeys: &[String]) -> HashMap<String, CachedElo> {
         let mut results = HashMap::new();
-        
+
         for pubkey in pubkeys {
             match self.get_elo(pubkey).await {
-                Ok(elo) => { results.insert(pubkey.clone(), elo); }
-                Err(e) => { warn!("[EloCache] Failed to fetch ELO for {}: {}", pubkey, e); }
+                Ok(elo) => {
+                    results.insert(pubkey.clone(), elo);
+                }
+                Err(e) => {
+                    warn!("[EloCache] Failed to fetch ELO for {}: {}", pubkey, e);
+                }
             }
         }
-        
+
         results
     }
 
@@ -208,14 +222,20 @@ impl EloCache {
     /// # Arguments
     /// * `pubkey` - Player's wallet public key
     pub fn invalidate(&self, pubkey: &str) {
-        let mut cache = self.cache.lock().expect("ELO cache mutex should not be poisoned");
+        let mut cache = self
+            .cache
+            .lock()
+            .expect("ELO cache mutex should not be poisoned");
         cache.remove(pubkey);
         info!("[EloCache] Invalidated cache for {}", pubkey);
     }
 
     /// Clears all cached entries.
     pub fn clear(&self) {
-        let mut cache = self.cache.lock().expect("ELO cache mutex should not be poisoned");
+        let mut cache = self
+            .cache
+            .lock()
+            .expect("ELO cache mutex should not be poisoned");
         cache.clear();
         info!("[EloCache] Cleared all cache entries");
     }
@@ -225,7 +245,8 @@ impl EloCache {
         if offset + 8 > data.len() {
             return Err("Offset out of bounds".to_string());
         }
-        let bytes: [u8; 8] = data[offset..offset+8].try_into()
+        let bytes: [u8; 8] = data[offset..offset + 8]
+            .try_into()
             .map_err(|_| "Failed to read bytes: slice length mismatch".to_string())?;
         Ok(f64::from_le_bytes(bytes))
     }
@@ -235,32 +256,39 @@ impl EloCache {
         if offset + 8 > data.len() {
             return Err("Offset out of bounds".to_string());
         }
-        let bytes: [u8; 8] = data[offset..offset+8].try_into()
+        let bytes: [u8; 8] = data[offset..offset + 8]
+            .try_into()
             .map_err(|_| "Failed to read bytes: slice length mismatch".to_string())?;
         Ok(i64::from_le_bytes(bytes))
     }
 
     /// Deserializes a String from account data at the given offset.
-    fn deserialize_string(&self, data: &[u8], offset: usize, max_len: usize) -> Result<String, String> {
+    fn deserialize_string(
+        &self,
+        data: &[u8],
+        offset: usize,
+        max_len: usize,
+    ) -> Result<String, String> {
         if offset + max_len > data.len() {
             return Err("Offset out of bounds".to_string());
         }
-        
+
         // Read length prefix (u32 in Anchor)
-        let len_bytes: [u8; 4] = data[offset..offset+4].try_into()
+        let len_bytes: [u8; 4] = data[offset..offset + 4]
+            .try_into()
             .map_err(|_| "Failed to read length: slice length mismatch".to_string())?;
         let len = u32::from_le_bytes(len_bytes) as usize;
-        
+
         if len == 0 {
             return Ok(String::new());
         }
-        
+
         let string_offset = offset + 4;
         if string_offset + len > data.len() {
             return Err("String data out of bounds".to_string());
         }
-        
-        String::from_utf8(data[string_offset..string_offset+len].to_vec())
+
+        String::from_utf8(data[string_offset..string_offset + len].to_vec())
             .map_err(|e| format!("Invalid UTF-8: {}", e))
     }
 }
@@ -272,13 +300,17 @@ mod tests {
     #[test]
     fn test_deserialize_f64() {
         let program_id = Pubkey::new_from_array([0u8; 32]);
-        let cache = EloCache::new("http://localhost".to_string(), Duration::from_secs(60), program_id);
+        let cache = EloCache::new(
+            "http://localhost".to_string(),
+            Duration::from_secs(60),
+            program_id,
+        );
         let mut data = vec![0u8; 56];
-        
+
         // Write f64 = 1200.5 at offset 40
         let value: f64 = 1200.5;
         data[40..48].copy_from_slice(&value.to_le_bytes());
-        
+
         let result = cache.deserialize_f64(&data, 40).unwrap();
         assert!((result - 1200.5).abs() < 0.01);
     }

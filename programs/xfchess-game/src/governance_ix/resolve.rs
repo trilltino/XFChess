@@ -1,5 +1,12 @@
-//! Instruction for admins to resolve an open dispute and allocate the prize pool.
+//! Dispute resolution by the platform dispute authority.
+//!
+//! Allocates the pot per the authority's ruling and settles the bond the
+//! challenger posted in `dispute_game`: refunded if the challenger's claim is
+//! upheld (or the game is ruled a draw), forfeited to the treasury if the ruling
+//! goes to the opponent. The game is set to `Settled` so `finalize_game` cannot
+//! re-process it.
 
+use crate::common::escrow;
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -12,24 +19,21 @@ pub struct ResolveDispute<'info> {
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [b"dispute", &game_id.to_le_bytes()], bump)]
     pub dispute: Account<'info, DisputeRecord>,
-    /// CHECK: Escrow PDA validated by seeds
+    /// System-owned wager escrow PDA — paid out via signed CPI.
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
-    pub escrow_pda: UncheckedAccount<'info>,
-    /// Dispute-resolution authority — only the platform key may resolve.
+    pub escrow_pda: SystemAccount<'info>,
+    /// Only the platform dispute authority may resolve.
     #[account(address = crate::constants::dispute_authority::ID @ GameErrorCode::UnauthorizedDisputeResolution)]
     pub dispute_authority: Signer<'info>,
-    /// CHECK: White player destination — must match game.white
+    /// White player wallet — must match game.white.
     #[account(mut, constraint = white_account.key() == game.white @ GameErrorCode::NotInGame)]
-    pub white_account: UncheckedAccount<'info>,
-    /// CHECK: Black player destination — must match game.black
+    pub white_account: SystemAccount<'info>,
+    /// Black player wallet — must match game.black.
     #[account(mut, constraint = black_account.key() == game.black @ GameErrorCode::NotInGame)]
-    pub black_account: UncheckedAccount<'info>,
-    /// CHECK: Winner destination — must match winner
-    #[account(mut)]
-    pub winner_account: UncheckedAccount<'info>,
-    /// CHECK: Platform treasury
-    #[account(mut)]
-    pub platform_treasury: UncheckedAccount<'info>,
+    pub black_account: SystemAccount<'info>,
+    /// Platform treasury — seeded PDA so funds can't be redirected.
+    #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
+    pub platform_treasury: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -39,62 +43,110 @@ pub fn handler(
     resolution: String,
     winner: Option<Pubkey>,
 ) -> Result<()> {
-    let dispute = &mut ctx.accounts.dispute;
-    let game = &mut ctx.accounts.game;
-
-    // Validate authority
+    crate::governance_ix::resolution::require_text_fits(&resolution)?;
     require!(
-        ctx.accounts.dispute_authority.key() == crate::constants::dispute_authority::ID,
-        GameErrorCode::UnauthorizedDisputeResolution
-    );
-
-    // Validate dispute state
-    require!(
-        dispute.status == DisputeStatus::Pending,
+        ctx.accounts.dispute.status == DisputeStatus::Pending,
         GameErrorCode::GameNotDisputed
     );
-    require!(dispute.game_id == game_id, GameErrorCode::InvalidGameStatus);
+    require!(
+        ctx.accounts.dispute.game_id == game_id,
+        GameErrorCode::InvalidGameStatus
+    );
 
-    // Update dispute
-    dispute.status = DisputeStatus::Resolved;
-    dispute.resolution = resolution;
-    dispute.resolved_at = Some(Clock::get()?.unix_timestamp);
+    let game_white = ctx.accounts.game.white;
+    let result = crate::governance_ix::resolution::validate_resolution(&ctx.accounts.game, winner)?;
 
-    // Update game state based on resolution
-    if let Some(winner_key) = winner {
-        require!(
-            winner_key == game.white || winner_key == game.black,
-            GameErrorCode::InvalidWinner
-        );
-        game.status = GameStatus::Finished;
-        game.result = GameResult::Winner(winner_key);
-    } else {
-        // Draw or other resolution
-        game.status = GameStatus::Finished;
-        game.result = GameResult::Draw;
-    }
+    let now = Clock::get()?.unix_timestamp;
+    let challenger = ctx.accounts.dispute.challenger;
+    let bond = ctx.accounts.dispute.bond_amount;
+    let wager = ctx.accounts.game.wager_amount;
+    let escrow_bump = ctx.bumps.escrow_pda;
 
-    // Transfer wager if applicable
-    if game.wager_amount > 0 {
-        let wager_total = game.wager_amount * 2;
-        // Flat infrastructure fee — not a percentage rake on the pot.
-        let platform_fee = DISPUTE_RESOLUTION_COST_LAMPORTS.min(wager_total);
-        let distributable = wager_total - platform_fee;
+    crate::governance_ix::resolution::apply_resolution(
+        &mut ctx.accounts.game,
+        &mut ctx.accounts.dispute,
+        result,
+        resolution,
+        ctx.accounts.dispute_authority.key(),
+        now,
+    )?;
 
-        if winner.is_some() {
-            **ctx.accounts.escrow_pda.lamports.borrow_mut() -= wager_total;
-            **ctx.accounts.winner_account.lamports.borrow_mut() += distributable;
-            **ctx.accounts.platform_treasury.lamports.borrow_mut() += platform_fee;
-        } else {
-            // Draw: split distributable equally between players
-            let split_amount = distributable / 2;
-            **ctx.accounts.escrow_pda.lamports.borrow_mut() -= wager_total;
-            **ctx.accounts.white_account.lamports.borrow_mut() += split_amount;
-            **ctx.accounts.black_account.lamports.borrow_mut() += split_amount;
-            **ctx.accounts.platform_treasury.lamports.borrow_mut() += platform_fee;
+    // ── Pot payout (signed CPI from the system-owned escrow) ──────────────────
+    if wager > 0 {
+        let pot = escrow::pot(wager)?;
+        if ctx.accounts.escrow_pda.lamports() >= pot {
+            let sp = &ctx.accounts.system_program;
+            let escrow = &ctx.accounts.escrow_pda;
+            let fee = DISPUTE_RESOLUTION_COST_LAMPORTS.min(pot);
+            let distributable = pot.saturating_sub(fee);
+
+            escrow::pay_from_game_escrow(
+                sp,
+                escrow,
+                ctx.accounts.platform_treasury.as_ref(),
+                fee,
+                game_id,
+                escrow_bump,
+            )?;
+            match winner {
+                Some(k) => {
+                    let dest = if k == game_white {
+                        ctx.accounts.white_account.as_ref()
+                    } else {
+                        ctx.accounts.black_account.as_ref()
+                    };
+                    escrow::pay_from_game_escrow(
+                        sp,
+                        escrow,
+                        dest,
+                        distributable,
+                        game_id,
+                        escrow_bump,
+                    )?;
+                }
+                None => {
+                    let each = distributable / 2;
+                    escrow::pay_from_game_escrow(
+                        sp,
+                        escrow,
+                        ctx.accounts.white_account.as_ref(),
+                        each,
+                        game_id,
+                        escrow_bump,
+                    )?;
+                    escrow::pay_from_game_escrow(
+                        sp,
+                        escrow,
+                        ctx.accounts.black_account.as_ref(),
+                        each,
+                        game_id,
+                        escrow_bump,
+                    )?;
+                }
+            }
         }
     }
 
+    // ── Dispute bond (held in the program-owned dispute PDA) ──────────────────
+    // Refund when the challenger's claim is upheld or the game is ruled a draw;
+    // forfeit to the treasury when the ruling goes to the opponent.
+    if bond > 0 {
+        let refund = match winner {
+            Some(k) => k == challenger,
+            None => true,
+        };
+        let dispute_info = ctx.accounts.dispute.to_account_info();
+        let dest = if refund {
+            if challenger == game_white {
+                ctx.accounts.white_account.as_ref()
+            } else {
+                ctx.accounts.black_account.as_ref()
+            }
+        } else {
+            ctx.accounts.platform_treasury.as_ref()
+        };
+        escrow::debit_program_pda(&dispute_info, dest, bond)?;
+    }
 
     Ok(())
 }

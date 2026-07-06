@@ -9,7 +9,6 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
 
-
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
@@ -17,21 +16,21 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
 /// A single popup entry.
 #[derive(Debug, Clone)]
 pub struct GamePopup {
-    pub title:     String,
-    pub message:   String,
+    pub title: String,
+    pub message: String,
     /// Text that the "Copy" button will put on the clipboard (e.g. a pubkey).
     pub copy_text: Option<String>,
     /// URL opened in the system browser when the "Open" button is clicked.
-    pub url:       Option<String>,
+    pub url: Option<String>,
     /// Display label for the URL button (defaults to "Open").
     pub url_label: Option<String>,
     /// How many seconds the popup stays visible before auto-dismissing.
     /// Set to `f32::INFINITY` to keep it until manually dismissed.
-    pub lifetime:  f32,
+    pub lifetime: f32,
     /// Remaining time (decremented each frame; private — set by the queue).
     pub(crate) remaining: f32,
     /// Whether the user clicked the  to dismiss early.
-    pub(crate) dismissed:  bool,
+    pub(crate) dismissed: bool,
 }
 
 impl GamePopup {
@@ -101,9 +100,9 @@ fn tick_popups(mut queue: ResMut<GamePopupQueue>, time: Res<Time>) {
 
 /// Render all active popups as egui windows stacked bottom-right.
 fn render_popups(
-    mut queue:    ResMut<GamePopupQueue>,
+    mut queue: ResMut<GamePopupQueue>,
     mut contexts: EguiContexts,
-    mut ready:    Local<u32>,
+    mut ready: Local<u32>,
 ) {
     // Skip first 2 frames: egui pass may not be initialized yet on frame 0-1
     *ready += 1;
@@ -113,8 +112,8 @@ fn render_popups(
 
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
-    let margin  = 16.0_f32;
-    let width   = 300.0_f32;
+    let margin = 16.0_f32;
+    let width = 300.0_f32;
     let mut y_offset = margin;
 
     // Render newest on top (iterate in reverse so we compute offsets bottom-up)
@@ -125,13 +124,16 @@ fn render_popups(
         let accent = egui::Color32::from_rgb(244, 187, 68); // gold
 
         let mut open = true;
-        let title    = popup.title.clone();
-        let message  = popup.message.clone();
-        let copy_text  = popup.copy_text.clone();
-        let url        = popup.url.clone();
-        let url_label  = popup.url_label.clone().unwrap_or_else(|| "Open".to_string());
-        let remaining  = popup.remaining;
-        let lifetime   = popup.lifetime;
+        let title = popup.title.clone();
+        let message = popup.message.clone();
+        let copy_text = popup.copy_text.clone();
+        let url = popup.url.clone();
+        let url_label = popup
+            .url_label
+            .clone()
+            .unwrap_or_else(|| "Open".to_string());
+        let remaining = popup.remaining;
+        let lifetime = popup.lifetime;
 
         let win_resp = egui::Window::new(&title)
             .id(egui::Id::new(("popup", &title))) // Use stable ID based on title
@@ -177,9 +179,7 @@ fn render_popups(
                             .monospace(),
                         );
                         if ui
-                            .small_button(
-                                egui::RichText::new(" Copy").size(11.0),
-                            )
+                            .small_button(egui::RichText::new(" Copy").size(11.0))
                             .on_hover_text("Copy address")
                             .clicked()
                         {
@@ -194,11 +194,7 @@ fn render_popups(
                 if let Some(ref u) = url {
                     ui.add_space(4.0);
                     if ui
-                        .button(
-                            egui::RichText::new(&url_label)
-                                .size(12.0)
-                                .color(accent),
-                        )
+                        .button(egui::RichText::new(&url_label).size(12.0).color(accent))
                         .clicked()
                     {
                         let url_to_open = u.clone();
@@ -251,10 +247,6 @@ impl Plugin for PopupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamePopupQueue>()
             .add_systems(Update, tick_popups)
-            .add_systems(
-                EguiPrimaryContextPass,
-                render_popups,
-            );
+            .add_systems(EguiPrimaryContextPass, render_popups);
     }
 }
-

@@ -32,7 +32,8 @@ pub fn update_check_highlight_system(
 
     // Find king position (the side that is in check = current turn's king)
     let king_color = current_turn.color;
-    let king_pos = pieces.iter()
+    let king_pos = pieces
+        .iter()
         .find(|p| p.piece_type == PieceType::King && p.color == king_color)
         .map(|p| Vec3::new(7.0 - p.x as f32, 1.2, p.y as f32));
 

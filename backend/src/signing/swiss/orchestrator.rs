@@ -13,7 +13,7 @@
 //! Reference: session_create_game instruction —
 //! `programs/xfchess-game/src/tournament_ix/session/session_create_game.rs`
 
-use crate::signing::storage::tournament::{TournamentStore, MatchStatus};
+use crate::signing::storage::tournament::{MatchStatus, TournamentStore};
 use crate::signing::swiss::service::SwissService;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -139,8 +139,7 @@ impl SwissOrchestrator {
                     game_id,
                     result,
                 } => {
-                    self.handle_game_ended(tournament_id, game_id, result)
-                        .await;
+                    self.handle_game_ended(tournament_id, game_id, result).await;
                 }
             }
         }
@@ -148,12 +147,7 @@ impl SwissOrchestrator {
     }
 
     /// Create game accounts for all pairings in a round.
-    async fn handle_round_paired(
-        &self,
-        tournament_id: u64,
-        round: u8,
-        pairings: Vec<Pairing>,
-    ) {
+    async fn handle_round_paired(&self, tournament_id: u64, round: u8, pairings: Vec<Pairing>) {
         info!(
             "[orchestrator] Creating {} games for tournament {} round {}",
             pairings.len(),
@@ -164,9 +158,7 @@ impl SwissOrchestrator {
         let total = pairings.len();
         {
             let mut inner = self.state.inner.write().await;
-            inner
-                .total_counts
-                .insert((tournament_id, round), total);
+            inner.total_counts.insert((tournament_id, round), total);
             inner
                 .finished_counts
                 .entry((tournament_id, round))
@@ -245,28 +237,17 @@ impl SwissOrchestrator {
     }
 
     /// Record a game result and check if the round is complete.
-    async fn handle_game_ended(
-        &self,
-        tournament_id: u64,
-        game_id: u64,
-        result: MatchResult,
-    ) {
+    async fn handle_game_ended(&self, tournament_id: u64, game_id: u64, result: MatchResult) {
         let active = match self.state.get_game(game_id).await {
             Some(g) => g,
             None => {
-                warn!(
-                    "[orchestrator] GameEnded for unknown game_id {}",
-                    game_id
-                );
+                warn!("[orchestrator] GameEnded for unknown game_id {}", game_id);
                 return;
             }
         };
 
         if active.finished {
-            warn!(
-                "[orchestrator] Duplicate GameEnded for game_id {}",
-                game_id
-            );
+            warn!("[orchestrator] Duplicate GameEnded for game_id {}", game_id);
             return;
         }
 
@@ -339,10 +320,7 @@ impl SwissOrchestrator {
                     // RoundPaired event sent by whoever triggered start_round.
                 }
                 Err(crate::signing::swiss::service::SwissServiceError::TournamentComplete) => {
-                    info!(
-                        "[orchestrator] Tournament {} is complete!",
-                        tournament_id
-                    );
+                    info!("[orchestrator] Tournament {} is complete!", tournament_id);
                 }
                 Err(e) => {
                     error!(
@@ -360,9 +338,7 @@ impl SwissOrchestrator {
         // so we use try_read to avoid deadlock.
         if let Ok(inner) = self.state.inner.try_read() {
             for game in inner.games.values() {
-                if game.tournament_id == tournament_id
-                    && game.round == round
-                    && game.board == board
+                if game.tournament_id == tournament_id && game.round == round && game.board == board
                 {
                     return game.game_id;
                 }
@@ -417,7 +393,9 @@ mod tests {
 
         {
             let mut inner = state.inner.write().await;
-            let count = inner.finished_counts.get_mut(&(1, 1))
+            let count = inner
+                .finished_counts
+                .get_mut(&(1, 1))
                 .expect("finished_counts should contain (1, 1)");
             *count = 2;
         }

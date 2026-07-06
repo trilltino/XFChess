@@ -102,12 +102,7 @@ impl MovePicker {
 ///
 /// Capture/quiet classification is done from the board (the only reliable
 /// source) — never from move scores, which mix history and positional bonuses.
-pub fn build_picker(
-    game: &Game,
-    moves: Vec<KK>,
-    depth: i32,
-    tt_move: Option<KK>,
-) -> MovePicker {
+pub fn build_picker(game: &Game, moves: Vec<KK>, depth: i32, tt_move: Option<KK>) -> MovePicker {
     let d_idx = depth.max(0) as usize;
     let killer_slots = if d_idx <= MAX_DEPTH {
         game.killer_moves[d_idx]

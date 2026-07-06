@@ -4,7 +4,7 @@
 //! via ngrok during local development for testing and debugging.
 
 use std::process::Command;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Starts ngrok tunnel for the signing server.
 ///
@@ -20,9 +20,7 @@ pub fn start_ngrok_tunnel(port: u16) -> Result<String, String> {
     info!("[Ngrok] Starting tunnel for port {}", port);
 
     // Check if ngrok is installed
-    let check_result = Command::new("ngrok")
-        .arg("version")
-        .output();
+    let check_result = Command::new("ngrok").arg("version").output();
 
     match check_result {
         Ok(_) => {

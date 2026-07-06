@@ -4,8 +4,8 @@
 //! for UI rendering, following the bevy_egui pattern of using SystemParams
 //! for cleaner APIs.
 
-pub mod main_menu;
 pub mod game_ui;
+pub mod main_menu;
 
-pub use main_menu::MainMenuUIContext;
 pub use game_ui::GameUIParams;
+pub use main_menu::MainMenuUIContext;

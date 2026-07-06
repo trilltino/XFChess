@@ -4,7 +4,7 @@
 #![allow(unused_variables)]
 #![allow(deprecated)]
 //! Tournament Test - Real 4-Player Tournament Simulation
-//! 
+//!
 //! Creates a complete tournament on Solana devnet with real games,
 //! moves, and transactions. Outputs data in the format expected by
 //! TournamentDemo.tsx for the web interface.
@@ -13,29 +13,29 @@ use std::fs;
 use std::time::Duration;
 use tokio::time::sleep;
 
+use chrono;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
-    signature::{Keypair, Signer},
-    transaction::Transaction,
-    pubkey::Pubkey,
     instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+    signature::{Keypair, Signer},
     system_program,
+    transaction::Transaction,
 };
-use serde_json::{json, Value};
-use serde::{Serialize, Deserialize};
-use chrono;
 
 // Import tournament instructions
 use xfchess::solana::instructions::{
-    create_game_ix, join_game_ix, record_move_ix, finalize_game_ix, PROFILE_SEED, PROGRAM_ID
+    create_game_ix, finalize_game_ix, join_game_ix, record_move_ix, PROFILE_SEED, PROGRAM_ID,
 };
 
 // Tournament-specific imports (these need to be created in instructions.rs)
 use xfchess::solana::instructions::{
-    initialize_tournament_ix, register_player_ix, start_tournament_ix, 
-    record_match_result_ix, advance_final_ix, TOURNAMENT_SEED, TOURNAMENT_ESCROW_SEED, TOURNAMENT_MATCH_SEED
+    advance_final_ix, initialize_tournament_ix, record_match_result_ix, register_player_ix,
+    start_tournament_ix, TOURNAMENT_ESCROW_SEED, TOURNAMENT_MATCH_SEED, TOURNAMENT_SEED,
 };
 
 const DEVNET_RPC: &str = "https://api.devnet.solana.com";
@@ -47,30 +47,27 @@ const ENTRY_FEE_LAMPORTS: u64 = 1_000_000; // 0.001 SOL
 
 // Players with their real keypairs (these should exist in keys/)
 const PLAYERS: &[(&str, &str, u32)] = &[
-    ("Magnus", "magnus.json", 2800),  // Norway, ELO 2800
-    ("Fabiano", "fabiano.json", 2750), // Italy, ELO 2750  
-    ("Anish", "anish.json", 2700),    // Netherlands, ELO 2700
-    ("Vidit", "vidit.json", 2650),    // Austria, ELO 2650
+    ("Magnus", "magnus.json", 2800),   // Norway, ELO 2800
+    ("Fabiano", "fabiano.json", 2750), // Italy, ELO 2750
+    ("Anish", "anish.json", 2700),     // Netherlands, ELO 2700
+    ("Vidit", "vidit.json", 2650),     // Austria, ELO 2650
 ];
 
 // Test moves for each game (real chess notation)
 const SF1_MOVES: &[&str] = &[
-    "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6",
-    "c1e3", "e7e6", "e4e5", "f6d7", "c2c4", "f8e7", "b1c3", "a7a6",
-    "c1d2", "b8c6", "d1e2", "c8d7"
+    "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "c1e3", "e7e6", "e4e5", "f6d7",
+    "c2c4", "f8e7", "b1c3", "a7a6", "c1d2", "b8c6", "d1e2", "c8d7",
 ];
 
 const SF2_MOVES: &[&str] = &[
-    "d2d4", "d7d5", "c2c4", "e7e6", "b1c3", "g8f6", "c4d3", "c7c6",
-    "e2e3", "f8d6", "f1d3", "e8g8", "e1g1", "d8e7", "c1e3", "e7h4",
-    "d3e2", "d6e7", "f1d1", "a7a6", "d1b3", "b8d7", "c3e4", "f6e4"
+    "d2d4", "d7d5", "c2c4", "e7e6", "b1c3", "g8f6", "c4d3", "c7c6", "e2e3", "f8d6", "f1d3", "e8g8",
+    "e1g1", "d8e7", "c1e3", "e7h4", "d3e2", "d6e7", "f1d1", "a7a6", "d1b3", "b8d7", "c3e4", "f6e4",
 ];
 
 const FINAL_MOVES: &[&str] = &[
-    "e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6", "e1g1", "f8e7",
-    "c2c3", "d7d6", "d2d4", "e5d4", "c3d4", "c6d4", "f3d4", "a7a6",
-    "b5c6", "b7c6", "d1e2", "d8e7", "c1e3", "e7e4", "d4c6", "d6d5",
-    "c6a5", "c6c5", "a5c4", "e4e7", "g1g5", "h7h6", "g5f3", "f8e8"
+    "e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6", "e1g1", "f8e7", "c2c3", "d7d6", "d2d4", "e5d4",
+    "c3d4", "c6d4", "f3d4", "a7a6", "b5c6", "b7c6", "d1e2", "d8e7", "c1e3", "e7e4", "d4c6", "d6d5",
+    "c6a5", "c6c5", "a5c4", "e4e7", "g1g5", "h7h6", "g5f3", "f8e8",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,18 +96,21 @@ struct Player {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" XFChess Tournament Test - Real On-Chain Simulation");
     println!("=====================================================");
-    
+
     // Load admin keypair
     let admin_keypair = load_keypair("keys/fee-payer.json")?;
     println!(" Admin: {}", admin_keypair.pubkey());
-    
+
     // Setup RPC client
     let rpc_client = RpcClient::new_with_commitment(DEVNET_RPC, CommitmentConfig::confirmed());
-    
+
     // Check admin balance
     let admin_balance = rpc_client.get_balance(&admin_keypair.pubkey())?;
-    println!(" Admin balance: {} SOL", admin_balance as f64 / 1_000_000_000.0);
-    
+    println!(
+        " Admin balance: {} SOL",
+        admin_balance as f64 / 1_000_000_000.0
+    );
+
     if admin_balance < 10_000_000_000 {
         println!("?  Admin balance low - please fund with devnet SOL");
         return Ok(());
@@ -125,15 +125,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             keypair,
             elo: *elo,
         });
-        println!(" {}: {} (ELO: {})", name, players.last().unwrap().keypair.pubkey(), elo);
+        println!(
+            " {}: {} (ELO: {})",
+            name,
+            players.last().unwrap().keypair.pubkey(),
+            elo
+        );
     }
 
     // Airdrop SOL to players if needed
     println!("\n Checking player balances...");
     for player in &players {
         let balance = rpc_client.get_balance(&player.keypair.pubkey())?;
-        println!("  {}: {} SOL", player.name, balance as f64 / 1_000_000_000.0);
-        
+        println!(
+            "  {}: {} SOL",
+            player.name,
+            balance as f64 / 1_000_000_000.0
+        );
+
         if balance < 2_000_000_000 {
             println!("   Airdropping 2 SOL to {}...", player.name);
             match airdrop_sol(&rpc_client, &player.keypair.pubkey()).await {
@@ -234,12 +243,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sf1_result = play_match(
         &rpc_client,
         &players[0], // Magnus
-        &players[3], // Vidit  
+        &players[3], // Vidit
         "SF1",
         SF1_MOVES,
         &mut lifecycle_steps,
         &mut session_notes,
-    ).await?;
+    )
+    .await?;
 
     // Step 6: SF2 - Fabiano vs Anish
     println!("\n Step 6: SF2 - Fabiano vs Anish");
@@ -247,15 +257,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &rpc_client,
         &players[1], // Fabiano
         &players[2], // Anish
-        "SF2", 
+        "SF2",
         SF2_MOVES,
         &mut lifecycle_steps,
         &mut session_notes,
-    ).await?;
+    )
+    .await?;
 
     // Step 7: Advance to final
     println!("\n Step 7: Advancing to final...");
-    let advance_sig = advance_to_final(&rpc_client, &admin_keypair, &sf1_result.winner, &sf2_result.winner).await?;
+    let advance_sig = advance_to_final(
+        &rpc_client,
+        &admin_keypair,
+        &sf1_result.winner,
+        &sf2_result.winner,
+    )
+    .await?;
     lifecycle_steps.push(TournamentStep {
         step: "Final Advanced".to_string(),
         status: "".to_string(),
@@ -265,12 +282,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         step: "Advance".to_string(),
         player: "Admin".to_string(),
         severity: "ok".to_string(),
-        text: format!("SF winners seeded into final: {} (White) vs {} (Black)", sf1_result.winner, sf2_result.winner),
+        text: format!(
+            "SF winners seeded into final: {} (White) vs {} (Black)",
+            sf1_result.winner, sf2_result.winner
+        ),
     });
     println!("   Advanced to final: {}", advance_sig);
 
     // Step 8: Final match
-    println!("\n Step 8: Final - {} vs {}", sf1_result.winner, sf2_result.winner);
+    println!(
+        "\n Step 8: Final - {} vs {}",
+        sf1_result.winner, sf2_result.winner
+    );
     let final_result = play_final(
         &rpc_client,
         &sf1_result.winner_player,
@@ -278,7 +301,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         FINAL_MOVES,
         &mut lifecycle_steps,
         &mut session_notes,
-    ).await?;
+    )
+    .await?;
 
     // Generate output files
     generate_tournament_data(&lifecycle_steps, &session_notes, &final_result.winner).await?;
@@ -307,7 +331,7 @@ async fn play_match(
         .as_secs();
 
     let _create_sig = create_match(rpc, player1, player2, game_id, round, lifecycle).await?;
-    
+
     // Join match
     let _join_sig = join_match(rpc, player2, game_id, round, lifecycle).await?;
 
@@ -333,7 +357,7 @@ async fn play_match(
                     step: round.to_string(),
                     player: player.name.clone(),
                     severity: "warn".to_string(),
-                    text: format!("move {} failed: {}", i+1, e),
+                    text: format!("move {} failed: {}", i + 1, e),
                 });
             }
         }
@@ -344,12 +368,20 @@ async fn play_match(
     let _finalize_sig = finalize_match(rpc, player1, game_id, round, lifecycle).await?;
 
     // Record result
-    let winner = if rand::random::<bool>() { player1 } else { player2 };
+    let winner = if rand::random::<bool>() {
+        player1
+    } else {
+        player2
+    };
     let _result_sig = record_match_result(rpc, winner, game_id, round, lifecycle).await?;
 
     notes.push(SessionNote {
         step: format!("{}-Result", round),
-        player: if winner.name == player1.name { player2.name.clone() } else { player1.name.clone() },
+        player: if winner.name == player1.name {
+            player2.name.clone()
+        } else {
+            player1.name.clone()
+        },
         severity: "ok".to_string(),
         text: "decisive tactical defeat, accepted gracefully".to_string(),
     });
@@ -387,8 +419,12 @@ async fn play_final(
     }
 
     let _finalize_sig = finalize_match(rpc, player1, game_id, "Final", lifecycle).await?;
-    
-    let winner = if rand::random::<bool>() { player1 } else { player2 };
+
+    let winner = if rand::random::<bool>() {
+        player1
+    } else {
+        player2
+    };
     let _result_sig = record_match_result(rpc, winner, game_id, "Final", lifecycle).await?;
 
     notes.push(SessionNote {
@@ -400,7 +436,11 @@ async fn play_final(
 
     notes.push(SessionNote {
         step: "Final".to_string(),
-        player: if winner.name == player1.name { player2.name.clone() } else { player1.name.clone() },
+        player: if winner.name == player1.name {
+            player2.name.clone()
+        } else {
+            player1.name.clone()
+        },
         severity: "ok".to_string(),
         text: "excellent fight, lost endgame on move 35".to_string(),
     });
@@ -512,32 +552,62 @@ async fn record_match_result(
 }
 
 // Tournament instruction functions (simplified for demo)
-async fn initialize_tournament(_rpc: &RpcClient, _admin: &Keypair) -> Result<String, Box<dyn std::error::Error>> {
+async fn initialize_tournament(
+    _rpc: &RpcClient,
+    _admin: &Keypair,
+) -> Result<String, Box<dyn std::error::Error>> {
     sleep(Duration::from_secs(2)).await;
-    Ok("5dVDBKTGSvokXQjksVqfcp7VQTXWE7KsCXn3THCC1XZbuAhiVRdoADh3CeWJK1V5bS1pRBxpvMyE8d1RG4vKPXkZ".to_string())
+    Ok(
+        "5dVDBKTGSvokXQjksVqfcp7VQTXWE7KsCXn3THCC1XZbuAhiVRdoADh3CeWJK1V5bS1pRBxpvMyE8d1RG4vKPXkZ"
+            .to_string(),
+    )
 }
 
-async fn create_player_profile(_rpc: &RpcClient, _admin: &Keypair, _player: &Pubkey) -> Result<String, Box<dyn std::error::Error>> {
+async fn create_player_profile(
+    _rpc: &RpcClient,
+    _admin: &Keypair,
+    _player: &Pubkey,
+) -> Result<String, Box<dyn std::error::Error>> {
     sleep(Duration::from_secs(1)).await;
     Ok("ProfileCreated".to_string())
 }
 
-async fn register_player(_rpc: &RpcClient, _player: &Keypair) -> Result<String, Box<dyn std::error::Error>> {
+async fn register_player(
+    _rpc: &RpcClient,
+    _player: &Keypair,
+) -> Result<String, Box<dyn std::error::Error>> {
     sleep(Duration::from_secs(1)).await;
     Ok("PlayerRegistered".to_string())
 }
 
-async fn start_tournament(_rpc: &RpcClient, _admin: &Keypair) -> Result<String, Box<dyn std::error::Error>> {
+async fn start_tournament(
+    _rpc: &RpcClient,
+    _admin: &Keypair,
+) -> Result<String, Box<dyn std::error::Error>> {
     sleep(Duration::from_secs(2)).await;
-    Ok("3rFjmPNsodQwZhiMwv2jYqA9EwBMkXnr5uJpLd7cVfaeTzYQNhkUo4GHxBiCwKpRs8tWqMnDvL3EjZcFoUgpX1m".to_string())
+    Ok(
+        "3rFjmPNsodQwZhiMwv2jYqA9EwBMkXnr5uJpLd7cVfaeTzYQNhkUo4GHxBiCwKpRs8tWqMnDvL3EjZcFoUgpX1m"
+            .to_string(),
+    )
 }
 
-async fn advance_to_final(rpc: &RpcClient, admin: &Keypair, winner1: &str, winner2: &str) -> Result<String, Box<dyn std::error::Error>> {
+async fn advance_to_final(
+    rpc: &RpcClient,
+    admin: &Keypair,
+    winner1: &str,
+    winner2: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     sleep(Duration::from_secs(2)).await;
-    Ok("5rKwPmrNx9aQjVsBhTdLuoCfEeZpWvXnRk7sI3gMoHtYqAeU5cFbJdNvPzXrLs4mKiWqBoD8eHjTCgRuNfpYa3A".to_string())
+    Ok(
+        "5rKwPmrNx9aQjVsBhTdLuoCfEeZpWvXnRk7sI3gMoHtYqAeU5cFbJdNvPzXrLs4mKiWqBoD8eHjTCgRuNfpYa3A"
+            .to_string(),
+    )
 }
 
-async fn airdrop_sol(rpc: &RpcClient, pubkey: &Pubkey) -> Result<String, Box<dyn std::error::Error>> {
+async fn airdrop_sol(
+    rpc: &RpcClient,
+    pubkey: &Pubkey,
+) -> Result<String, Box<dyn std::error::Error>> {
     // In real implementation, call devnet airdrop API
     sleep(Duration::from_secs(3)).await;
     Ok("AirdropComplete".to_string())
@@ -644,4 +714,3 @@ export const GENERATED_AT = '{}';
 
     Ok(())
 }
-

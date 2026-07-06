@@ -1,12 +1,12 @@
-﻿//! Tournament data store for managing 8-128 player single-elimination tournaments.
+//! Tournament data store for managing 8-128 player single-elimination tournaments.
 //!
 //! This module provides SQLite-backed storage for tournament records,
 //! including player registration, bracket management, and match results.
 //! Supports power-of-2 player counts: 8, 16, 32, 64, 128.
 
 use serde::{Deserialize, Serialize};
+use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
-use sqlx::{SqlitePool, Row};
 
 /// Tournament format - single elimination or Swiss
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -521,8 +521,11 @@ impl TournamentStore {
                 id       INTEGER PRIMARY KEY,
                 data     TEXT    NOT NULL,
                 updated_at INTEGER NOT NULL DEFAULT 0
-            );"
-        ).execute(&pool).await.ok();
+            );",
+        )
+        .execute(&pool)
+        .await
+        .ok();
         tracing::info!("[tournament-store] SQLite table ready");
         Self { pool }
     }
@@ -531,22 +534,22 @@ impl TournamentStore {
     pub async fn create(&self, record: TournamentRecord) {
         let data = serde_json::to_string(&record).unwrap_or_default();
         let now = chrono::Utc::now().timestamp();
-        sqlx::query(
-            "INSERT OR REPLACE INTO tournaments (id, data, updated_at) VALUES (?, ?, ?)"
-        )
-        .bind(record.tournament_id as i64)
-        .bind(&data)
-        .bind(now)
-        .execute(&self.pool)
-        .await
-        .ok();
+        sqlx::query("INSERT OR REPLACE INTO tournaments (id, data, updated_at) VALUES (?, ?, ?)")
+            .bind(record.tournament_id as i64)
+            .bind(&data)
+            .bind(now)
+            .execute(&self.pool)
+            .await
+            .ok();
     }
 
     /// Retrieves a tournament by ID.
     pub async fn get(&self, id: u64) -> Option<TournamentRecord> {
         let row = sqlx::query("SELECT data FROM tournaments WHERE id = ?")
             .bind(id as i64)
-            .fetch_optional(&self.pool).await.ok()??;
+            .fetch_optional(&self.pool)
+            .await
+            .ok()??;
         serde_json::from_str(&row.get::<String, _>(0)).ok()
     }
 
@@ -574,7 +577,9 @@ impl TournamentStore {
                 .bind(data)
                 .bind(now)
                 .bind(id as i64)
-                .execute(&self.pool).await.is_ok()
+                .execute(&self.pool)
+                .await
+                .is_ok()
         } else {
             false
         }
@@ -582,7 +587,10 @@ impl TournamentStore {
 
     /// Registers a player's P2P node ID for the tournament.
     pub async fn register_node_id(&self, id: u64, player: String, node_id: String) -> bool {
-        self.update(id, |t| { t.node_ids.insert(player, node_id); }).await
+        self.update(id, |t| {
+            t.node_ids.insert(player, node_id);
+        })
+        .await
     }
 
     /// Removes a player from the tournament and decrements the prize pool.
@@ -595,7 +603,8 @@ impl TournamentStore {
                     t.prize_pool -= t.entry_fee_lamports;
                 }
             }
-        }).await
+        })
+        .await
     }
 
     /// Sets the game ID for a specific match.
@@ -605,11 +614,18 @@ impl TournamentStore {
                 m.game_id = Some(game_id);
                 m.status = MatchStatus::Active;
             }
-        }).await
+        })
+        .await
     }
 
     /// Records a match result and tracks placements for top 4.
-    pub async fn record_result(&self, id: u64, match_index: usize, winner: String, loser: String) -> bool {
+    pub async fn record_result(
+        &self,
+        id: u64,
+        match_index: usize,
+        winner: String,
+        loser: String,
+    ) -> bool {
         self.update(id, |t| {
             if let Some(m) = t.matches[match_index].as_mut() {
                 m.winner = Some(winner.clone());
@@ -633,22 +649,25 @@ impl TournamentStore {
                 t.status = TournamentStatus::Completed;
                 t.completed_at = Some(chrono::Utc::now().timestamp());
             }
-        }).await
+        })
+        .await
     }
 
     /// Update tournament status
     pub async fn update_status(&self, id: u64, status: TournamentStatus) -> bool {
         self.update(id, |t| {
             t.status = status;
-        }).await
+        })
+        .await
     }
 
     /// Seed players by ELO rating (highest to lowest)
     pub async fn seed_players_by_elo(&self, id: u64) -> bool {
         self.update(id, |t| {
-            let mut indexed: Vec<(usize, u32)> = t.player_elos.iter().copied().enumerate().collect();
+            let mut indexed: Vec<(usize, u32)> =
+                t.player_elos.iter().copied().enumerate().collect();
             indexed.sort_by(|a, b| b.1.cmp(&a.1)); // descending ELO
-            
+
             // Reorder players and elos by sorted index
             let mut sorted_players = Vec::new();
             let mut sorted_elos = Vec::new();
@@ -658,7 +677,8 @@ impl TournamentStore {
             }
             t.players = sorted_players;
             t.player_elos = sorted_elos;
-        }).await
+        })
+        .await
     }
 
     /// Generate bracket for single-elimination tournaments
@@ -667,17 +687,17 @@ impl TournamentStore {
             if t.format != TournamentFormat::SingleElimination {
                 return;
             }
-            
+
             let num_players = t.players.len();
             let num_matches = num_players.saturating_sub(1);
             t.matches = vec![None; num_matches];
-            
+
             // Generate first round pairings (highest vs lowest seeding)
             let mut match_idx = 0;
-            for i in 0..num_players/2 {
+            for i in 0..num_players / 2 {
                 let white_idx = i;
                 let black_idx = num_players - 1 - i;
-                
+
                 t.matches[match_idx] = Some(TournamentMatch {
                     match_index: match_idx as u16,
                     round: 0,
@@ -687,23 +707,24 @@ impl TournamentStore {
                     game_id: None,
                     status: MatchStatus::Pending,
                     result_source: None,
-                    next_match_for_winner: Some((num_players/2 + match_idx/2) as u16),
+                    next_match_for_winner: Some((num_players / 2 + match_idx / 2) as u16),
                     next_match_slot: if match_idx % 2 == 0 { 0 } else { 1 },
                 });
                 match_idx += 1;
             }
-        }).await
+        })
+        .await
     }
 
     /// Start the tournament (generate bracket and set status)
     pub async fn start_tournament(&self, id: u64) -> Result<(), String> {
         let tournament = self.get(id).await.ok_or("Tournament not found")?;
-        
+
         // Seed players first
         if !self.seed_players_by_elo(id).await {
             return Err("Failed to seed players".to_string());
         }
-        
+
         match tournament.format {
             TournamentFormat::SingleElimination => {
                 if !self.generate_bracket(id).await {
@@ -718,17 +739,18 @@ impl TournamentStore {
                 }
             }
         }
-        
+
         // Set status to Active
         if !self.update_status(id, TournamentStatus::Active).await {
             return Err("Failed to update tournament status".to_string());
         }
-        
+
         // Set start time
         self.update(id, |t| {
             t.started_at = Some(chrono::Utc::now().timestamp());
-        }).await;
-        
+        })
+        .await;
+
         Ok(())
     }
 }

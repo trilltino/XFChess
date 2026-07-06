@@ -1,5 +1,5 @@
-use std::path::Path;
 use sqlx::SqlitePool;
+use std::path::Path;
 use tracing::info;
 
 use crate::config::AcConfig;
@@ -7,14 +7,17 @@ use crate::cross_game;
 use crate::report::{json, txt};
 use crate::types::{AcReport, Verdict};
 
-pub async fn save_report(pool: &SqlitePool, report: &AcReport, cfg: &AcConfig) -> crate::error::AcResult<()> {
-    let report_path = if report.white.verdict != Verdict::Clean
-        || report.black.verdict != Verdict::Clean
-    {
-        Some(write_report_files(report, cfg)?)
-    } else {
-        None
-    };
+pub async fn save_report(
+    pool: &SqlitePool,
+    report: &AcReport,
+    cfg: &AcConfig,
+) -> crate::error::AcResult<()> {
+    let report_path =
+        if report.white.verdict != Verdict::Clean || report.black.verdict != Verdict::Clean {
+            Some(write_report_files(report, cfg)?)
+        } else {
+            None
+        };
 
     let path_str = report_path.as_deref().unwrap_or("");
     let white_signals = serde_json::to_string(&report.white.signals)?;
@@ -27,7 +30,7 @@ pub async fn save_report(pool: &SqlitePool, report: &AcReport, cfg: &AcConfig) -
             white_verdict, black_verdict,
             white_score, black_score,
             white_signals, black_signals, report_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&report.game_id)
     .bind(&report.engine_version)
@@ -47,8 +50,10 @@ pub async fn save_report(pool: &SqlitePool, report: &AcReport, cfg: &AcConfig) -
     info!(
         "[anticheat] game {} — white: {} ({:.2}), black: {} ({:.2})",
         report.game_id,
-        report.white.verdict.as_str(), report.white.weighted_score,
-        report.black.verdict.as_str(), report.black.weighted_score,
+        report.white.verdict.as_str(),
+        report.white.weighted_score,
+        report.black.verdict.as_str(),
+        report.black.weighted_score,
     );
 
     cross_game::update_stats(pool, &report.white).await;
@@ -64,11 +69,14 @@ fn write_report_files(report: &AcReport, cfg: &AcConfig) -> crate::error::AcResu
     }
 
     let base = dir.join(&report.game_id);
-    let txt_path  = base.with_extension("txt");
+    let txt_path = base.with_extension("txt");
     let json_path = base.with_extension("json");
 
     std::fs::write(&txt_path, txt::render(report))?;
-    std::fs::write(&json_path, serde_json::to_string_pretty(&json::render(report))?)?;
+    std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(&json::render(report))?,
+    )?;
 
     info!("[anticheat] report written to {}", txt_path.display());
     Ok(txt_path.to_string_lossy().into_owned())

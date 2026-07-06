@@ -197,7 +197,10 @@ mod tests {
         // Fast moves that would read as 1.0 under Server are silenced by None.
         let plies = vec![eval(4, Complexity::Complex, 100)];
         let moves = vec![mv(4, 100)];
-        assert_eq!(timing_anomaly(&plies, &moves, TimingSource::None, &cfg), 0.0);
+        assert_eq!(
+            timing_anomaly(&plies, &moves, TimingSource::None, &cfg),
+            0.0
+        );
     }
 
     #[test]

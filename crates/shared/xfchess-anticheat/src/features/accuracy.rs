@@ -35,7 +35,10 @@ pub fn cpl_signal(elo: u32, plies: &[PlyEval]) -> f64 {
 
 /// Count of Complex positions (minimum sample gate).
 pub fn complex_ply_count(plies: &[PlyEval]) -> u32 {
-    plies.iter().filter(|p| p.complexity == Complexity::Complex).count() as u32
+    plies
+        .iter()
+        .filter(|p| p.complexity == Complexity::Complex)
+        .count() as u32
 }
 
 #[cfg(test)]

@@ -7,22 +7,21 @@
 
 use anyhow::Result;
 use sha2::{Digest, Sha256};
+#[allow(deprecated)]
+use solana_sdk::system_program;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
 };
-#[allow(deprecated)]
-use solana_sdk::system_program;
-
 
 /// Deployed program ID (must match `declare_id!` in xfchess-game).
 pub const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
 /// PDA seeds — kept in sync with `programs/xfchess-game/src/constants.rs`.
 pub const GAME_SEED: &[u8] = b"game";
-pub const MOVE_LOG_SEED: &[u8] = b"move_log";
 pub const PROFILE_SEED: &[u8] = b"profile";
 pub const USERNAME_SEED: &[u8] = b"username";
+pub const FRIENDSHIP_SEED: &[u8] = b"friendship";
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";
@@ -74,16 +73,10 @@ pub fn create_game_ix(
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> Result<Instruction> {
-    let game_pda = Pubkey::find_program_address(
-        &[GAME_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let escrow_pda = Pubkey::find_program_address(
-        &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
     let mut data = anchor_discriminator("create_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
@@ -129,26 +122,14 @@ pub fn join_game_ix(
     fee_payer: Pubkey,
     game_id: u64,
 ) -> Result<Instruction> {
-    let game_pda = Pubkey::find_program_address(
-        &[GAME_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let player_profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, player.as_ref()],
-        &program_id,
-    )
-    .0;
-    let escrow_pda = Pubkey::find_program_address(
-        &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let white_profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, white_player.as_ref()],
-        &program_id,
-    )
-    .0;
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let player_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let white_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, white_player.as_ref()], &program_id).0;
 
     let mut data = anchor_discriminator("join_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
@@ -176,7 +157,7 @@ pub fn join_game_ix(
 ///
 /// On-chain signature:
 /// ```ignore
-/// pub fn record_move(ctx, game_id: u64, move_str: String, next_fen: String)
+/// pub fn record_move(ctx, game_id: u64, move_uci: [u8; 5], next_board: [u8; 68], nonce: u64, signature: Option<Vec<u8>>, parent_nonce: Option<u64>)
 /// ```
 ///
 /// `annotation`, `move_time`, and `prev_hash` are client-side metadata used
@@ -191,21 +172,24 @@ pub fn record_move_ix(
     nonce: u64,
     signature: Option<Vec<u8>>,
 ) -> Result<Instruction> {
-    let game_pda = Pubkey::find_program_address(
-        &[GAME_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    ).0;
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let session_pda = Pubkey::find_program_address(
-        &[b"session_delegation", &game_id.to_le_bytes(), wallet_player.as_ref()],
+        &[
+            b"session_delegation",
+            &game_id.to_le_bytes(),
+            wallet_player.as_ref(),
+        ],
         &program_id,
-    ).0;
+    )
+    .0;
 
     let mut data = anchor_discriminator("record_move").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&move_uci);
     data.extend_from_slice(&next_board);
     data.extend_from_slice(&nonce.to_le_bytes());
-    
+
     if let Some(sig) = signature {
         data.push(1);
         data.extend_from_slice(&(sig.len() as u32).to_le_bytes());
@@ -213,6 +197,7 @@ pub fn record_move_ix(
     } else {
         data.push(0);
     }
+    data.push(0);
 
     Ok(Instruction {
         program_id,
@@ -249,26 +234,15 @@ pub fn finalize_game_ix(
     black_pubkey: Pubkey,
     fee_payer: Pubkey,
 ) -> Result<Instruction> {
-    let game_pda = Pubkey::find_program_address(
-        &[GAME_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    ).0;
-    let white_profile = Pubkey::find_program_address(
-        &[PROFILE_SEED, white_pubkey.as_ref()],
-        &program_id,
-    ).0;
-    let black_profile = Pubkey::find_program_address(
-        &[PROFILE_SEED, black_pubkey.as_ref()],
-        &program_id,
-    ).0;
-    let escrow_pda = Pubkey::find_program_address(
-        &[WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    ).0;
-    let treasury_vault = Pubkey::find_program_address(
-        &[TREASURY_VAULT_SEED],
-        &program_id,
-    ).0;
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let white_profile =
+        Pubkey::find_program_address(&[PROFILE_SEED, white_pubkey.as_ref()], &program_id).0;
+    let black_profile =
+        Pubkey::find_program_address(&[PROFILE_SEED, black_pubkey.as_ref()], &program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let treasury_vault = Pubkey::find_program_address(&[TREASURY_VAULT_SEED], &program_id).0;
 
     let mut data = anchor_discriminator("finalize_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
@@ -313,13 +287,14 @@ pub fn authorize_session_key_ix(
     session_pubkey: Pubkey,
     duration_seconds: i64,
 ) -> Result<Instruction> {
-    let game_pda = Pubkey::find_program_address(
-        &[GAME_SEED, &game_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let session_delegation_pda = Pubkey::find_program_address(
-        &[SESSION_DELEGATION_SEED, &game_id.to_le_bytes(), player.as_ref()],
+        &[
+            SESSION_DELEGATION_SEED,
+            &game_id.to_le_bytes(),
+            player.as_ref(),
+        ],
         &program_id,
     )
     .0;
@@ -363,15 +338,11 @@ pub fn init_profile_ix(
     country: String,
     date_of_birth: i64,
 ) -> Result<Instruction> {
-    let player_profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, player.as_ref()],
-        &program_id,
-    ).0;
+    let player_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
 
-    let username_record_pda = Pubkey::find_program_address(
-        &[USERNAME_SEED, username.as_bytes()],
-        &program_id,
-    ).0;
+    let username_record_pda =
+        Pubkey::find_program_address(&[USERNAME_SEED, username.as_bytes()], &program_id).0;
 
     let mut data = anchor_discriminator("init_profile").to_vec();
     data.extend(borsh_string(&username));
@@ -402,11 +373,8 @@ pub fn init_profile_ix(
 ///   1. admin           (mut, signer)
 ///   2. player          (pubkey only)
 pub fn verify_profile_ix(program_id: Pubkey, admin: Pubkey, player: Pubkey) -> Result<Instruction> {
-    let player_profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, player.as_ref()],
-        &program_id,
-    )
-    .0;
+    let player_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
 
     let data = anchor_discriminator("verify_profile").to_vec();
 
@@ -434,22 +402,12 @@ pub fn verify_profile_ix(program_id: Pubkey, admin: Pubkey, player: Pubkey) -> R
 ///   2. player          (mut, signer)
 ///   3. authority       (must match profile.authority)
 ///   4. system_program
-pub fn set_username_ix(
-    program_id: Pubkey,
-    player: Pubkey,
-    username: &str,
-) -> Result<Instruction> {
-    let player_profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, player.as_ref()],
-        &program_id,
-    )
-    .0;
+pub fn set_username_ix(program_id: Pubkey, player: Pubkey, username: &str) -> Result<Instruction> {
+    let player_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
 
-    let username_record_pda = Pubkey::find_program_address(
-        &[USERNAME_SEED, username.as_bytes()],
-        &program_id,
-    )
-    .0;
+    let username_record_pda =
+        Pubkey::find_program_address(&[USERNAME_SEED, username.as_bytes()], &program_id).0;
 
     let mut data = anchor_discriminator("set_username").to_vec();
     data.extend(borsh_string(username));
@@ -489,22 +447,38 @@ pub fn initialize_tournament_ix(
     .0;
 
     let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[0u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[1u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[2u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[3u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
@@ -549,29 +523,42 @@ pub fn register_player_ix(
         &program_id,
     )
     .0;
-    let player_profile_pda = Pubkey::find_program_address(
-        &[PROFILE_SEED, player.as_ref()],
-        &program_id,
-    )
-    .0;
+    let player_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
 
     let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[0u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[1u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[2u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[3u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
@@ -609,22 +596,38 @@ pub fn start_tournament_ix(
     .0;
 
     let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[0u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[1u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[2u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[3u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
@@ -692,22 +695,38 @@ pub fn record_swiss_result_ix(
     .0;
 
     let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[0u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[1u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[2u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[3u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
@@ -772,22 +791,38 @@ pub fn leave_tournament_ix(
     .0;
 
     let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[0u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[1u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[2u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
     let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
+        &[
+            TOURNAMENT_PLAYERS_SEED,
+            &[3u8],
+            &tournament_id.to_le_bytes(),
+        ],
         &program_id,
     )
     .0;
@@ -816,4 +851,91 @@ pub fn get_program_id() -> Result<Pubkey> {
     PROGRAM_ID
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid program ID: {}", e))
+}
+
+// ── Solana Friends ────────────────────────────────────────────────────────────
+//
+// Mirrors `programs/xfchess-game/src/account_ix/friends_ix.rs`. The `Friendship`
+// PDA is addressed by the two wallets in canonical (sorted) order, so both sides
+// derive the same account. Callers pass any two wallets; we sort them here.
+
+/// Sort two wallets into canonical (lo, hi) order and derive the Friendship PDA.
+fn friendship_pair(a: Pubkey, b: Pubkey, program_id: &Pubkey) -> (Pubkey, Pubkey, Pubkey) {
+    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+    let pda =
+        Pubkey::find_program_address(&[FRIENDSHIP_SEED, lo.as_ref(), hi.as_ref()], program_id).0;
+    (lo, hi, pda)
+}
+
+/// `send_friend_request` — `requester` asks to friend `other`.
+pub fn send_friend_request_ix(
+    program_id: Pubkey,
+    requester: Pubkey,
+    other: Pubkey,
+) -> Result<Instruction> {
+    let (lo, hi, friendship) = friendship_pair(requester, other, &program_id);
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(friendship, false),
+            AccountMeta::new_readonly(lo, false),
+            AccountMeta::new_readonly(hi, false),
+            AccountMeta::new(requester, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data: anchor_discriminator("send_friend_request").to_vec(),
+    })
+}
+
+/// `accept_friend_request` — `addressee` accepts a pending request from `other`.
+pub fn accept_friend_request_ix(
+    program_id: Pubkey,
+    addressee: Pubkey,
+    other: Pubkey,
+) -> Result<Instruction> {
+    let (lo, hi, friendship) = friendship_pair(addressee, other, &program_id);
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(friendship, false),
+            AccountMeta::new_readonly(lo, false),
+            AccountMeta::new_readonly(hi, false),
+            AccountMeta::new_readonly(addressee, true),
+        ],
+        data: anchor_discriminator("accept_friend_request").to_vec(),
+    })
+}
+
+/// `close_friendship` — decline / cancel / remove; `signer` (either party) closes the edge.
+pub fn close_friendship_ix(
+    program_id: Pubkey,
+    signer: Pubkey,
+    other: Pubkey,
+) -> Result<Instruction> {
+    let (lo, hi, friendship) = friendship_pair(signer, other, &program_id);
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(friendship, false),
+            AccountMeta::new_readonly(lo, false),
+            AccountMeta::new_readonly(hi, false),
+            AccountMeta::new(signer, true),
+        ],
+        data: anchor_discriminator("close_friendship").to_vec(),
+    })
+}
+
+/// `block_user` — `signer` (either party) marks an existing edge as blocked.
+pub fn block_user_ix(program_id: Pubkey, signer: Pubkey, other: Pubkey) -> Result<Instruction> {
+    let (lo, hi, friendship) = friendship_pair(signer, other, &program_id);
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(friendship, false),
+            AccountMeta::new_readonly(lo, false),
+            AccountMeta::new_readonly(hi, false),
+            AccountMeta::new_readonly(signer, true),
+        ],
+        data: anchor_discriminator("block_user").to_vec(),
+    })
 }

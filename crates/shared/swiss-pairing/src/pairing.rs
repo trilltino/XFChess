@@ -1,5 +1,5 @@
 use crate::{
-    Color, PairingConfig, Pairing, PairingError, PairingResult, Scoregroup, SwissPlayer, SwissRound,
+    Color, Pairing, PairingConfig, PairingError, PairingResult, Scoregroup, SwissPlayer, SwissRound,
 };
 use std::collections::HashSet;
 use tracing::{debug, trace, warn};
@@ -80,7 +80,12 @@ pub fn generate_pairings(
     let mut used_players: Vec<String> = overridden_ids.into_iter().collect();
 
     for (i, group) in scoregroups.iter().enumerate() {
-        trace!("Pairing scoregroup {} with score {} ({} players)", i, group.score, group.players.len());
+        trace!(
+            "Pairing scoregroup {} with score {} ({} players)",
+            i,
+            group.score,
+            group.players.len()
+        );
 
         // Filter out already paired players
         let available: Vec<SwissPlayer> = group
@@ -117,8 +122,14 @@ pub fn generate_pairings(
     // Track float-ups
     let mut float_ups: Vec<String> = Vec::new();
     for pairing in &all_pairings {
-        let white_score = ranked.iter().find(|p| p.id == pairing.white).map(|p| p.score);
-        let black_score = ranked.iter().find(|p| p.id == pairing.black).map(|p| p.score);
+        let white_score = ranked
+            .iter()
+            .find(|p| p.id == pairing.white)
+            .map(|p| p.score);
+        let black_score = ranked
+            .iter()
+            .find(|p| p.id == pairing.black)
+            .map(|p| p.score);
         if let (Some(ws), Some(bs)) = (white_score, black_score) {
             if (bs - ws).abs() > f64::EPSILON && ws < bs {
                 if !float_ups.contains(&pairing.white) {
@@ -236,10 +247,7 @@ fn pair_scoregroup(
     };
 
     // Now pair remaining players
-    let to_pair: Vec<&SwissPlayer> = players
-        .iter()
-        .filter(|p| !used.contains(&p.id))
-        .collect();
+    let to_pair: Vec<&SwissPlayer> = players.iter().filter(|p| !used.contains(&p.id)).collect();
 
     // Dutch system: split in half, pair top half vs bottom half
     let half = player_count / 2;
@@ -306,7 +314,11 @@ fn select_bye_candidate(players: &[SwissPlayer]) -> PairingResult<SwissPlayer> {
     candidates.sort_by(|a, b| {
         a.bye_count()
             .cmp(&b.bye_count())
-            .then_with(|| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| a.rating.cmp(&b.rating))
             .then_with(|| a.id.cmp(&b.id))
     });
@@ -548,7 +560,10 @@ mod tests {
         let round = generate_pairings(2, &players, 5, &default_config()).unwrap();
 
         assert_eq!(round.byes.len(), 1);
-        assert_ne!(round.byes[0], "p5", "p5 already had a bye; should not receive another");
+        assert_ne!(
+            round.byes[0], "p5",
+            "p5 already had a bye; should not receive another"
+        );
     }
 
     #[test]
@@ -569,8 +584,8 @@ mod tests {
 
         assert_eq!(round.pairings.len(), 2);
         for p in &round.pairings {
-            let rematch = (p.white == "p1" && p.black == "p3")
-                || (p.white == "p3" && p.black == "p1");
+            let rematch =
+                (p.white == "p1" && p.black == "p3") || (p.white == "p3" && p.black == "p1");
             assert!(!rematch, "engine produced a rematch: {:?}", p);
         }
     }
@@ -632,8 +647,8 @@ mod tests {
         let round = generate_pairings(1, &players, 5, &config).unwrap();
 
         for p in &round.pairings {
-            let forbidden = (p.white == "p1" && p.black == "p2")
-                || (p.white == "p2" && p.black == "p1");
+            let forbidden =
+                (p.white == "p1" && p.black == "p2") || (p.white == "p2" && p.black == "p1");
             assert!(!forbidden, "forbidden pair was produced: {:?}", p);
         }
     }
@@ -657,9 +672,10 @@ mod tests {
 
         let round = generate_pairings(1, &players, 5, &config).unwrap();
 
-        let forced = round.pairings.iter().any(|p| {
-            (p.white == "p1" && p.black == "p4") || (p.white == "p4" && p.black == "p1")
-        });
+        let forced = round
+            .pairings
+            .iter()
+            .any(|p| (p.white == "p1" && p.black == "p4") || (p.white == "p4" && p.black == "p1"));
         assert!(forced, "manual override pairing not present");
     }
 }

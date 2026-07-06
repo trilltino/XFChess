@@ -10,6 +10,19 @@ use std::path::PathBuf;
 use tracing::{info, warn};
 
 fn key_path() -> PathBuf {
+    // Override for running multiple instances on one machine (e.g. `just dev2`).
+    // Without this, both instances load the SAME persisted node key → identical
+    // node_id → the P2P relay can't tell host from joiner and misroutes JOIN_ACK,
+    // so the host never detects the joiner. Prod is unaffected (different machines).
+    if let Ok(p) = std::env::var("XFCHESS_NODE_KEY_PATH") {
+        if !p.trim().is_empty() {
+            let pb = PathBuf::from(p);
+            if let Some(parent) = pb.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            return pb;
+        }
+    }
     let base = dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("xfchess");

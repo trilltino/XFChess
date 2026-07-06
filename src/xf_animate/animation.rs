@@ -70,8 +70,7 @@ pub fn idle_float(
     let _ = BOARD_HALF; // keep import resolution tidy without functional impact
     let t = time.elapsed_secs();
     for (piece, mut transform) in q.iter_mut() {
-        let phase = (piece.file as f32 * 1.3 + piece.rank as f32 * 0.9)
-            % std::f32::consts::TAU;
+        let phase = (piece.file as f32 * 1.3 + piece.rank as f32 * 0.9) % std::f32::consts::TAU;
         let float_y = (t * 0.5 + phase).sin() * 0.012;
         transform.translation.y = float_y;
     }

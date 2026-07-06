@@ -102,6 +102,19 @@ pub fn handler_revoke_global_session(ctx: Context<RevokeGlobalSessionCtx>) -> Re
     Ok(())
 }
 
+/// Return the unspent balance of the (program-owned) delegation vault to the
+/// player, keeping the account rent-exempt so the delegation can be re-used.
+/// Without this, lamports deposited via `authorize_global_session` beyond what
+/// was wagered would be stranded.
+pub fn handler_withdraw_global_session(ctx: Context<WithdrawGlobalSessionCtx>) -> Result<()> {
+    let delegation_info = ctx.accounts.session_delegation.to_account_info();
+    let player_info = ctx.accounts.player.to_account_info();
+    let rent_min = Rent::get()?.minimum_balance(delegation_info.data_len());
+    let withdrawable = delegation_info.lamports().saturating_sub(rent_min);
+    crate::common::escrow::debit_program_pda(&delegation_info, &player_info, withdrawable)?;
+    Ok(())
+}
+
 #[derive(Accounts)]
 pub struct AuthorizeGlobalSessionCtx<'info> {
     #[account(
@@ -125,6 +138,20 @@ pub struct RevokeGlobalSessionCtx<'info> {
         mut,
         seeds = [GlobalSessionDelegation::SEED, player.key().as_ref()],
         bump = session_delegation.bump,
+    )]
+    pub session_delegation: Account<'info, GlobalSessionDelegation>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawGlobalSessionCtx<'info> {
+    #[account(
+        mut,
+        seeds = [GlobalSessionDelegation::SEED, player.key().as_ref()],
+        bump = session_delegation.bump,
+        constraint = session_delegation.player == player.key() @ XfchessGameError::UnauthorizedAccess,
     )]
     pub session_delegation: Account<'info, GlobalSessionDelegation>,
 

@@ -1,22 +1,23 @@
 //! Instructions managing multi-player structured tournaments.
 
 pub mod lifecycle;
-pub mod registration;
 pub mod matches;
-pub mod session;
 pub mod prizes;
+pub mod registration;
+pub mod session;
+pub mod shards;
 
 // Re-export all types from subdirectories for easier access
 pub use lifecycle::{
-    CancelTournament, CloseTournament, InitializeTournament, InitializeTournamentEscrow,
-    InitializeTournamentShards, InitializeShardsSmall, InitializeShardsMedium, StartTournament,
+    CancelTournament, CloseTournament, InitializeShardsMedium, InitializeShardsSmall,
+    InitializeTournament, InitializeTournamentEscrow, InitializeTournamentShards, StartTournament,
 };
-pub use registration::{RegisterPlayer, LeaveTournament};
 pub use matches::{
     AdvanceWinner, InitializeMatch, RecordMatchResult, RecordSwissResult, SwissMatchResult,
 };
+pub use prizes::{ClaimTournamentPrize, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize};
+pub use registration::{LeaveTournament, RegisterPlayer};
 pub use session::{
     AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx, RevokeTournamentSessionCtx,
     SessionCreateGame, SessionJoinGame,
 };
-pub use prizes::{ClaimTournamentPrize, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize};

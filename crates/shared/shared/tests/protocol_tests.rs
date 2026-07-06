@@ -129,28 +129,48 @@ fn test_lobby_message_game_starting() {
 fn roundtrip_game(msg: &GameMessage) {
     let bytes = bincode::serialize(msg).expect("serialize");
     let back: GameMessage = bincode::deserialize(&bytes).expect("deserialize");
-    assert_eq!(*msg, back, "GameMessage did not survive a bincode round-trip");
+    assert_eq!(
+        *msg, back,
+        "GameMessage did not survive a bincode round-trip"
+    );
 }
 
 fn roundtrip_lobby(msg: &LobbyMessage) {
     let bytes = bincode::serialize(msg).expect("serialize");
     let back: LobbyMessage = bincode::deserialize(&bytes).expect("deserialize");
-    assert_eq!(*msg, back, "LobbyMessage did not survive a bincode round-trip");
+    assert_eq!(
+        *msg, back,
+        "LobbyMessage did not survive a bincode round-trip"
+    );
 }
 
 #[test]
 fn game_messages_roundtrip() {
-    roundtrip_game(&GameMessage::SubmitMove { from: (4, 1), to: (4, 3) });
-    roundtrip_game(&GameMessage::MoveMade { from: (4, 6), to: (4, 4) });
+    roundtrip_game(&GameMessage::SubmitMove {
+        from: (4, 1),
+        to: (4, 3),
+    });
+    roundtrip_game(&GameMessage::MoveMade {
+        from: (4, 6),
+        to: (4, 4),
+    });
     roundtrip_game(&GameMessage::Resign);
-    roundtrip_game(&GameMessage::GameEnd { winner: Some(1), reason: "Checkmate".into() });
-    roundtrip_game(&GameMessage::GameEnd { winner: None, reason: "Stalemate".into() });
+    roundtrip_game(&GameMessage::GameEnd {
+        winner: Some(1),
+        reason: "Checkmate".into(),
+    });
+    roundtrip_game(&GameMessage::GameEnd {
+        winner: None,
+        reason: "Stalemate".into(),
+    });
 }
 
 #[test]
 fn lobby_messages_roundtrip() {
     roundtrip_lobby(&LobbyMessage::CreateRoom);
-    roundtrip_lobby(&LobbyMessage::JoinRoom { code: "ABCD1234".into() });
+    roundtrip_lobby(&LobbyMessage::JoinRoom {
+        code: "ABCD1234".into(),
+    });
     roundtrip_lobby(&LobbyMessage::SetReady { ready: true });
     roundtrip_lobby(&LobbyMessage::SetReady { ready: false });
     roundtrip_lobby(&LobbyMessage::GameStarting { your_color: true });
@@ -160,7 +180,15 @@ fn lobby_messages_roundtrip() {
 fn distinct_messages_serialize_differently() {
     // A guard against an accidental shared encoding that would let one message
     // type be misread as another on the wire.
-    let a = bincode::serialize(&GameMessage::SubmitMove { from: (4, 1), to: (4, 3) }).unwrap();
-    let b = bincode::serialize(&GameMessage::MoveMade { from: (4, 1), to: (4, 3) }).unwrap();
+    let a = bincode::serialize(&GameMessage::SubmitMove {
+        from: (4, 1),
+        to: (4, 3),
+    })
+    .unwrap();
+    let b = bincode::serialize(&GameMessage::MoveMade {
+        from: (4, 1),
+        to: (4, 3),
+    })
+    .unwrap();
     assert_ne!(a, b, "distinct variants must encode distinctly");
 }

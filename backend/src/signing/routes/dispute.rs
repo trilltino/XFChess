@@ -36,8 +36,7 @@ pub fn dispute_routes() -> Router<AppState> {
 }
 
 pub fn admin_dispute_routes() -> Router<AppState> {
-    Router::new()
-        .route("/resolve", post(resolve_dispute))
+    Router::new().route("/resolve", post(resolve_dispute))
 }
 
 // ── Request / Response types ──────────────────────────────────────────────────
@@ -150,17 +149,16 @@ pub async fn resolve_dispute(
         error!("[dispute] DISPUTE_AUTHORITY_KEYPAIR not set");
         StatusCode::SERVICE_UNAVAILABLE
     })?;
-    let authority =
-        solana_sdk::signature::Keypair::from_base58_string(&authority_key);
+    let authority = solana_sdk::signature::Keypair::from_base58_string(&authority_key);
 
     // Determine winner pubkey
     let winner: Option<Pubkey> = match req.decision.as_str() {
-        "WHITE_WINS" => Some(
-            Pubkey::from_str(&req.white_wallet).map_err(|_| StatusCode::BAD_REQUEST)?,
-        ),
-        "BLACK_WINS" => Some(
-            Pubkey::from_str(&req.black_wallet).map_err(|_| StatusCode::BAD_REQUEST)?,
-        ),
+        "WHITE_WINS" => {
+            Some(Pubkey::from_str(&req.white_wallet).map_err(|_| StatusCode::BAD_REQUEST)?)
+        }
+        "BLACK_WINS" => {
+            Some(Pubkey::from_str(&req.black_wallet).map_err(|_| StatusCode::BAD_REQUEST)?)
+        }
         "DRAW" | "DISMISS" => None,
         _ => return Err(StatusCode::BAD_REQUEST),
     };
@@ -233,10 +231,9 @@ async fn submit_resolve_dispute_tx(
 
     let game_id_bytes = game_id.to_le_bytes();
     let (game_pda, _) = Pubkey::find_program_address(&[b"game", &game_id_bytes], &program_id);
-    let (dispute_pda, _) =
-        Pubkey::find_program_address(&[b"dispute", &game_id_bytes], &program_id);
-    let (escrow_pda, _) =
-        Pubkey::find_program_address(&[b"escrow", &game_id_bytes], &program_id);
+    let (dispute_pda, _) = Pubkey::find_program_address(&[b"dispute", &game_id_bytes], &program_id);
+    let (escrow_pda, _) = Pubkey::find_program_address(&[b"escrow", &game_id_bytes], &program_id);
+    let (treasury_vault, _) = Pubkey::find_program_address(&[b"treasury_vault"], &program_id);
 
     let white = Pubkey::from_str(white_wallet)?;
     let black = Pubkey::from_str(black_wallet)?;
@@ -251,7 +248,7 @@ async fn submit_resolve_dispute_tx(
     // Encode args: resolution (String) + winner (Option<Pubkey>)
     let mut data = disc.to_vec();
     data.extend_from_slice(&(game_id as u64).to_le_bytes()); // game_id arg
-    // resolution string: 4-byte LE len + bytes
+                                                             // resolution string: 4-byte LE len + bytes
     let res_bytes = resolution.as_bytes();
     data.extend_from_slice(&(res_bytes.len() as u32).to_le_bytes());
     data.extend_from_slice(res_bytes);
@@ -264,6 +261,8 @@ async fn submit_resolve_dispute_tx(
         }
     }
 
+    // Account order must match `ResolveDispute`: game, dispute, escrow, authority,
+    // white, black, platform_treasury (seeded), system_program.
     let accounts = vec![
         AccountMeta::new(game_pda, false),
         AccountMeta::new(dispute_pda, false),
@@ -271,6 +270,7 @@ async fn submit_resolve_dispute_tx(
         AccountMeta::new_readonly(authority.pubkey(), true),
         AccountMeta::new(white, false),
         AccountMeta::new(black, false),
+        AccountMeta::new(treasury_vault, false),
         AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
     ];
 

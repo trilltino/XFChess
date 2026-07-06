@@ -79,10 +79,7 @@ fn setup_sky(
 /// Remove atmosphere settings (and the HDR requirement) from the shared camera
 /// when leaving the game, so non-game UI states render exactly as before.
 #[cfg(feature = "sky")]
-fn teardown_sky(
-    mut commands: Commands,
-    persistent_camera: Res<crate::PersistentEguiCamera>,
-) {
+fn teardown_sky(mut commands: Commands, persistent_camera: Res<crate::PersistentEguiCamera>) {
     if let Some(camera) = persistent_camera.entity {
         commands
             .entity(camera)

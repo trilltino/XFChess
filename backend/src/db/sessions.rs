@@ -1,8 +1,8 @@
 //! Persistent session storage for disconnect recovery
 
-use sqlx::{SqlitePool, Row};
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use sqlx::{Row, SqlitePool};
 
 /// Session status for reconnect handling
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -20,7 +20,8 @@ impl ToString for SessionStatus {
             SessionStatus::Paused => "paused",
             SessionStatus::Resumable => "resumable",
             SessionStatus::Expired => "expired",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
@@ -94,7 +95,10 @@ impl SessionStore {
     }
 
     /// Get a resumable session for a player
-    pub async fn get_resumable_session(&self, player_pubkey: &str) -> Result<Option<ActiveSession>> {
+    pub async fn get_resumable_session(
+        &self,
+        player_pubkey: &str,
+    ) -> Result<Option<ActiveSession>> {
         let now = chrono::Utc::now().timestamp();
 
         let row = sqlx::query(
@@ -120,12 +124,11 @@ impl SessionStore {
 
     /// Get session by game ID
     pub async fn get_session_by_game(&self, game_id: u64) -> Result<Option<ActiveSession>> {
-        let row = sqlx::query(
-            "SELECT * FROM active_sessions WHERE game_id = ?1 AND status != 'expired'"
-        )
-        .bind(game_id as i64)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row =
+            sqlx::query("SELECT * FROM active_sessions WHERE game_id = ?1 AND status != 'expired'")
+                .bind(game_id as i64)
+                .fetch_optional(&self.pool)
+                .await?;
 
         match row {
             Some(r) => Ok(Some(self.row_to_session(r)?)),
@@ -146,23 +149,21 @@ impl SessionStore {
         }
         query.push_str(" WHERE session_id = ?");
 
-        let mut q = sqlx::query(&query)
-            .bind(status.to_string());
+        let mut q = sqlx::query(&query).bind(status.to_string());
 
         if let Some(gpe) = grace_period_ends {
             q = q.bind(gpe);
         }
 
-        q.bind(session_id)
-            .execute(&self.pool)
-            .await?;
+        q.bind(session_id).execute(&self.pool).await?;
 
         Ok(())
     }
 
     /// Mark session as expired (cleanup)
     pub async fn expire_session(&self, session_id: &str) -> Result<()> {
-        self.update_status(session_id, SessionStatus::Expired, None).await
+        self.update_status(session_id, SessionStatus::Expired, None)
+            .await
     }
 
     /// Delete old expired sessions
@@ -170,7 +171,7 @@ impl SessionStore {
         let cutoff = chrono::Utc::now().timestamp() - (days_old as i64 * 24 * 60 * 60);
 
         let result = sqlx::query(
-            "DELETE FROM active_sessions WHERE status = 'expired' AND last_activity < ?1"
+            "DELETE FROM active_sessions WHERE status = 'expired' AND last_activity < ?1",
         )
         .bind(cutoff)
         .execute(&self.pool)

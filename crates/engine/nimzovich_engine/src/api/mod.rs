@@ -14,7 +14,9 @@ pub mod moves;
 pub mod state;
 
 #[cfg(feature = "std")]
-pub use game::{game_from_fen, game_to_fen, new_game, reset_game, set_game_from_fen, set_tt_size_mb};
+pub use game::{
+    game_from_fen, game_to_fen, new_game, reset_game, set_game_from_fen, set_tt_size_mb,
+};
 pub use moves::{do_move, do_move_with_promo, is_legal_move};
 pub use state::get_game_state;
 #[cfg(feature = "search")]

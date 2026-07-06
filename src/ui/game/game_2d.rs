@@ -5,8 +5,8 @@
 //! full compatibility with the existing game state and networking systems.
 
 use crate::core::states::GameMode;
-use crate::game::resources::{CurrentTurn, Players};
 use crate::game::components::FadingCapture;
+use crate::game::resources::{CurrentTurn, Players};
 use crate::game::systems::camera::get_is_black_view;
 use crate::game::systems::input::{
     can_move_color, clear_selection_state, is_human_turn, try_move_sequence, try_select_piece,
@@ -33,15 +33,14 @@ pub struct Board2DExtras<'w> {
     pub anim: ResMut<'w, PieceAnim2D>,
     pub time: Res<'w, Time>,
     pub promotion: Res<'w, crate::game::resources::PendingPromotion>,
-    pub promotion_writer: bevy::prelude::MessageWriter<'w, crate::game::resources::PromotionSelected>,
+    pub promotion_writer:
+        bevy::prelude::MessageWriter<'w, crate::game::resources::PromotionSelected>,
     pub focus: ResMut<'w, BoardFocus>,
     pub cm_flash: Res<'w, CheckmateFlashState>,
     pub board_fade: Res<'w, BoardFadeState>,
 }
 
-
-    // The local is_black_view function is removed in favor of the shared helper in camera.rs
-
+// The local is_black_view function is removed in favor of the shared helper in camera.rs
 
 /// Convert board (file, rank) to screen offset within the board widget.
 /// White view: a-file on left, rank 1 at bottom.
@@ -72,8 +71,13 @@ pub struct PremoveState {
 }
 
 impl PremoveState {
-    pub fn is_set(&self) -> bool { self.from.is_some() && self.to.is_some() }
-    pub fn clear(&mut self) { self.from = None; self.to = None; }
+    pub fn is_set(&self) -> bool {
+        self.from.is_some() && self.to.is_some()
+    }
+    pub fn clear(&mut self) {
+        self.from = None;
+        self.to = None;
+    }
 }
 
 /// 2D piece slide animation state.
@@ -92,7 +96,9 @@ pub struct PieceAnim2D {
 
 impl PieceAnim2D {
     const DURATION: f32 = 0.15;
-    pub fn t(&self) -> f32 { (self.elapsed / Self::DURATION).min(1.0) }
+    pub fn t(&self) -> f32 {
+        (self.elapsed / Self::DURATION).min(1.0)
+    }
     pub fn lerped_pos(&self) -> egui::Pos2 {
         let t = self.t();
         egui::Pos2::new(
@@ -109,7 +115,9 @@ pub fn trigger_piece_anim_2d(
     view_mode: Res<ViewMode>,
 ) {
     for ev in events.read() {
-        if *view_mode != ViewMode::Standard2D { continue; }
+        if *view_mode != ViewMode::Standard2D {
+            continue;
+        }
         anim.active = true;
         anim.elapsed = 0.0;
         anim.from_sq = ev.from;
@@ -145,10 +153,14 @@ pub fn trigger_checkmate_flash(
     mut flash: ResMut<CheckmateFlashState>,
     pieces: Query<&crate::rendering::pieces::Piece>,
 ) {
-    if flash.active { return; }
-    if !game_over.is_checkmate() { return; }
+    if flash.active {
+        return;
+    }
+    if !game_over.is_checkmate() {
+        return;
+    }
     // Find the king of the losing side (the side that was checkmated)
-    use crate::rendering::pieces::{PieceType, PieceColor};
+    use crate::rendering::pieces::{PieceColor, PieceType};
     // WhiteWon = Black was checkmated → Black king flashes
     let loser_color = match &*game_over {
         crate::game::resources::history::game_over::GameOverState::WhiteWon => PieceColor::Black,
@@ -167,7 +179,9 @@ pub fn trigger_checkmate_flash(
 
 /// System: ticks the checkmate flash timer.
 pub fn tick_checkmate_flash(mut flash: ResMut<CheckmateFlashState>, time: Res<Time>) {
-    if !flash.active { return; }
+    if !flash.active {
+        return;
+    }
     flash.elapsed += time.delta_secs();
     if flash.elapsed >= CheckmateFlashState::DURATION {
         flash.active = false;
@@ -183,7 +197,12 @@ pub struct BoardFadeState {
 }
 
 impl Default for BoardFadeState {
-    fn default() -> Self { Self { alpha_mult: 1.0, target: 1.0 } }
+    fn default() -> Self {
+        Self {
+            alpha_mult: 1.0,
+            target: 1.0,
+        }
+    }
 }
 
 /// System: triggers board fade on resign; ticks lerp each frame.
@@ -208,7 +227,12 @@ pub struct BoardFocus {
 }
 
 impl Default for BoardFocus {
-    fn default() -> Self { Self { active: false, cursor: (4, 1) } }
+    fn default() -> Self {
+        Self {
+            active: false,
+            cursor: (4, 1),
+        }
+    }
 }
 
 /// Right-click arrow annotations drawn over the board.
@@ -256,15 +280,17 @@ pub fn update_eval_bar(
     game_mode: Res<crate::core::states::GameMode>,
 ) {
     use crate::core::states::GameMode;
-    if !history.is_changed() { return; }
+    if !history.is_changed() {
+        return;
+    }
     // Hide eval in competitive online (anti-cheat)
     if matches!(*game_mode, GameMode::MultiplayerCompetitive) {
         eval.score = 0;
         eval_history.scores.clear();
         return;
     }
-    use nimzovich_engine::{do_move_with_promo, evaluate_position, new_game};
     use crate::game::components::PieceType;
+    use nimzovich_engine::{do_move_with_promo, evaluate_position, new_game};
 
     let moves = &history.moves;
     let cached_count = eval_history.scores.len();
@@ -312,33 +338,40 @@ pub enum MoveQuality {
 impl MoveQuality {
     pub fn symbol(self) -> &'static str {
         match self {
-            Self::Blunder    => "??",
-            Self::Mistake    => "?",
+            Self::Blunder => "??",
+            Self::Mistake => "?",
             Self::Inaccuracy => "?!",
-            Self::Good       => "!",
-            Self::Brilliant  => "!!",
+            Self::Good => "!",
+            Self::Brilliant => "!!",
         }
     }
 
     pub fn color(self) -> egui::Color32 {
         match self {
-            Self::Blunder    => egui::Color32::from_rgb(220, 50,  50),
-            Self::Mistake    => egui::Color32::from_rgb(230, 120, 20),
-            Self::Inaccuracy => egui::Color32::from_rgb(200, 180,  0),
-            Self::Good       => egui::Color32::from_rgb(100, 200, 50),
-            Self::Brilliant  => egui::Color32::from_rgb(  0, 210,110),
+            Self::Blunder => egui::Color32::from_rgb(220, 50, 50),
+            Self::Mistake => egui::Color32::from_rgb(230, 120, 20),
+            Self::Inaccuracy => egui::Color32::from_rgb(200, 180, 0),
+            Self::Good => egui::Color32::from_rgb(100, 200, 50),
+            Self::Brilliant => egui::Color32::from_rgb(0, 210, 110),
         }
     }
 
     /// Returns quality for a given centipawn gain from the moving side's perspective.
     /// `gain` = positive means the move helped, negative means it hurt.
     pub fn classify(gain: i16) -> Option<Self> {
-        if      gain <= -150 { Some(Self::Blunder) }
-        else if gain <=  -50 { Some(Self::Mistake) }
-        else if gain <=  -20 { Some(Self::Inaccuracy) }
-        else if gain >=  150 { Some(Self::Brilliant) }
-        else if gain >=   50 { Some(Self::Good) }
-        else                 { None }
+        if gain <= -150 {
+            Some(Self::Blunder)
+        } else if gain <= -50 {
+            Some(Self::Mistake)
+        } else if gain <= -20 {
+            Some(Self::Inaccuracy)
+        } else if gain >= 150 {
+            Some(Self::Brilliant)
+        } else if gain >= 50 {
+            Some(Self::Good)
+        } else {
+            None
+        }
     }
 }
 
@@ -365,26 +398,45 @@ pub fn detect_blunder_system(
     use crate::core::states::GameMode;
     use crate::rendering::pieces::PieceColor;
 
-    if !eval_history.is_changed() { return; }
+    if !eval_history.is_changed() {
+        return;
+    }
     // No spoilers in competitive mode.
-    if matches!(*game_mode, GameMode::MultiplayerCompetitive | GameMode::PgnReplay) { return; }
+    if matches!(
+        *game_mode,
+        GameMode::MultiplayerCompetitive | GameMode::PgnReplay
+    ) {
+        return;
+    }
 
     let ply = eval_history.scores.len();
-    if ply == 0 || ply <= indicator.last_ply { return; }
+    if ply == 0 || ply <= indicator.last_ply {
+        return;
+    }
 
-    let color = history.moves.last()
+    let color = history
+        .moves
+        .last()
         .map(|m| m.piece_color)
         .unwrap_or(PieceColor::White);
 
-    let after  = eval_history.scores[ply - 1];
-    let before = if ply > 1 { eval_history.scores[ply - 2] } else { 0 };
-    let gain   = if color == PieceColor::White { after - before } else { before - after };
+    let after = eval_history.scores[ply - 1];
+    let before = if ply > 1 {
+        eval_history.scores[ply - 2]
+    } else {
+        0
+    };
+    let gain = if color == PieceColor::White {
+        after - before
+    } else {
+        before - after
+    };
 
     if let Some(quality) = MoveQuality::classify(gain) {
-        indicator.quality       = Some(quality);
+        indicator.quality = Some(quality);
         indicator.eval_delta_cp = gain;
-        indicator.timer         = 3.5;
-        indicator.last_ply      = ply;
+        indicator.timer = 3.5;
+        indicator.last_ply = ply;
     } else {
         // Good / neutral move — just update last_ply so we don't re-fire.
         indicator.last_ply = ply;
@@ -404,7 +456,9 @@ pub fn blunder_indicator_ui(
     }
     indicator.timer -= dt;
 
-    let Some(quality) = indicator.quality else { return };
+    let Some(quality) = indicator.quality else {
+        return;
+    };
     if indicator.timer <= 0.0 {
         indicator.quality = None;
         return;
@@ -423,14 +477,14 @@ pub fn blunder_indicator_ui(
 
     // Build label: e.g. "?? Blunder  −3.2"
     let (label, bg_color) = match quality {
-        MoveQuality::Blunder    => ("Blunder",    egui::Color32::from_rgb(160, 30,  30)),
-        MoveQuality::Mistake    => ("Mistake",    egui::Color32::from_rgb(160, 80,  10)),
-        MoveQuality::Inaccuracy => ("Inaccuracy", egui::Color32::from_rgb(130,120,   0)),
-        MoveQuality::Good       => ("Good move",  egui::Color32::from_rgb( 20,120,  50)),
-        MoveQuality::Brilliant  => ("Brilliant!", egui::Color32::from_rgb(  0,140,  80)),
+        MoveQuality::Blunder => ("Blunder", egui::Color32::from_rgb(160, 30, 30)),
+        MoveQuality::Mistake => ("Mistake", egui::Color32::from_rgb(160, 80, 10)),
+        MoveQuality::Inaccuracy => ("Inaccuracy", egui::Color32::from_rgb(130, 120, 0)),
+        MoveQuality::Good => ("Good move", egui::Color32::from_rgb(20, 120, 50)),
+        MoveQuality::Brilliant => ("Brilliant!", egui::Color32::from_rgb(0, 140, 80)),
     };
-    let symbol    = quality.symbol();
-    let chip_col  = quality.color();
+    let symbol = quality.symbol();
+    let chip_col = quality.color();
     let delta_str = {
         let pawns = indicator.eval_delta_cp.abs() as f32 / 100.0;
         if indicator.eval_delta_cp < 0 {
@@ -448,10 +502,10 @@ pub fn blunder_indicator_ui(
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 56.0))
         .show(ctx, |ui| {
             egui::Frame {
-                fill:          a8(bg_color),
+                fill: a8(bg_color),
                 corner_radius: egui::CornerRadius::same(8),
-                inner_margin:  egui::Margin::symmetric(16, 10),
-                stroke:        egui::Stroke::new(1.5, a8(chip_col)),
+                inner_margin: egui::Margin::symmetric(16, 10),
+                stroke: egui::Stroke::new(1.5, a8(chip_col)),
                 ..egui::Frame::NONE
             }
             .show(ui, |ui| {
@@ -492,23 +546,58 @@ pub struct Board2DTheme {
 }
 
 impl Default for Board2DTheme {
-    fn default() -> Self { Self::classic() }
+    fn default() -> Self {
+        Self::classic()
+    }
 }
 
 impl Board2DTheme {
-    pub fn classic() -> Self { Self { dark_sq: egui::Color32::from_rgb(181, 136, 99), light_sq: egui::Color32::from_rgb(240, 217, 181) } }
-    pub fn green()   -> Self { Self { dark_sq: egui::Color32::from_rgb(118, 150, 86),  light_sq: egui::Color32::from_rgb(238, 238, 210) } }
-    pub fn blue()    -> Self { Self { dark_sq: egui::Color32::from_rgb(70, 130, 180),  light_sq: egui::Color32::from_rgb(200, 220, 240) } }
-    pub fn purple()  -> Self { Self { dark_sq: egui::Color32::from_rgb(100, 80, 150),  light_sq: egui::Color32::from_rgb(220, 210, 240) } }
-    pub fn dark()    -> Self { Self { dark_sq: egui::Color32::from_rgb(60, 60, 70),    light_sq: egui::Color32::from_rgb(115, 115, 125) } }
+    pub fn classic() -> Self {
+        Self {
+            dark_sq: egui::Color32::from_rgb(181, 136, 99),
+            light_sq: egui::Color32::from_rgb(240, 217, 181),
+        }
+    }
+    pub fn green() -> Self {
+        Self {
+            dark_sq: egui::Color32::from_rgb(118, 150, 86),
+            light_sq: egui::Color32::from_rgb(238, 238, 210),
+        }
+    }
+    pub fn blue() -> Self {
+        Self {
+            dark_sq: egui::Color32::from_rgb(70, 130, 180),
+            light_sq: egui::Color32::from_rgb(200, 220, 240),
+        }
+    }
+    pub fn purple() -> Self {
+        Self {
+            dark_sq: egui::Color32::from_rgb(100, 80, 150),
+            light_sq: egui::Color32::from_rgb(220, 210, 240),
+        }
+    }
+    pub fn dark() -> Self {
+        Self {
+            dark_sq: egui::Color32::from_rgb(60, 60, 70),
+            light_sq: egui::Color32::from_rgb(115, 115, 125),
+        }
+    }
 
     pub fn sq_color(&self, file: u8, rank: u8) -> egui::Color32 {
-        if (file + rank) % 2 == 0 { self.dark_sq } else { self.light_sq }
+        if (file + rank) % 2 == 0 {
+            self.dark_sq
+        } else {
+            self.light_sq
+        }
     }
 
     /// A contrasting label color for corner labels inside this square.
     pub fn label_color(&self, file: u8, rank: u8) -> egui::Color32 {
-        if (file + rank) % 2 == 0 { self.light_sq } else { self.dark_sq }
+        if (file + rank) % 2 == 0 {
+            self.light_sq
+        } else {
+            self.dark_sq
+        }
     }
 }
 
@@ -553,7 +642,9 @@ pub fn sync_board_theme_from_settings(
     settings: Res<crate::core::GameSettings>,
     mut theme: ResMut<Board2DTheme>,
 ) {
-    if !settings.is_changed() { return; }
+    if !settings.is_changed() {
+        return;
+    }
     *theme = theme_from_index(settings.board_theme);
 }
 
@@ -570,10 +661,18 @@ pub fn theme_from_index(idx: u8) -> Board2DTheme {
 
 /// Convert a Board2DTheme to its closest index.
 fn theme_to_index(t: &Board2DTheme) -> u8 {
-    if t.dark_sq == Board2DTheme::green().dark_sq   { return 1; }
-    if t.dark_sq == Board2DTheme::blue().dark_sq    { return 2; }
-    if t.dark_sq == Board2DTheme::purple().dark_sq  { return 3; }
-    if t.dark_sq == Board2DTheme::dark().dark_sq    { return 4; }
+    if t.dark_sq == Board2DTheme::green().dark_sq {
+        return 1;
+    }
+    if t.dark_sq == Board2DTheme::blue().dark_sq {
+        return 2;
+    }
+    if t.dark_sq == Board2DTheme::purple().dark_sq {
+        return 3;
+    }
+    if t.dark_sq == Board2DTheme::dark().dark_sq {
+        return 4;
+    }
     0
 }
 
@@ -582,8 +681,12 @@ pub fn render_2d_board(
     mut contexts: bevy_egui::EguiContexts,
     sprite_handles: Option<Res<crate::rendering::pieces::PieceSpriteHandles>>,
     _game_phase: Res<crate::game::resources::CurrentGamePhase>,
-    #[cfg(feature = "solana")] _solana_profile: Option<Res<crate::multiplayer::solana::addon::SolanaProfile>>,
-    #[cfg(feature = "solana")] _competitive_match: Option<Res<crate::multiplayer::solana::addon::CompetitiveMatchState>>,
+    #[cfg(feature = "solana")] _solana_profile: Option<
+        Res<crate::multiplayer::solana::addon::SolanaProfile>,
+    >,
+    #[cfg(feature = "solana")] _competitive_match: Option<
+        Res<crate::multiplayer::solana::addon::CompetitiveMatchState>,
+    >,
     view_mode: Res<ViewMode>,
     game_mode: Res<GameMode>,
     players: Res<Players>,
@@ -608,7 +711,14 @@ pub fn render_2d_board(
     // Pre-calculate texture IDs for piece sprites to avoid borrow conflicts with contexts.ctx_mut()
     let mut texture_map: HashMap<(PieceType, PieceColor), egui::TextureId> = HashMap::new();
     if let Some(handles) = &sprite_handles {
-        for pt in [PieceType::Pawn, PieceType::Knight, PieceType::Bishop, PieceType::Rook, PieceType::Queen, PieceType::King] {
+        for pt in [
+            PieceType::Pawn,
+            PieceType::Knight,
+            PieceType::Bishop,
+            PieceType::Rook,
+            PieceType::Queen,
+            PieceType::King,
+        ] {
             for pc in [PieceColor::White, PieceColor::Black] {
                 let handle = handles.get(pt, pc);
                 if let Some(id) = contexts.image_id(&handle) {
@@ -630,7 +740,8 @@ pub fn render_2d_board(
     let check_color = input_params.engine.current_turn;
 
     // Last move squares for highlight
-    let last_move_squares: Option<((u8, u8), (u8, u8))> = input_params.move_history
+    let last_move_squares: Option<((u8, u8), (u8, u8))> = input_params
+        .move_history
         .moves
         .last()
         .map(|m| (m.from, m.to));
@@ -694,16 +805,32 @@ pub fn render_2d_board(
                     egui::Sense::click_and_drag(),
                 );
                 // Determine color kind from modifier keys
-                let arrow_kind: u8 = if extras.keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) { 1 }
-                    else if extras.keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) { 2 }
-                    else { 0 };
+                let arrow_kind: u8 = if extras
+                    .keyboard
+                    .any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+                {
+                    1
+                } else if extras
+                    .keyboard
+                    .any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+                {
+                    2
+                } else {
+                    0
+                };
                 // Convert screen position to board square
-                let pos_to_sq = |pos: egui::Pos2| -> Option<(u8,u8)> {
+                let pos_to_sq = |pos: egui::Pos2| -> Option<(u8, u8)> {
                     let rel = pos - board_rect.min;
-                    if rel.x < 0.0 || rel.y < 0.0 || rel.x >= board_size || rel.y >= board_size { return None; }
+                    if rel.x < 0.0 || rel.y < 0.0 || rel.x >= board_size || rel.y >= board_size {
+                        return None;
+                    }
                     let col = (rel.x / square_size) as u8;
                     let row = (rel.y / square_size) as u8;
-                    let (file, rank) = if black_view { (7 - col, row) } else { (col, 7 - row) };
+                    let (file, rank) = if black_view {
+                        (7 - col, row)
+                    } else {
+                        (col, 7 - row)
+                    };
                     Some((file, rank))
                 };
                 // Right-click drag start
@@ -718,7 +845,10 @@ pub fn render_2d_board(
                         if let Some(pos) = board_resp.interact_pointer_pos() {
                             if let Some(to) = pos_to_sq(pos) {
                                 if to != from {
-                                    extras.arrows.arrows.push((from.0, from.1, to.0, to.1, arrow_kind));
+                                    extras
+                                        .arrows
+                                        .arrows
+                                        .push((from.0, from.1, to.0, to.1, arrow_kind));
                                 } else {
                                     extras.arrows.arrows.clear();
                                 }
@@ -743,7 +873,8 @@ pub fn render_2d_board(
                     }
                 }
                 // Left-click drag release → execute or cancel
-                if board_resp.drag_stopped_by(egui::PointerButton::Primary) && extras.drag.dragging {
+                if board_resp.drag_stopped_by(egui::PointerButton::Primary) && extras.drag.dragging
+                {
                     if let Some(pos) = board_resp.interact_pointer_pos() {
                         drag_released_at = pos_to_sq(pos);
                     } else {
@@ -866,58 +997,65 @@ pub fn render_2d_board(
                             || (extras.anim.active && extras.anim.to_sq == (file, rank));
 
                         if !extras.settings.blindfold && !skip_piece {
-                        if let Some((pt, pc, _)) = piece_map.get(&(file, rank)) {
-                            let mut piece_drawn = false;
+                            if let Some((pt, pc, _)) = piece_map.get(&(file, rank)) {
+                                let mut piece_drawn = false;
 
-                            // Try to draw sprite first
-                            if let Some(id) = texture_map.get(&(*pt, *pc)) {
-                                painter.image(
-                                    *id,
-                                    sq_rect.shrink(square_size * 0.1),
-                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, piece_alpha),
-                                );
-                                piece_drawn = true;
+                                // Try to draw sprite first
+                                if let Some(id) = texture_map.get(&(*pt, *pc)) {
+                                    painter.image(
+                                        *id,
+                                        sq_rect.shrink(square_size * 0.1),
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(0.0, 0.0),
+                                            egui::pos2(1.0, 1.0),
+                                        ),
+                                        egui::Color32::from_rgba_unmultiplied(
+                                            255,
+                                            255,
+                                            255,
+                                            piece_alpha,
+                                        ),
+                                    );
+                                    piece_drawn = true;
+                                }
+
+                                // Fallback to Unicode if sprite not available
+                                if !piece_drawn {
+                                    let symbol = piece_symbol(*pt, *pc);
+                                    let font_size = square_size * 0.72;
+
+                                    let shadow_col = if *pc == PieceColor::White {
+                                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160)
+                                    } else {
+                                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)
+                                    };
+                                    painter.text(
+                                        sq_rect.center() + egui::Vec2::new(1.5, 1.5),
+                                        egui::Align2::CENTER_CENTER,
+                                        symbol,
+                                        egui::FontId::proportional(font_size),
+                                        shadow_col,
+                                    );
+
+                                    let piece_col = if *pc == PieceColor::White {
+                                        egui::Color32::WHITE
+                                    } else {
+                                        egui::Color32::from_rgb(18, 18, 18)
+                                    };
+                                    painter.text(
+                                        sq_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        symbol,
+                                        egui::FontId::proportional(font_size),
+                                        piece_col,
+                                    );
+                                }
                             }
-
-                            // Fallback to Unicode if sprite not available
-                            if !piece_drawn {
-                                let symbol = piece_symbol(*pt, *pc);
-                                let font_size = square_size * 0.72;
-
-                                let shadow_col = if *pc == PieceColor::White {
-                                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160)
-                                } else {
-                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)
-                                };
-                                painter.text(
-                                    sq_rect.center() + egui::Vec2::new(1.5, 1.5),
-                                    egui::Align2::CENTER_CENTER,
-                                    symbol,
-                                    egui::FontId::proportional(font_size),
-                                    shadow_col,
-                                );
-
-                                let piece_col = if *pc == PieceColor::White {
-                                    egui::Color32::WHITE
-                                } else {
-                                    egui::Color32::from_rgb(18, 18, 18)
-                                };
-                                painter.text(
-                                    sq_rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    symbol,
-                                    egui::FontId::proportional(font_size),
-                                    piece_col,
-                                );
-                            }
-                        }
-
                         } // end !blindfold && !skip_piece draw
 
                         // In-board corner coordinate labels (Lichess style)
                         let is_bottom_row = if black_view { rank == 7 } else { rank == 0 };
-                        let is_left_col   = if black_view { file == 7 } else { file == 0 };
+                        let is_left_col = if black_view { file == 7 } else { file == 0 };
                         let lc = current_theme.label_color(file, rank);
                         let font = egui::FontId::proportional(9.0);
                         if is_left_col {
@@ -950,8 +1088,7 @@ pub fn render_2d_board(
                         }
 
                         // Per-square click detection.
-                        let sq_id = egui::Id::new("board_sq")
-                            .with(file as u32 * 8 + rank as u32);
+                        let sq_id = egui::Id::new("board_sq").with(file as u32 * 8 + rank as u32);
                         let sq_resp = ui.interact(sq_rect, sq_id, egui::Sense::click());
                         if sq_resp.clicked() {
                             if is_human && !game_over {
@@ -968,13 +1105,21 @@ pub fn render_2d_board(
                     // Compute pixel centers on the first render frame of this animation.
                     if !extras.anim.pixels_ready {
                         let from_off = board_to_screen(
-                            extras.anim.from_sq.0, extras.anim.from_sq.1, black_view, square_size,
+                            extras.anim.from_sq.0,
+                            extras.anim.from_sq.1,
+                            black_view,
+                            square_size,
                         );
                         let to_off = board_to_screen(
-                            extras.anim.to_sq.0, extras.anim.to_sq.1, black_view, square_size,
+                            extras.anim.to_sq.0,
+                            extras.anim.to_sq.1,
+                            black_view,
+                            square_size,
                         );
-                        extras.anim.from_px = board_rect.min + from_off + egui::Vec2::splat(square_size * 0.5);
-                        extras.anim.to_px   = board_rect.min + to_off   + egui::Vec2::splat(square_size * 0.5);
+                        extras.anim.from_px =
+                            board_rect.min + from_off + egui::Vec2::splat(square_size * 0.5);
+                        extras.anim.to_px =
+                            board_rect.min + to_off + egui::Vec2::splat(square_size * 0.5);
                         extras.anim.pixels_ready = true;
                         // Fill piece identity from piece_map (piece is now at to_sq in ECS).
                         if extras.anim.piece.is_none() {
@@ -986,19 +1131,35 @@ pub fn render_2d_board(
                     if let Some((pt, pc)) = extras.anim.piece {
                         let center = extras.anim.lerped_pos();
                         let half = square_size * 0.4;
-                        let rect = egui::Rect::from_center_size(center, egui::Vec2::splat(half * 2.0));
+                        let rect =
+                            egui::Rect::from_center_size(center, egui::Vec2::splat(half * 2.0));
                         let mut drawn = false;
                         if let Some(id) = texture_map.get(&(pt, pc)) {
-                            painter.image(*id, rect,
-                                egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)),
-                                egui::Color32::WHITE);
+                            painter.image(
+                                *id,
+                                rect,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                ),
+                                egui::Color32::WHITE,
+                            );
                             drawn = true;
                         }
                         if !drawn {
                             let symbol = piece_symbol(pt, pc);
-                            let col = if pc == PieceColor::White { egui::Color32::WHITE } else { egui::Color32::from_rgb(18,18,18) };
-                            painter.text(center, egui::Align2::CENTER_CENTER, symbol,
-                                egui::FontId::proportional(square_size * 0.72), col);
+                            let col = if pc == PieceColor::White {
+                                egui::Color32::WHITE
+                            } else {
+                                egui::Color32::from_rgb(18, 18, 18)
+                            };
+                            painter.text(
+                                center,
+                                egui::Align2::CENTER_CENTER,
+                                symbol,
+                                egui::FontId::proportional(square_size * 0.72),
+                                col,
+                            );
                         }
                     }
                 }
@@ -1011,23 +1172,40 @@ pub fn render_2d_board(
                         let rect = egui::Rect::from_center_size(pos, egui::Vec2::splat(half * 2.0));
                         let mut drawn = false;
                         if let Some(id) = texture_map.get(&(pt, pc)) {
-                            painter.image(*id, rect,
-                                egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)),
-                                egui::Color32::WHITE);
+                            painter.image(
+                                *id,
+                                rect,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                ),
+                                egui::Color32::WHITE,
+                            );
                             drawn = true;
                         }
                         if !drawn {
                             let symbol = piece_symbol(pt, pc);
-                            let col = if pc == PieceColor::White { egui::Color32::WHITE } else { egui::Color32::from_rgb(18,18,18) };
-                            painter.text(pos, egui::Align2::CENTER_CENTER, symbol,
-                                egui::FontId::proportional(square_size * 0.72), col);
+                            let col = if pc == PieceColor::White {
+                                egui::Color32::WHITE
+                            } else {
+                                egui::Color32::from_rgb(18, 18, 18)
+                            };
+                            painter.text(
+                                pos,
+                                egui::Align2::CENTER_CENTER,
+                                symbol,
+                                egui::FontId::proportional(square_size * 0.72),
+                                col,
+                            );
                         }
                     }
                 }
 
                 // ── Inline promotion picker ──────────────────────────────────
                 if extras.promotion.is_active() {
-                    if let (Some((pf, pr)), Some(pcolor)) = (extras.promotion.position, extras.promotion.color) {
+                    if let (Some((pf, pr)), Some(pcolor)) =
+                        (extras.promotion.position, extras.promotion.color)
+                    {
                         // Dim the rest of the board
                         painter.rect_filled(
                             board_rect,
@@ -1035,7 +1213,12 @@ pub fn render_2d_board(
                             egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
                         );
                         // Four piece options: Q, R, B, N — arranged vertically toward the board center
-                        let pieces_order = [PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight];
+                        let pieces_order = [
+                            PieceType::Queen,
+                            PieceType::Rook,
+                            PieceType::Bishop,
+                            PieceType::Knight,
+                        ];
                         let prom_rank_screen_top = pr == 7; // white promotes on rank 7 → column goes downward
                         for (idx, &pt) in pieces_order.iter().enumerate() {
                             let btn_rank = if prom_rank_screen_top {
@@ -1071,12 +1254,17 @@ pub fn render_2d_board(
                             };
                             painter.text(
                                 btn_rect.center() + egui::Vec2::new(1.5, 1.5),
-                                egui::Align2::CENTER_CENTER, symbol,
-                                egui::FontId::proportional(font_size), shadow_col,
+                                egui::Align2::CENTER_CENTER,
+                                symbol,
+                                egui::FontId::proportional(font_size),
+                                shadow_col,
                             );
                             painter.text(
-                                btn_rect.center(), egui::Align2::CENTER_CENTER, symbol,
-                                egui::FontId::proportional(font_size), piece_col,
+                                btn_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                symbol,
+                                egui::FontId::proportional(font_size),
+                                piece_col,
                             );
                             // Click detection
                             let btn_id = egui::Id::new("promo_btn").with(idx as u32);
@@ -1086,9 +1274,12 @@ pub fn render_2d_board(
                             }
                             // Hover highlight
                             if btn_resp.hovered() {
-                                painter.rect_stroke(btn_rect, 4.0,
+                                painter.rect_stroke(
+                                    btn_rect,
+                                    4.0,
                                     egui::Stroke::new(2.5, egui::Color32::from_rgb(255, 220, 80)),
-                                    egui::StrokeKind::Outside);
+                                    egui::StrokeKind::Outside,
+                                );
                             }
                         }
                     }
@@ -1097,27 +1288,37 @@ pub fn render_2d_board(
                 // ── Arrow overlays ───────────────────────────────────────────
                 for &(ff, fr, tf, tr, kind) in &extras.arrows.arrows {
                     let from_offset = board_to_screen(ff, fr, black_view, square_size);
-                    let to_offset   = board_to_screen(tf, tr, black_view, square_size);
-                    let from_c = board_rect.min + from_offset + egui::Vec2::splat(square_size * 0.5);
-                    let to_c   = board_rect.min + to_offset   + egui::Vec2::splat(square_size * 0.5);
+                    let to_offset = board_to_screen(tf, tr, black_view, square_size);
+                    let from_c =
+                        board_rect.min + from_offset + egui::Vec2::splat(square_size * 0.5);
+                    let to_c = board_rect.min + to_offset + egui::Vec2::splat(square_size * 0.5);
                     let col = match kind {
                         1 => egui::Color32::from_rgba_unmultiplied(255, 140, 0, 180),
                         2 => egui::Color32::from_rgba_unmultiplied(80, 160, 255, 180),
                         _ => egui::Color32::from_rgba_unmultiplied(20, 200, 60, 180),
                     };
-                    painter.arrow(from_c, to_c - from_c, egui::Stroke::new(square_size * 0.12, col));
+                    painter.arrow(
+                        from_c,
+                        to_c - from_c,
+                        egui::Stroke::new(square_size * 0.12, col),
+                    );
                 }
                 // Draw in-progress drag arrow
                 if let Some(from) = extras.arrows.drag_from {
                     if let Some(cursor) = board_resp.interact_pointer_pos() {
                         let from_off = board_to_screen(from.0, from.1, black_view, square_size);
-                        let from_c = board_rect.min + from_off + egui::Vec2::splat(square_size * 0.5);
+                        let from_c =
+                            board_rect.min + from_off + egui::Vec2::splat(square_size * 0.5);
                         let col = match arrow_kind {
                             1 => egui::Color32::from_rgba_unmultiplied(255, 140, 0, 120),
                             2 => egui::Color32::from_rgba_unmultiplied(80, 160, 255, 120),
                             _ => egui::Color32::from_rgba_unmultiplied(20, 200, 60, 120),
                         };
-                        painter.arrow(from_c, cursor - from_c, egui::Stroke::new(square_size * 0.10, col));
+                        painter.arrow(
+                            from_c,
+                            cursor - from_c,
+                            egui::Stroke::new(square_size * 0.10, col),
+                        );
                     }
                 }
 
@@ -1128,16 +1329,26 @@ pub fn render_2d_board(
                 if extras.focus.active && !game_over {
                     let (mut f, mut r) = extras.focus.cursor;
                     if extras.keyboard.just_pressed(KeyCode::ArrowRight) {
-                        if black_view { f = f.saturating_sub(1); } else { f = (f + 1).min(7); }
+                        if black_view {
+                            f = f.saturating_sub(1);
+                        } else {
+                            f = (f + 1).min(7);
+                        }
                     } else if extras.keyboard.just_pressed(KeyCode::ArrowLeft) {
-                        if black_view { f = (f + 1).min(7); } else { f = f.saturating_sub(1); }
+                        if black_view {
+                            f = (f + 1).min(7);
+                        } else {
+                            f = f.saturating_sub(1);
+                        }
                     } else if extras.keyboard.just_pressed(KeyCode::ArrowUp) {
                         r = (r + 1).min(7);
                     } else if extras.keyboard.just_pressed(KeyCode::ArrowDown) {
                         r = r.saturating_sub(1);
                     }
                     extras.focus.cursor = (f, r);
-                    if extras.keyboard.just_pressed(KeyCode::Enter) || extras.keyboard.just_pressed(KeyCode::Space) {
+                    if extras.keyboard.just_pressed(KeyCode::Enter)
+                        || extras.keyboard.just_pressed(KeyCode::Space)
+                    {
                         let sq = extras.focus.cursor;
                         if is_human {
                             clicked_square = Some(sq);
@@ -1235,13 +1446,17 @@ pub fn render_2d_board(
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 5.0;
-                ui.label(egui::RichText::new("Board:").size(10.0).color(egui::Color32::from_gray(140)));
+                ui.label(
+                    egui::RichText::new("Board:")
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(140)),
+                );
                 for (t, name) in [
                     (Board2DTheme::classic(), "Classic"),
-                    (Board2DTheme::green(),   "Green"),
-                    (Board2DTheme::blue(),    "Blue"),
-                    (Board2DTheme::purple(),  "Purple"),
-                    (Board2DTheme::dark(),    "Dark"),
+                    (Board2DTheme::green(), "Green"),
+                    (Board2DTheme::blue(), "Blue"),
+                    (Board2DTheme::purple(), "Purple"),
+                    (Board2DTheme::dark(), "Dark"),
                 ] {
                     let active = current_theme.dark_sq == t.dark_sq;
                     let size = egui::Vec2::splat(if active { 16.0 } else { 12.0 });
@@ -1266,7 +1481,11 @@ pub fn render_2d_board(
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 5.0;
-                ui.label(egui::RichText::new("Pieces:").size(10.0).color(egui::Color32::from_gray(140)));
+                ui.label(
+                    egui::RichText::new("Pieces:")
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(140)),
+                );
                 for (idx, label) in [(0u8, "CB"), (1, "α"), (2, "M")] {
                     let active = extras.settings.piece_set == idx;
                     let stroke = if active {
@@ -1286,7 +1505,11 @@ pub fn render_2d_board(
                             .min_size(egui::Vec2::new(20.0, 14.0))
                             .corner_radius(3.0),
                     );
-                    let hover = match idx { 1 => "Alpha", 2 => "Merida", _ => "CBurnett" };
+                    let hover = match idx {
+                        1 => "Alpha",
+                        2 => "Merida",
+                        _ => "CBurnett",
+                    };
                     if r.on_hover_text(hover).clicked() {
                         extras.settings.piece_set = idx;
                     }
@@ -1294,28 +1517,52 @@ pub fn render_2d_board(
                 ui.add_space(6.0);
                 // Eval bar toggle
                 let eval_active = extras.eval_bar.visible;
-                let eval_col = if eval_active { egui::Color32::from_rgb(60, 160, 80) } else { egui::Color32::from_gray(55) };
-                let eval_stroke = if eval_active { egui::Stroke::new(1.5, egui::Color32::WHITE) } else { egui::Stroke::NONE };
-                if ui.add(
-                    egui::Button::new(egui::RichText::new("E").size(9.0))
-                        .fill(eval_col)
-                        .stroke(eval_stroke)
-                        .min_size(egui::Vec2::new(16.0, 14.0))
-                        .corner_radius(3.0),
-                ).on_hover_text("Eval bar (offline only)").clicked() {
+                let eval_col = if eval_active {
+                    egui::Color32::from_rgb(60, 160, 80)
+                } else {
+                    egui::Color32::from_gray(55)
+                };
+                let eval_stroke = if eval_active {
+                    egui::Stroke::new(1.5, egui::Color32::WHITE)
+                } else {
+                    egui::Stroke::NONE
+                };
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("E").size(9.0))
+                            .fill(eval_col)
+                            .stroke(eval_stroke)
+                            .min_size(egui::Vec2::new(16.0, 14.0))
+                            .corner_radius(3.0),
+                    )
+                    .on_hover_text("Eval bar (offline only)")
+                    .clicked()
+                {
                     // toggle via DerefMut — eval_bar is Res so we need a separate path
                     extras.settings.show_eval_bar = !extras.settings.show_eval_bar;
                 }
                 // Blindfold toggle
-                let bf_col = if extras.settings.blindfold { egui::Color32::from_rgb(160, 60, 60) } else { egui::Color32::from_gray(55) };
-                let bf_stroke = if extras.settings.blindfold { egui::Stroke::new(1.5, egui::Color32::WHITE) } else { egui::Stroke::NONE };
-                if ui.add(
-                    egui::Button::new(egui::RichText::new("B").size(9.0))
-                        .fill(bf_col)
-                        .stroke(bf_stroke)
-                        .min_size(egui::Vec2::new(16.0, 14.0))
-                        .corner_radius(3.0),
-                ).on_hover_text("Blindfold (Ctrl+B)").clicked() {
+                let bf_col = if extras.settings.blindfold {
+                    egui::Color32::from_rgb(160, 60, 60)
+                } else {
+                    egui::Color32::from_gray(55)
+                };
+                let bf_stroke = if extras.settings.blindfold {
+                    egui::Stroke::new(1.5, egui::Color32::WHITE)
+                } else {
+                    egui::Stroke::NONE
+                };
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("B").size(9.0))
+                            .fill(bf_col)
+                            .stroke(bf_stroke)
+                            .min_size(egui::Vec2::new(16.0, 14.0))
+                            .corner_radius(3.0),
+                    )
+                    .on_hover_text("Blindfold (Ctrl+B)")
+                    .clicked()
+                {
                     extras.settings.blindfold = !extras.settings.blindfold;
                 }
             });
@@ -1332,11 +1579,13 @@ pub fn render_2d_board(
         extras.promotion.pawn_entity,
         extras.promotion.position,
     ) {
-        extras.promotion_writer.write(crate::game::resources::PromotionSelected {
-            entity,
-            position,
-            promoted_to: pt,
-        });
+        extras
+            .promotion_writer
+            .write(crate::game::resources::PromotionSelected {
+                entity,
+                position,
+                promoted_to: pt,
+            });
     }
 
     // Apply cursor update for dragged piece.
@@ -1344,7 +1593,9 @@ pub fn render_2d_board(
         extras.drag.cursor_pos = pos;
     }
 
-    if game_over { return; }
+    if game_over {
+        return;
+    }
 
     // ── Drag-to-move: start ──────────────────────────────────────────────
     if let Some(sq) = drag_started_at {
@@ -1403,7 +1654,8 @@ pub fn render_2d_board(
                 };
                 let has_own_piece = {
                     let q = input_params.pieces.p1();
-                    q.iter().any(|(_, p, _, _)| p.x == sq.0 && p.y == sq.1 && p.color == local_color)
+                    q.iter()
+                        .any(|(_, p, _, _)| p.x == sq.0 && p.y == sq.1 && p.color == local_color)
                 };
                 if has_own_piece {
                     extras.premove.from = Some(sq);
@@ -1424,7 +1676,7 @@ pub fn render_2d_board(
     // ── Execute queued premove when it becomes our turn ──────────────────
     if is_human && extras.premove.is_set() {
         let from = extras.premove.from.unwrap();
-        let to   = extras.premove.to.unwrap();
+        let to = extras.premove.to.unwrap();
         extras.premove.clear();
         // Select the from-piece and execute the premove move.
         let piece_at = {
@@ -1489,7 +1741,9 @@ pub fn render_2d_board(
                 _ => {
                     if let Some(ref s) = extras.sounds {
                         if !extras.settings.muted {
-                            input_params.commands.spawn(bevy::audio::AudioPlayer::new(s.illegal.clone()));
+                            input_params
+                                .commands
+                                .spawn(bevy::audio::AudioPlayer::new(s.illegal.clone()));
                         }
                     }
                     clear_selection_state(
@@ -1524,4 +1778,3 @@ pub fn sync_eval_bar_visibility(
         eval.visible = settings.show_eval_bar;
     }
 }
-

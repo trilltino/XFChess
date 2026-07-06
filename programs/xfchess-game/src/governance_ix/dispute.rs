@@ -34,6 +34,7 @@ pub fn handler(
     reason: String,
     evidence_hash: [u8; 32],
 ) -> Result<()> {
+    crate::governance_ix::resolution::require_text_fits(&reason)?;
     let game = &mut ctx.accounts.game;
     let dispute = &mut ctx.accounts.dispute_record;
 
@@ -42,10 +43,10 @@ pub fn handler(
         GameErrorCode::InvalidGameStatus
     );
 
-    game.status = GameStatus::Disputed;
-    game.updated_at = Clock::get()?.unix_timestamp;
-
     let now = Clock::get()?.unix_timestamp;
+    game.status = GameStatus::Disputed;
+    game.updated_at = now;
+
     dispute.game_id = _game_id;
     dispute.challenger = ctx.accounts.player.key();
     dispute.reason = reason;
@@ -53,9 +54,22 @@ pub fn handler(
     dispute.status = DisputeStatus::Pending;
     dispute.created_at = now;
     dispute.expires_at = now + crate::constants::DISPUTE_TTL_SECS;
+    dispute.bond_amount = DISPUTE_BOND_LAMPORTS;
     dispute.bump = ctx.bumps.dispute_record;
 
-
+    // Post the dispute bond into the (program-owned) dispute PDA. It is refunded
+    // if the dispute is upheld or auto-resolved, forfeited if dismissed — which
+    // deters a losing player from freezing the pot with a frivolous dispute.
+    anchor_lang::system_program::transfer(
+        CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            anchor_lang::system_program::Transfer {
+                from: ctx.accounts.player.to_account_info(),
+                to: ctx.accounts.dispute_record.to_account_info(),
+            },
+        ),
+        DISPUTE_BOND_LAMPORTS,
+    )?;
 
     Ok(())
 }

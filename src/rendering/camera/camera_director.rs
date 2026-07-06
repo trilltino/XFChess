@@ -63,10 +63,14 @@ pub fn camera_director_system(
     mut checkmate_ev: MessageReader<CheckmateFlash>,
     mut cam_q: Query<&mut Transform, (With<Camera3d>, With<CameraController>)>,
 ) {
-    if *game_mode != GameMode::PgnReplay { return; }
+    if *game_mode != GameMode::PgnReplay {
+        return;
+    }
 
     let dt = time.delta_secs();
-    let Ok(mut cam_tf) = cam_q.single_mut() else { return };
+    let Ok(mut cam_tf) = cam_q.single_mut() else {
+        return;
+    };
 
     // Consume events and kick off a zoom sequence
     let blunder = blunder_ev.read().next().is_some();
@@ -88,8 +92,8 @@ pub fn camera_director_system(
             let origin = *cam_tf;
             // Zoom target: move 35% of the way toward (target + a bit of elevation)
             let zoom_pos = cam_tf.translation.lerp(target_world + Vec3::Y * 1.5, 0.35);
-            let zoom_target = Transform::from_translation(zoom_pos)
-                .looking_at(target_world, Vec3::Y);
+            let zoom_target =
+                Transform::from_translation(zoom_pos).looking_at(target_world, Vec3::Y);
 
             director.mode = CameraDirectorMode::ZoomIn {
                 origin,
@@ -105,7 +109,13 @@ pub fn camera_director_system(
     let new_mode = match &mut director.mode {
         CameraDirectorMode::Free => None,
 
-        CameraDirectorMode::ZoomIn { origin, target, elapsed, duration, hold_after } => {
+        CameraDirectorMode::ZoomIn {
+            origin,
+            target,
+            elapsed,
+            duration,
+            hold_after,
+        } => {
             *elapsed += dt;
             let t = smooth_step((*elapsed / *duration).min(1.0));
             cam_tf.translation = origin.translation.lerp(target.translation, t);
@@ -122,7 +132,11 @@ pub fn camera_director_system(
             }
         }
 
-        CameraDirectorMode::Hold { return_to, elapsed, hold_duration } => {
+        CameraDirectorMode::Hold {
+            return_to,
+            elapsed,
+            hold_duration,
+        } => {
             *elapsed += dt;
             if *elapsed >= *hold_duration {
                 let from = *cam_tf;
@@ -137,7 +151,12 @@ pub fn camera_director_system(
             }
         }
 
-        CameraDirectorMode::ZoomOut { from, target, elapsed, duration } => {
+        CameraDirectorMode::ZoomOut {
+            from,
+            target,
+            elapsed,
+            duration,
+        } => {
             *elapsed += dt;
             let t = smooth_step((*elapsed / *duration).min(1.0));
             cam_tf.translation = from.translation.lerp(target.translation, t);

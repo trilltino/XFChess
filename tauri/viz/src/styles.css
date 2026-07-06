@@ -1,0 +1,38 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: radial-gradient(1200px 800px at 70% -10%, #1e293b 0%, #0b1120 55%, #060912 100%);
+  color: #e2e8f0;
+}
+
+input,
+button {
+  font-family: inherit;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 6px;
+}

@@ -3,8 +3,10 @@
 //! Uses the tournament-scoped session key to co-sign game creation,
 //! drawing funds from the delegation PDA vault for rent and wagers.
 
+use crate::account_ix::session_guards;
 use crate::constants::*;
 use crate::errors::*;
+use crate::game_ix::common::{init_game_fields, InitGameArgs};
 use crate::state::*;
 use anchor_lang::prelude::*;
 
@@ -60,6 +62,7 @@ pub struct SessionCreateGame<'info> {
         bump = session_delegation.bump,
         constraint = session_delegation.enabled @ XfchessGameError::SessionNotAuthorized,
         constraint = session_delegation.player == player.key() @ XfchessGameError::UnauthorizedAccess,
+        constraint = session_delegation.session_key == session_signer.key() @ XfchessGameError::InvalidSessionKey,
     )]
     pub session_delegation: Box<Account<'info, TournamentSessionDelegation>>,
 
@@ -109,7 +112,6 @@ pub fn handler(
 ) -> Result<()> {
     let session = &ctx.accounts.session_delegation;
     let tournament = &ctx.accounts.tournament;
-    let game = &mut ctx.accounts.game;
     let _escrow_pda = &ctx.accounts.escrow_pda;
     let fee_payer = &ctx.accounts.session_signer;
     let _system_program = &ctx.accounts.system_program;
@@ -124,7 +126,8 @@ pub fn handler(
         GameErrorCode::SessionExpired
     );
     require!(
-        session.total_spent.saturating_add(wager_amount) <= session.spending_limit,
+        session_guards::checked_session_total(session.total_spent, wager_amount)?
+            <= session.spending_limit,
         GameErrorCode::SpendingLimitExceeded
     );
 
@@ -133,6 +136,10 @@ pub fn handler(
         wager_amount <= session.max_wager,
         GameErrorCode::WagerLimitExceeded
     );
+    require!(
+        wager_amount == 0 || wager_amount >= MIN_WAGER_LAMPORTS,
+        GameErrorCode::StakeTooLow
+    );
 
     // Validate tournament state
     require!(
@@ -140,24 +147,31 @@ pub fn handler(
         GameErrorCode::InvalidTournamentStatus
     );
 
-    // Initialize game
-    game.game_id = game_id;
-    game.white = ctx.accounts.player.key();
-    game.black = Pubkey::default();
-    game.status = GameStatus::WaitingForOpponent;
-    game.match_type = match_type;
-    game.country_fee = if match_type == MatchType::Free { 0 } else { platform_fee };
-    game.wager_amount = wager_amount;
-    game.base_time_seconds = base_time_seconds;
-    game.increment_seconds = increment_seconds;
-    game.fee_payer = fee_payer.key();
-    game.halfmove_clock = 0;
-    game.nonce = 0;
+    // Initialize game (full init, matching create/global_create — otherwise the
+    // board, turn, and timestamps would be left zeroed and the game unplayable).
+    let now = Clock::get()?.unix_timestamp;
+    init_game_fields(
+        &mut ctx.accounts.game,
+        InitGameArgs {
+            game_id,
+            white: ctx.accounts.player.key(),
+            fee_payer: fee_payer.key(),
+            wager_amount,
+            match_type,
+            platform_fee,
+            base_time_seconds,
+            increment_seconds,
+            tournament_id: Some(tournament_id),
+        },
+        now,
+        ctx.bumps.game,
+    )?;
 
     // Transfer wager from session vault to escrow
     if wager_amount > 0 {
         require!(
-            session.total_spent + wager_amount <= session.spending_limit,
+            session_guards::checked_session_total(session.total_spent, wager_amount)?
+                <= session.spending_limit,
             GameErrorCode::InsufficientFunds
         );
         let tid_bytes = session.tournament_id.to_le_bytes();
@@ -186,7 +200,8 @@ pub fn handler(
 
     // Update session spent amount
     let session_account = &mut ctx.accounts.session_delegation;
-    session_account.total_spent += wager_amount;
+    session_account.total_spent =
+        session_guards::checked_session_total(session_account.total_spent, wager_amount)?;
 
     Ok(())
 }

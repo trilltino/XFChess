@@ -4,7 +4,7 @@
 //! This allows seamless switching between 2D and 3D rendering while
 //! maintaining game state compatibility.
 
-use crate::game::view_mode::{ViewMode, PlayerViewPreferences};
+use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
 use crate::rendering::pieces::Piece;
 use bevy::prelude::*;
 

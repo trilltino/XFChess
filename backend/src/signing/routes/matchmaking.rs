@@ -14,15 +14,15 @@ use axum::{
     Router,
 };
 
-#[path = "matchmaking/state.rs"]
-pub mod state;
 #[path = "matchmaking/handlers.rs"]
 pub mod handlers;
+#[path = "matchmaking/state.rs"]
+pub mod state;
 
 // Re-exports so existing call sites (e.g. `routes::matchmaking::SharedMatchmakingState`,
 // `routes::matchmaking::matchmaking_routes`) keep working unchanged.
+pub use handlers::{join, leave, status, JoinRequest, LeaveRequest};
 pub use state::{MatchResult, MatchmakingTicket, SharedMatchmakingState};
-pub use handlers::{JoinRequest, LeaveRequest, join, leave, status};
 
 /// Creates the matchmaking routes router.
 ///

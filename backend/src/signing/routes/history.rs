@@ -17,7 +17,10 @@ use crate::signing::AppState;
 pub fn history_routes() -> Router<AppState> {
     Router::new()
         .route("/games/history/{wallet}", get(get_game_history))
-        .route("/games/history/username/{username}", get(get_game_history_by_username))
+        .route(
+            "/games/history/username/{username}",
+            get(get_game_history_by_username),
+        )
         .route("/games/moves/{game_id}", get(get_game_moves))
         .route("/games/{game_id}/broadcast-delay", get(get_broadcast_delay))
         .route("/games/{game_id}/pgn", get(get_game_pgn))
@@ -36,19 +39,19 @@ pub async fn get_broadcast_delay(
     let delay = repo.get_broadcast_delay(&game_id).await;
     Json(serde_json::json!({ "delay_secs": delay }))
 }
- 
+
 pub async fn get_game_history(
     State(state): State<AppState>,
     Path(wallet): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let pool = state.store.pool();
     let repo = GameRepository::new(pool);
- 
+
     let games = repo.get_games_by_player(&wallet, 20).await.map_err(|e| {
         error!("[history] DB query failed: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
- 
+
     Ok(Json(serde_json::json!({ "games": games })))
 }
 
@@ -59,10 +62,13 @@ pub async fn get_game_history_by_username(
     let pool = state.store.pool();
     let repo = GameRepository::new(pool);
 
-    let games = repo.get_games_by_username(&username, 20).await.map_err(|e| {
-        error!("[history] DB query failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let games = repo
+        .get_games_by_username(&username, 20)
+        .await
+        .map_err(|e| {
+            error!("[history] DB query failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(Json(serde_json::json!({ "games": games })))
 }
@@ -82,10 +88,13 @@ pub async fn get_game_moves(
     let repo = GameRepository::new(pool);
 
     let now_ts = chrono::Utc::now().timestamp();
-    let moves = repo.get_moves_visible(&game_id, now_ts).await.map_err(|e| {
-        error!("[history] DB query failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let moves = repo
+        .get_moves_visible(&game_id, now_ts)
+        .await
+        .map_err(|e| {
+            error!("[history] DB query failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(Json(serde_json::json!({ "moves": moves })))
 }
@@ -104,26 +113,29 @@ pub async fn get_ratings_history(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let history: Vec<serde_json::Value> = games.iter().map(|g| {
-        let result = match g.winner.as_deref() {
-            Some(w) if w == wallet => "win",
-            Some(_) => "loss",
-            None if g.status == "draw" => "draw",
-            None => "unknown",
-        };
-        let opponent = if g.player_white.as_deref() == Some(wallet.as_str()) {
-            g.player_black.clone()
-        } else {
-            g.player_white.clone()
-        };
-        serde_json::json!({
-            "game_id": g.id,
-            "result": result,
-            "opponent": opponent,
-            "timestamp": g.start_time,
-            "stake_amount": g.stake_amount,
+    let history: Vec<serde_json::Value> = games
+        .iter()
+        .map(|g| {
+            let result = match g.winner.as_deref() {
+                Some(w) if w == wallet => "win",
+                Some(_) => "loss",
+                None if g.status == "draw" => "draw",
+                None => "unknown",
+            };
+            let opponent = if g.player_white.as_deref() == Some(wallet.as_str()) {
+                g.player_black.clone()
+            } else {
+                g.player_white.clone()
+            };
+            serde_json::json!({
+                "game_id": g.id,
+                "result": result,
+                "opponent": opponent,
+                "timestamp": g.start_time,
+                "stake_amount": g.stake_amount,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(serde_json::json!({ "history": history })))
 }
@@ -154,7 +166,9 @@ pub async fn get_game_pgn(
 
     use nimzovich_engine::{PgnAssembler, PgnResult};
     let mut assembler = PgnAssembler::new();
-    assembler.tag("Event", "XFChess Game").tag("Site", "XFChess");
+    assembler
+        .tag("Event", "XFChess Game")
+        .tag("Site", "XFChess");
     for mv in moves {
         if let Some(san) = mv.move_san {
             assembler.add_move(san);

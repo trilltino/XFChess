@@ -156,11 +156,18 @@ impl FriendManager {
         .execute(&self.pool)
         .await?;
 
-        info!("[Friends] Request {} → {:?}/{:?}", from_display, to_node_id, to_pubkey);
+        info!(
+            "[Friends] Request {} → {:?}/{:?}",
+            from_display, to_node_id, to_pubkey
+        );
         Ok(req)
     }
 
-    pub async fn get_pending_requests(&self, node_id: &str, pubkey: Option<&str>) -> Result<Vec<FriendRequest>> {
+    pub async fn get_pending_requests(
+        &self,
+        node_id: &str,
+        pubkey: Option<&str>,
+    ) -> Result<Vec<FriendRequest>> {
         let rows: Vec<(String, String, Option<String>, String, Option<String>, Option<String>, Option<String>, String, String)> =
             sqlx::query_as(
                 r#"SELECT id, from_node_id, from_pubkey, from_display, to_node_id, to_pubkey, message, status, created_at
@@ -173,24 +180,29 @@ impl FriendManager {
             .fetch_all(&self.pool)
             .await?;
 
-        Ok(rows.into_iter().map(|(id, from_node, from_pk, from_disp, to_node, to_pk, msg, status, created)| {
-            FriendRequest {
-                id,
-                from_node_id: from_node,
-                from_pubkey: from_pk,
-                from_display: from_disp,
-                to_node_id: to_node,
-                to_pubkey: to_pk,
-                message: msg,
-                status: match status.as_str() {
-                    "accepted" => RequestStatus::Accepted,
-                    "rejected" => RequestStatus::Rejected,
-                    _          => RequestStatus::Pending,
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, from_node, from_pk, from_disp, to_node, to_pk, msg, status, created)| {
+                    FriendRequest {
+                        id,
+                        from_node_id: from_node,
+                        from_pubkey: from_pk,
+                        from_display: from_disp,
+                        to_node_id: to_node,
+                        to_pubkey: to_pk,
+                        message: msg,
+                        status: match status.as_str() {
+                            "accepted" => RequestStatus::Accepted,
+                            "rejected" => RequestStatus::Rejected,
+                            _ => RequestStatus::Pending,
+                        },
+                        created_at: created.parse().unwrap_or_else(|_| Utc::now()),
+                        responded_at: None,
+                    }
                 },
-                created_at: created.parse().unwrap_or_else(|_| Utc::now()),
-                responded_at: None,
-            }
-        }).collect())
+            )
+            .collect())
     }
 
     pub async fn respond_to_request(
@@ -253,7 +265,10 @@ impl FriendManager {
             .execute(&self.pool)
             .await?;
 
-            info!("[Friends] Request {} accepted, contacts created", request_id);
+            info!(
+                "[Friends] Request {} accepted, contacts created",
+                request_id
+            );
         }
 
         Ok(())
@@ -269,17 +284,20 @@ impl FriendManager {
             .fetch_all(&self.pool)
             .await?;
 
-        Ok(rows.into_iter().map(|(id, node, pk, disp, elo, created)| Contact {
-            id,
-            owner_node_id: owner_node_id.to_string(),
-            contact_node_id: node,
-            contact_pubkey: pk,
-            contact_display: disp,
-            contact_elo: elo.map(|e| e as u16),
-            is_online: false,
-            last_seen: None,
-            created_at: created.parse().unwrap_or_else(|_| Utc::now()),
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .map(|(id, node, pk, disp, elo, created)| Contact {
+                id,
+                owner_node_id: owner_node_id.to_string(),
+                contact_node_id: node,
+                contact_pubkey: pk,
+                contact_display: disp,
+                contact_elo: elo.map(|e| e as u16),
+                is_online: false,
+                last_seen: None,
+                created_at: created.parse().unwrap_or_else(|_| Utc::now()),
+            })
+            .collect())
     }
 
     pub async fn remove_contact(&self, owner_node_id: &str, contact_node_id: &str) -> Result<()> {
@@ -292,7 +310,10 @@ impl FriendManager {
         .bind(owner_node_id)
         .execute(&self.pool)
         .await?;
-        info!("[Friends] Contact removed: {} <-> {}", owner_node_id, contact_node_id);
+        info!(
+            "[Friends] Contact removed: {} <-> {}",
+            owner_node_id, contact_node_id
+        );
         Ok(())
     }
 }

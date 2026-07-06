@@ -7,20 +7,20 @@ use bevy::prelude::*;
 use tokio::runtime::Runtime;
 
 pub mod error;
+pub mod join_link;
+pub mod social;
+pub mod systems;
+pub mod telemetry;
 pub mod traits;
 pub mod types;
-pub mod systems;
-pub mod social;
-pub mod join_link;
-pub mod telemetry;
 
 // Submodules
 pub mod network;
-pub mod spectator;
-#[cfg(feature = "solana")]
-pub mod solana;
 #[cfg(feature = "solana")]
 pub mod rollup;
+#[cfg(feature = "solana")]
+pub mod solana;
+pub mod spectator;
 pub mod tournament;
 pub mod ui;
 #[cfg(feature = "solana")]
@@ -34,11 +34,11 @@ pub mod vps_client {
 
 // Re-exports for public API
 pub use error::{MultiplayerError, MultiplayerResult};
-pub use traits::{Message, MessageReader, MessageWriter};
-pub use types::*;
 pub use network::*;
 #[cfg(feature = "solana")]
 pub use rollup::*;
+pub use traits::{Message, MessageReader, MessageWriter};
+pub use types::*;
 
 #[derive(Resource)]
 pub struct TokioRuntime(pub Runtime);
@@ -56,12 +56,12 @@ impl Plugin for MultiplayerPlugin {
         app.insert_resource(TokioRuntime(runtime));
 
         // 1. Register shared types and events
-        app.init_resource::<BraidNetworkState>()
-            .init_resource::<BraidGameSync>()
+        app.init_resource::<OnlineNetworkState>()
+            .init_resource::<OnlineGameSync>()
             .init_resource::<HeartbeatState>()
             .init_resource::<NetworkConfig>()
             .init_resource::<crate::multiplayer::types::CausalChainState>()
-            .init_resource::<network::braid::BraidP2PConfig>()
+            .init_resource::<network::braid::BraidSubscriptionConfig>()
             .add_message::<NetworkEvent>()
             .add_message::<crate::game::events::GameStartedEvent>()
             .add_message::<crate::game::events::GameEndedEvent>();
@@ -73,7 +73,8 @@ impl Plugin for MultiplayerPlugin {
         app.add_plugins((
             network::p2p::P2PConnectionPlugin,
             network::p2p_vps::P2PVpsPlugin,
-            network::braid_pvp::BraidPvpPlugin,
+            network::online_game_session::OnlineGameSessionPlugin,
+            network::relay_bridge::RelayBridgePlugin,
             social::SocialPlugin,
             join_link::JoinLinkPlugin,
             spectator::SpectatorPlugin,
@@ -92,16 +93,19 @@ impl Plugin for MultiplayerPlugin {
 
         // 3. Register core orchestration systems
         app.add_systems(Startup, systems::initialize_braid_network)
-            .add_systems(Update, (
-                systems::handle_network_events,
-                systems::dispatch_remote_moves,
-                systems::handle_resync_response,
-                systems::handle_resync_request,
-                systems::handle_game_control_messages,
-                systems::send_local_draw_events,
-                systems::tick_heartbeat,
-                systems::handle_pong,
-            ));
+            .add_systems(
+                Update,
+                (
+                    systems::handle_network_events,
+                    systems::dispatch_remote_moves,
+                    systems::handle_resync_response,
+                    systems::handle_resync_request,
+                    systems::handle_game_control_messages,
+                    systems::send_local_draw_events,
+                    systems::tick_heartbeat,
+                    systems::handle_pong,
+                ),
+            );
 
         // 4. Register feature-specific cross-cutting systems
         #[cfg(feature = "solana")]
@@ -111,11 +115,13 @@ impl Plugin for MultiplayerPlugin {
                 Update,
                 (
                     // Step 1: feed moves into rollup batch AFTER GameSystems::Execution has applied them
-                    (systems::feed_local_moves_to_rollup, systems::feed_remote_moves_to_rollup)
+                    (
+                        systems::feed_local_moves_to_rollup,
+                        systems::feed_remote_moves_to_rollup,
+                    )
                         .after(GameSystems::Execution),
                     // Step 2: detect game over
-                    systems::emit_game_ended_event
-                        .after(GameSystems::Execution),
+                    systems::emit_game_ended_event.after(GameSystems::Execution),
                     // Step 3: flush batch AFTER feeds have added all moves and event is emitted
                     systems::finalize_game_on_end
                         .after(systems::feed_local_moves_to_rollup)

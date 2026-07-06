@@ -8,7 +8,7 @@ use braid_iroh::tournament::{SwissMessage, SwissPairing};
 use tokio::sync::mpsc;
 use tracing::info;
 
-use crate::multiplayer::BraidNetworkState;
+use crate::multiplayer::OnlineNetworkState;
 
 /// Plugin for tournament gossip client
 pub struct TournamentClientPlugin;
@@ -93,11 +93,7 @@ pub struct StandingsUpdated {
 
 impl TournamentClientState {
     /// Join a tournament and subscribe to gossip updates
-    pub fn join_tournament(
-        &mut self,
-        tournament_id: u64,
-        player_id: String,
-    ) {
+    pub fn join_tournament(&mut self, tournament_id: u64, player_id: String) {
         self.active_tournament = Some(tournament_id);
         let player_id_clone = player_id.clone();
         self.player_id = Some(player_id);
@@ -106,7 +102,10 @@ impl TournamentClientState {
         self.standings.clear();
         self.my_rank = None;
 
-        info!("[tournament-client] Joined tournament {} as player {}", tournament_id, player_id_clone);
+        info!(
+            "[tournament-client] Joined tournament {} as player {}",
+            tournament_id, player_id_clone
+        );
     }
 
     /// Leave the current tournament
@@ -169,14 +168,17 @@ fn process_gossip_messages(
                 round,
                 pairings,
             } => {
-                info!("[tournament-client] Round {} started in tournament {}", round, msg_tournament_id);
+                info!(
+                    "[tournament-client] Round {} started in tournament {}",
+                    round, msg_tournament_id
+                );
 
                 client_state.current_round = round;
 
                 // Find the player's pairing
-                let my_pairing = player_id.as_ref().and_then(|pid| {
-                    find_player_pairing(pid, round, &pairings)
-                });
+                let my_pairing = player_id
+                    .as_ref()
+                    .and_then(|pid| find_player_pairing(pid, round, &pairings));
 
                 client_state.my_pairing = my_pairing.clone();
 
@@ -192,8 +194,10 @@ fn process_gossip_messages(
                 board,
                 result,
             } => {
-                info!("[tournament-client] Result recorded for tournament {} round {} board {}",
-                    msg_tournament_id, round, board);
+                info!(
+                    "[tournament-client] Result recorded for tournament {} round {} board {}",
+                    msg_tournament_id, round, board
+                );
 
                 let (white_score, black_score) = match result {
                     braid_iroh::tournament::MatchResult::Win { winner: _ } => {
@@ -216,8 +220,11 @@ fn process_gossip_messages(
                 tournament_id: msg_tournament_id,
                 standings,
             } => {
-                info!("[tournament-client] Standings updated for tournament {} ({} entries)",
-                    msg_tournament_id, standings.len());
+                info!(
+                    "[tournament-client] Standings updated for tournament {} ({} entries)",
+                    msg_tournament_id,
+                    standings.len()
+                );
 
                 let entries: Vec<StandingsEntry> = standings
                     .iter()
@@ -229,9 +236,9 @@ fn process_gossip_messages(
                     .collect();
 
                 // Find player's rank
-                let my_rank = player_id.as_ref().and_then(|pid| {
-                    entries.iter().find(|e| e.player_id == *pid).map(|e| e.rank)
-                });
+                let my_rank = player_id
+                    .as_ref()
+                    .and_then(|pid| entries.iter().find(|e| e.player_id == *pid).map(|e| e.rank));
 
                 client_state.standings = entries.clone();
                 client_state.my_rank = my_rank;
@@ -249,9 +256,7 @@ fn process_gossip_messages(
             } => {
                 info!(
                     "[tournament-client] Bracket fired for tournament {} ({} players) at {}",
-                    msg_tournament_id,
-                    player_count,
-                    started_at
+                    msg_tournament_id, player_count, started_at
                 );
             }
         }
@@ -289,7 +294,7 @@ fn find_player_pairing(
 pub fn handle_discovery_events(
     mut _commands: Commands,
     mut _client_state: ResMut<TournamentClientState>,
-    _braid_state: Res<BraidNetworkState>,
+    _braid_state: Res<OnlineNetworkState>,
 ) {
     // This would be triggered by a UI action or network response
     // For now, it's a placeholder for the integration point
@@ -356,13 +361,11 @@ mod tests {
 
     #[test]
     fn test_find_player_pairing_black() {
-        let pairings = vec![
-            SwissPairing {
-                white: "player1".to_string(),
-                black: "player2".to_string(),
-                board: 1,
-            },
-        ];
+        let pairings = vec![SwissPairing {
+            white: "player1".to_string(),
+            black: "player2".to_string(),
+            board: 1,
+        }];
 
         let pairing = find_player_pairing("player2", 1, &pairings);
         assert!(pairing.is_some());
@@ -375,13 +378,11 @@ mod tests {
 
     #[test]
     fn test_find_player_pairing_not_found() {
-        let pairings = vec![
-            SwissPairing {
-                white: "player1".to_string(),
-                black: "player2".to_string(),
-                board: 1,
-            },
-        ];
+        let pairings = vec![SwissPairing {
+            white: "player1".to_string(),
+            black: "player2".to_string(),
+            board: 1,
+        }];
 
         let pairing = find_player_pairing("player3", 1, &pairings);
         assert!(pairing.is_none());

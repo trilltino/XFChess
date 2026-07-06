@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use crate::GameConfig;
+use bevy::prelude::*;
 
 use super::state::WagerState;
 use super::ui::wager_ui_system;

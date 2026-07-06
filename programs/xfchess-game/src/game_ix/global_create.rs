@@ -4,9 +4,11 @@
 //! wager funds are drawn from the [`GlobalSessionDelegation`] vault.
 //! The player wallet never has to sign — zero popup per game.
 
-use crate::constants::{GAME_SEED, MAX_WAGER_AMOUNT, WAGER_ESCROW_SEED, CREATE_GAME_COST};
+use crate::account_ix::session_guards;
+use crate::constants::{GAME_SEED, MAX_WAGER_AMOUNT, MIN_WAGER_LAMPORTS, WAGER_ESCROW_SEED};
 use crate::errors::GameErrorCode;
-use crate::state::{Game, GameResult, GameStatus, GameType, GlobalSessionDelegation, MatchType};
+use crate::game_ix::common::{init_game_fields, InitGameArgs};
+use crate::state::{Game, GlobalSessionDelegation, MatchType};
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -55,12 +57,22 @@ pub fn handler(
     let now = Clock::get()?.unix_timestamp;
     let session = &ctx.accounts.session_delegation;
 
-    require!(session.is_valid(now), GameErrorCode::SessionExpiredOrDisabled);
+    require!(
+        session.is_valid(now),
+        GameErrorCode::SessionExpiredOrDisabled
+    );
     require!(
         session.games_remaining > 0,
         GameErrorCode::GlobalSessionNoGamesRemaining
     );
-    require!(wager_amount <= MAX_WAGER_AMOUNT, GameErrorCode::WagerTooHigh);
+    require!(
+        wager_amount <= MAX_WAGER_AMOUNT,
+        GameErrorCode::WagerTooHigh
+    );
+    require!(
+        wager_amount == 0 || wager_amount >= MIN_WAGER_LAMPORTS,
+        GameErrorCode::StakeTooLow
+    );
     require!(
         session.has_budget(wager_amount),
         GameErrorCode::GlobalSessionSpendingLimitExceeded
@@ -92,41 +104,25 @@ pub fn handler(
 
     // Update session bookkeeping
     let session = &mut ctx.accounts.session_delegation;
-    session.total_spent = session.total_spent.saturating_add(wager_amount);
+    session.total_spent = session_guards::checked_session_total(session.total_spent, wager_amount)?;
     session.games_remaining = session.games_remaining.saturating_sub(1);
 
-    // Initialize game
-    let game = &mut ctx.accounts.game;
-    game.game_id = game_id;
-    game.white = ctx.accounts.player.key();
-    game.black = Pubkey::default();
-    game.status = GameStatus::WaitingForOpponent;
-    game.result = GameResult::None;
-    #[cfg(feature = "move-validation")]
-    {
-        game.board_state = chess_logic_on_chain::nimzovich_engine::CompactBoard::starting_position().to_bytes();
-    }
-    #[cfg(not(feature = "move-validation"))]
-    {
-        game.board_state = [0; 68];
-    }
-    game.move_count = 0;
-    game.halfmove_clock = 0;
-    game.turn = 1;
-    game.nonce = 0;
-    game.created_at = now;
-    game.updated_at = now;
-    game.wager_amount = wager_amount;
-    game.wager_token = None;
-    game.game_type = GameType::PvP;
-    game.match_type = match_type.clone();
-    game.country_fee = if match_type == MatchType::Free { 0 } else { platform_fee };
-    game.base_time_seconds = base_time_seconds;
-    game.increment_seconds = increment_seconds;
-    game.bump = ctx.bumps.game;
-    game.fee_payer = ctx.accounts.session_signer.key();
-    game.fees_advanced = CREATE_GAME_COST;
-    game.is_delegated = false;
+    init_game_fields(
+        &mut ctx.accounts.game,
+        InitGameArgs {
+            game_id,
+            white: ctx.accounts.player.key(),
+            fee_payer: ctx.accounts.session_signer.key(),
+            wager_amount,
+            match_type,
+            platform_fee,
+            base_time_seconds,
+            increment_seconds,
+            tournament_id: None,
+        },
+        now,
+        ctx.bumps.game,
+    )?;
 
     Ok(())
 }

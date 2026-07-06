@@ -31,10 +31,8 @@ pub struct FocusTelemetryPlugin;
 
 impl Plugin for FocusTelemetryPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FocusTelemetry>().add_systems(
-            Update,
-            (track_window_focus, report_move_blur).chain(),
-        );
+        app.init_resource::<FocusTelemetry>()
+            .add_systems(Update, (track_window_focus, report_move_blur).chain());
     }
 }
 
@@ -67,9 +65,11 @@ fn report_move_blur(
         // Think time for the move just made: elapsed since the turn began
         // (the previous move applied, or game start). Resets for the next turn
         // regardless of who moved.
-        let think_ms = telemetry
-            .turn_started_at
-            .map(|t| now.saturating_duration_since(t).as_millis().min(u32::MAX as u128) as u32);
+        let think_ms = telemetry.turn_started_at.map(|t| {
+            now.saturating_duration_since(t)
+                .as_millis()
+                .min(u32::MAX as u128) as u32
+        });
         telemetry.turn_started_at = Some(now);
 
         if mv.remote {

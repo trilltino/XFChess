@@ -62,7 +62,9 @@ impl CursorStyle {
 pub struct HoverMaterials;
 
 impl Default for HoverMaterials {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 
 /// Observer function for piece hover events (Pointer<Over>)
@@ -89,10 +91,7 @@ pub fn on_piece_hover(
 }
 
 /// Observer function for piece unhover events (Pointer<Out>)
-pub fn on_piece_unhover(
-    unhover: On<Pointer<Out>>,
-    mut cursor_style: Option<ResMut<CursorStyle>>,
-) {
+pub fn on_piece_unhover(unhover: On<Pointer<Out>>, mut cursor_style: Option<ResMut<CursorStyle>>) {
     if let Some(ref mut cs) = cursor_style {
         cs.active_hovers.remove(&unhover.entity);
         cs.update();
@@ -125,10 +124,7 @@ pub fn on_square_hover(
 }
 
 /// Observer function for square unhover events (Pointer<Out>)
-pub fn on_square_unhover(
-    unhover: On<Pointer<Out>>,
-    mut cursor_style: Option<ResMut<CursorStyle>>,
-) {
+pub fn on_square_unhover(unhover: On<Pointer<Out>>, mut cursor_style: Option<ResMut<CursorStyle>>) {
     if let Some(ref mut cs) = cursor_style {
         cs.active_hovers.remove(&unhover.entity);
         cs.update();

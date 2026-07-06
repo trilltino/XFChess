@@ -6,8 +6,8 @@ use anchor_lang::prelude::*;
 /// Seeds: [b"username", username.as_bytes()]
 #[account]
 pub struct UsernameRecord {
-    pub owner: Pubkey,      // Player who owns this username
-    pub created_at: i64,    // Timestamp when username was claimed
+    pub owner: Pubkey,   // Player who owns this username
+    pub created_at: i64, // Timestamp when username was claimed
 }
 
 impl UsernameRecord {
@@ -22,23 +22,34 @@ pub fn validate_username(username: &str) -> Result<()> {
     // Check length
     let len = username.len();
     require!(len >= 3 && len <= 20, UsernameError::InvalidLength);
-    
+
     // Check valid characters
     for ch in username.chars() {
         let valid = ch.is_ascii_alphanumeric() || ch == '_' || ch == '-';
         require!(valid, UsernameError::InvalidCharacters);
     }
-    
+
     // Check reserved names (case-insensitive)
     let lower = username.to_lowercase();
-    let reserved = ["admin", "system", "support", "official", "moderator", 
-                    "xf", "xfchess", "chess", "test", "dev", "null"];
+    let reserved = [
+        "admin",
+        "system",
+        "support",
+        "official",
+        "moderator",
+        "xf",
+        "xfchess",
+        "chess",
+        "test",
+        "dev",
+        "null",
+    ];
     for r in reserved {
         if lower == r || lower.starts_with(r) {
             return Err(UsernameError::ReservedUsername.into());
         }
     }
-    
+
     Ok(())
 }
 

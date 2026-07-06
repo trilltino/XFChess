@@ -1,7 +1,7 @@
 //! Canada CACF compliance requirements.
 
-use serde::{Deserialize, Serialize};
 use super::types::CacfComplianceStatus;
+use serde::{Deserialize, Serialize};
 
 /// Canada CACF compliance requirements
 #[derive(Debug, Clone, Serialize, Deserialize)]

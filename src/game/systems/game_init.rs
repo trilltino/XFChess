@@ -144,7 +144,7 @@ pub fn reset_game_resources(
 /// System that initializes players based on game mode
 ///
 /// Creates player resources based on:
-/// - BraidMultiplayer: local player is human, remote player is not (color from P2PConnectionState)
+/// - OnlineMultiplayer: local player is human, remote player is not (color from P2PConnectionState)
 /// - MultiplayerLocal: both players human
 /// - VsAI: one human, one AI (based on ai_color)
 ///
@@ -162,7 +162,7 @@ pub fn initialize_players(
             player_2: Player::new(2, "Player 2".to_string(), PieceColor::Black, true),
         };
         info!("[GAME_INIT] Local PvP players initialized (both human)");
-    } else if let crate::core::states::GameMode::BraidMultiplayer = *core_mode {
+    } else if let crate::core::states::GameMode::OnlineMultiplayer = *core_mode {
         // Each instance only controls its assigned color; the other color is driven by the network.
         let my_color = p2p_conn
             .as_ref()
@@ -178,7 +178,10 @@ pub fn initialize_players(
                 player_2: Player::new(2, "You".to_string(), PieceColor::Black, true),
             },
         };
-        info!("[GAME_INIT] BraidMultiplayer players initialized: local={:?}", my_color);
+        info!(
+            "[GAME_INIT] OnlineMultiplayer players initialized: local={:?}",
+            my_color
+        );
     } else {
         // VsAI mode: One human, one AI
         let ai_color = ai_config.mode.ai_color();
@@ -225,11 +228,10 @@ pub fn start_timer_when_ready(
     mut engine: ResMut<ChessEngine>,
     pieces_query: Query<(Entity, &Piece, &HasMoved)>,
     game_phase: Res<crate::game::resources::CurrentGamePhase>,
-    mut ready_frames: Local<u32>,
+    move_history: Res<crate::game::resources::MoveHistory>,
     mut engine_inited: Local<bool>,
 ) {
     if game_timer.is_running {
-        *ready_frames = 0; // reset for next game
         *engine_inited = false; // reset for next game
         return;
     }
@@ -238,27 +240,26 @@ pub fn start_timer_when_ready(
         return;
     }
 
-    if pieces_query.iter().count() >= 32 {
-        *ready_frames += 1;
+    // Sync the engine from the ECS board exactly once, as soon as the full set
+    // of pieces is present. This must happen regardless of whether the clock has
+    // started yet, so move validation is ready before the first move.
+    if pieces_query.iter().count() >= 32 && !*engine_inited {
+        engine.sync_ecs_to_engine(&pieces_query);
+        *engine_inited = true;
+        info!(
+            "[GAME_INIT] Engine initialised with {} pieces | FEN: {}",
+            pieces_query.iter().count(),
+            engine.current_fen()
+        );
+    }
 
-        // Initialise engine once on the first frame pieces are present
-        if !*engine_inited {
-            engine.sync_ecs_to_engine(&pieces_query);
-            *engine_inited = true;
-            info!(
-                "[GAME_INIT] Engine initialised with {} pieces | FEN: {}",
-                pieces_query.iter().count(),
-                engine.current_fen()
-            );
-        }
-
-        if *ready_frames >= 5 {
-            game_timer.is_running = true;
-            *ready_frames = 0;
-            info!("[GAME_INIT] Timer started after pieces confirmed present");
-        }
-    } else {
-        *ready_frames = 0;
+    // The clock does not start until the first move has actually been played.
+    // This keeps either player's clock from ticking during the lobby/handshake
+    // (e.g. while the host waits to begin) and gives the side to move its first
+    // move "for free", matching the agreed multiplayer behaviour.
+    if *engine_inited && !move_history.is_empty() {
+        game_timer.is_running = true;
+        info!("[GAME_INIT] Timer started after first move played");
     }
 }
 

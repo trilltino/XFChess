@@ -1,5 +1,5 @@
-use sqlx::{SqlitePool, migrate::MigrateDatabase, Sqlite};
 use anyhow::Result;
+use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::str::FromStr;
 
 /// Initialize the SQLite database with required tables
@@ -16,8 +16,9 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool> {
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
-            .busy_timeout(std::time::Duration::from_secs(30))
-    ).await?;
+            .busy_timeout(std::time::Duration::from_secs(30)),
+    )
+    .await?;
 
     // Run migrations
     create_tables(&pool).await?;
@@ -79,9 +80,11 @@ async fn create_tables(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_games_players ON games(player_white, player_black)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_games_players ON games(player_white, player_black)",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_moves_game_id ON moves(game_id)")
         .execute(pool)
@@ -132,10 +135,11 @@ async fn create_tables(pool: &SqlitePool) -> Result<()> {
 pub async fn cleanup_old_games(pool: &SqlitePool, days_old: u32) -> Result<u64> {
     let cutoff_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs() - (days_old as u64 * 24 * 60 * 60);
+        .as_secs()
+        - (days_old as u64 * 24 * 60 * 60);
 
     let result = sqlx::query(
-        "DELETE FROM games WHERE start_time < ? AND status IN ('completed', 'aborted')"
+        "DELETE FROM games WHERE start_time < ? AND status IN ('completed', 'aborted')",
     )
     .bind(cutoff_time as i64)
     .execute(pool)

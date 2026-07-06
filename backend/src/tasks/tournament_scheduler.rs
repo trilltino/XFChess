@@ -22,7 +22,7 @@
 //! * Tokio tasks  — <https://tokio.rs/tokio/tutorial/spawning>
 //! * mpsc channel — <https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html>
 
-use crate::signing::storage::tournament::{TournamentStore, TournamentStatus};
+use crate::signing::storage::tournament::{TournamentStatus, TournamentStore};
 use crate::signing::tournament_gossip::TournamentGossipService;
 use braid_iroh::SwissMessage;
 use solana_sdk::signature::Keypair;
@@ -42,7 +42,10 @@ pub enum TournamentTrigger {
     /// Re-evaluate start conditions for a tournament.
     CheckStart { tournament_id: u64 },
     /// A player just joined — may trigger fill-start or grace timer.
-    PlayerJoined { tournament_id: u64, player_count: usize },
+    PlayerJoined {
+        tournament_id: u64,
+        player_count: usize,
+    },
     /// Admin explicitly requested an immediate start.
     AdminStart { tournament_id: u64 },
     /// Scheduled start time has been reached (emitted by the ticker task).
@@ -99,7 +102,12 @@ impl TournamentScheduler {
         vps_authority: Arc<Keypair>,
         host_treasury: solana_sdk::pubkey::Pubkey,
     ) {
-        self.on_chain = Some(OnChainConfig { program_id, rpc_url, vps_authority, host_treasury });
+        self.on_chain = Some(OnChainConfig {
+            program_id,
+            rpc_url,
+            vps_authority,
+            host_treasury,
+        });
     }
 
     pub async fn run(mut self) {
@@ -109,7 +117,10 @@ impl TournamentScheduler {
                 TournamentTrigger::CheckStart { tournament_id } => {
                     self.try_scheduled_start(tournament_id).await;
                 }
-                TournamentTrigger::PlayerJoined { tournament_id, player_count } => {
+                TournamentTrigger::PlayerJoined {
+                    tournament_id,
+                    player_count,
+                } => {
                     self.handle_player_joined(tournament_id, player_count).await;
                 }
                 TournamentTrigger::AdminStart { tournament_id } => {
@@ -154,7 +165,8 @@ impl TournamentScheduler {
             None => return,
         };
 
-        if tournament.status != TournamentStatus::Registration || tournament.scheduled_at.is_some() {
+        if tournament.status != TournamentStatus::Registration || tournament.scheduled_at.is_some()
+        {
             return;
         }
 
@@ -180,7 +192,9 @@ impl TournamentScheduler {
             let tx = self.trigger_tx.clone();
             let handle = tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(TournamentScheduler::FILL_GRACE_SECS)).await;
-                let _ = tx.send(TournamentTrigger::FillGraceExpired { tournament_id }).await;
+                let _ = tx
+                    .send(TournamentTrigger::FillGraceExpired { tournament_id })
+                    .await;
             });
             self.fill_timers.insert(tournament_id, handle);
         }
@@ -218,7 +232,10 @@ impl TournamentScheduler {
         let tournament = match self.store.get(tournament_id).await {
             Some(t) => t,
             None => {
-                warn!("[tournament-scheduler] Tournament {} not found", tournament_id);
+                warn!(
+                    "[tournament-scheduler] Tournament {} not found",
+                    tournament_id
+                );
                 return;
             }
         };
@@ -239,7 +256,10 @@ impl TournamentScheduler {
                         "[tournament-scheduler] Tournament {} past grace ({}/{} min). Cancelling.",
                         tournament_id, count, min
                     );
-                    let _ = self.store.update_status(tournament_id, TournamentStatus::Cancelled).await;
+                    let _ = self
+                        .store
+                        .update_status(tournament_id, TournamentStatus::Cancelled)
+                        .await;
                 } else {
                     info!(
                         "[tournament-scheduler] Tournament {} past scheduled_at, within grace ({}/{} min). Waiting.",
@@ -256,7 +276,10 @@ impl TournamentScheduler {
     async fn start_tournament(&self, tournament_id: u64) {
         // ── On-chain: start_tournament + initialize_match × N ────────────────
         if let Some(cfg) = &self.on_chain {
-            let max_players = self.store.get(tournament_id).await
+            let max_players = self
+                .store
+                .get(tournament_id)
+                .await
                 .map(|t| t.max_players)
                 .unwrap_or(0);
 
@@ -270,16 +293,21 @@ impl TournamentScheduler {
                 use crate::signing::solana::{
                     initialize_match_ix, make_rpc, sign_and_submit, start_tournament_ix,
                 };
-                use std::str::FromStr;
                 use solana_sdk::pubkey::Pubkey;
                 use solana_sdk::signature::Signer;
+                use std::str::FromStr;
 
                 let program_id = Pubkey::from_str(&program_id_str)
                     .map_err(|e| format!("bad program_id: {e}"))?;
                 let rpc = make_rpc(&rpc_url);
 
                 // Tx 1: start_tournament
-                let ix = start_tournament_ix(&program_id, tournament_id, &authority.pubkey(), &host_treasury);
+                let ix = start_tournament_ix(
+                    &program_id,
+                    tournament_id,
+                    &authority.pubkey(),
+                    &host_treasury,
+                );
                 sign_and_submit(&rpc, &authority, &[ix])
                     .map_err(|e| format!("start_tournament tx: {e}"))?;
 
@@ -287,29 +315,48 @@ impl TournamentScheduler {
                 let mut idx = 0u16;
                 while (idx as usize) < total_matches {
                     let end = ((idx as usize + 20).min(total_matches)) as u16;
-                    let ixs: Vec<_> = (idx..end).map(|i| {
-                        let round = (i as f32 + 1.0).log2() as u8;
-                        let next = if i == 0 { None } else { Some((i - 1) / 2) };
-                        initialize_match_ix(
-                            &program_id, tournament_id, i, round,
-                            None, None, next, (i % 2) as u8, &authority.pubkey(),
-                        )
-                    }).collect();
+                    let ixs: Vec<_> = (idx..end)
+                        .map(|i| {
+                            let round = (i as f32 + 1.0).log2() as u8;
+                            let next = if i == 0 { None } else { Some((i - 1) / 2) };
+                            initialize_match_ix(
+                                &program_id,
+                                tournament_id,
+                                i,
+                                round,
+                                None,
+                                None,
+                                next,
+                                (i % 2) as u8,
+                                &authority.pubkey(),
+                            )
+                        })
+                        .collect();
                     sign_and_submit(&rpc, &authority, &ixs)
                         .map_err(|e| format!("initialize_match batch {idx}: {e}"))?;
                     idx = end;
                 }
                 Ok::<(), String>(())
-            }).await;
+            })
+            .await;
 
             match result {
-                Ok(Ok(())) => info!("[tournament-scheduler] On-chain start confirmed for tournament {}", tournament_id),
+                Ok(Ok(())) => info!(
+                    "[tournament-scheduler] On-chain start confirmed for tournament {}",
+                    tournament_id
+                ),
                 Ok(Err(e)) => {
-                    error!("[tournament-scheduler] On-chain start failed for tournament {}: {}", tournament_id, e);
+                    error!(
+                        "[tournament-scheduler] On-chain start failed for tournament {}: {}",
+                        tournament_id, e
+                    );
                     return;
                 }
                 Err(e) => {
-                    error!("[tournament-scheduler] spawn_blocking panicked for tournament {}: {}", tournament_id, e);
+                    error!(
+                        "[tournament-scheduler] spawn_blocking panicked for tournament {}: {}",
+                        tournament_id, e
+                    );
                     return;
                 }
             }
@@ -346,13 +393,23 @@ impl TournamentScheduler {
             );
             return;
         };
-        let msg = SwissMessage::BracketFired { tournament_id, player_count, started_at };
+        let msg = SwissMessage::BracketFired {
+            tournament_id,
+            player_count,
+            started_at,
+        };
         match serde_json::to_vec(&msg) {
             Ok(bytes) => {
                 if let Err(e) = sender.broadcast(bytes.into()).await {
-                    warn!("[tournament-scheduler] BracketFired broadcast failed for {}: {}", tournament_id, e);
+                    warn!(
+                        "[tournament-scheduler] BracketFired broadcast failed for {}: {}",
+                        tournament_id, e
+                    );
                 } else {
-                    info!("[tournament-scheduler] BracketFired broadcast sent for tournament {}", tournament_id);
+                    info!(
+                        "[tournament-scheduler] BracketFired broadcast sent for tournament {}",
+                        tournament_id
+                    );
                 }
             }
             Err(e) => warn!("[tournament-scheduler] BracketFired serialize error: {}", e),
@@ -410,16 +467,16 @@ async fn anticheat_gate(
         .map(|g| g.to_string())
         .collect();
     if game_ids.is_empty() {
-        return PrizeGate::Proceed { flagged: Vec::new() };
+        return PrizeGate::Proceed {
+            flagged: Vec::new(),
+        };
     }
 
     let placeholders = vec!["?"; game_ids.len()].join(",");
 
     // Any of this tournament's games still awaiting analysis?
     let pending: i64 = {
-        let sql = format!(
-            "SELECT COUNT(*) FROM anticheat_queue WHERE game_id IN ({placeholders})"
-        );
+        let sql = format!("SELECT COUNT(*) FROM anticheat_queue WHERE game_id IN ({placeholders})");
         let mut q = sqlx::query_as::<_, (i64,)>(&sql);
         for id in &game_ids {
             q = q.bind(id);
@@ -524,9 +581,16 @@ pub fn spawn_prize_distributor(
                 use solana_sdk::pubkey::Pubkey;
                 use std::str::FromStr;
                 let places = [
-                    &t.winner, &t.second_place, &t.third_place, &t.fourth_place,
-                    &t.fifth_place, &t.sixth_place, &t.seventh_place, &t.eighth_place,
-                    &t.ninth_place, &t.tenth_place,
+                    &t.winner,
+                    &t.second_place,
+                    &t.third_place,
+                    &t.fourth_place,
+                    &t.fifth_place,
+                    &t.sixth_place,
+                    &t.seventh_place,
+                    &t.eighth_place,
+                    &t.ninth_place,
+                    &t.tenth_place,
                 ];
                 let flagged_places = places
                     .iter()
@@ -635,11 +699,15 @@ pub fn spawn_scheduled_start_ticker(
                 if t.status != TournamentStatus::Registration {
                     continue;
                 }
-                let Some(scheduled_at) = t.scheduled_at else { continue };
+                let Some(scheduled_at) = t.scheduled_at else {
+                    continue;
+                };
                 if now < scheduled_at {
                     continue;
                 }
-                let trigger = TournamentTrigger::ScheduledStart { tournament_id: t.tournament_id };
+                let trigger = TournamentTrigger::ScheduledStart {
+                    tournament_id: t.tournament_id,
+                };
                 if let Err(e) = trigger_tx.send(trigger).await {
                     warn!(
                         "[tournament-scheduler] Channel closed, dropping ScheduledStart for {}: {}",

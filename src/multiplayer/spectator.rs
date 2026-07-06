@@ -12,13 +12,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use bevy::prelude::*;
-use crate::multiplayer::traits::{Message, MessageReader, MessageWriter};
-use crate::game::events::NetworkMoveEvent;
 use crate::core::states::{GameMode, GameState};
-use crate::multiplayer::TokioRuntime;
+use crate::game::events::NetworkMoveEvent;
 #[cfg(feature = "solana")]
 use crate::multiplayer::network::protocol::NetworkMessage;
+use crate::multiplayer::traits::{Message, MessageReader, MessageWriter};
+use crate::multiplayer::TokioRuntime;
+use bevy::prelude::*;
 
 /// Deep-link event fired when OS / CLI passes `xfchess://spectate/{game_id}`.
 #[derive(Message, Debug, Clone)]
@@ -88,18 +88,21 @@ impl Plugin for SpectatorPlugin {
         app.init_resource::<SpectatorSession>()
             .init_resource::<SpectatorClockState>()
             .add_message::<SpectateViaLinkEvent>()
-            .add_systems(Update, (
-                handle_spectate_link,
-                resolve_spectator_delay,
-                tick_spectator_poll,
-                dispatch_pending_spectator_moves,
-                toggle_clock_side_on_move,
-            ));
+            .add_systems(
+                Update,
+                (
+                    handle_spectate_link,
+                    resolve_spectator_delay,
+                    tick_spectator_poll,
+                    dispatch_pending_spectator_moves,
+                    toggle_clock_side_on_move,
+                ),
+            );
         #[cfg(feature = "solana")]
-        app.add_systems(Update, (
-            apply_braid_resync_to_spectator,
-            tick_spectator_clock,
-        ));
+        app.add_systems(
+            Update,
+            (apply_braid_resync_to_spectator, tick_spectator_clock),
+        );
     }
 }
 
@@ -153,12 +156,14 @@ fn handle_spectate_link(
 /// pulled over gossip to ghost a stream.
 fn resolve_spectator_delay(
     mut session: ResMut<SpectatorSession>,
-    #[cfg(feature = "solana")] network_state: Option<Res<crate::multiplayer::BraidNetworkState>>,
+    #[cfg(feature = "solana")] network_state: Option<Res<crate::multiplayer::OnlineNetworkState>>,
 ) {
     if session.delay_checked || session.game_id.is_none() {
         return;
     }
-    let Some(slot) = session.delay_result.clone() else { return };
+    let Some(slot) = session.delay_result.clone() else {
+        return;
+    };
     let delay = { slot.lock().ok().and_then(|g| *g) };
     let Some(delay) = delay else { return }; // still pending
 
@@ -174,7 +179,10 @@ fn resolve_spectator_delay(
         return;
     }
 
-    info!("[spectator] game {:?} is live (no delay) — subscribing to gossip", session.game_id);
+    info!(
+        "[spectator] game {:?} is live (no delay) — subscribing to gossip",
+        session.game_id
+    );
     #[cfg(feature = "solana")]
     if let (Some(ref ns), Some(game_id)) = (
         network_state,
@@ -201,7 +209,9 @@ fn tick_spectator_poll(
     time: Res<Time>,
     tokio: Res<TokioRuntime>,
 ) {
-    let Some(game_id) = session.game_id.clone() else { return };
+    let Some(game_id) = session.game_id.clone() else {
+        return;
+    };
 
     session.poll_timer -= time.delta_secs();
     if session.poll_timer > 0.0 {
@@ -216,7 +226,8 @@ fn tick_spectator_poll(
     tokio.0.spawn(async move {
         let result = tokio::task::spawn_blocking(move || {
             crate::multiplayer::network::vps::get_game_moves_for_spectator(&game_id_clone)
-        }).await;
+        })
+        .await;
         if let Ok(Ok(moves)) = result {
             let _ = tx.send(moves);
         }
@@ -243,13 +254,13 @@ fn dispatch_pending_spectator_moves(
         if uci.len() >= 4 {
             let from_col = (uci.as_bytes()[0].wrapping_sub(b'a')) as u8;
             let from_row = (uci.as_bytes()[1].wrapping_sub(b'1')) as u8;
-            let to_col   = (uci.as_bytes()[2].wrapping_sub(b'a')) as u8;
-            let to_row   = (uci.as_bytes()[3].wrapping_sub(b'1')) as u8;
+            let to_col = (uci.as_bytes()[2].wrapping_sub(b'a')) as u8;
+            let to_row = (uci.as_bytes()[3].wrapping_sub(b'1')) as u8;
             let promotion = uci.chars().nth(4).filter(|c| "qrbn".contains(*c));
 
             move_events.write(NetworkMoveEvent {
                 from: (from_col, from_row),
-                to:   (to_col, to_row),
+                to: (to_col, to_row),
                 promotion,
                 expected_fen: None,
             });
@@ -280,18 +291,23 @@ fn apply_braid_resync_to_spectator(
         return;
     }
     for ev in rollup_events.read() {
-        if let crate::multiplayer::rollup::manager::RollupEvent::ResyncedMove { move_uci, next_fen, .. } = ev {
+        if let crate::multiplayer::rollup::manager::RollupEvent::ResyncedMove {
+            move_uci,
+            next_fen,
+            ..
+        } = ev
+        {
             let uci = move_uci;
             if uci.len() >= 4 {
                 let from_col = (uci.as_bytes()[0].wrapping_sub(b'a')) as u8;
                 let from_row = (uci.as_bytes()[1].wrapping_sub(b'1')) as u8;
-                let to_col   = (uci.as_bytes()[2].wrapping_sub(b'a')) as u8;
-                let to_row   = (uci.as_bytes()[3].wrapping_sub(b'1')) as u8;
+                let to_col = (uci.as_bytes()[2].wrapping_sub(b'a')) as u8;
+                let to_row = (uci.as_bytes()[3].wrapping_sub(b'1')) as u8;
                 let promotion = uci.chars().nth(4).filter(|c| "qrbn".contains(*c));
 
                 move_events.write(NetworkMoveEvent {
                     from: (from_col, from_row),
-                    to:   (to_col, to_row),
+                    to: (to_col, to_row),
                     promotion,
                     expected_fen: Some(next_fen.clone()),
                 });

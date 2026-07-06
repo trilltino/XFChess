@@ -4,6 +4,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::prizes::ledger;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
@@ -61,34 +62,13 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
     // Determine which place the claimant finished and their prize share.
     // Covers all 10 prize positions so 128-player (top 5) and 256-player (top 10)
     // tournaments can pay out every eligible winner.
-    let (place, prize_share_bps) = if Some(claimant_key) == tournament.winner {
-        (1u8, tournament.prize_shares[0])
-    } else if Some(claimant_key) == tournament.second_place {
-        (2u8, tournament.prize_shares[1])
-    } else if Some(claimant_key) == tournament.third_place {
-        (3u8, tournament.prize_shares[2])
-    } else if Some(claimant_key) == tournament.fourth_place {
-        (4u8, tournament.prize_shares[3])
-    } else if Some(claimant_key) == tournament.fifth_place {
-        (5u8, tournament.prize_shares[4])
-    } else if Some(claimant_key) == tournament.sixth_place {
-        (6u8, tournament.prize_shares[5])
-    } else if Some(claimant_key) == tournament.seventh_place {
-        (7u8, tournament.prize_shares[6])
-    } else if Some(claimant_key) == tournament.eighth_place {
-        (8u8, tournament.prize_shares[7])
-    } else if Some(claimant_key) == tournament.ninth_place {
-        (9u8, tournament.prize_shares[8])
-    } else if Some(claimant_key) == tournament.tenth_place {
-        (10u8, tournament.prize_shares[9])
-    } else {
-        return Err(GameErrorCode::NotTournamentWinner.into());
-    };
+    let (place_index, prize_share_bps) =
+        ledger::find_place(tournament, claimant_key).ok_or(GameErrorCode::NotTournamentWinner)?;
 
     require!(prize_share_bps > 0, GameErrorCode::NoPrizeToClaim);
 
     // Prevent double-claiming using bitflags
-    let place_bit = 1u16 << (place - 1);
+    let place_bit = ledger::place_bit(place_index)?;
     require!(
         (tournament.prizes_claimed & place_bit) == 0,
         GameErrorCode::PrizeAlreadyClaimed
@@ -98,9 +78,15 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
     // ── USDC prize path (host-funded guaranteed pool) ─────────────────────────
     // Pays winner's % share of the USDC that the operator locked before registration.
     if tournament.usdc_prize_mint.is_some() && tournament.usdc_prize_pool > 0 {
-        let usdc_prize_escrow = ctx.accounts.usdc_prize_escrow.as_ref()
+        let usdc_prize_escrow = ctx
+            .accounts
+            .usdc_prize_escrow
+            .as_ref()
             .ok_or(GameErrorCode::MissingTokenAccounts)?;
-        let claimant_usdc_ata = ctx.accounts.claimant_usdc_ata.as_ref()
+        let claimant_usdc_ata = ctx
+            .accounts
+            .claimant_usdc_ata
+            .as_ref()
             .ok_or(GameErrorCode::MissingTokenAccounts)?;
 
         require!(
@@ -108,18 +94,13 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
             GameErrorCode::UnauthorizedAccess
         );
 
-        let usdc_prize = (tournament.usdc_prize_pool as u128)
-            .checked_mul(prize_share_bps as u128)
-            .and_then(|v| v.checked_div(10000))
-            .map(|v| v as u64)
-            .unwrap_or(0);
+        let usdc_prize = ledger::prize_amount(tournament.usdc_prize_pool, prize_share_bps)?;
 
         if usdc_prize > 0 {
             let tournament_id_bytes = tournament_id.to_le_bytes();
             let bump = ctx.bumps.usdc_prize_escrow_authority;
-            let escrow_seeds: &[&[&[u8]]] = &[&[
-                TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump],
-            ]];
+            let escrow_seeds: &[&[&[u8]]] =
+                &[&[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump]]];
             token::transfer(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_program.to_account_info(),
@@ -140,15 +121,14 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
     // escrow before registration opened (fund_sol_prize). Entry fees never enter
     // this pool. Runs whether or not there is a USDC pool — both can pay out.
     if tournament.prize_pool > 0 {
-        let sol_prize = (tournament.prize_pool as u128)
-            .checked_mul(prize_share_bps as u128)
-            .and_then(|v| v.checked_div(10000))
-            .map(|v| v as u64)
-            .unwrap_or(0);
+        let sol_prize = ledger::prize_amount(tournament.prize_pool, prize_share_bps)?;
 
         if sol_prize > 0 {
             let escrow_lamports = ctx.accounts.escrow_pda.lamports();
-            require!(escrow_lamports >= sol_prize, GameErrorCode::InsufficientPrizeFunds);
+            require!(
+                escrow_lamports >= sol_prize,
+                GameErrorCode::InsufficientPrizeFunds
+            );
             **ctx.accounts.escrow_pda.lamports.borrow_mut() -= sol_prize;
             **ctx.accounts.claimant_wallet.lamports.borrow_mut() += sol_prize;
         }

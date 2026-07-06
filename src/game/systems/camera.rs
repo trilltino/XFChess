@@ -34,8 +34,10 @@
 //! - Total War series camera controls - RTS standard
 
 use crate::core::states::GameMode;
-use crate::game::camera_modes::{CameraViewMode, CinematicSequence, TransitionType, CameraControlsDisabled};
-use crate::game::resources::{CurrentTurn, Selection, Players};
+use crate::game::camera_modes::{
+    CameraControlsDisabled, CameraViewMode, CinematicSequence, TransitionType,
+};
+use crate::game::resources::{CurrentTurn, Players, Selection};
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
     prelude::*,
@@ -428,10 +430,14 @@ pub fn get_is_black_view(
     }
 
     // In other modes (SinglePlayer vs AI, Online), fix to the human player's perspective
-    if players.player_1.is_human && players.player_1.color == crate::rendering::pieces::PieceColor::Black {
+    if players.player_1.is_human
+        && players.player_1.color == crate::rendering::pieces::PieceColor::Black
+    {
         return true;
     }
-    if players.player_2.is_human && players.player_2.color == crate::rendering::pieces::PieceColor::Black {
+    if players.player_2.is_human
+        && players.player_2.color == crate::rendering::pieces::PieceColor::Black
+    {
         return true;
     }
 
@@ -483,7 +489,7 @@ pub fn camera_rotate_on_turn_detection_system(
     if rotation_state.last_turn_color == Some(turn_color) {
         return; // No change in turn
     }
-    
+
     let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
     let is_local_pvp = *game_mode == GameMode::MultiplayerLocal;
 
@@ -496,10 +502,10 @@ pub fn camera_rotate_on_turn_detection_system(
     } else if rotation_state.last_turn_color.is_none() {
         // At start of game in other modes, rotate to human player's side
         let target_yaw = if is_black_view { PI } else { 0.0 };
-        
+
         rotation_state.target_yaw = target_yaw;
         rotation_state.last_turn_color = Some(turn_color);
-        
+
         // If we need to rotate initially, do it instantly or smoothly
         if (target_yaw - rotation_state.current_yaw).abs() > 0.01 {
             rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED * 2.0; // Faster initial rotation
@@ -842,7 +848,11 @@ pub fn setup_game_camera(
 
     // Pre-initialize CameraRotationState to the correct side so the rotation
     // system doesn't animate from the wrong position on game start.
-    let initial_yaw = if is_black_view { std::f32::consts::PI } else { 0.0 };
+    let initial_yaw = if is_black_view {
+        std::f32::consts::PI
+    } else {
+        0.0
+    };
     rotation_state.current_yaw = initial_yaw;
     rotation_state.target_yaw = initial_yaw;
     rotation_state.is_rotating = false;
@@ -868,11 +878,13 @@ pub fn setup_game_camera(
                 let camera_pos_2d = if is_black_view {
                     Vec3::new(3.5, height, 7.0 + z_behind) // behind black's rank 8
                 } else {
-                    Vec3::new(3.5, height, -z_behind)       // behind white's rank 1
+                    Vec3::new(3.5, height, -z_behind) // behind white's rank 1
                 };
-                *transform = Transform::from_translation(camera_pos_2d).looking_at(board_center, Vec3::Y);
+                *transform =
+                    Transform::from_translation(camera_pos_2d).looking_at(board_center, Vec3::Y);
             } else {
-                *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+                *transform =
+                    Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
             }
 
             camera.order = 0;
@@ -888,7 +900,8 @@ pub fn setup_game_camera(
 
             info!(
                 "[CAMERA] Positioned for {} view. is_black_view: {}",
-                if is_2d { "2D" } else { "3D" }, is_black_view
+                if is_2d { "2D" } else { "3D" },
+                is_black_view
             );
         }
     }
@@ -925,8 +938,12 @@ pub fn update_game_viewport(
     hud_visibility: Res<crate::ui::game::game_ui::InGameHudVisibility>,
     game_mode: Res<crate::core::GameMode>,
 ) {
-    let Some(entity) = persistent_camera.entity else { return };
-    let Ok(mut camera) = cameras.get_mut(entity) else { return };
+    let Some(entity) = persistent_camera.entity else {
+        return;
+    };
+    let Ok(mut camera) = cameras.get_mut(entity) else {
+        return;
+    };
     let Ok(window) = windows.single() else { return };
 
     // HUD hidden or PGN replay: full viewport, no panel offset
@@ -967,7 +984,7 @@ pub fn camera_reset_system(
             let distance_behind = 8.0;
             let board_center = Vec3::new(3.5, 0.0, 3.5);
             let default_zoom = 16.0;
-            
+
             let default_pos = if is_black_view {
                 // Black view: camera on +Z side looking toward -Z
                 Vec3::new(3.5, initial_height, 7.0 + distance_behind)
@@ -983,7 +1000,10 @@ pub fn camera_reset_system(
             // Yaw is calculated from transform automatically when initialized=false
             controller.initialized = false;
 
-            info!("[CAMERA] Reset to {} Perspective with correct board orientation", if is_black_view { "Black" } else { "White" });
+            info!(
+                "[CAMERA] Reset to {} Perspective with correct board orientation",
+                if is_black_view { "Black" } else { "White" }
+            );
         }
     }
 }
@@ -1052,26 +1072,32 @@ pub fn camera_mode_cycle_system(
                         let height = 14.0;
                         let z_behind = 2.0;
                         let translation = Vec3::new(3.5, height, -z_behind);
-                        *transform = Transform::from_translation(translation).looking_at(board_center, Vec3::Y);
+                        *transform = Transform::from_translation(translation)
+                            .looking_at(board_center, Vec3::Y);
                         controller.target_zoom = height;
                         controller.current_zoom = height;
-                        commands.entity(camera_entity).remove::<CameraControlsDisabled>();
+                        commands
+                            .entity(camera_entity)
+                            .remove::<CameraControlsDisabled>();
                     }
                     CameraViewMode::TopDownBlack => {
                         // Nearly overhead from black's side — rank 8 at bottom, h–a left to right
                         let height = 14.0;
                         let z_behind = 2.0;
                         let translation = Vec3::new(3.5, height, 7.0 + z_behind);
-                        *transform = Transform::from_translation(translation).looking_at(board_center, Vec3::Y);
+                        *transform = Transform::from_translation(translation)
+                            .looking_at(board_center, Vec3::Y);
                         controller.target_zoom = height;
                         controller.current_zoom = height;
-                        commands.entity(camera_entity).remove::<CameraControlsDisabled>();
+                        commands
+                            .entity(camera_entity)
+                            .remove::<CameraControlsDisabled>();
                     }
                     CameraViewMode::Fixed => {
                         // Static angled view at center
                         let height = 14.0;
                         let distance = 6.0;
-                        
+
                         // Determine player color for orientation
                         let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
 
@@ -1081,16 +1107,19 @@ pub fn camera_mode_cycle_system(
                             Vec3::new(3.5, height, -distance)
                         };
 
-                        *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+                        *transform = Transform::from_translation(camera_pos)
+                            .looking_at(board_center, Vec3::Y);
                         controller.target_zoom = height;
                         controller.current_zoom = height;
-                        commands.entity(camera_entity).insert(CameraControlsDisabled);
+                        commands
+                            .entity(camera_entity)
+                            .insert(CameraControlsDisabled);
                     }
                     CameraViewMode::Default => {
                         // Standard 3D perspective - same as game setup
                         let initial_height = 16.0;
                         let distance_behind = 8.0;
-                        
+
                         let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
 
                         let camera_pos = if is_black_view {
@@ -1099,15 +1128,20 @@ pub fn camera_mode_cycle_system(
                             Vec3::new(3.5, initial_height, -distance_behind)
                         };
 
-                        *transform = Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
+                        *transform = Transform::from_translation(camera_pos)
+                            .looking_at(board_center, Vec3::Y);
                         controller.target_zoom = initial_height;
                         controller.current_zoom = initial_height;
                         controller.initialized = false;
-                        commands.entity(camera_entity).remove::<CameraControlsDisabled>();
+                        commands
+                            .entity(camera_entity)
+                            .remove::<CameraControlsDisabled>();
                     }
                     CameraViewMode::Cinematic => {
                         // Cinematic mode - controls disabled, sequence takes over
-                        commands.entity(camera_entity).insert(CameraControlsDisabled);
+                        commands
+                            .entity(camera_entity)
+                            .insert(CameraControlsDisabled);
                     }
                 }
             }
@@ -1221,9 +1255,7 @@ pub fn cinematic_camera_system(
     for (mut transform, mut controller) in camera_query.iter_mut() {
         // Calculate position based on transition type
         let new_position = match current_frame.transition_type {
-            TransitionType::Linear => {
-                current_frame.position.lerp(next_frame.position, smooth_t)
-            }
+            TransitionType::Linear => current_frame.position.lerp(next_frame.position, smooth_t),
             TransitionType::EaseInOut => {
                 // Cubic ease in-out
                 let ease_t = if t < 0.5 {
@@ -1233,17 +1265,23 @@ pub fn cinematic_camera_system(
                 };
                 current_frame.position.lerp(next_frame.position, ease_t)
             }
-            TransitionType::Elliptical { center, axis_x, axis_z, start_angle, end_angle } => {
+            TransitionType::Elliptical {
+                center,
+                axis_x,
+                axis_z,
+                start_angle,
+                end_angle,
+            } => {
                 // Interpolate angle
                 let angle = start_angle + (end_angle - start_angle) * smooth_t;
-                
+
                 // Calculate position on ellipse
                 let x = center.x + axis_x * angle.cos();
                 let z = center.z + axis_z * angle.sin();
-                
+
                 // Interpolate height separately
                 let y = current_frame.position.lerp(next_frame.position, smooth_t).y;
-                
+
                 Vec3::new(x, y, z)
             }
         };
@@ -1252,7 +1290,9 @@ pub fn cinematic_camera_system(
         let new_look_at = current_frame.look_at.lerp(next_frame.look_at, smooth_t);
 
         // Interpolate zoom/height
-        let target_zoom = current_frame.target_zoom.lerp(next_frame.target_zoom, smooth_t);
+        let target_zoom = current_frame
+            .target_zoom
+            .lerp(next_frame.target_zoom, smooth_t);
 
         // Apply transform
         *transform = Transform::from_translation(new_position).looking_at(new_look_at, Vec3::Y);
@@ -1263,7 +1303,10 @@ pub fn cinematic_camera_system(
         if sequence.elapsed_in_frame >= current_frame.duration_secs && !sequence.is_fading {
             sequence.elapsed_in_frame = 0.0;
             sequence.current_frame = next_frame_idx;
-            info!("[CINEMATIC] Advanced to keyframe {}", sequence.current_frame);
+            info!(
+                "[CINEMATIC] Advanced to keyframe {}",
+                sequence.current_frame
+            );
         }
     }
 }

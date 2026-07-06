@@ -4,8 +4,8 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
-use tokio::sync::{mpsc, oneshot};
 use std::time::Instant;
+use tokio::sync::{mpsc, oneshot};
 
 // Tournament status from backend
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -61,7 +61,9 @@ pub struct TournamentClientState {
     /// Oneshot receiver for an in-flight `register_player` transaction.
     pub tx_rx: Option<oneshot::Receiver<Result<usize, String>>>,
     /// Channel for receiving background tournament list polls.
-    pub list_rx: Option<crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentSummary>>>,
+    pub list_rx: Option<
+        crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentSummary>>,
+    >,
     pub last_list_poll: Option<Instant>,
     pub bracket_fired_rx: Option<crossbeam_channel::Receiver<BracketFiredEvent>>,
     pub bracket_ready: bool,
@@ -73,6 +75,8 @@ pub struct TournamentClientState {
     pub waiting_for_next_match: bool,
     /// Result of the last completed match (e.g. "1-0", "0-1", "½-½").
     pub last_match_result: Option<String>,
+    /// Active on-chain game for the current assigned tournament match.
+    pub active_game_id: Option<u64>,
     /// Filter shown in the tournament browser (None = All).
     pub status_filter: Option<String>,
     /// Which tournament card is currently expanded to show details.
@@ -122,6 +126,7 @@ impl Default for TournamentClientState {
             last_poll_error: None,
             waiting_for_next_match: false,
             last_match_result: None,
+            active_game_id: None,
             status_filter: None,
             expanded_tournament_id: None,
             registered_players: Vec::new(),
@@ -147,7 +152,9 @@ impl TournamentClientState {
     /// Polls `/api/tournament/{id}/chat` (GET for history, POST to send).
     /// Uses a simple long-poll pattern so no ws dependency is needed.
     pub fn start_chat(&mut self, tournament_id: u64, player_name: String) {
-        if self.chat_rx.is_some() { return; }
+        if self.chat_rx.is_some() {
+            return;
+        }
         let (inbound_tx, inbound_rx) = crossbeam_channel::bounded::<(String, String)>(64);
         let (outbound_tx, outbound_rx) = crossbeam_channel::bounded::<(String, String)>(16);
         self.chat_rx = Some(inbound_rx);
@@ -160,14 +167,27 @@ impl TournamentClientState {
             let client = reqwest::blocking::Client::new();
             let mut last_id: u64 = 0;
             loop {
-                let url = format!("{}/api/tournament/{}/chat?after={}", base2, tournament_id, last_id);
+                let url = format!(
+                    "{}/api/tournament/{}/chat?after={}",
+                    base2, tournament_id, last_id
+                );
                 if let Ok(resp) = client.get(&url).send() {
                     if let Ok(msgs) = resp.json::<Vec<serde_json::Value>>() {
                         for msg in msgs {
                             let id = msg.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-                            let sender = msg.get("player").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-                            let text = msg.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            if id > last_id { last_id = id; }
+                            let sender = msg
+                                .get("player")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?")
+                                .to_string();
+                            let text = msg
+                                .get("text")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if id > last_id {
+                                last_id = id;
+                            }
                             let _ = itx.send((sender, text));
                         }
                     }
@@ -261,11 +281,14 @@ pub fn spawn_register_tournament(
 ) -> oneshot::Receiver<Result<usize, String>> {
     let (tx, rx) = oneshot::channel();
     let pk = wallet_pubkey.to_string();
-    let rpc_url = std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
-    bevy::tasks::IoTaskPool::get().spawn(async move {
-        let res = register_tournament(tournament_id, &pk, &rpc_url, password.as_deref()).await;
-        let _ = tx.send(res.map(|slot| slot as usize));
-    }).detach();
+    let rpc_url = std::env::var("SOLANA_RPC_URL")
+        .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            let res = register_tournament(tournament_id, &pk, &rpc_url, password.as_deref()).await;
+            let _ = tx.send(res.map(|slot| slot as usize));
+        })
+        .detach();
     rx
 }
 
@@ -276,118 +299,150 @@ pub fn spawn_swiss_subscription(
     standings_tx: mpsc::UnboundedSender<SwissStandingsUpdatedEvent>,
     bracket_fired_tx: crossbeam_channel::Sender<BracketFiredEvent>,
 ) {
-    bevy::tasks::IoTaskPool::get().spawn(async move {
-        use braid_iroh::BraidIrohNode;
-        use braid_iroh::DiscoveryConfig;
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            use braid_iroh::BraidIrohNode;
+            use braid_iroh::DiscoveryConfig;
 
-        let vps_url = std::env::var("VPS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+            let vps_url =
+                std::env::var("VPS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-        // Get Iroh node ID from VPS
-        let client = reqwest::Client::new();
-        let node_id_res = client
-            .get(format!("{}/iroh/node-id", vps_url))
-            .send()
-            .await;
+            // Get Iroh node ID from VPS
+            let client = reqwest::Client::new();
+            let node_id_res = client.get(format!("{}/iroh/node-id", vps_url)).send().await;
 
-        let _node_id = match node_id_res {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.text().await {
+            let _node_id = match node_id_res {
+                Ok(resp) if resp.status().is_success() => match resp.text().await {
                     Ok(text) => text,
                     Err(e) => {
                         error!("Failed to read Iroh node ID response: {}", e);
                         return;
                     }
+                },
+                Ok(resp) => {
+                    error!(
+                        "Failed to get Iroh node ID from VPS: HTTP {}",
+                        resp.status()
+                    );
+                    return;
                 }
-            }
-            Ok(resp) => {
-                error!("Failed to get Iroh node ID from VPS: HTTP {}", resp.status());
-                return;
-            }
-            Err(e) => {
-                error!("Failed to get Iroh node ID from VPS: {}", e);
-                return;
-            }
-        };
-
-        // Create Iroh node using BraidIrohConfig
-        use braid_iroh::BraidIrohConfig;
-        let node = match BraidIrohNode::spawn(BraidIrohConfig {
-            discovery: DiscoveryConfig::Real,
-            secret_key: None,
-            proxy_config: None,
-            data_dir: None,
-        }).await {
-            Ok(node) => node,
-            Err(e) => {
-                error!("Failed to spawn Iroh node: {}", e);
-                return;
-            }
-        };
-
-        // Subscribe to Swiss tournament topic
-        let topic = format!("/swiss/{}", tournament_id);
-        let mut rx = match node.subscribe(&topic, vec![]).await {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Failed to subscribe to Swiss topic {}: {}", topic, e);
-                return;
-            }
-        };
-
-        info!("[Swiss] Subscribed to topic {}", topic);
-
-        // Process incoming messages
-        use futures::StreamExt;
-        use iroh_gossip::api::Event as GossipEvent;
-
-        while let Some(Ok(event)) = rx.next().await {
-            let payload = match event {
-                GossipEvent::Received(message) => message.content,
-                _ => continue,
+                Err(e) => {
+                    error!("Failed to get Iroh node ID from VPS: {}", e);
+                    return;
+                }
             };
-            let Ok(text) = std::str::from_utf8(&payload) else { continue };
-            let Ok(swiss_msg) = serde_json::from_str::<braid_iroh::tournament::SwissMessage>(text) else { continue };
-            match swiss_msg {
-                braid_iroh::tournament::SwissMessage::RoundStarted { round, pairings, .. } => {
-                    let _ = round_tx.send(SwissRoundStartedEvent {
-                        tournament_id,
-                        round,
-                        pairings: pairings.iter().map(|p| (p.white.clone(), p.black.clone())).collect(),
-                    });
+
+            // Create Iroh node using BraidIrohConfig
+            use braid_iroh::BraidIrohConfig;
+            let node = match BraidIrohNode::spawn(BraidIrohConfig {
+                discovery: DiscoveryConfig::Real,
+                secret_key: None,
+                proxy_config: None,
+                data_dir: None,
+            })
+            .await
+            {
+                Ok(node) => node,
+                Err(e) => {
+                    error!("Failed to spawn Iroh node: {}", e);
+                    return;
                 }
-                braid_iroh::tournament::SwissMessage::ResultRecorded { round, board, result, .. } => {
-                    // `SwissMessage::ResultRecorded` carries only the match outcome;
-                    // white/black player identifiers are resolved from the pairing
-                    // stored alongside the round.
-                    let (white, black) = match &result {
-                        braid_iroh::tournament::MatchResult::Win { winner } => (winner.clone(), String::new()),
-                        braid_iroh::tournament::MatchResult::Draw => (String::new(), String::new()),
-                    };
-                    let _ = result_tx.send(SwissResultRecordedEvent {
-                        tournament_id,
+            };
+
+            // Subscribe to Swiss tournament topic
+            let topic = format!("/swiss/{}", tournament_id);
+            let mut rx = match node.subscribe(&topic, vec![]).await {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Failed to subscribe to Swiss topic {}: {}", topic, e);
+                    return;
+                }
+            };
+
+            info!("[Swiss] Subscribed to topic {}", topic);
+
+            // Process incoming messages
+            use futures::StreamExt;
+            use iroh_gossip::api::Event as GossipEvent;
+
+            while let Some(Ok(event)) = rx.next().await {
+                let payload = match event {
+                    GossipEvent::Received(message) => message.content,
+                    _ => continue,
+                };
+                let Ok(text) = std::str::from_utf8(&payload) else {
+                    continue;
+                };
+                let Ok(swiss_msg) =
+                    serde_json::from_str::<braid_iroh::tournament::SwissMessage>(text)
+                else {
+                    continue;
+                };
+                match swiss_msg {
+                    braid_iroh::tournament::SwissMessage::RoundStarted {
+                        round, pairings, ..
+                    } => {
+                        let _ = round_tx.send(SwissRoundStartedEvent {
+                            tournament_id,
+                            round,
+                            pairings: pairings
+                                .iter()
+                                .map(|p| (p.white.clone(), p.black.clone()))
+                                .collect(),
+                        });
+                    }
+                    braid_iroh::tournament::SwissMessage::ResultRecorded {
                         round,
                         board,
-                        white,
-                        black,
-                        result: result.to_string(),
-                    });
-                }
-                braid_iroh::tournament::SwissMessage::StandingsUpdated { standings, .. } => {
-                    let _ = standings_tx.send(SwissStandingsUpdatedEvent {
-                        tournament_id,
-                        standings: standings.iter().map(|s| (s.player_id.clone(), s.score, s.rank)).collect(),
-                    });
-                }
-                braid_iroh::tournament::SwissMessage::BracketFired { player_count, started_at, .. } => {
-                    let _ = bracket_fired_tx.send(BracketFiredEvent {
-                        tournament_id,
+                        result,
+                        ..
+                    } => {
+                        // `SwissMessage::ResultRecorded` carries only the match outcome;
+                        // white/black player identifiers are resolved from the pairing
+                        // stored alongside the round.
+                        let (white, black) = match &result {
+                            braid_iroh::tournament::MatchResult::Win { winner } => {
+                                (winner.clone(), String::new())
+                            }
+                            braid_iroh::tournament::MatchResult::Draw => {
+                                (String::new(), String::new())
+                            }
+                        };
+                        let _ = result_tx.send(SwissResultRecordedEvent {
+                            tournament_id,
+                            round,
+                            board,
+                            white,
+                            black,
+                            result: result.to_string(),
+                        });
+                    }
+                    braid_iroh::tournament::SwissMessage::StandingsUpdated {
+                        standings, ..
+                    } => {
+                        let _ = standings_tx.send(SwissStandingsUpdatedEvent {
+                            tournament_id,
+                            standings: standings
+                                .iter()
+                                .map(|s| (s.player_id.clone(), s.score, s.rank))
+                                .collect(),
+                        });
+                    }
+                    braid_iroh::tournament::SwissMessage::BracketFired {
                         player_count,
                         started_at,
-                    });
+                        ..
+                    } => {
+                        let _ = bracket_fired_tx.send(BracketFiredEvent {
+                            tournament_id,
+                            player_count,
+                            started_at,
+                        });
+                    }
                 }
             }
-        }
-    }).detach();
+        })
+        .detach();
 }
 
 fn poll_tournament_tasks(
@@ -450,7 +505,8 @@ fn poll_tournament_list(
         return;
     }
 
-    let should_poll = tournament.last_list_poll
+    let should_poll = tournament
+        .last_list_poll
         .map(|t| t.elapsed().as_secs_f64() >= poll_interval_secs)
         .unwrap_or(true);
 
@@ -462,18 +518,24 @@ fn poll_tournament_list(
     let (tx, rx) = crossbeam_channel::bounded(1);
     tournament.list_rx = Some(rx);
 
-    bevy::tasks::IoTaskPool::get().spawn(async move {
-        match crate::multiplayer::network::vps::list_tournaments() {
-            Ok(list) => { let _ = tx.send(list); }
-            Err(e) => { warn!("[TOURNAMENT] list_tournaments failed: {}", e); }
-        }
-    }).detach();
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            match crate::multiplayer::network::vps::list_tournaments() {
+                Ok(list) => {
+                    let _ = tx.send(list);
+                }
+                Err(e) => {
+                    warn!("[TOURNAMENT] list_tournaments failed: {}", e);
+                }
+            }
+        })
+        .detach();
 }
 
-fn poll_bracket_fired(
-    mut tournament: ResMut<TournamentClientState>,
-) {
-    let Some(ref rx) = tournament.bracket_fired_rx else { return };
+fn poll_bracket_fired(mut tournament: ResMut<TournamentClientState>) {
+    let Some(ref rx) = tournament.bracket_fired_rx else {
+        return;
+    };
     if let Ok(event) = rx.try_recv() {
         info!(
             "[TOURNAMENT] BracketFired received: tournament {} — {} players",
@@ -494,7 +556,14 @@ impl Plugin for TournamentClientPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TournamentClientState>()
             .add_message::<TournamentMatchAssignedEvent>()
-            .add_systems(Update, (poll_tournament_tasks, poll_tournament_list, poll_bracket_fired))
+            .add_systems(
+                Update,
+                (
+                    poll_tournament_tasks,
+                    poll_tournament_list,
+                    poll_bracket_fired,
+                ),
+            )
             .add_systems(Update, handle_tournament_match_assigned);
     }
 }
@@ -504,8 +573,21 @@ impl Plugin for TournamentClientPlugin {
 fn handle_tournament_match_assigned(
     mut events: MessageReader<TournamentMatchAssignedEvent>,
     mut tournament: ResMut<TournamentClientState>,
-    #[cfg(feature = "solana")]
-    solana_state: Option<Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>>,
+    solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
+    network_state: Res<crate::multiplayer::types::OnlineNetworkState>,
+    network_config: Res<crate::multiplayer::types::NetworkConfig>,
+    mut online_session: ResMut<crate::multiplayer::network::online_game_session::OnlineGameSession>,
+    mut p2p_state: ResMut<crate::multiplayer::network::p2p::P2PConnectionState>,
+    mut connect_events: MessageWriter<crate::multiplayer::network::p2p::ConnectToPeerEvent>,
+    mut core_mode: ResMut<crate::core::GameMode>,
+    mut ai_config: ResMut<crate::game::ai::ChessAIResource>,
+    mut next_game_state: ResMut<NextState<crate::core::GameState>>,
+    mut game_started: MessageWriter<crate::game::events::GameStartedEvent>,
+    mut solana_sync: ResMut<crate::multiplayer::solana::addon::SolanaGameSync>,
+    mut competitive: ResMut<crate::multiplayer::solana::addon::CompetitiveMatchState>,
+    mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
 ) {
     for ev in events.read() {
         let game_id = match ev.game_id {
@@ -516,36 +598,118 @@ fn handle_tournament_match_assigned(
             }
         };
 
-        #[cfg(feature = "solana")]
-        let wallet_str = solana_state.as_ref()
+        if tournament.active_game_id == Some(game_id) {
+            continue;
+        }
+
+        let wallet_str = solana_state
+            .as_ref()
             .and_then(|s| s.wallet_pubkey)
             .map(|pk| pk.to_string())
             .unwrap_or_default();
 
-        #[cfg(not(feature = "solana"))]
-        let wallet_str = String::new();
-
         if wallet_str.is_empty() {
-            warn!("[TOURNAMENT] No wallet for tournament {} game {} session setup", ev.tournament_id, game_id);
+            warn!(
+                "[TOURNAMENT] No wallet for tournament {} game {} session setup",
+                ev.tournament_id, game_id
+            );
             continue;
         }
 
         let tournament_id = ev.tournament_id;
         let is_white = ev.your_color == "white";
         let wallet = wallet_str.clone();
+        let game_id_str = game_id.to_string();
+        let local_node_id = network_state
+            .node_id
+            .as_ref()
+            .map(|id| bs58::encode(id.as_bytes()).into_string());
+        let opponent_node_id = ev.opponent_node_id.clone();
+
+        if let Some(ref peer_node_id) = opponent_node_id {
+            connect_events.write(crate::multiplayer::network::p2p::ConnectToPeerEvent {
+                peer_node_id: peer_node_id.clone(),
+            });
+        }
+
+        if let Some(ref node_id) = local_node_id {
+            announce_or_join_tournament_relay(
+                game_id_str.clone(),
+                node_id.clone(),
+                wallet_str.clone(),
+                is_white,
+            );
+        } else {
+            warn!(
+                "[TOURNAMENT] Local online node id not ready for relay setup on game {}",
+                game_id
+            );
+        }
+
+        crate::multiplayer::network::online_game_session::start_session(
+            &mut online_session,
+            network_config.vps_base_url.clone(),
+            game_id_str,
+            0.0,
+            &network_state,
+        );
+
+        p2p_state.local_node_id = network_state.node_id;
+        p2p_state.peer_node_id = opponent_node_id;
+        p2p_state.game_id = Some(game_id);
+        p2p_state.is_host = is_white;
+        p2p_state.player_color = Some(if is_white {
+            crate::rendering::pieces::PieceColor::White
+        } else {
+            crate::rendering::pieces::PieceColor::Black
+        });
+        p2p_state.status = crate::multiplayer::network::p2p::P2PConnectionStatus::InGame;
+
+        *core_mode = crate::core::GameMode::OnlineMultiplayer;
+        ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+        solana_sync.game_id = Some(game_id);
+        solana_sync.wager_amount = 0;
+        competitive.game_id = Some(game_id);
+        competitive.wager_lamports = 0;
+        competitive.active = true;
+        rollup_manager.game_id = game_id;
+        rollup_manager.is_creator = is_white;
+        crate::multiplayer::network::game_id_store::set(game_id);
+
+        game_started.write(crate::game::events::GameStartedEvent { game_id });
+        next_game_state.set(crate::core::GameState::InGame);
+        tournament.active_game_id = Some(game_id);
+        tournament.waiting_for_next_match = false;
 
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
                 use crate::multiplayer::vps_client;
                 if is_white {
-                    match vps_client::tournament_session_create_game(tournament_id, game_id, &wallet) {
-                        Ok(session_pk) => info!("[TOURNAMENT] Session created for game {} → {}", game_id, session_pk),
-                        Err(e) => error!("[TOURNAMENT] session-create-game failed for game {}: {e}", game_id),
+                    match vps_client::tournament_session_create_game(
+                        tournament_id,
+                        game_id,
+                        &wallet,
+                    ) {
+                        Ok(session_pk) => info!(
+                            "[TOURNAMENT] Session created for game {} → {}",
+                            game_id, session_pk
+                        ),
+                        Err(e) => error!(
+                            "[TOURNAMENT] session-create-game failed for game {}: {e}",
+                            game_id
+                        ),
                     }
                 } else {
-                    match vps_client::tournament_session_join_game(tournament_id, game_id, &wallet) {
-                        Ok(session_pk) => info!("[TOURNAMENT] Session joined for game {} → {}", game_id, session_pk),
-                        Err(e) => error!("[TOURNAMENT] session-join-game failed for game {}: {e}", game_id),
+                    match vps_client::tournament_session_join_game(tournament_id, game_id, &wallet)
+                    {
+                        Ok(session_pk) => info!(
+                            "[TOURNAMENT] Session joined for game {} → {}",
+                            game_id, session_pk
+                        ),
+                        Err(e) => error!(
+                            "[TOURNAMENT] session-join-game failed for game {}: {e}",
+                            game_id
+                        ),
                     }
                 }
             })
@@ -556,6 +720,63 @@ fn handle_tournament_match_assigned(
             game_id
         );
     }
+}
+
+fn announce_or_join_tournament_relay(
+    game_id: String,
+    local_node_id: String,
+    wallet: String,
+    is_white: bool,
+) {
+    std::thread::spawn(move || {
+        use crate::multiplayer::vps_client;
+        if is_white {
+            match vps_client::p2p_announce_game(
+                game_id.clone(),
+                &local_node_id,
+                &format!("Tournament {}", &wallet[..wallet.len().min(8)]),
+                0.0,
+                "tournament_match",
+                0,
+                0,
+                Some(wallet),
+                None,
+                None,
+            ) {
+                Ok(()) => info!("[TOURNAMENT] Relay announced game {}", game_id),
+                Err(e) => warn!(
+                    "[TOURNAMENT] Relay announce failed for game {}: {}",
+                    game_id, e
+                ),
+            }
+        } else {
+            for attempt in 1..=15 {
+                match vps_client::p2p_join_game(game_id.clone(), &local_node_id) {
+                    Ok(Some(host_id)) => {
+                        info!(
+                            "[TOURNAMENT] Relay joined game {} via host {}",
+                            game_id, host_id
+                        );
+                        return;
+                    }
+                    Ok(None) => {
+                        info!("[TOURNAMENT] Relay joined game {}", game_id);
+                        return;
+                    }
+                    Err(e) => {
+                        if attempt == 15 {
+                            warn!(
+                                "[TOURNAMENT] Relay join failed for game {} after retries: {}",
+                                game_id, e
+                            );
+                        } else {
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
 
 async fn register_tournament(

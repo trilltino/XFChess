@@ -120,9 +120,7 @@ impl FromWorld for SquareMaterials {
                 unlit: true,
                 ..default()
             }),
-            hint_mesh: world
-                .resource_mut::<Assets<Mesh>>()
-                .add(Circle::new(0.28)),
+            hint_mesh: world.resource_mut::<Assets<Mesh>>().add(Circle::new(0.28)),
             capture_hint_mesh: world
                 .resource_mut::<Assets<Mesh>>()
                 .add(Annulus::new(0.38, 0.48)),

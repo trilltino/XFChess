@@ -40,7 +40,10 @@ impl PatchedDoc {
     pub fn new(initial: Value) -> Self {
         let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
-            inner: Arc::new(RwLock::new(PatchedDocInner { doc: initial, version: 0 })),
+            inner: Arc::new(RwLock::new(PatchedDocInner {
+                doc: initial,
+                version: 0,
+            })),
             tx,
         }
     }
@@ -108,7 +111,10 @@ impl AppendLog {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
-            inner: Arc::new(RwLock::new(AppendLogInner { entries: Vec::new(), version: 0 })),
+            inner: Arc::new(RwLock::new(AppendLogInner {
+                entries: Vec::new(),
+                version: 0,
+            })),
             tx,
         }
     }

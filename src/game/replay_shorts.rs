@@ -100,18 +100,18 @@ fn s2b(pos: egui::Pos2, board_min: egui::Pos2, sq: f32) -> Option<(u8, u8)> {
 
 fn piece_sym(piece_type: PieceType, color: PieceColor) -> &'static str {
     match (piece_type, color) {
-        (PieceType::King,   PieceColor::White) => "♔",
-        (PieceType::Queen,  PieceColor::White) => "♕",
-        (PieceType::Rook,   PieceColor::White) => "♖",
+        (PieceType::King, PieceColor::White) => "♔",
+        (PieceType::Queen, PieceColor::White) => "♕",
+        (PieceType::Rook, PieceColor::White) => "♖",
         (PieceType::Bishop, PieceColor::White) => "♗",
         (PieceType::Knight, PieceColor::White) => "♘",
-        (PieceType::Pawn,   PieceColor::White) => "♙",
-        (PieceType::King,   PieceColor::Black) => "♚",
-        (PieceType::Queen,  PieceColor::Black) => "♛",
-        (PieceType::Rook,   PieceColor::Black) => "♜",
+        (PieceType::Pawn, PieceColor::White) => "♙",
+        (PieceType::King, PieceColor::Black) => "♚",
+        (PieceType::Queen, PieceColor::Black) => "♛",
+        (PieceType::Rook, PieceColor::Black) => "♜",
         (PieceType::Bishop, PieceColor::Black) => "♝",
         (PieceType::Knight, PieceColor::Black) => "♞",
-        (PieceType::Pawn,   PieceColor::Black) => "♟",
+        (PieceType::Pawn, PieceColor::Black) => "♟",
         _ => "?",
     }
 }
@@ -170,10 +170,13 @@ pub fn replay_2d_annotation_system(
                     egui::Sense::click_and_drag(),
                 );
 
-                let kind: u8 =
-                    if keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) { 1 }
-                    else if keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) { 2 }
-                    else { 0 };
+                let kind: u8 = if keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+                    1
+                } else if keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
+                    2
+                } else {
+                    0
+                };
 
                 // Right-click drag → draw arrow; click on same square → highlight toggle
                 if board_resp.drag_started_by(egui::PointerButton::Secondary) {
@@ -188,7 +191,10 @@ pub fn replay_2d_annotation_system(
                                 if to != from {
                                     annotations.arrows.push((from.0, from.1, to.0, to.1, kind));
                                 } else {
-                                    let idx = annotations.highlights.iter().position(|&(f, r, _)| f == from.0 && r == from.1);
+                                    let idx = annotations
+                                        .highlights
+                                        .iter()
+                                        .position(|&(f, r, _)| f == from.0 && r == from.1);
                                     if let Some(i) = idx {
                                         annotations.highlights.remove(i);
                                     } else {
@@ -213,13 +219,17 @@ pub fn replay_2d_annotation_system(
                 for rank in 0..8u8 {
                     for file in 0..8u8 {
                         let off = b2s(file, rank, sq);
-                        let rect = egui::Rect::from_min_size(board_rect.min + off, egui::Vec2::splat(sq));
+                        let rect =
+                            egui::Rect::from_min_size(board_rect.min + off, egui::Vec2::splat(sq));
                         let light = (file + rank) % 2 == 1;
                         painter.rect_filled(
                             rect,
                             0.0,
-                            if light { egui::Color32::from_rgb(240, 217, 181) }
-                            else     { egui::Color32::from_rgb(181, 136, 99) },
+                            if light {
+                                egui::Color32::from_rgb(240, 217, 181)
+                            } else {
+                                egui::Color32::from_rgb(181, 136, 99)
+                            },
                         );
                     }
                 }
@@ -235,7 +245,8 @@ pub fn replay_2d_annotation_system(
                 // ── Square highlights ──
                 for &(hf, hr, hk) in &annotations.highlights {
                     let off = b2s(hf, hr, sq);
-                    let rect = egui::Rect::from_min_size(board_rect.min + off, egui::Vec2::splat(sq));
+                    let rect =
+                        egui::Rect::from_min_size(board_rect.min + off, egui::Vec2::splat(sq));
                     painter.rect_filled(rect, 0.0, kind_highlight_egui(hk));
                 }
 
@@ -247,10 +258,22 @@ pub fn replay_2d_annotation_system(
                     let fs = egui::FontId::proportional((sq * 0.18).max(9.0));
                     // File label along bottom edge
                     let fx = board_rect.min.x + b2s(i, 0, sq).x + sq * 0.5;
-                    painter.text(egui::Pos2::new(fx, board_rect.max.y - 9.0), egui::Align2::CENTER_BOTTOM, file_char.to_string(), fs.clone(), label_col);
+                    painter.text(
+                        egui::Pos2::new(fx, board_rect.max.y - 9.0),
+                        egui::Align2::CENTER_BOTTOM,
+                        file_char.to_string(),
+                        fs.clone(),
+                        label_col,
+                    );
                     // Rank label along left edge
                     let ry = board_rect.min.y + b2s(0, i, sq).y + sq * 0.5;
-                    painter.text(egui::Pos2::new(board_rect.min.x + 2.0, ry), egui::Align2::LEFT_CENTER, rank_char.to_string(), fs.clone(), label_col);
+                    painter.text(
+                        egui::Pos2::new(board_rect.min.x + 2.0, ry),
+                        egui::Align2::LEFT_CENTER,
+                        rank_char.to_string(),
+                        fs.clone(),
+                        label_col,
+                    );
                 }
 
                 // ── Pieces ──
@@ -265,24 +288,46 @@ pub fn replay_2d_annotation_system(
                     } else {
                         egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)
                     };
-                    painter.text(center + egui::Vec2::new(1.5, 2.0), egui::Align2::CENTER_CENTER, sym, egui::FontId::proportional(font_size), shadow);
-                    let col = if piece.color == PieceColor::White { egui::Color32::WHITE } else { egui::Color32::from_rgb(18, 18, 18) };
-                    painter.text(center, egui::Align2::CENTER_CENTER, sym, egui::FontId::proportional(font_size), col);
+                    painter.text(
+                        center + egui::Vec2::new(1.5, 2.0),
+                        egui::Align2::CENTER_CENTER,
+                        sym,
+                        egui::FontId::proportional(font_size),
+                        shadow,
+                    );
+                    let col = if piece.color == PieceColor::White {
+                        egui::Color32::WHITE
+                    } else {
+                        egui::Color32::from_rgb(18, 18, 18)
+                    };
+                    painter.text(
+                        center,
+                        egui::Align2::CENTER_CENTER,
+                        sym,
+                        egui::FontId::proportional(font_size),
+                        col,
+                    );
                 }
 
                 // ── Stored arrows ──
                 for &(ff, fr, tf, tr, ak) in &annotations.arrows {
                     let fc = board_rect.min + b2s(ff, fr, sq) + egui::Vec2::splat(sq * 0.5);
                     let tc = board_rect.min + b2s(tf, tr, sq) + egui::Vec2::splat(sq * 0.5);
-                    painter.arrow(fc, tc - fc, egui::Stroke::new(sq * 0.12, kind_color_egui(ak)));
+                    painter.arrow(
+                        fc,
+                        tc - fc,
+                        egui::Stroke::new(sq * 0.12, kind_color_egui(ak)),
+                    );
                 }
 
                 // ── In-progress drag arrow ──
                 if let Some(from) = annotations.drag_from {
                     if let Some(cursor) = board_resp.interact_pointer_pos() {
-                        let fc = board_rect.min + b2s(from.0, from.1, sq) + egui::Vec2::splat(sq * 0.5);
+                        let fc =
+                            board_rect.min + b2s(from.0, from.1, sq) + egui::Vec2::splat(sq * 0.5);
                         let c = kind_color_egui(kind);
-                        let preview_col = egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 120);
+                        let preview_col =
+                            egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 120);
                         painter.arrow(fc, cursor - fc, egui::Stroke::new(sq * 0.10, preview_col));
                     }
                 }
@@ -293,7 +338,11 @@ pub fn replay_2d_annotation_system(
                         board_rect.center() - egui::Vec2::new(120.0, 30.0),
                         egui::Vec2::new(240.0, 60.0),
                     );
-                    painter.rect_filled(overlay_rect, 8.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180));
+                    painter.rect_filled(
+                        overlay_rect,
+                        8.0,
+                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+                    );
                     painter.text(
                         overlay_rect.center(),
                         egui::Align2::CENTER_CENTER,
@@ -376,9 +425,11 @@ pub fn replay_3d_annotations_system(
     // ── Arrows: cylinder shaft + cone head ──
     for &(ff, fr, tf, tr, ak) in &annotations.arrows {
         let from_pos = sq_center_3d(ff, fr);
-        let to_pos   = sq_center_3d(tf, tr);
+        let to_pos = sq_center_3d(tf, tr);
         let len = from_pos.distance(to_pos);
-        if len < 0.1 { continue; }
+        if len < 0.1 {
+            continue;
+        }
 
         let dir = (to_pos - from_pos).normalize();
         let col = kind_color_3d(ak);
@@ -436,8 +487,12 @@ pub fn replay_screenshot_system(
     mut commands: Commands,
 ) {
     let mut fired = false;
-    for _ in events.read() { fired = true; }
-    if !fired { return; }
+    for _ in events.read() {
+        fired = true;
+    }
+    if !fired {
+        return;
+    }
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -497,9 +552,12 @@ pub struct QualityBadgeState {
     pub alpha: f32,
 }
 
-#[derive(Message, Default)] pub struct BlunderFlash;
-#[derive(Message, Default)] pub struct BrilliantGlow;
-#[derive(Message, Default)] pub struct CheckmateFlash;
+#[derive(Message, Default)]
+pub struct BlunderFlash;
+#[derive(Message, Default)]
+pub struct BrilliantGlow;
+#[derive(Message, Default)]
+pub struct CheckmateFlash;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // System: load PGN annotations per-ply and fire cinematic events
@@ -519,7 +577,9 @@ pub fn load_pgn_annotations_system(
     let Some(pgn) = pgn else { return };
     let ply = replay.engine_ply;
 
-    if ply == replay.last_annotation_ply { return; }
+    if ply == replay.last_annotation_ply {
+        return;
+    }
     replay.last_annotation_ply = ply;
 
     // Clear existing annotations before loading new ones
@@ -549,18 +609,31 @@ pub fn load_pgn_annotations_system(
 
     // Cinematic effects
     let (slow, timer) = match quality {
-        MoveQuality::Brilliant => { brilliant_ev.write(BrilliantGlow); (0.35, 2.0) }
-        MoveQuality::Good      => (0.7, 1.0),
-        MoveQuality::Blunder   => { blunder_ev.write(BlunderFlash);   (0.45, 2.0) }
-        MoveQuality::Mistake   => { blunder_ev.write(BlunderFlash);   (0.6, 1.5) }
-        _                      => (1.0, 0.0),
+        MoveQuality::Brilliant => {
+            brilliant_ev.write(BrilliantGlow);
+            (0.35, 2.0)
+        }
+        MoveQuality::Good => (0.7, 1.0),
+        MoveQuality::Blunder => {
+            blunder_ev.write(BlunderFlash);
+            (0.45, 2.0)
+        }
+        MoveQuality::Mistake => {
+            blunder_ev.write(BlunderFlash);
+            (0.6, 1.5)
+        }
+        _ => (1.0, 0.0),
     };
     replay.slow_factor = slow;
     replay.cinematic_timer = timer;
 
     // Checkmate flash (detected via game state)
-    use nimzovich_engine::{get_game_state, STATE_CHECKMATE, COLOR_WHITE, COLOR_BLACK};
-    let color = if replay.engine.move_counter % 2 == 0 { COLOR_WHITE } else { COLOR_BLACK };
+    use nimzovich_engine::{get_game_state, COLOR_BLACK, COLOR_WHITE, STATE_CHECKMATE};
+    let color = if replay.engine.move_counter % 2 == 0 {
+        COLOR_WHITE
+    } else {
+        COLOR_BLACK
+    };
     let state = get_game_state(&mut replay.engine, color);
     if state == STATE_CHECKMATE {
         checkmate_ev.write(CheckmateFlash);
@@ -644,8 +717,12 @@ pub fn cinematic_effect_system(
     effect: Res<CinematicEffect>,
     game_mode: Res<GameMode>,
 ) {
-    if *game_mode != GameMode::PgnReplay { return; }
-    if effect.flash_alpha < 0.01 { return; }
+    if *game_mode != GameMode::PgnReplay {
+        return;
+    }
+    if effect.flash_alpha < 0.01 {
+        return;
+    }
 
     let ctx = match contexts.ctx_mut() {
         Ok(c) => c,
@@ -665,7 +742,10 @@ pub fn cinematic_effect_system(
                 screen,
                 0.0,
                 egui::Color32::from_rgba_unmultiplied(
-                    (r * 255.0) as u8, (g * 255.0) as u8, b as u8, a,
+                    (r * 255.0) as u8,
+                    (g * 255.0) as u8,
+                    b as u8,
+                    a,
                 ),
             );
         });
@@ -681,18 +761,22 @@ pub fn quality_badge_system(
     badge: Res<QualityBadgeState>,
     game_mode: Res<GameMode>,
 ) {
-    if *game_mode != GameMode::PgnReplay { return; }
-    if badge.alpha < 0.01 { return; }
+    if *game_mode != GameMode::PgnReplay {
+        return;
+    }
+    if badge.alpha < 0.01 {
+        return;
+    }
 
     use nimzovich_engine::MoveQuality;
     let (symbol, color_rgb) = match badge.quality {
-        MoveQuality::Brilliant   => ("!!", [255u8, 200, 30]),
-        MoveQuality::Good        => ("!",  [100, 220, 100]),
+        MoveQuality::Brilliant => ("!!", [255u8, 200, 30]),
+        MoveQuality::Good => ("!", [100, 220, 100]),
         MoveQuality::Interesting => ("!?", [180, 100, 220]),
-        MoveQuality::Dubious     => ("?!", [220, 140, 20]),
-        MoveQuality::Mistake     => ("?",  [220, 120, 30]),
-        MoveQuality::Blunder     => ("??", [220, 40, 40]),
-        MoveQuality::Normal      => return,
+        MoveQuality::Dubious => ("?!", [220, 140, 20]),
+        MoveQuality::Mistake => ("?", [220, 120, 30]),
+        MoveQuality::Blunder => ("??", [220, 40, 40]),
+        MoveQuality::Normal => return,
     };
 
     let ctx = match contexts.ctx_mut() {
@@ -711,10 +795,8 @@ pub fn quality_badge_system(
             let screen = ctx.screen_rect();
             let cx = screen.center().x;
             let cy = screen.center().y - 60.0;
-            let bg_rect = egui::Rect::from_center_size(
-                egui::Pos2::new(cx, cy),
-                egui::Vec2::new(100.0, 56.0),
-            );
+            let bg_rect =
+                egui::Rect::from_center_size(egui::Pos2::new(cx, cy), egui::Vec2::new(100.0, 56.0));
             let painter = ui.painter_at(screen);
             painter.rect_filled(
                 bg_rect,
@@ -743,7 +825,9 @@ pub fn hook_text_system(
     game_mode: Res<GameMode>,
     time: Res<Time>,
 ) {
-    if *game_mode != GameMode::PgnReplay { return; }
+    if *game_mode != GameMode::PgnReplay {
+        return;
+    }
 
     // Tick hook text alpha (fade in over 0.3s when a hook text is present)
     let has_hook = shorts.hook_texts.contains_key(&replay.engine_ply);
@@ -752,7 +836,9 @@ pub fn hook_text_system(
     } else {
         shorts.hook_text_alpha = (shorts.hook_text_alpha - time.delta_secs() / 0.2).max(0.0);
     }
-    if shorts.hook_text_alpha < 0.01 { return; }
+    if shorts.hook_text_alpha < 0.01 {
+        return;
+    }
 
     let hook = match shorts.hook_texts.get(&replay.engine_ply) {
         Some(h) => h.clone(),
@@ -845,11 +931,15 @@ pub fn capture_sequence_system(
     mut screenshot_writer: MessageWriter<ScreenshotRequested>,
     pgn: Option<Res<ParsedPgnGameResource>>,
 ) {
-    let Some(seq) = shorts.capture_mode.as_mut() else { return };
+    let Some(seq) = shorts.capture_mode.as_mut() else {
+        return;
+    };
     let Some(_pgn) = pgn else { return };
 
     seq.timer += time.delta_secs();
-    if seq.timer < seq.delay_secs { return; }
+    if seq.timer < seq.delay_secs {
+        return;
+    }
     seq.timer = 0.0;
 
     // Fire screenshot
@@ -858,7 +948,10 @@ pub fn capture_sequence_system(
     // Advance ply
     seq.current += 1;
     if seq.current > seq.to_ply {
-        info!("[SHORTS] Capture sequence complete — {} frames", seq.to_ply - seq.from_ply + 1);
+        info!(
+            "[SHORTS] Capture sequence complete — {} frames",
+            seq.to_ply - seq.from_ply + 1
+        );
         shorts.capture_mode = None;
         return;
     }

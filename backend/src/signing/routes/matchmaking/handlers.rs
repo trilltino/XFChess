@@ -66,11 +66,12 @@ pub async fn join(
     }
 
     // Fetch ELO from on-chain profile via cache
-    let cached_elo = state
-        .elo_cache
-        .get_elo(&req.pubkey)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch ELO: {}", e)))?;
+    let cached_elo = state.elo_cache.get_elo(&req.pubkey).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to fetch ELO: {}", e),
+        )
+    })?;
 
     // Determine effective ELO for matchmaking.
     // If the player was seeded from external and has a linked Lichess account,
@@ -78,7 +79,10 @@ pub async fn join(
     // whose on-chain profile may not have synced yet, fall back to the backend DB.
     let mut effective_elo = cached_elo.elo_rating;
     if cached_elo.seeded_from_external {
-        info!("[Matchmaking] Player {} using externally-seeded ELO {}", req.pubkey, cached_elo.elo_rating);
+        info!(
+            "[Matchmaking] Player {} using externally-seeded ELO {}",
+            req.pubkey, cached_elo.elo_rating
+        );
     } else if effective_elo == 120000.0 {
         // Still at default — check backend DB for a pending link
         let pool = app_state.store.pool();
@@ -103,7 +107,10 @@ pub async fn join(
         joined_at: now,
     };
 
-    let mut queue = state.queue.lock().expect("Mutex lock should not be poisoned");
+    let mut queue = state
+        .queue
+        .lock()
+        .expect("Mutex lock should not be poisoned");
     // Remove if already in queue to prevent duplicates
     queue.retain(|t| t.pubkey != req.pubkey);
     queue.push(ticket);
@@ -122,9 +129,15 @@ pub async fn status(
     Path(pubkey): Path<String>,
 ) -> Result<Json<Option<MatchResult>>, (StatusCode, String)> {
     let state = &app_state.matchmaking;
-    let mut matches = state.matches.lock().expect("Mutex lock should not be poisoned");
+    let mut matches = state
+        .matches
+        .lock()
+        .expect("Mutex lock should not be poisoned");
     if let Some(res) = matches.remove(&pubkey) {
-        info!("[Matchmaking] Player {} retrieved match {}", pubkey, res.game_id);
+        info!(
+            "[Matchmaking] Player {} retrieved match {}",
+            pubkey, res.game_id
+        );
         Ok(Json(Some(res)))
     } else {
         Ok(Json(None))
@@ -146,7 +159,10 @@ pub async fn leave(
         return Err((StatusCode::UNAUTHORIZED, "Invalid Signature".to_string()));
     }
 
-    let mut queue = state.queue.lock().expect("Mutex lock should not be poisoned");
+    let mut queue = state
+        .queue
+        .lock()
+        .expect("Mutex lock should not be poisoned");
     queue.retain(|t| t.pubkey != req.pubkey);
 
     info!("[Matchmaking] Player {} left queue", req.pubkey);

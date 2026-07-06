@@ -144,7 +144,10 @@ See [OBSERVABILITY.md](docs/OBSERVABILITY.md) for full documentation.
 
 ### Solana Development
 
-The Solana program uses **ephemeral-rollups-sdk v0.8.5** for sub-second latency:
+The Solana program uses MagicBlock Ephemeral Rollups for sub-second latency.
+Current pinned stack: **Anchor 0.31.1**, **Solana 2.2.1**, and
+**ephemeral-rollups-sdk 0.13.0**. SDK 0.15.x is a separate Anchor 1.0 /
+Solana 3.x upgrade, not part of the lifecycle cleanup.
 
 ```bash
 # Build program
@@ -227,4 +230,3 @@ XFChess is a modern 3D chess game combining traditional gameplay with blockchain
 ---
 
 **[XFChess](https://github.com/trilltino/XFChess)** - The forever free, open source 3D chess game
-

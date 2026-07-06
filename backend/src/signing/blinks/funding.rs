@@ -65,7 +65,8 @@ pub fn generate_funding_url(
 
 /// Validates that a funding URL is properly formatted.
 pub fn validate_funding_url(url: &str) -> bool {
-    url.starts_with("https://") && (url.contains("moonpay.com") || url.contains("transak.com") || url.contains("banxa.com"))
+    url.starts_with("https://")
+        && (url.contains("moonpay.com") || url.contains("transak.com") || url.contains("banxa.com"))
 }
 
 #[cfg(test)]
@@ -74,8 +75,14 @@ mod tests {
 
     #[test]
     fn test_generate_moonpay_url() {
-        let url = generate_funding_url("test_wallet", 0.5, "USD", FundingProvider::MoonPay, "test_key")
-            .unwrap();
+        let url = generate_funding_url(
+            "test_wallet",
+            0.5,
+            "USD",
+            FundingProvider::MoonPay,
+            "test_key",
+        )
+        .unwrap();
         assert!(url.contains("moonpay.com"));
         assert!(url.contains("walletAddress=test_wallet"));
         assert!(url.contains("amount=0.5"));
@@ -83,16 +90,28 @@ mod tests {
 
     #[test]
     fn test_generate_transak_url() {
-        let url = generate_funding_url("test_wallet", 0.5, "USD", FundingProvider::Transak, "test_key")
-            .unwrap();
+        let url = generate_funding_url(
+            "test_wallet",
+            0.5,
+            "USD",
+            FundingProvider::Transak,
+            "test_key",
+        )
+        .unwrap();
         assert!(url.contains("transak.com"));
         assert!(url.contains("walletAddress=test_wallet"));
     }
 
     #[test]
     fn test_generate_banxa_url() {
-        let url = generate_funding_url("test_wallet", 0.5, "USD", FundingProvider::Banxa, "test_key")
-            .unwrap();
+        let url = generate_funding_url(
+            "test_wallet",
+            0.5,
+            "USD",
+            FundingProvider::Banxa,
+            "test_key",
+        )
+        .unwrap();
         assert!(url.contains("banxa.com"));
         assert!(url.contains("wallet=test_wallet"));
     }

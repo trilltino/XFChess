@@ -21,8 +21,7 @@ use thiserror::Error;
 #[cfg(feature = "solana")]
 use ephemeral_rollups_sdk::pda::{
     delegate_buffer_pda_from_delegated_account_and_owner_program,
-    delegation_metadata_pda_from_delegated_account,
-    delegation_record_pda_from_delegated_account,
+    delegation_metadata_pda_from_delegated_account, delegation_record_pda_from_delegated_account,
 };
 
 /// The XFChess program ID on Solana
@@ -292,7 +291,7 @@ impl MagicBlockResolver {
             &signature,
             &recent_blockhash,
             commitment,
-            60, // 60 attempts
+            60,                                    // 60 attempts
             std::time::Duration::from_millis(500), // 500ms between polls
         );
 
@@ -302,7 +301,10 @@ impl MagicBlockResolver {
             }
             Ok(false) => {
                 // Check if transaction actually landed despite confirmation timeout
-                warn!("Confirmation polling timed out for {}, checking if landed...", signature);
+                warn!(
+                    "Confirmation polling timed out for {}, checking if landed...",
+                    signature
+                );
                 match Self::check_signature_landed(rpc_client, &signature) {
                     Ok(true) => {
                         info!("Delegation transaction landed on-chain: {}", signature);
@@ -310,13 +312,13 @@ impl MagicBlockResolver {
                     Ok(false) => {
                         return Err(Box::new(std::io::Error::new(
                             std::io::ErrorKind::Other,
-                            "Transaction did not land on-chain"
+                            "Transaction did not land on-chain",
                         )));
                     }
                     Err(e) => {
                         return Err(Box::new(std::io::Error::new(
                             std::io::ErrorKind::Other,
-                            format!("Failed to check transaction status: {}", e)
+                            format!("Failed to check transaction status: {}", e),
                         )));
                     }
                 }
@@ -324,7 +326,7 @@ impl MagicBlockResolver {
             Err(e) => {
                 return Err(Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!("Delegation confirmation failed: {}", e)
+                    format!("Delegation confirmation failed: {}", e),
                 )));
             }
         }
@@ -389,7 +391,7 @@ impl MagicBlockResolver {
     ) -> Result<bool, String> {
         // Use finalized commitment for the final check
         let commitment = solana_sdk::commitment_config::CommitmentConfig::finalized();
-        
+
         match rpc_client.get_signature_status_with_commitment(signature, commitment) {
             Ok(Some(status)) => {
                 if status.is_err() {
@@ -433,7 +435,8 @@ impl MagicBlockResolver {
         let move_log_pda = Pubkey::find_program_address(
             &[b"move_log", &game_id.to_le_bytes()],
             &self.config.program_id,
-        ).0;
+        )
+        .0;
 
         // --- Game PDA delegation accounts ---
         let buffer_pda = {
@@ -465,7 +468,8 @@ impl MagicBlockResolver {
             Pubkey::new_from_array(pda.to_bytes())
         };
         let ml_delegation_metadata = {
-            let pda = delegation_metadata_pda_from_delegated_account(&move_log_pda.to_bytes().into());
+            let pda =
+                delegation_metadata_pda_from_delegated_account(&move_log_pda.to_bytes().into());
             Pubkey::new_from_array(pda.to_bytes())
         };
 
@@ -607,7 +611,10 @@ impl MagicBlockResolver {
 
         let game_id = self.delegated_game_id.unwrap_or(0);
         let move_log_pda = Pubkey::find_program_address(
-            &[crate::solana::instructions::MOVE_LOG_SEED, &game_id.to_le_bytes()],
+            &[
+                crate::solana::instructions::MOVE_LOG_SEED,
+                &game_id.to_le_bytes(),
+            ],
             &self.config.program_id,
         )
         .0;

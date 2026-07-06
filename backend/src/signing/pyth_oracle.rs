@@ -92,7 +92,9 @@ pub struct PythOracle {
 
 impl PythOracle {
     pub fn new() -> Self {
-        Self { rates: RwLock::new(None) }
+        Self {
+            rates: RwLock::new(None),
+        }
     }
 
     /// Fetch all five rates in one Hermes batch call and cache them.
@@ -117,7 +119,10 @@ impl PythOracle {
 
         let parse_feed = |idx: usize| -> Result<f64, String> {
             let p = &resp.parsed[idx];
-            let mantissa: f64 = p.price.price.parse()
+            let mantissa: f64 = p
+                .price
+                .price
+                .parse()
                 .map_err(|e| format!("price[{idx}] parse: {e}"))?;
             Ok(mantissa * 10f64.powi(p.price.expo))
         };
@@ -160,5 +165,7 @@ impl PythOracle {
 }
 
 impl Default for PythOracle {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

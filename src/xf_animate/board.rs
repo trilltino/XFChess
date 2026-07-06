@@ -58,11 +58,7 @@ pub fn spawn_mini_board(
                 MiniSquare,
                 RenderLayers::layer(MINI_LAYER),
                 DespawnOnExit(GameState::MainMenu),
-                Name::new(format!(
-                    "MiniSquare {}{}",
-                    (b'a' + file) as char,
-                    rank + 1
-                )),
+                Name::new(format!("MiniSquare {}{}", (b'a' + file) as char, rank + 1)),
             ));
         }
     }
@@ -78,12 +74,7 @@ pub fn spawn_mini_lights(mut commands: Commands) {
             shadow_maps_enabled: false,
             ..default()
         },
-        Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ,
-            -0.95,
-            -0.5,
-            0.0,
-        )),
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.95, -0.5, 0.0)),
         RenderLayers::layer(MINI_LAYER),
         DespawnOnExit(GameState::MainMenu),
         Name::new("XFAnimate Key Light"),

@@ -50,12 +50,21 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
 
     // Base-layer instructions charged at 5_000 (base) + 10_000 (priority) lamports per TX.
     let paid_instructions = [
-        "init_profile", "create_game", "join_game", "finalize_game",
+        "init_profile",
+        "create_game",
+        "join_game",
+        "finalize_game",
         "resign",
-        "initialize_tournament", "initialize_tournament_shards", "initialize_tournament_escrow",
-        "register_player", "start_tournament",
-        "record_match_result", "session_create_game", "session_join_game",
-        "record_swiss_result", "authorize_session_key",
+        "initialize_tournament",
+        "initialize_tournament_shards",
+        "initialize_tournament_escrow",
+        "register_player",
+        "start_tournament",
+        "record_match_result",
+        "session_create_game",
+        "session_join_game",
+        "record_swiss_result",
+        "authorize_session_key",
         "authorize_tournament_session",
     ];
 
@@ -63,8 +72,8 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
     // undelegate_game  -> 0.0003 SOL session fee
     // commit_move_batch -> 0.0001 SOL commit fee
     let mut paid_tx_count = 0u64;
-    let mut er_session_count = 0u64;  // undelegate_game calls
-    let mut er_commit_count = 0u64;   // commit_move_batch calls
+    let mut er_session_count = 0u64; // undelegate_game calls
+    let mut er_commit_count = 0u64; // commit_move_batch calls
     let mut paid_breakdown_map: std::collections::HashMap<String, (u64, u64)> =
         std::collections::HashMap::new();
 
@@ -139,17 +148,38 @@ pub fn print_cost_report(report: &CostReport) {
     println!("   Total CU Consumed:     {}", report.total_cu);
     println!("   Total Transactions:    {}", report.tx_count);
     println!("   Paid Transactions:     {}", report.paid_tx_count);
-    println!("   Free ER Transactions:  {}", report.tx_count - report.paid_tx_count);
+    println!(
+        "   Free ER Transactions:  {}",
+        report.tx_count - report.paid_tx_count
+    );
     println!();
     println!("   Fee Breakdown:");
-    println!("     Base TX Fees:        {:.6} SOL  (5000 lam × paid txs)", report.base_tx_fees_sol);
-    println!("     Priority Fees:       {:.6} SOL  (10000 lam × paid txs)", report.priority_fees_sol);
-    println!("     ER Session Fees:     {:.6} SOL  (0.0003 SOL × undelegations)", report.er_session_fees_sol);
-    println!("     ER Commit Fees:      {:.6} SOL  (0.0001 SOL × commits)", report.er_commit_fees_sol);
+    println!(
+        "     Base TX Fees:        {:.6} SOL  (5000 lam × paid txs)",
+        report.base_tx_fees_sol
+    );
+    println!(
+        "     Priority Fees:       {:.6} SOL  (10000 lam × paid txs)",
+        report.priority_fees_sol
+    );
+    println!(
+        "     ER Session Fees:     {:.6} SOL  (0.0003 SOL × undelegations)",
+        report.er_session_fees_sol
+    );
+    println!(
+        "     ER Commit Fees:      {:.6} SOL  (0.0001 SOL × commits)",
+        report.er_commit_fees_sol
+    );
     println!();
     println!("   ╔══════════════════════════════════════════════════════╗");
-    println!("   ║  TOTAL ESTIMATED COST:  {:>12.6} SOL            ║", report.estimated_sol);
-    println!("   ║                        ({:>12.2} GBP)            ║", report.estimated_gbp);
+    println!(
+        "   ║  TOTAL ESTIMATED COST:  {:>12.6} SOL            ║",
+        report.estimated_sol
+    );
+    println!(
+        "   ║                        ({:>12.2} GBP)            ║",
+        report.estimated_gbp
+    );
     println!("   ╚══════════════════════════════════════════════════════╝");
     println!();
 

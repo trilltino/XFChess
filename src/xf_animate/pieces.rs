@@ -47,30 +47,18 @@ pub struct MiniMeshes {
 impl MiniMeshes {
     pub fn load(asset_server: &AssetServer) -> Self {
         Self {
-            white_bishop: asset_server
-                .load("models/wooden_chess_board.glb#Mesh18/Primitive0"),
-            white_king: asset_server
-                .load("models/wooden_chess_board.glb#Mesh20/Primitive0"),
-            white_knight: asset_server
-                .load("models/wooden_chess_board.glb#Mesh21/Primitive0"),
-            white_pawn: asset_server
-                .load("models/wooden_chess_board.glb#Mesh23/Primitive0"),
-            white_queen: asset_server
-                .load("models/wooden_chess_board.glb#Mesh31/Primitive0"),
-            white_rook: asset_server
-                .load("models/wooden_chess_board.glb#Mesh32/Primitive0"),
-            black_bishop: asset_server
-                .load("models/wooden_chess_board.glb#Mesh0/Primitive0"),
-            black_king: asset_server
-                .load("models/wooden_chess_board.glb#Mesh2/Primitive0"),
-            black_knight: asset_server
-                .load("models/wooden_chess_board.glb#Mesh3/Primitive0"),
-            black_pawn: asset_server
-                .load("models/wooden_chess_board.glb#Mesh5/Primitive0"),
-            black_queen: asset_server
-                .load("models/wooden_chess_board.glb#Mesh13/Primitive0"),
-            black_rook: asset_server
-                .load("models/wooden_chess_board.glb#Mesh14/Primitive0"),
+            white_bishop: asset_server.load("models/wooden_chess_board.glb#Mesh18/Primitive0"),
+            white_king: asset_server.load("models/wooden_chess_board.glb#Mesh20/Primitive0"),
+            white_knight: asset_server.load("models/wooden_chess_board.glb#Mesh21/Primitive0"),
+            white_pawn: asset_server.load("models/wooden_chess_board.glb#Mesh23/Primitive0"),
+            white_queen: asset_server.load("models/wooden_chess_board.glb#Mesh31/Primitive0"),
+            white_rook: asset_server.load("models/wooden_chess_board.glb#Mesh32/Primitive0"),
+            black_bishop: asset_server.load("models/wooden_chess_board.glb#Mesh0/Primitive0"),
+            black_king: asset_server.load("models/wooden_chess_board.glb#Mesh2/Primitive0"),
+            black_knight: asset_server.load("models/wooden_chess_board.glb#Mesh3/Primitive0"),
+            black_pawn: asset_server.load("models/wooden_chess_board.glb#Mesh5/Primitive0"),
+            black_queen: asset_server.load("models/wooden_chess_board.glb#Mesh13/Primitive0"),
+            black_rook: asset_server.load("models/wooden_chess_board.glb#Mesh14/Primitive0"),
         }
     }
 
@@ -133,13 +121,27 @@ pub fn spawn_starting_position(commands: &mut Commands, assets: &MiniAssets) {
         spawn_mini_piece(commands, assets, PieceColor::White, kind, file as u8, 0);
     }
     for file in 0..8u8 {
-        spawn_mini_piece(commands, assets, PieceColor::White, PieceType::Pawn, file, 1);
+        spawn_mini_piece(
+            commands,
+            assets,
+            PieceColor::White,
+            PieceType::Pawn,
+            file,
+            1,
+        );
     }
     for (file, &kind) in BACK_ROW.iter().enumerate() {
         spawn_mini_piece(commands, assets, PieceColor::Black, kind, file as u8, 7);
     }
     for file in 0..8u8 {
-        spawn_mini_piece(commands, assets, PieceColor::Black, PieceType::Pawn, file, 6);
+        spawn_mini_piece(
+            commands,
+            assets,
+            PieceColor::Black,
+            PieceType::Pawn,
+            file,
+            6,
+        );
     }
 }
 
@@ -176,7 +178,12 @@ fn spawn_mini_piece(
         .spawn((
             Transform::from_translation(pos).with_rotation(rotation),
             Visibility::Inherited,
-            MiniPiece { file, rank, color, kind },
+            MiniPiece {
+                file,
+                rank,
+                color,
+                kind,
+            },
             RenderLayers::layer(MINI_LAYER),
             DespawnOnExit(GameState::MainMenu),
             Name::new(format!("Mini {:?} {:?}", color, kind)),

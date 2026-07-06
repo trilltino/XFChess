@@ -6,17 +6,22 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
-use super::{GAME_SEED, MAGIC_CONTEXT_PUBKEY, MAGIC_PROGRAM_PUBKEY, MOVE_LOG_SEED, PLATFORM_FEE_VAULT_SEED, PROFILE_SEED, SESSION_DELEGATION_SEED, TOURNAMENT_SEED, WAGER_ESCROW_SEED};
+use super::{
+    GAME_SEED, MAGIC_CONTEXT_PUBKEY, MAGIC_PROGRAM_PUBKEY, PLATFORM_FEE_VAULT_SEED, PROFILE_SEED,
+    SESSION_DELEGATION_SEED, TOURNAMENT_SEED, WAGER_ESCROW_SEED,
+};
 
-const TOURNAMENT_ESCROW_SEED: &[u8]  = b"t_escrow";
+const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
-const TOURNAMENT_MATCH_SEED: &[u8]   = b"t_match";
+const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 
 /// Computes the Anchor discriminator for a given instruction name.
 fn anchor_discriminator(name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
     hasher.update(format!("global:{}", name));
-    hasher.finalize()[..8].try_into().expect("SHA256 hash should be at least 8 bytes")
+    hasher.finalize()[..8]
+        .try_into()
+        .expect("SHA256 hash should be at least 8 bytes")
 }
 
 /// Borsh-encodes a string (length prefix + bytes).
@@ -34,47 +39,50 @@ pub fn record_move_ix(
     session_pubkey: &Pubkey,
     wallet_pubkey: &Pubkey,
     game_id: u64,
-    move_str: &str,
-    next_fen: &str,
+    move_uci: [u8; 5],
+    next_board: [u8; 68],
     nonce: u64,
     signature: Option<Vec<u8>>,
+    parent_nonce: Option<u64>,
 ) -> anyhow::Result<Instruction> {
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
-    let move_log_pda =
-        Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], program_id).0;
     let session_delegation_pda = Pubkey::find_program_address(
-        &[SESSION_DELEGATION_SEED, &game_id.to_le_bytes(), wallet_pubkey.as_ref()],
+        &[
+            SESSION_DELEGATION_SEED,
+            &game_id.to_le_bytes(),
+            wallet_pubkey.as_ref(),
+        ],
         program_id,
-    ).0;
-    let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY.parse()
-        .map_err(|e| anyhow::anyhow!("Invalid magic context pubkey: {}", e))?;
-    let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY.parse()
-        .map_err(|e| anyhow::anyhow!("Invalid magic program pubkey: {}", e))?;
+    )
+    .0;
 
     let mut data = anchor_discriminator("record_move").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
-    data.extend(borsh_string(move_str));
-    data.extend(borsh_string(next_fen));
+    data.extend_from_slice(&move_uci);
+    data.extend_from_slice(&next_board);
     data.extend_from_slice(&nonce.to_le_bytes());
 
-    // Optional Vec<u8> (Borsh encoding)
     if let Some(sig) = signature {
-        data.push(1); // Some
+        data.push(1);
         data.extend_from_slice(&(sig.len() as u32).to_le_bytes());
         data.extend_from_slice(&sig);
     } else {
-        data.push(0); // None
+        data.push(0);
+    }
+
+    if let Some(parent_nonce) = parent_nonce {
+        data.push(1);
+        data.extend_from_slice(&parent_nonce.to_le_bytes());
+    } else {
+        data.push(0);
     }
 
     Ok(Instruction {
         program_id: *program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
-            AccountMeta::new(move_log_pda, false),
             AccountMeta::new_readonly(*session_pubkey, true),
             AccountMeta::new_readonly(session_delegation_pda, false),
-            AccountMeta::new(magic_context, false),
-            AccountMeta::new_readonly(magic_program, false),
         ],
         data,
     })
@@ -82,13 +90,18 @@ pub fn record_move_ix(
 
 /// Builds an `undelegate_game` instruction for the ER.
 ///
-/// Commits the ER state (game + move_log) back to devnet and releases the accounts.
-pub fn undelegate_game_ix(program_id: &Pubkey, session_pubkey: &Pubkey, game_id: u64) -> anyhow::Result<Instruction> {
+/// Commits the ER game state back to devnet and releases the delegated account.
+pub fn undelegate_game_ix(
+    program_id: &Pubkey,
+    session_pubkey: &Pubkey,
+    game_id: u64,
+) -> anyhow::Result<Instruction> {
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
-    let move_log_pda = Pubkey::find_program_address(&[MOVE_LOG_SEED, &game_id.to_le_bytes()], program_id).0;
-    let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY.parse()
+    let magic_context: Pubkey = MAGIC_CONTEXT_PUBKEY
+        .parse()
         .map_err(|e| anyhow::anyhow!("Invalid magic context pubkey: {}", e))?;
-    let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY.parse()
+    let magic_program: Pubkey = MAGIC_PROGRAM_PUBKEY
+        .parse()
         .map_err(|e| anyhow::anyhow!("Invalid magic program pubkey: {}", e))?;
 
     let mut data = anchor_discriminator("undelegate_game").to_vec();
@@ -98,7 +111,6 @@ pub fn undelegate_game_ix(program_id: &Pubkey, session_pubkey: &Pubkey, game_id:
         program_id: *program_id,
         accounts: vec![
             AccountMeta::new(game_pda, false),
-            AccountMeta::new(move_log_pda, false),
             AccountMeta::new(*session_pubkey, true),
             AccountMeta::new(magic_context, false),
             AccountMeta::new_readonly(magic_program, false),
@@ -124,7 +136,8 @@ pub fn finalize_game_ix(
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let white_profile = Pubkey::find_program_address(&[PROFILE_SEED, white.as_ref()], program_id).0;
     let black_profile = Pubkey::find_program_address(&[PROFILE_SEED, black.as_ref()], program_id).0;
-    let escrow_pda = Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], program_id).0;
     let treasury_vault = Pubkey::find_program_address(&[b"treasury_vault"], program_id).0;
 
     let mut data = anchor_discriminator("finalize_game").to_vec();
@@ -132,9 +145,17 @@ pub fn finalize_game_ix(
 
     // GameResult Borsh encoding: 1 = Winner(Pubkey), 2 = Draw
     match winner {
-        Some("white") => { data.push(1); data.extend_from_slice(white.as_ref()); }
-        Some("black") => { data.push(1); data.extend_from_slice(black.as_ref()); }
-        _ =>            { data.push(2); }
+        Some("white") => {
+            data.push(1);
+            data.extend_from_slice(white.as_ref());
+        }
+        Some("black") => {
+            data.push(1);
+            data.extend_from_slice(black.as_ref());
+        }
+        _ => {
+            data.push(2);
+        }
     }
 
     Instruction {
@@ -166,7 +187,8 @@ pub fn link_external_elo_ix(
     rapid_rating: u32,
     bullet_rating: u32,
 ) -> Instruction {
-    let player_profile_pda = Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
+    let player_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
 
     let mut data = anchor_discriminator("link_external_elo").to_vec();
     data.extend(borsh_string(username));
@@ -188,12 +210,9 @@ pub fn link_external_elo_ix(
 /// Builds a `verify_profile` instruction for devnet.
 ///
 /// Marks a player as KYC-verified on-chain.
-pub fn verify_profile_ix(
-    program_id: &Pubkey,
-    admin: &Pubkey,
-    player: &Pubkey,
-) -> Instruction {
-    let player_profile_pda = Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
+pub fn verify_profile_ix(program_id: &Pubkey, admin: &Pubkey, player: &Pubkey) -> Instruction {
+    let player_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
 
     let data = anchor_discriminator("verify_profile").to_vec();
 
@@ -217,11 +236,7 @@ pub fn verify_profile_ix(
 /// * `program_id` - The XFChess program ID
 /// * `caller` - The account triggering the claim (fee-payer)
 /// * `host_wallet` - The wallet that receives the claimed fees (must match vault.host_wallet)
-pub fn claim_fees_ix(
-    program_id: &Pubkey,
-    caller: &Pubkey,
-    host_wallet: &Pubkey,
-) -> Instruction {
+pub fn claim_fees_ix(program_id: &Pubkey, caller: &Pubkey, host_wallet: &Pubkey) -> Instruction {
     let fee_vault_pda = Pubkey::find_program_address(&[PLATFORM_FEE_VAULT_SEED], program_id).0;
 
     let data = anchor_discriminator("claim_fees").to_vec();
@@ -247,13 +262,12 @@ pub fn leave_tournament_ix(
     player: &Pubkey,
     host_treasury: &Pubkey,
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
- 
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+
     let data = anchor_discriminator("leave_tournament").to_vec();
- 
+
     Instruction {
         program_id: *program_id,
         accounts: vec![
@@ -265,7 +279,7 @@ pub fn leave_tournament_ix(
         data,
     }
 }
- 
+
 /// Builds an `initialize_tournament` instruction for devnet.
 pub fn initialize_tournament_ix(
     program_id: &Pubkey,
@@ -284,23 +298,23 @@ pub fn initialize_tournament_ix(
     winner_takes_all: bool,
     host_treasury: &Pubkey,
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
- 
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+
     let mut data = anchor_discriminator("initialize_tournament").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend(borsh_string(name));
     data.extend_from_slice(&entry_fee.to_le_bytes());
     data.extend_from_slice(&max_players.to_le_bytes());
-    
+
     // TournamentType Borsh encoding
     data.push(tournament_type);
-    if tournament_type == 1 { // Swiss
+    if tournament_type == 1 {
+        // Swiss
         data.push(swiss_rounds);
     }
- 
+
     data.extend_from_slice(&elo_min.to_le_bytes());
     data.extend_from_slice(&elo_max.to_le_bytes());
     data.extend_from_slice(&min_players.to_le_bytes());
@@ -310,7 +324,7 @@ pub fn initialize_tournament_ix(
     data.extend_from_slice(&platform_fee.to_le_bytes());
     data.push(if winner_takes_all { 1 } else { 0 });
     data.extend_from_slice(host_treasury.as_ref());
-    
+
     // Optional usdc_mint (None = 0)
     data.push(0);
 
@@ -337,14 +351,14 @@ pub fn initialize_escrow_ix(
     tournament_id: u64,
     authority: &Pubkey,
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
     let escrow_pda = Pubkey::find_program_address(
         &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         program_id,
-    ).0;
+    )
+    .0;
 
     let mut data = anchor_discriminator("initialize_tournament_escrow").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
@@ -373,16 +387,20 @@ pub fn initialize_shards_ix(
     max_players: u16,
     authority: &Pubkey,
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
 
     let shard = |idx: u8| {
         Pubkey::find_program_address(
-            &[TOURNAMENT_PLAYERS_SEED, &[idx], &tournament_id.to_le_bytes()],
+            &[
+                TOURNAMENT_PLAYERS_SEED,
+                &[idx],
+                &tournament_id.to_le_bytes(),
+            ],
             program_id,
-        ).0
+        )
+        .0
     };
 
     let discriminator_name = if max_players <= 64 {
@@ -442,21 +460,26 @@ pub fn start_tournament_ix(
     authority: &Pubkey,
     host_treasury: &Pubkey,
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
 
     let escrow_pda = Pubkey::find_program_address(
         &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         program_id,
-    ).0;
+    )
+    .0;
 
     let shard = |idx: u8| {
         Pubkey::find_program_address(
-            &[TOURNAMENT_PLAYERS_SEED, &[idx], &tournament_id.to_le_bytes()],
+            &[
+                TOURNAMENT_PLAYERS_SEED,
+                &[idx],
+                &tournament_id.to_le_bytes(),
+            ],
             program_id,
-        ).0
+        )
+        .0
     };
 
     let mut data = anchor_discriminator("start_tournament").to_vec();
@@ -489,15 +512,15 @@ pub fn fund_sol_prize_ix(
     operator: &Pubkey,
     amount_lamports: u64,
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
 
     let escrow_pda = Pubkey::find_program_address(
         &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         program_id,
-    ).0;
+    )
+    .0;
 
     let mut data = anchor_discriminator("fund_sol_prize").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
@@ -527,14 +550,14 @@ pub fn distribute_tournament_prizes_ix(
     cranker: &Pubkey,
     winners: &[Pubkey],
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
     let escrow_pda = Pubkey::find_program_address(
         &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         program_id,
-    ).0;
+    )
+    .0;
 
     let mut data = anchor_discriminator("distribute_tournament_prizes").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
@@ -567,14 +590,18 @@ pub fn initialize_match_ix(
     next_match_slot: u8,
     authority: &Pubkey,
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
     let match_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_MATCH_SEED, &tournament_id.to_le_bytes(), &match_index.to_le_bytes()],
+        &[
+            TOURNAMENT_MATCH_SEED,
+            &tournament_id.to_le_bytes(),
+            &match_index.to_le_bytes(),
+        ],
         program_id,
-    ).0;
+    )
+    .0;
 
     let mut data = anchor_discriminator("initialize_match").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
@@ -582,17 +609,32 @@ pub fn initialize_match_ix(
     data.push(round);
     // Option<Pubkey> Borsh encoding
     match player_white {
-        Some(pk) => { data.push(1); data.extend_from_slice(pk.as_ref()); }
-        None     => { data.push(0); }
+        Some(pk) => {
+            data.push(1);
+            data.extend_from_slice(pk.as_ref());
+        }
+        None => {
+            data.push(0);
+        }
     }
     match player_black {
-        Some(pk) => { data.push(1); data.extend_from_slice(pk.as_ref()); }
-        None     => { data.push(0); }
+        Some(pk) => {
+            data.push(1);
+            data.extend_from_slice(pk.as_ref());
+        }
+        None => {
+            data.push(0);
+        }
     }
     // Option<u16>
     match next_match_for_winner {
-        Some(n) => { data.push(1); data.extend_from_slice(&n.to_le_bytes()); }
-        None    => { data.push(0); }
+        Some(n) => {
+            data.push(1);
+            data.extend_from_slice(&n.to_le_bytes());
+        }
+        None => {
+            data.push(0);
+        }
     }
     data.push(next_match_slot);
 
@@ -616,17 +658,20 @@ pub fn record_result_ix(
     match_index: u16,
     winner: &Pubkey,
     loser: &Pubkey,
-    game_pda: &Pubkey,
     authority: &Pubkey,
 ) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
     let match_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_MATCH_SEED, &tournament_id.to_le_bytes(), &match_index.to_le_bytes()],
+        &[
+            TOURNAMENT_MATCH_SEED,
+            &tournament_id.to_le_bytes(),
+            &match_index.to_le_bytes(),
+        ],
         program_id,
-    ).0;
+    )
+    .0;
 
     let mut data = anchor_discriminator("record_match_result").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
@@ -636,10 +681,10 @@ pub fn record_result_ix(
 
     Instruction {
         program_id: *program_id,
+        // Account order must match `RecordMatchResult`: tournament, match, authority.
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
             AccountMeta::new(match_pda, false),
-            AccountMeta::new_readonly(*game_pda, false),
             AccountMeta::new(*authority, true),
         ],
         data,
@@ -649,23 +694,18 @@ pub fn record_result_ix(
 /// Builds a `claim_tournament_prize` instruction (player-signed).
 /// Pulls the claimant's share from the SOL escrow PDA. The program validates
 /// that the claimant matches a finishing position and prevents double-claim.
-pub fn claim_prize_ix(
-    program_id: &Pubkey,
-    tournament_id: u64,
-    claimant: &Pubkey,
-) -> Instruction {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+pub fn claim_prize_ix(program_id: &Pubkey, tournament_id: u64, claimant: &Pubkey) -> Instruction {
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
     let escrow_pda = Pubkey::find_program_address(
         &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         program_id,
-    ).0;
-    let usdc_prize_authority = Pubkey::find_program_address(
-        &[b"t_usdc_prize", &tournament_id.to_le_bytes()],
-        program_id,
-    ).0;
+    )
+    .0;
+    let usdc_prize_authority =
+        Pubkey::find_program_address(&[b"t_usdc_prize", &tournament_id.to_le_bytes()], program_id)
+            .0;
 
     let mut data = anchor_discriminator("claim_tournament_prize").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
@@ -683,7 +723,9 @@ pub fn claim_prize_ix(
             AccountMeta::new(*claimant, true), // claimant signer
             // SPL Token program (required by the program even on the SOL path)
             AccountMeta::new_readonly(
-                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".parse().expect("spl token id"),
+                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+                    .parse()
+                    .expect("spl token id"),
                 false,
             ),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),

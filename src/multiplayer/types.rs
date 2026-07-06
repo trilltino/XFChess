@@ -1,10 +1,10 @@
+use crate::multiplayer::network::protocol::NetworkMessage;
+use crate::multiplayer::traits::Message;
 use bevy::prelude::*;
 use iroh::EndpointId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
-use crate::multiplayer::traits::Message;
-use crate::multiplayer::network::protocol::NetworkMessage;
 
 /// Role of a node in the gossip network
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Reflect)]
@@ -99,7 +99,7 @@ pub struct CausalChainState {
 }
 
 #[derive(Resource)]
-pub struct BraidNetworkState {
+pub struct OnlineNetworkState {
     pub node_id: Option<EndpointId>,
     pub secret_key_bytes: Option<[u8; 32]>,
     pub connected: bool,
@@ -108,19 +108,23 @@ pub struct BraidNetworkState {
     pub active_session: Option<GameSession>,
     pub pending_invites: HashMap<String, GamePreferences>,
     pub event_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<NetworkEvent>>,
+    /// Clone of the event channel sender, so alternate transports (the VPS relay
+    /// bridge) can inject `NetworkEvent::MessageReceived` into the same pipeline
+    /// gossip feeds. See [`crate::multiplayer::network::relay_bridge`].
+    pub event_sender: Option<tokio::sync::mpsc::UnboundedSender<NetworkEvent>>,
     pub message_sender: Option<tokio::sync::mpsc::UnboundedSender<NetworkMessage>>,
     pub bootstrap_sender: Option<tokio::sync::mpsc::UnboundedSender<EndpointId>>,
     pub subscription_sender: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     /// Raw 32-byte Ed25519 signing key for the on-chain session.
     /// When present, all outgoing [`NetworkMessage`]s are signed before broadcast.
     pub session_signing_key: Option<[u8; 32]>,
-    /// Per-game expected nonce for P2P-layer replay protection.
+    /// Per-game expected nonce for online transport replay protection.
     /// Moves with nonce < expected are dropped; nonce >= expected are accepted
     /// and the map is updated to nonce + 1.
     pub expected_nonces: std::collections::HashMap<u64, u64>,
 }
 
-impl Default for BraidNetworkState {
+impl Default for OnlineNetworkState {
     fn default() -> Self {
         Self {
             node_id: None,
@@ -131,6 +135,7 @@ impl Default for BraidNetworkState {
             active_session: None,
             pending_invites: HashMap::new(),
             event_receiver: None,
+            event_sender: None,
             message_sender: None,
             bootstrap_sender: None,
             subscription_sender: None,
@@ -141,11 +146,11 @@ impl Default for BraidNetworkState {
 }
 
 #[derive(Resource, Default)]
-pub struct BraidGameSync {
+pub struct OnlineGameSync {
     pub pending_patches: Vec<Vec<u8>>,
 }
 
-/// Tracks heartbeat timing for the active P2P game session.
+/// Tracks heartbeat timing for the active online game session.
 #[derive(Resource)]
 pub struct HeartbeatState {
     /// Elapsed seconds since the last Ping was sent.

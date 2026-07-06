@@ -15,7 +15,9 @@
 
 use crate::constants::*;
 use crate::errors::XfchessGameError;
-use crate::state::{Tournament, TournamentPlayersShard, TournamentSessionDelegation, TournamentStatus};
+use crate::state::{
+    Tournament, TournamentPlayersShard, TournamentSessionDelegation, TournamentStatus,
+};
 use anchor_lang::prelude::*;
 
 /// Arguments for `authorize_tournament_session`.

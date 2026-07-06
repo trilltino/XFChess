@@ -6,6 +6,7 @@ pub mod game_flows;
 pub mod instructions;
 pub mod keygen;
 pub mod moves;
+pub mod rpc_bench;
 
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
@@ -61,18 +62,12 @@ pub const RPC_RETRY_DELAY_MS: u64 = 2_000;
 
 /// Create a base-layer RPC client.
 pub fn base_client() -> RpcClient {
-    RpcClient::new_with_commitment(
-        BASE_RPC_URL.to_string(),
-        CommitmentConfig::confirmed(),
-    )
+    RpcClient::new_with_commitment(BASE_RPC_URL.to_string(), CommitmentConfig::confirmed())
 }
 
 /// Create an ER-layer RPC client.
 pub fn er_client() -> RpcClient {
-    RpcClient::new_with_commitment(
-        ER_RPC_URL.to_string(),
-        CommitmentConfig::confirmed(),
-    )
+    RpcClient::new_with_commitment(ER_RPC_URL.to_string(), CommitmentConfig::confirmed())
 }
 
 /// Parse a pubkey from a string.
@@ -119,8 +114,9 @@ where
             Err(e) => {
                 eprintln!("   RPC attempt {} failed: {}", attempt + 1, e);
                 if let solana_client::client_error::ClientErrorKind::RpcError(
-                    solana_client::rpc_request::RpcError::RpcResponseError { data, .. }
-                ) = &e.kind {
+                    solana_client::rpc_request::RpcError::RpcResponseError { data, .. },
+                ) = &e.kind
+                {
                     eprintln!("   RPC ERROR DATA: {:?}", data);
                     use solana_client::rpc_request::RpcResponseErrorData;
                     match data {
@@ -157,7 +153,11 @@ pub fn unique_id() -> u64 {
 
 /// Fetch a player's ELO rating from their on-chain profile.
 /// Returns the ELO as f64 (scaled: 120000.0 = 1200 ELO).
-pub fn fetch_profile_elo(rpc: &RpcClient, program_id: Pubkey, player: Pubkey) -> anyhow::Result<f64> {
+pub fn fetch_profile_elo(
+    rpc: &RpcClient,
+    program_id: Pubkey,
+    player: Pubkey,
+) -> anyhow::Result<f64> {
     let profile_pda = Pubkey::find_program_address(&[b"profile", player.as_ref()], &program_id).0;
     let account = rpc.get_account_data(&profile_pda)?;
     if account.len() < 8 + 32 + 8 + 4 + 4 + 4 + 8 + 8 {

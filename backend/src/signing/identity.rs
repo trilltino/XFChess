@@ -8,8 +8,8 @@ use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
-use sha2::{Digest, Sha256};
 use regex::Regex;
+use sha2::{Digest, Sha256};
 
 /// Country-specific validation rules for identity fields
 #[derive(Debug, Clone)]
@@ -34,35 +34,45 @@ impl CountryValidationRules {
                 requires_full_name: true,
                 requires_dob: true,
                 requires_address: true,
-                tax_id_pattern: Some(Regex::new(r"^[A-Z]{2}\d{6}[A-Z]$").expect("Invalid UK tax ID regex pattern")),
+                tax_id_pattern: Some(
+                    Regex::new(r"^[A-Z]{2}\d{6}[A-Z]$").expect("Invalid UK tax ID regex pattern"),
+                ),
                 tax_id_field_name: "National Insurance Number (NI)",
             },
             "BR" => CountryValidationRules {
                 requires_full_name: true,
                 requires_dob: true,
                 requires_address: true,
-                tax_id_pattern: Some(Regex::new(r"^\d{11}$").expect("Invalid Brazil tax ID regex pattern")),
+                tax_id_pattern: Some(
+                    Regex::new(r"^\d{11}$").expect("Invalid Brazil tax ID regex pattern"),
+                ),
                 tax_id_field_name: "CPF (Cadastro de Pessoas Físicas)",
             },
             "CA" => CountryValidationRules {
                 requires_full_name: true,
                 requires_dob: true,
                 requires_address: true,
-                tax_id_pattern: Some(Regex::new(r"^\d{9}$").expect("Invalid Canada tax ID regex pattern")),
+                tax_id_pattern: Some(
+                    Regex::new(r"^\d{9}$").expect("Invalid Canada tax ID regex pattern"),
+                ),
                 tax_id_field_name: "Social Insurance Number (SIN)",
             },
             "DE" => CountryValidationRules {
                 requires_full_name: true,
                 requires_dob: true,
                 requires_address: true,
-                tax_id_pattern: Some(Regex::new(r"^\d{11}$").expect("Invalid Germany tax ID regex pattern")),
+                tax_id_pattern: Some(
+                    Regex::new(r"^\d{11}$").expect("Invalid Germany tax ID regex pattern"),
+                ),
                 tax_id_field_name: "Tax ID (Steueridentifikationsnummer)",
             },
             "US" => CountryValidationRules {
                 requires_full_name: false,
                 requires_dob: false,
                 requires_address: false,
-                tax_id_pattern: Some(Regex::new(r"^\d{9}$").expect("Invalid US tax ID regex pattern")),
+                tax_id_pattern: Some(
+                    Regex::new(r"^\d{9}$").expect("Invalid US tax ID regex pattern"),
+                ),
                 tax_id_field_name: "Social Security Number (SSN) - Optional",
             },
             _ => CountryValidationRules {
@@ -90,8 +100,11 @@ impl CountryValidationRules {
             "tax_id" => {
                 if let Some(ref pattern) = self.tax_id_pattern {
                     if !value.is_empty() && !pattern.is_match(value) {
-                        Err(format!("Invalid format for {}. Expected format: {}", 
-                            self.tax_id_field_name, pattern.as_str()))
+                        Err(format!(
+                            "Invalid format for {}. Expected format: {}",
+                            self.tax_id_field_name,
+                            pattern.as_str()
+                        ))
                     } else {
                         Ok(())
                     }
@@ -126,23 +139,23 @@ impl IdentityVault {
     pub fn new(key_hex: &str, salt_hex: &str) -> Result<Self, String> {
         let key_bytes = hex::decode(key_hex).map_err(|e| format!("Invalid key hex: {}", e))?;
         let salt_bytes = hex::decode(salt_hex).map_err(|e| format!("Invalid salt hex: {}", e))?;
-        
+
         let mut encryption_key = [0u8; 32];
         let mut index_salt = [0u8; 32];
-        
+
         if key_bytes.len() != 32 || salt_bytes.len() != 32 {
             return Err("Encryption key and salt must be exactly 32 bytes (64 hex chars)".into());
         }
-        
+
         encryption_key.copy_from_slice(&key_bytes);
         index_salt.copy_from_slice(&salt_bytes);
-        
+
         Ok(Self {
             encryption_key,
             index_salt,
         })
     }
-    
+
     /// Generates a Blind Index (salted hash) for searching without decryption.
     ///
     /// The blind index allows searching by tax ID or other identifiers
@@ -173,10 +186,11 @@ impl IdentityVault {
     pub fn encrypt(&self, plaintext: &str) -> Result<Vec<u8>, String> {
         let cipher = Aes256Gcm::new(&self.encryption_key.into());
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng); // 12-bytes
-        
-        let ciphertext = cipher.encrypt(&nonce, plaintext.as_bytes())
+
+        let ciphertext = cipher
+            .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|e| format!("Encryption failed: {}", e))?;
-            
+
         let mut result = nonce.to_vec();
         result.extend(ciphertext);
         Ok(result)
@@ -195,13 +209,15 @@ impl IdentityVault {
         }
         let (nonce_bytes, ciphertext) = blob.split_at(12);
         let cipher = Aes256Gcm::new(&self.encryption_key.into());
-        let nonce_arr: [u8; 12] = nonce_bytes.try_into()
+        let nonce_arr: [u8; 12] = nonce_bytes
+            .try_into()
             .expect("Nonce must be exactly 12 bytes");
         let nonce = Nonce::from(nonce_arr);
-        
-        let plaintext = cipher.decrypt(&nonce, ciphertext)
+
+        let plaintext = cipher
+            .decrypt(&nonce, ciphertext)
             .map_err(|e| format!("Decryption failed: {}", e))?;
-            
+
         String::from_utf8(plaintext).map_err(|e| format!("Invalid UTF-8: {}", e))
     }
 
@@ -213,13 +229,16 @@ impl IdentityVault {
     ///
     /// # Returns
     /// Ok(()) if all fields pass validation, or an error message if validation fails
-    pub fn validate_fields(country_code: &str, fields: &std::collections::HashMap<&str, &str>) -> Result<(), String> {
+    pub fn validate_fields(
+        country_code: &str,
+        fields: &std::collections::HashMap<&str, &str>,
+    ) -> Result<(), String> {
         let rules = CountryValidationRules::for_country(country_code);
-        
+
         for (field_name, value) in fields {
             rules.validate_field(field_name, value)?;
         }
-        
+
         Ok(())
     }
 }

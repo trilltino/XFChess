@@ -32,7 +32,7 @@ pub enum BraidConnectionStatus {
 
 #[derive(Resource, Default, Clone, Reflect)]
 #[reflect(Resource)]
-pub struct BraidP2PConfig {
+pub struct BraidSubscriptionConfig {
     pub base_url: String,
     pub game_id: String,
     pub active: bool,
@@ -41,4 +41,3 @@ pub struct BraidP2PConfig {
 /// Message for notifying Bevy about network incoming states
 #[derive(Message, Debug)]
 pub struct NetworkGameStateUpdated(pub BraidGameState);
-

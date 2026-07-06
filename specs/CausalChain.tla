@@ -1,10 +1,10 @@
 -------------------------------- MODULE CausalChain --------------------------------
 (***************************************************************************)
-(* Formal model of the XFChess P2P causal-chain move protocol.             *)
+(* Formal model of the XFChess online causal-chain move protocol.          *)
 (*                                                                         *)
 (* This models the EXACT logic of two code paths in the game client:       *)
 (*                                                                         *)
-(*   publish_local_move      (src/multiplayer/network/braid_pvp.rs:127)    *)
+(*   publish_local_move      (src/multiplayer/network/online_game_session.rs:127) *)
 (*   handle_network_events   (src/multiplayer/systems.rs:341-398)          *)
 (*                                                                         *)
 (* Sender side (publish_local_move):                                       *)

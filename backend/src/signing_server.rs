@@ -1,10 +1,10 @@
-use backend::signing::{AppState, SigningConfig};
+use backend::infrastructure::{initialize_pools, run_migrations, spawn_background_tasks};
 use backend::signing::storage::tournament::TournamentStore;
 use backend::signing::storage::SessionStore;
-use backend::infrastructure::{initialize_pools, run_migrations, spawn_background_tasks};
+use backend::signing::{AppState, SigningConfig};
 use std::sync::Arc;
-use tracing_subscriber::EnvFilter;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 const PID_FILE: &str = ".backend.pid";
 
@@ -56,10 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read DB locations from the environment so production can point them at
     // /opt/xfchess/data (the only writable path under the hardened systemd
     // unit). Falls back to the local-dev defaults when unset.
-    let session_db = std::env::var("SESSION_DB_URL")
-        .unwrap_or_else(|_| "sqlite://sessions.db?mode=rwc".into());
-    let vault_db = std::env::var("VAULT_DB_URL")
-        .unwrap_or_else(|_| "sqlite://vault.db?mode=rwc".into());
+    let session_db =
+        std::env::var("SESSION_DB_URL").unwrap_or_else(|_| "sqlite://sessions.db?mode=rwc".into());
+    let vault_db =
+        std::env::var("VAULT_DB_URL").unwrap_or_else(|_| "sqlite://vault.db?mode=rwc".into());
     let pools = initialize_pools(&session_db, &vault_db).await?;
     info!("[signing-server] Database pools initialized");
 
@@ -75,7 +75,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
     info!("[signing-server] Tournament store initialized");
 
-    let mut state = AppState::new(config.clone(), pools.session_pool.clone(), pools.vault_pool.clone(), Arc::new(tournament_store.clone()));
+    let mut state = AppState::new(
+        config.clone(),
+        pools.session_pool.clone(),
+        pools.vault_pool.clone(),
+        Arc::new(tournament_store.clone()),
+    );
 
     // ── Initialize social tables (friends, contacts) ─────────────────────────
     if let Err(e) = state.friends.init().await {
@@ -89,12 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Spawn Braid-Iroh P2P node (ephemeral UDP port, no conflict with HTTP) ─
     info!("[signing-server] Spawning Braid-Iroh Node (ephemeral port)");
-    let (_braid_state, _rx) = braid_iroh::spawn_node(
-        "xfchess-vps",
-        None,
-        None,
-        braid_iroh::DiscoveryConfig::Real,
-    ).await.map_err(|e| anyhow::anyhow!("failed to spawn braid-iroh node: {}", e))?;
+    let (_braid_state, _rx) =
+        braid_iroh::spawn_node("xfchess-vps", None, None, braid_iroh::DiscoveryConfig::Real)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to spawn braid-iroh node: {}", e))?;
 
     // ── Spawn background tasks ───────────────────────────────────────────────
     let (tournament_trigger, ac_queue) = spawn_background_tasks(state.clone(), config);
@@ -103,9 +106,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("[signing-server] Background tasks spawned");
 
     // ── Start HTTP Server ──────────────────────────────────────────────────
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to bind TCP listener on port {}: {}", port, e))?;
-    info!("[signing-server] Listening for HTTP traffic on port {}", port);
+    info!(
+        "[signing-server] Listening for HTTP traffic on port {}",
+        port
+    );
 
     // Serve with graceful shutdown: on SIGTERM (systemctl stop/restart) or Ctrl-C,
     // stop accepting new connections and let in-flight requests finish before exit.

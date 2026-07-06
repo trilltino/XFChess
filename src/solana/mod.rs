@@ -2,10 +2,11 @@
 
 // Sub-modules
 pub mod core;
+pub mod multiplayer;
 pub mod program_interface;
+pub mod routing;
 pub mod session;
 pub mod wallet;
-pub mod multiplayer;
 
 // Expose modules themselves so callers can use `crate::solana::instructions::Foo` paths
 pub use program_interface::instructions;

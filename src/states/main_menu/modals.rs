@@ -38,8 +38,18 @@ pub(super) fn render_ai_setup_modal(
             ui.horizontal(|ui| {
                 ui.label(TextStyle::popup_title("GAME SETUP"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("✕").size(12.0).color(UiColors::TEXT_POPUP_BODY))
-                        .fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("✕")
+                                    .size(12.0)
+                                    .color(UiColors::TEXT_POPUP_BODY),
+                            )
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
+                        )
+                        .clicked()
+                    {
                         competitive.show_ai_setup = false;
                     }
                 });
@@ -61,13 +71,13 @@ pub(super) fn render_ai_setup_modal(
                 for lvl in 1..=8 {
                     let response = ui.add(
                         egui::Button::new(
-                            egui::RichText::new(format!("{}", lvl))
-                                .size(14.0)
-                                .color(if competitive.ai_difficulty == lvl {
+                            egui::RichText::new(format!("{}", lvl)).size(14.0).color(
+                                if competitive.ai_difficulty == lvl {
                                     egui::Color32::WHITE
                                 } else {
                                     egui::Color32::from_rgba_unmultiplied(255, 255, 255, 160)
-                                })
+                                },
+                            ),
                         )
                         .min_size(egui::Vec2::new(32.0, 32.0))
                         .fill(if competitive.ai_difficulty == lvl {
@@ -82,8 +92,8 @@ pub(super) fn render_ai_setup_modal(
                                 accent_color
                             } else {
                                 egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
-                            }
-                        ))
+                            },
+                        )),
                     );
 
                     if response.clicked() {
@@ -96,9 +106,12 @@ pub(super) fn render_ai_setup_modal(
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("{} ELO", elos[competitive.ai_difficulty as usize]))
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(150, 150, 150)),
+                    egui::RichText::new(format!(
+                        "{} ELO",
+                        elos[competitive.ai_difficulty as usize]
+                    ))
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(150, 150, 150)),
                 );
             });
 
@@ -114,24 +127,37 @@ pub(super) fn render_ai_setup_modal(
 
             use crate::game::time_control::TimeControl;
             let tc_presets = [
-                ("∞",   TimeControl::Unlimited),
+                ("∞", TimeControl::Unlimited),
                 ("15s", TimeControl::UltraBullet),
                 ("1+0", TimeControl::Bullet),
                 ("3+0", TimeControl::BlitzThree),
                 ("5+0", TimeControl::Blitz),
-                ("10+0",TimeControl::Rapid),
+                ("10+0", TimeControl::Rapid),
                 ("30m", TimeControl::Classical),
             ];
             ui.horizontal_wrapped(|ui| {
                 for (label, tc) in tc_presets {
                     let selected = competitive.ai_time_control == tc;
                     let btn = egui::Button::new(
-                        egui::RichText::new(label).size(13.0).color(egui::Color32::WHITE),
+                        egui::RichText::new(label)
+                            .size(13.0)
+                            .color(egui::Color32::WHITE),
                     )
                     .min_size(egui::Vec2::new(44.0, 28.0))
                     .corner_radius(4.0)
-                    .fill(if selected { accent_color } else { egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5) })
-                    .stroke(egui::Stroke::new(1.0, if selected { accent_color } else { egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10) }));
+                    .fill(if selected {
+                        accent_color
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
+                    })
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        if selected {
+                            accent_color
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                        },
+                    ));
                     if ui.add(btn).clicked() {
                         competitive.ai_time_control = tc;
                     }
@@ -152,7 +178,10 @@ pub(super) fn render_ai_setup_modal(
             ui.horizontal(|ui| {
                 for (label, engine) in [
                     ("Stockfish", crate::game::ai::resource::AIEngine::Stockfish),
-                    ("XFChessEngine", crate::game::ai::resource::AIEngine::XFChessEngine),
+                    (
+                        "XFChessEngine",
+                        crate::game::ai::resource::AIEngine::XFChessEngine,
+                    ),
                 ] {
                     let selected = competitive.ai_engine == engine;
                     let btn = egui::Button::new(egui::RichText::new(label).size(13.0))
@@ -230,8 +259,12 @@ pub(super) fn render_ai_setup_modal(
                 .min_size(egui::Vec2::new(ui.available_width() * 0.8, 44.0));
 
                 if ui.add(start_btn).clicked() {
-                    info!("[MENU] AI setup modal - START GAME clicked with side: {:?}", competitive.ai_side);
-                    ai_config.difficulty = crate::game::ai::resource::AIDifficulty::from_u8(competitive.ai_difficulty);
+                    info!(
+                        "[MENU] AI setup modal - START GAME clicked with side: {:?}",
+                        competitive.ai_side
+                    );
+                    ai_config.difficulty =
+                        crate::game::ai::resource::AIDifficulty::from_u8(competitive.ai_difficulty);
                     ai_config.mode = GameMode::VsAI {
                         ai_color: match competitive.ai_side {
                             AISide::Black => crate::rendering::pieces::PieceColor::White,
@@ -269,8 +302,18 @@ pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut Compe
             ui.horizontal(|ui| {
                 ui.label(TextStyle::popup_title("CONTROLS"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("✕").size(12.0).color(UiColors::TEXT_POPUP_BODY))
-                        .fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("✕")
+                                    .size(12.0)
+                                    .color(UiColors::TEXT_POPUP_BODY),
+                            )
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
+                        )
+                        .clicked()
+                    {
                         competitive.show_controls_popup = false;
                     }
                 });

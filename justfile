@@ -273,11 +273,11 @@ dev2: kill build build-wallet-ui build-admin-ui build-web-ui
      Set-Content -Path "$root\tmp\dev2-backend.ps1"   -Value "Set-Location '$root\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:HOST_TREASURY_PUBKEY='{{HOST_TREASURY_PUBKEY}}'; `$env:ADMIN_API_KEY='{{ADMIN_API_KEY}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-wallet-p1.ps1" -Value "Set-Location '$root\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-tauri-p1.ps1"  -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-game-p1.ps1"   -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-game-p1.ps1"   -Value "$env_common; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p1'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-web.ps1"        -Value "Set-Location '$root\web-solana'; npm run dev" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7464'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p2'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
      $hasWT = Get-Command wt -ErrorAction SilentlyContinue; \
      if ($hasWT) { \
          Write-Host "[ P1 ] Opening Player 1 window..." -ForegroundColor Cyan; \

@@ -6,11 +6,11 @@ use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use futures_lite::future;
 use serde::Deserialize;
 
- fn auth_base_url() -> String {
-     std::env::var("SIGNING_SERVICE_URL")
-         .or_else(|_| std::env::var("BACKEND_URL"))
-         .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string())
- }
+fn auth_base_url() -> String {
+    std::env::var("SIGNING_SERVICE_URL")
+        .or_else(|_| std::env::var("BACKEND_URL"))
+        .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string())
+}
 
 // --- Resources ---
 
@@ -49,7 +49,11 @@ pub struct AuthTask(Task<Result<AuthTaskResult, String>>);
 #[derive(Debug)]
 enum AuthTaskResult {
     Auth(AuthResponse),
-    WalletCheck { pubkey: String, registered: bool, has_kyc: bool },
+    WalletCheck {
+        pubkey: String,
+        registered: bool,
+        has_kyc: bool,
+    },
 }
 
 // --- API Types ---
@@ -193,7 +197,9 @@ fn auth_ui_system(
                     let font_size = 18.0;
 
                     // Show username field for Register or WalletRegister modes
-                    if auth_state.mode == AuthMode::Register || auth_state.mode == AuthMode::WalletRegister {
+                    if auth_state.mode == AuthMode::Register
+                        || auth_state.mode == AuthMode::WalletRegister
+                    {
                         ui.add_sized(
                             [container_width, input_height],
                             egui::TextEdit::singleline(&mut auth_state.username)
@@ -310,9 +316,19 @@ fn auth_ui_system(
 
                     // Login with Wallet (New Option) - only show in Login mode
                     if auth_state.mode == AuthMode::Login {
-                        if ui.add_sized([200.0, 40.0], egui::Button::new(
-                            egui::RichText::new("LOGIN WITH WALLET").strong().color(egui::Color32::WHITE)
-                        ).fill(egui::Color32::from_rgb(50, 50, 60)).corner_radius(8.0)).clicked() {
+                        if ui
+                            .add_sized(
+                                [200.0, 40.0],
+                                egui::Button::new(
+                                    egui::RichText::new("LOGIN WITH WALLET")
+                                        .strong()
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(50, 50, 60))
+                                .corner_radius(8.0),
+                            )
+                            .clicked()
+                        {
                             perform_wallet_connect(&mut auth_state, &mut commands);
                         }
                     }
@@ -401,11 +417,16 @@ pub fn perform_auth(auth_state: &mut ResMut<AuthState>, commands: &mut Commands)
         match res {
             Ok(response) => {
                 if response.status().is_success() {
-                    let ct = response.headers().get("content-type")
+                    let ct = response
+                        .headers()
+                        .get("content-type")
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("");
                     if ct.contains("application/json") {
-                        response.json::<AuthResponse>().map_err(|e| e.to_string()).map(|r| AuthTaskResult::Auth(r))
+                        response
+                            .json::<AuthResponse>()
+                            .map_err(|e| e.to_string())
+                            .map(|r| AuthTaskResult::Auth(r))
                     } else {
                         let text = response.text().unwrap_or_default();
                         Err(format!("Auth returned non-JSON response: {}", text))
@@ -448,13 +469,18 @@ pub fn perform_wallet_connect(auth_state: &mut ResMut<AuthState>, commands: &mut
             {
                 pubkey = crate::multiplayer::solana::integration::systems::query_wallet_pubkey_from_tauri();
             }
-            if pubkey.is_some() { break; }
+            if pubkey.is_some() {
+                break;
+            }
         }
 
         let pubkey = match pubkey {
             Some(pk) => pk,
             None => {
-                let _ = tx.send(Err("Wallet not connected. Please connect your wallet in the popup window.".to_string()));
+                let _ = tx.send(Err(
+                    "Wallet not connected. Please connect your wallet in the popup window."
+                        .to_string(),
+                ));
                 return;
             }
         };
@@ -475,12 +501,17 @@ pub fn perform_wallet_connect(auth_state: &mut ResMut<AuthState>, commands: &mut
             .map(|s| s.can_wager)
             .unwrap_or(false);
 
-        let _ = tx.send(Ok(AuthTaskResult::WalletCheck { pubkey, registered: is_registered, has_kyc: can_wager }));
+        let _ = tx.send(Ok(AuthTaskResult::WalletCheck {
+            pubkey,
+            registered: is_registered,
+            has_kyc: can_wager,
+        }));
     });
 
     // Wrap the channel in an async task so the rest of the auth pipeline (AuthTask polling) still works
     let task = thread_pool.spawn(async move {
-        rx.recv().unwrap_or_else(|_| Err("Wallet check thread dropped unexpectedly".to_string()))
+        rx.recv()
+            .unwrap_or_else(|_| Err("Wallet check thread dropped unexpectedly".to_string()))
     });
 
     commands.insert_resource(AuthTask(task));
@@ -501,9 +532,9 @@ pub fn perform_wallet_register(auth_state: &mut ResMut<AuthState>, commands: &mu
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let _msg = format!("xfchess:register:{}", timestamp);
-        
+
         #[cfg(feature = "solana")]
         let sig_result = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&_msg);
         #[cfg(not(feature = "solana"))]
@@ -529,18 +560,27 @@ pub fn perform_wallet_register(auth_state: &mut ResMut<AuthState>, commands: &mu
         match res {
             Ok(response) => {
                 if response.status().is_success() {
-                    let ct = response.headers().get("content-type")
+                    let ct = response
+                        .headers()
+                        .get("content-type")
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("");
                     if ct.contains("application/json") {
-                        response.json::<AuthResponse>().map_err(|e| e.to_string()).map(|r| AuthTaskResult::Auth(r))
+                        response
+                            .json::<AuthResponse>()
+                            .map_err(|e| e.to_string())
+                            .map(|r| AuthTaskResult::Auth(r))
                     } else {
-                        let text = response.text().unwrap_or_else(|e| format!("[failed to read response: {}]", e));
+                        let text = response
+                            .text()
+                            .unwrap_or_else(|e| format!("[failed to read response: {}]", e));
                         Err(format!("Register returned non-JSON response: {}", text))
                     }
                 } else {
                     let status = response.status();
-                    let text = response.text().unwrap_or_else(|e| format!("[failed to read response: {}]", e));
+                    let text = response
+                        .text()
+                        .unwrap_or_else(|e| format!("[failed to read response: {}]", e));
                     Err(format!("Register failed ({}): {}", status, text))
                 }
             }
@@ -564,9 +604,9 @@ pub fn perform_wallet_login(auth_state: &mut ResMut<AuthState>, commands: &mut C
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let _msg = format!("xfchess:login:{}", timestamp);
-        
+
         #[cfg(feature = "solana")]
         let sig_result = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(&_msg);
         #[cfg(not(feature = "solana"))]
@@ -590,11 +630,16 @@ pub fn perform_wallet_login(auth_state: &mut ResMut<AuthState>, commands: &mut C
         match res {
             Ok(response) => {
                 if response.status().is_success() {
-                    let ct = response.headers().get("content-type")
+                    let ct = response
+                        .headers()
+                        .get("content-type")
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("");
                     if ct.contains("application/json") {
-                        response.json::<AuthResponse>().map_err(|e| e.to_string()).map(|r| AuthTaskResult::Auth(r))
+                        response
+                            .json::<AuthResponse>()
+                            .map_err(|e| e.to_string())
+                            .map(|r| AuthTaskResult::Auth(r))
                     } else {
                         let text = response.text().unwrap_or_default();
                         Err(format!("Login returned non-JSON response: {}", text))
@@ -633,11 +678,15 @@ fn handle_auth_task(
                         identity.username = Some(response.username.clone());
                     }
                     info!("Authenticated as: {}", response.username);
-                    
+
                     // After successful auth, show the "Complete Profile" consent modal
                     consent_state.show = true;
                 }
-                Ok(AuthTaskResult::WalletCheck { pubkey, registered, has_kyc }) => {
+                Ok(AuthTaskResult::WalletCheck {
+                    pubkey,
+                    registered,
+                    has_kyc,
+                }) => {
                     auth_state.wallet_pubkey = Some(pubkey.clone());
                     auth_state.wallet_connected = true;
                     if registered {
@@ -757,7 +806,7 @@ pub fn render_profile_consent_modal(
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    
+
     egui::Window::new("Complete Profile")
         .id(egui::Id::new("profile_consent_modal"))
         .collapsible(false)

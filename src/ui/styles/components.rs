@@ -42,7 +42,10 @@ impl ModernButton {
     pub fn primary(ui: &mut egui::Ui, text: &str) -> egui::Response {
         let button = egui::Button::new(text)
             .fill(egui::Color32::from_rgba_premultiplied(40, 40, 45, 200))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(218, 165, 32)));
+            .stroke(egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgb(218, 165, 32),
+            ));
         ui.add(button)
     }
 
@@ -50,7 +53,10 @@ impl ModernButton {
     pub fn secondary(ui: &mut egui::Ui, text: &str) -> egui::Response {
         let button = egui::Button::new(text)
             .fill(egui::Color32::from_rgba_premultiplied(30, 30, 35, 180))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 105)));
+            .stroke(egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgb(100, 100, 105),
+            ));
         ui.add(button)
     }
 }

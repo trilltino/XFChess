@@ -10,7 +10,7 @@ use solana_sdk::{
 use std::fs;
 use std::path::Path;
 
-use crate::{CHILD_FUNDING_AMOUNT, CHILDREN_KEYPAIR_PATH, MASTER_KEYPAIR_PATH, MASTER_MIN_BALANCE};
+use crate::{CHILDREN_KEYPAIR_PATH, CHILD_FUNDING_AMOUNT, MASTER_KEYPAIR_PATH, MASTER_MIN_BALANCE};
 
 /// Load the master keypair from disk or generate a new one.
 pub fn load_or_generate_master_keypair() -> anyhow::Result<Keypair> {
@@ -47,14 +47,23 @@ pub fn generate_child_keypairs(count: usize) -> Vec<Keypair> {
     if path.exists() {
         if let Ok(data) = fs::read_to_string(path) {
             if let Ok(arr) = serde_json::from_str::<Vec<Vec<u8>>>(&data) {
-                let keypairs: Vec<Keypair> = arr.iter()
+                let keypairs: Vec<Keypair> = arr
+                    .iter()
                     .filter_map(|b| Keypair::from_bytes(b).ok())
                     .collect();
                 if keypairs.len() == count {
-                    println!("   Loaded {} existing child keypairs from {}", count, path.display());
+                    println!(
+                        "   Loaded {} existing child keypairs from {}",
+                        count,
+                        path.display()
+                    );
                     return keypairs;
                 }
-                println!("   Found {} saved child keypairs but need {}. Regenerating...", keypairs.len(), count);
+                println!(
+                    "   Found {} saved child keypairs but need {}. Regenerating...",
+                    keypairs.len(),
+                    count
+                );
             }
         }
     }
@@ -64,7 +73,11 @@ pub fn generate_child_keypairs(count: usize) -> Vec<Keypair> {
     let bytes_arr: Vec<Vec<u8>> = keypairs.iter().map(|k| k.to_bytes().to_vec()).collect();
     if let Ok(json) = serde_json::to_string(&bytes_arr) {
         let _ = fs::write(path, json);
-        println!("   Generated and saved {} child keypairs to {}", count, path.display());
+        println!(
+            "   Generated and saved {} child keypairs to {}",
+            count,
+            path.display()
+        );
     }
 
     keypairs
@@ -89,11 +102,8 @@ pub async fn fund_children(
     }
 
     for (i, child) in children.iter().enumerate() {
-        let ix = system_instruction::transfer(
-            &master.pubkey(),
-            &child.pubkey(),
-            CHILD_FUNDING_AMOUNT,
-        );
+        let ix =
+            system_instruction::transfer(&master.pubkey(), &child.pubkey(), CHILD_FUNDING_AMOUNT);
         let recent_blockhash = rpc.get_latest_blockhash()?;
         let tx = Transaction::new_signed_with_payer(
             &[ix],

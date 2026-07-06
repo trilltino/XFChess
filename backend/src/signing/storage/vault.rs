@@ -204,16 +204,18 @@ impl VaultStore {
     /// Appends an entry to the audit log. Best-effort — failures are logged.
     pub async fn write_audit(&self, pubkey: &str, action: &str) {
         let now = chrono::Utc::now().timestamp();
-        if let Err(e) = sqlx::query(
-            "INSERT INTO audit_log (pubkey, action, timestamp) VALUES (?1, ?2, ?3)",
-        )
-        .bind(pubkey)
-        .bind(action)
-        .bind(now)
-        .execute(&self.pool)
-        .await
+        if let Err(e) =
+            sqlx::query("INSERT INTO audit_log (pubkey, action, timestamp) VALUES (?1, ?2, ?3)")
+                .bind(pubkey)
+                .bind(action)
+                .bind(now)
+                .execute(&self.pool)
+                .await
         {
-            warn!("[vault] audit log write failed for {}/{}: {}", pubkey, action, e);
+            warn!(
+                "[vault] audit log write failed for {}/{}: {}",
+                pubkey, action, e
+            );
         }
     }
 
@@ -258,15 +260,14 @@ impl VaultStore {
     /// Returns the persisted CACF status string for a (wallet, country) pair,
     /// or `None` if no record exists yet.
     pub async fn load_cacf_status(&self, wallet: &str, country: &str) -> Option<String> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT status FROM cacf_compliance WHERE wallet = ?1 AND country = ?2",
-        )
-        .bind(wallet)
-        .bind(country)
-        .fetch_optional(&self.pool)
-        .await
-        .ok()
-        .flatten();
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT status FROM cacf_compliance WHERE wallet = ?1 AND country = ?2")
+                .bind(wallet)
+                .bind(country)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
         row.map(|(s,)| s)
     }
 

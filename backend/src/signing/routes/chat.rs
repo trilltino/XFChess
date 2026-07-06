@@ -54,8 +54,7 @@ pub struct ChatMessageReq {
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 pub fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/game/{game_id}/chat", get(get_chat).put(put_chat))
+    Router::new().route("/game/{game_id}/chat", get(get_chat).put(put_chat))
 }
 
 // ── GET /game/:game_id/chat ───────────────────────────────────────────────────
@@ -147,8 +146,8 @@ async fn put_chat(
 ) -> StatusCode {
     // Verify the claimed player holds an active session on this backend.
     {
-        use std::str::FromStr;
         use solana_sdk::signer::Signer as _;
+        use std::str::FromStr;
         let Ok(wallet) = solana_sdk::pubkey::Pubkey::from_str(&req.player) else {
             return StatusCode::BAD_REQUEST;
         };
@@ -190,15 +189,23 @@ async fn put_chat(
         let sender = map
             .entry(game_id.clone())
             .or_insert_with(|| broadcast::channel(CHAT_BROADCAST_CAP).0);
-        let update = BraidUpdate::snapshot(req.timestamp_ms, serde_json::json!({
-            "type": "chat",
-            "player": req.player,
-            "text": text,
-            "timestamp_ms": req.timestamp_ms,
-        }));
+        let update = BraidUpdate::snapshot(
+            req.timestamp_ms,
+            serde_json::json!({
+                "type": "chat",
+                "player": req.player,
+                "text": text,
+                "timestamp_ms": req.timestamp_ms,
+            }),
+        );
         let _ = sender.send(update);
     }
 
-    info!("[chat] {} → game {}: {:?}", req.player, game_id, &text[..text.len().min(40)]);
+    info!(
+        "[chat] {} → game {}: {:?}",
+        req.player,
+        game_id,
+        &text[..text.len().min(40)]
+    );
     StatusCode::OK
 }

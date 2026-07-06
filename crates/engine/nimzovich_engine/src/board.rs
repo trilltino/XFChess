@@ -169,15 +169,11 @@ pub fn update_bitboards(game: &mut Game, square: usize, piece: i8) {
 #[inline]
 pub fn has_non_pawn_material(game: &Game, color: Color) -> bool {
     if color > 0 {
-        (game.white_knights.0
-            | game.white_bishops.0
-            | game.white_rooks.0
-            | game.white_queens.0) != 0
+        (game.white_knights.0 | game.white_bishops.0 | game.white_rooks.0 | game.white_queens.0)
+            != 0
     } else {
-        (game.black_knights.0
-            | game.black_bishops.0
-            | game.black_rooks.0
-            | game.black_queens.0) != 0
+        (game.black_knights.0 | game.black_bishops.0 | game.black_rooks.0 | game.black_queens.0)
+            != 0
     }
 }
 
@@ -254,12 +250,12 @@ mod tests {
         // White pieces on first rank
         assert_eq!(get_piece_at(&board, 0), W_ROOK); // a1
         assert_eq!(get_piece_at(&board, 3), W_QUEEN); // d1
-        assert_eq!(get_piece_at(&board, 4), W_KING);  // e1
+        assert_eq!(get_piece_at(&board, 4), W_KING); // e1
 
         // Black pieces on eighth rank
         assert_eq!(get_piece_at(&board, 56), B_ROOK); // a8
         assert_eq!(get_piece_at(&board, 59), B_QUEEN); // d8
-        assert_eq!(get_piece_at(&board, 60), B_KING);  // e8
+        assert_eq!(get_piece_at(&board, 60), B_KING); // e8
 
         // Empty squares in the middle
         assert_eq!(get_piece_at(&board, 28), 0); // e4
@@ -316,8 +312,8 @@ mod tests {
 
         // Verify piece positions (Standard Chess: d-file = Queen, e-file = King)
         assert_eq!(board[3], W_QUEEN, "White queen should be on d1");
-        assert_eq!(board[4], W_KING,  "White king should be on e1");
+        assert_eq!(board[4], W_KING, "White king should be on e1");
         assert_eq!(board[59], B_QUEEN, "Black queen should be on d8");
-        assert_eq!(board[60], B_KING,  "Black king should be on e8");
+        assert_eq!(board[60], B_KING, "Black king should be on e8");
     }
 }

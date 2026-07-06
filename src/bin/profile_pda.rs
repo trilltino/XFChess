@@ -9,8 +9,7 @@ fn main() {
         .nth(1)
         .expect("Usage: profile_pda <wallet_pubkey>");
 
-    let wallet_pubkey = Pubkey::from_str(&wallet_arg)
-        .expect("Invalid wallet public key");
+    let wallet_pubkey = Pubkey::from_str(&wallet_arg).expect("Invalid wallet public key");
 
     let program_id = Pubkey::from_str(PROGRAM_ID).unwrap();
 
@@ -23,7 +22,10 @@ fn main() {
     println!("Profile PDA   : {} (bump {})", profile_pda, profile_bump);
     println!();
     println!("Solscan (devnet):");
-    println!("  https://solscan.io/account/{}?cluster=devnet", profile_pda);
+    println!(
+        "  https://solscan.io/account/{}?cluster=devnet",
+        profile_pda
+    );
     println!();
     println!("MagicBlock Explorer:");
     println!("  https://explorer.magicblock.app/account/{}", profile_pda);

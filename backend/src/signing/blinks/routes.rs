@@ -16,21 +16,14 @@ use tracing::info;
 
 use crate::signing::blinks::{Action, ActionLinks};
 use crate::signing::{
-    AppState,
+    blinks::chains::{create_onboarding_chain, create_registration_chain, ActionChain},
     blinks::core::{
-        ActionMetadata,
-        RegisterTransactionRequest,
-        TransactionResponse,
-        ValidationResult,
-        BalanceResult,
-        get_action_metadata,
-        build_register_transaction,
-        build_claim_prize_transaction,
-        build_start_tournament_transactions,
-        validate_registration,
-        check_wallet_balance,
+        build_claim_prize_transaction, build_register_transaction,
+        build_start_tournament_transactions, check_wallet_balance, get_action_metadata,
+        validate_registration, ActionMetadata, BalanceResult, RegisterTransactionRequest,
+        TransactionResponse, ValidationResult,
     },
-    blinks::chains::{ActionChain, create_registration_chain, create_onboarding_chain},
+    AppState,
 };
 use serde::Deserialize;
 
@@ -39,13 +32,28 @@ pub fn blinks_routes() -> Router<AppState> {
     Router::new()
         .route("/tournament/{id}", get(get_tournament_action))
         .route("/tournament/{id}/register", post(register_transaction))
-        .route("/tournament/{id}/register/confirm", post(confirm_registration))
+        .route(
+            "/tournament/{id}/register/confirm",
+            post(confirm_registration),
+        )
         .route("/tournament/{id}/check-balance", get(check_balance))
-        .route("/tournament/{id}/validate", post(validate_registration_endpoint))
+        .route(
+            "/tournament/{id}/validate",
+            post(validate_registration_endpoint),
+        )
         .route("/tournament/{id}/claim-prize", get(get_claim_prize_action))
-        .route("/tournament/{id}/claim-prize", post(claim_prize_transaction))
-        .route("/tournament/{id}/chain/registration", get(get_registration_chain))
-        .route("/tournament/{id}/chain/onboarding", get(get_onboarding_chain))
+        .route(
+            "/tournament/{id}/claim-prize",
+            post(claim_prize_transaction),
+        )
+        .route(
+            "/tournament/{id}/chain/registration",
+            get(get_registration_chain),
+        )
+        .route(
+            "/tournament/{id}/chain/onboarding",
+            get(get_onboarding_chain),
+        )
         // Admin-only — requires X-API-Key header (enforced by the admin middleware)
         .route("/admin/tournament/{id}/start", post(start_tournament))
 }
@@ -78,8 +86,8 @@ async fn register_transaction(
     State(state): State<AppState>,
     Json(req): Json<RegisterTransactionRequest>,
 ) -> Result<Json<TransactionResponse>, StatusCode> {
-    let wallet_pubkey = solana_sdk::pubkey::Pubkey::from_str(&req.account)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let wallet_pubkey =
+        solana_sdk::pubkey::Pubkey::from_str(&req.account).map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let program_id = std::str::FromStr::from_str(&state.config.program_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -97,7 +105,10 @@ async fn register_transaction(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    info!("[blinks] Built registration transaction for tournament {} wallet {}", id, req.account);
+    info!(
+        "[blinks] Built registration transaction for tournament {} wallet {}",
+        id, req.account
+    );
 
     Ok(Json(tx_response))
 }
@@ -111,8 +122,8 @@ async fn check_balance(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<BalanceResult>, StatusCode> {
     let wallet_str = params.get("wallet").ok_or(StatusCode::BAD_REQUEST)?;
-    let wallet_pubkey = solana_sdk::pubkey::Pubkey::from_str(wallet_str)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let wallet_pubkey =
+        solana_sdk::pubkey::Pubkey::from_str(wallet_str).map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let balance = check_wallet_balance(&wallet_pubkey, id, &state.tournament_store)
         .await
@@ -132,14 +143,16 @@ async fn validate_registration_endpoint(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<ValidationResult>, StatusCode> {
-    let wallet_str = body.get("account")
+    let wallet_str = body
+        .get("account")
         .and_then(|v| v.as_str())
         .ok_or(StatusCode::BAD_REQUEST)?;
 
-    let wallet_pubkey = solana_sdk::pubkey::Pubkey::from_str(wallet_str)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let wallet_pubkey =
+        solana_sdk::pubkey::Pubkey::from_str(wallet_str).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    let ip_address = body.get("ip_address")
+    let ip_address = body
+        .get("ip_address")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
@@ -157,8 +170,10 @@ async fn validate_registration_endpoint(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    info!("[blinks] Validation for tournament {} wallet {}: valid={}",
-        id, wallet_str, validation.valid);
+    info!(
+        "[blinks] Validation for tournament {} wallet {}: valid={}",
+        id, wallet_str, validation.valid
+    );
 
     Ok(Json(validation))
 }
@@ -173,7 +188,10 @@ async fn get_registration_chain(
 ) -> Result<Json<ActionChain>, StatusCode> {
     let wallet = params.get("wallet").map(|s| s.clone());
 
-    let tournament = state.tournament_store.get(id).await
+    let tournament = state
+        .tournament_store
+        .get(id)
+        .await
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let required_sol = tournament.entry_fee_lamports as f64 / 1_000_000_000.0;
@@ -198,7 +216,10 @@ async fn get_onboarding_chain(
 ) -> Result<Json<ActionChain>, StatusCode> {
     let wallet = params.get("wallet").map(|s| s.clone());
 
-    let tournament = state.tournament_store.get(id).await
+    let tournament = state
+        .tournament_store
+        .get(id)
+        .await
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let required_sol = tournament.entry_fee_lamports as f64 / 1_000_000_000.0;
@@ -218,19 +239,29 @@ async fn get_claim_prize_action(
 ) -> Result<Json<ActionMetadata>, StatusCode> {
     use crate::signing::storage::tournament::TournamentStatus;
 
-    let tournament = state.tournament_store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let tournament = state
+        .tournament_store
+        .get(id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     if tournament.status != TournamentStatus::Completed {
         return Err(StatusCode::CONFLICT);
     }
 
-    let _wallet = params.get("wallet").map(|s| s.as_str()).unwrap_or("unknown");
+    let _wallet = params
+        .get("wallet")
+        .map(|s| s.as_str())
+        .unwrap_or("unknown");
     let prize_sol = tournament.prize_pool as f64 / 1_000_000_000.0;
 
     Ok(Json(ActionMetadata {
         icon: "https://xfchess.com/logo.png".to_string(),
         title: format!("Claim Prize — {}", tournament.name),
-        description: format!("You placed in this tournament. Claim your share of the {:.4} SOL prize pool.", prize_sol),
+        description: format!(
+            "You placed in this tournament. Claim your share of the {:.4} SOL prize pool.",
+            prize_sol
+        ),
         label: "Claim Prize".to_string(),
         links: ActionLinks {
             actions: vec![Action {
@@ -249,8 +280,8 @@ async fn claim_prize_transaction(
     State(state): State<AppState>,
     Json(req): Json<RegisterTransactionRequest>,
 ) -> Result<Json<TransactionResponse>, StatusCode> {
-    let claimant = solana_sdk::pubkey::Pubkey::from_str(&req.account)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let claimant =
+        solana_sdk::pubkey::Pubkey::from_str(&req.account).map_err(|_| StatusCode::BAD_REQUEST)?;
     let program_id = std::str::FromStr::from_str(&state.config.program_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -263,11 +294,19 @@ async fn claim_prize_transaction(
     )
     .await
     .map_err(|e| {
-        tracing::error!("[blinks] claim_prize failed for tournament {} wallet {}: {:?}", id, req.account, e);
+        tracing::error!(
+            "[blinks] claim_prize failed for tournament {} wallet {}: {:?}",
+            id,
+            req.account,
+            e
+        );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    info!("[blinks] Built claim_prize transaction for tournament {} wallet {}", id, req.account);
+    info!(
+        "[blinks] Built claim_prize transaction for tournament {} wallet {}",
+        id, req.account
+    );
     Ok(Json(tx_response))
 }
 
@@ -281,7 +320,11 @@ async fn start_tournament(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     use crate::signing::storage::tournament::TournamentStatus;
 
-    let tournament = state.tournament_store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let tournament = state
+        .tournament_store
+        .get(id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
     if tournament.status != TournamentStatus::Registration {
         return Err(StatusCode::CONFLICT);
     }
@@ -298,12 +341,22 @@ async fn start_tournament(
     )
     .await
     .map_err(|e| {
-        tracing::error!("[blinks] build_start_tournament_transactions failed for {}: {:?}", id, e);
+        tracing::error!(
+            "[blinks] build_start_tournament_transactions failed for {}: {:?}",
+            id,
+            e
+        );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    info!("[blinks] start_tournament broadcast {} txs for tournament {}", txs.len(), id);
-    Ok(Json(serde_json::json!({ "ok": true, "tx_count": txs.len(), "transactions": txs })))
+    info!(
+        "[blinks] start_tournament broadcast {} txs for tournament {}",
+        txs.len(),
+        id
+    );
+    Ok(Json(
+        serde_json::json!({ "ok": true, "tx_count": txs.len(), "transactions": txs }),
+    ))
 }
 
 /// POST /api/actions/tournament/:id/register/confirm
@@ -320,13 +373,17 @@ async fn confirm_registration(
     use std::str::FromStr;
 
     let sig = Signature::from_str(&req.signature).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let player = solana_sdk::pubkey::Pubkey::from_str(&req.account)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let player =
+        solana_sdk::pubkey::Pubkey::from_str(&req.account).map_err(|_| StatusCode::BAD_REQUEST)?;
 
     // Confirm the tournament exists and is open for registration.
     {
         use crate::signing::storage::tournament::TournamentStatus;
-        let t = state.tournament_store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+        let t = state
+            .tournament_store
+            .get(id)
+            .await
+            .ok_or(StatusCode::NOT_FOUND)?;
         if t.status != TournamentStatus::Registration {
             return Err(StatusCode::CONFLICT);
         }
@@ -339,10 +396,7 @@ async fn confirm_registration(
         use solana_sdk::commitment_config::CommitmentConfig;
         let rpc = make_rpc(&rpc_url);
         for _ in 0..30 {
-            match rpc.get_signature_status_with_commitment(
-                &sig,
-                CommitmentConfig::confirmed(),
-            ) {
+            match rpc.get_signature_status_with_commitment(&sig, CommitmentConfig::confirmed()) {
                 Ok(Some(Ok(()))) => return true,
                 Ok(Some(Err(_))) => return false,
                 _ => {}
@@ -362,27 +416,40 @@ async fn confirm_registration(
     }
 
     // Add the player to the store (idempotent — no-op if already present).
-    state.tournament_store.update(id, |t| {
-        if !t.players.iter().any(|p| p == &player.to_string()) {
-            t.players.push(player.to_string());
-            t.player_elos.push(0);
-            t.prize_pool += t.entry_fee_lamports.saturating_sub(t.platform_fee_lamports);
-        }
-    }).await;
+    state
+        .tournament_store
+        .update(id, |t| {
+            if !t.players.iter().any(|p| p == &player.to_string()) {
+                t.players.push(player.to_string());
+                t.player_elos.push(0);
+                t.prize_pool += t.entry_fee_lamports.saturating_sub(t.platform_fee_lamports);
+            }
+        })
+        .await;
 
     // Notify the scheduler that a player joined.
-    let player_count = state.tournament_store.get(id).await
+    let player_count = state
+        .tournament_store
+        .get(id)
+        .await
         .map(|t| t.players.len())
         .unwrap_or(0);
     if let Some(tx) = &state.tournament_trigger {
-        let _ = tx.send(crate::signing::TournamentTrigger::PlayerJoined {
-            tournament_id: id,
-            player_count,
-        }).await;
+        let _ = tx
+            .send(crate::signing::TournamentTrigger::PlayerJoined {
+                tournament_id: id,
+                player_count,
+            })
+            .await;
     }
 
-    info!("[blinks] Registration confirmed for tournament {} player {} ({} total)", id, player, player_count);
-    Ok(Json(serde_json::json!({ "ok": true, "player_count": player_count })))
+    info!(
+        "[blinks] Registration confirmed for tournament {} player {} ({} total)",
+        id, player, player_count
+    );
+    Ok(Json(
+        serde_json::json!({ "ok": true, "player_count": player_count }),
+    ))
 }
 
 #[cfg(test)]

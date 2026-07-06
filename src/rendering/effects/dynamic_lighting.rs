@@ -50,12 +50,19 @@ fn spawn_orbital_lights(mut commands: Commands, settings: Res<GameSettings>) {
     }
 
     let quality_cap = DynamicLightingSettings::quality_cap(settings.graphics_quality);
-    let light_count = settings.dynamic_lighting.light_count.min(quality_cap).clamp(1, 6) as usize;
+    let light_count = settings
+        .dynamic_lighting
+        .light_count
+        .min(quality_cap)
+        .clamp(1, 6) as usize;
     let radius = settings.dynamic_lighting.orbital_radius;
     let height = settings.dynamic_lighting.orbital_height;
     let shadows_enabled = settings.dynamic_lighting.shadows_enabled;
 
-    info!("[DYNAMIC_LIGHTING] Spawning {} orbital lights (quality cap: {})", light_count, quality_cap);
+    info!(
+        "[DYNAMIC_LIGHTING] Spawning {} orbital lights (quality cap: {})",
+        light_count, quality_cap
+    );
 
     for i in 0..light_count {
         // Calculate initial angular position
@@ -139,7 +146,11 @@ fn sync_light_count(
     }
 
     let quality_cap = DynamicLightingSettings::quality_cap(settings.graphics_quality);
-    let target_count = settings.dynamic_lighting.light_count.min(quality_cap).clamp(1, 6) as usize;
+    let target_count = settings
+        .dynamic_lighting
+        .light_count
+        .min(quality_cap)
+        .clamp(1, 6) as usize;
     let current_count = query.iter().count();
 
     if current_count == target_count {

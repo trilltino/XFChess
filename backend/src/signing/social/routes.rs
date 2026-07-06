@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::signing::AppState;
 use super::friends::{Contact, FriendRequest};
 use super::presence::{Presence, PresenceStatus};
+use crate::signing::AppState;
 
 // ── Request / response DTOs ─────────────────────────────────────────────────
 
@@ -80,26 +80,38 @@ struct ErrorBody {
 type InviteStore = Arc<RwLock<HashMap<String, Vec<LobbyInvite>>>>;
 
 fn err(msg: impl Into<String>) -> (StatusCode, Json<ErrorBody>) {
-    (StatusCode::BAD_REQUEST, Json(ErrorBody { error: msg.into() }))
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorBody { error: msg.into() }),
+    )
 }
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
 pub fn social_routes(invite_store: InviteStore) -> Router<AppState> {
     Router::new()
-        .route("/friends/requests",     post(send_friend_request).get(list_pending_requests))
+        .route(
+            "/friends/requests",
+            post(send_friend_request).get(list_pending_requests),
+        )
         .route("/friends/requests/{id}", put(respond_friend_request))
-        .route("/friends",              get(list_friends))
+        .route("/friends", get(list_friends))
         .route("/friends/{contact_id}", delete(remove_friend))
-        .route("/presence",             get(get_presence).put(update_presence))
-        .route("/friends/invite",       post({
-            let store = invite_store.clone();
-            move |state, body| push_lobby_invite(state, body, store)
-        }))
-        .route("/social/poll",          get({
-            let store = invite_store.clone();
-            move |state, query| poll_social(state, query, store)
-        }))
+        .route("/presence", get(get_presence).put(update_presence))
+        .route(
+            "/friends/invite",
+            post({
+                let store = invite_store.clone();
+                move |state, body| push_lobby_invite(state, body, store)
+            }),
+        )
+        .route(
+            "/social/poll",
+            get({
+                let store = invite_store.clone();
+                move |state, query| poll_social(state, query, store)
+            }),
+        )
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -108,22 +120,31 @@ async fn send_friend_request(
     State(state): State<AppState>,
     Json(body): Json<SendFriendRequestBody>,
 ) -> Result<Json<FriendRequest>, (StatusCode, Json<ErrorBody>)> {
-    state.friends.send_request(
-        body.from_node_id,
-        body.from_pubkey,
-        body.from_display,
-        body.to_node_id,
-        body.to_pubkey,
-        body.message,
-    ).await.map(Json).map_err(|e| err(e.to_string()))
+    state
+        .friends
+        .send_request(
+            body.from_node_id,
+            body.from_pubkey,
+            body.from_display,
+            body.to_node_id,
+            body.to_pubkey,
+            body.message,
+        )
+        .await
+        .map(Json)
+        .map_err(|e| err(e.to_string()))
 }
 
 async fn list_pending_requests(
     State(state): State<AppState>,
     Query(q): Query<FriendQuery>,
 ) -> Result<Json<Vec<FriendRequest>>, (StatusCode, Json<ErrorBody>)> {
-    state.friends.get_pending_requests(&q.node_id, q.pubkey.as_deref())
-        .await.map(Json).map_err(|e| err(e.to_string()))
+    state
+        .friends
+        .get_pending_requests(&q.node_id, q.pubkey.as_deref())
+        .await
+        .map(Json)
+        .map_err(|e| err(e.to_string()))
 }
 
 async fn respond_friend_request(
@@ -132,16 +153,23 @@ async fn respond_friend_request(
     Json(body): Json<RespondBody>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
     let accept = body.action == "accept";
-    state.friends.respond_to_request(&request_id, accept, &body.responder_node_id)
-        .await.map(|_| StatusCode::OK).map_err(|e| err(e.to_string()))
+    state
+        .friends
+        .respond_to_request(&request_id, accept, &body.responder_node_id)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(|e| err(e.to_string()))
 }
 
 async fn list_friends(
     State(state): State<AppState>,
     Query(q): Query<FriendQuery>,
 ) -> Result<Json<Vec<Contact>>, (StatusCode, Json<ErrorBody>)> {
-    let mut contacts = state.friends.get_contacts(&q.node_id)
-        .await.map_err(|e| err(e.to_string()))?;
+    let mut contacts = state
+        .friends
+        .get_contacts(&q.node_id)
+        .await
+        .map_err(|e| err(e.to_string()))?;
 
     // Annotate online status from presence store
     for c in &mut contacts {
@@ -158,20 +186,19 @@ async fn remove_friend(
     State(state): State<AppState>,
     Query(q): Query<FriendQuery>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
-    state.friends.remove_contact(&q.node_id, &contact_id)
-        .await.map(|_| StatusCode::OK).map_err(|e| err(e.to_string()))
+    state
+        .friends
+        .remove_contact(&q.node_id, &contact_id)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(|e| err(e.to_string()))
 }
 
-async fn get_presence(
-    State(state): State<AppState>,
-) -> Json<Vec<Presence>> {
+async fn get_presence(State(state): State<AppState>) -> Json<Vec<Presence>> {
     Json(state.presence.get_all_online())
 }
 
-async fn update_presence(
-    State(state): State<AppState>,
-    Json(p): Json<Presence>,
-) -> StatusCode {
+async fn update_presence(State(state): State<AppState>, Json(p): Json<Presence>) -> StatusCode {
     state.presence.upsert(p);
     StatusCode::OK
 }
@@ -187,7 +214,9 @@ async fn push_lobby_invite(
         from_display: body.from_display,
         received_at: Utc::now(),
     };
-    store.write().unwrap()
+    store
+        .write()
+        .unwrap()
         .entry(body.to_node_id)
         .or_default()
         .push(invite);
@@ -204,5 +233,8 @@ async fn poll_social(
     let since = q.since_index.unwrap_or(0);
     let invites = all.get(since..).unwrap_or(&[]).to_vec();
     let next_index = since + invites.len();
-    Json(SocialPollResponse { invites, next_index })
+    Json(SocialPollResponse {
+        invites,
+        next_index,
+    })
 }

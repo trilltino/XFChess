@@ -114,10 +114,8 @@ async fn fetch_sol_lamports(client: &reqwest::Client, pubkey: &str) -> Result<u6
         return Ok(rpc.result.value);
     }
 
-    let rpc: RpcResponse<BalanceResult> = resp
-        .json()
-        .await
-        .map_err(|e| format!("Helius json: {e}"))?;
+    let rpc: RpcResponse<BalanceResult> =
+        resp.json().await.map_err(|e| format!("Helius json: {e}"))?;
     Ok(rpc.result.value)
 }
 
@@ -218,7 +216,9 @@ async fn get_wallet_balance(
     let local_symbol = crate::signing::pyth_oracle::FxRates::symbol(local_currency).to_string();
 
     // Fetch SPL token balances
-    let token_accounts = fetch_token_balances(&client, &pubkey).await.unwrap_or_default();
+    let token_accounts = fetch_token_balances(&client, &pubkey)
+        .await
+        .unwrap_or_default();
 
     let mut usdc_bal = 0.0f64;
     let mut eurc_bal = 0.0f64;
@@ -226,7 +226,14 @@ async fn get_wallet_balance(
 
     for entry in &token_accounts {
         let mint = &entry.account.data.parsed.info.mint;
-        let amount = entry.account.data.parsed.info.token_amount.ui_amount.unwrap_or(0.0);
+        let amount = entry
+            .account
+            .data
+            .parsed
+            .info
+            .token_amount
+            .ui_amount
+            .unwrap_or(0.0);
         if mint == USDC_MINT {
             usdc_bal += amount;
         } else if mint == EURC_MINT {

@@ -4,14 +4,11 @@
 //! [`SessionKeyManager`](crate::multiplayer::solana::session_key_manager::SessionKeyManager)
 //! to key stored sessions by `(wallet, tournament_id)` instead of a global singleton.
 
-use solana_sdk::{
-    instruction::AccountMeta,
-    pubkey::Pubkey,
-    signature::Keypair,
-    transaction::Transaction,
-};
 #[allow(deprecated)]
 use solana_sdk::system_program;
+use solana_sdk::{
+    instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, transaction::Transaction,
+};
 use std::collections::HashMap;
 
 /// PDA seed prefix matching the on-chain constant.
@@ -85,9 +82,7 @@ pub fn build_authorize_tournament_session_ix(
 ) -> solana_sdk::instruction::Instruction {
     // Anchor discriminator for `authorize_tournament_session`
     // sha256("global:authorize_tournament_session")[..8]
-    let discriminator: [u8; 8] = [
-        0x6a, 0x1e, 0xd5, 0x3b, 0x8c, 0x2f, 0x9a, 0xe4,
-    ];
+    let discriminator: [u8; 8] = [0x6a, 0x1e, 0xd5, 0x3b, 0x8c, 0x2f, 0x9a, 0xe4];
 
     let mut data = Vec::with_capacity(256);
     data.extend_from_slice(&discriminator);
@@ -148,12 +143,8 @@ pub fn build_registration_with_session_tx(
         find_tournament_session_pda(program_id, tournament_id, player_pubkey);
 
     // register_player instruction
-    let register_ix = build_register_player_ix(
-        program_id,
-        tournament_id,
-        tournament_pubkey,
-        player_pubkey,
-    );
+    let register_ix =
+        build_register_player_ix(program_id, tournament_id, tournament_pubkey, player_pubkey);
 
     // authorize_tournament_session instruction
     let authorize_ix = build_authorize_tournament_session_ix(
@@ -172,10 +163,7 @@ pub fn build_registration_with_session_tx(
         },
     );
 
-    let tx = Transaction::new_with_payer(
-        &[register_ix, authorize_ix],
-        Some(player_pubkey),
-    );
+    let tx = Transaction::new_with_payer(&[register_ix, authorize_ix], Some(player_pubkey));
     // Note: tx is unsigned; the wallet adapter must sign before sending.
 
     (tx, session_pda)
@@ -189,9 +177,7 @@ fn build_register_player_ix(
     player_pubkey: &Pubkey,
 ) -> solana_sdk::instruction::Instruction {
     // Anchor discriminator for `register_player`
-    let discriminator: [u8; 8] = [
-        0x2e, 0x42, 0x6e, 0x0a, 0x7c, 0x44, 0x0e, 0x9a,
-    ];
+    let discriminator: [u8; 8] = [0x2e, 0x42, 0x6e, 0x0a, 0x7c, 0x44, 0x0e, 0x9a];
 
     let mut data = Vec::with_capacity(16);
     data.extend_from_slice(&discriminator);

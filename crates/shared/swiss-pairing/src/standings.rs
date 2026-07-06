@@ -1,4 +1,4 @@
-use crate::{MatchResult, Pairing, SwissPlayer, SwissRound, StandingsEntry};
+use crate::{MatchResult, Pairing, StandingsEntry, SwissPlayer, SwissRound};
 
 /// Calculate tournament standings
 ///
@@ -45,11 +45,12 @@ pub fn calculate_standings(
     let mut prev_sonneborn = None;
 
     for entry in entries.iter_mut() {
-        let is_tie = if let (Some(ps), Some(pb), Some(pso)) = (prev_score, prev_buchholz, prev_sonneborn) {
-            entry.score == ps && entry.buchholz == pb && entry.sonneborn == pso
-        } else {
-            false
-        };
+        let is_tie =
+            if let (Some(ps), Some(pb), Some(pso)) = (prev_score, prev_buchholz, prev_sonneborn) {
+                entry.score == ps && entry.buchholz == pb && entry.sonneborn == pso
+            } else {
+                false
+            };
 
         if !is_tie {
             entry.rank = current_rank;
@@ -75,7 +76,10 @@ fn calculate_buchholz(
 
     for opponent_id in &player.opponents {
         // Withdrawn opponents are excluded from Buchholz (gap 2)
-        if let Some(opponent) = all_players.iter().find(|p| &p.id == opponent_id && !p.withdrawn) {
+        if let Some(opponent) = all_players
+            .iter()
+            .find(|p| &p.id == opponent_id && !p.withdrawn)
+        {
             sum += opponent.score;
         }
     }
@@ -219,10 +223,7 @@ mod tests {
 
     #[test]
     fn test_update_scores() {
-        let mut players = vec![
-            test_player("p1", 2000, 0.0),
-            test_player("p2", 1900, 0.0),
-        ];
+        let mut players = vec![test_player("p1", 2000, 0.0), test_player("p2", 1900, 0.0)];
 
         let results = vec![(
             1,

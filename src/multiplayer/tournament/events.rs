@@ -151,14 +151,12 @@ mod tests {
     fn test_standings_updated_event() {
         let event = StandingsUpdated {
             tournament_id: 123,
-            standings: vec![
-                StandingsEntry {
-                    player_id: "player1".to_string(),
-                    score: 1.0,
-                    rank: 1,
-                    tiebreak: None,
-                },
-            ],
+            standings: vec![StandingsEntry {
+                player_id: "player1".to_string(),
+                score: 1.0,
+                rank: 1,
+                tiebreak: None,
+            }],
             my_rank: Some(1),
         };
         assert_eq!(event.tournament_id, 123);

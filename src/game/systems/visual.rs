@@ -25,7 +25,6 @@ pub struct SelectedBorder;
 #[derive(Component)]
 pub struct MoveHint;
 
-
 /// System to visually highlight possible moves and selected square
 ///
 /// Updates square materials to provide visual feedback for:
@@ -98,7 +97,12 @@ pub fn highlight_possible_moves(
 pub fn animate_piece_movement(
     time: Res<Time>,
     mut commands: Commands,
-    mut query: Query<(Entity, &mut Transform, &Piece, Option<&mut PieceMoveAnimation>)>,
+    mut query: Query<(
+        Entity,
+        &mut Transform,
+        &Piece,
+        Option<&mut PieceMoveAnimation>,
+    )>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut transform, piece, animation) in query.iter_mut() {
@@ -156,14 +160,14 @@ pub fn animate_capture_fade(
         //    Vertical sink: start at board height, end at -0.8 (fully submerged)
         let slide_dist = 0.6 * t;
         let sink_y = PIECE_ON_BOARD_Y - (1.0 * t * t); // Quadratic sink for weight
-        
-        transform.translation = fading.initial_pos 
-            + (fading.knockback_dir * slide_dist) 
+
+        transform.translation = fading.initial_pos
+            + (fading.knockback_dir * slide_dist)
             + (Vec3::Y * (sink_y - PIECE_ON_BOARD_Y));
 
         // 2. Rotation: Tilt back based on impact
         //    Tilt up to 25 degrees (0.43 rad) and then settle
-        let tilt_angle = 0.43 * t * (1.0 - t) * 4.0; 
+        let tilt_angle = 0.43 * t * (1.0 - t) * 4.0;
         transform.rotation = Quat::from_axis_angle(fading.tilt_axis, tilt_angle);
 
         // 3. Scale: Slight shrink to emphasize the 'vanishing'
@@ -201,12 +205,19 @@ pub fn setup_global_scene(
         Name::new("Global Background"),
     ));
 
+    // Match the menu board's ambient (GlobalAmbientLight brightness 95) so the
+    // in-game board isn't washed out / over-bright.
     commands.spawn(AmbientLight {
         color: Color::srgb(0.9, 0.92, 1.0),
-        brightness: 150.0,
+        brightness: 95.0,
         ..default()
     });
 }
+
+/// Marker for the board's camera-following fill light (the "headlamp") that
+/// keeps pieces evenly lit from the viewer's side as the camera orbits.
+#[derive(Component)]
+pub(crate) struct CameraFollowLight;
 
 /// Setup game scene when entering InGame state
 ///
@@ -241,33 +252,47 @@ pub fn setup_game_scene(
 
     // Skip lights for TempleOS mode (unlit rendering)
     if !view_mode.is_templeos() {
-        // Main directional light — no shadows to keep framerates smooth
-        commands.spawn((
-            DirectionalLight {
-                illuminance: 8_000.0,
-                shadow_maps_enabled: false,
-                color: Color::srgb(1.0, 0.97, 0.90),
-                ..default()
-            },
-            Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, -0.4, 0.0)),
-            DespawnOnExit(GameState::InGame),
-            Name::new("Main Directional Light"),
-        ));
-
-        // Fill light (reduces harsh shadows)
+        // Key light is the overhead "Angel Light" (2M, shadows on, spawned in
+        // `game_init`) — camera-independent. This is the *fill*: a camera-following
+        // "headlamp" so the viewer-facing side of every piece stays evenly lit no
+        // matter how the player orbits/zooms. Its position is updated each frame by
+        // `update_board_fill_light`. No fixed directional/fill (those over-brightened
+        // the board and lit unevenly as the camera moved).
         commands.spawn((
             PointLight {
-                intensity: 120_000.0,
-                color: Color::srgb(1.0, 1.0, 1.0),
+                intensity: 600_000.0,
+                range: 80.0,
+                color: Color::srgb(0.95, 0.96, 1.0),
                 shadow_maps_enabled: false,
-                range: 100.0,
                 ..default()
             },
-            Transform::from_xyz(3.5, 10.0, 3.5),
+            Transform::from_xyz(3.5, 12.0, 3.5),
+            CameraFollowLight,
             DespawnOnExit(GameState::InGame),
-            Name::new("Fill Light"),
+            Name::new("Board Fill Light (camera-follow)"),
         ));
     }
 
     // Note: Ambient light is set globally in setup_global_scene (Startup)
+}
+
+/// Keeps the board fill light at the viewer's position so pieces are lit evenly
+/// from the camera's side no matter how the player orbits or zooms. The overhead
+/// "Angel Light" and the ambient stay camera-independent; this is the moving fill.
+pub fn update_board_fill_light(
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    cam_q: Query<&Transform, Without<CameraFollowLight>>,
+    mut light_q: Query<&mut Transform, With<CameraFollowLight>>,
+) {
+    let Some(cam_entity) = persistent_camera.entity else {
+        return;
+    };
+    let Ok(cam) = cam_q.get(cam_entity) else {
+        return;
+    };
+    // Sit just above the camera so the viewer-facing side of every piece is lit.
+    let pos = cam.translation + Vec3::Y * 2.0;
+    for mut t in &mut light_q {
+        t.translation = pos;
+    }
 }

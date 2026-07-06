@@ -234,19 +234,36 @@ impl BraidNetwork for NativeNetwork {
             // Initialize parser with the HTTP headers and content-length
             // so it can parse the first message (snapshot) correctly
             let mut parser = MessageParser::new_with_state(headers, content_length);
-            tracing::debug!("[BraidHTTP-Parser] Started with content_length={}", content_length);
+            tracing::debug!(
+                "[BraidHTTP-Parser] Started with content_length={}",
+                content_length
+            );
 
             while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
                     Ok(chunk) => {
-                        tracing::trace!("[BraidHTTP-Parser] Received chunk of {} bytes: {:?}", chunk.len(), 
-                            chunk.iter().take(50).map(|b| *b as char).collect::<String>());
+                        tracing::trace!(
+                            "[BraidHTTP-Parser] Received chunk of {} bytes: {:?}",
+                            chunk.len(),
+                            chunk
+                                .iter()
+                                .take(50)
+                                .map(|b| *b as char)
+                                .collect::<String>()
+                        );
                         match parser.feed(&chunk) {
                             Ok(messages) => {
-                                tracing::trace!("[BraidHTTP-Parser] Parsed {} messages", messages.len());
+                                tracing::trace!(
+                                    "[BraidHTTP-Parser] Parsed {} messages",
+                                    messages.len()
+                                );
                                 for (i, msg) in messages.iter().enumerate() {
-                                    tracing::trace!("[BraidHTTP-Parser] Message {}: body_len={}, headers={:?}", 
-                                        i, msg.body.len(), msg.headers.keys().collect::<Vec<_>>());
+                                    tracing::trace!(
+                                        "[BraidHTTP-Parser] Message {}: body_len={}, headers={:?}",
+                                        i,
+                                        msg.body.len(),
+                                        msg.headers.keys().collect::<Vec<_>>()
+                                    );
                                 }
                                 for msg in messages {
                                     let update = crate::client::utils::message_to_update(msg);

@@ -1,24 +1,24 @@
 use crate::core::{GameMode as CoreGameMode, GameState, PreviousState};
 use crate::game::resources::{AIParams, GameStateParams};
-use crate::game::systems::input::InGameExitConfirmation;
 use crate::game::resources::{CurrentTurn, GameTimer, MoveHistory, Players};
+use crate::game::systems::input::InGameExitConfirmation;
 use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
-#[cfg(feature = "solana")]
-use crate::multiplayer::solana::addon::{
-    CompetitiveMatchState, SolanaGameSync, SolanaProfile, SolanaWallet,
-};
 #[cfg(feature = "solana")]
 use crate::multiplayer::rollup::bridge::RecentTransactions;
 #[cfg(feature = "solana")]
 use crate::multiplayer::rollup::manager::EphemeralRollupManager;
 #[cfg(feature = "solana")]
+use crate::multiplayer::solana::addon::{
+    CompetitiveMatchState, SolanaGameSync, SolanaProfile, SolanaWallet,
+};
+#[cfg(feature = "solana")]
 use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
 #[cfg(feature = "solana")]
 use crate::ui::account::profile_view::ProfileViewState;
+use crate::ui::game::game_ui::InGameHudVisibility;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
-use crate::ui::game::game_ui::InGameHudVisibility;
 
 /// System parameter grouping UI-related resources
 #[derive(SystemParam)]
@@ -53,11 +53,15 @@ pub struct GameUIParams<'w, 's> {
     #[cfg(feature = "solana")]
     pub profile_view: Option<ResMut<'w, ProfileViewState>>,
     #[cfg(feature = "solana")]
-    pub global_session_active: Option<Res<'w, crate::multiplayer::solana::integration::systems::GlobalSessionActive>>,
+    pub global_session_active:
+        Option<Res<'w, crate::multiplayer::solana::integration::systems::GlobalSessionActive>>,
     #[cfg(feature = "solana")]
-    pub global_session_pending: Option<Res<'w, crate::multiplayer::solana::integration::systems::GlobalSessionCheckPending>>,
+    pub global_session_pending: Option<
+        Res<'w, crate::multiplayer::solana::integration::systems::GlobalSessionCheckPending>,
+    >,
     pub spectator_mode: Res<'w, crate::ui::spectator_mode::SpectatorMode>,
-    pub active_time_control: Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
+    pub active_time_control:
+        Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
     pub current_turn: Res<'w, CurrentTurn>,
     pub eval_history: Res<'w, crate::ui::game::game_2d::EvalHistory>,
     pub p2p_conn: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>,

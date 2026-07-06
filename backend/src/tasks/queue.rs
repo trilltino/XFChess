@@ -81,7 +81,8 @@ pub async fn enqueue<P: Serialize>(
     payload: &P,
     dedupe_key: Option<&str>,
 ) -> Result<Option<i64>, sqlx::Error> {
-    let payload = serde_json::to_string(payload).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+    let payload =
+        serde_json::to_string(payload).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
     let ts = now();
     let res = sqlx::query(
         r#"INSERT INTO jobs (kind, payload, dedupe_key, run_at, created_at, updated_at)
@@ -134,7 +135,12 @@ async fn claim_next(pool: &SqlitePool) -> Result<Option<Job>, sqlx::Error> {
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|(id, kind, payload, attempts)| Job { id, kind, payload, attempts }))
+    Ok(row.map(|(id, kind, payload, attempts)| Job {
+        id,
+        kind,
+        payload,
+        attempts,
+    }))
 }
 
 async fn mark_done(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
@@ -158,7 +164,10 @@ async fn mark_failed(pool: &SqlitePool, job: &Job, err: &str) -> Result<(), sqlx
     let max_attempts = row.map(|(m,)| m).unwrap_or(5);
 
     if attempts >= max_attempts {
-        warn!("[queue] job {} kind={} DEAD after {} attempts: {}", job.id, job.kind, attempts, err);
+        warn!(
+            "[queue] job {} kind={} DEAD after {} attempts: {}",
+            job.id, job.kind, attempts, err
+        );
         sqlx::query(
             "UPDATE jobs SET status='dead', attempts=?, last_error=?, updated_at=? WHERE id=?",
         )
@@ -282,12 +291,22 @@ mod tests {
     #[tokio::test]
     async fn dedupe_key_makes_enqueue_idempotent() {
         let pool = test_pool().await;
-        let first = enqueue(&pool, "test.mail", &serde_json::json!({}), Some("mail:alice"))
-            .await
-            .unwrap();
-        let second = enqueue(&pool, "test.mail", &serde_json::json!({}), Some("mail:alice"))
-            .await
-            .unwrap();
+        let first = enqueue(
+            &pool,
+            "test.mail",
+            &serde_json::json!({}),
+            Some("mail:alice"),
+        )
+        .await
+        .unwrap();
+        let second = enqueue(
+            &pool,
+            "test.mail",
+            &serde_json::json!({}),
+            Some("mail:alice"),
+        )
+        .await
+        .unwrap();
         assert!(first.is_some());
         assert!(second.is_none(), "duplicate enqueue must be a no-op");
     }

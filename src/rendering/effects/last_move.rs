@@ -63,7 +63,9 @@ pub fn update_last_move_highlight_system(
         return;
     }
 
-    let Some(last_move) = move_history.last_move() else { return };
+    let Some(last_move) = move_history.last_move() else {
+        return;
+    };
     let Some(assets) = arrow_assets else { return };
 
     for (x, y) in [last_move.from, last_move.to] {

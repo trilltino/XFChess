@@ -88,12 +88,10 @@ pub async fn readiness_check(State(state): State<AppState>) -> impl IntoResponse
 }
 
 /// Detailed health check
-pub async fn detailed_health_check(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub async fn detailed_health_check(State(state): State<AppState>) -> impl IntoResponse {
     let _start = std::time::Instant::now();
     let mut checks = vec![];
-    
+
     // Check database connectivity
     let db_start = std::time::Instant::now();
     let db_check = match check_database(&state).await {
@@ -111,7 +109,7 @@ pub async fn detailed_health_check(
         },
     };
     checks.push(db_check);
-    
+
     // Check Solana RPC
     let rpc_start = std::time::Instant::now();
     let rpc_check = match check_solana_rpc(&state).await {
@@ -129,7 +127,7 @@ pub async fn detailed_health_check(
         },
     };
     checks.push(rpc_check);
-    
+
     // Check fee payer pool
     let feepayer_start = std::time::Instant::now();
     let feepayer_check = check_feepayer_pool(&state).await;
@@ -139,7 +137,7 @@ pub async fn detailed_health_check(
         message: feepayer_check.0,
         response_time_ms: feepayer_start.elapsed().as_millis() as u64,
     });
-    
+
     // Check disk space
     let disk_start = std::time::Instant::now();
     let disk_check = check_disk_space().await;
@@ -149,7 +147,7 @@ pub async fn detailed_health_check(
         message: disk_check.0,
         response_time_ms: disk_start.elapsed().as_millis() as u64,
     });
-    
+
     // Check memory
     let memory_start = std::time::Instant::now();
     let memory_check = check_memory().await;
@@ -159,7 +157,7 @@ pub async fn detailed_health_check(
         message: memory_check.0,
         response_time_ms: memory_start.elapsed().as_millis() as u64,
     });
-    
+
     // Determine overall status
     let overall_status = if checks.iter().all(|c| c.status == "ok") {
         "healthy"
@@ -168,27 +166,25 @@ pub async fn detailed_health_check(
     } else {
         "degraded"
     };
-    
+
     let response = DetailedHealthResponse {
         status: overall_status.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         checks,
     };
-    
+
     let status_code = match overall_status {
         "healthy" => StatusCode::OK,
         "degraded" => StatusCode::OK,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     };
-    
+
     (status_code, Json(response))
 }
 
 /// Metrics endpoint for Prometheus
-pub async fn metrics_endpoint(
-    State(_state): State<AppState>,
-) -> impl IntoResponse {
+pub async fn metrics_endpoint(State(_state): State<AppState>) -> impl IntoResponse {
     let mut metrics = format!(
         "# HELP xfchess_health Health status (1 = healthy, 0 = unhealthy)\n\
          # TYPE xfchess_health gauge\n\
@@ -222,10 +218,10 @@ pub async fn debug_transaction_endpoint(
             );
         }
     };
-    
+
     // Create RPC client
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
-    
+
     // Fetch debug info
     match debug_transaction(&rpc, &sig).await {
         Ok(debug_info) => {
@@ -239,14 +235,12 @@ pub async fn debug_transaction_endpoint(
                 })),
             )
         }
-        Err(e) => {
-            (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({
-                    "error": format!("Failed to fetch transaction: {}", e)
-                })),
-            )
-        }
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": format!("Failed to fetch transaction: {}", e)
+            })),
+        ),
     }
 }
 
@@ -279,17 +273,24 @@ async fn check_feepayer_pool(state: &AppState) -> (Option<String>, String) {
     // Get a fee payer and check its balance
     let fee_payer = state.feepayer.next();
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
-    
+
     match rpc.get_balance(&fee_payer.pubkey()) {
         Ok(balance) => {
             let sol = balance as f64 / 1_000_000_000.0;
-            if balance < 10_000_000 { // Less than 0.01 SOL
-                (Some(format!("Low balance: {} SOL", sol)), "warning".to_string())
+            if balance < 10_000_000 {
+                // Less than 0.01 SOL
+                (
+                    Some(format!("Low balance: {} SOL", sol)),
+                    "warning".to_string(),
+                )
             } else {
                 (Some(format!("Balance: {} SOL", sol)), "ok".to_string())
             }
         }
-        Err(e) => (Some(format!("Error checking balance: {}", e)), "error".to_string()),
+        Err(e) => (
+            Some(format!("Error checking balance: {}", e)),
+            "error".to_string(),
+        ),
     }
 }
 
@@ -307,28 +308,46 @@ async fn check_disk_space() -> (Option<String>, String) {
                     if parts.len() >= 5 {
                         let usage = parts[4];
                         let usage_percent = usage.trim_end_matches('%').parse::<u32>().unwrap_or(0);
-                        
+
                         if usage_percent > 90 {
-                            (Some(format!("Disk usage: {}", usage)), "critical".to_string())
+                            (
+                                Some(format!("Disk usage: {}", usage)),
+                                "critical".to_string(),
+                            )
                         } else if usage_percent > 80 {
-                            (Some(format!("Disk usage: {}", usage)), "warning".to_string())
+                            (
+                                Some(format!("Disk usage: {}", usage)),
+                                "warning".to_string(),
+                            )
                         } else {
                             (Some(format!("Disk usage: {}", usage)), "ok".to_string())
                         }
                     } else {
-                        (Some("Could not parse disk info".to_string()), "warning".to_string())
+                        (
+                            Some("Could not parse disk info".to_string()),
+                            "warning".to_string(),
+                        )
                     }
                 } else {
-                    (Some("Could not get disk info".to_string()), "warning".to_string())
+                    (
+                        Some("Could not get disk info".to_string()),
+                        "warning".to_string(),
+                    )
                 }
             }
-            Err(e) => (Some(format!("Error checking disk: {}", e)), "error".to_string()),
+            Err(e) => (
+                Some(format!("Error checking disk: {}", e)),
+                "error".to_string(),
+            ),
         }
     }
-    
+
     #[cfg(not(unix))]
     {
-        (Some("Disk check not available on Windows".to_string()), "warning".to_string())
+        (
+            Some("Disk check not available on Windows".to_string()),
+            "warning".to_string(),
+        )
     }
 }
 
@@ -340,7 +359,7 @@ async fn check_memory() -> (Option<String>, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_health_check() {
         let _response = health_check().await;

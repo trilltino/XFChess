@@ -483,8 +483,14 @@ function ConnectWalletStep({ username, onConnected }: { username: string; onConn
                     <button
                         style={{ ...walletBtn, background: 'rgba(100, 50, 200, 0.1)', border: '1px solid rgba(100, 50, 200, 0.3)' }}
                         onClick={() => {
-                            const moonpayUrl = `https://buy.moonpay.com?apiKey=pk_test_123&currencyCode=sol&walletAddress=${publicKey.toBase58()}`;
-                            window.open(moonpayUrl, '_blank');
+                            // Use the configured MoonPay key for the prefilled widget; if
+                            // unset, open MoonPay's public buy page instead of a broken
+                            // widget URL with a fake key.
+                            const mpKey = import.meta.env.VITE_MOONPAY_API_KEY as string | undefined;
+                            const moonpayUrl = mpKey
+                                ? `https://buy.moonpay.com?apiKey=${mpKey}&currencyCode=sol&walletAddress=${publicKey.toBase58()}`
+                                : 'https://www.moonpay.com/buy';
+                            window.open(moonpayUrl, '_blank', 'noopener,noreferrer');
                         }}
                     >
                         <span style={{ fontSize: 20 }}></span>

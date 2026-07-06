@@ -7,11 +7,11 @@
 //! Replaces the previous victim−attacker approximation, which scored every
 //! higher-takes-lower capture as losing even when the victim was undefended.
 
+use crate::constants::PAWN_ID;
 use crate::on_chain_attack::{
     bishop_attacks, rook_attacks, BLACK_PAWN_ATTACKS, KING_ATTACKS, KNIGHT_ATTACKS,
     WHITE_PAWN_ATTACKS,
 };
-use crate::constants::PAWN_ID;
 use crate::types::*;
 
 /// Piece values for exchange evaluation, indexed by piece type id (0 unused).
@@ -22,10 +22,8 @@ const SEE_VALUE: [i32; 7] = [0, 100, 320, 330, 500, 900, 20000];
 /// Piece bitboards from `game` are masked by `occ` at use, so pieces removed
 /// during the swap stop attacking, and sliders behind them start to (x-ray).
 fn attackers_to(game: &Game, sq: usize, occ: u64) -> u64 {
-    let bishops_queens = game.white_bishops.0
-        | game.black_bishops.0
-        | game.white_queens.0
-        | game.black_queens.0;
+    let bishops_queens =
+        game.white_bishops.0 | game.black_bishops.0 | game.white_queens.0 | game.black_queens.0;
     let rooks_queens =
         game.white_rooks.0 | game.black_rooks.0 | game.white_queens.0 | game.black_queens.0;
 

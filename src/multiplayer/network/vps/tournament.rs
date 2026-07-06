@@ -51,16 +51,23 @@ pub fn tournament_session_create_game(
     wallet_pubkey: &str,
 ) -> Result<String, String> {
     let resp = client()?
-        .post(format!("{}/tournament/{}/session-create-game", vps_base(), tournament_id))
+        .post(format!(
+            "{}/tournament/{}/session-create-game",
+            vps_base(),
+            tournament_id
+        ))
         .json(&serde_json::json!({ "game_id": game_id, "wallet_pubkey": wallet_pubkey }))
         .send()
         .map_err(|e| format!("tournament_session_create_game: {e}"))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(format!("tournament_session_create_game: HTTP {status} — {body}"));
+        return Err(format!(
+            "tournament_session_create_game: HTTP {status} — {body}"
+        ));
     }
-    let data = resp.json::<serde_json::Value>()
+    let data = resp
+        .json::<serde_json::Value>()
         .map_err(|e| format!("tournament_session_create_game parse: {e}"))?;
     data.get("session_pubkey")
         .and_then(|v| v.as_str())
@@ -76,16 +83,23 @@ pub fn tournament_session_join_game(
     wallet_pubkey: &str,
 ) -> Result<String, String> {
     let resp = client()?
-        .post(format!("{}/tournament/{}/session-join-game", vps_base(), tournament_id))
+        .post(format!(
+            "{}/tournament/{}/session-join-game",
+            vps_base(),
+            tournament_id
+        ))
         .json(&serde_json::json!({ "game_id": game_id, "wallet_pubkey": wallet_pubkey }))
         .send()
         .map_err(|e| format!("tournament_session_join_game: {e}"))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(format!("tournament_session_join_game: HTTP {status} — {body}"));
+        return Err(format!(
+            "tournament_session_join_game: HTTP {status} — {body}"
+        ));
     }
-    let data = resp.json::<serde_json::Value>()
+    let data = resp
+        .json::<serde_json::Value>()
         .map_err(|e| format!("tournament_session_join_game parse: {e}"))?;
     data.get("session_pubkey")
         .and_then(|v| v.as_str())

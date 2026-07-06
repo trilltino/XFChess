@@ -10,9 +10,9 @@ use bevy::ecs::system::{ParamSet, SystemParam};
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use std::env;
-use std::process::{Command, Stdio};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::time::Instant;
 
 /// Resource holding the async AI computation task
@@ -43,13 +43,26 @@ impl StockfishInner {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("Failed to spawn Stockfish at '{}': {}", stockfish_path.display(), e))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to spawn Stockfish at '{}': {}",
+                    stockfish_path.display(),
+                    e
+                )
+            })?;
 
         let stdin = child.stdin.take().ok_or("Failed to get Stockfish stdin")?;
-        let stdout = child.stdout.take().ok_or("Failed to get Stockfish stdout")?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("Failed to get Stockfish stdout")?;
         let reader = std::io::BufReader::new(stdout);
         drop(child);
-        Ok(Self { stdin, reader, initialized: false })
+        Ok(Self {
+            stdin,
+            reader,
+            initialized: false,
+        })
     }
 }
 
@@ -87,7 +100,12 @@ fn resolve_stockfish_path() -> Result<PathBuf, String> {
         candidates.push(current_dir.join("stockfish.exe"));
         candidates.push(current_dir.join("stockfish"));
         candidates.push(current_dir.join("assets").join("bin").join("stockfish.exe"));
-        candidates.push(current_dir.join("references").join("Stockfish").join("stockfish.exe"));
+        candidates.push(
+            current_dir
+                .join("references")
+                .join("Stockfish")
+                .join("stockfish.exe"),
+        );
     }
 
     if let Ok(exe_path) = env::current_exe() {
@@ -95,7 +113,12 @@ fn resolve_stockfish_path() -> Result<PathBuf, String> {
             candidates.push(ancestor.join("stockfish.exe"));
             candidates.push(ancestor.join("resources").join("stockfish.exe"));
             candidates.push(ancestor.join("assets").join("bin").join("stockfish.exe"));
-            candidates.push(ancestor.join("references").join("Stockfish").join("stockfish.exe"));
+            candidates.push(
+                ancestor
+                    .join("references")
+                    .join("Stockfish")
+                    .join("stockfish.exe"),
+            );
         }
     }
 
@@ -146,18 +169,28 @@ impl Plugin for AIPlugin {
 /// InGame while the board and assets are loading, so it finishes before the player
 /// can make their first move.
 fn warmup_xf_engine_pool(mut commands: Commands, ai_config: Res<ChessAIResource>) {
-    if ai_config.engine != crate::game::ai::resource::AIEngine::XFChessEngine { return; }
-    if matches!(ai_config.mode, crate::game::ai::resource::GameMode::Multiplayer | crate::game::ai::resource::GameMode::MultiplayerCompetitive) { return; }
+    if ai_config.engine != crate::game::ai::resource::AIEngine::XFChessEngine {
+        return;
+    }
+    if matches!(
+        ai_config.mode,
+        crate::game::ai::resource::GameMode::Multiplayer
+            | crate::game::ai::resource::GameMode::MultiplayerCompetitive
+    ) {
+        return;
+    }
 
     let pool_arc = std::sync::Arc::new(std::sync::Mutex::new(None::<nimzovich_engine::Game>));
     let fill = pool_arc.clone();
 
-    AsyncComputeTaskPool::get().spawn(async move {
-        let game = nimzovich_engine::game_from_fen(
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        );
-        *fill.lock().unwrap() = Some(game);
-    }).detach();
+    AsyncComputeTaskPool::get()
+        .spawn(async move {
+            let game = nimzovich_engine::game_from_fen(
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            );
+            *fill.lock().unwrap() = Some(game);
+        })
+        .detach();
 
     commands.insert_resource(XFChessGamePool(pool_arc));
     info!("[AI] XFChess engine warm-up started");
@@ -234,10 +267,7 @@ pub struct AiPollParams<'w, 's> {
     pub sounds: Option<Res<'w, crate::game::resources::GameSounds>>,
 }
 
-fn spawn_ai_task_system(
-    mut commands: Commands,
-    params: AiSpawnParams,
-) {
+fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
     #[cfg(not(target_arch = "wasm32"))]
     let _start_time = std::time::Instant::now();
 
@@ -300,7 +330,8 @@ fn spawn_ai_task_system(
             // task so it can put the game back when the search finishes.
             let pool_arc = params.game_pool.as_ref().map(|p| p.0.clone());
             let preloaded = pool_arc.as_ref().and_then(|arc| arc.lock().ok()?.take());
-            let task = spawn_xf_engine_task(fen, think_time, max_depth, ai_color, preloaded, pool_arc);
+            let task =
+                spawn_xf_engine_task(fen, think_time, max_depth, ai_color, preloaded, pool_arc);
             commands.insert_resource(PendingAIMove(task));
         }
     }
@@ -388,7 +419,9 @@ fn spawn_stockfish_task_persistent(
     AsyncComputeTaskPool::get().spawn(async move {
         let start_time = Instant::now();
 
-        let mut guard = sf.lock().map_err(|e| format!("Stockfish mutex poisoned: {}", e))?;
+        let mut guard = sf
+            .lock()
+            .map_err(|e| format!("Stockfish mutex poisoned: {}", e))?;
 
         // One-time UCI handshake — wait for uciok, then readyok.
         if !guard.initialized {
@@ -396,15 +429,33 @@ fn spawn_stockfish_task_persistent(
             guard.stdin.flush().map_err(|e| e.to_string())?;
             loop {
                 let mut line = String::new();
-                if guard.reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 { break; }
-                if line.trim() == "uciok" { break; }
+                if guard
+                    .reader
+                    .read_line(&mut line)
+                    .map_err(|e| e.to_string())?
+                    == 0
+                {
+                    break;
+                }
+                if line.trim() == "uciok" {
+                    break;
+                }
             }
             writeln!(guard.stdin, "isready").map_err(|e| e.to_string())?;
             guard.stdin.flush().map_err(|e| e.to_string())?;
             loop {
                 let mut line = String::new();
-                if guard.reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 { break; }
-                if line.trim() == "readyok" { break; }
+                if guard
+                    .reader
+                    .read_line(&mut line)
+                    .map_err(|e| e.to_string())?
+                    == 0
+                {
+                    break;
+                }
+                if line.trim() == "readyok" {
+                    break;
+                }
             }
             guard.initialized = true;
         }
@@ -425,16 +476,27 @@ fn spawn_stockfish_task_persistent(
         let mut search_depth = 0u8;
         loop {
             let mut line = String::new();
-            if guard.reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 { break; }
+            if guard
+                .reader
+                .read_line(&mut line)
+                .map_err(|e| e.to_string())?
+                == 0
+            {
+                break;
+            }
             let trimmed = line.trim();
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 2 && parts[0] == "info" {
                 for (i, &part) in parts.iter().enumerate() {
                     if part == "depth" && i + 1 < parts.len() {
-                        if let Ok(d) = parts[i + 1].parse::<u8>() { search_depth = d; }
+                        if let Ok(d) = parts[i + 1].parse::<u8>() {
+                            search_depth = d;
+                        }
                     }
                     if part == "cp" && i + 1 < parts.len() {
-                        if let Ok(s) = parts[i + 1].parse::<i32>() { score = s; }
+                        if let Ok(s) = parts[i + 1].parse::<i32>() {
+                            score = s;
+                        }
                     }
                 }
             }
@@ -449,7 +511,10 @@ fn spawn_stockfish_task_persistent(
         }
 
         let thinking_time = start_time.elapsed().as_secs_f32();
-        info!("[AI] Stockfish: {} depth={} score={} time={:.2}s", best_move, search_depth, score, thinking_time);
+        info!(
+            "[AI] Stockfish: {} depth={} score={} time={:.2}s",
+            best_move, search_depth, score, thinking_time
+        );
 
         if best_move.len() >= 4 {
             let from_coords = ChessEngine::uci_to_coords(&best_move[0..2])
@@ -483,11 +548,12 @@ fn should_skip_ai_spawn(
         trace!("[AI] Skipping spawn: pending task already exists");
         return true;
     }
-    
+
     if pending_turn_advance
-            .as_ref()
-            .map(|r| r.is_pending())
-            .unwrap_or(false) {
+        .as_ref()
+        .map(|r| r.is_pending())
+        .unwrap_or(false)
+    {
         trace!("[AI] Skipping spawn: turn advance pending");
         return true;
     }
@@ -498,32 +564,42 @@ fn should_skip_ai_spawn(
     }
 
     if !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check) {
-        trace!("[AI] Skipping spawn: game phase is {:?}, not Playing/Check", game_phase.0);
+        trace!(
+            "[AI] Skipping spawn: game phase is {:?}, not Playing/Check",
+            game_phase.0
+        );
         return true;
     }
 
     let current_player = players.current(current_turn.color);
     if current_player.is_human {
-        trace!("[AI] Skipping spawn: current player ({:?}) is human", current_turn.color);
+        trace!(
+            "[AI] Skipping spawn: current player ({:?}) is human",
+            current_turn.color
+        );
         return true;
     }
 
     let ai_color = ai_config.mode.ai_color();
     if current_turn.color != ai_color {
-        trace!("[AI] Skipping spawn: turn color ({:?}) != AI color ({:?})", current_turn.color, ai_color);
+        trace!(
+            "[AI] Skipping spawn: turn color ({:?}) != AI color ({:?})",
+            current_turn.color,
+            ai_color
+        );
         return true;
     }
 
-    info!("[AI] Conditions met - spawning AI task for {:?}", current_turn.color);
+    info!(
+        "[AI] Conditions met - spawning AI task for {:?}",
+        current_turn.color
+    );
     false
 }
 
 /// System that polls the AI task and executes the move when ready
 #[allow(clippy::too_many_arguments)]
-fn poll_ai_task_system(
-    mut commands: Commands,
-    mut params: AiPollParams,
-) {
+fn poll_ai_task_system(mut commands: Commands, mut params: AiPollParams) {
     let Some(mut task_resource) = params.task_resource else {
         return;
     };
@@ -533,19 +609,25 @@ fn poll_ai_task_system(
 
     // Poll the local AI task
     if move_found.is_none() {
-        if let Some(result) = futures_lite::future::block_on(futures_lite::future::poll_once(&mut task_resource.0)) {
+        if let Some(result) =
+            futures_lite::future::block_on(futures_lite::future::poll_once(&mut task_resource.0))
+        {
             commands.remove_resource::<PendingAIMove>();
-            
+
             match result {
                 Ok(ai_move) => {
-                    info!("[AI] Direct Stockfish task completed with move: {}", ai_move.uci);
-                    let uci_move = format!("{}{}", 
+                    info!(
+                        "[AI] Direct Stockfish task completed with move: {}",
+                        ai_move.uci
+                    );
+                    let uci_move = format!(
+                        "{}{}",
                         ChessEngine::coords_to_uci(ai_move.from.0, ai_move.from.1),
                         ChessEngine::coords_to_uci(ai_move.to.0, ai_move.to.1)
                     );
                     move_found = Some(uci_move);
                     move_from_direct_stockfish = true;
-                    
+
                     // Update AI statistics
                     params.ai_stats.last_score = ai_move.score as i64;
                     params.ai_stats.last_depth = ai_move.depth as i64;

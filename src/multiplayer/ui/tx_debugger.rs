@@ -506,4 +506,3 @@ mod tests {
         assert_eq!(debugger.transaction_count(), 1);
     }
 }
-

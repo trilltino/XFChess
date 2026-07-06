@@ -53,7 +53,11 @@ impl FeepayerPool {
             .iter()
             .filter_map(|k| {
                 let k = k.trim();
-                if k.ends_with(".json") || k.starts_with('.') || k.starts_with('/') || k.contains('\\') {
+                if k.ends_with(".json")
+                    || k.starts_with('.')
+                    || k.starts_with('/')
+                    || k.contains('\\')
+                {
                     load_keypair_from_file(k)
                 } else {
                     let bytes = bs58::decode(k).into_vec().ok()?;
@@ -63,7 +67,9 @@ impl FeepayerPool {
             .collect();
 
         let keypairs = if keypairs.is_empty() {
-            tracing::warn!("[FeepayerPool] No FEE_PAYER_KEYS set — using ephemeral keypair (dev only)");
+            tracing::warn!(
+                "[FeepayerPool] No FEE_PAYER_KEYS set — using ephemeral keypair (dev only)"
+            );
             vec![Keypair::new()]
         } else {
             keypairs

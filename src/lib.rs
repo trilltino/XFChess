@@ -1,5 +1,4 @@
 /// XFChess library module for decentralized chess on Solana
-
 pub mod assets;
 pub mod core;
 pub mod engine;
@@ -15,10 +14,10 @@ pub mod states;
 pub mod ui;
 pub mod xf_animate;
 
-use bevy::prelude::*;
 use bevy::asset::AssetMetaCheck;
 use bevy::audio::{AudioPlugin, Volume};
 use bevy::log::LogPlugin;
+use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
@@ -49,7 +48,11 @@ pub struct GameConfig {
     pub player_color: Option<PlayerColor>,
 
     /// Solana RPC endpoint URL
-    #[arg(long, default_value = "https://api.devnet.solana.com", env = "XFCHESS_RPC_URL")]
+    #[arg(
+        long,
+        default_value = "https://api.devnet.solana.com",
+        env = "XFCHESS_RPC_URL"
+    )]
     pub rpc_url: String,
 
     /// Session key (base58 encoded) for signing rollups
@@ -201,18 +204,21 @@ pub fn build_app(game_config: GameConfig) -> App {
 
     // Configure AI if requested
     if let Some(diff_val) = game_config.ai_difficulty {
-        use crate::game::ai::resource::{ChessAIResource, GameMode, AIDifficulty};
+        use crate::game::ai::resource::{AIDifficulty, ChessAIResource, GameMode};
         use crate::rendering::pieces::PieceColor;
-        
+
         let difficulty = AIDifficulty::from_u8(diff_val);
         let ai_color = match game_config.ai_side.unwrap_or(PlayerColor::Black) {
             PlayerColor::White => PieceColor::White,
             PlayerColor::Black => PieceColor::Black,
         };
-        
-        info!("[AI] Initializing VS Computer Match: {} (Side: {:?})", 
-            difficulty.description(), ai_color);
-            
+
+        info!(
+            "[AI] Initializing VS Computer Match: {} (Side: {:?})",
+            difficulty.description(),
+            ai_color
+        );
+
         app.insert_resource(ChessAIResource {
             mode: GameMode::VsAI { ai_color },
             difficulty,
@@ -228,7 +234,10 @@ pub fn build_app(game_config: GameConfig) -> App {
             auto_create_primary_context: false,
             ..default()
         })
-        .add_systems(Startup, core::persistent_camera::setup_persistent_egui_camera);
+        .add_systems(
+            Startup,
+            core::persistent_camera::setup_persistent_egui_camera,
+        );
 
     // Add core plugins
     app.add_plugins(

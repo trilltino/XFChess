@@ -30,16 +30,26 @@ impl StockfishHandle {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| AcError::Stockfish(format!("failed to spawn stockfish at '{path}': {e}")))?;
+            .map_err(|e| {
+                AcError::Stockfish(format!("failed to spawn stockfish at '{path}': {e}"))
+            })?;
 
-        let stdin = child.stdin.take()
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| AcError::Stockfish("no stdin".into()))?;
         let stdout = BufReader::new(
-            child.stdout.take()
-                .ok_or_else(|| AcError::Stockfish("no stdout".into()))?
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| AcError::Stockfish("no stdout".into()))?,
         );
 
-        let mut sf = StockfishHandle { _child: child, stdin, stdout };
+        let mut sf = StockfishHandle {
+            _child: child,
+            stdin,
+            stdout,
+        };
 
         // Handshake
         sf.send("uci")?;
@@ -51,8 +61,7 @@ impl StockfishHandle {
     }
 
     fn send(&mut self, cmd: &str) -> AcResult<()> {
-        writeln!(self.stdin, "{cmd}")
-            .map_err(|e| AcError::Stockfish(format!("write error: {e}")))
+        writeln!(self.stdin, "{cmd}").map_err(|e| AcError::Stockfish(format!("write error: {e}")))
     }
 
     fn wait_for(&mut self, token: &str, timeout_ms: u64) -> AcResult<()> {
@@ -63,7 +72,8 @@ impl StockfishHandle {
                 return Err(AcError::StockfishTimeout(timeout_ms));
             }
             line.clear();
-            self.stdout.read_line(&mut line)
+            self.stdout
+                .read_line(&mut line)
                 .map_err(|e| AcError::Stockfish(format!("read error: {e}")))?;
             if line.contains(token) {
                 return Ok(());
@@ -86,7 +96,8 @@ impl StockfishHandle {
                 return Err(AcError::StockfishTimeout(movetime_ms * 3));
             }
             let mut line = String::new();
-            self.stdout.read_line(&mut line)
+            self.stdout
+                .read_line(&mut line)
                 .map_err(|e| AcError::Stockfish(format!("read error: {e}")))?;
             let line = line.trim();
 
@@ -102,7 +113,9 @@ impl StockfishHandle {
                             // Keep the latest score for each multipv slot
                             if mpv <= 2 {
                                 let idx = mpv - 1;
-                                while scores.len() <= idx { scores.push((0, String::new())); }
+                                while scores.len() <= idx {
+                                    scores.push((0, String::new()));
+                                }
                                 scores[idx] = (cp, mv);
                             }
                         }
@@ -122,7 +135,11 @@ impl StockfishHandle {
 
         debug!("[stockfish] fen={fen} top1={top1_cp} top2={top2_cp} best={best_move}");
 
-        Ok(PosResult { top1_cp, top2_cp, best_move })
+        Ok(PosResult {
+            top1_cp,
+            top2_cp,
+            best_move,
+        })
     }
 
     /// Configure multipv (call once after spawn, before analysis loop).

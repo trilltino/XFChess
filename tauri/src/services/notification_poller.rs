@@ -13,102 +13,112 @@ use tracing::{error, info};
 /// State tracking for deduplication — only notify once per event.
 #[derive(Default, Clone)]
 pub struct NotificationState {
-    pub last_tournament_id: Option<String>,
-    pub last_match_found: bool,
-    pub last_game_invite: Option<String>,
+  pub last_tournament_id: Option<String>,
+  pub last_match_found: bool,
+  pub last_game_invite: Option<String>,
 }
 
 /// Starts the background poller on a dedicated thread with its own runtime.
 ///
 /// Safe to call from the Tauri `setup` closure.
 pub fn startPoller(app: AppHandle, backendUrl: String, walletPubkey: Option<String>) {
-    let state = Arc::new(std::sync::Mutex::new(NotificationState::default()));
+  let state = Arc::new(std::sync::Mutex::new(NotificationState::default()));
 
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("[Poller] Failed to build tokio runtime");
+  std::thread::spawn(move || {
+    let rt = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .build()
+      .expect("[Poller] Failed to build tokio runtime");
 
-        rt.block_on(async move {
-            let mut ticker = tokio::time::interval(Duration::from_secs(30));
-            ticker.tick().await; // skip the immediate first tick
+    rt.block_on(async move {
+      let mut ticker = tokio::time::interval(Duration::from_secs(30));
+      ticker.tick().await; // skip the immediate first tick
 
-            loop {
-                ticker.tick().await;
+      loop {
+        ticker.tick().await;
 
-                let pubkey = match &walletPubkey {
-                    Some(p) => p.clone(),
-                    None => continue,
-                };
+        let pubkey = match &walletPubkey {
+          Some(p) => p.clone(),
+          None => continue,
+        };
 
-                // ── Poll tournaments ─────────────────────────────────────────
-                match poll_tournaments(&backendUrl).await {
-                    Ok(tournaments) => {
-                        for t in tournaments {
-                            let mut s = state.lock().unwrap();
-                            if s.last_tournament_id.as_deref() != Some(&t.id) {
-                                s.last_tournament_id = Some(t.id.clone());
-                                drop(s);
-                                notify(
-                                    &app,
-                                    "Tournament Available",
-                                    &format!("{} — {} players, {} entry fee", t.name, t.players, t.fee),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => tracing::debug!("[Poller] Tournament poll: {}", e),
-                }
-
-                // ── Poll matchmaking status ──────────────────────────────────
-                match poll_matchmaking(&backendUrl, &pubkey).await {
-                    Ok(status) => {
-                        let mut s = state.lock().unwrap();
-                        if status.match_found && !s.last_match_found {
-                            s.last_match_found = true;
-                            drop(s);
-                            notify(&app, "Match Found", "An opponent has been found! Click to join.");
-                        } else if !status.match_found {
-                            s.last_match_found = false;
-                        }
-                    }
-                    Err(e) => tracing::debug!("[Poller] Matchmaking poll: {}", e),
-                }
+        // ── Poll tournaments ─────────────────────────────────────────
+        match poll_tournaments(&backendUrl).await {
+          Ok(tournaments) => {
+            for t in tournaments {
+              let mut s = state.lock().unwrap();
+              if s.last_tournament_id.as_deref() != Some(&t.id) {
+                s.last_tournament_id = Some(t.id.clone());
+                drop(s);
+                notify(
+                  &app,
+                  "Tournament Available",
+                  &format!("{} — {} players, {} entry fee", t.name, t.players, t.fee),
+                );
+              }
             }
-        });
+          }
+          Err(e) => tracing::debug!("[Poller] Tournament poll: {}", e),
+        }
+
+        // ── Poll matchmaking status ──────────────────────────────────
+        match poll_matchmaking(&backendUrl, &pubkey).await {
+          Ok(status) => {
+            let mut s = state.lock().unwrap();
+            if status.match_found && !s.last_match_found {
+              s.last_match_found = true;
+              drop(s);
+              notify(
+                &app,
+                "Match Found",
+                "An opponent has been found! Click to join.",
+              );
+            } else if !status.match_found {
+              s.last_match_found = false;
+            }
+          }
+          Err(e) => tracing::debug!("[Poller] Matchmaking poll: {}", e),
+        }
+      }
     });
+  });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 fn notify(app: &AppHandle, title: &str, body: &str) {
-    if let Err(e) = app.notification().builder().title(title).body(body).show() {
-        error!("[Notification] Failed to show: {}", e);
-    } else {
-        info!("[Notification] {} — {}", title, body);
-    }
+  if let Err(e) = app.notification().builder().title(title).body(body).show() {
+    error!("[Notification] Failed to show: {}", e);
+  } else {
+    info!("[Notification] {} — {}", title, body);
+  }
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct TournamentInfo {
-    id: String,
-    name: String,
-    players: u32,
-    fee: String,
+  id: String,
+  name: String,
+  players: u32,
+  fee: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct MatchmakingStatus {
-    match_found: bool,
+  match_found: bool,
 }
 
 async fn poll_tournaments(backend_url: &str) -> Result<Vec<TournamentInfo>, reqwest::Error> {
-    let url = format!("{}/tournaments/active", backend_url);
-    reqwest::get(&url).await?.json::<Vec<TournamentInfo>>().await
+  let url = format!("{}/tournaments/active", backend_url);
+  reqwest::get(&url)
+    .await?
+    .json::<Vec<TournamentInfo>>()
+    .await
 }
 
-async fn poll_matchmaking(backend_url: &str, pubkey: &str) -> Result<MatchmakingStatus, reqwest::Error> {
-    let url = format!("{}/matchmaking/status/{}", backend_url, pubkey);
-    reqwest::get(&url).await?.json::<MatchmakingStatus>().await
+async fn poll_matchmaking(
+  backend_url: &str,
+  pubkey: &str,
+) -> Result<MatchmakingStatus, reqwest::Error> {
+  let url = format!("{}/matchmaking/status/{}", backend_url, pubkey);
+  reqwest::get(&url).await?.json::<MatchmakingStatus>().await
 }

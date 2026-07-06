@@ -42,6 +42,7 @@ fn test_config() -> SigningConfig {
         port: 0,
         solana_rpc_url: "http://127.0.0.1:9".into(),
         er_rpc_url: "http://127.0.0.1:9".into(),
+        magic_router_rpc_url: "http://127.0.0.1:9".into(),
         program_id: "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into(),
         jwt_secret: "test-secret-not-for-production".into(),
         identity_encryption_key: "0".repeat(64),
@@ -147,10 +148,22 @@ async fn metrics_endpoint_exposes_worker_counters() {
     let (status, body) = app.get_text("/metrics").await;
     assert_eq!(status, StatusCode::OK);
     // Core + worker/anti-cheat/linkage counters must all be present.
-    assert!(body.contains("xfchess_settlement_ticks_total"), "missing settlement metric:\n{body}");
-    assert!(body.contains("xfchess_anticheat_queue_depth"), "missing anticheat metric");
-    assert!(body.contains("xfchess_linkage_flagged_total"), "missing linkage metric");
-    assert!(body.contains("xfchess_prize_distribution_held_total"), "missing prize metric");
+    assert!(
+        body.contains("xfchess_settlement_ticks_total"),
+        "missing settlement metric:\n{body}"
+    );
+    assert!(
+        body.contains("xfchess_anticheat_queue_depth"),
+        "missing anticheat metric"
+    );
+    assert!(
+        body.contains("xfchess_linkage_flagged_total"),
+        "missing linkage metric"
+    );
+    assert!(
+        body.contains("xfchess_prize_distribution_held_total"),
+        "missing prize metric"
+    );
 }
 
 // ── Blur telemetry parity (anti-cheat input boundary) ─────────────────────────
@@ -216,19 +229,31 @@ async fn broadcast_delay_gates_public_move_feed() {
 
     // Live game (delay 0): create the row, add two (now-stamped) moves.
     repo.set_broadcast_delay(game, 0).await.unwrap();
-    repo.add_move_simple(game, 1, "e2e4", None, Some("fen1"), "white").await.unwrap();
-    repo.add_move_simple(game, 2, "e7e5", None, Some("fen2"), "black").await.unwrap();
+    repo.add_move_simple(game, 1, "e2e4", None, Some("fen1"), "white")
+        .await
+        .unwrap();
+    repo.add_move_simple(game, 2, "e7e5", None, Some("fen2"), "black")
+        .await
+        .unwrap();
 
     let (status, body) = app.get(&format!("/games/moves/{game}")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["moves"].as_array().unwrap().len(), 2, "live feed shows all moves");
+    assert_eq!(
+        body["moves"].as_array().unwrap().len(),
+        2,
+        "live feed shows all moves"
+    );
 
     // Apply a 1-hour delay: the just-recorded moves are inside the window and
     // must disappear from the public feed.
     repo.set_broadcast_delay(game, 3600).await.unwrap();
     let (status, body) = app.get(&format!("/games/moves/{game}")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["moves"].as_array().unwrap().len(), 0, "delayed feed withholds recent moves");
+    assert_eq!(
+        body["moves"].as_array().unwrap().len(),
+        0,
+        "delayed feed withholds recent moves"
+    );
 
     // The delay is reported for the spectator client's pre-subscribe check.
     let (status, body) = app.get(&format!("/games/{game}/broadcast-delay")).await;
@@ -358,7 +383,9 @@ async fn siws_login_then_logout_revokes_token() {
     assert_eq!(status, StatusCode::OK, "challenge: {body}");
     let nonce = body["nonce"].as_str().expect("nonce").to_string();
 
-    let sig = kp.sign_message(format!("xfchess:siws:{nonce}").as_bytes()).to_string();
+    let sig = kp
+        .sign_message(format!("xfchess:siws:{nonce}").as_bytes())
+        .to_string();
     let (status, body) = app
         .post_json(
             "/api/auth/siws-verify",
@@ -370,21 +397,41 @@ async fn siws_login_then_logout_revokes_token() {
 
     // A JWT-protected, chain-free route works with the fresh token.
     let (status, _) = app
-        .send_auth("PATCH", "/api/auth/username", Some(&token), Some(&json!({ "username": "e2eplayer" })))
+        .send_auth(
+            "PATCH",
+            "/api/auth/username",
+            Some(&token),
+            Some(&json!({ "username": "e2eplayer" })),
+        )
         .await;
-    assert_eq!(status, StatusCode::OK, "authed route should accept fresh token");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "authed route should accept fresh token"
+    );
 
     // Cross a one-second boundary so the logout cut-off is strictly after `iat`.
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
 
-    let (status, _) = app.send_auth("POST", "/api/auth/logout", Some(&token), None).await;
+    let (status, _) = app
+        .send_auth("POST", "/api/auth/logout", Some(&token), None)
+        .await;
     assert_eq!(status, StatusCode::OK, "logout should succeed");
 
     // The same token is now rejected.
     let (status, _) = app
-        .send_auth("PATCH", "/api/auth/username", Some(&token), Some(&json!({ "username": "e2eplayer2" })))
+        .send_auth(
+            "PATCH",
+            "/api/auth/username",
+            Some(&token),
+            Some(&json!({ "username": "e2eplayer2" })),
+        )
         .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "revoked token must be rejected");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "revoked token must be rejected"
+    );
 }
 
 /// A correctly-signed login with a stale timestamp is rejected (replay window).
@@ -394,7 +441,9 @@ async fn login_rejects_stale_timestamp() {
     let kp = Keypair::new();
     let wallet = kp.pubkey().to_string();
     let ts = now_secs() - 4000; // well outside the 300s freshness window
-    let sig = kp.sign_message(format!("xfchess:login:{ts}").as_bytes()).to_string();
+    let sig = kp
+        .sign_message(format!("xfchess:login:{ts}").as_bytes())
+        .to_string();
 
     let (status, body) = app
         .post_json(
@@ -402,7 +451,11 @@ async fn login_rejects_stale_timestamp() {
             &json!({ "wallet": wallet, "signature": sig, "timestamp": ts }),
         )
         .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "stale signature must be rejected: {body}");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "stale signature must be rejected: {body}"
+    );
 }
 
 /// Dual-accept guard on the signing endpoints: a valid per-user JWT *or* the
@@ -429,7 +482,11 @@ async fn dual_accept_auth_guards_signing_endpoints() {
         .body(Body::from(serde_json::to_vec(&move_body).unwrap()))
         .unwrap();
     let (status, _) = app.send(req).await;
-    assert_ne!(status, StatusCode::UNAUTHORIZED, "valid relay secret must pass");
+    assert_ne!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "valid relay secret must pass"
+    );
 
     // (c) Per-user JWT (no relay header) → accepted.
     let kp = Keypair::new();
@@ -438,21 +495,47 @@ async fn dual_accept_auth_guards_signing_endpoints() {
     let (status, _) = app
         .send_auth("POST", "/move/record", Some(&token), Some(&move_body))
         .await;
-    assert_ne!(status, StatusCode::UNAUTHORIZED, "valid JWT must pass the guard");
+    assert_ne!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "valid JWT must pass the guard"
+    );
 
     // (d) A JWT may only open a session for its own wallet.
     let other = Keypair::new().pubkey().to_string();
     let (status, _) = app
-        .send_auth("POST", "/session/create", Some(&token), Some(&json!({ "game_id": 7, "wallet_pubkey": other })))
+        .send_auth(
+            "POST",
+            "/session/create",
+            Some(&token),
+            Some(&json!({ "game_id": 7, "wallet_pubkey": other })),
+        )
         .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "JWT creating a session for another wallet must 403");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "JWT creating a session for another wallet must 403"
+    );
 
     // (e) Same JWT, own wallet → passes both authn and authz.
     let (status, _) = app
-        .send_auth("POST", "/session/create", Some(&token), Some(&json!({ "game_id": 8, "wallet_pubkey": wallet })))
+        .send_auth(
+            "POST",
+            "/session/create",
+            Some(&token),
+            Some(&json!({ "game_id": 8, "wallet_pubkey": wallet })),
+        )
         .await;
-    assert_ne!(status, StatusCode::UNAUTHORIZED, "own-wallet session must pass authn");
-    assert_ne!(status, StatusCode::FORBIDDEN, "own-wallet session must pass authz");
+    assert_ne!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "own-wallet session must pass authn"
+    );
+    assert_ne!(
+        status,
+        StatusCode::FORBIDDEN,
+        "own-wallet session must pass authz"
+    );
 
     std::env::remove_var("RELAY_SHARED_SECRET");
 }

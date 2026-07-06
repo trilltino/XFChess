@@ -11,8 +11,8 @@ use crate::hash::*;
 use crate::move_gen::is_in_check;
 use crate::move_gen::*;
 use crate::types::*;
-use std::time::Instant;
 use core::sync::atomic::Ordering;
+use std::time::Instant;
 
 static SP: SearchParams = SearchParams::sarah_tuned();
 
@@ -48,9 +48,12 @@ pub fn iterative_deepening(game: &mut Game, max_time_secs: f32, color: Color) ->
     for depth in 1..=depth_limit {
         // Aspiration windows after depth 1
         let (alpha, beta) = if depth > 1 {
-            let window = (SP.aspiration_base as i16 + (SP.aspiration_mul * depth as i32) as i16)
-                .max(10);
-            (prev_score.saturating_sub(window), prev_score.saturating_add(window))
+            let window =
+                (SP.aspiration_base as i16 + (SP.aspiration_mul * depth as i32) as i16).max(10);
+            (
+                prev_score.saturating_sub(window),
+                prev_score.saturating_add(window),
+            )
         } else {
             (-AB_INF, AB_INF)
         };

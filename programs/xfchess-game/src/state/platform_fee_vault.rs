@@ -22,9 +22,9 @@ pub struct PlatformFeeVault {
 
 impl PlatformFeeVault {
     pub const SEED: &'static [u8] = b"platform_fee_vault";
-    pub const DEFAULT_THRESHOLD: u64 = 100_000_000;   // 0.1 SOL
-    pub const DEFAULT_INTERVAL: i64 = 86_400;          // 24 hours
-    pub const FEE_PER_GAME: u64 = 50_000_000;          // 0.05 SOL per ranked game
+    pub const DEFAULT_THRESHOLD: u64 = 100_000_000; // 0.1 SOL
+    pub const DEFAULT_INTERVAL: i64 = 86_400; // 24 hours
+    pub const FEE_PER_GAME: u64 = 50_000_000; // 0.05 SOL per ranked game
 
     /// Returns true if a claim should be triggered.
     pub fn should_claim(&self, now: i64) -> bool {

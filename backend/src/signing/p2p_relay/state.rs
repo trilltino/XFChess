@@ -32,7 +32,9 @@ pub fn create_relay_state() -> P2PRelayState {
 fn cleanup_stale_games(state: &P2PRelayState) {
     use super::types::GameStatus;
 
-    let mut games = state.write().expect("P2P relay mutex should not be poisoned");
+    let mut games = state
+        .write()
+        .expect("P2P relay mutex should not be poisoned");
     let now = Utc::now();
     let stale_threshold = chrono::Duration::minutes(5);
 
@@ -44,7 +46,9 @@ fn cleanup_stale_games(state: &P2PRelayState) {
         if is_stale || is_finished {
             tracing::info!(
                 "Removing game {} (stale={}, finished={})",
-                game.announcement.game_id, is_stale, is_finished
+                game.announcement.game_id,
+                is_stale,
+                is_finished
             );
         }
 

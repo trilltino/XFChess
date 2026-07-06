@@ -157,7 +157,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-
 use core::ops::Range;
 
 #[allow(dead_code)] // Part of engine's public API
@@ -285,7 +284,6 @@ pub const POS_RANGE_US: Range<usize> = 0..64;
 
 pub const COLOR_BLACK: i64 = -1;
 pub const COLOR_WHITE: i64 = 1;
-
 
 // Iterative-deepening ceiling. Time management stops the search long before
 // this in practice; the old stack-overflow concern is handled by the MAX_PLY

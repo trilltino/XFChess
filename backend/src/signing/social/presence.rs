@@ -44,13 +44,16 @@ impl PresenceStore {
     }
 
     pub fn get_all_online(&self) -> Vec<Presence> {
-        self.inner.read().map(|m| {
-            let cutoff = Utc::now() - chrono::Duration::minutes(5);
-            m.values()
-                .filter(|p| p.updated_at > cutoff && p.status != PresenceStatus::Offline)
-                .cloned()
-                .collect()
-        }).unwrap_or_default()
+        self.inner
+            .read()
+            .map(|m| {
+                let cutoff = Utc::now() - chrono::Duration::minutes(5);
+                m.values()
+                    .filter(|p| p.updated_at > cutoff && p.status != PresenceStatus::Offline)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn get(&self, node_id: &str) -> Option<Presence> {

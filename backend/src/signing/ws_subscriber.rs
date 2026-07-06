@@ -1,4 +1,4 @@
-use futures::{Stream, StreamExt, SinkExt};
+use futures::{SinkExt, Stream, StreamExt};
 use solana_sdk::pubkey::Pubkey;
 use std::pin::Pin;
 use tokio::sync::mpsc;
@@ -45,10 +45,7 @@ pub struct WebSocketSubscriber {
 
 impl WebSocketSubscriber {
     /// Creates a new WebSocketSubscriber
-    pub async fn new(
-        cluster: Cluster,
-        er_endpoint: Option<&str>,
-    ) -> Result<Self, AppError> {
+    pub async fn new(cluster: Cluster, er_endpoint: Option<&str>) -> Result<Self, AppError> {
         // Spawn two L1 WebSocket connections to split subscription load
         let mut l1_connections = Vec::new();
         for i in 0..2 {
@@ -101,8 +98,7 @@ impl WebSocketSubscriber {
                         let subscription_id = subscriptions.len();
                         let subscribe_msg = format!(
                             r#"{{"jsonrpc":"2.0","id":{},"method":"accountSubscribe","params":["{}",{{ "encoding": "base64" }}]}}"#,
-                            subscription_id,
-                            pubkey
+                            subscription_id, pubkey
                         );
                         if let Err(e) = write.send(Message::Text(subscribe_msg)).await {
                             error!("Failed to send subscription message: {}", e);

@@ -157,10 +157,12 @@ impl SessionStore {
             .execute(&self.pool)
             .await
             .ok();
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_linkage_device ON account_linkage(device_hash)")
-            .execute(&self.pool)
-            .await
-            .ok();
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_linkage_device ON account_linkage(device_hash)",
+        )
+        .execute(&self.pool)
+        .await
+        .ok();
 
         // JWT revocation cut-offs (migration 017). A logout records the current
         // time for a subject; any token issued at or before `valid_after` is then
@@ -181,7 +183,11 @@ impl SessionStore {
 
     /// Revokes all JWTs for `subject` issued at or before `valid_after` (Unix
     /// seconds). Used by logout; safe to call repeatedly (last write wins).
-    pub async fn revoke_tokens_before(&self, subject: &str, valid_after: i64) -> Result<(), sqlx::Error> {
+    pub async fn revoke_tokens_before(
+        &self,
+        subject: &str,
+        valid_after: i64,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO jwt_revocations (subject, valid_after) VALUES (?, ?)
              ON CONFLICT(subject) DO UPDATE SET valid_after = MAX(valid_after, excluded.valid_after)",
@@ -213,7 +219,10 @@ impl SessionStore {
     }
 
     /// Finds a user by wallet pubkey. Returns (wallet, username, email, kyc_status, password_hash).
-    pub async fn find_user_by_wallet(&self, wallet: &str) -> Option<(String, String, Option<String>, String, Option<String>)> {
+    pub async fn find_user_by_wallet(
+        &self,
+        wallet: &str,
+    ) -> Option<(String, String, Option<String>, String, Option<String>)> {
         sqlx::query_as(
             "SELECT wallet, username, email, kyc_status, password_hash FROM users_v2 WHERE wallet = ? AND deleted_at IS NULL",
         )
@@ -224,7 +233,10 @@ impl SessionStore {
     }
 
     /// Finds a user by email.
-    pub async fn find_user_by_email(&self, email: &str) -> Option<(String, String, Option<String>, String, Option<String>)> {
+    pub async fn find_user_by_email(
+        &self,
+        email: &str,
+    ) -> Option<(String, String, Option<String>, String, Option<String>)> {
         sqlx::query_as(
             "SELECT wallet, username, email, kyc_status, password_hash FROM users_v2 WHERE email = ? AND deleted_at IS NULL",
         )
@@ -386,13 +398,12 @@ impl SessionStore {
 
     /// Retrieves a session entry by game ID.
     pub async fn get(&self, game_id: u64) -> Option<SessionEntry> {
-        let row: (Vec<u8>, String, i64) = sqlx::query_as(
-            "SELECT keypair, wallet, active FROM sessions WHERE game_id = ?"
-        )
-        .bind(game_id as i64)
-        .fetch_one(&self.pool)
-        .await
-        .ok()?;
+        let row: (Vec<u8>, String, i64) =
+            sqlx::query_as("SELECT keypair, wallet, active FROM sessions WHERE game_id = ?")
+                .bind(game_id as i64)
+                .fetch_one(&self.pool)
+                .await
+                .ok()?;
 
         let mut keypair_bytes = [0u8; 64];
         keypair_bytes.copy_from_slice(&row.0);
@@ -486,7 +497,10 @@ impl SessionStore {
     }
 
     /// Lists all players in the system.
-    pub async fn list_players(&self, limit: i32) -> Result<Vec<(String, String, String)>, sqlx::Error> {
+    pub async fn list_players(
+        &self,
+        limit: i32,
+    ) -> Result<Vec<(String, String, String)>, sqlx::Error> {
         sqlx::query_as(
             "SELECT wallet, username, kyc_status FROM users_v2 WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?"
         )

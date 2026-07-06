@@ -139,7 +139,6 @@ fn piece_type_to_char(piece: PieceType) -> char {
     }
 }
 
-
 /// Extension trait for ChessEngine to get FEN string
 pub trait ChessEngineExt {
     fn to_fen_string(&self) -> String;

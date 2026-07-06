@@ -42,7 +42,6 @@ pub struct BraidIrohConfig {
     pub proxy_config: Option<ProxyConfig>,
 }
 
-
 /// Configuration for the TCP proxy bridge.
 #[derive(Clone)]
 pub struct ProxyConfig {
@@ -78,7 +77,9 @@ async fn load_resources(data_dir: &Path) -> HashMap<String, Vec<Update>> {
 async fn save_resources(data_dir: &Path, map: &HashMap<String, Vec<Update>>) {
     let path = data_dir.join("resources.json");
     let tmp = data_dir.join("resources.json.tmp");
-    let Ok(json) = serde_json::to_string(map) else { return };
+    let Ok(json) = serde_json::to_string(map) else {
+        return;
+    };
     if tokio::fs::write(&tmp, &json).await.is_ok() {
         tokio::fs::rename(&tmp, &path).await.ok();
     }
@@ -208,7 +209,11 @@ impl BraidIrohNode {
         url: &str,
         bootstrap: Vec<EndpointId>,
     ) -> anyhow::Result<GossipReceiver> {
-        println!("[NODE] Subscribing to {} with {} bootstrap peers", url, bootstrap.len());
+        println!(
+            "[NODE] Subscribing to {} with {} bootstrap peers",
+            url,
+            bootstrap.len()
+        );
         for peer in &bootstrap {
             println!("[NODE]   bootstrap: {}", peer);
         }
@@ -222,7 +227,7 @@ impl BraidIrohNode {
     pub async fn put(&self, url: &str, update: Update) -> anyhow::Result<()> {
         // Normalize the URL for consistent storage (using same logic as SubscriptionManager)
         let normalized = crate::subscription::SubscriptionManager::normalize_url(url);
-        
+
         // Debug logging for Braid format
         println!("\nOUTGOING BRAID PUT:");
         println!("PUT {} HTTP/3", normalized);
@@ -250,7 +255,9 @@ impl BraidIrohNode {
                 tokio::spawn(async move { save_resources(&dir, &snapshot).await });
             }
         }
-        self.subscription_mgr.broadcast(&normalized, &update).await?;
+        self.subscription_mgr
+            .broadcast(&normalized, &update)
+            .await?;
         Ok(())
     }
 

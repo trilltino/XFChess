@@ -14,7 +14,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-
 use super::sliding;
 use crate::types::*;
 

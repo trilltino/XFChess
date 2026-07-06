@@ -107,8 +107,14 @@ pub fn handler(
         prize_shares
     };
 
-    msg!("Tournament space: {}", 8 + Tournament::space_for(max_players));
-    msg!("TournamentPlayersShard space per shard: {}", 8 + TournamentPlayersShard::space_for());
+    msg!(
+        "Tournament space: {}",
+        8 + Tournament::space_for(max_players)
+    );
+    msg!(
+        "TournamentPlayersShard space per shard: {}",
+        8 + TournamentPlayersShard::space_for()
+    );
 
     let t = &mut ctx.accounts.tournament;
     let total_matches = max_players - 1;

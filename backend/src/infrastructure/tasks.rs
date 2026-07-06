@@ -5,10 +5,10 @@
 
 use crate::signing::{AnalysisQueue, AppState, SigningConfig, TournamentTrigger};
 use crate::tasks::anticheat_worker;
-use crate::tasks::matchmaking;
-use crate::tasks::fee_claimer;
-use crate::tasks::tournament_scheduler::spawn_tournament_scheduler;
 use crate::tasks::archiver;
+use crate::tasks::fee_claimer;
+use crate::tasks::matchmaking;
+use crate::tasks::tournament_scheduler::spawn_tournament_scheduler;
 use tracing::info;
 
 /// Spawns all background tasks for the application.
@@ -24,7 +24,10 @@ use tracing::info;
 ///
 /// # Returns
 /// `(tournament_trigger, anticheat_queue)` — callers set these on `AppState`.
-pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> (tokio::sync::mpsc::Sender<TournamentTrigger>, AnalysisQueue) {
+pub fn spawn_background_tasks(
+    state: AppState,
+    config: SigningConfig,
+) -> (tokio::sync::mpsc::Sender<TournamentTrigger>, AnalysisQueue) {
     // Spawn matchmaking service
     let matchmaking_state = state.matchmaking.clone();
     tokio::spawn(async move {
@@ -50,7 +53,7 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> (tokio:
     ));
     let trigger_tx = spawn_tournament_scheduler(tournament_store, gossip, on_chain);
     info!("[Tasks] Tournament scheduler spawned with async-fill and gossip broadcast");
- 
+
     // Spawn game archiver
     let pool = state.store.pool();
     tokio::spawn(async move {
@@ -67,7 +70,10 @@ pub fn spawn_background_tasks(state: AppState, config: SigningConfig) -> (tokio:
     // Settlement/prizes stay scan-based (chain-derived, already durable) — see
     // tasks/queue.rs module docs.
     crate::tasks::queue::QueueWorker::new()
-        .register("email.send", crate::signing::routes::mailer::handle_email_job)
+        .register(
+            "email.send",
+            crate::signing::routes::mailer::handle_email_job,
+        )
         .spawn(state.store.pool());
     info!("[Tasks] Durable job-queue worker spawned (email.send)");
 

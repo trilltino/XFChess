@@ -78,7 +78,10 @@ pub fn create_registration_chain(tournament_id: u64, wallet_pubkey: &str) -> Act
                 step: 3,
                 label: "View Your Match".to_string(),
                 action: ChainAction::ViewMatch {
-                    url: format!("/tournament/{}/my-match?player={}", tournament_id, wallet_pubkey),
+                    url: format!(
+                        "/tournament/{}/my-match?player={}",
+                        tournament_id, wallet_pubkey
+                    ),
                 },
                 completed: false,
             },
@@ -148,8 +151,7 @@ pub fn create_onboarding_chain(
                 action: ChainAction::Funding {
                     url: format!(
                         "https://xfchess.com/fund?wallet={}&amount={}",
-                        wallet,
-                        required_sol
+                        wallet, required_sol
                     ),
                     amount_sol: required_sol,
                 },
@@ -175,11 +177,7 @@ pub fn create_onboarding_chain(
                 step: 4,
                 label: "View Your Match".to_string(),
                 action: ChainAction::ViewMatch {
-                    url: format!(
-                        "/tournament/{}/my-match?player={}",
-                        tournament_id,
-                        wallet
-                    ),
+                    url: format!("/tournament/{}/my-match?player={}", tournament_id, wallet),
                 },
                 completed: false,
             },

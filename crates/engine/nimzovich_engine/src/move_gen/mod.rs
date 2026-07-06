@@ -52,7 +52,6 @@ use alloc::sync::Arc;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-
 mod attack;
 mod bishop;
 mod king;

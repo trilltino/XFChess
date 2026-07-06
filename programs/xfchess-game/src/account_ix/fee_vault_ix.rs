@@ -1,8 +1,8 @@
 //! Instructions for platform fee vault management and ELO updates.
 
-use anchor_lang::prelude::*;
-use crate::state::{PlatformFeeVault, PlayerSession};
 use crate::errors::GameErrorCode;
+use crate::state::{PlatformFeeVault, PlayerSession};
+use anchor_lang::prelude::*;
 
 // ─── Fee Vault Instructions ───────────────────────────────────────────────────
 
@@ -62,7 +62,10 @@ pub fn handler_collect_fee(ctx: Context<CollectFee>, amount: u64) -> Result<()> 
         ),
         amount,
     )?;
-    ctx.accounts.fee_vault.total_accumulated = ctx.accounts.fee_vault.total_accumulated
+    ctx.accounts.fee_vault.total_accumulated = ctx
+        .accounts
+        .fee_vault
+        .total_accumulated
         .checked_add(amount)
         .ok_or(GameErrorCode::Overflow)?;
     Ok(())
@@ -89,8 +92,14 @@ pub fn handler_claim_fees(ctx: Context<ClaimFees>) -> Result<u64> {
     let now = Clock::get()?.unix_timestamp;
 
     // Read state and validate before any mutable borrow.
-    require!(ctx.accounts.fee_vault.should_claim(now), GameErrorCode::NoPrizeToClaim);
-    require!(ctx.accounts.fee_vault.total_accumulated > 0, GameErrorCode::NoPrizeToClaim);
+    require!(
+        ctx.accounts.fee_vault.should_claim(now),
+        GameErrorCode::NoPrizeToClaim
+    );
+    require!(
+        ctx.accounts.fee_vault.total_accumulated > 0,
+        GameErrorCode::NoPrizeToClaim
+    );
 
     let amount = ctx.accounts.fee_vault.total_accumulated;
 
@@ -109,10 +118,12 @@ pub fn handler_claim_fees(ctx: Context<ClaimFees>) -> Result<u64> {
 
     // Re-borrow for data mutation after lamport manipulation is complete.
     let vault = &mut ctx.accounts.fee_vault;
-    vault.total_claimed = vault.total_claimed.checked_add(amount).ok_or(GameErrorCode::Overflow)?;
+    vault.total_claimed = vault
+        .total_claimed
+        .checked_add(amount)
+        .ok_or(GameErrorCode::Overflow)?;
     vault.total_accumulated = 0;
     vault.last_claim_at = now;
-
 
     Ok(amount)
 }
@@ -203,26 +214,52 @@ pub fn handler_update_elo(
 
     match outcome {
         10000 => {
-            p.wins += 1;
-            p.win_streak += 1;
-            if p.win_streak > p.best_streak { p.best_streak = p.win_streak; }
+            p.wins = p
+                .wins
+                .checked_add(1)
+                .ok_or(GameErrorCode::ArithmeticOverflow)?;
+            p.win_streak = p
+                .win_streak
+                .checked_add(1)
+                .ok_or(GameErrorCode::ArithmeticOverflow)?;
+            if p.win_streak > p.best_streak {
+                p.best_streak = p.win_streak;
+            }
         }
         0 => {
-            p.losses += 1;
+            p.losses = p
+                .losses
+                .checked_add(1)
+                .ok_or(GameErrorCode::ArithmeticOverflow)?;
             p.win_streak = 0;
         }
         _ => {
-            p.draws += 1;
+            p.draws = p
+                .draws
+                .checked_add(1)
+                .ok_or(GameErrorCode::ArithmeticOverflow)?;
             p.win_streak = 0;
         }
     }
-    p.games_played += 1;
+    p.games_played = p
+        .games_played
+        .checked_add(1)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
     p.last_game_at = Clock::get()?.unix_timestamp;
 
     if is_ranked {
-        p.ranked_games += 1;
-        p.total_wagered = p.total_wagered.saturating_add(wager);
-        p.total_won = p.total_won.saturating_add(won_amount);
+        p.ranked_games = p
+            .ranked_games
+            .checked_add(1)
+            .ok_or(GameErrorCode::ArithmeticOverflow)?;
+        p.total_wagered = p
+            .total_wagered
+            .checked_add(wager)
+            .ok_or(GameErrorCode::ArithmeticOverflow)?;
+        p.total_won = p
+            .total_won
+            .checked_add(won_amount)
+            .ok_or(GameErrorCode::ArithmeticOverflow)?;
     }
     Ok(())
 }

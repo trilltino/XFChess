@@ -36,8 +36,14 @@ const fn compute_knight_attacks() -> [u64; 64] {
         let r = (sq / 8) as i32;
         let f = (sq % 8) as i32;
         let deltas: [(i32, i32); 8] = [
-            (2, 1), (2, -1), (-2, 1), (-2, -1),
-            (1, 2), (1, -2), (-1, 2), (-1, -2),
+            (2, 1),
+            (2, -1),
+            (-2, 1),
+            (-2, -1),
+            (1, 2),
+            (1, -2),
+            (-1, 2),
+            (-1, -2),
         ];
         let mut bb = 0u64;
         let mut i = 0;
@@ -63,7 +69,14 @@ const fn compute_king_attacks() -> [u64; 64] {
         let r = (sq / 8) as i32;
         let f = (sq % 8) as i32;
         let deltas: [(i32, i32); 8] = [
-            (1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
         ];
         let mut bb = 0u64;
         let mut i = 0;
@@ -92,8 +105,12 @@ const fn compute_pawn_attacks(white: bool) -> [u64; 64] {
         let dr: i32 = if white { 1 } else { -1 };
         let nr = r + dr;
         if nr >= 0 && nr < 8 {
-            if f - 1 >= 0 { bb |= 1u64 << (nr * 8 + f - 1); }
-            if f + 1 < 8  { bb |= 1u64 << (nr * 8 + f + 1); }
+            if f - 1 >= 0 {
+                bb |= 1u64 << (nr * 8 + f - 1);
+            }
+            if f + 1 < 8 {
+                bb |= 1u64 << (nr * 8 + f + 1);
+            }
         }
         table[sq] = bb;
         sq += 1;
@@ -109,10 +126,7 @@ const fn compute_pawn_attacks(white: bool) -> [u64; 64] {
 /// Uses classical ray-casting — no magic bitboards needed at this scale.
 #[inline]
 pub fn rook_attacks(sq: u8, occ: u64) -> u64 {
-    ray_north(sq, occ)
-    | ray_south(sq, occ)
-    | ray_east(sq, occ)
-    | ray_west(sq, occ)
+    ray_north(sq, occ) | ray_south(sq, occ) | ray_east(sq, occ) | ray_west(sq, occ)
 }
 
 /// Generate bishop attacks from `sq` given occupancy `occ`.
@@ -136,7 +150,9 @@ fn ray_north(sq: u8, occ: u64) -> u64 {
     let mut s = sq as i32 + 8;
     while s < 64 {
         attacks |= 1u64 << s;
-        if (occ >> s) & 1 != 0 { break; }
+        if (occ >> s) & 1 != 0 {
+            break;
+        }
         s += 8;
     }
     attacks
@@ -148,7 +164,9 @@ fn ray_south(sq: u8, occ: u64) -> u64 {
     let mut s = sq as i32 - 8;
     while s >= 0 {
         attacks |= 1u64 << s;
-        if (occ >> s) & 1 != 0 { break; }
+        if (occ >> s) & 1 != 0 {
+            break;
+        }
         s -= 8;
     }
     attacks
@@ -160,7 +178,9 @@ fn ray_east(sq: u8, occ: u64) -> u64 {
     let mut s = sq as i32 + 1;
     while s < 64 && s % 8 != 0 {
         attacks |= 1u64 << s;
-        if (occ >> s) & 1 != 0 { break; }
+        if (occ >> s) & 1 != 0 {
+            break;
+        }
         s += 1;
     }
     attacks
@@ -172,7 +192,9 @@ fn ray_west(sq: u8, occ: u64) -> u64 {
     let mut s = sq as i32 - 1;
     while s >= 0 && (s + 1) % 8 != 0 {
         attacks |= 1u64 << s;
-        if (occ >> s) & 1 != 0 { break; }
+        if (occ >> s) & 1 != 0 {
+            break;
+        }
         s -= 1;
     }
     attacks
@@ -184,7 +206,9 @@ fn ray_ne(sq: u8, occ: u64) -> u64 {
     let mut s = sq as i32 + 9;
     while s < 64 && s % 8 != 0 {
         attacks |= 1u64 << s;
-        if (occ >> s) & 1 != 0 { break; }
+        if (occ >> s) & 1 != 0 {
+            break;
+        }
         s += 9;
     }
     attacks
@@ -196,7 +220,9 @@ fn ray_nw(sq: u8, occ: u64) -> u64 {
     let mut s = sq as i32 + 7;
     while s < 64 && (s + 1) % 8 != 0 {
         attacks |= 1u64 << s;
-        if (occ >> s) & 1 != 0 { break; }
+        if (occ >> s) & 1 != 0 {
+            break;
+        }
         s += 7;
     }
     attacks
@@ -208,7 +234,9 @@ fn ray_se(sq: u8, occ: u64) -> u64 {
     let mut s = sq as i32 - 7;
     while s >= 0 && s % 8 != 0 {
         attacks |= 1u64 << s;
-        if (occ >> s) & 1 != 0 { break; }
+        if (occ >> s) & 1 != 0 {
+            break;
+        }
         s -= 7;
     }
     attacks
@@ -220,7 +248,9 @@ fn ray_sw(sq: u8, occ: u64) -> u64 {
     let mut s = sq as i32 - 9;
     while s >= 0 && (s + 1) % 8 != 0 {
         attacks |= 1u64 << s;
-        if (occ >> s) & 1 != 0 { break; }
+        if (occ >> s) & 1 != 0 {
+            break;
+        }
         s -= 9;
     }
     attacks
@@ -272,8 +302,14 @@ mod tests {
     #[test]
     fn test_no_check_starting_position() {
         let g = CompactBoard::starting_position().to_on_chain_game();
-        assert!(!is_in_check_fast(&g, 1),  "White should not be in check at start");
-        assert!(!is_in_check_fast(&g, -1), "Black should not be in check at start");
+        assert!(
+            !is_in_check_fast(&g, 1),
+            "White should not be in check at start"
+        );
+        assert!(
+            !is_in_check_fast(&g, -1),
+            "Black should not be in check at start"
+        );
     }
 
     #[test]

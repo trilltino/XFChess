@@ -1,13 +1,15 @@
 //! Social API helpers (friends, presence, lobby invites).
 
-use serde::{Deserialize, Serialize};
 use super::client::{client, vps_base};
+use serde::{Deserialize, Serialize};
 
 fn urlenc(s: &str) -> String {
-    s.chars().flat_map(|c| match c {
-        'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => vec![c],
-        c => format!("%{:02X}", c as u32).chars().collect(),
-    }).collect()
+    s.chars()
+        .flat_map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => vec![c],
+            c => format!("%{:02X}", c as u32).chars().collect(),
+        })
+        .collect()
 }
 
 // ── Types mirroring the backend ──────────────────────────────────────────────
@@ -88,20 +90,31 @@ pub fn send_friend_request(
     if !resp.status().is_success() {
         return Err(format!("send_friend_request: HTTP {}", resp.status()));
     }
-    resp.json::<FriendRequest>().map_err(|e| format!("parse: {e}"))
+    resp.json::<FriendRequest>()
+        .map_err(|e| format!("parse: {e}"))
 }
 
-pub fn get_pending_requests(node_id: &str, pubkey: Option<&str>) -> Result<Vec<FriendRequest>, String> {
+pub fn get_pending_requests(
+    node_id: &str,
+    pubkey: Option<&str>,
+) -> Result<Vec<FriendRequest>, String> {
     let mut qs = format!("?node_id={}", urlenc(node_id));
-    if let Some(pk) = pubkey { qs.push_str(&format!("&pubkey={}", urlenc(pk))); }
+    if let Some(pk) = pubkey {
+        qs.push_str(&format!("&pubkey={}", urlenc(pk)));
+    }
     let resp = client()?
         .get(format!("{}/friends/requests{}", vps_base(), qs))
         .send()
         .map_err(|e| format!("get_pending_requests: {e}"))?;
-    resp.json::<Vec<FriendRequest>>().map_err(|e| format!("parse: {e}"))
+    resp.json::<Vec<FriendRequest>>()
+        .map_err(|e| format!("parse: {e}"))
 }
 
-pub fn respond_friend_request(request_id: &str, accept: bool, responder_node_id: &str) -> Result<(), String> {
+pub fn respond_friend_request(
+    request_id: &str,
+    accept: bool,
+    responder_node_id: &str,
+) -> Result<(), String> {
     let body = serde_json::json!({
         "action": if accept { "accept" } else { "reject" },
         "responder_node_id": responder_node_id,
@@ -119,17 +132,25 @@ pub fn respond_friend_request(request_id: &str, accept: bool, responder_node_id:
 
 pub fn get_contacts(node_id: &str, pubkey: Option<&str>) -> Result<Vec<Contact>, String> {
     let mut qs = format!("?node_id={}", urlenc(node_id));
-    if let Some(pk) = pubkey { qs.push_str(&format!("&pubkey={}", urlenc(pk))); }
+    if let Some(pk) = pubkey {
+        qs.push_str(&format!("&pubkey={}", urlenc(pk)));
+    }
     let resp = client()?
         .get(format!("{}/friends{}", vps_base(), qs))
         .send()
         .map_err(|e| format!("get_contacts: {e}"))?;
-    resp.json::<Vec<Contact>>().map_err(|e| format!("parse: {e}"))
+    resp.json::<Vec<Contact>>()
+        .map_err(|e| format!("parse: {e}"))
 }
 
 pub fn remove_contact(owner_node_id: &str, contact_node_id: &str) -> Result<(), String> {
     let resp = client()?
-        .delete(format!("{}/friends/{}?node_id={}", vps_base(), contact_node_id, urlenc(owner_node_id)))
+        .delete(format!(
+            "{}/friends/{}?node_id={}",
+            vps_base(),
+            contact_node_id,
+            urlenc(owner_node_id)
+        ))
         .send()
         .map_err(|e| format!("remove_contact: {e}"))?;
     if !resp.status().is_success() {
@@ -159,7 +180,8 @@ pub fn get_online() -> Result<Vec<Presence>, String> {
     if !resp.status().is_success() {
         return Err(format!("get_online: HTTP {}", resp.status()));
     }
-    resp.json::<Vec<Presence>>().map_err(|e| format!("parse: {e}"))
+    resp.json::<Vec<Presence>>()
+        .map_err(|e| format!("parse: {e}"))
 }
 
 pub fn push_lobby_invite(
@@ -187,13 +209,19 @@ pub fn push_lobby_invite(
 
 pub fn poll_social(node_id: &str, since_index: usize) -> Result<SocialPollResponse, String> {
     let resp = client()?
-        .get(format!("{}/social/poll?node_id={}&since_index={}", vps_base(), urlenc(node_id), since_index))
+        .get(format!(
+            "{}/social/poll?node_id={}&since_index={}",
+            vps_base(),
+            urlenc(node_id),
+            since_index
+        ))
         .send()
         .map_err(|e| format!("poll_social: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("poll_social: HTTP {}", resp.status()));
     }
-    resp.json::<SocialPollResponse>().map_err(|e| format!("parse: {e}"))
+    resp.json::<SocialPollResponse>()
+        .map_err(|e| format!("parse: {e}"))
 }
 
 /// GET /region — fetch the backend's region tag + display label.
@@ -207,6 +235,6 @@ pub fn fetch_region() -> Result<(String, String), String> {
     }
     let v: serde_json::Value = resp.json().map_err(|e| format!("parse: {e}"))?;
     let region = v["region"].as_str().unwrap_or("unknown").to_string();
-    let label  = v["label"].as_str().unwrap_or("Unknown Region").to_string();
+    let label = v["label"].as_str().unwrap_or("Unknown Region").to_string();
     Ok((region, label))
 }

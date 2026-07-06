@@ -3,9 +3,9 @@
 //! Provides functions to make and unmake moves during search, with undo
 //! information to restore the board state.
 
-use crate::hash::{toggle_turn, update_hash};
 use crate::board::update_bitboards;
 use crate::constants::*;
+use crate::hash::{toggle_turn, update_hash};
 use crate::types::*;
 
 /// Information needed to fully undo a move during search
@@ -54,9 +54,17 @@ pub(crate) fn make_move(game: &mut Game, mv: KK) -> UndoInfo {
     // 2. Handle Castling (Move the Rook)
     if piece_type == KING_ID && (dst as i32 - src as i32).abs() == 2 {
         let (r_src, r_dst) = if color > 0 {
-            if dst == 6 { (7, 5) } else { (0, 3) }
+            if dst == 6 {
+                (7, 5)
+            } else {
+                (0, 3)
+            }
         } else {
-            if dst == 62 { (63, 61) } else { (56, 59) }
+            if dst == 62 {
+                (63, 61)
+            } else {
+                (56, 59)
+            }
         };
         let rook = game.board[r_src];
         update_hash(game, r_src, rook);
@@ -70,31 +78,39 @@ pub(crate) fn make_move(game: &mut Game, mv: KK) -> UndoInfo {
     // 3. Update EP Target
     game.en_passant_target = None;
     if piece_type == PAWN_ID && (dst as i32 - src as i32).abs() == 16 {
-        game.en_passant_target = Some(if color > 0 { src as i8 + 8 } else { src as i8 - 8 });
+        game.en_passant_target = Some(if color > 0 {
+            src as i8 + 8
+        } else {
+            src as i8 - 8
+        });
     }
 
     // 4. Update Castling Flags
     match src {
-        0  => game.white_rook_0_has_moved  = true,
-        4  => game.white_king_has_moved     = true,
-        7  => game.white_rook_7_has_moved   = true,
-        56 => game.black_rook_56_has_moved  = true,
-        60 => game.black_king_has_moved      = true,
-        63 => game.black_rook_63_has_moved  = true,
+        0 => game.white_rook_0_has_moved = true,
+        4 => game.white_king_has_moved = true,
+        7 => game.white_rook_7_has_moved = true,
+        56 => game.black_rook_56_has_moved = true,
+        60 => game.black_king_has_moved = true,
+        63 => game.black_rook_63_has_moved = true,
         _ => {}
     }
     match dst {
-        0  => game.white_rook_0_has_moved  = true,
-        7  => game.white_rook_7_has_moved   = true,
-        56 => game.black_rook_56_has_moved  = true,
-        63 => game.black_rook_63_has_moved  = true,
+        0 => game.white_rook_0_has_moved = true,
+        7 => game.white_rook_7_has_moved = true,
+        56 => game.black_rook_56_has_moved = true,
+        63 => game.black_rook_63_has_moved = true,
         _ => {}
     }
 
     // 5. Handle Promotion
     let promo_id = (mv.nxt_dir_idx >> 4) as i8;
     let final_piece = if promo_id != 0 {
-        if color > 0 { promo_id } else { -promo_id }
+        if color > 0 {
+            promo_id
+        } else {
+            -promo_id
+        }
     } else {
         moving_piece
     };
@@ -167,9 +183,17 @@ pub(crate) fn unmake_move(game: &mut Game, mv: KK, undo: UndoInfo) {
     // Handle Castling Restore
     if piece_type == KING_ID && (dst as i32 - src as i32).abs() == 2 {
         let (r_src, r_dst) = if color > 0 {
-            if dst == 6 { (7, 5) } else { (0, 3) }
+            if dst == 6 {
+                (7, 5)
+            } else {
+                (0, 3)
+            }
         } else {
-            if dst == 62 { (63, 61) } else { (56, 59) }
+            if dst == 62 {
+                (63, 61)
+            } else {
+                (56, 59)
+            }
         };
         let rook = if color > 0 { W_ROOK } else { B_ROOK };
         game.board[r_dst] = 0;

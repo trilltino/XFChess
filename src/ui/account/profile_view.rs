@@ -36,10 +36,10 @@ impl ProfileViewState {
         let mut curve: Vec<f32> = vec![elo];
         for entry in self.history.iter().rev() {
             elo += match entry.result.as_str() {
-                "win"  =>  15.0,
+                "win" => 15.0,
                 "loss" => -15.0,
-                "draw" =>   5.0,
-                _      =>   0.0,
+                "draw" => 5.0,
+                _ => 0.0,
             };
             elo = elo.max(100.0);
             curve.push(elo);
@@ -63,13 +63,16 @@ fn fetch_history_blocking(wallet: String) -> Result<Vec<GameHistoryEntry>, Strin
     }
     let v: serde_json::Value = resp.json().map_err(|e| format!("parse: {e}"))?;
     let arr = v["history"].as_array().cloned().unwrap_or_default();
-    Ok(arr.into_iter().map(|item| GameHistoryEntry {
-        game_id:      item["game_id"].as_str().unwrap_or("").to_string(),
-        result:       item["result"].as_str().unwrap_or("unknown").to_string(),
-        opponent:     item["opponent"].as_str().map(|s| s.to_string()),
-        timestamp:    item["timestamp"].as_i64().unwrap_or(0),
-        stake_amount: item["stake_amount"].as_f64().unwrap_or(0.0),
-    }).collect())
+    Ok(arr
+        .into_iter()
+        .map(|item| GameHistoryEntry {
+            game_id: item["game_id"].as_str().unwrap_or("").to_string(),
+            result: item["result"].as_str().unwrap_or("unknown").to_string(),
+            opponent: item["opponent"].as_str().map(|s| s.to_string()),
+            timestamp: item["timestamp"].as_i64().unwrap_or(0),
+            stake_amount: item["stake_amount"].as_f64().unwrap_or(0.0),
+        })
+        .collect())
 }
 
 // ── Systems ─────────────────────────────────────────────────────────────────
@@ -88,7 +91,9 @@ pub fn fetch_profile_history(
     if *was_open || view.fetching || view.fetch_rx.is_some() {
         return;
     }
-    let Some(pk) = solana_state.wallet_pubkey else { return; };
+    let Some(pk) = solana_state.wallet_pubkey else {
+        return;
+    };
     let wallet = pk.to_string();
     *was_open = true;
     view.fetching = true;
@@ -136,8 +141,12 @@ pub fn profile_view_ui(
     solana_state: Res<SolanaIntegrationState>,
     profile: Option<Res<SolanaProfile>>,
 ) {
-    if !view.open { return; }
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    if !view.open {
+        return;
+    }
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
 
     let mut open = view.open;
     egui::Window::new("Profile")
@@ -146,13 +155,16 @@ pub fn profile_view_ui(
         .default_width(480.0)
         .default_height(520.0)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .frame(egui::Frame::window(&ctx.style())
-            .fill(egui::Color32::from_rgba_premultiplied(18, 18, 22, 250))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(230, 57, 70))))
+        .frame(
+            egui::Frame::window(&ctx.style())
+                .fill(egui::Color32::from_rgba_premultiplied(18, 18, 22, 250))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(230, 57, 70))),
+        )
         .show(ctx, |ui| {
             ui.vertical(|ui| {
                 // ── Header ──────────────────────────────────────────────
-                let username = solana_state.cached_display_name
+                let username = solana_state
+                    .cached_display_name
                     .as_deref()
                     .unwrap_or("Anonymous");
                 let elo = if solana_state.cached_elo > 0 {
@@ -162,20 +174,28 @@ pub fn profile_view_ui(
                 };
 
                 ui.horizontal(|ui| {
-                    ui.heading(egui::RichText::new(username)
-                        .color(egui::Color32::WHITE)
-                        .size(24.0));
+                    ui.heading(
+                        egui::RichText::new(username)
+                            .color(egui::Color32::WHITE)
+                            .size(24.0),
+                    );
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(format!("ELO {}", elo))
-                        .color(egui::Color32::from_rgb(230, 57, 70))
-                        .size(18.0)
-                        .strong());
+                    ui.label(
+                        egui::RichText::new(format!("ELO {}", elo))
+                            .color(egui::Color32::from_rgb(230, 57, 70))
+                            .size(18.0)
+                            .strong(),
+                    );
                 });
 
                 if let Some(pk) = solana_state.wallet_pubkey {
                     let s = pk.to_string();
-                    ui.label(egui::RichText::new(format!("{}…{}", &s[..6], &s[s.len()-4..]))
-                        .color(egui::Color32::GRAY).monospace().size(11.0));
+                    ui.label(
+                        egui::RichText::new(format!("{}…{}", &s[..6], &s[s.len() - 4..]))
+                            .color(egui::Color32::GRAY)
+                            .monospace()
+                            .size(11.0),
+                    );
                 }
 
                 ui.add_space(12.0);
@@ -203,13 +223,20 @@ pub fn profile_view_ui(
 
                 // ── ELO sparkline ───────────────────────────────────────
                 if view.elo_curve.len() >= 2 {
-                    ui.label(egui::RichText::new("ELO Progression")
-                        .color(egui::Color32::GRAY).size(12.0));
+                    ui.label(
+                        egui::RichText::new("ELO Progression")
+                            .color(egui::Color32::GRAY)
+                            .size(12.0),
+                    );
                     ui.add_space(4.0);
                     render_sparkline(ui, &view.elo_curve, egui::vec2(ui.available_width(), 60.0));
                     ui.add_space(12.0);
                 } else if view.fetching {
-                    ui.label(egui::RichText::new("Loading history…").color(egui::Color32::GRAY).size(12.0));
+                    ui.label(
+                        egui::RichText::new("Loading history…")
+                            .color(egui::Color32::GRAY)
+                            .size(12.0),
+                    );
                     ui.add_space(12.0);
                 }
 
@@ -221,8 +248,11 @@ pub fn profile_view_ui(
                 ui.add_space(6.0);
 
                 if view.history.is_empty() && !view.fetching {
-                    ui.label(egui::RichText::new("No games recorded yet.")
-                        .color(egui::Color32::GRAY).size(12.0));
+                    ui.label(
+                        egui::RichText::new("No games recorded yet.")
+                            .color(egui::Color32::GRAY)
+                            .size(12.0),
+                    );
                 }
 
                 egui::ScrollArea::vertical()
@@ -230,27 +260,41 @@ pub fn profile_view_ui(
                     .show(ui, |ui| {
                         for entry in view.history.iter().take(20) {
                             let (result_text, result_color) = match entry.result.as_str() {
-                                "win"  => ("WIN",  egui::Color32::from_rgb(34, 197, 94)),
+                                "win" => ("WIN", egui::Color32::from_rgb(34, 197, 94)),
                                 "loss" => ("LOSS", egui::Color32::from_rgb(239, 68, 68)),
                                 "draw" => ("DRAW", egui::Color32::from_rgb(156, 163, 175)),
-                                _      => ("?",    egui::Color32::GRAY),
+                                _ => ("?", egui::Color32::GRAY),
                             };
                             ui.horizontal(|ui| {
-                                ui.colored_label(result_color,
-                                    egui::RichText::new(result_text).monospace().size(11.0).strong());
+                                ui.colored_label(
+                                    result_color,
+                                    egui::RichText::new(result_text)
+                                        .monospace()
+                                        .size(11.0)
+                                        .strong(),
+                                );
                                 ui.add_space(6.0);
                                 let opp = entry.opponent.as_deref().unwrap_or("Unknown");
                                 let short_opp = if opp.len() > 12 {
-                                    format!("{}…{}", &opp[..6], &opp[opp.len()-4..])
+                                    format!("{}…{}", &opp[..6], &opp[opp.len() - 4..])
                                 } else {
                                     opp.to_string()
                                 };
-                                ui.label(egui::RichText::new(format!("vs {}", short_opp))
-                                    .color(egui::Color32::LIGHT_GRAY).size(11.0));
+                                ui.label(
+                                    egui::RichText::new(format!("vs {}", short_opp))
+                                        .color(egui::Color32::LIGHT_GRAY)
+                                        .size(11.0),
+                                );
                                 if entry.stake_amount > 0.0 {
                                     ui.add_space(4.0);
-                                    ui.label(egui::RichText::new(format!("{:.3} SOL", entry.stake_amount))
-                                        .color(egui::Color32::from_rgb(230, 57, 70)).size(10.0));
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{:.3} SOL",
+                                            entry.stake_amount
+                                        ))
+                                        .color(egui::Color32::from_rgb(230, 57, 70))
+                                        .size(10.0),
+                                    );
                                 }
                             });
                         }
@@ -267,8 +311,17 @@ fn stat_card(ui: &mut egui::Ui, label: &str, value: u32, color: egui::Color32) {
     ui.group(|ui| {
         ui.set_min_width(60.0);
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(value.to_string()).color(color).size(20.0).strong());
-            ui.label(egui::RichText::new(label).color(egui::Color32::GRAY).size(11.0));
+            ui.label(
+                egui::RichText::new(value.to_string())
+                    .color(color)
+                    .size(20.0)
+                    .strong(),
+            );
+            ui.label(
+                egui::RichText::new(label)
+                    .color(egui::Color32::GRAY)
+                    .size(11.0),
+            );
         });
     });
 }
@@ -282,11 +335,15 @@ fn render_sparkline(ui: &mut egui::Ui, curve: &[f32], size: egui::Vec2) {
     let range = (max_v - min_v).max(1.0);
 
     let n = curve.len();
-    let points: Vec<egui::Pos2> = curve.iter().enumerate().map(|(i, &v)| {
-        let x = rect.left() + (i as f32 / (n - 1) as f32) * rect.width();
-        let y = rect.bottom() - ((v - min_v) / range) * rect.height();
-        egui::pos2(x, y)
-    }).collect();
+    let points: Vec<egui::Pos2> = curve
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            let x = rect.left() + (i as f32 / (n - 1) as f32) * rect.width();
+            let y = rect.bottom() - ((v - min_v) / range) * rect.height();
+            egui::pos2(x, y)
+        })
+        .collect();
 
     // Fill area under curve
     if points.len() >= 2 {

@@ -56,7 +56,7 @@ impl TurnRelayClient {
     /// Connect to TURN server and create allocation
     pub async fn connect(config: TurnRelayConfig) -> Result<Self, TurnError> {
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
-        
+
         let mut client = Self {
             socket,
             config,
@@ -67,7 +67,7 @@ impl TurnRelayClient {
 
         client.allocate().await?;
         info!("[turn-relay] Connected to TURN server, relay established");
-        
+
         Ok(client)
     }
 
@@ -81,7 +81,7 @@ impl TurnRelayClient {
         // In full implementation, this would wrap data in TURN ChannelData or Send Indication
         let _ = peer; // Would use peer address in actual TURN framing
         self.socket.send_to(data, self.config.server_addr).await?;
-        
+
         Ok(())
     }
 
@@ -121,13 +121,13 @@ impl TurnRelayClient {
         // 2. Handle 401 Unauthorized with nonce
         // 3. Re-send with proper credentials
         // 4. Receive success with relayed address
-        
+
         // For now, simulate successful allocation
         // In production, use a proper STUN/TURN library like `stun` or `turn` crate
-        
+
         self.relayed_addr = Some(self.config.server_addr);
         warn!("[turn-relay] Using simplified TURN allocation - full RFC 5766 not implemented");
-        
+
         Ok(())
     }
 }
@@ -179,7 +179,7 @@ async fn can_stun_punch(_stun_server: &SocketAddr) -> bool {
     // 1. Send STUN Binding Request
     // 2. Check mapped address
     // 3. Verify if it's consistent across multiple requests
-    
+
     // For now, return false to prefer TURN
     false
 }
@@ -232,9 +232,7 @@ impl TurnConnection {
                 socket.send_to(data, addr).await?;
                 Ok(())
             }
-            TurnConnection::Relay(relay) => {
-                relay.send_to(data, addr).await
-            }
+            TurnConnection::Relay(relay) => relay.send_to(data, addr).await,
         }
     }
 
@@ -245,9 +243,7 @@ impl TurnConnection {
                 let (len, addr) = socket.recv_from(buf).await?;
                 Ok((len, addr))
             }
-            TurnConnection::Relay(relay) => {
-                relay.recv_from(buf).await
-            }
+            TurnConnection::Relay(relay) => relay.recv_from(buf).await,
         }
     }
 }
@@ -258,9 +254,9 @@ pub fn default_turn_config() -> Option<TurnRelayConfig> {
     let server = std::env::var("TURN_SERVER").ok()?;
     let username = std::env::var("TURN_USERNAME").ok()?;
     let password = std::env::var("TURN_PASSWORD").ok()?;
-    
+
     let addr = server.parse().ok()?;
-    
+
     Some(TurnRelayConfig {
         server_addr: addr,
         username,

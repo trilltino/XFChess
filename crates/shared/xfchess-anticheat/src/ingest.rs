@@ -41,7 +41,9 @@ pub fn build_game_record(rows: &[MoveRow], meta: &GameMeta) -> AcResult<GameReco
             tournament_id: tid,
             round: meta.tournament_round.unwrap_or(1),
         },
-        None => GameContext::Pvp { wager_sol: meta.stake_amount },
+        None => GameContext::Pvp {
+            wager_sol: meta.stake_amount,
+        },
     };
 
     let result = match meta.winner.as_deref() {
@@ -53,7 +55,11 @@ pub fn build_game_record(rows: &[MoveRow], meta: &GameMeta) -> AcResult<GameReco
     // Build move records with server-timestamp latencies
     let mut moves: Vec<MoveRecord> = Vec::with_capacity(rows.len());
     for (i, row) in rows.iter().enumerate() {
-        let prev_ts = if i == 0 { row.timestamp } else { rows[i - 1].timestamp };
+        let prev_ts = if i == 0 {
+            row.timestamp
+        } else {
+            rows[i - 1].timestamp
+        };
         let latency_ms = ((row.timestamp - prev_ts).max(0) * 1000) as u32;
 
         moves.push(MoveRecord {

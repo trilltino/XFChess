@@ -7,10 +7,10 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 use xfchess_game::constants::{
-    GAME_SEED, MOVE_LOG_SEED, PROFILE_SEED, SESSION_DELEGATION_SEED, WAGER_ESCROW_SEED,
+    GAME_SEED, PROFILE_SEED, SESSION_DELEGATION_SEED, WAGER_ESCROW_SEED,
 };
-use xfchess_game::state::{Game, PlayerProfile};
 use xfchess_game::state::game::MatchType;
+use xfchess_game::state::{Game, PlayerProfile};
 
 /// Get the system program Pubkey (11111...1).
 fn system_program_id() -> Pubkey {
@@ -46,10 +46,6 @@ impl ChessRpcClient {
 
     pub fn get_profile_pda(&self, wallet: &Pubkey) -> Pubkey {
         self.derive_pda(&[PROFILE_SEED, wallet.as_ref()])
-    }
-
-    pub fn get_move_log_pda(&self, game_id: u64) -> Pubkey {
-        self.derive_pda(&[MOVE_LOG_SEED, &game_id.to_le_bytes()])
     }
 
     pub fn get_session_delegation_pda(&self, game_id: u64, player: &Pubkey) -> Pubkey {
@@ -104,7 +100,13 @@ impl ChessRpcClient {
     }
 
     /// Creates an instruction to initialize a player profile.
-    pub fn create_init_profile_ix(&self, player: Pubkey, username: String, country: String, date_of_birth: i64) -> Instruction {
+    pub fn create_init_profile_ix(
+        &self,
+        player: Pubkey,
+        username: String,
+        country: String,
+        date_of_birth: i64,
+    ) -> Instruction {
         let profile_pda = self.get_profile_pda(&player);
         // Derive the username record PDA (needed by the Anchor accounts struct).
         let username_record_pda = self.derive_pda(&[b"username", username.as_bytes()]);
@@ -117,7 +119,12 @@ impl ChessRpcClient {
                 AccountMeta::new(player, true),
                 AccountMeta::new_readonly(system_program_id(), false),
             ],
-            data: xfchess_game::instruction::InitProfile { username, country, date_of_birth }.data(),
+            data: xfchess_game::instruction::InitProfile {
+                username,
+                country,
+                date_of_birth,
+            }
+            .data(),
         }
     }
 
@@ -137,14 +144,12 @@ impl ChessRpcClient {
         increment_seconds: u16,
     ) -> Instruction {
         let game_pda = self.get_game_pda(game_id);
-        let move_log_pda = self.get_move_log_pda(game_id);
         let escrow_pda = self.get_escrow_pda(game_id);
 
         Instruction {
             program_id: self.program_id,
             accounts: vec![
                 AccountMeta::new(game_pda, false),
-                AccountMeta::new(move_log_pda, false),
                 AccountMeta::new(escrow_pda, false),
                 AccountMeta::new(player, true),
                 AccountMeta::new(fee_payer, true),
@@ -196,22 +201,24 @@ impl ChessRpcClient {
     /// Creates an instruction to record a move on-chain.
     pub fn create_record_move_ix(
         &self,
-        player: Pubkey,
+        session_key: Pubkey,
+        wallet_player: Pubkey,
         game_id: u64,
         move_uci: [u8; 5],
         next_board: [u8; 68],
         nonce: u64,
         signature: Option<Vec<u8>>,
+        parent_nonce: Option<u64>,
     ) -> Instruction {
         let game_pda = self.get_game_pda(game_id);
-        let move_log_pda = self.get_move_log_pda(game_id);
+        let session_delegation_pda = self.get_session_delegation_pda(game_id, &wallet_player);
 
         Instruction {
             program_id: self.program_id,
             accounts: vec![
                 AccountMeta::new(game_pda, false),
-                AccountMeta::new(move_log_pda, false),
-                AccountMeta::new(player, true),
+                AccountMeta::new_readonly(session_key, true),
+                AccountMeta::new_readonly(session_delegation_pda, false),
             ],
             data: xfchess_game::instruction::RecordMove {
                 game_id,
@@ -219,7 +226,7 @@ impl ChessRpcClient {
                 next_board,
                 nonce,
                 signature,
-                parent_nonce: None,
+                parent_nonce,
             }
             .data(),
         }

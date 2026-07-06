@@ -136,5 +136,8 @@ pub fn apply_graphics_quality_lights_system(
         light.shadow_maps_enabled = shadows_enabled;
     }
 
-    info!("[GRAPHICS] Shadow quality: {:?} (map {}px, enabled: {})", current_quality, shadow_size, shadows_enabled);
+    info!(
+        "[GRAPHICS] Shadow quality: {:?} (map {}px, enabled: {})",
+        current_quality, shadow_size, shadows_enabled
+    );
 }

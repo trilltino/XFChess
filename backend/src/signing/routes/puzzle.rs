@@ -324,7 +324,9 @@ async fn post_move(
             .bind(&req.nonce)
             .execute(&pool)
             .await;
-        Ok(Json(json!({ "correct": true, "done": false, "reply": line[oidx] })))
+        Ok(Json(
+            json!({ "correct": true, "done": false, "reply": line[oidx] }),
+        ))
     } else {
         // That was the final move — solved.
         consume(&pool, &req.nonce).await;
@@ -370,8 +372,18 @@ async fn finalize(
                 match pay_sol(state, &ch.wallet, bounty.reward_lamports as u64).await {
                     Ok(sig) => {
                         paid_lamports = bounty.reward_lamports;
-                        debit_bounty(pool, bounty.id, bounty.reward_lamports, bounty.budget_lamports, bounty.spent_lamports).await;
-                        info!("[puzzle] paid {} lamports to {} (sig {})", bounty.reward_lamports, ch.wallet, sig);
+                        debit_bounty(
+                            pool,
+                            bounty.id,
+                            bounty.reward_lamports,
+                            bounty.budget_lamports,
+                            bounty.spent_lamports,
+                        )
+                        .await;
+                        info!(
+                            "[puzzle] paid {} lamports to {} (sig {})",
+                            bounty.reward_lamports, ch.wallet, sig
+                        );
                         payout_sig = Some(sig);
                     }
                     Err(e) => warn!("[puzzle] payout failed for {}: {e}", ch.wallet),
@@ -397,13 +409,22 @@ async fn finalize(
 
     let _ = if win {
         sqlx::query("UPDATE puzzles SET plays = plays + 1, nb_wins = nb_wins + 1 WHERE id = ?")
-            .bind(&puzzle.id).execute(pool).await
+            .bind(&puzzle.id)
+            .execute(pool)
+            .await
     } else {
         sqlx::query("UPDATE puzzles SET plays = plays + 1 WHERE id = ?")
-            .bind(&puzzle.id).execute(pool).await
+            .bind(&puzzle.id)
+            .execute(pool)
+            .await
     };
 
-    Outcome { new_rating, rating_diff: new_rating - player_rating, payout_sig, paid_lamports }
+    Outcome {
+        new_rating,
+        rating_diff: new_rating - player_rating,
+        payout_sig,
+        paid_lamports,
+    }
 }
 
 async fn consume(pool: &sqlx::SqlitePool, nonce: &str) {
@@ -415,10 +436,7 @@ async fn consume(pool: &sqlx::SqlitePool, nonce: &str) {
 
 // ── GET /puzzle/rating/{wallet} ──────────────────────────────────────────────
 
-async fn get_rating(
-    State(state): State<AppState>,
-    Path(wallet): Path<String>,
-) -> Json<Value> {
+async fn get_rating(State(state): State<AppState>, Path(wallet): Path<String>) -> Json<Value> {
     let pool = state.store.pool();
     let (rating, dev) = load_rating(&pool, &wallet).await;
     Json(json!({ "wallet": wallet, "rating": rating, "rating_dev": dev }))
@@ -535,11 +553,12 @@ async fn consume_challenge(
     }
 
     // Mark consumed atomically; if 0 rows changed someone else won the race.
-    let res = sqlx::query("UPDATE puzzle_challenges SET consumed = 1 WHERE nonce = ? AND consumed = 0")
-        .bind(nonce)
-        .execute(pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let res =
+        sqlx::query("UPDATE puzzle_challenges SET consumed = 1 WHERE nonce = ? AND consumed = 0")
+            .bind(nonce)
+            .execute(pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if res.rows_affected() == 0 {
         return Err(StatusCode::GONE);
     }
@@ -549,16 +568,14 @@ async fn consume_challenge(
 // ── Rating (simplified Glicko / Elo) ─────────────────────────────────────────
 
 async fn load_rating(pool: &sqlx::SqlitePool, wallet: &str) -> (i64, i64) {
-    sqlx::query_as::<_, RatingRow>(
-        "SELECT rating, rating_dev FROM puzzle_ratings WHERE wallet = ?",
-    )
-    .bind(wallet)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .map(|r| (r.rating, r.rating_dev))
-    .unwrap_or((DEFAULT_RATING, DEFAULT_RATING_DEV))
+    sqlx::query_as::<_, RatingRow>("SELECT rating, rating_dev FROM puzzle_ratings WHERE wallet = ?")
+        .bind(wallet)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| (r.rating, r.rating_dev))
+        .unwrap_or((DEFAULT_RATING, DEFAULT_RATING_DEV))
 }
 
 async fn save_rating(pool: &sqlx::SqlitePool, wallet: &str, rating: i64, dev: i64, now: i64) {
@@ -676,13 +693,7 @@ async fn payout_decision(
     PayoutDecision::Pay
 }
 
-async fn debit_bounty(
-    pool: &sqlx::SqlitePool,
-    id: i64,
-    reward: i64,
-    budget: i64,
-    spent: i64,
-) {
+async fn debit_bounty(pool: &sqlx::SqlitePool, id: i64, reward: i64, budget: i64, spent: i64) {
     let new_spent = spent + reward;
     let exhausted = new_spent + reward > budget; // can't fund another full reward
     let _ = sqlx::query(
@@ -742,7 +753,10 @@ pub fn puzzle_admin_routes() -> Router<AppState> {
         .route("/admin/puzzles", get(admin_list))
         .route("/admin/puzzles/fund", post(admin_fund))
         .route("/admin/puzzles/bounties", get(admin_bounties))
-        .route("/admin/puzzles/bounties/{id}/close", post(admin_close_bounty))
+        .route(
+            "/admin/puzzles/bounties/{id}/close",
+            post(admin_close_bounty),
+        )
         .route("/admin/puzzles/{id}", get(admin_get))
         .route("/admin/puzzles/{id}/name", post(admin_name))
         .route("/admin/puzzles/{id}/feature", post(admin_feature))

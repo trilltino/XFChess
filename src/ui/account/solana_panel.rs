@@ -6,9 +6,7 @@ use crate::multiplayer::solana::addon::{
     CompetitiveMatchState, SolanaGameSync, SolanaProfile, SolanaWallet,
 };
 use crate::multiplayer::solana::integration::state::{ProfileStatus, SolanaIntegrationState};
-use crate::multiplayer::solana::integration::systems::{
-    GlobalSessionActive,
-};
+use crate::multiplayer::solana::integration::systems::GlobalSessionActive;
 use crate::ui::styles::UiColors;
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -17,18 +15,18 @@ use bevy_egui::egui;
 fn profile_status_color(status: ProfileStatus) -> egui::Color32 {
     match status {
         ProfileStatus::HasProfileWithUsername => egui::Color32::from_rgb(34, 197, 94),
-        ProfileStatus::HasProfileNoUsername   => egui::Color32::from_rgb(251, 191, 36),
-        ProfileStatus::NoProfile              => egui::Color32::from_rgb(239, 68, 68),
-        ProfileStatus::Unknown                => egui::Color32::GRAY,
+        ProfileStatus::HasProfileNoUsername => egui::Color32::from_rgb(251, 191, 36),
+        ProfileStatus::NoProfile => egui::Color32::from_rgb(239, 68, 68),
+        ProfileStatus::Unknown => egui::Color32::GRAY,
     }
 }
 
 fn profile_status_label(status: ProfileStatus) -> &'static str {
     match status {
         ProfileStatus::HasProfileWithUsername => "Profile OK",
-        ProfileStatus::HasProfileNoUsername   => "No Username",
-        ProfileStatus::NoProfile              => "No Profile",
-        ProfileStatus::Unknown                => "Checking…",
+        ProfileStatus::HasProfileNoUsername => "No Username",
+        ProfileStatus::NoProfile => "No Profile",
+        ProfileStatus::Unknown => "Checking…",
     }
 }
 
@@ -62,7 +60,8 @@ pub fn render_solana_panel(
                         .clicked()
                     {
                         ui.output_mut(|o| {
-                            o.commands.push(egui::OutputCommand::CopyText(pk_str.clone()))
+                            o.commands
+                                .push(egui::OutputCommand::CopyText(pk_str.clone()))
                         });
                     }
                 });
@@ -78,16 +77,28 @@ pub fn render_solana_panel(
             } else {
                 ui.colored_label(UiColors::DANGER, "Not Connected");
                 ui.add_space(5.0);
-                ui.label(egui::RichText::new("Connect your Solana wallet to play:").size(11.0).color(UiColors::TEXT_SECONDARY));
+                ui.label(
+                    egui::RichText::new("Connect your Solana wallet to play:")
+                        .size(11.0)
+                        .color(UiColors::TEXT_SECONDARY),
+                );
                 ui.add_space(5.0);
-                
+
                 ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new(" Phantom").strong()).on_hover_text("Connect via Phantom Extension").clicked() {
+                    if ui
+                        .button(egui::RichText::new(" Phantom").strong())
+                        .on_hover_text("Connect via Phantom Extension")
+                        .clicked()
+                    {
                         crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                         info!("[WALLET] User selected Phantom - opening Tauri popup...");
                     }
                     ui.add_space(5.0);
-                    if ui.button(egui::RichText::new("? Solflare").strong()).on_hover_text("Connect via Solflare Extension").clicked() {
+                    if ui
+                        .button(egui::RichText::new("? Solflare").strong())
+                        .on_hover_text("Connect via Solflare Extension")
+                        .clicked()
+                    {
                         crate::multiplayer::solana::tauri_signer::open_wallet_browser();
                         info!("[WALLET] User selected Solflare - opening Tauri popup...");
                     }
@@ -101,7 +112,7 @@ pub fn render_solana_panel(
         if wallet.pubkey.is_some() {
             ui.group(|ui| {
                 ui.label(egui::RichText::new("VERIFICATION").strong());
-                
+
                 let status = &wallet.user_status;
                 let has_profile = status.as_ref().map(|s| s.has_profile).unwrap_or(false);
                 let has_email = status.as_ref().map(|s| s.has_email).unwrap_or(false);
@@ -117,11 +128,19 @@ pub fn render_solana_panel(
                 });
                 ui.horizontal(|ui| {
                     ui.label(if has_kyc { "" } else { "" });
-                    ui.colored_label(if has_kyc { UiColors::SUCCESS } else { UiColors::DANGER }, "KYC — required for wagered play");
+                    ui.colored_label(
+                        if has_kyc {
+                            UiColors::SUCCESS
+                        } else {
+                            UiColors::DANGER
+                        },
+                        "KYC — required for wagered play",
+                    );
                 });
 
                 ui.add_space(5.0);
-                let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
+                let backend_url = std::env::var("BACKEND_URL")
+                    .unwrap_or_else(|_| "http://178.104.55.19".to_string());
                 let profile_url = format!("{}/profile", backend_url);
                 if ui.button("Complete at xfchess.gg/profile ?").clicked() {
                     let _ = webbrowser::open(&profile_url);
@@ -137,20 +156,36 @@ pub fn render_solana_panel(
                 if global_session_pending {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label(egui::RichText::new("Verifying…").size(11.0).color(UiColors::TEXT_SECONDARY));
+                        ui.label(
+                            egui::RichText::new("Verifying…")
+                                .size(11.0)
+                                .color(UiColors::TEXT_SECONDARY),
+                        );
                     });
                 } else if let Some(gs) = global_session {
                     let short = if gs.session_pubkey.len() > 12 {
-                        format!("{}…{}", &gs.session_pubkey[..6], &gs.session_pubkey[gs.session_pubkey.len()-4..])
+                        format!(
+                            "{}…{}",
+                            &gs.session_pubkey[..6],
+                            &gs.session_pubkey[gs.session_pubkey.len() - 4..]
+                        )
                     } else {
                         gs.session_pubkey.clone()
                     };
                     ui.horizontal(|ui| {
                         ui.colored_label(egui::Color32::from_rgb(80, 220, 120), "Active");
-                        ui.label(egui::RichText::new(short).size(10.0).color(UiColors::TEXT_SECONDARY).monospace());
+                        ui.label(
+                            egui::RichText::new(short)
+                                .size(10.0)
+                                .color(UiColors::TEXT_SECONDARY)
+                                .monospace(),
+                        );
                     });
                 } else {
-                    ui.colored_label(egui::Color32::from_rgb(255, 200, 50), "No session — authorize to skip wallet popups");
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 200, 50),
+                        "No session — authorize to skip wallet popups",
+                    );
                 }
             });
         }
@@ -191,14 +226,14 @@ pub fn render_solana_panel(
                 if ui.button("View Profile").clicked() {
                     *profile_view_open = true;
                 }
-                let backend_url = std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://178.104.55.19".to_string());
+                let backend_url = std::env::var("BACKEND_URL")
+                    .unwrap_or_else(|_| "http://178.104.55.19".to_string());
                 let profile_url = format!("{}/profile", backend_url);
                 if ui.small_button("Web ↗").clicked() {
                     let _ = webbrowser::open(&profile_url);
                 }
             });
         });
-
 
         ui.add_space(10.0);
 
@@ -245,4 +280,3 @@ pub fn render_solana_panel(
         }
     });
 }
-

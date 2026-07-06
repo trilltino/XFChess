@@ -24,7 +24,9 @@ fn example_validate_move_helpers() {
 
     let engine = ChessEngine::default();
     assert_eq!(engine.current_turn, PieceColor::White);
-    assert!(engine.fen.starts_with("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"));
+    assert!(engine
+        .fen
+        .starts_with("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"));
 }
 
 /// Test getting legal moves for a square

@@ -7,21 +7,21 @@
 //! - Revoking session keys on logout
 //! - Using session keys for silent transaction signing
 
-use solana_sdk::{
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    signature::Signature,
-};
-use std::path::PathBuf;
-use std::sync::Arc;
-use directories::ProjectDirs;
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use base64::{Engine as _, engine::general_purpose};
-use serde::{Deserialize, Serialize};
+use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
+use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
+use solana_sdk::{
+    pubkey::Pubkey,
+    signature::Signature,
+    signature::{Keypair, Signer},
+};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Session key data stored encrypted on disk
 #[derive(Serialize, Deserialize, Clone)]
@@ -112,10 +112,11 @@ impl SessionKeyManager {
         // Encrypt
         let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
             .map_err(|e| format!("Failed to create cipher: {}", e))?;
-        
+
         #[allow(deprecated)]
         let nonce = Nonce::from_slice(b"xfchess sess"); // 12 bytes for AES-256-GCM
-        let encrypted = cipher.encrypt(nonce, json.as_bytes())
+        let encrypted = cipher
+            .encrypt(nonce, json.as_bytes())
             .map_err(|e| format!("Failed to encrypt: {}", e))?;
 
         // Encode to base64
@@ -124,7 +125,7 @@ impl SessionKeyManager {
         // Save to file
         std::fs::create_dir_all(&self.data_dir)
             .map_err(|e| format!("Failed to create data directory: {}", e))?;
-        
+
         let session_file = self.data_dir.join("session_key.enc");
         std::fs::write(&session_file, encoded)
             .map_err(|e| format!("Failed to write session file: {}", e))?;
@@ -152,17 +153,19 @@ impl SessionKeyManager {
             .map_err(|e| format!("Failed to read session file: {}", e))?;
 
         // Decode from base64
-        let encrypted = general_purpose::STANDARD.decode(encoded)
+        let encrypted = general_purpose::STANDARD
+            .decode(encoded)
             .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
         // Decrypt
         let encryption_key = Self::derive_encryption_key(wallet_pubkey);
         let cipher = Aes256Gcm::new_from_slice(&encryption_key)
             .map_err(|e| format!("Failed to create cipher: {}", e))?;
-        
+
         #[allow(deprecated)]
         let nonce = Nonce::from_slice(b"xfchess sess"); // 12 bytes for AES-256-GCM
-        let decrypted = cipher.decrypt(nonce, encrypted.as_ref())
+        let decrypted = cipher
+            .decrypt(nonce, encrypted.as_ref())
             .map_err(|e| format!("Failed to decrypt: {}", e))?;
 
         // Deserialize
@@ -184,7 +187,7 @@ impl SessionKeyManager {
         let private_key_bytes = bs58::decode(&session_data.session_private_key)
             .into_vec()
             .map_err(|e| format!("Failed to decode private key: {}", e))?;
-        
+
         let keypair = Keypair::from_bytes(&private_key_bytes)
             .map_err(|e| format!("Failed to reconstruct keypair: {}", e))?;
 
@@ -250,10 +253,10 @@ mod tests {
     fn test_session_key_generation() {
         let wallet_pubkey = Pubkey::new_unique();
         let manager = SessionKeyManager::new(&wallet_pubkey);
-        
+
         let session_pubkey = manager.pubkey();
         assert_ne!(session_pubkey, wallet_pubkey);
-        
+
         let message = b"test message";
         let signature = manager.sign(message);
         assert!(signature.verify(&session_pubkey.as_ref(), message));

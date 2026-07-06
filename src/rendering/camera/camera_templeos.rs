@@ -3,11 +3,11 @@
 //! Provides an isometric orthographic camera view for the TempleOS chess board mode.
 //! The camera uses orthographic projection to create a true 2D isometric view.
 
-use crate::core::{DespawnOnExit, GameState};
-use crate::game::view_mode::ViewMode;
-use crate::game::resources::{CurrentTurn, Players};
 use crate::core::states::GameMode;
+use crate::core::{DespawnOnExit, GameState};
+use crate::game::resources::{CurrentTurn, Players};
 use crate::game::systems::camera::get_is_black_view;
+use crate::game::view_mode::ViewMode;
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 
@@ -49,10 +49,10 @@ pub fn setup_templeos_camera(
     // This creates a true isometric view, not a bird's eye view
     // Offset from board center to match the example's angle
     let offset = 5.0;
-    
+
     // Adjust camera position based on player color
     let camera_position = if is_black_view {
-        // Look from +X, +Z side for Black view? 
+        // Look from +X, +Z side for Black view?
         // Actually, for isometric, we usually look from a corner.
         // Standard White is from (+X, +Y, +Z) looking at center.
         // To flip 180°, we look from (-X, +Y, -Z)

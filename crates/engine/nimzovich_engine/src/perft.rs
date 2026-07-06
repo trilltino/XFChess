@@ -127,7 +127,11 @@ mod tests {
 
     #[cfg(feature = "std")]
     fn fen_color(fen: &str) -> Color {
-        if fen.split_whitespace().nth(1) == Some("w") { 1 } else { -1 }
+        if fen.split_whitespace().nth(1) == Some("w") {
+            1
+        } else {
+            -1
+        }
     }
 
     // ── Starting position (chessprogramming.org/Perft_Results) ───────────────

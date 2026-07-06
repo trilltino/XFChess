@@ -247,24 +247,37 @@ fn handle_rollup_events(
                 rollup_manager.status = GameStateStatus::Synced;
                 info!("Batch committed successfully for game {}", game_id);
             }
-            RollupEvent::ResyncedMove { game_id, move_uci, next_fen, .. }
-                if *game_id == rollup_manager.game_id =>
-            {
+            RollupEvent::ResyncedMove {
+                game_id,
+                move_uci,
+                next_fen,
+                ..
+            } if *game_id == rollup_manager.game_id => {
                 // A missed move arrived via Braid reconnection recovery.
                 // Update committed state to keep the rollup manager in sync;
                 // the actual board position is applied by the game-logic layer
                 // which receives the same event independently.
                 rollup_manager.committed_fen = next_fen.clone();
                 rollup_manager.committed_turn = rollup_manager.committed_turn.saturating_add(1);
-                info!("[ROLLUP] ResyncedMove {} applied, turn now {}", move_uci, rollup_manager.committed_turn);
+                info!(
+                    "[ROLLUP] ResyncedMove {} applied, turn now {}",
+                    move_uci, rollup_manager.committed_turn
+                );
             }
-            RollupEvent::SnapshotReceived { game_id, fen, move_payloads, head_version }
-                if *game_id == rollup_manager.game_id =>
-            {
+            RollupEvent::SnapshotReceived {
+                game_id,
+                fen,
+                move_payloads,
+                head_version,
+            } if *game_id == rollup_manager.game_id => {
                 rollup_manager.committed_fen = fen.clone();
                 rollup_manager.committed_turn = move_payloads.len() as u16;
                 rollup_manager.status = GameStateStatus::Synced;
-                info!("[ROLLUP] SnapshotReceived: {} moves, head {}, fen set", move_payloads.len(), head_version);
+                info!(
+                    "[ROLLUP] SnapshotReceived: {} moves, head {}, fen set",
+                    move_payloads.len(),
+                    head_version
+                );
             }
             RollupEvent::BatchFailed {
                 game_id,

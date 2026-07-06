@@ -69,10 +69,7 @@ impl SubscriptionManager {
         let (sender, receiver) = topic.split();
 
         // Stash the sender so we can broadcast later
-        self.topics
-            .lock()
-            .await
-            .insert(normalized, sender.clone());
+        self.topics.lock().await.insert(normalized, sender.clone());
 
         Ok((sender, receiver))
     }
@@ -84,14 +81,19 @@ impl SubscriptionManager {
         let bytes = serde_json::to_vec(update)?;
         self.broadcast_raw(&normalized, Bytes::from(bytes)).await
     }
-    
+
     /// Broadcast raw bytes to all peers on a resource's gossip topic.
     /// This allows sending wrapped messages with metadata.
     pub async fn broadcast_raw(&self, url: &str, data: Bytes) -> anyhow::Result<()> {
         let normalized = Self::normalize_url(url);
         let mut topics = self.topics.lock().await;
 
-        println!("[BROADCAST] url={} normalized={} topics_count={}", url, normalized, topics.len());
+        println!(
+            "[BROADCAST] url={} normalized={} topics_count={}",
+            url,
+            normalized,
+            topics.len()
+        );
         for (k, _) in topics.iter() {
             println!("[BROADCAST]   known topic: {}", k);
         }
@@ -111,7 +113,11 @@ impl SubscriptionManager {
         }
 
         if let Some(sender) = topics.get(&normalized) {
-            println!("[BROADCAST] Sending {} bytes to topic {}", data.len(), normalized);
+            println!(
+                "[BROADCAST] Sending {} bytes to topic {}",
+                data.len(),
+                normalized
+            );
             sender.broadcast(data).await?;
             println!("[BROADCAST] Broadcast complete for {}", normalized);
         }

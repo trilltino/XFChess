@@ -23,7 +23,7 @@ pub struct Tournament {
     pub start_time: Option<i64>,
     pub end_time: Option<i64>,
     pub fees_advanced: u64, // Accumulator for operational fees paid by relayer
-    pub fee_payer: Pubkey, // Relayer wallet that paid; reimbursed at claim
+    pub fee_payer: Pubkey,  // Relayer wallet that paid; reimbursed at claim
     pub tournament_type: TournamentType,
     pub current_round: u8,
     /// Total rounds (for Swiss tournaments only).
@@ -118,9 +118,7 @@ pub struct VestingParams {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq, InitSpace)]
 pub enum TournamentType {
-    Swiss {
-        rounds: u8,
-    },
+    Swiss { rounds: u8 },
     SingleElimination,
 }
 
@@ -137,10 +135,10 @@ pub enum TournamentStatus {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, InitSpace, Debug)]
 pub struct SwissStanding {
     pub player: Pubkey,
-    pub score: u8,  // Points: 2 for win, 1 for draw, 0 for loss
-    pub buchholz: u16,  // Sum of opponents' scores
-    pub sonneborn: u16,  // Sum of defeated opponents' scores + 0.5*draws
-    pub color_balance: i8,  // Whites - blacks (should balance to 0)
+    pub score: u8,         // Points: 2 for win, 1 for draw, 0 for loss
+    pub buchholz: u16,     // Sum of opponents' scores
+    pub sonneborn: u16,    // Sum of defeated opponents' scores + 0.5*draws
+    pub color_balance: i8, // Whites - blacks (should balance to 0)
 }
 
 impl Tournament {
@@ -169,7 +167,13 @@ impl TournamentPlayersShard {
     /// Layout: 8 (tournament_id) + 1 (shard_id) + 4 + 64*32 (players) + 4 + 64*4 (elos) + 4 + 64*38 (standings)
     pub const SHARD_CAPACITY: u16 = 64;
     pub fn space_for() -> usize {
-        8 + 1 + 4 + (Self::SHARD_CAPACITY as usize) * 32 + 4 + (Self::SHARD_CAPACITY as usize) * 4 + 4 + (Self::SHARD_CAPACITY as usize) * 38
+        8 + 1
+            + 4
+            + (Self::SHARD_CAPACITY as usize) * 32
+            + 4
+            + (Self::SHARD_CAPACITY as usize) * 4
+            + 4
+            + (Self::SHARD_CAPACITY as usize) * 38
     }
 }
 

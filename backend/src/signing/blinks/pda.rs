@@ -48,8 +48,16 @@ pub fn derive_player_profile_pda(wallet_pubkey: &Pubkey, program_id: &Pubkey) ->
 /// Derives a `TournamentPlayersShard` PDA address.
 ///
 /// Seeds: ["tourney_players", shard_index_byte, tournament_id_le_bytes]
-pub fn derive_shard_pda(shard_index: u8, tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
-    let seeds: &[&[u8]] = &[b"tourney_players", &[shard_index], &tournament_id.to_le_bytes()];
+pub fn derive_shard_pda(
+    shard_index: u8,
+    tournament_id: u64,
+    program_id: &Pubkey,
+) -> Result<Pubkey> {
+    let seeds: &[&[u8]] = &[
+        b"tourney_players",
+        &[shard_index],
+        &tournament_id.to_le_bytes(),
+    ];
     let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
     Ok(pda)
 }
@@ -57,8 +65,16 @@ pub fn derive_shard_pda(shard_index: u8, tournament_id: u64, program_id: &Pubkey
 /// Derives a `TournamentMatch` PDA address.
 ///
 /// Seeds: ["t_match", tournament_id_le_bytes, match_index_le_bytes]
-pub fn derive_match_pda(tournament_id: u64, match_index: u16, program_id: &Pubkey) -> Result<Pubkey> {
-    let seeds: &[&[u8]] = &[b"t_match", &tournament_id.to_le_bytes(), &match_index.to_le_bytes()];
+pub fn derive_match_pda(
+    tournament_id: u64,
+    match_index: u16,
+    program_id: &Pubkey,
+) -> Result<Pubkey> {
+    let seeds: &[&[u8]] = &[
+        b"t_match",
+        &tournament_id.to_le_bytes(),
+        &match_index.to_le_bytes(),
+    ];
     let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
     Ok(pda)
 }

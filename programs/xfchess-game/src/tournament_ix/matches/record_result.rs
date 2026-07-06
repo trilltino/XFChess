@@ -4,6 +4,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::matches::guards;
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -22,8 +23,8 @@ pub struct RecordMatchResult<'info> {
         bump = tournament_match.bump
     )]
     pub tournament_match: Account<'info, TournamentMatch>,
-    /// CHECK: The game PDA for this match — read-only for result verification.
-    pub game: UncheckedAccount<'info>,
+    /// The tournament authority is the trusted source of match results (results
+    /// are not verified against an on-chain game account by design).
     #[account(mut)]
     pub authority: Signer<'info>,
 }
@@ -36,8 +37,19 @@ pub fn handler(
     loser: Pubkey,
 ) -> Result<()> {
     let tm = &mut ctx.accounts.tournament_match;
-    require!(ctx.accounts.tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
-    require!(tm.match_index == match_index, GameErrorCode::InvalidMatchStatus);
+    require!(
+        ctx.accounts.tournament.tournament_id == tournament_id,
+        GameErrorCode::UnauthorizedAccess
+    );
+    require!(
+        tm.match_index == match_index,
+        GameErrorCode::InvalidMatchStatus
+    );
+    require!(
+        tm.tournament_id == tournament_id,
+        GameErrorCode::InvalidMatchStatus
+    );
+    guards::require_match_participants(tm, winner, loser)?;
 
     require!(
         tm.status == MatchStatus::Active || tm.status == MatchStatus::Pending,
@@ -57,19 +69,15 @@ pub fn handler(
 
     if match_index == semifinal1_idx {
         tournament.fourth_place = Some(loser);
-
     } else if match_index == semifinal2_idx {
         tournament.third_place = Some(loser);
-
     } else if match_index == final_idx {
         // Final completed - tournament done
         tournament.winner = Some(winner);
         tournament.second_place = Some(loser);
         tournament.status = TournamentStatus::Completed;
         tournament.completed_at = Some(Clock::get()?.unix_timestamp);
-
     } else {
-
     }
 
     Ok(())
@@ -108,8 +116,14 @@ pub fn handler_advance_winner(
     source_match_index: u16,
 ) -> Result<()> {
     let source = &ctx.accounts.source_match;
-    require!(ctx.accounts.tournament.tournament_id == tournament_id, GameErrorCode::UnauthorizedAccess);
-    require!(source.match_index == source_match_index, GameErrorCode::InvalidMatchStatus);
+    require!(
+        ctx.accounts.tournament.tournament_id == tournament_id,
+        GameErrorCode::UnauthorizedAccess
+    );
+    require!(
+        source.match_index == source_match_index,
+        GameErrorCode::InvalidMatchStatus
+    );
 
     require!(
         source.status == MatchStatus::Completed,
@@ -130,7 +144,6 @@ pub fn handler_advance_winner(
     if target.player_white.is_some() && target.player_black.is_some() {
         target.status = MatchStatus::Pending;
     }
-
 
     Ok(())
 }

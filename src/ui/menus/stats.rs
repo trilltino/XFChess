@@ -95,4 +95,3 @@ fn fetch_stats_system(
         }
     });
 }
-

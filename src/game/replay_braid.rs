@@ -11,9 +11,7 @@
 //! existing replay UI plays it back immediately (no PGN text round-trip needed).
 
 use braid_chess::MovePayload;
-use nimzovich_engine::{
-    do_move_with_promo, move_to_san, new_game, parse_uci, ParsedPgnGame,
-};
+use nimzovich_engine::{do_move_with_promo, move_to_san, new_game, parse_uci, ParsedPgnGame};
 use std::collections::BTreeMap;
 use tracing::{info, warn};
 
@@ -44,7 +42,11 @@ pub fn braid_move_log_to_parsed_pgn(
         let (src, dst, promo) = match parse_uci(&buf) {
             Ok(t) => t,
             Err(_) => {
-                warn!("[replay-braid] Failed to parse UCI '{}' at ply {}", payload.uci, idx + 1);
+                warn!(
+                    "[replay-braid] Failed to parse UCI '{}' at ply {}",
+                    payload.uci,
+                    idx + 1
+                );
                 return None;
             }
         };
@@ -60,7 +62,10 @@ pub fn braid_move_log_to_parsed_pgn(
     tags.insert("Black".to_string(), black_name.to_string());
     tags.insert("Result".to_string(), result.to_string());
 
-    info!("[replay-braid] Assembled ParsedPgnGame: {} half-moves", san_moves.len());
+    info!(
+        "[replay-braid] Assembled ParsedPgnGame: {} half-moves",
+        san_moves.len()
+    );
     Some(ParsedPgnGame {
         tags,
         moves: san_moves,

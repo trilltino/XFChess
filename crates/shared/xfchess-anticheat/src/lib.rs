@@ -18,9 +18,7 @@ use config::AcConfig;
 use engine::stockfish::StockfishHandle;
 use error::AcResult;
 use features::{accuracy, blur, complexity, timing};
-use types::{
-    AcReport, GameRecord, PlyEval, SideAnalysis, SignalValues,
-};
+use types::{AcReport, GameRecord, PlyEval, SideAnalysis, SignalValues};
 
 /// Analyse a single game with Stockfish.  This is a blocking-ish call that
 /// runs a Stockfish subprocess for the duration — call it from a worker task.
@@ -31,12 +29,12 @@ pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport
     let movetime = cfg.movetime_ms;
 
     // Extract metadata before moving game into the blocking closure
-    let game_id      = game.game_id.clone();
-    let context      = game.context.clone();
-    let result       = game.result.clone();
-    let white_ref    = game.white.clone();
-    let black_ref    = game.black.clone();
-    let moves_clone  = game.moves.clone();
+    let game_id = game.game_id.clone();
+    let context = game.context.clone();
+    let result = game.result.clone();
+    let white_ref = game.white.clone();
+    let black_ref = game.black.clone();
+    let moves_clone = game.moves.clone();
 
     // Run the CPU-bound Stockfish work on a blocking thread
     let (white_evals, black_evals) = tokio::task::spawn_blocking(move || {
@@ -45,11 +43,24 @@ pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport
         evaluate_all_plies(&mut sf, &game, depth, movetime)
     })
     .await
-    .map_err(|e| error::AcError::Stockfish(format!("spawn_blocking panicked: {e}")))?
-    ?;
+    .map_err(|e| error::AcError::Stockfish(format!("spawn_blocking panicked: {e}")))??;
 
-    let white = build_side_analysis(&white_ref.pubkey, white_ref.elo, &white_evals, &moves_clone, 0, cfg);
-    let black = build_side_analysis(&black_ref.pubkey, black_ref.elo, &black_evals, &moves_clone, 1, cfg);
+    let white = build_side_analysis(
+        &white_ref.pubkey,
+        white_ref.elo,
+        &white_evals,
+        &moves_clone,
+        0,
+        cfg,
+    );
+    let black = build_side_analysis(
+        &black_ref.pubkey,
+        black_ref.elo,
+        &black_evals,
+        &moves_clone,
+        1,
+        cfg,
+    );
 
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -99,7 +110,9 @@ fn evaluate_all_plies(
 
         let pos = sf.analyse(&fen_before, depth, movetime)?;
 
-        let cpl = (pos.top1_cp - (pos.top1_cp - cpl_of_played_move(sf, &mv.fen_after, depth, movetime))).max(0);
+        let cpl = (pos.top1_cp
+            - (pos.top1_cp - cpl_of_played_move(sf, &mv.fen_after, depth, movetime)))
+        .max(0);
         let is_t1 = pos.best_move == mv.move_uci;
         let cplx = complexity::classify(pos.top1_cp, pos.top2_cp, &AcConfig::default());
 
@@ -127,13 +140,10 @@ fn evaluate_all_plies(
 /// Evaluate the position *after* the played move to compute CPL.
 /// CPL = best_score_before − score_of_played_position (from side-to-move perspective).
 /// We get this by evaluating fen_after and negating (it's opponent's turn).
-fn cpl_of_played_move(
-    sf: &mut StockfishHandle,
-    fen_after: &str,
-    depth: u8,
-    movetime: u64,
-) -> i32 {
-    if fen_after.is_empty() { return 0; }
+fn cpl_of_played_move(sf: &mut StockfishHandle, fen_after: &str, depth: u8, movetime: u64) -> i32 {
+    if fen_after.is_empty() {
+        return 0;
+    }
     match sf.analyse(fen_after, depth, movetime) {
         Ok(pos) => -pos.top1_cp, // negate because it's now the opponent's perspective
         Err(_) => 0,

@@ -1,21 +1,21 @@
 #![cfg(feature = "solana")]
 //! Tournament Test - Real On-Chain Tournament Execution
-//! 
+//!
 //! Executes a complete tournament on Solana devnet with real transactions
 //! and generates data for TournamentDemo.tsx with valid explorer links.
 
+use chrono;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
-use serde::{Serialize, Deserialize};
-use chrono;
 
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
-    pubkey::Pubkey,
-    instruction::{AccountMeta, Instruction},
 };
 
 #[allow(deprecated)]
@@ -44,8 +44,8 @@ struct MatchResult {
 
 // Import tournament instructions
 use xfchess::solana::instructions::{
-    initialize_tournament_ix, register_player_ix, start_tournament_ix, 
-    record_match_result_ix, advance_final_ix, PROGRAM_ID
+    advance_final_ix, initialize_tournament_ix, record_match_result_ix, register_player_ix,
+    start_tournament_ix, PROGRAM_ID,
 };
 
 const DEVNET_RPC: &str = "https://api.devnet.solana.com";
@@ -54,18 +54,21 @@ const DEVNET_RPC: &str = "https://api.devnet.solana.com";
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" XFChess Real Tournament E2E Test - Solana Devnet");
     println!("==================================================");
-    
+
     // Load deployer keypair - this funds everything
     let deployer_keypair = load_keypair("keys/fee-payer.json")?;
     println!("? Deployer: {}", deployer_keypair.pubkey());
-    
+
     // Setup RPC client
     let rpc_client = RpcClient::new_with_commitment(DEVNET_RPC, CommitmentConfig::confirmed());
-    
+
     // Check deployer balance
     let deployer_balance = rpc_client.get_balance(&deployer_keypair.pubkey())?;
-    println!(" Deployer balance: {} SOL", deployer_balance as f64 / 1_000_000_000.0);
-    
+    println!(
+        " Deployer balance: {} SOL",
+        deployer_balance as f64 / 1_000_000_000.0
+    );
+
     if deployer_balance < 2_000_000_000 {
         println!("?  Deployer needs at least 2 SOL to fund tournament");
         return Ok(());
@@ -73,16 +76,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load 4 player keypairs
     let players = load_players_with_keypairs()?;
-    
+
     // Fund all players from deployer wallet (not airdrops)
     println!("\n Funding players from deployer wallet...");
     for player in &players {
         let balance = rpc_client.get_balance(&player.keypair.pubkey())?;
-        println!("  {}: {} SOL", player.name, balance as f64 / 1_000_000_000.0);
-        
+        println!(
+            "  {}: {} SOL",
+            player.name,
+            balance as f64 / 1_000_000_000.0
+        );
+
         if balance < 500_000_000 {
             println!("   Funding 1 SOL to {} from deployer...", player.name);
-            match fund_player(&rpc_client, &deployer_keypair, &player.keypair.pubkey(), 1_000_000_000).await {
+            match fund_player(
+                &rpc_client,
+                &deployer_keypair,
+                &player.keypair.pubkey(),
+                1_000_000_000,
+            )
+            .await
+            {
                 Ok(sig) => println!("     Funded: {}", sig),
                 Err(e) => println!("     Funding failed: {}", e),
             }
@@ -94,7 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tournament_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    
+
     println!("\n Tournament Setup:");
     println!("  Program ID: {}", program_id);
     println!("  Tournament ID: {}", tournament_id);
@@ -106,7 +120,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 1: Initialize tournament
     println!("\n Step 1: Initializing tournament...");
-    let init_sig = initialize_tournament_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id, "XFChess Cup", 1_000_000).await?;
+    let init_sig = initialize_tournament_on_chain(
+        &rpc_client,
+        &program_id,
+        &deployer_keypair,
+        tournament_id,
+        "XFChess Cup",
+        1_000_000,
+    )
+    .await?;
     lifecycle_steps.push(TournamentStep {
         step: "Tournament Created".to_string(),
         status: "".to_string(),
@@ -172,7 +194,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 4: Start tournament
     println!("\n Step 4: Starting tournament...");
-    let start_sig = start_tournament_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id).await?;
+    let start_sig =
+        start_tournament_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id)
+            .await?;
     lifecycle_steps.push(TournamentStep {
         step: "Bracket Started".to_string(),
         status: "".to_string(),
@@ -192,13 +216,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &rpc_client,
         &program_id,
         &players[0], // Magnus
-        &players[3], // Vidit  
-        0, // Magnus index
+        &players[3], // Vidit
+        0,           // Magnus index
         "SF1",
-        &["e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "c1e3", "e7e6", "e4e5", "f6d7", "c2c4", "f8e7", "b1c3", "a7a6"],
+        &[
+            "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "c1e3", "e7e6", "e4e5",
+            "f6d7", "c2c4", "f8e7", "b1c3", "a7a6",
+        ],
         &mut lifecycle_steps,
         &mut session_notes,
-    ).await?;
+    )
+    .await?;
 
     // Step 6: SF2 - Fabiano vs Anish (real game with moves)
     println!("\n Step 6: SF2 - Fabiano vs Anish");
@@ -207,23 +235,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &program_id,
         &players[1], // Fabiano
         &players[2], // Anish
-        1, // Fabiano index
-        "SF2", 
-        &["d2d4", "d7d5", "c2c4", "e7e6", "b1c3", "g8f6", "c4d3", "c7c6", "e2e3", "f8d6", "f1d3", "e8g8", "e1g1", "d8e7", "c1e3", "e7h4"],
+        1,           // Fabiano index
+        "SF2",
+        &[
+            "d2d4", "d7d5", "c2c4", "e7e6", "b1c3", "g8f6", "c4d3", "c7c6", "e2e3", "f8d6", "f1d3",
+            "e8g8", "e1g1", "d8e7", "c1e3", "e7h4",
+        ],
         &mut lifecycle_steps,
         &mut session_notes,
-    ).await?;
+    )
+    .await?;
 
     // Step 7: Record SF results
     println!("\n Step 7: Recording semifinal results...");
-    let sf1_result_sig = record_match_result_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id, 0, &sf1_result.winner, Pubkey::default()).await?;
+    let sf1_result_sig = record_match_result_on_chain(
+        &rpc_client,
+        &program_id,
+        &deployer_keypair,
+        tournament_id,
+        0,
+        &sf1_result.winner,
+        Pubkey::default(),
+    )
+    .await?;
     lifecycle_steps.push(TournamentStep {
         step: "SF1 Result Recorded".to_string(),
         status: "".to_string(),
         sig: sf1_result_sig.clone(),
     });
 
-    let sf2_result_sig = record_match_result_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id, 1, &sf2_result.winner, Pubkey::default()).await?;
+    let sf2_result_sig = record_match_result_on_chain(
+        &rpc_client,
+        &program_id,
+        &deployer_keypair,
+        tournament_id,
+        1,
+        &sf2_result.winner,
+        Pubkey::default(),
+    )
+    .await?;
     lifecycle_steps.push(TournamentStep {
         step: "SF2 Result Recorded".to_string(),
         status: "".to_string(),
@@ -232,7 +282,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 8: Advance to final
     println!("\n Step 8: Advancing to final...");
-    let advance_sig = advance_to_final_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id).await?;
+    let advance_sig =
+        advance_to_final_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id)
+            .await?;
     lifecycle_steps.push(TournamentStep {
         step: "Final Advanced".to_string(),
         status: "".to_string(),
@@ -242,12 +294,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         step: "Advance".to_string(),
         player: "Admin".to_string(),
         severity: "ok".to_string(),
-        text: format!("SF winners seeded into final: {} (White) vs {} (Black)", sf1_result.winner, sf2_result.winner),
+        text: format!(
+            "SF winners seeded into final: {} (White) vs {} (Black)",
+            sf1_result.winner, sf2_result.winner
+        ),
     });
     println!("   Advanced to final: {}", advance_sig);
 
     // Step 9: Final match (real game with moves)
-    println!("\n Step 9: Final - {} vs {}", sf1_result.winner, sf2_result.winner);
+    println!(
+        "\n Step 9: Final - {} vs {}",
+        sf1_result.winner, sf2_result.winner
+    );
     let final_result = play_real_game(
         &rpc_client,
         &program_id,
@@ -255,14 +313,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &players[sf2_result.winner_index],
         sf1_result.winner_index,
         "Final",
-        &["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6", "e1g1", "f8e7", "c2c3", "d7d6", "d2d4", "e5d4", "c3d4", "c6d4", "f3d4", "a7a6"],
+        &[
+            "e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6", "e1g1", "f8e7", "c2c3", "d7d6", "d2d4",
+            "e5d4", "c3d4", "c6d4", "f3d4", "a7a6",
+        ],
         &mut lifecycle_steps,
         &mut session_notes,
-    ).await?;
+    )
+    .await?;
 
     // Step 10: Record final result
     println!("\n Step 10: Recording final result...");
-    let final_result_sig = record_match_result_on_chain(&rpc_client, &program_id, &deployer_keypair, tournament_id, 2, &final_result.winner, Pubkey::default()).await?;
+    let final_result_sig = record_match_result_on_chain(
+        &rpc_client,
+        &program_id,
+        &deployer_keypair,
+        tournament_id,
+        2,
+        &final_result.winner,
+        Pubkey::default(),
+    )
+    .await?;
     lifecycle_steps.push(TournamentStep {
         step: "Final Result Recorded".to_string(),
         status: "".to_string(),
@@ -277,7 +348,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Generate output files
-    generate_tournament_data(&lifecycle_steps, &session_notes, &final_result.winner, tournament_id).await?;
+    generate_tournament_data(
+        &lifecycle_steps,
+        &session_notes,
+        &final_result.winner,
+        tournament_id,
+    )
+    .await?;
 
     println!("\n Tournament complete!");
     println!(" Champion: {}", final_result.winner);
@@ -330,7 +407,7 @@ async fn fund_player(
         &[deployer],
         rpc.get_latest_blockhash()?,
     );
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     Ok(sig.to_string())
 }
@@ -352,7 +429,7 @@ async fn initialize_tournament_on_chain(
         600,
         5,
     )?;
-    
+
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&admin.pubkey()),
@@ -384,7 +461,7 @@ async fn create_player_profile_on_chain(
         &[player_keypair],
         rpc.get_latest_blockhash()?,
     );
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(1)).await;
     Ok(sig.to_string())
@@ -398,7 +475,7 @@ async fn register_player_on_chain(
     let program_id: Pubkey = PROGRAM_ID.parse()?;
     let ix = register_player_ix(program_id, player.pubkey(), tournament_id)?;
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(1)).await;
     Ok(sig.to_string())
@@ -412,7 +489,7 @@ async fn start_tournament_on_chain(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let ix = start_tournament_ix(*program_id, admin.pubkey(), tournament_id)?;
     let tx = Transaction::new_with_payer(&[ix], Some(&admin.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(2)).await;
     Ok(sig.to_string())
@@ -429,7 +506,10 @@ async fn play_real_game(
     lifecycle: &mut Vec<TournamentStep>,
     notes: &mut Vec<SessionNote>,
 ) -> Result<MatchResult, Box<dyn std::error::Error>> {
-    println!("   Playing {} - {} vs {}", round, player1.name, player2.name);
+    println!(
+        "   Playing {} - {} vs {}",
+        round, player1.name, player2.name
+    );
 
     let game_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
@@ -478,7 +558,7 @@ async fn play_real_game(
                     step: round.to_string(),
                     player: player.name.clone(),
                     severity: "warn".to_string(),
-                    text: format!("move {} failed: {}", i+1, e),
+                    text: format!("move {} failed: {}", i + 1, e),
                 });
             }
         }
@@ -520,7 +600,7 @@ async fn create_game_on_chain(
         5,
     )?;
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(1)).await;
     Ok(sig.to_string())
@@ -540,7 +620,7 @@ async fn join_game_on_chain(
         game_id,
     )?;
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(1)).await;
     Ok(sig.to_string())
@@ -555,18 +635,16 @@ async fn delegate_to_er_on_chain(
     // Create delegation instruction - simplified for now
     // In a real implementation, this would delegate to MagicBlock ER
     let delegation_data = format!("delegate_{}", game_id);
-    
+
     // Create a simple instruction for demo purposes
     let ix = Instruction {
         program_id: *program_id,
-        accounts: vec![
-            AccountMeta::new(player.pubkey(), true),
-        ],
+        accounts: vec![AccountMeta::new(player.pubkey(), true)],
         data: delegation_data.into_bytes(),
     };
-    
+
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(2)).await;
     Ok(sig.to_string())
@@ -583,19 +661,19 @@ async fn record_move_on_chain(
     let move_str = parse_move(mv)?;
     let signature = None; // Optional signature for devnet
     let nonce = 0; // Local nonce
-    
+
     let ix = xfchess::solana::instructions::record_move_ix(
-        *program_id, 
+        *program_id,
         player.pubkey(), // session_key
         player.pubkey(), // wallet_pubkey (for test purposes)
-        game_id, 
+        game_id,
         move_str,
         format!("next_fen_{}", mv), // Placeholder for next_fen
         nonce,
         signature,
     )?;
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     Ok(sig.to_string())
 }
@@ -610,17 +688,17 @@ async fn finalize_game_on_chain(
     let winner = 1u8; // White wins
     let white_pubkey = player.pubkey();
     let black_pubkey = player.pubkey(); // Placeholder
-    
+
     let ix = xfchess::solana::instructions::finalize_game_ix(
-        *program_id, 
+        *program_id,
         game_id,
         winner,
         white_pubkey,
         black_pubkey,
-        player.pubkey() // Use player as fee_payer for now
+        player.pubkey(), // Use player as fee_payer for now
     )?;
     let tx = Transaction::new_with_payer(&[ix], Some(&player.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(1)).await;
     Ok(sig.to_string())
@@ -637,10 +715,17 @@ async fn record_match_result_on_chain(
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Parse winner pubkey from string (simplified)
     let winner_pubkey = admin.pubkey(); // Placeholder
-    
-    let ix = record_match_result_ix(*program_id, admin.pubkey(), tournament_id, match_index, winner_pubkey, game_pda)?;
+
+    let ix = record_match_result_ix(
+        *program_id,
+        admin.pubkey(),
+        tournament_id,
+        match_index,
+        winner_pubkey,
+        game_pda,
+    )?;
     let tx = Transaction::new_with_payer(&[ix], Some(&admin.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(1)).await;
     Ok(sig.to_string())
@@ -654,7 +739,7 @@ async fn advance_to_final_on_chain(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let ix = advance_final_ix(*program_id, admin.pubkey(), tournament_id)?;
     let tx = Transaction::new_with_payer(&[ix], Some(&admin.pubkey()));
-    
+
     let sig = rpc.send_and_confirm_transaction(&tx)?;
     sleep(Duration::from_secs(2)).await;
     Ok(sig.to_string())
@@ -668,7 +753,7 @@ fn parse_move(mv: &str) -> Result<String, Box<dyn std::error::Error>> {
 
 fn load_keypair(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> {
     let data = std::fs::read(path)?;
-    
+
     // Try JSON format first (array of numbers)
     if path.ends_with(".json") {
         let bytes: Vec<u8> = serde_json::from_slice(&data)?;
@@ -707,25 +792,33 @@ export const GENERATED_AT = '{}';
 "#,
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
         tournament_id,
-        lifecycle.iter().map(|s| {
-            format!(
-                r#"  {{ step: '{}', status: '{}', sig: '{}' }}"#,
-                s.step, s.status, s.sig
-            )
-        }).collect::<Vec<_>>().join(",\n"),
-        notes.iter().map(|n| {
-            format!(
-                r#"  {{ step: '{}', player: '{}', severity: '{}', text: '{}' }}"#,
-                n.step, n.player, n.severity, n.text
-            )
-        }).collect::<Vec<_>>().join(",\n"),
+        lifecycle
+            .iter()
+            .map(|s| {
+                format!(
+                    r#"  {{ step: '{}', status: '{}', sig: '{}' }}"#,
+                    s.step, s.status, s.sig
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",\n"),
+        notes
+            .iter()
+            .map(|n| {
+                format!(
+                    r#"  {{ step: '{}', player: '{}', severity: '{}', text: '{}' }}"#,
+                    n.step, n.player, n.severity, n.text
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",\n"),
         champion,
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
     );
 
     // Create directory if it doesn't exist
     std::fs::create_dir_all("web-react/src/data")?;
-    
+
     // Write files
     std::fs::write("web-react/src/data/tournamentData.ts", &ts_content)?;
 
@@ -803,4 +896,3 @@ export const GENERATED_AT = '{}';
 
     Ok(())
 }
-
