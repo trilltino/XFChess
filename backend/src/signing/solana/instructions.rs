@@ -14,6 +14,7 @@ use super::{
 const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
 const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
+const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
 
 /// Computes the Anchor discriminator for a given instruction name.
 fn anchor_discriminator(name: &str) -> [u8; 8] {
@@ -393,13 +394,34 @@ pub fn initialize_tournament_ix(
     data.extend_from_slice(&600u64.to_le_bytes()); // 10 mins
     data.extend_from_slice(&0u16.to_le_bytes()); // 0 inc
 
+    let usdc_prize_escrow_authority = Pubkey::find_program_address(
+        &[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    )
+    .0;
+    let token_program: Pubkey = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        .parse()
+        .expect("spl token id");
+    let associated_token_program: Pubkey = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        .parse()
+        .expect("spl associated token id");
+
     Instruction {
         program_id: *program_id,
+        // Account order must match `InitializeTournament`: tournament,
+        // usdc_prize_escrow_authority, usdc_prize_escrow (None), usdc_mint
+        // (None), authority, token_program, associated_token_program,
+        // system_program. SOL-only tournaments pass the program ID for the two
+        // optional USDC accounts (Anchor's `None` marker).
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
+            AccountMeta::new_readonly(usdc_prize_escrow_authority, false),
+            AccountMeta::new_readonly(*program_id, false),
+            AccountMeta::new_readonly(*program_id, false),
             AccountMeta::new(*admin, true),
+            AccountMeta::new_readonly(token_program, false),
+            AccountMeta::new_readonly(associated_token_program, false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
         ],
         data,
     }

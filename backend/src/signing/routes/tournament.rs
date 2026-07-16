@@ -486,28 +486,23 @@ async fn get_bracket(
         .get(id)
         .await
         .ok_or(StatusCode::NOT_FOUND)?;
-    let final_idx = t.final_match_index();
-    let current_round = if t.matches.get(final_idx).map_or(false, |m| m.is_some()) {
-        let Some(m) = t.matches[final_idx].as_ref() else {
-            return Ok(Json(serde_json::json!({
-                "tournament_id": t.tournament_id,
-                "status": format!("{:?}", t.status),
-                "current_round": 0u8,
-                "max_players": t.max_players,
-                "players": t.players,
-                "matches": t.matches,
-                "winner": t.winner,
-                "second_place": t.second_place,
-                "third_place": t.third_place,
-            })));
-        };
-        if m.status == MatchStatus::Completed {
-            255u8
-        } else {
-            m.round
-        }
+    // Current round = lowest round that still has an uncompleted match.
+    // 255 marks a finished bracket (final completed).
+    let final_completed = t
+        .matches
+        .last()
+        .and_then(|m| m.as_ref())
+        .map_or(false, |m| m.status == MatchStatus::Completed);
+    let current_round = if final_completed {
+        255u8
     } else {
-        0u8
+        t.matches
+            .iter()
+            .flatten()
+            .filter(|m| m.status != MatchStatus::Completed)
+            .map(|m| m.round)
+            .min()
+            .unwrap_or(0)
     };
 
     let round_deadline_at = t.swiss_data.as_ref().and_then(|s| s.round_deadline_at);

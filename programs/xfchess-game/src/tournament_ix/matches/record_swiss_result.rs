@@ -14,30 +14,36 @@ pub struct RecordSwissResult<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// TournamentPlayersShard 0 (players 0-63)
+    /// TournamentPlayersShard 0 always present (all tournament sizes).
+    /// `mut` is required — standings updates must persist.
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 1 (players 64-127)
+    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
+    /// Pass the program ID in its place for smaller tournaments.
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_1: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 2 (players 128-191)
+    pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_2: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 3 (players 192-255)
+    pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
+        mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_3: Account<'info, TournamentPlayersShard>,
+    pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
 
     /// CHECK: Player who played the match
     #[account(mut)]
@@ -84,13 +90,20 @@ pub fn handler(
     let boards_per_round = t.num_registered_players.max(2) / 2;
     require!(board < boards_per_round, GameErrorCode::InvalidArgument);
 
-    // Collect all shards to search for players
-    let mut shards = [
-        &mut ctx.accounts.tournament_players_shard_0,
-        &mut ctx.accounts.tournament_players_shard_1,
-        &mut ctx.accounts.tournament_players_shard_2,
-        &mut ctx.accounts.tournament_players_shard_3,
-    ];
+    // Collect the present shards (1-3 are optional — small/medium tournaments
+    // only initialize shard 0 or 0-1). Presence is prefix-closed, so the
+    // position in this vec equals the shard id.
+    let mut shards: Vec<&mut TournamentPlayersShard> =
+        vec![&mut ctx.accounts.tournament_players_shard_0];
+    if let Some(s) = ctx.accounts.tournament_players_shard_1.as_mut() {
+        shards.push(s);
+    }
+    if let Some(s) = ctx.accounts.tournament_players_shard_2.as_mut() {
+        shards.push(s);
+    }
+    if let Some(s) = ctx.accounts.tournament_players_shard_3.as_mut() {
+        shards.push(s);
+    }
 
     // Find player and opponent indices across all shards
     let mut player_shard_idx: Option<(usize, usize)> = None; // (shard_id, player_idx)
@@ -155,112 +168,24 @@ pub fn handler(
             shard.swiss_standings[opponent_idx].sonneborn += (player_score_before / 2) as u16;
         }
     } else {
-        // Different shards - use match to handle each pair
-        match (player_shard_id, opponent_shard_id) {
-            (0, 1) | (1, 0) => {
-                let (s0, s1) = shards.split_at_mut(1);
-                let (player_shard, opponent_shard) = if player_shard_id == 0 {
-                    (&mut s0[0], &mut s1[0])
-                } else {
-                    (&mut s1[0], &mut s0[0])
-                };
-                update_shards(
-                    player_shard,
-                    opponent_shard,
-                    player_idx,
-                    opponent_idx,
-                    result,
-                    player_score_before,
-                    opponent_score_before,
-                );
-            }
-            (0, 2) | (2, 0) => {
-                let (s0, s2) = shards.split_at_mut(2);
-                let (player_shard, opponent_shard) = if player_shard_id == 0 {
-                    (&mut s0[0], &mut s2[0])
-                } else {
-                    (&mut s2[0], &mut s0[0])
-                };
-                update_shards(
-                    player_shard,
-                    opponent_shard,
-                    player_idx,
-                    opponent_idx,
-                    result,
-                    player_score_before,
-                    opponent_score_before,
-                );
-            }
-            (0, 3) | (3, 0) => {
-                let (s0, s3) = shards.split_at_mut(3);
-                let (player_shard, opponent_shard) = if player_shard_id == 0 {
-                    (&mut s0[0], &mut s3[0])
-                } else {
-                    (&mut s3[0], &mut s0[0])
-                };
-                update_shards(
-                    player_shard,
-                    opponent_shard,
-                    player_idx,
-                    opponent_idx,
-                    result,
-                    player_score_before,
-                    opponent_score_before,
-                );
-            }
-            (1, 2) | (2, 1) => {
-                let (s1, s2) = shards.split_at_mut(2);
-                let (player_shard, opponent_shard) = if player_shard_id == 1 {
-                    (&mut s1[0], &mut s2[0])
-                } else {
-                    (&mut s2[0], &mut s1[0])
-                };
-                update_shards(
-                    player_shard,
-                    opponent_shard,
-                    player_idx,
-                    opponent_idx,
-                    result,
-                    player_score_before,
-                    opponent_score_before,
-                );
-            }
-            (1, 3) | (3, 1) => {
-                let (s1, s3) = shards.split_at_mut(3);
-                let (player_shard, opponent_shard) = if player_shard_id == 1 {
-                    (&mut s1[0], &mut s3[0])
-                } else {
-                    (&mut s3[0], &mut s1[0])
-                };
-                update_shards(
-                    player_shard,
-                    opponent_shard,
-                    player_idx,
-                    opponent_idx,
-                    result,
-                    player_score_before,
-                    opponent_score_before,
-                );
-            }
-            (2, 3) | (3, 2) => {
-                let (s2, s3) = shards.split_at_mut(3);
-                let (player_shard, opponent_shard) = if player_shard_id == 2 {
-                    (&mut s2[0], &mut s3[0])
-                } else {
-                    (&mut s3[0], &mut s2[0])
-                };
-                update_shards(
-                    player_shard,
-                    opponent_shard,
-                    player_idx,
-                    opponent_idx,
-                    result,
-                    player_score_before,
-                    opponent_score_before,
-                );
-            }
-            _ => return Err(GameErrorCode::PlayerNotFound.into()),
-        }
+        // Different shards — split the vec so we can hold both mutably.
+        let lo = player_shard_id.min(opponent_shard_id);
+        let hi = player_shard_id.max(opponent_shard_id);
+        let (left, right) = shards.split_at_mut(hi);
+        let (player_shard, opponent_shard) = if player_shard_id == lo {
+            (&mut *left[lo], &mut *right[0])
+        } else {
+            (&mut *right[0], &mut *left[lo])
+        };
+        update_shards(
+            player_shard,
+            opponent_shard,
+            player_idx,
+            opponent_idx,
+            result,
+            player_score_before,
+            opponent_score_before,
+        );
     }
 
     // Round advancement is deliberately not inferred from board index. The
@@ -278,8 +203,8 @@ pub fn handler(
 }
 
 fn update_shards(
-    player_shard: &mut &mut Account<TournamentPlayersShard>,
-    opponent_shard: &mut &mut Account<TournamentPlayersShard>,
+    player_shard: &mut TournamentPlayersShard,
+    opponent_shard: &mut TournamentPlayersShard,
     player_idx: usize,
     opponent_idx: usize,
     result: SwissMatchResult,
