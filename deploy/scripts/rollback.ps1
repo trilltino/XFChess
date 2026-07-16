@@ -1,4 +1,4 @@
-# XFChess rollback script
+﻿# XFChess rollback script
 # Restores the previous backend binary (and optionally the databases).
 # Usage: .\deploy\rollback.ps1 -Server 178.104.55.19 -User root [-RestoreDb]
 

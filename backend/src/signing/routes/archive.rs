@@ -10,8 +10,10 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 
-const ARCHIVE_PATH: &str = "archive/games.xfg";
-const WALLET_INDEX_PATH: &str = "archive/wallets.idx";
+// Must match tasks::archiver — archives live under data/ (the only writable
+// path in production, and the dir covered by nightly backups).
+const ARCHIVE_PATH: &str = "data/archive/games.xfg";
+const WALLET_INDEX_PATH: &str = "data/archive/wallets.idx";
 
 pub fn archive_routes() -> Router<AppState> {
     Router::new()

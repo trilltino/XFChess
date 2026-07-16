@@ -117,6 +117,14 @@ They do not touch Solana.
    be logged out immediately. Schedule during low-traffic hours.
 4. Update `/opt/xfchess/.env` and restart.
 
+**Disaster recovery:** `/opt/xfchess/.env` exists only on the server and is
+deliberately excluded from the B2 backup set (it holds secrets). But `vault.db`
+backups are ciphertext — without `IDENTITY_ENCRYPTION_KEY` and `IDENTITY_SALT`
+they are unrecoverable. Keep a current copy of the production `.env` in a
+password manager (or other encrypted offline store), and update it whenever a
+secret is rotated. Losing the server *and* these two values means losing all
+encrypted identity/KYC data permanently.
+
 ---
 
 ## Checklist after any rotation

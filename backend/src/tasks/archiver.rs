@@ -8,10 +8,12 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::{error, info};
 
-/// Path to the binary archive file
-const ARCHIVE_PATH: &str = "archive/games.xfg";
+/// Path to the binary archive file. Lives under data/ — in production the
+/// hardened systemd unit only permits writes to /opt/xfchess/data, and data/
+/// is what the nightly backup covers.
+const ARCHIVE_PATH: &str = "data/archive/games.xfg";
 /// Path to the wallet index file
-const WALLET_INDEX_PATH: &str = "archive/wallets.idx";
+const WALLET_INDEX_PATH: &str = "data/archive/wallets.idx";
 
 /// Compact binary record for a single game
 pub struct BinaryGameRecord {
@@ -50,6 +52,9 @@ pub struct Archiver {
 
 impl Archiver {
     pub async fn new(pool: SqlitePool) -> Result<Self> {
+        if let Some(dir) = Path::new(ARCHIVE_PATH).parent() {
+            std::fs::create_dir_all(dir)?;
+        }
         let mut archiver = Self {
             repo: GameRepository::new(pool),
             wallet_map: HashMap::new(),

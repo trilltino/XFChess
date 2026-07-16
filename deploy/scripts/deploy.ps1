@@ -1,4 +1,4 @@
-# XFChess full deploy script
+﻿# XFChess full deploy script
 # Usage: .\deploy\scripts\deploy.ps1 -Server 178.104.55.19 [-Domain xfchess.example.com]
 #
 # First run: connects as root, creates deploy user, hardens server, obtains SSL cert.
@@ -13,7 +13,7 @@ param(
     [switch]$SkipBuild       # Skip frontend/backend build (re-deploy existing binaries)
 )
 
-$SSH_KEY  = "$env:USERPROFILE\.ssh\id_xfchess"
+$SSH_KEY  = "$env:USERPROFILE\.ssh\xfchess_vps"
 $SSH_ARGS = @('-i', $SSH_KEY, '-o', 'StrictHostKeyChecking=accept-new')
 $DEST     = "${User}@${Server}"
 $ROOT     = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent   # repo root
@@ -144,6 +144,40 @@ Run-Remote "cat /root/.ssh/authorized_keys >> /home/deploy/.ssh/authorized_keys 
 Run-Remote "chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/.ssh/authorized_keys"
 Write-Host "deploy user created. After this run, use -User deploy for future deploys." -ForegroundColor DarkGray
 
+# ── Step 2a2: Locked-down SSH tunnel user (admin panel PRODUCTION mode) ────────
+# The tournament-admin panel reaches the never-public /admin/* API by forwarding
+# a local port to the backend's loopback (ssh -N -L 8091:127.0.0.1:8090). This
+# user is nologin and — via the sshd drop-in below — may ONLY forward to the
+# backend port. A leak of its key yields a port-forward, not a shell.
+Write-Host "`n=== Creating SSH tunnel user ===" -ForegroundColor Green
+Run-Remote "id tunnel 2>/dev/null || adduser tunnel --disabled-password --shell /usr/sbin/nologin --gecos ''"
+Run-Remote "mkdir -p /home/tunnel/.ssh && chmod 700 /home/tunnel/.ssh && chown tunnel:tunnel /home/tunnel/.ssh"
+Run-Remote "cat /root/.ssh/authorized_keys >> /home/tunnel/.ssh/authorized_keys 2>/dev/null || true"
+Run-Remote "sort -u /home/tunnel/.ssh/authorized_keys -o /home/tunnel/.ssh/authorized_keys"
+Run-Remote "chown tunnel:tunnel /home/tunnel/.ssh/authorized_keys && chmod 600 /home/tunnel/.ssh/authorized_keys"
+# Append the forward-only policy to the END of sshd_config. It must be the LAST
+# block: a Match captures everything after it, and Ubuntu's `Include` sits ABOVE
+# the global directives, so a drop-in Match would wrongly scope those globals.
+# No ForceCommand — a forced command that exits would drop the -N port-forward;
+# the nologin shell already blocks interactive/command sessions. Idempotent via marker.
+Run-Remote @"
+if ! grep -q 'XFCHESS-TUNNEL-MATCH' /etc/ssh/sshd_config; then
+cat >> /etc/ssh/sshd_config << 'TUNEOF'
+
+# XFCHESS-TUNNEL-MATCH (managed by deploy.ps1) — forward-only admin tunnel user.
+# Must remain the LAST block in this file.
+Match User tunnel
+    AllowTcpForwarding yes
+    PermitOpen 127.0.0.1:8090
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTTY no
+    GatewayPorts no
+TUNEOF
+fi
+"@
+Write-Host "tunnel user created (nologin; may only forward to 127.0.0.1:8090)." -ForegroundColor DarkGray
+
 # ── Step 2b: SSH hardening (disable password auth, prohibit root password login) ──
 Write-Host "`n=== Hardening SSH ===" -ForegroundColor Green
 Run-Remote "sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config"
@@ -167,14 +201,17 @@ Write-Host "UFW enabled: 22/80/443 open; 8090/9090/9100 internal only." -Foregro
 
 # ── Step 2d: node_exporter ────────────────────────────────────────────────────
 Write-Host "`n=== Installing node_exporter ===" -ForegroundColor Green
-Run-Remote @"
+# Single-quoted here-string: PowerShell must NOT expand ${NE_VER} — it's a remote
+# shell variable. (In a double-quoted here-string PS5.1 expands ${...}/$(...) even
+# behind a backslash, which mangled this URL and the backup cron below.)
+Run-Remote @'
 if ! command -v node_exporter >/dev/null 2>&1; then
     NE_VER=1.8.2
-    curl -fsSL https://github.com/prometheus/node_exporter/releases/download/v\${NE_VER}/node_exporter-\${NE_VER}.linux-amd64.tar.gz | tar xz -C /tmp
-    mv /tmp/node_exporter-\${NE_VER}.linux-amd64/node_exporter /usr/local/bin/node_exporter
+    curl -fsSL https://github.com/prometheus/node_exporter/releases/download/v${NE_VER}/node_exporter-${NE_VER}.linux-amd64.tar.gz | tar xz -C /tmp
+    mv /tmp/node_exporter-${NE_VER}.linux-amd64/node_exporter /usr/local/bin/node_exporter
     chmod +x /usr/local/bin/node_exporter
 fi
-"@
+'@
 Run-Remote @"
 id node_exporter 2>/dev/null || useradd --no-create-home --shell /bin/false node_exporter
 cat > /etc/systemd/system/node_exporter.service << 'NEEOF'
@@ -233,11 +270,32 @@ fi
 # The rclone remote 'b2xfchess' must be configured manually once:
 #   ssh root@SERVER rclone config
 #   Choose: New remote -> name: b2xfchess -> type: b2 -> enter account/key
-# Daily 3am: SQLite .backup (online-safe) + rclone sync to B2, 7-day local retention
-Run-Remote @"
-(crontab -l 2>/dev/null | grep -v xfchess/backups; echo '0 3 * * * STAMP=\$(date +%%Y%%m%%d-%%H%%M%%S); sqlite3 /opt/xfchess/data/sessions.db ".backup /opt/xfchess/backups/sessions-\${STAMP}.db" 2>/dev/null; sqlite3 /opt/xfchess/data/vault.db ".backup /opt/xfchess/backups/vault-\${STAMP}.db" 2>/dev/null; rclone sync /opt/xfchess/backups b2xfchess:xfchess-backups --min-age 1s 2>/dev/null || true; find /opt/xfchess/backups -name "*.db" -mtime +7 -delete') | crontab -
-"@
-Write-Host "Backup cron: 3am UTC daily, rclone to b2xfchess:xfchess-backups, 7-day local retention." -ForegroundColor DarkGray
+# Daily 3am: SQLite .backup (online-safe) + non-SQLite data (signup/waitlist JSONL,
+# game archive) + rclone sync to B2, 7-day local retention.
+# Installed as a script rather than a crontab one-liner: a one-liner needs cron '%'
+# escaping AND survives PS5.1 here-string expansion of $()/${} — the previous
+# one-liner was silently mangled by exactly that (STAMP expanded to nothing).
+# NOTE on \" below: PS5.1 passes args to native exes (ssh) without escaping — bare
+# embedded " chars are eaten by the Windows argv parser and the command arrives
+# quote-less. Writing \" makes a literal " arrive on the server. Single-quoted
+# shell strings pass through untouched, so prefer ' where no expansion is needed.
+Run-Remote @'
+cat > /opt/xfchess/backup.sh << 'EOF'
+#!/bin/sh
+# Nightly XFChess backup. DBs are snapshotted online-safe via sqlite3 .backup;
+# everything non-SQLite under data/ (subscribers.jsonl, waitlist.jsonl, archive/)
+# is rclone-copied as-is. Requires the b2xfchess rclone remote (rclone config).
+STAMP=$(date +%Y%m%d-%H%M%S)
+sqlite3 /opt/xfchess/data/sessions.db \".backup /opt/xfchess/backups/sessions-${STAMP}.db\" 2>/dev/null
+sqlite3 /opt/xfchess/data/vault.db \".backup /opt/xfchess/backups/vault-${STAMP}.db\" 2>/dev/null
+rclone sync /opt/xfchess/backups b2xfchess:xfchess-backups/db --min-age 1s 2>/dev/null || true
+rclone copy /opt/xfchess/data b2xfchess:xfchess-backups/data --exclude '*.db' --exclude '*.db-*' 2>/dev/null || true
+find /opt/xfchess/backups -name '*.db' -mtime +7 -delete
+EOF
+chmod +x /opt/xfchess/backup.sh
+(crontab -l 2>/dev/null | grep -v 'xfchess/backup'; echo '0 3 * * * /opt/xfchess/backup.sh') | crontab -
+'@
+Write-Host "Backup: 3am UTC daily via /opt/xfchess/backup.sh -> b2xfchess:xfchess-backups (db snapshots + JSONL + archive), 7-day local retention." -ForegroundColor DarkGray
 Write-Host "ACTION REQUIRED: run 'rclone config' on the server to set up the B2 remote." -ForegroundColor Yellow
 
 # ── Step 3: Sync source and build backend ─────────────────────────────────────
@@ -306,7 +364,10 @@ if ($serverHasEnv) {
     Write-Host "  JWT_SECRET=<openssl rand -hex 32>"
     Write-Host "  IDENTITY_ENCRYPTION_KEY=<openssl rand -hex 32>"
     Write-Host "  IDENTITY_SALT=<openssl rand -hex 32>"
-    Write-Host "  ALLOWED_ORIGINS=https://${TlsDomain}"
+    # Include the tournament-admin panel's Tauri origins so PRODUCTION mode (via
+    # the SSH tunnel) is not CORS-blocked. tauri.localhost = packaged WebView2;
+    # localhost:7455/:1420 = dev.
+    Write-Host "  ALLOWED_ORIGINS=https://${TlsDomain},http://tauri.localhost,https://tauri.localhost,http://localhost:7455,http://localhost:1420"
     Write-Host "  SESSION_DB_URL=sqlite:///opt/xfchess/data/sessions.db?mode=rwc"
     Write-Host "  VAULT_DB_URL=sqlite:///opt/xfchess/data/vault.db?mode=rwc"
 }
@@ -348,7 +409,9 @@ test -f /etc/letsencrypt/live/${Domain}/fullchain.pem || \
 "@
     Run-Remote "nginx -t && systemctl reload nginx && systemctl restart nginx"
     # Auto-renew hook
-    Run-Remote "(crontab -l 2>/dev/null | grep -v certbot; echo '0 2 * * 1 certbot renew --quiet --post-hook \"systemctl reload nginx\"') | crontab -"
+    # Single-quoted PS string ('' = literal '); \" becomes a literal " on the server
+    # (PS5.1 native-arg passing eats bare embedded quotes)
+    Run-Remote '(crontab -l 2>/dev/null | grep -v certbot; echo ''0 2 * * 1 certbot renew --quiet --post-hook \"systemctl reload nginx\"'') | crontab -'
     Write-Host "Certbot renewal cron: every Monday 2am UTC." -ForegroundColor DarkGray
 } else {
     Write-Host "`n=== Generating self-signed TLS certificate (no domain provided) ===" -ForegroundColor Yellow
@@ -382,20 +445,30 @@ if (& ssh @SSH_ARGS $DEST "test -f /etc/prometheus/prometheus.yml && echo yes" 2
 Write-Host "`n=== Verifying deployment ===" -ForegroundColor Green
 Start-Sleep -Seconds 3
 $proto = "https"
-$result = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/api/user/status/11111111111111111111111111111111" -SkipCertificateCheck -ErrorAction SilentlyContinue
+# -SkipCertificateCheck only exists on PS6+; on Windows PowerShell 5.1 (this
+# machine) it's a binding error and every check below "fails". Splat it on PS6+,
+# and trust-all at the ServicePoint level on 5.1 (self-signed cert deploys).
+$skipCert = @{}
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+    $skipCert = @{ SkipCertificateCheck = $true }
+} else {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+}
+$result = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/api/user/status/11111111111111111111111111111111" @skipCert -ErrorAction SilentlyContinue
 if ($result) {
     Write-Host "Backend responding: $($result | ConvertTo-Json -Compress)" -ForegroundColor Green
 } else {
     Write-Host "Backend check failed — check logs: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
 }
 # /health now returns JSON {status, version, git_sha, timestamp}
-$health = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/health" -SkipCertificateCheck -ErrorAction SilentlyContinue
+$health = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/health" @skipCert -ErrorAction SilentlyContinue
 if ($health.status -eq "ok") {
     Write-Host "Health OK — running git_sha $($health.git_sha), version $($health.version)." -ForegroundColor Green
 } else {
     Write-Host "Health endpoint failed — check: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
 }
-$ready = try { Invoke-WebRequest -Uri "${proto}://${TlsDomain}/readyz" -SkipCertificateCheck -ErrorAction Stop; "200" } catch { $_.Exception.Response.StatusCode.value__ }
+$ready = try { Invoke-WebRequest -Uri "${proto}://${TlsDomain}/readyz" -UseBasicParsing @skipCert -ErrorAction Stop; "200" } catch { $_.Exception.Response.StatusCode.value__ }
 Write-Host "Readiness (/readyz): $ready (200 = DB reachable)" -ForegroundColor DarkGray
 
 Write-Host "`n=== Deploy complete ===" -ForegroundColor Green
@@ -407,3 +480,5 @@ Write-Host "Hetzner snapshot: Hetzner Cloud Console -> Servers -> ${Server} -> S
 Write-Host "                  (Schedule weekly via Hetzner API: POST /servers/{id}/actions/create_image)" -ForegroundColor DarkGray
 Write-Host "B2 backup:        Run 'rclone config' on the server once to configure b2xfchess remote." -ForegroundColor DarkGray
 Write-Host "Secrets rotation: See deploy/SECRETS_ROTATION.md" -ForegroundColor DarkGray
+Write-Host "DR note:          Keep an offline copy of /opt/xfchess/.env (password manager) —" -ForegroundColor DarkGray
+Write-Host "                  vault.db backups are unreadable without IDENTITY_ENCRYPTION_KEY/IDENTITY_SALT." -ForegroundColor DarkGray
