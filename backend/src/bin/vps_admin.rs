@@ -19,19 +19,72 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::{self, Write};
 
-const VPS_DEFAULT_URL: &str = "https://unrejuvenated-philologically-trudi.ngrok-free.app";
+use std::sync::OnceLock;
+
+static SERVICE_URL: OnceLock<String> = OnceLock::new();
 
 fn vps_base() -> String {
-    match env::var("SIGNING_SERVICE_URL") {
-        Ok(url) => url,
-        Err(e) => {
-            eprintln!(
-                "SIGNING_SERVICE_URL error: {:?}, using default: {}",
-                e, VPS_DEFAULT_URL
+    SERVICE_URL.get_or_init(resolve_service_url).clone()
+}
+
+/// Resolve the backend URL once. An explicit `SIGNING_SERVICE_URL` wins (but is
+/// rejected if it is plain http to a non-loopback host — an admin/treasury tool
+/// must never send secrets over an unencrypted link to a remote box). With no
+/// env set, prompt the operator to pick LOCAL or PRODUCTION. There is no silent
+/// remote default (this used to fall back to a public ngrok tunnel).
+fn resolve_service_url() -> String {
+    if let Ok(url) = env::var("SIGNING_SERVICE_URL") {
+        if is_insecure_remote(&url) {
+            panic!(
+                "SIGNING_SERVICE_URL={url} is plain http to a non-loopback host. \
+                 Use https, or a loopback SSH-tunnel port (http://127.0.0.1:8091)."
             );
-            VPS_DEFAULT_URL.to_string()
         }
+        return url;
     }
+
+    println!("\nSelect environment:");
+    println!("  1. LOCAL      http://127.0.0.1:8090");
+    println!("  2. PRODUCTION http://127.0.0.1:8091  (requires an SSH tunnel)");
+    print!("  Choice [1/2]: ");
+    io::stdout().flush().unwrap();
+    let mut buf = String::new();
+    io::stdin().read_line(&mut buf).unwrap();
+
+    match buf.trim() {
+        "2" => {
+            let url = "http://127.0.0.1:8091".to_string();
+            if !health_ok(&url) {
+                eprintln!("\n[!] No backend reachable at {url}. Open the tunnel first:");
+                eprintln!(
+                    "    ssh -i ~/.ssh/xfchess_vps -N -L 8091:127.0.0.1:8090 tunnel@178.104.55.19\n"
+                );
+                std::process::exit(1);
+            }
+            url
+        }
+        _ => "http://127.0.0.1:8090".to_string(),
+    }
+}
+
+/// True for an `http://` URL whose host is neither 127.0.0.1 nor localhost.
+fn is_insecure_remote(url: &str) -> bool {
+    if let Some(rest) = url.strip_prefix("http://") {
+        let host = rest.split(['/', ':']).next().unwrap_or("");
+        return host != "127.0.0.1" && host != "localhost";
+    }
+    false
+}
+
+/// Blocking GET {url}/health with a short timeout; true on 2xx.
+fn health_ok(url: &str) -> bool {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()
+        .and_then(|c| c.get(format!("{url}/health")).send().ok())
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
 }
 
 fn get_api_key() -> String {
@@ -42,10 +95,6 @@ fn client() -> reqwest::blocking::Client {
     let api_key = get_api_key();
 
     let mut h = reqwest::header::HeaderMap::new();
-    h.insert(
-        "ngrok-skip-browser-warning",
-        reqwest::header::HeaderValue::from_static("true"),
-    );
     h.insert(
         "Content-Type",
         reqwest::header::HeaderValue::from_static("application/json"),
@@ -287,13 +336,13 @@ fn create_tournament() {
     let entry_fee_lamports = read_u64("Entry fee (lamports, 1 SOL = 1_000_000_000)");
     let is_free = entry_fee_lamports == 0;
 
-    println!("\nPlayer count options: 8, 16, 32, 64, 128");
+    println!("\nPlayer count options: 2, 4, 8, 16, 32, 64, 128");
     let max_players = loop {
         let n = read_u16("Max players");
-        if [8, 16, 32, 64, 128].contains(&n) {
+        if [2, 4, 8, 16, 32, 64, 128].contains(&n) {
             break n;
         }
-        println!("  Invalid choice. Must be 8, 16, 32, 64, or 128.");
+        println!("  Invalid choice. Must be 2, 4, 8, 16, 32, 64, or 128.");
     };
 
     // Default prize shares

@@ -19,7 +19,7 @@ import Settings from "./components/Settings";
 type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc" | "treasury" | "puzzles" | "settings";
 
 function AppContent() {
-  const { authState, loading, login } = useAuth();
+  const { authState, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>("tournaments");
   const [selectedTournamentId, setSelectedTournamentId] = useState<number | null>(null);
 
@@ -39,9 +39,7 @@ function AppContent() {
   }
 
   if (!authState.authenticated) {
-    return <TokenAuth onAuth={(state) => {
-      login(state.token!, state.backend_url);
-    }} />;
+    return <TokenAuth />;
   }
 
   const handleTournamentSelect = (tournamentId: number) => {

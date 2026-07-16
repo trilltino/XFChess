@@ -1,6 +1,6 @@
 //! Instruction to bootstrap a new bracket-based tournament.
-//! Supports 8, 16, 32, 64, 128, 256 player single-elimination and Swiss tournaments.
-//! Player data is sharded across 4 TournamentPlayersShard PDAs (64 players each).
+//! Supports 2, 4, 8, 16, 32, 64, 128, 256 player single-elimination and Swiss tournaments.
+//! Player data is sharded across up to 4 TournamentPlayersShard PDAs (64 players each).
 
 use crate::constants::*;
 use crate::errors::GameErrorCode;
@@ -10,7 +10,7 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Token, TokenAccount};
 
 /// Valid player counts (must be power of 2 for single-elimination, any for Swiss).
-const VALID_PLAYER_COUNTS: [u16; 6] = [8, 16, 32, 64, 128, 256];
+const VALID_PLAYER_COUNTS: [u16; 8] = [2, 4, 8, 16, 32, 64, 128, 256];
 
 #[derive(Accounts)]
 #[instruction(

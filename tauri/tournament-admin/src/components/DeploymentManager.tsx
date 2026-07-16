@@ -1,40 +1,18 @@
 import { useState } from "react";
-import { Command } from "@tauri-apps/plugin-shell";
 
 export default function DeploymentManager() {
   const [logs, setLogs] = useState<string[]>([]);
-  const [deploying, setDeploying] = useState(false);
+  const [deploying] = useState(false);
 
   const addLog = (msg: string) => {
     setLogs(prev => [...prev.slice(-100), `[${new Date().toLocaleTimeString()}] ${msg}`]);
   };
 
-  const runDeployment = async () => {
-    setDeploying(true);
-    addLog("Initiating cross-service deployment sequence...");
-    
-    try {
-      const command = Command.sidecar("../deploy/scripts/deploy.bat");
-      const child = await command.spawn();
-      addLog(`Deployment handshake success (PID: ${child.pid})`);
-
-      command.stdout.on('data', line => addLog(line));
-      command.stderr.on('data', line => addLog(`ERR: ${line}`));
-
-      command.on('close', data => {
-        addLog(`Deployment sequence complete. Exit code: ${data.code}`);
-        setDeploying(false);
-      });
-
-      command.on('error', error => {
-        addLog(`System error: ${error}`);
-        setDeploying(false);
-      });
-
-    } catch (err) {
-      addLog(`Fatal exception: ${err}`);
-      setDeploying(false);
-    }
+  // In-app deployment is not implemented. Deploys run from a terminal via
+  // deploy\scripts\deploy.ps1 (see docs/plans/admin-panel-and-production-hardening.md).
+  const runDeployment = () => {
+    addLog("NOT IMPLEMENTED: deploys run from a terminal, not this panel.");
+    addLog("Run: powershell -File deploy\\scripts\\deploy.ps1 -Server 178.104.55.19 [-Domain your.domain]");
   };
 
   return (

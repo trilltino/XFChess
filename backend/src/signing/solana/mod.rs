@@ -18,10 +18,11 @@ pub mod transactions;
 
 pub use debug::{debug_transaction, format_debug_info, parse_program_error, TransactionDebugInfo};
 pub use instructions::{
-    claim_fees_ix, claim_prize_ix, distribute_tournament_prizes_ix, finalize_game_ix,
-    fund_sol_prize_ix, initialize_escrow_ix, initialize_match_ix, initialize_shards_ix,
-    initialize_tournament_ix, leave_tournament_ix, link_external_elo_ix, record_move_ix,
-    record_result_ix, start_tournament_ix, undelegate_game_ix, verify_profile_ix,
+    advance_winner_ix, bracket_position, claim_fees_ix, claim_prize_ix,
+    distribute_tournament_prizes_ix, finalize_game_ix, fund_sol_prize_ix, initialize_escrow_ix,
+    initialize_match_ix, initialize_shards_ix, initialize_tournament_ix, leave_tournament_ix,
+    link_external_elo_ix, record_move_ix, record_result_ix, required_shards, start_tournament_ix,
+    undelegate_game_ix, verify_profile_ix, withdraw_treasury_ix,
 };
 pub use routing::{magic_router_url, route_for_game_write, routed_rpc, TxRoute};
 pub use rpc::{fallback_rpc_url, make_rpc, read_with_failover, redact_url, rpc_url_or_devnet};

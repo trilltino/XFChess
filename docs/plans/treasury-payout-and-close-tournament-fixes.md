@@ -24,13 +24,13 @@ Author: audit follow-up (2026-07-02).
   (`8e7NzfKVTyeSmsqjuESoXT9WCadkRioyKgJfNeHMG4HM`) and `link_authority`
   (`42fiB5KcC1jEVXxmgPoWqpA3zuKEsZGu77YHmCwNEcrh`); secrets are in gitignored
   `keys/treasury_authority.json` / `keys/link_authority.json`. `treasury_authority` is
-  currently a single fresh key — move to multisig and rotate before mainnet (Fix 4).
+  a single dedicated wallet (no multisig — decision 2026-07-15); rotate before mainnet (Fix 4).
 - **Tests added:** `programs/xfchess-game/tests/treasury_tests.rs` (7 tests: 4 for
   `withdraw_treasury`, 3 for `close_tournament`) — all passing alongside the existing
   ER suites. Registered as a `[[test]]` in `Cargo.toml`.
 - **Still pending:** regenerate IDL + add a `withdraw_treasury` client builder in
-  `crates/solana-chess-client`; devnet deploy + smoke; key rotation/multisig; mainnet
-  upgrade.
+  `crates/solana-chess-client`; devnet deploy + smoke; key rotation (single wallets, no
+  multisig); mainnet upgrade.
 
 This document is the apply-ready spec for four findings from the on-chain money-flow
 audit. Each fix section is self-contained: the problem, the exact files to add/change,
@@ -117,8 +117,8 @@ pub struct WithdrawTreasury<'info> {
     #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub treasury_vault: SystemAccount<'info>,
     /// Only the dedicated treasury authority may withdraw. Kept separate from
-    /// `vps_authority` so treasury access can be a multisig without touching the
-    /// result-signing key (see Fix 4).
+    /// `vps_authority` so treasury access uses its own dedicated wallet without
+    /// touching the result-signing key (see Fix 4).
     #[account(
         mut,
         address = crate::constants::treasury_authority::ID @ GameErrorCode::UnauthorizedAccess
@@ -176,14 +176,12 @@ it later (Fix 4) without an ABI change.
 ```rust
 /// The treasury-withdrawal authority — the only signer allowed to call
 /// `withdraw_treasury`. Deliberately separate from `vps_authority` so platform
-/// revenue can sit behind a multisig without also gating result-signing.
-/// Replace with a dedicated (ideally multisig / squads) pubkey before mainnet.
+/// revenue sits behind a dedicated single wallet without also gating result-signing.
+/// Single dedicated devnet/testnet wallet (no multisig); rotate before mainnet.
 pub mod treasury_authority {
     use super::*;
-    pub const ID: Pubkey = Pubkey::new_from_array([
-        // TODO: paste the treasury authority pubkey bytes here.
-        // For an interim single-key deploy, copy vps_authority's byte array.
-    ]);
+    // NOW SET: 8e7NzfKVTyeSmsqjuESoXT9WCadkRioyKgJfNeHMG4HM (keys/treasury_authority.json)
+    pub const ID: Pubkey = Pubkey::new_from_array([/* real bytes — see constants.rs */]);
 }
 ```
 
@@ -396,13 +394,13 @@ game verification) and initialize tournaments.
 
 1. **Separate duties** — keep four distinct keys, never reuse one across roles:
    - `vps_authority` → result signing + ELO + tournament init (operational, hot).
-   - `treasury_authority` → `withdraw_treasury` (revenue, cold/multisig).
+   - `treasury_authority` → `withdraw_treasury` (revenue; dedicated single wallet).
    - `dispute_authority` → `resolve_dispute` (cold).
    - `kyc_authority` → `verify_profile`.
-2. **Move revenue + dispute keys to multisig** — use Squads (or an equivalent
-   multisig) for `treasury_authority` and `dispute_authority`. The `address = …ID`
-   gate accepts the multisig's authority PDA/derived signer; validate the exact
-   signer type your multisig exposes when you wire it.
+2. **Single dedicated wallets — no multisig (decision 2026-07-15).** `treasury_authority`
+   and `dispute_authority` each use their own dedicated key, distinct from the hot
+   `vps_authority`. Multisig (Squads) was considered and dropped as overkill for the
+   testnet/devnet stage; it can be revisited before mainnet if desired, but is not required.
 3. **Rotate every key before mainnet**, since the old secrets are in history. Generate
    fresh keypairs, update the `constants.rs` byte arrays, redeploy.
 4. **Never rely on git-history removal alone** — treat all previously-committed secrets
@@ -474,7 +472,7 @@ All three code fixes (1, 2, 3) and any key rotation (4) ship in one program upgr
 - [ ] `cargo test -p xfchess-game` green.
 - [ ] Regenerate IDL; add `withdraw_treasury` builder to `solana-chess-client`.
 - [ ] Devnet deploy + end-to-end smoke (treasury withdraw + full tournament close).
-- [ ] Rotate keys, move treasury/dispute to multisig, mainnet upgrade.
+- [ ] Rotate keys (single dedicated wallets — no multisig), mainnet upgrade.
 
 ## Related memory
 

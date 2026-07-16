@@ -9,10 +9,6 @@ non-shipping material.
 
 Related docs:
 
-- [CODEBASE_DEEP_DIVE.md](../CODEBASE_DEEP_DIVE.md) - architecture and component map.
-- [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) - identity, profiles,
-  social, onboarding.
-- [plans/comprehensive-testing.md](comprehensive-testing.md) - test-suite plan.
 - [deploy/docs/E2E_REMEDIATION.md](../../deploy/docs/E2E_REMEDIATION.md) -
   hosted deployment remediation.
 - [deploy/docs/FRONTEND_REMEDIATION.md](../../deploy/docs/FRONTEND_REMEDIATION.md)

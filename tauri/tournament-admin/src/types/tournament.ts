@@ -62,4 +62,5 @@ export interface AdminAuthState {
   token: string | null;
   authenticated: boolean;
   backend_url: string;
+  env: "local" | "production";
 }

@@ -1,8 +1,7 @@
 # XFChess Formal Specifications (TLA+)
 
 Mechanically-checked models of the XFChess consistency protocol, executed with
-the TLC model checker. This is the engineering deliverable from Phases 1–4 of
-[docs/plans/tla-causal-chain.md](../docs/plans/tla-causal-chain.md).
+the TLC model checker (the deliverable of the TLA causal-chain plan, Phases 1–4).
 
 **Headline result:** TLC found a real, exploitable gap in the live P2P
 causal-chain code (the `parent_version == "0"` bypass), produced a concrete

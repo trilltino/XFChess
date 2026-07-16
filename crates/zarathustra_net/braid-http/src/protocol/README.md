@@ -1,6 +1,6 @@
 # Braid-HTTP Protocol Module (`protocol`)
 
-The `protocol` module is the low-level byte-crunching engine of the Braid implementation. It handles the serialization and deserialization of the Braid-HTTP protocol rules.
+The `protocol` module implements the Braid-HTTP wire format: serialization and deserialization of the protocol's headers, updates, and patches.
 
 ## Responsibility
 

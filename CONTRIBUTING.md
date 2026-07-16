@@ -14,7 +14,7 @@ cd XFChess
 
 2. Install dependencies
 - Rust toolchain (stable)
-- Node.js 18+ (for web interface)
+- Node.js 20+ (for web interface; Vite 8 requires 20.19+)
 - Solana CLI (optional, for blockchain features)
 
 3. Build the project
@@ -103,10 +103,6 @@ When you're ready, make an issue ticket and link relevant, constructive comments
 - Is unique, if you're aiming to solve a problem. Features that can easily be replaced by easier ideas have little value and may not have to be brought up to begin with
 - Is clear and concise. If ambiguities exist, define them or propose options
 
-## I want to help translate XFChess
-
-Check out our translation project on [Crowdin](https://crowdin.com/) (coming soon).
-
 ## Development Guidelines
 
 ### Code Style
@@ -134,17 +130,4 @@ Check out our translation project on [Crowdin](https://crowdin.com/) (coming soo
 - Check gas costs and rent requirements
 - Document any breaking changes
 
-## Other ways to contribute
-
-- **Star the project** on GitHub
-- **Share** XFChess with others
-- **Report bugs** you encounter
-- **Suggest improvements** on Discord
-- **Help other users** with questions
-- **Write blog posts** about XFChess
-- **Create tutorials** and guides
-
-See [https://xfchess.org/help/contribute](https://xfchess.org/help/contribute) for more ways to help.
-
 Thank you for contributing to XFChess!
-    

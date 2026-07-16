@@ -14,6 +14,7 @@ export default function Treasury() {
   const [refundWallet, setRefundWallet] = useState("");
   const [refundLamports, setRefundLamports] = useState("");
   const [refundReason, setRefundReason] = useState("");
+  const [refundAdminToken, setRefundAdminToken] = useState("");
   const [refundMsg, setRefundMsg] = useState<string | null>(null);
   const [refundTx, setRefundTx] = useState<string | null>(null);
 
@@ -29,12 +30,14 @@ export default function Treasury() {
 
   const handleRefund = async () => {
     const lam = parseInt(refundLamports);
-    if (!refundWallet || isNaN(lam) || !refundReason) return;
-    const r = await apiClient.manualRefund(refundWallet, lam, refundReason);
+    if (!refundWallet || isNaN(lam) || !refundReason || !refundAdminToken) return;
+    const r = await apiClient.manualRefund(refundWallet, lam, refundReason, refundAdminToken);
     if (r.ok) {
-      setRefundMsg("Refund TX built. Sign and broadcast via CLI.");
-      setRefundTx(r.data?.partial_tx ?? null);
-      setRefundWallet(""); setRefundLamports(""); setRefundReason("");
+      // Backend now signs + submits withdraw_treasury with treasury_authority and
+      // returns the confirmed on-chain signature (no more client-side signing).
+      setRefundMsg(`Refund submitted on-chain. Sig: ${r.data?.signature ?? "—"}`);
+      setRefundTx(r.data?.signature ?? null);
+      setRefundWallet(""); setRefundLamports(""); setRefundReason(""); setRefundAdminToken("");
     } else {
       setRefundMsg(`Error: ${r.error?.message}`);
     }
@@ -104,27 +107,30 @@ export default function Treasury() {
       <div style={{ backgroundColor: "var(--surface)", borderRadius: "24px", border: "1px solid var(--border)", padding: "1.5rem" }}>
         <h3 style={{ color: "var(--primary)", fontSize: "12px", fontWeight: "800", letterSpacing: "2px", margin: "0 0 1.25rem" }}>MANUAL REFUND</h3>
         <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 1rem" }}>
-          Builds a partially-signed transfer TX. Sign with vps_authority via CLI and broadcast.
+          Signs + submits <code>withdraw_treasury</code> with treasury_authority and returns the
+          on-chain signature. Requires the ADMIN_TOKEN second factor (money path).
         </p>
-        <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
+        <div style={{ display: "flex", gap: "10px", marginBottom: "10px", flexWrap: "wrap" }}>
           <input value={refundWallet} onChange={e => setRefundWallet(e.target.value)} placeholder="Recipient wallet…"
-            style={{ flex: 2, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
+            style={{ flex: 2, minWidth: "180px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
           <input value={refundLamports} onChange={e => setRefundLamports(e.target.value)} type="number" placeholder="Lamports…"
-            style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
+            style={{ flex: 1, minWidth: "120px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
           <input value={refundReason} onChange={e => setRefundReason(e.target.value)} placeholder="Reason…"
-            style={{ flex: 2, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
-          <button onClick={handleRefund} style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>BUILD TX</button>
+            style={{ flex: 2, minWidth: "160px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
+          <input value={refundAdminToken} onChange={e => setRefundAdminToken(e.target.value)} type="password" placeholder="ADMIN_TOKEN (2nd factor)…"
+            style={{ flex: 2, minWidth: "180px", background: "rgba(255,255,255,0.06)", border: "1px solid #f59e0b55", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
+          <button onClick={handleRefund} style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>SUBMIT REFUND</button>
         </div>
         {refundMsg && <div style={{ fontSize: "12px", color: refundMsg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{refundMsg}</div>}
         {refundTx && (
           <div style={{ marginTop: "12px" }}>
-            <div style={{ fontSize: "10px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "6px" }}>PARTIAL TX (base64)</div>
+            <div style={{ fontSize: "10px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "6px" }}>ON-CHAIN SIGNATURE</div>
             <div style={{ background: "rgba(0,0,0,0.4)", padding: "10px 12px", borderRadius: "8px", fontFamily: "monospace", fontSize: "11px", color: "var(--primary)", wordBreak: "break-all", border: "1px solid var(--border)", marginBottom: "8px" }}>
               {refundTx}
             </div>
             <button onClick={() => navigator.clipboard.writeText(refundTx).catch(() => {})}
               style={{ padding: "6px 14px", borderRadius: "8px", background: "rgba(255,255,255,0.08)", color: "var(--text-dim)", border: "1px solid var(--border)", fontSize: "11px", cursor: "pointer" }}>
-              COPY TX
+              COPY SIG
             </button>
           </div>
         )}

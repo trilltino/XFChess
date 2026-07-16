@@ -29,4 +29,4 @@ has a 30s timeout.
 
 ## Root cause / follow-up
 - Persistent Triton issues → formalize multi-provider failover ordering in WS-D config and
-  record provider SLAs in [VENDORS.md](../VENDORS.md).
+  record provider SLAs in a VENDORS.md (not yet written).

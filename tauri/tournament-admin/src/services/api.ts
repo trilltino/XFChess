@@ -207,17 +207,14 @@ class ApiClient {
   // Treasury
   async getTreasuryPayouts() { return this.request<any>("/admin/treasury/payouts"); }
   async getFeeReport(period = "week") { return this.request<any>(`/admin/treasury/fee-report?period=${period}`); }
-  async manualRefund(wallet: string, lamports: number, reason: string) {
-    return this.request<any>("/admin/treasury/refund", { method: "POST", body: JSON.stringify({ wallet, lamports, reason }) });
+  async manualRefund(wallet: string, lamports: number, reason: string, adminToken: string) {
+    return this.request<any>("/admin/treasury/refund", { method: "POST", body: JSON.stringify({ wallet, lamports, reason, admin_token: adminToken }) });
   }
 
   // Infrastructure
   async getTasksStatus() { return this.request<any>("/admin/tasks/status"); }
   async getDbStats() { return this.request<any>("/admin/db/stats"); }
   async getTlsExpiry() { return this.request<any>("/admin/tls/expiry"); }
-  async rotateAuthority(newKeyBase58: string) {
-    return this.request<any>("/admin/keys/rotate-authority", { method: "POST", body: JSON.stringify({ new_key_base58: newKeyBase58 }) });
-  }
   async rotateToken() { return this.request<any>("/admin/auth/rotate-token", { method: "POST", body: JSON.stringify({}) }); }
 
   // Moderation
@@ -253,9 +250,26 @@ class ApiClient {
     return this.request<any>("/admin/archive/stats");
   }
  
-  getArchiveDownloadUrl(type: "games" | "wallets") {
-    const token = localStorage.getItem("admin_token");
-    return `${this.baseUrl}/admin/archive/download/${type}?api_key=${token}`;
+  // Download an archive via an authenticated fetch (X-API-Key header) and save
+  // it through a blob URL. The token is never placed in the URL — the download
+  // route is behind require_api_key, which only reads the header, so a plain
+  // window.open() navigation (which can't set headers) would 401 anyway.
+  async downloadArchive(type: "games" | "wallets"): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/admin/archive/download/${type}`, {
+      headers: this.token ? { "X-API-Key": this.token } : {},
+    });
+    if (!res.ok) {
+      throw new Error(`Archive download failed: HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = type === "games" ? "games.xfg" : "wallets.idx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
  
   async getPlayers(limit: number = 50) {

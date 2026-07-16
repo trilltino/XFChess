@@ -1,90 +1,40 @@
-# Core Module
+# src/core
 
-## Purpose
+Foundational app infrastructure: the `GameState` machine, window setup, crash
+reporting, and settings persistence. `CorePlugin` must be added **before** every
+other XFChess plugin — it registers the states and resources they depend on.
 
-The Core module provides foundational infrastructure for the XFChess application, managing game state transitions, window configuration, settings persistence, and error handling. It serves as the backbone that orchestrates the application's lifecycle.
+## Role in XFChess
 
-## Impact on Game
+Every other module keys its systems off the states defined here
+(`run_if(in_state(GameState::InGame))` etc.). State transitions are validated
+centrally so a bug can't jump from `Auth` straight into `Paused`.
 
-This module is essential for:
-- **State Management**: Controls flow between menu, gameplay, and pause states
-- **Settings Persistence**: Saves and restores user preferences (graphics, audio, controls)
-- **Window Management**: Handles window configuration, resizing, and display modes
-- **Error Recovery**: Centralized error handling prevents crashes and provides graceful degradation
-- **Application Lifecycle**: Manages startup, shutdown, and state transitions
+## Key files
 
-## Architecture/Key Components
+| File | Contents |
+|------|----------|
+| [states.rs](states.rs) | `GameState` (`Auth, MainMenu, InGame, Paused, GameOver, MultiplayerMenu, Matching, Settings`), `GameMode`, menu sub-states, allowed-transition table |
+| [plugin.rs](plugin.rs) | `CorePlugin` — panic hook, state registration, core resources |
+| [crash.rs](crash.rs) / [error_handling.rs](error_handling.rs) | Crash reports with system info; non-fatal error surface |
+| [settings_persistence.rs](settings_persistence.rs) | `GameSettings` load/save (graphics, audio, controls) |
+| [window_config.rs](window_config.rs) | Window creation and mode handling |
+| [persistent_camera.rs](persistent_camera.rs) | Camera that survives state transitions |
+| [state_lifecycle.rs](state_lifecycle.rs) | Despawn-on-exit bookkeeping per state |
 
-### State Management
-
-| Component | Purpose |
-|-----------|---------|
-| [`AppState`](states.rs:1) | Enum defining all application states: `Splash`, `MainMenu`, `Game`, `Pause` |
-| [`GameState`](states.rs:1) | In-game state machine: `None`, `Setup`, `Playing`, `GameOver` |
-| [`state_lifecycle.rs`](state_lifecycle.rs) | Handles state entry/exit transitions and cleanup |
-
-### Core Systems
-
-| Module | Function |
-|--------|----------|
-| [`plugin.rs`](plugin.rs) | [`CorePlugin`](plugin.rs) - Registers all core systems and resources |
-| [`window_config.rs`](window_config.rs) | Window settings, resolution, fullscreen mode |
-| [`settings_persistence.rs`](settings_persistence.rs) | Save/load user preferences to disk |
-| [`error_handling.rs`](error_handling.rs) | Global error handlers and recovery mechanisms |
-| [`resources.rs`](resources.rs) | Shared game resources and configuration |
-
-### State Transitions
-
-```
-[Splash] → [MainMenu] → [Game] ↔ [Pause]
-                             ↓
-                          [GameOver]
-```
-
-## Usage
-
-### Adding States
+## Example
 
 ```rust
-use crate::core::states::AppState;
-
-fn main() {
-    App::new()
-        .add_state::<AppState>()
-        .add_systems(Update, my_system.run_if(in_state(AppState::Game)))
-        .run();
-}
+// states.rs — transitions are an explicit allowlist, not free-form
+(GameState::MainMenu, GameState::InGame) => true,
+(GameState::MainMenu, GameState::MultiplayerMenu) => true,
+(GameState::MultiplayerMenu, GameState::InGame) => true, // start game from lobby
 ```
 
-### State Transition
+## Gotchas
 
-```rust
-fn start_game(
-    mut next_state: ResMut<NextState<AppState>>,
-) {
-    next_state.set(AppState::Game);
-}
-```
-
-### Settings Persistence
-
-```rust
-fn save_settings(
-    settings: Res<GameSettings>,
-) {
-    // Automatically persisted to disk
-    // Loaded on next startup
-}
-```
-
-## Dependencies
-
-- [`bevy`](https://docs.rs/bevy) - Core game engine
-- `serde` - Settings serialization
-- `dirs` - Platform-appropriate config directories
-
-## Related Modules
-
-- [`states`](../states/README.md) - State-specific implementations
-- [`game`](../game/README.md) - Core gameplay systems
-- [`ui`](../ui/README.md) - UI that responds to state changes
+- On `wasm32` the default state is `Auth`; on native it's `MainMenu` — don't assume
+  the boot state.
+- Add new state transitions to the allowlist in [states.rs](states.rs); an
+  unlisted transition is rejected at runtime, which shows up as a "button does
+  nothing" bug.

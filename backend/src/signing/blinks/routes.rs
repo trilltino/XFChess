@@ -98,6 +98,7 @@ async fn register_transaction(
         &state.tournament_store,
         &program_id,
         &state.feepayer.next(),
+        &state.host_treasury_pubkey,
     )
     .await
     .map_err(|e| {

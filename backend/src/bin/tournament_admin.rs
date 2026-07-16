@@ -27,12 +27,70 @@ use std::io::{self, Write};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_URL: &str = "http://localhost:8090";
-
 // ── Config ────────────────────────────────────────────────────────────────────
 
+static SERVICE_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 fn server_url() -> String {
-    env::var("SIGNING_SERVICE_URL").unwrap_or_else(|_| DEFAULT_URL.to_string())
+    SERVICE_URL.get_or_init(resolve_service_url).clone()
+}
+
+/// Resolve the backend URL once. An explicit `SIGNING_SERVICE_URL` wins (but is
+/// rejected if it is plain http to a non-loopback host). With no env set, prompt
+/// the operator to pick LOCAL or PRODUCTION (which needs an SSH tunnel).
+fn resolve_service_url() -> String {
+    if let Ok(url) = env::var("SIGNING_SERVICE_URL") {
+        if is_insecure_remote(&url) {
+            panic!(
+                "SIGNING_SERVICE_URL={url} is plain http to a non-loopback host. \
+                 Use https, or a loopback SSH-tunnel port (http://127.0.0.1:8091)."
+            );
+        }
+        return url;
+    }
+
+    println!("\nSelect environment:");
+    println!("  1. LOCAL      http://127.0.0.1:8090");
+    println!("  2. PRODUCTION http://127.0.0.1:8091  (requires an SSH tunnel)");
+    print!("  Choice [1/2]: ");
+    io::stdout().flush().unwrap();
+    let mut buf = String::new();
+    io::stdin().read_line(&mut buf).unwrap();
+
+    match buf.trim() {
+        "2" => {
+            let url = "http://127.0.0.1:8091".to_string();
+            if !health_ok(&url) {
+                eprintln!("\n[!] No backend reachable at {url}. Open the tunnel first:");
+                eprintln!(
+                    "    ssh -i ~/.ssh/xfchess_vps -N -L 8091:127.0.0.1:8090 tunnel@178.104.55.19\n"
+                );
+                std::process::exit(1);
+            }
+            url
+        }
+        _ => "http://127.0.0.1:8090".to_string(),
+    }
+}
+
+/// True for an `http://` URL whose host is neither 127.0.0.1 nor localhost.
+fn is_insecure_remote(url: &str) -> bool {
+    if let Some(rest) = url.strip_prefix("http://") {
+        let host = rest.split(['/', ':']).next().unwrap_or("");
+        return host != "127.0.0.1" && host != "localhost";
+    }
+    false
+}
+
+/// Blocking GET {url}/health with a short timeout; true on 2xx.
+fn health_ok(url: &str) -> bool {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()
+        .and_then(|c| c.get(format!("{url}/health")).send().ok())
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
 }
 
 fn api_key() -> String {
@@ -45,10 +103,6 @@ fn client() -> reqwest::blocking::Client {
     headers.insert(
         "Content-Type",
         reqwest::header::HeaderValue::from_static("application/json"),
-    );
-    headers.insert(
-        "ngrok-skip-browser-warning",
-        reqwest::header::HeaderValue::from_static("true"),
     );
     headers.insert(
         "X-API-Key",
@@ -163,14 +217,14 @@ fn read_scheduled_at() -> Option<i64> {
 }
 
 fn read_max_players() -> u16 {
-    println!("  For Single Elimination: must be a power of 2 (8, 16, 32, 64, 128, 256)");
-    println!("  For Swiss: any value >= 4");
+    println!("  For Single Elimination: must be a power of 2 (2, 4, 8, 16, 32, 64, 128, 256)");
+    println!("  For Swiss: any value >= 2");
     loop {
         let n = read_u16("Max entrants");
-        if n >= 4 {
+        if n >= 2 {
             return n;
         }
-        println!("  [!] Minimum 4 players required.");
+        println!("  [!] Minimum 2 players required.");
     }
 }
 

@@ -10,7 +10,7 @@ compile time.
 
 | Module | Responsibility |
 |--------|----------------|
-| [`core/`](core/) | App lifecycle, crash reporting, the `AppState` flow (`Splash → MainMenu → Game → Pause`) |
+| [`core/`](core/) | App lifecycle, crash reporting, the `GameState` flow (`Auth/MainMenu → InGame → Paused/GameOver`) |
 | [`states/`](states/) | State types and transition wiring |
 | [`game/`](game/) | Board state, FEN management, move validation, check/checkmate detection |
 | [`engine/`](engine/) | AI opponent — delegates to the `nimzovich_engine` crate |

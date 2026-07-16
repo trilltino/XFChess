@@ -19,7 +19,7 @@ This checklist ensures that all components and configurations for the XFChess ba
 
 - [ ] **Server Access and Setup**
   - [ ] SSH access confirmed to Hetzner server (`root@178.104.55.19`).
-  - [ ] SSH key for deployment set up and working (`~/.ssh/id_xfchess`).
+  - [ ] SSH key for deployment set up and working (`~/.ssh/xfchess_vps`).
 
 ## Deployment Checklist
 

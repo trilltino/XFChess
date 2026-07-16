@@ -30,6 +30,10 @@ braid-iroh (Braid over Iroh QUIC)  ── iroh-h3 / iroh-h3-axum / iroh-h3-clien
 | [`iroh-h3/`](iroh-h3/), [`iroh-h3-axum/`](iroh-h3-axum/), [`iroh-h3-client/`](iroh-h3-client/) | HTTP/3 over Iroh: core layer, Axum server integration, and client |
 | [`iroh-gossip/`](iroh-gossip/) | Gossip broadcast over Iroh, used by the backend relay |
 
+`iroh-gossip` (upstream [n0-computer/iroh-gossip](https://github.com/n0-computer/iroh-gossip))
+and the three `iroh-h3*` crates (upstream [Le-Maz/iroh-h3](https://github.com/Le-Maz/iroh-h3))
+are vendored third-party code — keep their docs and comments as upstream wrote them.
+
 ## Channel roles
 
 Braid HTTP-209 subscriptions carry **state sync** (move logs, clocks, tournament

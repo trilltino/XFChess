@@ -1,218 +1,72 @@
-# XFChess Backend
+# backend/ — signing & tournament server
 
-## Purpose
+Axum 0.8 HTTP server that sits between the game client / web frontend and Solana.
+It builds (but never signs) Solana transactions, manages tournament state, relays
+P2P connections, and exposes Prometheus metrics. It never holds player private keys.
 
-The Backend provides server-side services for XFChess, including game indexing, P2P network observation, and HTTP API endpoints. It acts as a sidecar node that observes the Iroh gossip network to track active games and provide queryable game state.
+## Role in XFChess
 
-## Impact on Game
+```
+Bevy client / web-solana ──HTTP──> backend ──RPC──> Solana (mainnet + MagicBlock ER)
+                          ──WS───> auth / signaling
+                          ──QUIC──> p2p_relay (braid-iroh) ──> opponent client
+```
 
-This backend enables:
-- **Game Discovery**: Query active and historical games via REST API
-- **Network Observation**: Monitors P2P network traffic for game events
-- **Game Indexing**: Maintains searchable index of all games
-- **Observer Mode**: Spectator functionality without direct P2P participation
-- **Relay Services**: Fallback connectivity for players behind NAT
+The backend returns serialized **unsigned** transactions; the client signs with its
+wallet (or delegated session key) and either sends them back for relay or broadcasts
+directly. Background tasks settle finished games and distribute tournament prizes
+on-chain without any client action.
 
-## Architecture/Key Components
+## Binaries
 
-### Application State
-
-| Component | Purpose |
-|-----------|---------|
-| [`AppState`](src/main.rs:18) | Shared application state including Iroh node and game index |
-| [`GameRecord`](src/main.rs:30) | Indexed game data structure |
-| [`Indexed Games`](src/main.rs:25) | In-memory storage of observed games |
-
-### API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check for monitoring |
-| `/games` | GET | List all indexed games |
-| `/games/:id` | GET | Get specific game by ID |
-| `/observe` | POST | Start observing a game node |
-
-### Network Components
-
-| Component | Purpose |
-|-----------|---------|
-| Iroh Node | P2P networking node for gossip protocol participation |
-| Gossip Topic | `XFChess-0.5-SOL` topic for game event broadcast |
-| Network Observer | Async task processing gossip events |
-
-### Event Types
-
-| Event | Description |
-|-------|-------------|
-| `game_start` | New game created with players and stake |
-| `move_made` | Chess move recorded |
-| `game_end` | Game concluded with winner |
-| `NeighborUp` | New peer discovered |
-| `NeighborDown` | Peer disconnected |
-
-## Usage
-
-### Running the Backend
+| Binary | Entry point | Purpose |
+|--------|-------------|---------|
+| `signing-server` (alias `signing-server-http`) | [src/signing_server.rs](src/signing_server.rs) | **The API server** — everything described here |
+| `backend` | [src/main.rs](src/main.rs) | Stub; prints "use signing-server instead" |
+| `vps_admin` | [src/bin/vps_admin.rs](src/bin/vps_admin.rs) | VPS admin tasks |
+| `tournament_admin` | [src/bin/tournament_admin.rs](src/bin/tournament_admin.rs) | Tournament management CLI |
+| `import_puzzles` | [src/bin/import_puzzles.rs](src/bin/import_puzzles.rs) | Puzzle DB importer |
 
 ```bash
-# Development
-cargo run --bin backend
-
-# Production
-cargo run --release --bin backend
+cd backend
+cargo run --bin signing-server   # the API server, :8090
+cargo test -p backend
 ```
 
-### API Usage Examples
+## Module map
 
-#### Health Check
+| Module | Purpose |
+|--------|---------|
+| [src/signing/](src/signing/README.md) | Core domain: transaction building, auth, routes, compliance, relay |
+| [src/signing/routes/](src/signing/routes/) | HTTP handlers: matchmaking, tournaments, ratings, disputes, KYC, mailer |
+| [src/signing/solana/](src/signing/solana/) | Transaction building, RPC routing (mainnet vs ER), tx debug API |
+| [src/signing/swiss/](src/signing/swiss/) | Swiss tournament orchestration (scoring: [SCORING.md](src/signing/swiss/SCORING.md)) |
+| [src/db/](src/db/README.md) | SQLite via SQLx; migrations in [migrations/](migrations/) |
+| [src/tasks/](src/tasks/) | Background workers: settlement, prize distribution, matchmaking, anticheat, archiver |
+| [src/telemetry/](src/telemetry/) | Prometheus metrics, logging, HTTP middleware |
+| [src/infrastructure/](src/infrastructure/README.md) | Router assembly, DB pool, auth middleware, task spawning |
 
-```bash
-curl http://localhost:3000/health
-# Response: OK
-```
+## Example — session-key game flow
 
-#### List Games
-
-```bash
-curl http://localhost:3000/games
-```
-
-```json
-[
-  {
-    "id": "game-12345",
-    "players": ["node-abc", "node-def"],
-    "stake_amount": 0.5,
-    "start_time": 1705319521,
-    "moves": ["e2e4", "e7e5", "Nf3"],
-    "end_time": null,
-    "winner": null
-  }
-]
-```
-
-#### Get Specific Game
-
-```bash
-curl http://localhost:3000/games/game-12345
-```
-
-#### Start Observing
-
-```bash
-curl -X POST http://localhost:3000/observe \
-  -H "Content-Type: application/json" \
-  -d '{"observer_node_id": "node-xyz"}'
-```
-
-## Architecture Flow
+The passwordless play loop the game client drives (routes in
+[src/signing/routes/main.rs](src/signing/routes/main.rs)):
 
 ```
-┌─────────────────┐     ┌──────────────────┐
-│   XFChess       │     │   XFChess        │
-│   Player 1      │◄───►│   Player 2       │
-│   (Iroh Node)   │ P2P │   (Iroh Node)    │
-└────────┬────────┘     └────────┬─────────┘
-         │                       │
-         └───────────┬───────────┘
-                     │ Gossip
-                     ▼
-            ┌─────────────────┐
-            │   Backend       │
-            │   (Observer)    │
-            │                 │
-            │ • Indexes games │
-            │ • Tracks moves  │
-            │ • Stores state  │
-            └────────┬────────┘
-                     │ HTTP
-                     ▼
-            ┌─────────────────┐
-            │   API Clients   │
-            │   (Spectators)  │
-            └─────────────────┘
+POST /session/create     -> unsigned create_game tx + session keypair delegation
+POST /session/activate   -> activates the delegated session key
+POST /move/record        -> backend co-signs move for MagicBlock ER, sub-second ack
+POST /game/undelegate    -> commit ER state back to mainnet
+POST /game/finalize      -> settle wager (also done automatically by tasks/settlement_worker.rs)
 ```
 
-## Dependencies
+## Invariants
 
-| Crate | Purpose |
-|-------|---------|
-| [`axum`](https://docs.rs/axum) | HTTP web framework |
-| [`tokio`](https://docs.rs/tokio) | Async runtime |
-| [`serde`](https://docs.rs/serde) | JSON serialization |
-| [`tracing`](https://docs.rs/tracing) | Logging and instrumentation |
-| [`braid-iroh`](../../crates/braid-iroh/README.md) | P2P networking |
-| [`iroh-gossip`](../../crates/iroh-gossip/README.md) | Gossip protocol |
+- **Never add private-key handling.** The signing model is build-unsigned/return-serialized.
+- Tournament state of record is [src/signing/storage/tournament.rs](src/signing/storage/tournament.rs)
+  (SQLite `tournaments` table, JSON blob per record) — survives restarts.
+- Wager routes check [src/signing/cacf/](src/signing/cacf/) jurisdiction rules (UK, Brazil,
+  Germany, Canada) before building transactions.
+- Schema changes = new numbered file in [migrations/](migrations/); never edit old ones.
 
-## Configuration
-
-Environment variables (future enhancement):
-
-```bash
-XFCHESS_BACKEND_PORT=3000          # HTTP server port
-XFCHESS_BACKEND_LOG_LEVEL=info     # Logging level
-XFCHESS_BACKEND_DB_PATH=./data.db  # SQLite database path
-```
-
-## Database Schema (Planned)
-
-```sql
--- Games table
-CREATE TABLE games (
-    id TEXT PRIMARY KEY,
-    player_white TEXT NOT NULL,
-    player_black TEXT NOT NULL,
-    stake_amount REAL,
-    start_time INTEGER,
-    end_time INTEGER,
-    winner TEXT,
-    final_fen TEXT
-);
-
--- Moves table
-CREATE TABLE moves (
-    id INTEGER PRIMARY KEY,
-    game_id TEXT REFERENCES games(id),
-    move_number INTEGER,
-    move_san TEXT,
-    timestamp INTEGER
-);
-```
-
-## Related Modules
-
-- [`crates/braid-iroh`](../../crates/braid-iroh/README.md) - P2P networking
-- [`crates/iroh-gossip`](../../crates/iroh-gossip/README.md) - Gossip protocol
-- [`src/multiplayer`](../../src/multiplayer/README.md) - Client-side multiplayer
-- [`shared`](../../crates/shared/README.md) - Shared message types
-
-## Deployment
-
-### Docker (Future)
-
-```dockerfile
-FROM rust:1.75
-WORKDIR /app
-COPY . .
-RUN cargo build --release
-EXPOSE 3000
-CMD ["./target/release/backend"]
-```
-
-### Systemd Service
-
-```ini
-[Unit]
-Description=XFChess Backend
-After=network.target
-
-[Service]
-Type=simple
-User=xfchess
-WorkingDirectory=/opt/xfchess
-ExecStart=/opt/xfchess/backend
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
+Observability: `GET /health`, `GET /metrics` (Prometheus). More detail in
+[CLAUDE.md](CLAUDE.md) and [src/README.md](src/README.md).

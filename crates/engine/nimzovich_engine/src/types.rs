@@ -112,71 +112,8 @@ use alloc::vec::Vec;
 // This produces **~4 billion unique hashes** (2^32), sufficient for practical play where collisions occur after
 // searching ~65,000 positions (birthday paradox). Debugging builds use 32 bytes to include full hash verification.
 //
-// ## XFChess Integration
-//
-// ### Adding AI to XFChess
-//
-// ```rust,ignore
-// // In game/ai/mod.rs (new module)
-// use chess_engine::{Game, Move, new_game, reply};
-//
-// #[derive(Resource)]
-// struct ChessAI {
-//     engine: Arc<Mutex<Game>>,
-// }
-//
-// fn spawn_ai_task(
-//     mut commands: Commands,
-//     mut ai: ResMut<ChessAI>,
-//     turn: Res<CurrentTurn>,
-// ) {
-//     if turn.color == PieceColor::Black {  // AI plays black
-//         let engine = ai.engine.clone();
-//         let task = AsyncComputeTaskPool::get().spawn(async move {
-//             let mut game = engine.lock().unwrap();
-//             reply(&mut game)  // Returns Move struct
-//         });
-//         commands.insert_resource(PendingAIMove(task));
-//     }
-// }
-// ```
-//
-// ### Syncing ECS Board to Engine Board
-//
-// ```rust,ignore
-// fn sync_ecs_to_engine(
-//     pieces: Query<&Piece>,
-//     mut ai: ResMut<ChessAI>,
-// ) {
-//     let mut game = ai.engine.lock().unwrap();
-//
-//     // Clear board
-//     game.board = [0; 64];
-//
-//     // Copy pieces
-//     for piece in pieces.iter() {
-//         let square = piece.y * 8 + piece.x;
-//         let piece_id = match piece.piece_type {
-//             PieceType::Pawn => 1,
-//             PieceType::Knight => 2,
-//             // ... etc
-//         };
-//         game.board[square as usize] = if piece.color == PieceColor::White {
-//             piece_id
-//         } else {
-//             -piece_id
-//         };
-//     }
-// }
-// ```
-//
-// ## Further Reading
-//
-// - **Alpha-Beta Pruning**: https://www.chessprogramming.org/Alpha-Beta
-// - **Transposition Tables**: https://www.chessprogramming.org/Transposition_Table
-// - **Zobrist Hashing**: https://www.chessprogramming.org/Zobrist_Hashing
-// - **Move Ordering**: https://www.chessprogramming.org/Move_Ordering
-// - **Cache-Oriented Programming**: https://en.wikipedia.org/wiki/Data-oriented_design
+// XFChess integration lives in the game client: `src/engine/board_state.rs`
+// (ECS↔engine sync) and `src/game/ai/` (async search tasks).
 
 use super::bitset::BitSet;
 use super::constants::*;

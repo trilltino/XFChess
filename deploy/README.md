@@ -23,17 +23,12 @@ deploy/
 │   ├── .env.example                    # Environment template
 │   └── .env.production                 # Production environment
 │
-├── frontend/            # Frontend deployment
-│   └── deploy-frontend.ps1             # Frontend deployment script
-│
 ├── nginx/               # Nginx configuration
 │   └── nginx.conf                      # Reverse proxy config
 │
 ├── scripts/             # Deployment utilities
-│   ├── deploy.bat                      # Batch deployment script
-│   ├── deploy.ps1                      # PowerShell deployment script
-│   ├── rollback.ps1                    # Rollback script
-│   └── copy-key.bat                    # SSH key copying
+│   ├── deploy.ps1                      # Full deploy script (backend + frontend + nginx)
+│   └── rollback.ps1                    # Rollback script
 │
 └── docs/                # Documentation
     ├── HOSTED_BACKEND_CHECKLIST.md     # Deployment checklist

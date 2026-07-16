@@ -413,21 +413,10 @@ impl Plugin for TransactionDebuggerPlugin {
         let debugger = TransactionDebugger::new(log_file, self.pretty_print, self.game_id);
 
         app.insert_resource(debugger);
-        // TODO: Migrate to Bevy 0.18 event system
-        // .add_systems(Update, debug_rollup_events);
+        // TODO: re-add a rollup-event logging system once migrated to the
+        // Bevy 0.18 event API (a reader system feeding log_rollup_event).
     }
 }
-
-// TODO: Migrate to Bevy 0.18 event system
-// /// System that listens to rollup events and logs them
-// fn debug_rollup_events(
-//     mut debugger: ResMut<TransactionDebugger>,
-//     mut rollup_events: EventReader<RollupEvent>,
-// ) {
-//     for event in rollup_events.read() {
-//         debugger.log_rollup_event(event);
-//     }
-// }
 
 /// Calculate a simple batch hash from moves.
 #[cfg(feature = "solana")]

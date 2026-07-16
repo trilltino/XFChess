@@ -12,7 +12,7 @@ input/keys/testing.
 - [ ] **T6** 🟡 CSP `'unsafe-inline'` + `withGlobalTauri` `[you]`
 - [ ] **T7** 🔵 `.unwrap()` panics in IPC commands `[auto]`
 - [ ] **T8** 🔵 Dead weak `hash_password` `[auto]`
-- [ ] **T9** 🔵 Fragile `deploy.bat` sidecar `[you]`
+- [x] **T9** 🔵 Fragile `deploy.bat` sidecar — resolved 2026-07-15: the sidecar call was removed; Dashboard now instructs running `deploy/scripts/deploy.ps1` from a terminal
 
 ---
 
@@ -64,7 +64,7 @@ the desktop wallet still logs in and signs.
 wallet window loads remote Privy scripts, so XSS/CDN-compromise → RCE.
 
 **Fix `[auto]`:** strip all shell perms from `default.json` (leaving `core:default` for
-all windows) and move shell into a new **[capabilities/tournament-admin.json](../capabilities/tournament-admin.json)**
+all windows) and move shell into **[capabilities/admin-shell.json](../capabilities/admin-shell.json)**
 scoped to `windows: ["tournament-admin"]` only.
 
 **Verify:** the tournament-admin terminal still runs; the wallet window can no longer
@@ -124,7 +124,7 @@ won't resolve in a bundle and ships a one-click prod-deploy. Register it properl
 
 ---
 
-## Applied this pass (`[auto]`): T1 (partial), T2, T3, T4, T7, T8.
-Deferred (`[you]`): T1 (bearer-token hardening), T5 (updater), T6 (CSP/global), T9 (sidecar).
+## Applied (`[auto]`): T1 (partial), T2, T3, T4, T7, T8, T9.
+Deferred (`[you]`): T1 (bearer-token hardening), T5 (updater), T6 (CSP/global).
 
 **Verify build:** `cargo check -p xfchess-tauri`.

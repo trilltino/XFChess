@@ -86,8 +86,9 @@ fn move_apply_rejects_turn_and_nonce_mismatches() {
     game.black = Pubkey::new_unique();
     game.nonce = 7;
 
-    assert!(apply_recorded_move(&mut game, game.black, [0; 5], [0; 68], 8, Some(7), 1).is_err());
-    assert!(apply_recorded_move(&mut game, game.white, [0; 5], [0; 68], 9, Some(7), 1).is_err());
+    let (white, black) = (game.white, game.black);
+    assert!(apply_recorded_move(&mut game, black, [0; 5], [0; 68], 8, Some(7), 1).is_err());
+    assert!(apply_recorded_move(&mut game, white, [0; 5], [0; 68], 9, Some(7), 1).is_err());
 }
 
 #[test]

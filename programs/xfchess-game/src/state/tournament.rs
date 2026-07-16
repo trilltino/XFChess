@@ -1,5 +1,5 @@
 //! State structure defining tournament meta-info, prize pools, and progression.
-//! Supports 8, 16, 32, 64, 128, 256 player single-elimination and Swiss tournaments.
+//! Supports 2, 4, 8, 16, 32, 64, 128, 256 player single-elimination and Swiss tournaments.
 
 use anchor_lang::prelude::*;
 
@@ -13,7 +13,7 @@ pub struct Tournament {
     pub entry_fee: u64,
     pub platform_fee: u64,
     pub prize_pool: u64,
-    /// Maximum players (must be power of 2 for single-elimination: 8, 16, 32, 64, 128, 256).
+    /// Maximum players (must be power of 2 for single-elimination: 2, 4, 8, 16, 32, 64, 128, 256).
     pub max_players: u16,
     /// Current number of registered players.
     pub player_count: u16,
@@ -185,7 +185,11 @@ pub fn get_default_prize_shares(max_players: u16, winner_takes_all: bool) -> [u1
     }
 
     match max_players {
-        0..=64 => {
+        0..=2 => {
+            // Head-to-head: only 1st and 2nd exist — 70/30%
+            [7000, 3000, 0, 0, 0, 0, 0, 0, 0, 0]
+        }
+        3..=64 => {
             // Top 3: 60/30/10%
             [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]
         }

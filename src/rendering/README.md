@@ -1,139 +1,40 @@
-# Rendering Module
+# src/rendering
 
-## Purpose
+3D visualization of the chess game: board construction, piece meshes, cameras,
+lighting, and move-feedback effects. Purely presentational — it reads game state and
+never mutates it.
 
-The Rendering module handles all 3D visualization for XFChess, including the chess board, pieces, camera controls, lighting effects, and visual feedback. It transforms the abstract game state into a visually appealing 3D chess experience.
+## Role in XFChess
 
-## Impact on Game
+Consumes `ChessEngine` state and `game/` components and draws them. Piece meshes come
+from [`assets/`](../assets/) (`GameAssets.piece_meshes`); quality settings arrive via
+`GameSettings` and are applied by [graphics_quality.rs](graphics_quality.rs).
 
-This module delivers:
-- **3D Chess Board**: Visual representation of the chess board with customizable themes
-- **Piece Models**: High-quality 3D chess piece rendering with materials
-- **Dynamic Camera**: Smooth camera controls with multiple viewing angles
-- **Visual Effects**: Last move highlighting, move hints, and dynamic lighting
-- **Theme Support**: Multiple board themes (Classic, TempleOS, etc.)
-- **Performance**: Efficient rendering for smooth 60+ FPS gameplay
+## Layout
 
-## Architecture/Key Components
+| Path | Contents |
+|------|----------|
+| [board/](board/) | Board mesh + themes ([board_theme.rs](board/board_theme.rs)), square coordinates, TempleOS-style debug UI |
+| [pieces/](pieces/) | `Piece`, `PieceColor`, `PieceType` components and piece spawning |
+| [camera/](camera/) | `camera_director.rs` — in-game camera rigs and transitions |
+| [effects/](effects/) | Check highlight, last-move marker, move hints, dynamic lighting, sky |
+| [graphics_quality.rs](graphics_quality.rs) | Applies quality presets (SSAO, bloom) to cameras/lights when `GameSettings.graphics_quality` changes |
+| [utils.rs](utils.rs) | `Square` ↔ world-position conversion helpers |
 
-### Submodules
-
-| Module | Purpose |
-|--------|---------|
-| [`board/`](board/) | Chess board mesh, materials, and themes |
-| [`pieces/`](pieces/) | 3D piece models, spawning, and positioning |
-| [`camera/`](camera/) | Camera controls, movement, and perspectives |
-| [`effects/`](effects/) | Visual effects (highlights, lighting, hints) |
-| [`utils.rs`](utils.rs) | Rendering utilities and helpers |
-
-### Board System
-
-| Component | Function |
-|-----------|----------|
-| [`BoardPlugin`](board/mod.rs) | Manages board visualization |
-| [`BoardTheme`](board/board_theme.rs) | Theme configuration and materials |
-| [`TempleOSBoardPlugin`](board/templeos_ui.rs) | TempleOS-style retro theme |
-
-### Piece System
-
-| Component | Function |
-|-----------|----------|
-| [`PiecePlugin`](pieces/mod.rs) | Handles all piece rendering |
-| [`Piece`](pieces/pieces.rs) | Component identifying piece type and color |
-| [`PieceType`](pieces/pieces.rs) | Enum: King, Queen, Rook, Bishop, Knight, Pawn |
-| [`PieceColor`](pieces/pieces.rs) | Enum: White, Black |
-
-### Camera System
-
-| Component | Function |
-|-----------|----------|
-| [`CameraPlugin`](camera/mod.rs) | Camera control and positioning |
-| [`TempleOSCamera`](camera/camera_templeos.rs) | Special camera for TempleOS theme |
-
-### Effects System
-
-| Component | Function |
-|-----------|----------|
-| [`LastMoveHighlight`](effects/last_move.rs) | Highlights the most recent move |
-| [`MoveHints`](effects/move_hints.rs) | Shows legal move indicators |
-| [`DynamicLighting`](effects/dynamic_lighting.rs) | Adaptive lighting system |
-
-## Usage
-
-### Spawning a Piece
+## Example
 
 ```rust
-fn spawn_piece(
-    mut commands: Commands,
-    game_assets: Res<GameAssets>,
-    position: (u8, u8),
-) {
-    let mesh = game_assets.piece_meshes.king.clone().unwrap();
-    let material = materials.add(Color::WHITE);
-    
-    commands.spawn((
-        PbrBundle {
-            mesh,
-            material,
-            transform: Transform::from_xyz(
-                position.0 as f32, 
-                0.5, 
-                position.1 as f32
-            ),
-            ..default()
-        },
-        Piece {
-            piece_type: PieceType::King,
-            color: PieceColor::White,
-        },
-    ));
-}
+// graphics_quality.rs — presets toggle real Bevy 0.18 components
+use bevy::pbr::ScreenSpaceAmbientOcclusion;
+use bevy::post_process::bloom::Bloom;
+
+// watches GameSettings.graphics_quality and inserts/removes
+// ScreenSpaceAmbientOcclusion + Bloom on the game cameras
 ```
 
-### Changing Board Theme
+## Gotchas
 
-```rust
-fn set_theme(
-    mut theme: ResMut<BoardTheme>,
-) {
-    theme.current = ThemeType::TempleOS;
-    // Theme automatically updates materials
-}
-```
-
-### Camera Control
-
-```rust
-fn focus_on_square(
-    mut camera_query: Query<&mut Transform, With<GameCamera>>,
-    target: (u8, u8),
-) {
-    if let Ok(mut transform) = camera_query.get_single_mut() {
-        let target_pos = Vec3::new(
-            target.0 as f32,
-            0.0,
-            target.1 as f32,
-        );
-        transform.translation = target_pos + Vec3::new(0.0, 10.0, 5.0);
-        transform.look_at(target_pos, Vec3::Y);
-    }
-}
-```
-
-## Dependencies
-
-- [`bevy::pbr`](https://docs.rs/bevy/latest/bevy/pbr/index.html) - 3D rendering and materials
-- [`bevy::gltf`](https://docs.rs/bevy/latest/bevy/gltf/index.html) - GLTF model loading
-- [`assets`](../assets/README.md) - Asset handles for models and materials
-
-## Related Modules
-
-- [`assets`](../assets/README.md) - Provides loaded 3D models
-- [`game`](../game/README.md) - Drives piece positions
-- [`input`](../input/README.md) - Raycasting for piece selection
-
-## Performance Notes
-
-- Pieces use instanced rendering where possible
-- Board uses a single mesh with material switching for themes
-- Shadows are optimized for the static board environment
+- Keep this module read-only with respect to game state: effects react to
+  `game/` components (`HasMoved`, check state) rather than computing chess logic.
+- Board-square ↔ world math must go through [utils.rs](utils.rs) `Square` helpers so
+  the isometric layout stays consistent with picking.

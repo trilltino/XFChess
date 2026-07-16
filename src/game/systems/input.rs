@@ -38,7 +38,6 @@ use bevy::picking::events::{Click, Drag, DragEnd, DragStart, Pointer};
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy_egui::egui;
-// use bevy::ecs::event::EventWriter; // EventWriter is in prelude
 
 /// Query for mutable access to pieces (used for executing moves)
 pub type PieceMutQuery<'w, 's> = Query<'w, 's, (Entity, &'static mut Piece, &'static mut HasMoved)>;

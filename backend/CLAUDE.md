@@ -10,13 +10,13 @@ The XFChess backend is an Axum 0.8 HTTP server that sits between the game client
 
 | Binary | Entry point | Purpose |
 |--------|-------------|---------|
-| `backend` | `src/main.rs` | Main API server |
-| `signing-server` | `src/signing_server.rs` | Standalone signing service |
+| `signing-server` | `src/signing_server.rs` | The API server (alias: `signing-server-http`) |
+| `backend` | `src/main.rs` | Stub — prints "use signing-server instead" |
 | `vps_admin` | `src/bin/vps_admin.rs` | VPS admin tasks |
 | `tournament_admin` | `src/bin/tournament_admin.rs` | CLI tournament management |
+| `import_puzzles` | `src/bin/import_puzzles.rs` | Puzzle DB importer |
 
 ```bash
-cargo run --bin backend
 cargo run --bin signing-server
 cargo test
 cargo test test_name   # single test

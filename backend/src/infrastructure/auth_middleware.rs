@@ -168,7 +168,11 @@ pub async fn require_relay_or_jwt(
 }
 
 /// Constant-time string comparison to prevent timing attacks.
-fn constant_time_eq(a: &str, b: &str) -> bool {
+///
+/// Shared across admin auth surfaces (this middleware's `X-API-Key` check and
+/// `routes/dispute.rs`'s `ADMIN_TOKEN` check) so no secret is ever compared with
+/// a short-circuiting `==`/`!=`.
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }

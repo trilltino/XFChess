@@ -23,30 +23,31 @@ pub struct CancelTournament<'info> {
         constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
     pub tournament: Account<'info, Tournament>,
-    /// TournamentPlayersShard 0 (players 0-63)
+    /// TournamentPlayersShard 0 always present (all tournament sizes)
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 1 (players 64-127)
+    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
+    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_1: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 2 (players 128-191)
+    pub tournament_players_shard_1: Option<Box<Account<'info, TournamentPlayersShard>>>,
+    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_2: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 3 (players 192-255)
+    pub tournament_players_shard_2: Option<Box<Account<'info, TournamentPlayersShard>>>,
+    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_3: Box<Account<'info, TournamentPlayersShard>>,
+    pub tournament_players_shard_3: Option<Box<Account<'info, TournamentPlayersShard>>>,
     /// CHECK: USDC prize escrow PDA — the authority of the token account.
     #[account(
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
@@ -104,14 +105,20 @@ pub fn handler<'a, 'b, 'c, 'info>(
     let refund_from_escrow = tournament.status == TournamentStatus::Registration;
     let sol_guarantee = tournament.prize_pool;
 
-    // Collect all players from all shards
+    // Collect all players from all present shards (shards 1-3 are optional —
+    // small/medium tournaments only initialize shard 0 or 0-1).
     let mut all_players: Vec<Pubkey> = Vec::new();
-    let shards = [
-        &ctx.accounts.tournament_players_shard_0,
-        &ctx.accounts.tournament_players_shard_1,
-        &ctx.accounts.tournament_players_shard_2,
-        &ctx.accounts.tournament_players_shard_3,
-    ];
+    let mut shards: Vec<&TournamentPlayersShard> =
+        vec![&ctx.accounts.tournament_players_shard_0];
+    if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
+        shards.push(s);
+    }
+    if let Some(s) = ctx.accounts.tournament_players_shard_2.as_ref() {
+        shards.push(s);
+    }
+    if let Some(s) = ctx.accounts.tournament_players_shard_3.as_ref() {
+        shards.push(s);
+    }
 
     for shard in shards.iter() {
         for player in shard.players.iter() {

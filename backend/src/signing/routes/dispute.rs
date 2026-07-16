@@ -19,6 +19,7 @@ use std::str::FromStr;
 use tracing::{error, info, warn};
 
 use crate::db::repository::DisputeRepository;
+use crate::infrastructure::auth_middleware::constant_time_eq;
 use crate::signing::AppState;
 
 const DISPUTE_NOTIFY_EMAIL: &str = "isicheivalentine@gmail.com";
@@ -139,7 +140,7 @@ pub async fn resolve_dispute(
 ) -> Result<Json<ResolveDisputeResp>, StatusCode> {
     // Authenticate admin token
     let expected = env::var("ADMIN_TOKEN").unwrap_or_default();
-    if expected.is_empty() || req.admin_token != expected {
+    if expected.is_empty() || !constant_time_eq(&req.admin_token, &expected) {
         warn!("[dispute] resolve rejected — bad admin token");
         return Err(StatusCode::UNAUTHORIZED);
     }

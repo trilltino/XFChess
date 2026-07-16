@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { Command } from "@tauri-apps/plugin-shell";
 import { apiClient } from "../services/api";
+import { useAuth } from "../hooks/useAuth";
+import { VPS_HOST } from "../config/environments";
 
 interface WalletData { pubkey: string; balance_lamports: number; balance_sol: string; }
 interface Report { game_id: number; white: string; black: string; suspect: string; verdict: string; wager: string; score: number; reason: string; status: string; created_at?: number; assigned_to?: string; }
@@ -11,19 +12,22 @@ const DEPLOY_HISTORY_KEY = "deploy_history";
 function loadDeployHistory(): DeployEntry[] {
   try { return JSON.parse(localStorage.getItem(DEPLOY_HISTORY_KEY) || "[]"); } catch { return []; }
 }
-function pushDeployHistory(entry: DeployEntry) {
-  const h = loadDeployHistory().slice(-9); h.push(entry);
-  localStorage.setItem(DEPLOY_HISTORY_KEY, JSON.stringify(h));
-}
 
 const FEEPAYER_THRESHOLD_KEY = "feepayer_threshold_sol";
 function getFeepayerThreshold() { return parseFloat(localStorage.getItem(FEEPAYER_THRESHOLD_KEY) || "0.5"); }
 
-const serverIp = "178.104.55.19";
+// Monitoring stack (Prometheus :9090, node_exporter :9100) is internal-only on
+// the VPS and not forwarded by the SSH tunnel, so those tiles reflect direct
+// reachability from this machine (typically offline behind the firewall).
+// Backend-served data (/health, /metrics) goes through the active env's
+// backend_url instead — that IS tunnel-aware.
+const serverIp = VPS_HOST;
 
 export default function Dashboard() {
   type MainTab = "CONSOLE" | "MODERATION" | "AUDIT" | "INFRA";
   const [activeTab, setActiveTab] = useState<MainTab>("CONSOLE");
+  const { authState } = useAuth();
+  const backendUrl = authState.backend_url;
 
   const [activeSessions, setActiveSessions] = useState(0);
   const [totalGames, setTotalGames] = useState(0);
@@ -35,14 +39,14 @@ export default function Dashboard() {
   const [reports, setReports] = useState<Report[]>([]);
 
   const [logs, setLogs] = useState<string[]>([]);
-  const [deploying, setDeploying] = useState(false);
-  const [deployHistory, setDeployHistory] = useState<DeployEntry[]>(loadDeployHistory);
+  const [deploying] = useState(false);
+  const [deployHistory] = useState<DeployEntry[]>(loadDeployHistory);
 
   const [taskStatus, setTaskStatus] = useState<Record<string, { last_tick: number; status: string }>>({});
   const [dbStats, setDbStats] = useState<{ sessions_rows: number; games_rows: number; users_rows: number; db_mb: number } | null>(null);
   const [tlsExpiry, setTlsExpiry] = useState<{ domain: string; days_remaining: number | null; status: string }[]>([]);
   const [nodeChecks, setNodeChecks] = useState<NodeCheck[]>([
-    { label: "Backend API",   url: `http://${serverIp}:8090/health`,    status: "checking" },
+    { label: "Backend API",   url: `${backendUrl}/health`,              status: "checking" },
     { label: "Node Exporter", url: `http://${serverIp}:9100/metrics`,   status: "checking" },
     { label: "Prometheus",    url: `http://${serverIp}:9090/-/healthy`, status: "checking" },
   ]);
@@ -59,7 +63,7 @@ export default function Dashboard() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const metrics = await fetch(`http://${serverIp}:8090/metrics`).then(r => r.text()).catch(() => "");
+        const metrics = await fetch(`${backendUrl}/metrics`).then(r => r.text()).catch(() => "");
         setActiveSessions(parseInt(metrics.match(/active_sessions (\d+)/)?.[1] || "0"));
         setTotalGames(parseInt(metrics.match(/games_created_total (\d+)/)?.[1] || "0"));
         setTxConfirmed(parseInt(metrics.match(/transactions_confirmed_total\{chain="solana"\} (\d+)/)?.[1] || "0"));
@@ -131,19 +135,11 @@ export default function Dashboard() {
     check(); const id = setInterval(check, 30000); return () => clearInterval(id);
   }, []);
 
+  // In-app deployment is not implemented (T9, tauri/docs/TAURI_REMEDIATION.md).
+  // Deploys run from a terminal via deploy\scripts\deploy.ps1.
   const runDeployment = async () => {
-    setDeploying(true); addLog("Initiating production rollout…");
-    try {
-      const command = Command.sidecar("../deploy/scripts/deploy.bat");
-      await command.spawn();
-      command.stdout.on("data", l => addLog(l));
-      command.stderr.on("data", l => addLog(`ERROR: ${l}`));
-      command.on("close", d => {
-        addLog(`Rollout finished (exit ${d.code})`);
-        const entry: DeployEntry = { ts: new Date().toLocaleString(), note: "Production rollout", code: d.code ?? -1 };
-        pushDeployHistory(entry); setDeployHistory(loadDeployHistory()); setDeploying(false);
-      });
-    } catch (e) { addLog(`Failed: ${e}`); setDeploying(false); }
+    addLog("NOT IMPLEMENTED: deploys run from a terminal, not this panel.");
+    addLog("Run: powershell -File deploy\\scripts\\deploy.ps1 -Server 178.104.55.19 [-Domain your.domain]");
   };
 
   const handleIpBan = async () => {

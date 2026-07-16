@@ -167,9 +167,7 @@ impl WebSocketSubscriber {
             )));
         }
 
-        // On reconnect, fetch latest account state via RPC to catch missed updates
-        // This is a placeholder for actual RPC call
-        // let initial_state = self.rpc_client.get_account(&pubkey)?;
+        // TODO: on reconnect, fetch the latest account state via RPC to catch missed updates.
 
         Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
     }

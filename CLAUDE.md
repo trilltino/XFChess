@@ -43,8 +43,7 @@ cargo run --bin debugger
 ```bash
 cd backend
 cargo build
-cargo run --bin backend          # Main API server
-cargo run --bin signing-server   # Standalone signing service
+cargo run --bin signing-server   # The API server (the `backend` bin is a stub)
 cargo run --bin tournament_admin # Tournament management CLI
 ```
 
@@ -61,8 +60,8 @@ cargo test test_name
 cargo test -p xfchess-game
 
 # A specific program test file
-cargo test -p xfchess-game --test smoke_tests
-cargo test -p xfchess-game --test security_tests
+cargo test -p xfchess-game --test treasury_tests
+cargo test -p xfchess-game --test er_delegation_tests
 
 # Backend tests
 cargo test -p backend
@@ -110,8 +109,8 @@ scripts\build.bat
 # Run local dev stack with monitoring (Prometheus, Grafana)
 scripts\run_offline.bat
 
-# Production packaging for Hetzner VPS
-scripts\package_backend_hetzner.bat
+# Production deploy to Hetzner VPS (build + nginx + systemd + TLS)
+deploy\scripts\deploy.ps1
 
 # Docker monitoring stack
 docker-compose up -d
@@ -127,13 +126,13 @@ Player -> Bevy client -> Backend API (Axum) -> Solana RPC
                                               -> Ephemeral Rollups (MagicBlock, sub-second moves)
 ```
 
-Moves are validated on-chain via `chess-logic-on-chain` (no_std). The Solana program stores game state as FEN + move history. Session delegation allows passwordless play — a session key co-signs moves on behalf of the wallet owner.
+Moves are validated on-chain via `chess-logic-on-chain` (no_std). The Solana program stores game state as a compact 68-byte binary board plus move counters (`state/game.rs`). Session delegation allows passwordless play — a session key co-signs moves on behalf of the wallet owner.
 
 ### Game client (`src/`)
 
 Bevy ECS app. Key modules:
 
-- `core/` — app lifecycle, crash reporting, `AppState` enum (`Splash → MainMenu → Game → Pause`)
+- `core/` — app lifecycle, crash reporting, `GameState` enum (`Auth/MainMenu → InGame → Paused/GameOver`)
 - `game/` — board state, FEN management, move validation, check/checkmate detection
 - `engine/` — delegates to `nimzovich_engine` crate for AI moves
 - `multiplayer/` — WebSocket auth + Iroh P2P relay
@@ -198,4 +197,4 @@ See [crates/CLAUDE.md](crates/CLAUDE.md) for per-crate details. Key ones:
 - Grafana: `http://localhost:3000` (when running `docker-compose up -d`)
 - Transaction debug: `GET /api/debug/transaction/:signature`
 
-See [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) for dashboard setup.
+Monitoring stack config lives in [deploy/monitoring/](deploy/monitoring/).

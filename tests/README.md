@@ -5,9 +5,6 @@ Integration tests for the Bevy game client. These compile against the real
 live in `backend/`, program tests under `programs/`, protocol/pairing tests in
 their `crates/` crate. Do not import `backend`, `shared`, `shakmaty`, etc. here.
 
-See [docs/plans/comprehensive-testing.md](../docs/plans/comprehensive-testing.md)
-for the full testing strategy and roadmap.
-
 ## Layout
 
 ```
@@ -16,7 +13,8 @@ tests/
 │                       #   (Cargo does not compile subdirectories as targets on their own)
 ├── components/         # game component usage (HasMoved, SelectedPiece, GamePhase, MoveRecord)
 ├── resources/          # game resources (ChessEngine moves, CapturedPieces, CurrentTurn, history)
-├── core_tests.rs       # AppState state-machine transitions (needs StatesPlugin under Bevy 0.18)
+├── core_tests.rs       # GameState state-machine transitions (needs StatesPlugin under Bevy 0.18)
+├── protocol_roundtrip_tests.rs  # multiplayer wire-protocol serialization round-trips
 ├── systems_tests.rs    # ECS system test: reset_game_resources
 ├── types_tests.rs      # File / Rank / Square / Centipawns
 └── integration_rollup.rs  # #![cfg(feature = "solana")] — only built with --features solana

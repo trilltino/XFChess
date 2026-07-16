@@ -22,7 +22,7 @@
 //! * Tokio tasks  — <https://tokio.rs/tokio/tutorial/spawning>
 //! * mpsc channel — <https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html>
 
-use crate::signing::storage::tournament::{TournamentStatus, TournamentStore};
+use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
 use crate::signing::tournament_gossip::TournamentGossipService;
 use braid_iroh::SwissMessage;
 use solana_sdk::signature::Keypair;
@@ -35,6 +35,15 @@ use tracing::{error, info, warn};
 
 /// Channel buffer size for tournament trigger events.
 pub const TOURNAMENT_TRIGGER_CHANNEL_SIZE: usize = 256;
+
+/// Minimum players needed before the scheduler will start a tournament when
+/// the operator didn't set `min_players` explicitly. Capped at `max_players`
+/// so small brackets (2/4 players) can start once full.
+fn default_min_players(tournament: &TournamentRecord) -> usize {
+    tournament
+        .min_players
+        .unwrap_or_else(|| tournament.max_players.min(8)) as usize
+}
 
 /// Messages that can trigger tournament actions via Braid pub/sub.
 #[derive(Debug, Clone)]
@@ -171,7 +180,7 @@ impl TournamentScheduler {
         }
 
         let max = tournament.max_players as usize;
-        let min = tournament.min_players.unwrap_or(8) as usize;
+        let min = default_min_players(&tournament);
 
         if player_count >= max {
             // Bracket is completely full — fire immediately.
@@ -210,7 +219,7 @@ impl TournamentScheduler {
             return;
         }
 
-        let min = tournament.min_players.unwrap_or(8) as usize;
+        let min = default_min_players(&tournament);
         let count = tournament.players.len();
 
         if count >= min {
@@ -244,7 +253,7 @@ impl TournamentScheduler {
             return;
         }
 
-        let min = tournament.min_players.unwrap_or(8) as usize;
+        let min = default_min_players(&tournament);
         let count = tournament.players.len();
 
         match tournament.scheduled_at {
@@ -291,7 +300,8 @@ impl TournamentScheduler {
 
             let result = tokio::task::spawn_blocking(move || {
                 use crate::signing::solana::{
-                    initialize_match_ix, make_rpc, sign_and_submit, start_tournament_ix,
+                    bracket_position, initialize_match_ix, make_rpc, sign_and_submit,
+                    start_tournament_ix,
                 };
                 use solana_sdk::pubkey::Pubkey;
                 use solana_sdk::signature::Signer;
@@ -305,20 +315,22 @@ impl TournamentScheduler {
                 let ix = start_tournament_ix(
                     &program_id,
                     tournament_id,
+                    max_players,
                     &authority.pubkey(),
                     &host_treasury,
                 );
                 sign_and_submit(&rpc, &authority, &[ix])
                     .map_err(|e| format!("start_tournament tx: {e}"))?;
 
-                // Tx batches: initialize_match (20 per batch)
+                // Tx batches: initialize_match (20 per batch). Linear bracket
+                // layout: round 1 first, final at the last index — must match
+                // the store's generate_bracket and on-chain final_match_index.
                 let mut idx = 0u16;
                 while (idx as usize) < total_matches {
                     let end = ((idx as usize + 20).min(total_matches)) as u16;
                     let ixs: Vec<_> = (idx..end)
                         .map(|i| {
-                            let round = (i as f32 + 1.0).log2() as u8;
-                            let next = if i == 0 { None } else { Some((i - 1) / 2) };
+                            let (round, next, slot) = bracket_position(max_players, i);
                             initialize_match_ix(
                                 &program_id,
                                 tournament_id,
@@ -327,7 +339,7 @@ impl TournamentScheduler {
                                 None,
                                 None,
                                 next,
-                                (i % 2) as u8,
+                                slot,
                                 &authority.pubkey(),
                             )
                         })

@@ -394,7 +394,11 @@ impl TournamentRecord {
     /// Generates a complete single-elimination bracket.
     /// Call after tournament is started (players seeded by ELO).
     pub fn generate_bracket(&mut self) {
-        let player_count = self.max_players as usize;
+        let player_count = self.players.len();
+        if player_count < 2 {
+            self.matches.clear();
+            return;
+        }
         let total_matches = player_count - 1;
 
         // Initialize all matches
@@ -406,11 +410,10 @@ impl TournamentRecord {
             let white_idx = i;
             let black_idx = player_count - 1 - i;
 
-            let next_match = if i % 2 == 0 {
-                // Even index matches advance to next round's match i/2 as white
-                Some((round1_matches + i / 2) as u16)
+            // In a 2-player bracket the single round-1 match IS the final.
+            let next_match = if round1_matches == 1 {
+                None
             } else {
-                // Odd index matches advance to next round's match i/2 as black
                 Some((round1_matches + i / 2) as u16)
             };
             let next_slot = if i % 2 == 0 { 0 } else { 1 };
@@ -435,13 +438,12 @@ impl TournamentRecord {
         let mut round = 1u8;
 
         while matches_in_round > 0 {
+            let round_start = match_idx;
             for i in 0..matches_in_round {
                 let next_match = if matches_in_round == 1 {
                     None // Final match has no next match
-                } else if i % 2 == 0 {
-                    Some((match_idx + matches_in_round + i / 2) as u16)
                 } else {
-                    Some((match_idx + matches_in_round + i / 2) as u16)
+                    Some((round_start + matches_in_round + i / 2) as u16)
                 };
                 let next_slot = if i % 2 == 0 { 0 } else { 1 };
 
@@ -632,22 +634,40 @@ impl TournamentStore {
                 m.status = MatchStatus::Completed;
             }
 
-            let final_idx = t.final_match_index();
-            let sf1_idx = t.semifinal1_index();
-            let sf2_idx = t.semifinal2_index();
+            // Advance the winner into their next-round match slot (if any).
+            let next = t.matches[match_index]
+                .as_ref()
+                .and_then(|m| m.next_match_for_winner.map(|n| (n as usize, m.next_match_slot)));
+            if let Some((next_idx, slot)) = next {
+                if next_idx < t.matches.len() {
+                    if let Some(nm) = t.matches[next_idx].as_mut() {
+                        if slot == 0 {
+                            nm.player_white = Some(winner.clone());
+                        } else {
+                            nm.player_black = Some(winner.clone());
+                        }
+                    }
+                }
+            }
 
-            if match_index == sf1_idx {
-                // First semifinal - loser is 4th place
-                t.fourth_place = Some(loser);
-            } else if match_index == sf2_idx {
-                // Second semifinal - loser is 3rd place
-                t.third_place = Some(loser);
-            } else if match_index == final_idx {
+            let final_idx = t.final_match_index();
+
+            // The final must be checked before the semifinals: a 2-player
+            // bracket has a single match, so the saturating semifinal indices
+            // would otherwise swallow the final and never complete the
+            // tournament. Semifinals only exist in brackets of 4+ players.
+            if match_index == final_idx {
                 // Final complete - tournament done
                 t.winner = Some(winner);
                 t.second_place = Some(loser);
                 t.status = TournamentStatus::Completed;
                 t.completed_at = Some(chrono::Utc::now().timestamp());
+            } else if t.matches.len() >= 3 && match_index == t.semifinal1_index() {
+                // First semifinal - loser is 4th place
+                t.fourth_place = Some(loser);
+            } else if t.matches.len() >= 3 && match_index == t.semifinal2_index() {
+                // Second semifinal - loser is 3rd place
+                t.third_place = Some(loser);
             }
         })
         .await
@@ -687,31 +707,9 @@ impl TournamentStore {
             if t.format != TournamentFormat::SingleElimination {
                 return;
             }
-
-            let num_players = t.players.len();
-            let num_matches = num_players.saturating_sub(1);
-            t.matches = vec![None; num_matches];
-
-            // Generate first round pairings (highest vs lowest seeding)
-            let mut match_idx = 0;
-            for i in 0..num_players / 2 {
-                let white_idx = i;
-                let black_idx = num_players - 1 - i;
-
-                t.matches[match_idx] = Some(TournamentMatch {
-                    match_index: match_idx as u16,
-                    round: 0,
-                    player_white: Some(t.players[white_idx].clone()),
-                    player_black: Some(t.players[black_idx].clone()),
-                    winner: None,
-                    game_id: None,
-                    status: MatchStatus::Pending,
-                    result_source: None,
-                    next_match_for_winner: Some((num_players / 2 + match_idx / 2) as u16),
-                    next_match_slot: if match_idx % 2 == 0 { 0 } else { 1 },
-                });
-                match_idx += 1;
-            }
+            // Builds every round up front (later-round matches start with empty
+            // player slots); record_result advances winners into them.
+            t.generate_bracket();
         })
         .await
     }
@@ -733,8 +731,8 @@ impl TournamentStore {
             }
             TournamentFormat::Swiss { .. } => {
                 // Swiss bracket generation handled by swiss service
-                // Just verify we have enough players
-                if tournament.players.len() < tournament.min_players.unwrap_or(8) as usize {
+                // Just verify we have enough players for at least one pairing
+                if tournament.players.len() < tournament.min_players.unwrap_or(2) as usize {
                     return Err("Not enough players for Swiss tournament".to_string());
                 }
             }
@@ -794,5 +792,138 @@ impl Default for TournamentRecord {
             prizes_distributed: false,
             broadcast_delay_secs: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record_with_players(tournament_id: u64, n: usize) -> TournamentRecord {
+        let mut t = TournamentRecord::new(tournament_id, "test", 0);
+        t.max_players = n as u16;
+        for i in 0..n {
+            t.players.push(format!("P{i}"));
+            t.player_elos.push(2000 - i as u32); // P0 highest seed
+        }
+        t
+    }
+
+    async fn mem_store() -> TournamentStore {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        TournamentStore::new(pool).await
+    }
+
+    #[test]
+    fn bracket_two_players_is_a_single_final() {
+        let mut t = record_with_players(1, 2);
+        t.generate_bracket();
+
+        assert_eq!(t.matches.len(), 1);
+        let m = t.matches[0].as_ref().unwrap();
+        assert_eq!(m.round, 0);
+        assert_eq!(m.player_white.as_deref(), Some("P0"));
+        assert_eq!(m.player_black.as_deref(), Some("P1"));
+        // The only match is the final — it must not point past the bracket.
+        assert_eq!(m.next_match_for_winner, None);
+    }
+
+    #[test]
+    fn bracket_four_players_semis_feed_the_final() {
+        let mut t = record_with_players(1, 4);
+        t.generate_bracket();
+
+        assert_eq!(t.matches.len(), 3);
+        // Semifinal 0: seed 1 vs seed 4, winner goes to final slot 0
+        let m0 = t.matches[0].as_ref().unwrap();
+        assert_eq!(m0.player_white.as_deref(), Some("P0"));
+        assert_eq!(m0.player_black.as_deref(), Some("P3"));
+        assert_eq!(m0.next_match_for_winner, Some(2));
+        assert_eq!(m0.next_match_slot, 0);
+        // Semifinal 1: seed 2 vs seed 3, winner goes to final slot 1
+        let m1 = t.matches[1].as_ref().unwrap();
+        assert_eq!(m1.player_white.as_deref(), Some("P1"));
+        assert_eq!(m1.player_black.as_deref(), Some("P2"));
+        assert_eq!(m1.next_match_for_winner, Some(2));
+        assert_eq!(m1.next_match_slot, 1);
+        // Final exists as an empty shell awaiting winners
+        let m2 = t.matches[2].as_ref().unwrap();
+        assert_eq!(m2.round, 1);
+        assert!(m2.player_white.is_none() && m2.player_black.is_none());
+        assert_eq!(m2.next_match_for_winner, None);
+    }
+
+    #[test]
+    fn bracket_eight_players_next_pointers_stay_in_bounds() {
+        let mut t = record_with_players(1, 8);
+        t.generate_bracket();
+
+        assert_eq!(t.matches.len(), 7);
+        for m in t.matches.iter().flatten() {
+            if let Some(next) = m.next_match_for_winner {
+                assert!((next as usize) < t.matches.len());
+                assert!(next > m.match_index);
+            } else {
+                assert_eq!(m.match_index, 6); // only the final has no successor
+            }
+        }
+        // Semifinal winners meet in the final
+        assert_eq!(
+            t.matches[4].as_ref().unwrap().next_match_for_winner,
+            Some(6)
+        );
+        assert_eq!(
+            t.matches[5].as_ref().unwrap().next_match_for_winner,
+            Some(6)
+        );
+    }
+
+    #[tokio::test]
+    async fn two_player_tournament_completes_on_its_only_match() {
+        let store = mem_store().await;
+        let mut t = record_with_players(11, 2);
+        t.generate_bracket();
+        t.status = TournamentStatus::Active;
+        store.create(t).await;
+
+        assert!(store.record_result(11, 0, "P1".into(), "P0".into()).await);
+
+        let t = store.get(11).await.unwrap();
+        assert_eq!(t.status, TournamentStatus::Completed);
+        assert_eq!(t.winner.as_deref(), Some("P1"));
+        assert_eq!(t.second_place.as_deref(), Some("P0"));
+        // A head-to-head has no semifinals — no phantom 3rd/4th placements.
+        assert!(t.third_place.is_none());
+        assert!(t.fourth_place.is_none());
+    }
+
+    #[tokio::test]
+    async fn four_player_tournament_advances_winners_and_completes() {
+        let store = mem_store().await;
+        let mut t = record_with_players(12, 4);
+        t.generate_bracket();
+        t.status = TournamentStatus::Active;
+        store.create(t).await;
+
+        // Semifinal 0: P0 beats P3 (P3 -> 4th)
+        assert!(store.record_result(12, 0, "P0".into(), "P3".into()).await);
+        // Semifinal 1: P1 beats P2 (P2 -> 3rd)
+        assert!(store.record_result(12, 1, "P1".into(), "P2".into()).await);
+
+        // Both winners must have been advanced into the final.
+        let t = store.get(12).await.unwrap();
+        let final_match = t.matches[2].as_ref().unwrap();
+        assert_eq!(final_match.player_white.as_deref(), Some("P0"));
+        assert_eq!(final_match.player_black.as_deref(), Some("P1"));
+        assert_eq!(t.status, TournamentStatus::Active);
+        assert_eq!(t.fourth_place.as_deref(), Some("P3"));
+        assert_eq!(t.third_place.as_deref(), Some("P2"));
+
+        // Final: P1 beats P0
+        assert!(store.record_result(12, 2, "P1".into(), "P0".into()).await);
+        let t = store.get(12).await.unwrap();
+        assert_eq!(t.status, TournamentStatus::Completed);
+        assert_eq!(t.winner.as_deref(), Some("P1"));
+        assert_eq!(t.second_place.as_deref(), Some("P0"));
     }
 }

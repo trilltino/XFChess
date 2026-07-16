@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Command } from "@tauri-apps/plugin-shell";
+import { OPS_SSH } from "../config/environments";
 
 interface TerminalLine {
   type: "cmd" | "out" | "err" | "info";
@@ -14,13 +15,14 @@ export default function HetznerSsh() {
   ]);
   const [running, setRunning] = useState(false);
   const termRef = useRef<HTMLDivElement>(null);
-  const serverIp = "178.104.55.19";
+  const serverIp = OPS_SSH.host;
+  const sshTarget = `${OPS_SSH.user}@${serverIp}`;
 
   useEffect(() => {
     // Ping to check reachability
     (async () => {
       try {
-        const cmd = Command.create("ssh", ["-o", "ConnectTimeout=3", "-o", "BatchMode=yes", `root@${serverIp}`, "echo ok"]);
+        const cmd = Command.create("ssh", ["-i", OPS_SSH.key, "-o", "ConnectTimeout=3", "-o", "BatchMode=yes", sshTarget, "echo ok"]);
         const out = await cmd.execute();
         setStatus(out.stdout.trim() === "ok" ? "online" : "offline");
       } catch { setStatus("offline"); }
@@ -37,9 +39,9 @@ export default function HetznerSsh() {
   const runSshCommand = async (remoteCmd: string) => {
     if (running) return;
     setRunning(true);
-    push("cmd", `$ ssh root@${serverIp} "${remoteCmd}"`);
+    push("cmd", `$ ssh ${sshTarget} "${remoteCmd}"`);
     try {
-      const child = Command.create("ssh", [`root@${serverIp}`, remoteCmd]);
+      const child = Command.create("ssh", ["-i", OPS_SSH.key, sshTarget, remoteCmd]);
       child.stdout.on("data", data => push("out", data));
       child.stderr.on("data", data => push("err", data));
       const result = await child.execute();
@@ -60,7 +62,7 @@ export default function HetznerSsh() {
 
   const openNativeTerminal = async () => {
     try {
-      await Command.create("powershell", ["-NoExit", "-Command", `ssh root@${serverIp}`]).spawn();
+      await Command.create("powershell", ["-NoExit", "-Command", `ssh -i ${OPS_SSH.key} ${sshTarget}`]).spawn();
     } catch (err: any) {
       push("err", `Failed to open native terminal: ${err?.message}`);
     }
@@ -71,7 +73,7 @@ export default function HetznerSsh() {
     { label: "JOURNAL ERRORS", cmd: "journalctl -p err -n 30 --no-pager" },
     { label: "BACKEND STATUS", cmd: "systemctl status xfchess-backend --no-pager -l" },
     { label: "DISK USAGE", cmd: "df -h" },
-    { label: "ROTATE SESSION KEYS", cmd: "systemctl restart xfchess-signing-server && echo 'signing server restarted'" },
+    { label: "RESTART BACKEND", cmd: "sudo systemctl restart xfchess-backend && echo 'backend restarted'" },
     { label: "NGINX ERRORS", cmd: "tail -n 50 /var/log/nginx/error.log" },
   ];
 
@@ -91,7 +93,7 @@ export default function HetznerSsh() {
         <div>
           <h2 style={{ color: "#fff", margin: 0, fontWeight: "900", fontSize: "22px" }}>REMOTE TERMINAL</h2>
           <p style={{ color: "var(--text-dim)", fontSize: "11px", letterSpacing: "1px", margin: "4px 0 0" }}>
-            root@{serverIp}
+            {sshTarget}
             <span style={{ marginLeft: "12px", color: status === "online" ? "var(--primary)" : status === "offline" ? "#f87171" : "var(--accent)" }}>
               ● {status === "online" ? "OPERATIONAL" : status === "offline" ? "UNREACHABLE" : "SCANNING…"}
             </span>

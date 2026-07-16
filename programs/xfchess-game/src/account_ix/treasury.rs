@@ -27,8 +27,8 @@ pub struct WithdrawTreasury<'info> {
     #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub treasury_vault: SystemAccount<'info>,
     /// Only the dedicated treasury authority may withdraw. Kept separate from
-    /// `vps_authority` so treasury access can be a multisig without touching the
-    /// result-signing key.
+    /// `vps_authority` so treasury access uses its own dedicated wallet without
+    /// touching the result-signing key.
     #[account(
         mut,
         address = crate::constants::treasury_authority::ID @ GameErrorCode::UnauthorizedAccess

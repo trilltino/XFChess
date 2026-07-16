@@ -180,32 +180,12 @@ pub fn broadcast_state_system(
     }
 }
 
-/// System to receive and apply remote state
+/// System to receive and apply remote state.
+/// TODO: wire a braid-iroh reader; apply updates via `BoardStateSync::apply_remote_state`.
 pub fn receive_state_system(
     _board_sync: ResMut<BoardStateSync>,
     _engine: ResMut<ChessEngine>,
-    // Add braid network reader here when integrated
 ) {
-    // TODO: Read from braid-blob file or receive via braid-iroh
-    // For now, placeholder
-
-    // Example:
-    // if let Some(remote_state) = receive_from_network() {
-    //     match board_sync.apply_remote_state(&remote_state, engine.get_move_counter()) {
-    //         Ok(StateDiff::ApplyState(state)) => {
-    //             engine.import_fen(&state.fen);
-    //             // Update captured pieces
-    //             // Apply visual updates
-    //         }
-    //         Ok(StateDiff::NoAction) => {}
-    //         Ok(StateDiff::ReplayMoves(moves)) => {
-    //             // Replay moves one by one
-    //         }
-    //         Err(e) => {
-    //             board_sync.sync_status = SyncStatus::Error(format!("{:?}", e));
-    //         }
-    //     }
-    // }
 }
 
 /// Initialize BoardStateSync on startup

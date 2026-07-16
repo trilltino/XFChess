@@ -17,34 +17,35 @@ pub struct StartTournament<'info> {
         constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
     pub tournament: Account<'info, Tournament>,
-    /// TournamentPlayersShard 0 (players 0-63)
+    /// TournamentPlayersShard 0 always present (all tournament sizes)
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 1 (players 64-127)
+    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
+    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_1: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 2 (players 128-191)
+    pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_2: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 3 (players 192-255)
+    pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_3: Account<'info, TournamentPlayersShard>,
+    pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
     /// CHECK: Tournament escrow PDA — entry-fee deposits are swept from here to
     /// host_treasury once the tournament actually starts.
     #[account(
@@ -96,64 +97,65 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
 
     let player_count = tournament.num_registered_players as usize;
 
-    let shards: [&TournamentPlayersShard; 4] = [
-        &ctx.accounts.tournament_players_shard_0,
-        &ctx.accounts.tournament_players_shard_1,
-        &ctx.accounts.tournament_players_shard_2,
-        &ctx.accounts.tournament_players_shard_3,
-    ];
-    let collected = shards::collect_players(&shards)?;
-    require!(
-        collected.len() == player_count,
-        GameErrorCode::InvalidTournamentStatus
-    );
-
-    // Sort players by ELO descending
-    let mut seeded = collected;
-    seeded.sort_by(|a, b| b.1.cmp(&a.1));
+    // Small/medium tournaments only initialize shard 0 (or 0-1); the missing
+    // shard accounts are passed as the program ID and resolve to None.
+    let required = shards::required_shards(tournament.max_players) as usize;
 
     {
-        let tp0 = &mut ctx.accounts.tournament_players_shard_0;
-        let tp1 = &mut ctx.accounts.tournament_players_shard_1;
-        let tp2 = &mut ctx.accounts.tournament_players_shard_2;
-        let tp3 = &mut ctx.accounts.tournament_players_shard_3;
+        let mut shard_refs: Vec<&TournamentPlayersShard> =
+            vec![&ctx.accounts.tournament_players_shard_0];
+        if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
+            shard_refs.push(s);
+        }
+        if let Some(s) = ctx.accounts.tournament_players_shard_2.as_ref() {
+            shard_refs.push(s);
+        }
+        if let Some(s) = ctx.accounts.tournament_players_shard_3.as_ref() {
+            shard_refs.push(s);
+        }
+        require!(
+            shard_refs.len() >= required,
+            GameErrorCode::InvalidTournamentStatus
+        );
 
-        tp0.players.clear();
-        tp0.player_elos.clear();
-        tp0.swiss_standings.clear();
-        tp1.players.clear();
-        tp1.player_elos.clear();
-        tp1.swiss_standings.clear();
-        tp2.players.clear();
-        tp2.player_elos.clear();
-        tp2.swiss_standings.clear();
-        tp3.players.clear();
-        tp3.player_elos.clear();
-        tp3.swiss_standings.clear();
+        let collected = shards::collect_players(&shard_refs)?;
+        require!(
+            collected.len() == player_count,
+            GameErrorCode::InvalidTournamentStatus
+        );
+
+        // Sort players by ELO descending
+        let mut seeded = collected;
+        seeded.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let mut shard_muts: Vec<&mut TournamentPlayersShard> =
+            vec![&mut ctx.accounts.tournament_players_shard_0];
+        if let Some(s) = ctx.accounts.tournament_players_shard_1.as_mut() {
+            shard_muts.push(s);
+        }
+        if let Some(s) = ctx.accounts.tournament_players_shard_2.as_mut() {
+            shard_muts.push(s);
+        }
+        if let Some(s) = ctx.accounts.tournament_players_shard_3.as_mut() {
+            shard_muts.push(s);
+        }
+
+        for shard in shard_muts.iter_mut() {
+            shard.players.clear();
+            shard.player_elos.clear();
+            shard.swiss_standings.clear();
+        }
 
         for (i, (player, elo)) in seeded.iter().copied().enumerate() {
-            let shard_id = (i / TournamentPlayersShard::SHARD_CAPACITY as usize) as u8;
-            match shard_id {
-                0 => {
-                    shards::push_player(tp0, player, elo)?;
-                }
-                1 => {
-                    shards::push_player(tp1, player, elo)?;
-                }
-                2 => {
-                    shards::push_player(tp2, player, elo)?;
-                }
-                3 => {
-                    shards::push_player(tp3, player, elo)?;
-                }
-                _ => return Err(GameErrorCode::TournamentFull.into()),
-            }
+            let shard_id = i / TournamentPlayersShard::SHARD_CAPACITY as usize;
+            let shard = shard_muts
+                .get_mut(shard_id)
+                .ok_or(GameErrorCode::TournamentFull)?;
+            shards::push_player(shard, player, elo)?;
         }
 
         if matches!(tournament.tournament_type, TournamentType::Swiss { .. }) {
-            let mut swiss_shards: [&mut TournamentPlayersShard; 4] =
-                [&mut **tp0, &mut **tp1, &mut **tp2, &mut **tp3];
-            shards::initialize_swiss_standings(&mut swiss_shards)?;
+            shards::initialize_swiss_standings(&mut shard_muts)?;
         }
     }
 

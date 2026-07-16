@@ -118,8 +118,6 @@ fn auth_ui_system(
 
     // Dark Theme Colors
     let _bg_dark = egui::Color32::from_rgb(10, 10, 10);
-    // let bg_gradient_top = egui::Color32::from_rgb(20, 20, 20);
-    // let bg_gradient_bottom = egui::Color32::from_rgb(5, 5, 5);
     let text_light = egui::Color32::from_rgb(240, 240, 240);
     let text_dim = egui::Color32::from_rgb(160, 160, 160);
     let accent_color = egui::Color32::from_rgb(220, 140, 60); // Burnt Orange/Gold accent
@@ -150,7 +148,6 @@ fn auth_ui_system(
             println!("App Loading State: {}", auth_state.is_loading);
 
             let _rect = ui.max_rect();
-            // draw_dark_gradient(ui, rect); // Commented out to test interaction
 
             ui.vertical_centered(|ui| {
                 ui.add_space(50.0);
@@ -357,11 +354,8 @@ fn render_floating_title(ui: &mut egui::Ui, color: egui::Color32) {
 
     // Center the title horizontally in the allocated rect
     // But since we are in `vertical_centered`, the rect is already centered if we allocated correctly?
-    // Actually, allocate_exact_size reserves space but doesn't auto-center if the width is explicit.
-    // The previous layout `vertical_centered` aligns the *center* of widgets.
-    // We need to calculate start x.
-
-    // Let's just draw relative to rect.min
+    // allocate_exact_size doesn't auto-center an explicit width, so compute the
+    // start x manually and draw relative to rect.min.
     let mut x_offset = 0.0;
     let actual_width_estimate = title.len() as f32 * (font_size * 0.55);
     let start_x = rect.center().x - (actual_width_estimate / 2.0);

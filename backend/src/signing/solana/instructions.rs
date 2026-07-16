@@ -253,27 +253,88 @@ pub fn claim_fees_ix(program_id: &Pubkey, caller: &Pubkey, host_wallet: &Pubkey)
     }
 }
 
+/// Builds a `withdraw_treasury` instruction.
+///
+/// Moves `amount` lamports from the system-owned platform treasury vault
+/// (seeds `[b"treasury_vault"]`) to `destination`. Must be signed by
+/// `authority`, which the program constrains to `treasury_authority::ID`.
+/// Account order mirrors `WithdrawTreasury` in the program:
+/// treasury_vault, authority (signer), destination, system_program.
+pub fn withdraw_treasury_ix(
+    program_id: &Pubkey,
+    authority: &Pubkey,
+    destination: &Pubkey,
+    amount: u64,
+) -> Instruction {
+    let treasury_vault = Pubkey::find_program_address(&[b"treasury_vault"], program_id).0;
+
+    let mut data = anchor_discriminator("withdraw_treasury").to_vec();
+    data.extend_from_slice(&amount.to_le_bytes());
+
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(treasury_vault, false),
+            AccountMeta::new(*authority, true),
+            AccountMeta::new(*destination, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+        data,
+    }
+}
+
 /// Builds a `leave_tournament` instruction for devnet.
 ///
 /// Removes a player from the tournament and triggers a refund.
 pub fn leave_tournament_ix(
     program_id: &Pubkey,
     tournament_id: u64,
+    max_players: u16,
     player: &Pubkey,
-    host_treasury: &Pubkey,
 ) -> Instruction {
     let tournament_pda =
         Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
             .0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    )
+    .0;
 
-    let data = anchor_discriminator("leave_tournament").to_vec();
+    let present = required_shards(max_players);
+    // Absent shards are passed as the program ID → Anchor resolves them to None.
+    let shard = |idx: u8| {
+        if idx < present {
+            let pda = Pubkey::find_program_address(
+                &[
+                    TOURNAMENT_PLAYERS_SEED,
+                    &[idx],
+                    &tournament_id.to_le_bytes(),
+                ],
+                program_id,
+            )
+            .0;
+            AccountMeta::new(pda, false)
+        } else {
+            AccountMeta::new_readonly(*program_id, false)
+        }
+    };
+
+    let mut data = anchor_discriminator("leave_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
 
     Instruction {
         program_id: *program_id,
+        // Account order must match `LeaveTournament`: tournament, shards 0-3,
+        // player, escrow, system_program.
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
+            shard(0),
+            shard(1),
+            shard(2),
+            shard(3),
             AccountMeta::new(*player, true),
-            AccountMeta::new(*host_treasury, true),
+            AccountMeta::new(escrow_pda, false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ],
         data,
@@ -449,14 +510,49 @@ pub fn initialize_shards_ix(
     }
 }
 
+/// Number of TournamentPlayersShard PDAs that exist for a tournament size.
+/// Must mirror `shards::required_shards` in the on-chain program.
+pub fn required_shards(max_players: u16) -> u8 {
+    match max_players {
+        0..=64 => 1,
+        65..=128 => 2,
+        _ => 4,
+    }
+}
+
+/// Computes a match's (round, next_match_for_winner, next_match_slot) in the
+/// linear single-elimination layout used by the store and the on-chain program:
+/// round-1 matches occupy indices 0..P/2, each later round follows, and the
+/// final is the last index (`total_matches - 1`).
+pub fn bracket_position(max_players: u16, match_index: u16) -> (u8, Option<u16>, u8) {
+    let total_matches = max_players.saturating_sub(1);
+    let mut round_start = 0u16;
+    let mut round_size = max_players / 2;
+    let mut round = 0u8;
+    while round_size > 1 && match_index >= round_start + round_size {
+        round_start += round_size;
+        round_size /= 2;
+        round += 1;
+    }
+    let pos_in_round = match_index - round_start;
+    let next = if match_index + 1 >= total_matches {
+        None // the final
+    } else {
+        Some(round_start + round_size + pos_in_round / 2)
+    };
+    (round, next, (pos_in_round % 2) as u8)
+}
+
 /// Builds a `start_tournament` instruction.
 /// Locks registration, seeds players for bracket generation, and sweeps the
 /// entry-fee deposits from the tournament escrow to `host_treasury` (operator
 /// revenue — the guaranteed prize stays locked in escrow).
-/// All 4 shard PDAs are always passed; the program ignores extra ones.
+/// Shard PDAs that don't exist for this tournament size are passed as the
+/// program ID (Anchor's `None` marker for optional accounts).
 pub fn start_tournament_ix(
     program_id: &Pubkey,
     tournament_id: u64,
+    max_players: u16,
     authority: &Pubkey,
     host_treasury: &Pubkey,
 ) -> Instruction {
@@ -470,16 +566,24 @@ pub fn start_tournament_ix(
     )
     .0;
 
+    let present = required_shards(max_players);
+    // Present shards must be writable (start re-seeds players by ELO); absent
+    // shards are passed as the program ID → Anchor resolves them to None.
     let shard = |idx: u8| {
-        Pubkey::find_program_address(
-            &[
-                TOURNAMENT_PLAYERS_SEED,
-                &[idx],
-                &tournament_id.to_le_bytes(),
-            ],
-            program_id,
-        )
-        .0
+        if idx < present {
+            let pda = Pubkey::find_program_address(
+                &[
+                    TOURNAMENT_PLAYERS_SEED,
+                    &[idx],
+                    &tournament_id.to_le_bytes(),
+                ],
+                program_id,
+            )
+            .0;
+            AccountMeta::new(pda, false)
+        } else {
+            AccountMeta::new_readonly(*program_id, false)
+        }
     };
 
     let mut data = anchor_discriminator("start_tournament").to_vec();
@@ -489,10 +593,10 @@ pub fn start_tournament_ix(
         program_id: *program_id,
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
-            AccountMeta::new_readonly(shard(0), false),
-            AccountMeta::new_readonly(shard(1), false),
-            AccountMeta::new_readonly(shard(2), false),
-            AccountMeta::new_readonly(shard(3), false),
+            shard(0),
+            shard(1),
+            shard(2),
+            shard(3),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(*host_treasury, false),
             AccountMeta::new(*authority, true),
@@ -691,6 +795,49 @@ pub fn record_result_ix(
     }
 }
 
+/// Builds an `advance_winner` instruction (VPS-signed).
+/// Copies the completed source match's winner into their slot in the target
+/// match so the next round can start.
+pub fn advance_winner_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    source_match_index: u16,
+    target_match_index: u16,
+    authority: &Pubkey,
+) -> Instruction {
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+    let match_pda = |idx: u16| {
+        Pubkey::find_program_address(
+            &[
+                TOURNAMENT_MATCH_SEED,
+                &tournament_id.to_le_bytes(),
+                &idx.to_le_bytes(),
+            ],
+            program_id,
+        )
+        .0
+    };
+
+    let mut data = anchor_discriminator("advance_winner").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&source_match_index.to_le_bytes());
+    data.extend_from_slice(&target_match_index.to_le_bytes());
+
+    Instruction {
+        program_id: *program_id,
+        // Account order must match `AdvanceWinner`: tournament, source, target, authority.
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new_readonly(match_pda(source_match_index), false),
+            AccountMeta::new(match_pda(target_match_index), false),
+            AccountMeta::new(*authority, true),
+        ],
+        data,
+    }
+}
+
 /// Builds a `claim_tournament_prize` instruction (player-signed).
 /// Pulls the claimant's share from the SOL escrow PDA. The program validates
 /// that the claimant matches a finishing position and prevents double-claim.
@@ -731,5 +878,64 @@ pub fn claim_prize_ix(program_id: &Pubkey, tournament_id: u64, claimant: &Pubkey
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ],
         data,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bracket_position_two_players() {
+        // One match: it is the final.
+        assert_eq!(bracket_position(2, 0), (0, None, 0));
+    }
+
+    #[test]
+    fn bracket_position_four_players() {
+        // Two semifinals feeding the final at index 2.
+        assert_eq!(bracket_position(4, 0), (0, Some(2), 0));
+        assert_eq!(bracket_position(4, 1), (0, Some(2), 1));
+        assert_eq!(bracket_position(4, 2), (1, None, 0));
+    }
+
+    #[test]
+    fn bracket_position_eight_players() {
+        // Round 1: indices 0-3 -> semifinals 4-5; semifinals -> final 6.
+        assert_eq!(bracket_position(8, 0), (0, Some(4), 0));
+        assert_eq!(bracket_position(8, 1), (0, Some(4), 1));
+        assert_eq!(bracket_position(8, 2), (0, Some(5), 0));
+        assert_eq!(bracket_position(8, 3), (0, Some(5), 1));
+        assert_eq!(bracket_position(8, 4), (1, Some(6), 0));
+        assert_eq!(bracket_position(8, 5), (1, Some(6), 1));
+        assert_eq!(bracket_position(8, 6), (2, None, 0));
+    }
+
+    #[test]
+    fn bracket_position_next_pointers_stay_in_bounds() {
+        for max_players in [2u16, 4, 8, 16, 32, 64, 128, 256] {
+            let total = max_players - 1;
+            for i in 0..total {
+                let (_, next, slot) = bracket_position(max_players, i);
+                assert!(slot <= 1);
+                match next {
+                    Some(n) => {
+                        assert!(n < total, "match {i} of {max_players}p points at {n}");
+                        assert!(n > i);
+                    }
+                    None => assert_eq!(i, total - 1, "only the final has no successor"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn required_shards_matches_program_tiers() {
+        assert_eq!(required_shards(2), 1);
+        assert_eq!(required_shards(4), 1);
+        assert_eq!(required_shards(64), 1);
+        assert_eq!(required_shards(65), 2);
+        assert_eq!(required_shards(128), 2);
+        assert_eq!(required_shards(256), 4);
     }
 }

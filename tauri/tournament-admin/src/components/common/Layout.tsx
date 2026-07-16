@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { getTunnelState, onTunnelState, type TunnelState } from "../../services/tunnel";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -8,8 +9,12 @@ interface LayoutProps {
 }
 
 export default function Layout({ children, currentPage = "dashboard", onPageChange }: LayoutProps) {
-  const { logout } = useAuth();
+  const { logout, authState } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isProd = authState.env === "production";
+  const [tunnelState, setTunnelState] = useState<TunnelState>(getTunnelState());
+
+  useEffect(() => onTunnelState(setTunnelState), []);
 
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: "" },
@@ -136,6 +141,21 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
         display: "flex",
         flexDirection: "column",
       }}>
+        {/* Environment banner — unmistakable LOCAL (green) vs PRODUCTION (red) */}
+        <div style={{
+          padding: "6px 1.5rem",
+          fontSize: "11px",
+          fontWeight: 800,
+          letterSpacing: "1.5px",
+          textAlign: "center",
+          color: "#fff",
+          backgroundColor: isProd ? "#7f1d1d" : "#14532d",
+          borderBottom: `1px solid ${isProd ? "#ef4444" : "#4ade80"}`,
+        }}>
+          {isProd
+            ? `PRODUCTION — ${authState.backend_url} (SSH tunnel: ${tunnelState.toUpperCase()})`
+            : `LOCAL — ${authState.backend_url}`}
+        </div>
         {/* Header */}
         <header style={{
           backgroundColor: "#2d2d2d",
@@ -179,13 +199,15 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
                 width: "8px",
                 height: "8px",
                 borderRadius: "50%",
-                backgroundColor: "#4ade80",
+                backgroundColor: isProd
+                  ? tunnelState === "up" ? "#4ade80" : tunnelState === "connecting" ? "#facc15" : "#ef4444"
+                  : "#4ade80",
               }} />
               <span style={{
                 fontSize: "12px",
                 color: "#999",
               }}>
-                Connected
+                {isProd ? `Tunnel ${tunnelState}` : "Local"}
               </span>
             </div>
 

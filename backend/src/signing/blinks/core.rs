@@ -132,6 +132,7 @@ pub async fn build_register_transaction(
     store: &TournamentStore,
     program_id: &Pubkey,
     fee_payer: &Keypair,
+    host_treasury: &Pubkey,
 ) -> Result<TransactionResponse> {
     let tournament = store
         .get(tournament_id)
@@ -171,6 +172,7 @@ pub async fn build_register_transaction(
         shard_1.as_ref(),
         shard_2.as_ref(),
         shard_3.as_ref(),
+        host_treasury,
     )?;
 
     let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
@@ -270,6 +272,7 @@ pub async fn build_start_tournament_transactions(
         let ix = start_tournament_ix(
             program_id,
             tournament_id,
+            tournament.max_players,
             &authority.pubkey(),
             host_treasury,
         );
@@ -292,17 +295,19 @@ pub async fn build_start_tournament_transactions(
         let end = ((match_idx as usize + 20).min(total_matches)) as u16;
         let ixs: Vec<_> = (match_idx..end)
             .map(|idx| {
-                // Derive round from match index for single-elimination bracket
-                let round = (idx as f32).log2() as u8;
+                // Linear bracket layout: round 1 first, final at the last
+                // index — must match the store and on-chain final_match_index.
+                let (round, next, slot) =
+                    crate::signing::solana::bracket_position(tournament.max_players, idx);
                 initialize_match_ix(
                     program_id,
                     tournament_id,
                     idx,
                     round,
-                    None, // players filled by start_tournament on-chain
+                    None, // players filled by backend via advance/record flows
                     None,
-                    if idx == 0 { None } else { Some((idx - 1) / 2) },
-                    (idx % 2) as u8,
+                    next,
+                    slot,
                     &authority.pubkey(),
                 )
             })
@@ -456,7 +461,11 @@ pub async fn validate_registration(
 ///
 /// Account order matches `RegisterPlayer` in the Solana program:
 ///   tournament, player_profile, player (signer), escrow_pda,
-///   shard_0, shard_1?, shard_2?, shard_3?, system_program
+///   shard_0, shard_1?, shard_2?, shard_3?, host_treasury, system_program
+///
+/// Absent optional shards must be passed as the program ID (Anchor's `None`
+/// marker) — they cannot simply be omitted because accounts follow them.
+#[allow(clippy::too_many_arguments)]
 fn build_register_player_instruction(
     program_id: &Pubkey,
     tournament_pda: &Pubkey,
@@ -468,6 +477,7 @@ fn build_register_player_instruction(
     shard_1: Option<&Pubkey>,
     shard_2: Option<&Pubkey>,
     shard_3: Option<&Pubkey>,
+    host_treasury: &Pubkey,
 ) -> Result<solana_sdk::instruction::Instruction> {
     use sha2::{Digest, Sha256};
     use solana_sdk::instruction::{AccountMeta, Instruction};
@@ -481,26 +491,23 @@ fn build_register_player_instruction(
     // elo placeholder — backend supplies 0; the program reads from the profile PDA
     data.extend_from_slice(&0u32.to_le_bytes());
 
-    let mut accounts = vec![
+    let optional_shard = |shard: Option<&Pubkey>| match shard {
+        Some(s) => AccountMeta::new(*s, false),
+        None => AccountMeta::new_readonly(*program_id, false),
+    };
+
+    let accounts = vec![
         AccountMeta::new(*tournament_pda, false),
         AccountMeta::new_readonly(*player_profile_pda, false),
         AccountMeta::new(*player, true),
         AccountMeta::new(*escrow_pda, false),
         AccountMeta::new(*shard_0, false),
+        optional_shard(shard_1),
+        optional_shard(shard_2),
+        optional_shard(shard_3),
+        AccountMeta::new(*host_treasury, false),
+        AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
     ];
-    if let Some(s1) = shard_1 {
-        accounts.push(AccountMeta::new(*s1, false));
-    }
-    if let Some(s2) = shard_2 {
-        accounts.push(AccountMeta::new(*s2, false));
-    }
-    if let Some(s3) = shard_3 {
-        accounts.push(AccountMeta::new(*s3, false));
-    }
-    accounts.push(AccountMeta::new_readonly(
-        solana_sdk::system_program::id(),
-        false,
-    ));
 
     Ok(Instruction {
         program_id: *program_id,

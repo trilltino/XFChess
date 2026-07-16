@@ -1,137 +1,33 @@
-# States Module
+# src/states
 
-## Purpose
+Per-screen plugins: one module per `GameState` variant (main menu, pause, game over,
+settings, tournament menu). The state *machine* lives in
+[core/states.rs](../core/states.rs); this module owns what each screen shows and does.
 
-The States module implements Bevy state-specific plugins for each game screen in XFChess. Each state encapsulates its own systems, UI, and behavior, providing clean separation between menu, gameplay, and other application modes.
+## Key files
 
-## Impact on Game
+| File | Contents |
+|------|----------|
+| [main_menu/](main_menu/) | The main menu: screen layout ([screens.rs](main_menu/screens.rs), [new_menu.rs](main_menu/new_menu.rs)), modals, cinematic + board animation backdrop, music |
+| [pause.rs](pause.rs) | Pause overlay (`GameState::Paused`) |
+| [game_over.rs](game_over.rs) | Result screen (`GameState::GameOver`) |
+| [settings.rs](settings.rs) | Settings screen (`GameState::Settings`) |
+| [tournament_menu.rs](tournament_menu.rs) | Tournament browser/registration UI |
 
-This module organizes:
-- **Main Menu**: Primary navigation with game mode selection
-- **Game State**: Active gameplay with board and piece interaction
-- **Pause Menu**: In-game menu for settings and exit options
-- **Game Over**: Match end screen with results and rematch options
-- **Multiplayer Menu**: Lobby and connection interface
-
-## Architecture/Key Components
-
-### State Plugins
-
-| Plugin | File | Purpose |
-|--------|------|---------|
-| [`MainMenuPlugin`](main_menu.rs) | `main_menu.rs` | Main menu UI and navigation |
-| [`MainMenuShowcase`](main_menu_showcase.rs) | `main_menu_showcase.rs` | Visual showcase in main menu |
-| [`GameOverPlugin`](game_over.rs) | `game_over.rs` | End-game screen and results |
-| [`PausePlugin`](pause.rs) | `pause.rs` | Pause menu overlay |
-| [`MultiplayerMenuPlugin`](multiplayer_menu.rs) | `multiplayer_menu.rs` | Multiplayer lobby UI |
-
-### State Lifecycle
-
-Each state plugin follows this pattern:
+## Example
 
 ```rust
-// On Enter: Setup systems run once
-app.add_systems(OnEnter(AppState::Game), setup_game);
-
-// On Update: Systems run every frame
-app.add_systems(Update, game_logic.run_if(in_state(AppState::Game)));
-
-// On Exit: Cleanup systems run once
-app.add_systems(OnExit(AppState::Game), cleanup_game);
+// Each screen scopes its systems and entities to its state:
+app.add_systems(OnEnter(GameState::Paused), spawn_pause_menu)
+   .add_systems(Update, pause_menu_buttons.run_if(in_state(GameState::Paused)));
+// UI entities carry a despawn-on-exit marker so leaving the state cleans up.
 ```
 
-### State Transitions
+## Gotchas
 
-```
-                    ┌─────────────────┐
-                    │   Main Menu     │
-                    └────────┬────────┘
-                             │
-                             │
-                             │
-                             ▼
-                      ┌─────────────────┐   ┌──────────────┐
-                      │  Multiplayer    │   │ Singleplayer │
-                      │     Menu        │   │    Game      │
-                      └────────┬────────┘   └──────┬───────┘
-                             │                    │
-                             └────────┬───────────┘
-                                      ▼
-                            ┌─────────────────┐
-                            │  Active Game    │◄──────┐
-                            └────────┬────────┘       │
-                                     │                │
-                              ┌──────┴──────┐         │
-                              ▼             ▼         │
-                      ┌──────────┐   ┌──────────┐     │
-                      │   Pause  │   │ Game Over│     │
-                      └────┬─────┘   └────┬─────┘     │
-                           │              │           │
-                           └──────┬───────┘           │
-                                  └───────────────────┘
-```
-
-## Usage
-
-### Implementing a State Plugin
-
-```rust
-pub struct MyStatePlugin;
-
-impl Plugin for MyStatePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::MyState), setup)
-           .add_systems(Update, update.run_if(in_state(AppState::MyState)))
-           .add_systems(OnExit(AppState::MyState), cleanup);
-    }
-}
-
-fn setup(mut commands: Commands) {
-    // Spawn UI, load resources
-}
-
-fn update() {
-    // State-specific logic
-}
-
-fn cleanup(mut commands: Commands, query: Query<Entity, With<MyStateUI>>) {
-    // Despawn entities, clean up
-    for entity in &query {
-        commands.entity(entity).despawn_recursive();
-    }
-}
-```
-
-### State Transitions
-
-```rust
-fn start_game(mut next_state: ResMut<NextState<AppState>>) {
-    next_state.set(AppState::Game);
-}
-
-fn return_to_menu(mut next_state: ResMut<NextState<AppState>>) {
-    next_state.set(AppState::MainMenu);
-}
-
-fn pause_game(mut next_state: ResMut<NextState<AppState>>) {
-    next_state.set(AppState::Pause);
-}
-
-fn resume_game(mut next_state: ResMut<NextState<AppState>>) {
-    next_state.set(AppState::Game);
-}
-```
-
-## Dependencies
-
-- [`bevy`](https://docs.rs/bevy) - State management systems
-- [`core`](../core/README.md) - Core state definitions
-- [`ui`](../ui/README.md) - UI components for states
-- [`egui`](https://docs.rs/egui) - Immediate mode UI
-
-## Related Modules
-
-- [`core`](../core/README.md) - Defines AppState enum and lifecycle
-- [`ui`](../ui/README.md) - Shared UI components
-- [`game`](../game/README.md) - Game logic during Game state
-- [`multiplayer`](../multiplayer/README.md) - Multiplayer during Game state
+- Entities spawned for a screen must be tagged for despawn-on-exit (see
+  [core/state_lifecycle.rs](../core/state_lifecycle.rs)) or they leak into the next
+  state.
+- New screens also need their transitions added to the allowlist in
+  [core/states.rs](../core/states.rs) — otherwise navigation to them is silently
+  rejected.

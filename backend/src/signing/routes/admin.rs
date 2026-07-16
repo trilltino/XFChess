@@ -13,7 +13,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::info;
+use tracing::{error, info, warn};
 
 // ── In-memory state for features that don't yet have DB backing ──────────────
 
@@ -112,6 +112,10 @@ struct RefundReq {
     wallet: String,
     lamports: u64,
     reason: String,
+    /// Second factor for this financially-irreversible action (checked against
+    /// ADMIN_TOKEN in addition to the X-API-Key transport gate).
+    #[serde(default)]
+    admin_token: String,
 }
 
 #[derive(Deserialize)]
@@ -128,11 +132,6 @@ struct WhitelistReq {
 #[derive(Deserialize)]
 struct AssignDisputeReq {
     reviewer: String,
-}
-
-#[derive(Deserialize)]
-struct RotateAuthorityReq {
-    new_key_base58: String,
 }
 
 #[derive(Deserialize)]
@@ -193,8 +192,8 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/admin/tasks/status", get(tasks_status))
         .route("/admin/db/stats", get(db_stats))
         .route("/admin/tls/expiry", get(tls_expiry))
-        // Key + token rotation
-        .route("/admin/keys/rotate-authority", post(rotate_authority))
+        // Token rotation (authority-key rotation is a runbook, not an endpoint —
+        // see deploy/SECRETS_ROTATION.md; a "rotate" button that only logs is a footgun)
         .route("/admin/auth/rotate-token", post(rotate_token))
         // Moderation
         .route("/admin/moderation/ip-ban", post(ip_ban))
@@ -209,33 +208,11 @@ pub fn admin_routes() -> Router<AppState> {
 async fn anti_cheat_reports(
     State(_state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Real data only. This used to prepend two hardcoded fake reports (game 1001,
+    // 1045), which is fabricated data on a compliance/moderation surface. Report
+    // only genuinely flagged games (from flag_game / FLAGGED_GAMES).
     let flagged = FLAGGED_GAMES.lock().map(|f| f.clone()).unwrap_or_default();
-    let mut reports = vec![
-        json!({
-            "game_id": 1001,
-            "white": "A1B2...3C4D",
-            "black": "C9D8...7E6F",
-            "suspect": "Black",
-            "verdict": "Flag",
-            "wager": "0.5 SOL",
-            "score": 0.88,
-            "reason": "T1 overlap 89%, consistent 1.5s move latency",
-            "status": "Disputed",
-            "created_at": now_secs() - 7200
-        }),
-        json!({
-            "game_id": 1045,
-            "white": "F5E4...D3C2",
-            "black": "B1A0...9Z8Y",
-            "suspect": "White",
-            "verdict": "Review",
-            "wager": "1.0 SOL",
-            "score": 0.65,
-            "reason": "High CPL deviation from baseline",
-            "status": "Disputed",
-            "created_at": now_secs() - 172800
-        }),
-    ];
+    let mut reports: Vec<serde_json::Value> = Vec::new();
     for (game_id, reason) in &flagged {
         reports.push(json!({
             "game_id": game_id,
@@ -465,20 +442,31 @@ async fn get_wallet_balances(
 async fn force_resign(
     Path(game_id): Path<u64>,
     Json(req): Json<ForceResignReq>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> (StatusCode, Json<serde_json::Value>) {
+    // Honest 501: there is no on-chain resign/timeout instruction builder in the
+    // backend, so this cannot submit a real transaction. The stub previously
+    // returned {ok:true, sig:"admin_force_resign_pending"}, which could mislead an
+    // operator into thinking the game was settled. To force a disputed game's
+    // outcome, use POST /admin/dispute/resolve (dispute_authority). A dedicated
+    // admin force-resign path is Phase 5 on-chain work.
     add_audit(
-        "force_resign",
+        "force_resign_attempt",
         &format!("game_{}", game_id),
-        &format!("winner={}", req.winner),
+        &format!("winner={} (rejected: not implemented)", req.winner),
     );
-    info!(
-        "[admin] Force resign game {} winner={}",
-        game_id, req.winner
+    warn!(
+        "[admin] force_resign game {} rejected — no on-chain resign builder; use /admin/dispute/resolve",
+        game_id
     );
-    // Real impl: build + sign ResignGame ix with vps_authority, broadcast, return sig
-    Ok(Json(
-        json!({ "ok": true, "game_id": game_id, "winner": req.winner, "sig": "admin_force_resign_pending" }),
-    ))
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(json!({
+            "ok": false,
+            "error": "not_implemented",
+            "detail": "Forcing a game outcome on-chain is not wired up. Use POST /admin/dispute/resolve to resolve a disputed game (dispute_authority). A direct admin resign instruction requires Phase 5 on-chain work.",
+            "game_id": game_id,
+        })),
+    )
 }
 
 async fn flag_game(
@@ -503,14 +491,16 @@ async fn get_audit_log(
 }
 
 async fn logs_stream() -> Result<Json<serde_json::Value>, StatusCode> {
-    // SSE not easily done without a shared broadcast channel; return last buffered lines as JSON
-    // A real impl would use `axum::response::Sse` with a tokio broadcast channel fed by tracing.
-    let lines = vec![
-        format!("[{}] INFO backend started", now_secs()),
-        format!("[{}] INFO metrics polled", now_secs()),
-        format!("[{}] INFO health check OK", now_secs()),
-    ];
-    Ok(Json(json!({ "lines": lines })))
+    // Honest empty stream: real log streaming needs either `axum::response::Sse`
+    // fed by a tokio broadcast channel wired into the tracing subscriber, or the
+    // panel tailing journald over SSH (it already has an SSH terminal). The stub
+    // fabricated "backend started / metrics polled / health check OK" lines every
+    // poll, which is noise that masks the absence of real logs. Return nothing
+    // until a real source is wired.
+    Ok(Json(json!({
+        "lines": [],
+        "note": "in-app log streaming not wired; tail journald via the Hetzner SSH panel or `journalctl -u xfchess-backend -f`",
+    })))
 }
 
 async fn treasury_payouts(
@@ -555,24 +545,97 @@ async fn treasury_fee_report(
     })))
 }
 
+/// Withdraw `lamports` from the platform treasury vault to `wallet`, signed by
+/// `treasury_authority`. Double-gated: the X-API-Key transport gate PLUS an
+/// ADMIN_TOKEN second factor in the body (this is a financially-irreversible
+/// money path). Requires the on-chain `withdraw_treasury` instruction to be
+/// deployed and `TREASURY_AUTHORITY_KEY` set to the treasury_authority keypair.
 async fn treasury_refund(
+    State(state): State<AppState>,
     Json(req): Json<RefundReq>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    add_audit(
-        "treasury_refund",
-        &req.wallet,
-        &format!("{} lamports reason={}", req.lamports, req.reason),
-    );
-    info!(
-        "[admin] Manual refund {} lamports to {} reason={}",
-        req.lamports, req.wallet, req.reason
-    );
-    Ok(Json(json!({
-        "ok": true,
-        "wallet": req.wallet,
-        "lamports": req.lamports,
-        "partial_tx": "BASE64_TX_PLACEHOLDER_SIGN_WITH_VPS_AUTHORITY",
-    })))
+) -> (StatusCode, Json<serde_json::Value>) {
+    use crate::infrastructure::auth_middleware::constant_time_eq;
+    use crate::signing::solana::{make_rpc, sign_and_submit, withdraw_treasury_ix};
+    use solana_sdk::pubkey::Pubkey;
+    use solana_sdk::signature::Signer;
+    use std::str::FromStr;
+
+    // Second factor — constant-time; reject if ADMIN_TOKEN is unset or mismatched.
+    let expected = state.config.admin_token.clone().unwrap_or_default();
+    if expected.is_empty() || !constant_time_eq(&req.admin_token, &expected) {
+        warn!("[admin] treasury_refund rejected — bad/missing ADMIN_TOKEN second factor");
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "ok": false, "error": "bad_admin_token" })),
+        );
+    }
+
+    if req.lamports == 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": "amount_must_be_positive" })),
+        );
+    }
+    let destination = match Pubkey::from_str(&req.wallet) {
+        Ok(pk) => pk,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "ok": false, "error": "invalid_wallet_pubkey" })),
+            );
+        }
+    };
+
+    let program_id = state.program_id;
+    let rpc_url = state.config.solana_rpc_url.clone();
+    let authority = state.treasury_authority.clone();
+    let amount = req.lamports;
+
+    let result = tokio::task::spawn_blocking(move || {
+        let rpc = make_rpc(&rpc_url);
+        let ix = withdraw_treasury_ix(&program_id, &authority.pubkey(), &destination, amount);
+        sign_and_submit(&rpc, &authority, &[ix])
+    })
+    .await;
+
+    match result {
+        Ok(Ok(sig)) => {
+            add_audit(
+                "treasury_refund",
+                &req.wallet,
+                &format!("{} lamports reason={} sig={}", req.lamports, req.reason, sig),
+            );
+            info!(
+                "[admin] treasury_refund {} lamports -> {} ({}) sig {}",
+                req.lamports, req.wallet, req.reason, sig
+            );
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "ok": true,
+                    "wallet": req.wallet,
+                    "lamports": req.lamports,
+                    "signature": sig.to_string(),
+                })),
+            )
+        }
+        Ok(Err(e)) => {
+            add_audit(
+                "treasury_refund_failed",
+                &req.wallet,
+                &format!("{} lamports reason={} err={}", req.lamports, req.reason, e),
+            );
+            error!("[admin] treasury_refund on-chain submit failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "ok": false, "error": "onchain_submit_failed", "detail": e.to_string() })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "error": "task_join_failed", "detail": e.to_string() })),
+        ),
+    }
 }
 
 async fn tournament_escrow_balance(
@@ -649,11 +712,17 @@ async fn fund_tournament_prize(
 }
 
 async fn tasks_status() -> Result<Json<serde_json::Value>, StatusCode> {
-    let now = now_secs();
+    // Honest placeholder: the background workers do not yet publish their last-tick
+    // timestamps to a shared registry, so we cannot report real liveness. The stub
+    // used to fabricate "ok, ticked 30s ago" for every worker, which hides an actually
+    // dead worker. Report unknown until the workers are instrumented (e.g. an
+    // AtomicU64 last_tick per worker surfaced here or via /metrics).
+    let unknown = json!({ "last_tick": null, "status": "not_instrumented" });
     Ok(Json(json!({
-        "tournament_scheduler": { "last_tick": now - 30, "status": "ok" },
-        "matchmaking":          { "last_tick": now - 15, "status": "ok" },
-        "elo_cache_refresh":    { "last_tick": now - 120, "status": "ok" },
+        "tournament_scheduler": unknown,
+        "settlement_worker":    unknown,
+        "prize_distributor":    unknown,
+        "note": "worker last-tick instrumentation not yet wired; see /metrics for scrape counters",
     })))
 }
 
@@ -705,24 +774,6 @@ async fn tls_expiry() -> Result<Json<serde_json::Value>, StatusCode> {
             "note": "TLS not yet configured on this node"
         }])))
     }
-}
-
-async fn rotate_authority(
-    Json(req): Json<RotateAuthorityReq>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    add_audit(
-        "rotate_authority",
-        "vps_authority",
-        &format!(
-            "new_key={}…",
-            &req.new_key_base58[..8.min(req.new_key_base58.len())]
-        ),
-    );
-    info!("[admin] Authority key rotation requested — restart required to apply");
-    Ok(Json(json!({
-        "ok": true,
-        "note": "Update VPS_AUTHORITY_KEY in .env and restart the backend to apply the new keypair."
-    })))
 }
 
 async fn rotate_token() -> Result<Json<serde_json::Value>, StatusCode> {

@@ -97,6 +97,9 @@ pub struct AppState {
     pub vps_authority: Arc<Keypair>,
     pub kyc_authority: Arc<Keypair>,
     pub link_authority: Arc<Keypair>,
+    /// Signs `withdraw_treasury` (platform-fee payouts / manual refunds).
+    /// Must correspond to `treasury_authority::ID` in the on-chain program.
+    pub treasury_authority: Arc<Keypair>,
     pub tournament_store: Arc<TournamentStore>,
     pub swiss_service: Arc<SwissService>,
     pub tournament_gossip: Arc<TournamentGossipService>,
@@ -212,6 +215,13 @@ impl AppState {
                 Keypair::new()
             }));
 
+        let treasury_authority = Arc::new(config.treasury_authority_key.as_deref()
+            .map(load_keypair)
+            .unwrap_or_else(|| {
+                warn!("[VPS] No treasury_authority_key provided, using random fallback — withdraw_treasury / refunds will fail on-chain");
+                Keypair::new()
+            }));
+
         // Initialize Swiss service and attach Braid hub
         let braid_hub = Arc::new(ResourceHub::new());
         let mut _swiss = swiss::SwissService::new((*tournament_store).clone());
@@ -254,6 +264,7 @@ impl AppState {
             vps_authority,
             kyc_authority,
             link_authority,
+            treasury_authority,
             tournament_store,
             swiss_service,
             tournament_gossip,

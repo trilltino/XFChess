@@ -23,7 +23,7 @@ mod inner {
 
         // validator: None lets the delegation program / magic-router assign a
         // validator. Pinning a single devnet pubkey here broke mainnet and forced
-        // every game onto one region. See docs/MAGICBLOCK_INTEGRATION.md §2.
+        // every game onto one region. See MAGICBLOCK.md at the repo root.
         // Delegate the game PDA
         let delegate_accounts = DelegateAccounts {
             payer: &ctx.accounts.payer.to_account_info(),

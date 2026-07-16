@@ -14,23 +14,7 @@ export default function Spectate() {
         if (wasmLoaded.current || !canvasRef.current) return;
         wasmLoaded.current = true;
 
-        // WASM temporarily disabled - see xfchess-wasm/pkg/ for stub
-        // const loadWasm = async () => {
-        //     try {
-        //         const wasm = await import('/wasm/xfchess_wasm.js');
-        //         await wasm.default();
-        //         if (gameId) {
-        //             wasm.load_game(Number(gameId), 'spectate');
-        //         }
-        //     } catch (err) {
-        //         console.error('[spectate] WASM load failed:', err);
-        //         if (canvasRef.current) {
-        //             canvasRef.current.innerHTML =
-        //                 '<p style="color:#888;text-align:center;padding:2rem">WASM not available — build with scripts/build_wasm.bat</p>';
-        //         }
-        //     }
-        // };
-        // loadWasm();
+        // In-browser WASM board is not wired up; spectating renders the move feed only.
     }, [gameId]);
 
     return (

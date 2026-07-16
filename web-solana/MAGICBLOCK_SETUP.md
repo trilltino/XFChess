@@ -1,5 +1,8 @@
 # MagicBlock Integration Setup
 
+Web-client specifics only. The full delegation/undelegation lifecycle and routing
+model is documented in [MAGICBLOCK.md](../MAGICBLOCK.md) at the repo root.
+
 ## Required Dependencies
 
 Add to `package.json`:

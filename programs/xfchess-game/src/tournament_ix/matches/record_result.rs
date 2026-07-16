@@ -63,21 +63,20 @@ pub fn handler(
     let tournament = &mut ctx.accounts.tournament;
     let final_idx = tournament.final_match_index;
 
-    // Check if this is a semifinal (the two matches right before the final)
-    let semifinal1_idx = final_idx.saturating_sub(2);
-    let semifinal2_idx = final_idx.saturating_sub(1);
-
-    if match_index == semifinal1_idx {
-        tournament.fourth_place = Some(loser);
-    } else if match_index == semifinal2_idx {
-        tournament.third_place = Some(loser);
-    } else if match_index == final_idx {
+    // The final must be checked before the semifinals: in a 2-player bracket
+    // there is only one match, so final_idx.saturating_sub(..) would otherwise
+    // misclassify the final as a semifinal and the tournament would never
+    // complete. Semifinals only exist for brackets of 4+ players (>= 3 matches).
+    if match_index == final_idx {
         // Final completed - tournament done
         tournament.winner = Some(winner);
         tournament.second_place = Some(loser);
         tournament.status = TournamentStatus::Completed;
         tournament.completed_at = Some(Clock::get()?.unix_timestamp);
-    } else {
+    } else if final_idx >= 2 && match_index == final_idx - 2 {
+        tournament.fourth_place = Some(loser);
+    } else if final_idx >= 2 && match_index == final_idx - 1 {
+        tournament.third_place = Some(loser);
     }
 
     Ok(())

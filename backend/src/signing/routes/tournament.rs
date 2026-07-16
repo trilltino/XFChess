@@ -1,4 +1,4 @@
-//! Tournament API routes for 8-256 player single-elimination and Swiss tournaments.
+//! Tournament API routes for 2-256 player single-elimination and Swiss tournaments.
 //!
 //! This module provides HTTP endpoints for tournament management:
 //! - Admin endpoints: create, record results, set match game IDs
@@ -42,7 +42,7 @@ pub struct CreateTournamentReq {
     pub entry_fee_lamports: Option<u64>,
     /// Platform fee portion in lamports. If omitted, auto-calculated as 50p from live rate.
     pub platform_fee_lamports: Option<u64>,
-    /// Max players: 8, 16, 32, 64, 128, or 256
+    /// Max players: 2, 4, 8, 16, 32, 64, 128, or 256
     pub max_players: u16,
     /// Tournament format: "SingleElimination" or "Swiss"
     #[serde(default = "default_format")]
@@ -231,6 +231,23 @@ async fn create_tournament(
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
+    // Validate the player count. Single-elimination needs a full power-of-2
+    // bracket (the on-chain program enforces the same list); Swiss just needs
+    // at least one pairing.
+    const VALID_PLAYER_COUNTS: [u16; 8] = [2, 4, 8, 16, 32, 64, 128, 256];
+    match format {
+        TournamentFormat::SingleElimination => {
+            if !VALID_PLAYER_COUNTS.contains(&req.max_players) {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
+        TournamentFormat::Swiss { .. } => {
+            if req.max_players < 2 {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
+    }
+
     // Auto-calculate fees from live SOL/GBP rate if not explicitly provided.
     // Standard: 50p platform fee + £2.50 prize contribution = £3.00 total entry.
     let platform_fee_lamports = match req.platform_fee_lamports {
@@ -247,7 +264,8 @@ async fn create_tournament(
         [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     } else {
         match req.max_players {
-            0..=64 => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0], // Top 3: 60/30/10%
+            0..=2 => [7000, 3000, 0, 0, 0, 0, 0, 0, 0, 0], // Head-to-head: 70/30% (no 3rd place)
+            3..=64 => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0], // Top 3: 60/30/10%
             128 => [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0], // Top 5: 50/25/15/5/5%
             256 => [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300], // Top 10: 40/20/12/8/6/4/3/2/2/3%
             _ => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],                 // Default to 64 and below
@@ -567,6 +585,27 @@ async fn record_result(
                 "[tournament] record_result on-chain failed for match {} of tournament {}: {}",
                 req.match_index, id, e
             );
+        } else if let Some((next_idx, _slot)) = store.get(id).await.and_then(|t| {
+            t.matches
+                .get(req.match_index)
+                .and_then(|m| m.as_ref())
+                .and_then(|m| m.next_match_for_winner.map(|n| (n, m.next_match_slot)))
+        }) {
+            // Mirror the store-side advancement: push the winner into their
+            // next-round match on-chain as well (best-effort).
+            let ix = crate::signing::solana::advance_winner_ix(
+                &program_id,
+                id,
+                req.match_index as u16,
+                next_idx,
+                &authority.pubkey(),
+            );
+            if let Err(e) = sign_and_submit(&rpc, authority, &[ix]) {
+                error!(
+                    "[tournament] advance_winner on-chain failed for match {} -> {} of tournament {}: {}",
+                    req.match_index, next_idx, id, e
+                );
+            }
         }
     }
 
@@ -700,9 +739,9 @@ async fn initialize_swiss_tournament(
         TournamentFormat::SingleElimination => return Err(StatusCode::BAD_REQUEST),
     };
 
-    // Check minimum players
+    // Check minimum players (a Swiss event needs at least one pairing)
     let current_players = tournament.players.len() as u16;
-    let min_players = tournament.min_players.unwrap_or(8);
+    let min_players = tournament.min_players.unwrap_or(2);
     if current_players < min_players {
         return Err(StatusCode::CONFLICT); // Not enough players
     }
@@ -900,19 +939,19 @@ async fn build_leave_transaction(
     Json(req): Json<BuildLeaveTxReq>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let store = &state.tournament_store;
-    let _tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
 
     let player_pubkey = Pubkey::from_str(&req.player).map_err(|_| StatusCode::BAD_REQUEST)?;
     let program_id = Pubkey::from_str(&state.config.program_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let host_treasury = state.vps_authority.pubkey();
 
-    // 1. Build the instruction
+    // 1. Build the instruction (refund comes from the tournament escrow PDA;
+    //    the player is the only signer)
     let instruction = crate::signing::solana::leave_tournament_ix(
         &program_id,
         id,
+        tournament.max_players,
         &player_pubkey,
-        &host_treasury,
     );
 
     // 2. Fetch latest blockhash
@@ -922,18 +961,10 @@ async fn build_leave_transaction(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // 3. Build and partially sign the transaction
-    // Fee payer is the player (for simplicity in this flow, or host_treasury if you prefer)
+    // 3. Build the unsigned transaction — the player signs it client-side
     let message = Message::new(&[instruction], Some(&player_pubkey));
     let mut transaction = Transaction::new_unsigned(message);
-
-    // Partially sign with the host_treasury (vps_authority)
-    transaction
-        .try_partial_sign(&[&*state.vps_authority], blockhash)
-        .map_err(|e| {
-            error!("[tournament] Failed to partially sign: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    transaction.message.recent_blockhash = blockhash;
 
     // 4. Serialize to base64
     let tx_bytes =
@@ -1417,7 +1448,7 @@ mod tests {
     #[test]
     fn test_max_players_validation() {
         // Test valid player counts (power of 2)
-        let valid_counts = vec![8, 16, 32, 64, 128];
+        let valid_counts = vec![2, 4, 8, 16, 32, 64, 128];
         for count in valid_counts {
             let req = CreateTournamentReq {
                 tournament_id: 1,

@@ -38,9 +38,9 @@ pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize"; // Derives the SP
 //
 // TRUST MODEL: these single keys gate result-setting, ELO, fee collection, and
 // dispute resolution. Compromise of any one is catastrophic (forge results /
-// drain fees). Before mainnet: move each to a dedicated, hardware-backed or
-// multisig signer, and rotate the devnet keys whose secrets were exposed in git
-// history (see backend/.env handling).
+// drain fees). Each role uses its own dedicated single wallet (no multisig).
+// Before mainnet: rotate the devnet keys whose secrets were exposed in git
+// history (see backend/.env handling); optionally move to hardware-backed signers.
 
 /// The KYC/identity verification authority (VPS backend signer).
 /// Called by `verify_profile` to mark a player as KYC-verified on-chain.
@@ -98,11 +98,12 @@ pub mod vps_authority {
 
 /// The treasury-withdrawal authority — the only signer allowed to call
 /// `withdraw_treasury` and drain accumulated platform fees. Deliberately kept
-/// separate from `vps_authority` so platform revenue can sit behind a dedicated
-/// (ideally multisig / Squads) signer without also gating result-signing.
+/// separate from `vps_authority` so platform revenue sits behind a dedicated
+/// signer without also gating result-signing.
 /// Public key: 8e7NzfKVTyeSmsqjuESoXT9WCadkRioyKgJfNeHMG4HM
-/// Private key stored in keys/treasury_authority.json (gitignored). Move to a
-/// multisig and rotate before mainnet.
+/// A single dedicated devnet/testnet wallet (no multisig). Private key stored in
+/// keys/treasury_authority.json (gitignored) / backend .env TREASURY_AUTHORITY_KEY.
+/// Rotate before mainnet.
 pub mod treasury_authority {
     use super::*;
     pub const ID: Pubkey = Pubkey::new_from_array([

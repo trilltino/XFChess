@@ -16,34 +16,35 @@ pub struct LeaveTournament<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// TournamentPlayersShard 0 (players 0-63)
+    /// TournamentPlayersShard 0 always present (all tournament sizes)
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 1 (players 64-127)
+    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
+    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_1: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 2 (players 128-191)
+    pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_2: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 3 (players 192-255)
+    pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_3: Account<'info, TournamentPlayersShard>,
+    pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
     #[account(mut)]
     pub player: Signer<'info>,
     /// CHECK: Tournament escrow PDA — entry fees are held here, not in the operator's wallet.
@@ -70,21 +71,40 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
         GameErrorCode::InvalidTournamentStatus
     );
 
-    let shard_refs: [&TournamentPlayersShard; 4] = [
-        &ctx.accounts.tournament_players_shard_0,
-        &ctx.accounts.tournament_players_shard_1,
-        &ctx.accounts.tournament_players_shard_2,
-        &ctx.accounts.tournament_players_shard_3,
-    ];
+    // Shards 1-3 are optional — small/medium tournaments only initialize shard 0
+    // (or 0-1); missing shards are passed as the program ID and resolve to None.
+    let mut shard_refs: Vec<&TournamentPlayersShard> =
+        vec![&ctx.accounts.tournament_players_shard_0];
+    if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
+        shard_refs.push(s);
+    }
+    if let Some(s) = ctx.accounts.tournament_players_shard_2.as_ref() {
+        shard_refs.push(s);
+    }
+    if let Some(s) = ctx.accounts.tournament_players_shard_3.as_ref() {
+        shard_refs.push(s);
+    }
     let (shard_id, index) =
         shards::find_player(&shard_refs, player_key).ok_or(GameErrorCode::PlayerNotFound)?;
 
     // Get mutable reference to the correct shard
-    let target_shard = match shard_id {
+    let target_shard: &mut TournamentPlayersShard = match shard_id {
         0 => &mut ctx.accounts.tournament_players_shard_0,
-        1 => &mut ctx.accounts.tournament_players_shard_1,
-        2 => &mut ctx.accounts.tournament_players_shard_2,
-        3 => &mut ctx.accounts.tournament_players_shard_3,
+        1 => ctx
+            .accounts
+            .tournament_players_shard_1
+            .as_mut()
+            .ok_or(GameErrorCode::PlayerNotFound)?,
+        2 => ctx
+            .accounts
+            .tournament_players_shard_2
+            .as_mut()
+            .ok_or(GameErrorCode::PlayerNotFound)?,
+        3 => ctx
+            .accounts
+            .tournament_players_shard_3
+            .as_mut()
+            .ok_or(GameErrorCode::PlayerNotFound)?,
         _ => return Err(GameErrorCode::PlayerNotFound.into()),
     };
 

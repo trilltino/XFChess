@@ -51,8 +51,8 @@ settlement, with the maintenance-window carve-out below.
 
 Deploys are zero-downtime (graceful shutdown + rolling; WS-A/G) so no scheduled window is
 normally needed. Migrations that can't be expand-contract get a pre-announced window
-(low-traffic UTC night). Chain/ER provider maintenance is outside our SLA (documented in
-[VENDORS.md](VENDORS.md) once created).
+(low-traffic UTC night). Chain/ER provider maintenance is outside our SLA (provider SLAs to be documented
+in a VENDORS.md when written).
 
 ## Ownership & notification
 

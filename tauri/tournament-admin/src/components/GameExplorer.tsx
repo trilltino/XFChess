@@ -110,11 +110,11 @@ export default function GameExplorer() {
               <div style={{ color: "#fff", fontWeight: "900", fontSize: "14px" }}>{archiveStats.unique_wallets_count}</div>
             </div>
             <div style={{ display: "flex", gap: "6px" }}>
-              <button onClick={() => window.open(apiClient.getArchiveDownloadUrl("games"), "_blank")}
+              <button onClick={() => apiClient.downloadArchive("games").catch((e) => alert(String(e)))}
                 style={{ ...inputS, padding: "5px 12px", cursor: "pointer", background: "var(--primary)", color: "#000", fontWeight: "700", border: "none" }}>
                 DL GAMES
               </button>
-              <button onClick={() => window.open(apiClient.getArchiveDownloadUrl("wallets"), "_blank")}
+              <button onClick={() => apiClient.downloadArchive("wallets").catch((e) => alert(String(e)))}
                 style={{ ...inputS, padding: "5px 12px", cursor: "pointer" }}>
                 DL WALLETS
               </button>

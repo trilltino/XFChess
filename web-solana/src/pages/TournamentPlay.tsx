@@ -34,30 +34,7 @@ export default function TournamentPlay() {
         if (wasmLoaded.current || !canvasRef.current) return;
         wasmLoaded.current = true;
 
-        // WASM temporarily disabled - see xfchess-wasm/pkg/ for stub
-        // const loadWasm = async () => {
-        //     try {
-        //         const wasm = await import('/wasm/xfchess_wasm.js');
-        //         await wasm.default();
-        //
-        //         // Register wallet signing bridge
-        //         if (publicKey) {
-        //             wasm.sign_callback(async (txBytes: Uint8Array) => {
-        //                 console.log('[play] Sign callback invoked with', txBytes.length, 'bytes');
-        //                 return txBytes;
-        //             });
-        //         }
-        //
-        //         wasm.load_tournament(Number(id));
-        //     } catch (err) {
-        //         console.error('[play] WASM load failed:', err);
-        //         if (canvasRef.current) {
-        //             canvasRef.current.innerHTML =
-        //                 '<p style="color:#888;text-align:center;padding:2rem">WASM not available</p>';
-        //         }
-        //     }
-        // };
-        // loadWasm();
+        // In-browser WASM board is not wired up; play happens in the desktop client.
     }, [id, publicKey]);
 
     useEffect(() => {

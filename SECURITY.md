@@ -1,10 +1,7 @@
 # Security Policy
 
-XFChess is a free and open source chess game powered by volunteers. We believe in transparency and community-driven development. That is reflected in our discussions and decisions every day.
-
-Like all contributions to XFChess, security reviews and pentesting are appreciated.
-
-If you believe you've found a security issue in our platform, we encourage you to notify us. We welcome working with you to resolve the issue promptly.
+Security reviews and pentesting of XFChess are welcome. If you believe you've found
+a security issue, please notify us so we can resolve it promptly.
 
 ## Reporting Vulnerabilities
 
@@ -48,10 +45,10 @@ Please report issues related to:
 When contract vulnerabilities are reported, we will:
 1. **Assess severity** and potential impact on funds
 2. **Pause program** if necessary (using Solana's upgrade authority)
-2. **Deploy fix** after thorough testing on devnet
-3. **Upgrade program** on mainnet
-4. **Compensate affected users** if funds were lost (community fund available)
-5. **Full disclosure** after resolution
+3. **Deploy fix** after thorough testing on devnet
+4. **Upgrade program** on mainnet
+5. **Compensate affected users** if funds were lost (community fund available)
+6. **Full disclosure** after resolution
 
 ## Rules for Testing Production Infrastructure
 

@@ -4,10 +4,6 @@ import { apiClient } from "../services/api";
 const FEEPAYER_THRESHOLD_KEY = "feepayer_threshold_sol";
 
 export default function Settings() {
-  // Key rotation
-  const [newAuthorityKey, setNewAuthorityKey] = useState("");
-  const [authorityMsg, setAuthorityMsg] = useState<string | null>(null);
-
   // Token rotation
   const [tokenMsg, setTokenMsg] = useState<string | null>(null);
 
@@ -16,13 +12,6 @@ export default function Settings() {
     parseFloat(localStorage.getItem(FEEPAYER_THRESHOLD_KEY) || "0.5").toString()
   );
   const [thresholdMsg, setThresholdMsg] = useState<string | null>(null);
-
-  const handleRotateAuthority = async () => {
-    if (!newAuthorityKey.trim()) return;
-    const r = await apiClient.rotateAuthority(newAuthorityKey.trim());
-    setAuthorityMsg(r.ok ? r.data?.note || "Rotation requested." : `Error: ${r.error?.message}`);
-    if (r.ok) setNewAuthorityKey("");
-  };
 
   const handleRotateToken = async () => {
     const r = await apiClient.rotateToken();
@@ -50,21 +39,15 @@ export default function Settings() {
         <p style={{ color: "var(--text-dim)", margin: "0.25rem 0 0" }}>Key rotation, token management, and alert thresholds</p>
       </div>
 
-      {/* VPS Authority rotation */}
+      {/* VPS Authority rotation — runbook, not a button */}
       <SettingsCard title="VPS AUTHORITY KEY ROTATION" danger>
-        <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 1rem", lineHeight: "1.6" }}>
-          Hot-swap the vps_authority keypair. Update <code style={{ color: "var(--primary)" }}>VPS_AUTHORITY_KEY</code> in backend <code style={{ color: "var(--primary)" }}>.env</code>, then click ROTATE. A backend restart is required to apply the new keypair.
+        <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: 0, lineHeight: "1.6" }}>
+          Authority-key rotation is a deliberate operational procedure, not a one-click action — the
+          old "rotate" button only logged and told you to hand-edit <code style={{ color: "var(--primary)" }}>.env</code> anyway.
+          Follow <code style={{ color: "var(--primary)" }}>deploy/SECRETS_ROTATION.md</code>: generate the new keypair
+          offline, update <code style={{ color: "var(--primary)" }}>VPS_AUTHORITY_KEY</code> in <code style={{ color: "var(--primary)" }}>/opt/xfchess/.env</code>,
+          and restart <code style={{ color: "var(--primary)" }}>xfchess-backend</code>. Treasury/dispute authorities move to a Squads multisig in Phase 5.
         </p>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <input value={newAuthorityKey} onChange={e => setNewAuthorityKey(e.target.value)}
-            placeholder="New base58 keypair…"
-            style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px", fontFamily: "monospace" }} />
-          <button onClick={handleRotateAuthority}
-            style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "#f59e0b", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
-            ROTATE
-          </button>
-        </div>
-        {authorityMsg && <div style={{ marginTop: "8px", fontSize: "12px", color: authorityMsg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{authorityMsg}</div>}
       </SettingsCard>
 
       {/* Admin token rotation */}
