@@ -98,7 +98,7 @@ async fn register_transaction(
         &state.tournament_store,
         &program_id,
         &state.feepayer.next(),
-        &state.host_treasury_pubkey,
+        &state.tournament_fee_recipient,
     )
     .await
     .map_err(|e| {
@@ -338,7 +338,7 @@ async fn start_tournament(
         &state.tournament_store,
         &program_id,
         &state.vps_authority,
-        &state.host_treasury_pubkey,
+        &state.tournament_fee_recipient,
     )
     .await
     .map_err(|e| {

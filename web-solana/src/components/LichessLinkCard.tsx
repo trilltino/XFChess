@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface LichessLinkCardProps {
   walletPubkey: string | null;
@@ -29,6 +29,26 @@ export function LichessLinkCard({
   lichessVerified,
 }: LichessLinkCardProps) {
   const [linking, setLinking] = useState(false);
+
+  // The OAuth popup (backend's /auth/lichess/callback page) posts a message
+  // back to this window once the link completes, then closes itself. Reload
+  // to pick up the newly-linked profile — simplest correct way to refresh
+  // whatever fetched `lichessUsername`/etc without threading a refetch
+  // callback through every page that renders this card.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; ok?: boolean; payload?: { error?: string } } | undefined;
+      if (data?.type !== 'xfchess-lichess-linked') return;
+      setLinking(false);
+      if (data.ok) {
+        window.location.reload();
+      } else {
+        alert(data.payload?.error ?? 'Failed to link Lichess account.');
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
 
   const handleLink = async () => {
     if (!walletPubkey || linking) return;

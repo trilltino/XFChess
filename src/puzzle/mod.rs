@@ -157,9 +157,19 @@ fn start_request(
     if session.phase == PuzzlePhase::Loading {
         return;
     }
-    if req.wallet.trim().is_empty() {
-        warn!("[puzzle] no wallet connected — cannot request a puzzle");
+    // Earn mode pays out on completion, so it still requires a real wallet.
+    // Solve mode has no reward and is open to Guest play — the identifier
+    // just needs to be *something* (a node ID or local username both work)
+    // so the server can track solve-attempt state for this session. See
+    // docs/plans/identity-implementation-plan.md.
+    if req.wallet.trim().is_empty() && req.mode == PuzzleMode::Earn {
+        warn!("[puzzle] no wallet connected — cannot request an Earn puzzle");
         session.status = "connect a wallet first".into();
+        return;
+    }
+    if req.wallet.trim().is_empty() {
+        warn!("[puzzle] no identifier available — cannot request a puzzle");
+        session.status = "unable to start — no local identity available".into();
         return;
     }
 

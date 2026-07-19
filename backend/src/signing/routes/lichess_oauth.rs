@@ -10,6 +10,7 @@
 use axum::{
     extract::{Query, State},
     http::StatusCode,
+    response::Html,
     routing::{get, post},
     Json, Router,
 };
@@ -76,11 +77,18 @@ use once_cell::sync::Lazy;
 static PKCE_STATES: Lazy<Arc<Mutex<HashMap<String, PkceState>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
+/// Must exactly match the redirect_uri sent to `/oauth` at authorize time —
+/// Lichess matches it by exact string equality at token-exchange time. This
+/// route is nested under `/api` (see `backend/src/signing/mod.rs`), so the
+/// path here must include that prefix.
+const REDIRECT_URI: &str = "http://178.104.55.19/api/auth/lichess/callback";
+
 /// Creates the Lichess OAuth routes router.
 pub fn lichess_oauth_routes() -> Router<AppState> {
     Router::new()
         .route("/auth/lichess/init", get(init_oauth))
         .route("/auth/lichess/exchange", post(exchange_code))
+        .route("/auth/lichess/callback", get(oauth_callback))
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -130,11 +138,10 @@ async fn init_oauth(
     }
 
     // Build Lichess authorize URL
-    let redirect_uri = "http://178.104.55.19/auth/lichess/callback";
     let auth_url = format!(
         "https://lichess.org/oauth?response_type=code&client_id={}&redirect_uri={}&state={}&code_challenge={}&code_challenge_method=S256&scope=preference:read",
         urlencoding::encode(client_id),
-        urlencoding::encode(redirect_uri),
+        urlencoding::encode(REDIRECT_URI),
         urlencoding::encode(&state_param),
         urlencoding::encode(&code_challenge)
     );
@@ -153,7 +160,15 @@ async fn init_oauth(
 
 /// POST /api/auth/lichess/exchange
 /// Exchanges the authorization code for an access token, fetches profile,
-/// and submits link_external_elo on-chain.
+/// and submits link_external_elo on-chain. Requires the caller to supply the
+/// original `code_verifier` — since `/init` never returns it to the client
+/// (by design, PKCE verifiers are never sent over the wire twice), only a
+/// caller who generated its own matching verifier client-side can use this
+/// route. Nothing in this codebase does that today (`/init` generates the
+/// verifier server-side) — this route exists for a future client that wants
+/// to own the full PKCE handshake itself. The flow every current UI actually
+/// uses is `GET /auth/lichess/callback`, which completes the exchange
+/// server-side using the verifier `/init` already stored.
 async fn exchange_code(
     State(state): State<AppState>,
     Json(req): Json<ExchangeRequest>,
@@ -186,6 +201,101 @@ async fn exchange_code(
         return Err((StatusCode::FORBIDDEN, "Invalid code_verifier".to_string()));
     }
 
+    complete_link(&state, &req.code, &pkce_state.code_verifier, &req.wallet_pubkey)
+        .await
+        .map(Json)
+}
+
+/// GET /api/auth/lichess/callback?code=...&state=...
+/// This is the `redirect_uri` Lichess actually sends the browser back to
+/// after the player authorizes. The server already holds the matching PKCE
+/// `code_verifier` (stored by `/init`, keyed by `state`), so it completes the
+/// whole exchange itself here — the popup window that started the flow never
+/// needs to see the verifier or call `/exchange` directly. Renders a small
+/// HTML page that reports success/failure to the opener window (if any) via
+/// `postMessage`, then closes itself.
+async fn oauth_callback(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Html<String> {
+    let result = handle_callback(&state, &params).await;
+    Html(render_callback_page(result))
+}
+
+async fn handle_callback(
+    state: &AppState,
+    params: &HashMap<String, String>,
+) -> Result<ExchangeResponse, String> {
+    let code = params.get("code").ok_or("Missing code parameter")?;
+    let state_param = params.get("state").ok_or("Missing state parameter")?;
+
+    if let Some(err) = params.get("error") {
+        return Err(format!("Lichess denied the request: {}", err));
+    }
+
+    let pkce_state = {
+        let mut store = PKCE_STATES
+            .lock()
+            .expect("PKCE mutex should not be poisoned");
+        let entry = store
+            .remove(state_param)
+            .ok_or("Invalid or expired state parameter")?;
+        if entry.created_at.elapsed() > Duration::from_secs(600) {
+            return Err("State expired — please try linking again".to_string());
+        }
+        entry
+    };
+
+    complete_link(state, code, &pkce_state.code_verifier, &pkce_state.wallet_pubkey)
+        .await
+        .map_err(|(_, msg)| msg)
+}
+
+fn render_callback_page(result: Result<ExchangeResponse, String>) -> String {
+    let (ok, payload) = match &result {
+        Ok(r) => (
+            true,
+            serde_json::json!({
+                "lichessUsername": r.lichess_username,
+                "blitz": r.blitz_rating,
+                "rapid": r.rapid_rating,
+                "bullet": r.bullet_rating,
+            }),
+        ),
+        Err(msg) => (false, serde_json::json!({ "error": msg })),
+    };
+    let message_json = serde_json::json!({ "type": "xfchess-lichess-linked", "ok": ok, "payload": payload }).to_string();
+    let human = match &result {
+        Ok(r) => format!("Linked Lichess account '{}'. This window will close automatically.", r.lichess_username),
+        Err(msg) => format!("Lichess linking failed: {}. This window will close automatically.", msg),
+    };
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><title>XFChess — Lichess link</title></head>
+<body style="background:#0a0a0a;color:#eee;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:24px;">
+<div>
+<p>{human}</p>
+</div>
+<script>
+(function() {{
+  var msg = {message_json};
+  if (window.opener) {{ try {{ window.opener.postMessage(msg, "*"); }} catch (e) {{}} }}
+  setTimeout(function() {{ window.close(); }}, 1500);
+}})();
+</script>
+</body></html>"#
+    )
+}
+
+/// Shared exchange logic used by both `/exchange` (client-supplied verifier)
+/// and `/callback` (server-stored verifier): swap the code for a token, fetch
+/// the Lichess profile, submit `link_external_elo` on-chain, and persist the
+/// link locally.
+async fn complete_link(
+    state: &AppState,
+    code: &str,
+    code_verifier: &str,
+    wallet_pubkey: &str,
+) -> Result<ExchangeResponse, (StatusCode, String)> {
     let client_id = &state.config.lichess_client_id;
     if client_id.is_empty() {
         return Err((
@@ -196,17 +306,16 @@ async fn exchange_code(
 
     // ── Step 1: Exchange code for access token ───────────────────────────────
     let token_url = "https://lichess.org/api/token";
-    let redirect_uri = "http://178.104.55.19/auth/lichess/callback";
 
     let client = reqwest::Client::new();
     let token_resp = client
         .post(token_url)
         .form(&[
             ("grant_type", "authorization_code"),
-            ("code", &req.code),
-            ("code_verifier", &pkce_state.code_verifier),
+            ("code", code),
+            ("code_verifier", code_verifier),
             ("client_id", client_id),
-            ("redirect_uri", redirect_uri),
+            ("redirect_uri", REDIRECT_URI),
         ])
         .send()
         .await
@@ -242,10 +351,7 @@ async fn exchange_code(
             )
         })?;
 
-    info!(
-        "[LichessOAuth] Got access token for wallet {}",
-        req.wallet_pubkey
-    );
+    info!("[LichessOAuth] Got access token for wallet {}", wallet_pubkey);
 
     // ── Step 2: Fetch authenticated user profile ─────────────────────────────
     let profile_resp = client
@@ -304,11 +410,11 @@ async fn exchange_code(
 
     info!(
         "[LichessOAuth] Fetched profile for {}: {} (Blitz: {}, Rapid: {}, Bullet: {})",
-        req.wallet_pubkey, username, blitz_rating, rapid_rating, bullet_rating
+        wallet_pubkey, username, blitz_rating, rapid_rating, bullet_rating
     );
 
     // ── Step 3: Build and submit on-chain link_external_elo instruction ────
-    let player_pk = Pubkey::from_str(&req.wallet_pubkey).map_err(|e| {
+    let player_pk = Pubkey::from_str(wallet_pubkey).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid wallet_pubkey: {}", e),
@@ -333,7 +439,7 @@ async fn exchange_code(
         Err(e) => {
             error!(
                 "[LichessOAuth] On-chain submission failed for {}: {}",
-                req.wallet_pubkey, e
+                wallet_pubkey, e
             );
             return Err((
                 StatusCode::BAD_GATEWAY,
@@ -346,7 +452,7 @@ async fn exchange_code(
     let pool = state.store.pool();
     if let Err(e) = store_link_in_db(
         pool,
-        &req.wallet_pubkey,
+        wallet_pubkey,
         username,
         blitz_rating,
         rapid_rating,
@@ -359,7 +465,7 @@ async fn exchange_code(
     }
 
     // Invalidate ELO cache
-    state.elo_cache.invalidate(&req.wallet_pubkey);
+    state.elo_cache.invalidate(wallet_pubkey);
 
     let seeded_elo = if blitz_rating > rapid_rating + 500 {
         blitz_rating as f64
@@ -369,17 +475,17 @@ async fn exchange_code(
 
     info!(
         "[LichessOAuth] Linked {} -> Lichess '{}' (Blitz: {}, Rapid: {}, Bullet: {}) tx: {}",
-        req.wallet_pubkey, username, blitz_rating, rapid_rating, bullet_rating, tx_sig
+        wallet_pubkey, username, blitz_rating, rapid_rating, bullet_rating, tx_sig
     );
 
-    Ok(Json(ExchangeResponse {
+    Ok(ExchangeResponse {
         tx_signature: tx_sig,
         lichess_username: username.to_string(),
         blitz_rating,
         rapid_rating,
         bullet_rating,
         seeded_elo,
-    }))
+    })
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

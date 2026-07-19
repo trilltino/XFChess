@@ -13,6 +13,7 @@ pub mod admin;
 pub mod anticheat;
 pub mod archive;
 pub mod auth;
+pub mod casual_games;
 pub mod chat;
 pub mod debug;
 pub mod dispute;

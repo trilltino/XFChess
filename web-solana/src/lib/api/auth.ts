@@ -83,3 +83,42 @@ export function addEmail(email: string, token: string): Promise<{ ok: boolean }>
     body: JSON.stringify({ email }),
   });
 }
+
+export interface InitProfileTxRequest {
+  username: string;
+  country: string;
+  /** Unix timestamp (seconds). Must be >= 18 years before now. */
+  date_of_birth: number;
+}
+
+export interface InitProfileTxResponse {
+  /** Base64 bincode-serialized Transaction, already partially signed by the
+   * backend as fee payer. The player still needs to sign before broadcasting. */
+  tx_b64: string;
+  profile_pda: string;
+}
+
+/**
+ * Build a backend-sponsored `init_profile` transaction — XFChess pays the
+ * on-chain rent for the player's first profile. Requires KYC to already be
+ * submitted (see submitKyc in kyc.ts) and only works once per account.
+ */
+export function initProfileSponsoredTx(
+  body: InitProfileTxRequest,
+  token: string,
+): Promise<InitProfileTxResponse> {
+  return request('/api/auth/init-profile-sponsored-tx', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Broadcast a fully-signed transaction (base64 bincode) built by one of the
+ * `*Tx` helpers above, once the player's wallet has added its signature. */
+export function broadcastTx(txB64: string): Promise<{ signature: string }> {
+  return request('/api/auth/broadcast-tx', {
+    method: 'POST',
+    body: JSON.stringify({ tx_b64: txB64 }),
+  });
+}

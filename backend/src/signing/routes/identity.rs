@@ -151,7 +151,7 @@ async fn register_identity(
     }
 
     let result = sqlx::query(
-        "INSERT INTO users (pubkey, blind_index_hash, encrypted_blob, registered_at, consent_kyc, consent_retention_years) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO vault_users (pubkey, blind_index_hash, encrypted_blob, registered_at, consent_kyc, consent_retention_years) VALUES (?, ?, ?, ?, ?, ?)"
     )
     .bind(&payload.pubkey)
     .bind(blind_index)
@@ -254,7 +254,7 @@ async fn check_kyc_status(
     let pool = &state.vault_pool;
 
     // Check if user exists and get basic info (without decrypting PII)
-    let row = sqlx::query("SELECT registered_at, blind_index_hash FROM users WHERE pubkey = ?")
+    let row = sqlx::query("SELECT registered_at, blind_index_hash FROM vault_users WHERE pubkey = ?")
         .bind(&pubkey)
         .fetch_optional(&**pool)
         .await
@@ -310,7 +310,7 @@ async fn delete_identity_data(
     log_audit_event(&req.pubkey, "KYC_DELETION_REQUESTED", pool).await;
 
     // 4. Delete user data
-    let result = sqlx::query("DELETE FROM users WHERE pubkey = ?")
+    let result = sqlx::query("DELETE FROM vault_users WHERE pubkey = ?")
         .bind(&req.pubkey)
         .execute(&**pool)
         .await;

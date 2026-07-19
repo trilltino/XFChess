@@ -64,3 +64,29 @@ pub fn node_id_b58() -> String {
     let public = key.public();
     bs58::encode(public.as_bytes()).into_string()
 }
+
+fn guest_username_path() -> PathBuf {
+    let base = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("xfchess");
+    std::fs::create_dir_all(&base).ok();
+    base.join("guest_username")
+}
+
+/// Load the locally-cached Guest display name, if one was ever saved. Guest
+/// identity has no account and no server-side record — this is purely a
+/// per-device display name shown to P2P peers. See
+/// docs/plans/identity-implementation-plan.md.
+pub fn load_guest_username() -> Option<String> {
+    std::fs::read_to_string(guest_username_path())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Persist the Guest display name for next launch.
+pub fn save_guest_username(name: &str) {
+    if let Err(e) = std::fs::write(guest_username_path(), name.trim()) {
+        warn!("[identity] Failed to save guest_username: {e}");
+    }
+}

@@ -119,7 +119,7 @@ async fn test_swiss_tournament_full_lifecycle() {
     std::env::set_var("JWT_SECRET", "test-jwt-secret-test-jwt-secret-test-jwt-secret-32");
     std::env::set_var("IDENTITY_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     std::env::set_var("IDENTITY_SALT", "1111111111111111111111111111111111111111111111111111111111111111");
-    std::env::set_var("HOST_TREASURY_PUBKEY", "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C");
+    std::env::set_var("TOURNAMENT_FEE_RECIPIENT", "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C");
     std::env::set_var("USDC_MINT", "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
     std::env::set_var("ADMIN_TOKEN", "test-admin-token");
 

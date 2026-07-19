@@ -28,6 +28,8 @@ pub struct CachedElo {
     pub username: String,
     /// Lichess account verified on-chain
     pub lichess_verified: bool,
+    /// Lichess blitz rating (centiscale — divide by 100 for the real rating)
+    pub lichess_blitz: u32,
     /// Lichess last sync timestamp
     pub lichess_last_sync: i64,
     /// Whether ELO was seeded from external rating
@@ -148,6 +150,12 @@ impl EloCache {
         } else {
             false
         };
+        // lichess_blitz: u32 at byte 243 (right after lichess_verified at 242).
+        let lichess_blitz = if data_len >= 247 {
+            u32::from_le_bytes(account.data[243..247].try_into().unwrap_or_default())
+        } else {
+            0
+        };
         let lichess_last_sync = if data_len >= 263 {
             self.deserialize_i64(&account.data, 255).unwrap_or(0)
         } else {
@@ -170,6 +178,7 @@ impl EloCache {
             country: country.clone(),
             username: username.clone(),
             lichess_verified,
+            lichess_blitz,
             lichess_last_sync,
             external_elo_source,
             seeded_from_external,

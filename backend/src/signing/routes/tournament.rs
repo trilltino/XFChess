@@ -26,6 +26,7 @@ use crate::signing::solana::{
     initialize_escrow_ix, initialize_shards_ix, initialize_tournament_ix, record_result_ix,
     sign_and_submit,
 };
+use crate::signing::storage::vault::VaultStore;
 use crate::signing::storage::tournament::{
     MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus,
 };
@@ -809,16 +810,19 @@ async fn join_tournament(
     let tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
 
     // ── CACF KYC gate ────────────────────────────────────────────────────────
-    // When kyc_required is true every entrant must have a row in vault_users,
-    // which is written by POST /identity/register (web or in-game flow).
+    // When kyc_required is true every entrant must have an active kyc_records
+    // row, written by POST /api/kyc/submit (the live KYC flow — see kyc.rs).
+    // Previously this checked `vault_users`, which is only ever written by
+    // POST /identity/register; that handler had a table-name bug (inserted
+    // into a differently-shaped `users` table) and so vault_users was never
+    // actually populated, meaning this gate rejected every entrant
+    // unconditionally. Fixed to use the same VaultStore::has_kyc check that
+    // /api/user/status already relies on.
     if tournament.kyc_required {
-        let row = sqlx::query("SELECT 1 FROM vault_users WHERE pubkey = ?")
-            .bind(player)
-            .fetch_optional(&*state.vault_pool)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let vault = VaultStore::new((*state.vault_pool).clone());
+        let has_kyc = vault.has_kyc(player).await;
 
-        if row.is_none() {
+        if !has_kyc {
             info!(
                 "[tournament] KYC gate rejected {} for tournament {} — CACF not completed",
                 player, id

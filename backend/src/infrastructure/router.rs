@@ -6,6 +6,7 @@
 use crate::infrastructure::auth_middleware::require_api_key;
 use crate::signing::routes::admin::admin_routes;
 use crate::signing::routes::archive::archive_routes;
+use crate::signing::routes::casual_games::casual_games_routes;
 use crate::signing::routes::chat::routes as chat_routes;
 use crate::signing::routes::dispute::{admin_dispute_routes, dispute_routes};
 use crate::signing::routes::history::history_routes;
@@ -59,6 +60,9 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
     // Build KYC / user-status router (needs AppState for vault_pool + store)
     let kyc_router = kyc_routes();
 
+    // Build casual (off-chain) game recording router
+    let casual_games_router = casual_games_routes();
+
     // Build game history router
     let history_router = history_routes();
 
@@ -91,6 +95,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         .merge(matchmaking_router)
         .nest("/api", mail_router)
         .merge(kyc_router)
+        .merge(casual_games_router)
         .merge(history_router)
         .merge(puzzle_routes())
         .merge(dispute_router)

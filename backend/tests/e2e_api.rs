@@ -53,7 +53,7 @@ fn test_config() -> SigningConfig {
         link_authority_key: None,
         treasury_authority_key: None,
         admin_token: Some("test-admin-token".into()),
-        host_treasury_pubkey: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
+        tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
         usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
         lichess_client_id: String::new(),
     }

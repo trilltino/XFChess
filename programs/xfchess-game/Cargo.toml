@@ -57,6 +57,10 @@ name = "profile_session_tests"
 path = "tests/profile_session_tests.rs"
 
 [[test]]
+name = "init_profile_sponsored_tests"
+path = "tests/init_profile_sponsored_tests.rs"
+
+[[test]]
 name = "dispute_tests"
 path = "tests/dispute_tests.rs"
 

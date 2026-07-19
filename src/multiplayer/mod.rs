@@ -104,6 +104,7 @@ impl Plugin for MultiplayerPlugin {
                     systems::send_local_draw_events,
                     systems::tick_heartbeat,
                     systems::handle_pong,
+                    systems::record_casual_game_on_end,
                 ),
             );
 

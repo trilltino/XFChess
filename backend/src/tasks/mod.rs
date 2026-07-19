@@ -50,7 +50,7 @@ pub async fn spawn_background_tasks(mut state: AppState) -> Result<(), AppError>
         state.config.program_id.clone(),
         state.config.solana_rpc_url.clone(),
         state.vps_authority.clone(),
-        state.host_treasury_pubkey,
+        state.tournament_fee_recipient,
     ));
     let _tournament_handle = spawn_tournament_scheduler(
         (*state.tournament_store).clone(),

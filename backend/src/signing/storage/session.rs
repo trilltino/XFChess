@@ -327,6 +327,54 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Returns `Some(unix_ts)` if this account already received a
+    /// backend-sponsored on-chain profile creation — guards against repeat
+    /// sponsorship of the same wallet.
+    pub async fn profile_sponsored_at(&self, wallet: &str) -> Option<i64> {
+        let row: Option<(Option<i64>,)> =
+            sqlx::query_as("SELECT profile_sponsored_at FROM users_v2 WHERE wallet = ?")
+                .bind(wallet)
+                .fetch_one(&self.pool)
+                .await
+                .ok();
+        row.and_then(|(v,)| v)
+    }
+
+    /// Marks this account as having received its one backend-sponsored
+    /// profile creation.
+    pub async fn mark_profile_sponsored(&self, wallet: &str, now: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users_v2 SET profile_sponsored_at = ? WHERE wallet = ?")
+            .bind(now)
+            .bind(wallet)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Records a casual (off-chain) game result — bot or local-P2P play,
+    /// with no on-chain effect. `account_id` is a wallet pubkey or the
+    /// `"email:<addr>"` JWT subject.
+    pub async fn record_casual_game(
+        &self,
+        account_id: &str,
+        opponent_type: &str,
+        result: &str,
+        pgn: Option<&str>,
+        now: i64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO casual_games (account_id, opponent_type, result, pgn, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(account_id)
+        .bind(opponent_type)
+        .bind(result)
+        .bind(pgn)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Returns true if the given username is already taken (case-insensitive).
     pub async fn username_taken(&self, username: &str) -> bool {
         let (count,): (i64,) = sqlx::query_as(

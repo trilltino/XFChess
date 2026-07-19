@@ -1,9 +1,11 @@
 ﻿import { useState, useEffect, useCallback, useRef } from 'react';
 import bs58 from 'bs58';
+import { Transaction } from '@solana/web3.js';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletReadyState } from '@solana/wallet-adapter-base';
-import { Loader2, Shield, ShieldCheck, Trophy, Zap, ChevronRight, RefreshCw, Cpu, X } from 'lucide-react';
-import { getAnchorProgram, fetchPlayerProfile, createPlayerProfile } from '../lib/anchor_client';
+import { Loader2, Shield, ShieldCheck, Trophy, Zap, ChevronRight, RefreshCw, Cpu, X, UserCircle2 } from 'lucide-react';
+import { getAnchorProgram, fetchPlayerProfile } from '../lib/anchor_client';
+import { getUserStatus, initProfileSponsoredTx, broadcastTx } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
 
 // --- Live SOL price hook -----------------------------------------------------
@@ -66,7 +68,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 // --- Flow steps -------------------------------------------------------------
-type FlowStep = 'identity' | 'credentials' | 'wallet_login' | 'connect_wallet' | 'profile';
+type FlowStep = 'identity' | 'credentials' | 'wallet_login' | 'connect_wallet' | 'profile' | 'guest';
 
 interface AuthResult { token: string; username: string }
 
@@ -162,10 +164,11 @@ function ErrBox({ msg }: { msg: string }) {
 
 // --- Identity picker --------------------------------------------------------
 function IdentityStep({
-    onWallet, onEmail,
+    onWallet, onEmail, onGuest,
 }: {
     onWallet: () => void;
     onEmail: (mode: 'login' | 'register') => void;
+    onGuest: () => void;
 }) {
     return (
         <div style={{ ...card, maxWidth: 440 }}>
@@ -205,8 +208,77 @@ function IdentityStep({
                     <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.25)' }} />
                 </button>
 
+                <button
+                    style={identityBtn}
+                    onClick={onGuest}
+                    onMouseEnter={e => applyHover(e, true)}
+                    onMouseLeave={e => applyHover(e, false)}
+                >
+                    <div style={identityIcon}><UserCircle2 size={20} color="#ffffff" /></div>
+                    <div style={{ flex: 1, textAlign: 'left' as const }}>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}>Continue as Guest</div>
+                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>No account, no wallet — bots, puzzles &amp; play with friends</div>
+                    </div>
+                    <ChevronRight size={16} style={{ color: 'rgba(255,255,255,0.25)' }} />
+                </button>
+
             </div>
 
+        </div>
+    );
+}
+
+// --- Guest step ----------------------------------------------------------
+// No backend account, no wallet — a locally-cached display name only. See
+// docs/plans/identity-implementation-plan.md.
+const GUEST_USERNAME_KEY = 'xfchess_guest_username';
+
+function GuestStep() {
+    const navigate = useNavigate();
+    const [username, setUsername] = useState(() => localStorage.getItem(GUEST_USERNAME_KEY) ?? '');
+    const [launching, setLaunching] = useState(false);
+
+    const handlePlay = async () => {
+        const trimmed = username.trim();
+        if (!trimmed) return;
+        setLaunching(true);
+        localStorage.setItem(GUEST_USERNAME_KEY, trimmed);
+        localStorage.setItem('xfchess_guest_mode', 'true');
+        await launchLocalGame(`guest-${trimmed}`, trimmed, null);
+        setLaunching(false);
+        navigate('/play');
+    };
+
+    return (
+        <div style={{ ...card, maxWidth: 420 }}>
+            <div style={{ textAlign: 'center', marginBottom: 28 }}>
+                <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>Play as Guest</h2>
+                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 6 }}>
+                    Pick a name your friends will see. Nothing is saved to the server — bots, puzzles, and direct P2P games only.
+                </p>
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                    Display Name
+                </label>
+                <input
+                    style={input}
+                    type="text"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    placeholder="YourName"
+                    maxLength={20}
+                    onKeyDown={e => e.key === 'Enter' && handlePlay()}
+                    onFocus={e => (e.target.style.borderColor = '#ffffff')}
+                    onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
+                />
+            </div>
+
+            <button style={{ ...primaryBtn, opacity: launching || !username.trim() ? 0.6 : 1 }} onClick={handlePlay} disabled={launching || !username.trim()}>
+                {launching ? <Loader2 size={16} className="spinner" /> : <UserCircle2 size={16} />}
+                Play as Guest
+            </button>
         </div>
     );
 }
@@ -636,6 +708,7 @@ function ProfileStep() {
     const [dob, setDob] = useState(''); // YYYY-MM-DD
     const [creating, setCreating] = useState(false);
     const [err, setErr] = useState<string | null>(null);
+    const [hasKyc, setHasKyc] = useState<boolean | null>(null); // null = still checking
 
     const countries = [
         { code: 'GB', label: 'United Kingdom', taxLabel: 'NI Number' },
@@ -670,6 +743,16 @@ function ProfileStep() {
             loadProfile();
         }
     }, [wallet.connected, wallet.publicKey]);
+
+    // On-chain profile creation is gated behind KYC (see
+    // docs/plans/identity-implementation-plan.md) — check once we have a
+    // wallet to check against.
+    useEffect(() => {
+        if (!wallet.publicKey) return;
+        getUserStatus(wallet.publicKey.toBase58())
+            .then(status => setHasKyc(status.has_kyc))
+            .catch(() => setHasKyc(false));
+    }, [wallet.publicKey]);
 
     const loadProfile = async () => {
         if (!wallet.publicKey) return;
@@ -707,6 +790,10 @@ function ProfileStep() {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!wallet.publicKey || !createHandle) return;
+        if (!hasKyc) {
+            setErr('KYC verification is required before creating an on-chain profile.');
+            return;
+        }
         setCreating(true);
         setErr(null);
         try {
@@ -715,11 +802,11 @@ function ProfileStep() {
             const minDob = Math.floor(Date.now() / 1000) - 567_648_000; // 18 years
             if (dobTimestamp > minDob) throw new Error('You must be 18 or older to play');
 
-            const program = getAnchorProgram(connection, wallet);
-            // 1. On-chain initialization (username, country, DOB for age gate)
-            await createPlayerProfile(program, wallet.publicKey, createHandle, country, dobTimestamp);
-            
-            // 2. Backend registration (timestamp in seconds for signature verification)
+            // 1. Ensure we have a backend JWT — needed to call the sponsored
+            // profile-creation route below (init-profile-sponsored-tx is
+            // JWT-authed). Sign the standard register message; a 409 means
+            // this wallet is already registered and any existing token is
+            // still valid.
             let authToken = localStorage.getItem('xfchess_token');
             try {
                 const timestamp = Math.floor(Date.now() / 1000);
@@ -743,22 +830,34 @@ function ProfileStep() {
                     console.warn("Backend registration skipped/failed:", e);
                 }
             }
+            if (!authToken) throw new Error('Could not authenticate — please try again.');
 
-            // 3. Sync on-chain username ? SQLite (canonical source of truth)
-            if (authToken) {
-                try {
-                    const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) || 'http://localhost:8090';
-                    const r = await fetch(`${backendUrl}/api/auth/sync-profile`, {
-                        method: 'POST',
-                        headers: { Authorization: `Bearer ${authToken}` },
-                    });
-                    if (r.ok) {
-                        const { username: synced } = await r.json();
-                        if (synced) localStorage.setItem('xfchess_username', synced);
-                    }
-                } catch (e) {
-                    console.warn('sync-profile non-critical:', e);
+            // 2. Backend-sponsored on-chain initialization: XFChess pays the
+            // rent, the player only signs. Replaces the old self-funded
+            // createPlayerProfile() Anchor .rpc() call — see
+            // docs/plans/identity-implementation-plan.md.
+            const { tx_b64 } = await initProfileSponsoredTx(
+                { username: createHandle, country, date_of_birth: dobTimestamp },
+                authToken,
+            );
+            const tx = Transaction.from(Buffer.from(tx_b64, 'base64'));
+            const signedTx = await wallet.signTransaction!(tx);
+            const signedB64 = Buffer.from(signedTx.serialize()).toString('base64');
+            await broadcastTx(signedB64);
+
+            // 3. Sync on-chain username → SQLite (canonical source of truth)
+            try {
+                const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) || 'http://localhost:8090';
+                const r = await fetch(`${backendUrl}/api/auth/sync-profile`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${authToken}` },
+                });
+                if (r.ok) {
+                    const { username: synced } = await r.json();
+                    if (synced) localStorage.setItem('xfchess_username', synced);
                 }
+            } catch (e) {
+                console.warn('sync-profile non-critical:', e);
             }
 
             // Wait for chain confirmation then reload
@@ -995,7 +1094,24 @@ function ProfileStep() {
                 </>
             )}
 
-            {!loading && !profile && (
+            {!loading && !profile && hasKyc === false && (
+                <div style={{
+                    padding: '24px', background: 'rgba(255,255,255,0.02)',
+                    borderRadius: 12, border: '1px dashed rgba(255,255,255,0.1)',
+                    marginBottom: 20, textAlign: 'center',
+                }}>
+                    <Shield size={36} style={{ color: '#ffffff', opacity: 0.5, marginBottom: 12 }} />
+                    <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 800 }}>KYC Required</h3>
+                    <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '0 0 16px' }}>
+                        Creating a Solana account requires identity verification, same as wagered play.
+                    </p>
+                    <a href="/kyc" className="btn btn-secondary" style={{ display: 'inline-block', padding: '10px 20px', fontSize: 13 }}>
+                        Complete KYC
+                    </a>
+                </div>
+            )}
+
+            {!loading && !profile && hasKyc !== false && (
                 <>
                     <div style={{
                         padding: '24px', background: 'rgba(255,255,255,0.02)',
@@ -1120,7 +1236,11 @@ export function SignIn(_: { defaultMode?: 'login' | 'register' } = {}) {
                 <IdentityStep
                     onWallet={() => setStep('wallet_login')}
                     onEmail={(mode) => { setCredMode(mode); setStep('credentials'); }}
+                    onGuest={() => setStep('guest')}
                 />
+            )}
+            {step === 'guest' && (
+                <GuestStep />
             )}
             {step === 'wallet_login' && (
                 <ConnectWalletStep username="" onConnected={handleConnected} />

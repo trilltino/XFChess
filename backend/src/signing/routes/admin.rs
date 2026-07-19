@@ -424,7 +424,7 @@ async fn get_wallet_balances(
     let fp_pk = state.feepayer.next().pubkey();
     let vps_pk = state.vps_authority.pubkey();
     let kyc_pk = state.kyc_authority.pubkey();
-    let treasury_pk = state.host_treasury_pubkey;
+    let treasury_pk = state.tournament_fee_recipient;
 
     let (fp_bal, fp_sol) = get_bal(&fp_pk)?;
     let (vps_bal, vps_sol) = get_bal(&vps_pk)?;

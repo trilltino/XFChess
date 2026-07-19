@@ -419,6 +419,12 @@ pub struct P2PHostState {
     pub last_heartbeat: Option<std::time::Instant>,
     /// Room name displayed in the lobby browser.
     pub lobby_name: String,
+    /// When true, `render_host_p2p_config_screen` skips announcing to the
+    /// VPS-backed public lobby directory entirely — the host only shares
+    /// their raw node ID out of band (Discord, text, etc). Set by the
+    /// "Direct Connection" panel; always false for the normal "Create
+    /// Lobby" flow. See docs/plans/identity-implementation-plan.md.
+    pub direct_mode: bool,
 }
 
 impl Default for P2PHostState {
@@ -432,6 +438,7 @@ impl Default for P2PHostState {
             game_id: None,
             last_heartbeat: None,
             lobby_name: String::new(),
+            direct_mode: false,
         }
     }
 }
@@ -460,6 +467,9 @@ pub struct BridgeMeResp {
     pub can_wager: bool,
     pub has_onchain_profile: bool,
     pub jwt_token: String,
+    /// Lichess blitz rating (centiscale), 0 if not linked.
+    pub lichess_blitz: u32,
+    pub lichess_verified: bool,
 }
 
 /// Polling resource for the Tauri wallet bridge at http://localhost:7454/status.
@@ -513,6 +523,15 @@ fn poll_wallet_bridge(
                 }
                 player_identity.can_wager = me.can_wager;
                 player_identity.has_onchain_profile = me.has_onchain_profile;
+                // Lichess Elo — a distinct, second stat, synced via the
+                // existing external-ELO link flow. Never merged with `elo`
+                // (the on-chain rating). 0/unset when not linked.
+                player_identity.lichess_elo = if me.lichess_blitz > 0 {
+                    Some(me.lichess_blitz / 100)
+                } else {
+                    None
+                };
+                player_identity.lichess_verified = me.lichess_verified;
                 info!(
                     "[WalletBridge] /auth/me: {} ELO {} can_wager={} onchain={}",
                     player_identity.username.as_deref().unwrap_or("?"),
@@ -855,6 +874,8 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
         can_wager: me["can_wager"].as_bool().unwrap_or(false),
         has_onchain_profile: me["has_onchain_profile"].as_bool().unwrap_or(false),
         jwt_token: jwt,
+        lichess_blitz: me["lichess_blitz"].as_u64().unwrap_or(0) as u32,
+        lichess_verified: me["lichess_verified"].as_bool().unwrap_or(false),
     })
 }
 
@@ -947,6 +968,16 @@ pub struct PlayerIdentity {
             Result<crate::multiplayer::network::vps::identity::PlayerProfile, String>,
         >,
     >,
+    /// True when the player chose "Continue as Guest" — no account, no
+    /// wallet, nothing sent to the backend. `username` still holds the
+    /// locally-cached display name shown to P2P peers. See
+    /// docs/plans/identity-implementation-plan.md.
+    pub is_guest: bool,
+    /// Lichess rating, synced via the existing external-ELO link flow —
+    /// stored on the same on-chain PlayerProfile as `elo` (on-chain Elo).
+    /// Shown as a second, clearly-labeled stat, never merged with `elo`.
+    pub lichess_elo: Option<u32>,
+    pub lichess_verified: bool,
 }
 
 impl PlayerIdentity {
@@ -1038,9 +1069,6 @@ pub struct BrandLogoState {
 }
 
 const BRAND_LOGO_PATH: &str = "assets/xfchess-title.png";
-
-/// Grey bezel border color shared by popups and modals.
-const BEZEL_GREY: egui::Color32 = egui::Color32::from_rgb(100, 100, 100);
 
 pub(super) fn ensure_brand_logo_texture(
     ctx: &egui::Context,
@@ -1178,19 +1206,7 @@ fn main_menu_ui(ctx: &mut MainMenuUIContext) -> Result<(), bevy::ecs::query::Que
     // Always render the main menu (keeps 3D board visible behind all popups)
     render_website_menu(&egui_ctx, ctx);
 
-    let popup_frame = egui::Frame {
-        fill: egui::Color32::from_rgba_unmultiplied(18, 18, 22, 242),
-        inner_margin: egui::Margin::same(20),
-        outer_margin: egui::Margin::ZERO,
-        corner_radius: egui::CornerRadius::same(8),
-        stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(80, 80, 100, 180)),
-        shadow: egui::Shadow {
-            blur: 24,
-            spread: 4,
-            color: egui::Color32::from_black_alpha(180),
-            offset: [0, 4],
-        },
-    };
+    let popup_frame = crate::ui::styles::StyledPanel::popup();
 
     if current_substate == crate::core::MenuState::BraidLobby {
         egui::Window::new("p2p_lobby_popup")

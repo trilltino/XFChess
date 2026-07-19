@@ -41,8 +41,12 @@ pub struct SigningConfig {
     pub treasury_authority_key: Option<String>,
     /// Admin token for protected endpoints (POST /admin/dispute/resolve, etc.)
     pub admin_token: Option<String>,
-    /// Host treasury pubkey - receives entry fees directly
-    pub host_treasury_pubkey: String,
+    /// Tournament entry-fee recipient pubkey — a *different* address from
+    /// `treasury_authority_key` above (that one is the withdraw-authority
+    /// signer; this one just receives entry fees directly). Deliberately
+    /// distinctly named to avoid the two being conflated — see
+    /// docs/plans/identity-implementation-plan.md.
+    pub tournament_fee_recipient: String,
     /// USDC mint address (devnet or mainnet)
     pub usdc_mint_pubkey: String,
     /// Lichess OAuth client ID (from lichess.org/account/oauth/app)
@@ -64,7 +68,7 @@ impl SigningConfig {
     /// - `VPS_AUTHORITY_KEY` - Base58 VPS authority key
     /// - `KYC_AUTHORITY_KEY` - Base58 KYC authority key
     /// - `LINK_AUTHORITY_KEY` - Base58 external-elo linking authority key
-    /// - `HOST_TREASURY_PUBKEY` - Host treasury pubkey for entry fees
+    /// - `TOURNAMENT_FEE_RECIPIENT` - Host treasury pubkey for entry fees
     /// - `USDC_MINT` - USDC mint address (devnet or mainnet)
     /// - `LICHESS_CLIENT_ID` - Lichess OAuth client ID
     ///
@@ -109,7 +113,7 @@ impl SigningConfig {
             link_authority_key: env::var("LINK_AUTHORITY_KEY").ok(),
             treasury_authority_key: env::var("TREASURY_AUTHORITY_KEY").ok(),
             admin_token: env::var("ADMIN_TOKEN").ok(),
-            host_treasury_pubkey: env::var("HOST_TREASURY_PUBKEY")
+            tournament_fee_recipient: env::var("TOURNAMENT_FEE_RECIPIENT")
                 .unwrap_or_else(|_| "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string()),
             usdc_mint_pubkey: env::var("USDC_MINT")
                 .unwrap_or_else(|_| "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".to_string()),

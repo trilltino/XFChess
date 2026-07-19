@@ -16,7 +16,6 @@ use crate::multiplayer::TokioRuntime;
 
 #[cfg(feature = "solana")]
 use crate::game::events::{GameEndedEvent, MoveMadeEvent};
-#[cfg(feature = "solana")]
 use crate::game::resources::history::game_over::GameOverState;
 #[cfg(feature = "solana")]
 use crate::rendering::PieceType;
@@ -796,6 +795,79 @@ pub fn emit_game_ended_event(
         game_id,
         winner,
         reason: reason.to_string(),
+    });
+}
+
+/// Records a bot game's result to the backend, purely for history — no
+/// on-chain effect, no Elo change (on-chain Elo stays driven only by real
+/// wagered/ranked settlement). Deliberately NOT gated behind the `solana`
+/// feature: this is an Account-only concept, independent of wallets. Skips
+/// entirely for Guest play or when not logged in — see
+/// docs/plans/identity-implementation-plan.md.
+///
+/// Local pass-and-play (`GameMode::MultiplayerLocal`) is intentionally not
+/// recorded here: both sides are the same physical player, so "did the
+/// Account win or lose" isn't well-defined the way it is for a bot game.
+pub fn record_casual_game_on_end(
+    game_over: Res<GameOverState>,
+    game_mode: Res<crate::core::states::GameMode>,
+    players: Option<Res<crate::game::resources::player::Players>>,
+    player_identity: Option<Res<crate::states::main_menu::PlayerIdentity>>,
+    mut recorded: Local<bool>,
+) {
+    if !game_over.is_game_over() {
+        *recorded = false;
+        return;
+    }
+    if *recorded {
+        return;
+    }
+    if *game_mode != crate::core::states::GameMode::SinglePlayer {
+        return;
+    }
+    *recorded = true;
+
+    let Some(identity) = player_identity else {
+        return;
+    };
+    if identity.is_guest {
+        return;
+    }
+    let Some(token) = identity.jwt_token.clone() else {
+        return;
+    };
+
+    let Some(players) = players else { return };
+    let human_color = if players.player_1.is_human {
+        players.player_1.color
+    } else if players.player_2.is_human {
+        players.player_2.color
+    } else {
+        return; // no human side (shouldn't happen in SinglePlayer)
+    };
+
+    let result = match game_over.winner() {
+        Some(winner) if winner == human_color => "win",
+        Some(_) => "loss",
+        None => "draw",
+    };
+
+    let base_url = crate::multiplayer::network::vps::vps_base();
+    let result = result.to_string();
+    std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::new();
+        let body = serde_json::json!({
+            "opponent_type": "bot",
+            "result": result,
+        });
+        if let Err(e) = client
+            .post(format!("{base_url}/api/games/casual"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+        {
+            warn!("[casual-game] Failed to record bot game result: {}", e);
+        }
     });
 }
 

@@ -81,7 +81,7 @@ fn verify_wallet_sig(
 /// Authenticates a Bearer JWT request: verifies the token signature/expiry and
 /// checks it against the per-subject revocation cut-off. Returns the wallet
 /// (the `sub` claim) on success.
-async fn authed_wallet(
+pub(crate) async fn authed_wallet(
     state: &AppState,
     headers: &axum::http::HeaderMap,
 ) -> Result<String, (StatusCode, String)> {
@@ -124,6 +124,7 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/add-email", post(add_email))
         .route("/sync-profile", post(sync_profile))
         .route("/init-profile-tx", post(init_profile_tx))
+        .route("/init-profile-sponsored-tx", post(init_profile_sponsored_tx))
         .route("/broadcast-tx", post(broadcast_tx))
         .route("/username", axum::routing::patch(set_username))
         .route("/check-username/{username}", get(check_username))
@@ -396,6 +397,10 @@ struct MeResp {
     elo: u32,
     /// ISO 3166-1 alpha-2 country from VPS record (empty if not set).
     country: String,
+    /// Lichess blitz rating (0 = not linked / no games). Shown as a second,
+    /// clearly-labeled stat alongside `elo` — never merged.
+    lichess_blitz: u32,
+    lichess_verified: bool,
 }
 
 /// GET /auth/me — validates Bearer JWT and returns caller profile.
@@ -451,6 +456,11 @@ async fn me(
         .as_ref()
         .map(|e| e.elo_rating as u32)
         .unwrap_or(0);
+    let lichess_blitz = cached_elo.as_ref().map(|e| e.lichess_blitz).unwrap_or(0);
+    let lichess_verified = cached_elo
+        .as_ref()
+        .map(|e| e.lichess_verified)
+        .unwrap_or(false);
     let country = kyc_country.unwrap_or_default();
 
     Ok(Json(MeResp {
@@ -461,6 +471,8 @@ async fn me(
         wallet_linked,
         can_wager,
         has_onchain_profile,
+        lichess_blitz,
+        lichess_verified,
         elo,
         country,
     }))
@@ -740,6 +752,177 @@ async fn init_profile_tx(
         wallet_pk, req.username
     );
     Ok(Json(InitProfileTxResp {
+        tx_b64,
+        profile_pda: profile_pda.to_string(),
+    }))
+}
+
+// ── POST /auth/init-profile-sponsored-tx ──────────────────────────────────────
+
+#[derive(Serialize)]
+struct InitProfileSponsoredResp {
+    tx_b64: String,
+    profile_pda: String,
+}
+
+/// POST /auth/init-profile-sponsored-tx
+///
+/// Same as `init_profile_tx`, except XFChess pays the on-chain rent for the
+/// player's *first* profile — removes the "need SOL before you can go
+/// on-chain at all" problem. Gated on: (1) KYC submitted, (2) never
+/// sponsored before for this account.
+///
+/// `InitProfile`'s `create_account` CPIs debit `player`, not whichever
+/// account happens to be the transaction's fee payer — so merely paying the
+/// tx fee wouldn't actually cover the meaningful cost (account rent). This
+/// prepends a `system_instruction::transfer` from the backend fee payer to
+/// the player for exactly the rent both PDAs need, so the existing,
+/// unmodified `init_profile` instruction can then debit *that* balance from
+/// the player as it always does — no program change required. Returns a
+/// transaction partially signed by the backend (as fee payer); the player
+/// still signs before broadcasting via `/auth/broadcast-tx`.
+async fn init_profile_sponsored_tx(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<InitProfileTxReq>,
+) -> Result<Json<InitProfileSponsoredResp>, (StatusCode, String)> {
+    use base64::engine::general_purpose;
+    use base64::Engine as _;
+    use solana_sdk::{
+        instruction::{AccountMeta, Instruction},
+        message::Message,
+        signature::Signer as _,
+        system_instruction, system_program,
+        transaction::Transaction,
+    };
+
+    let wallet = authed_wallet(&state, &headers).await?;
+    let wallet_pk = Pubkey::from_str(&wallet).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid wallet in token".to_string(),
+        )
+    })?;
+
+    // ── KYC gate ──────────────────────────────────────────────────────────
+    // Uses the working KYC store (kyc_records, written by /api/kyc/submit) —
+    // NOT vault_users, which historically was never populated. See
+    // docs/plans/identity-implementation-plan.md.
+    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
+    if !vault.has_kyc(&wallet).await {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "KYC verification required before creating an on-chain profile. Submit KYC via /api/kyc/submit first.".to_string(),
+        ));
+    }
+
+    // ── One sponsorship per account ─────────────────────────────────────
+    if state.store.profile_sponsored_at(&wallet).await.is_some() {
+        return Err((
+            StatusCode::CONFLICT,
+            "This account has already received a sponsored profile creation.".to_string(),
+        ));
+    }
+
+    // Validate inputs (same rules as init_profile_tx)
+    if req.username.len() < 3 || req.username.len() > 20 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Username must be 3–20 chars".to_string(),
+        ));
+    }
+    let min_dob = chrono::Utc::now().timestamp() - 567_648_000; // 18 years
+    if req.date_of_birth <= 0 || req.date_of_birth > min_dob {
+        return Err((StatusCode::BAD_REQUEST, "Must be 18+ years old".to_string()));
+    }
+
+    let program_id = state.program_id;
+    let (profile_pda, _) =
+        Pubkey::find_program_address(&[b"profile", wallet_pk.as_ref()], &program_id);
+    let (username_record_pda, _) =
+        Pubkey::find_program_address(&[b"username", req.username.as_bytes()], &program_id);
+
+    let discriminator: [u8; 8] = [0xd2, 0xa2, 0xd4, 0x5f, 0x5f, 0xba, 0x59, 0x77];
+    let mut data = Vec::with_capacity(64);
+    data.extend_from_slice(&discriminator);
+    let un_bytes = req.username.as_bytes();
+    data.extend_from_slice(&(un_bytes.len() as u32).to_le_bytes());
+    data.extend_from_slice(un_bytes);
+    let co_bytes = req.country.as_bytes();
+    data.extend_from_slice(&(co_bytes.len() as u32).to_le_bytes());
+    data.extend_from_slice(co_bytes);
+    data.extend_from_slice(&req.date_of_birth.to_le_bytes());
+
+    let accounts = vec![
+        AccountMeta::new(profile_pda, false),
+        AccountMeta::new(username_record_pda, false),
+        AccountMeta::new(wallet_pk, true),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+    let init_ix = Instruction {
+        program_id,
+        accounts,
+        data,
+    };
+
+    // discriminator(8) + PlayerProfile::INIT_SPACE(257). The username_record
+    // account struct constraint is `space = 8 + UsernameRecord::LEN`, and
+    // UsernameRecord::LEN (48) already includes its own discriminator — so
+    // the real allocated space is 56, not 48 (verified against a live
+    // ProgramTest run in programs/xfchess-game/tests/init_profile_sponsored_tests.rs,
+    // which failed on-chain with "insufficient lamports" before this fix).
+    // Kept in sync manually since the backend doesn't depend on the program
+    // crate — see programs/xfchess-game/src/state/{player_profile.rs,username_record.rs}.
+    const PROFILE_SPACE: usize = 8 + 257;
+    const USERNAME_RECORD_SPACE: usize = 8 + 48;
+
+    let rpc = std::sync::Arc::clone(&state.solana_rpc);
+    let (rent_lamports, recent_blockhash) = tokio::task::spawn_blocking(move || {
+        let profile_rent = rpc
+            .get_minimum_balance_for_rent_exemption(PROFILE_SPACE)
+            .map_err(|e| e.to_string())?;
+        let username_rent = rpc
+            .get_minimum_balance_for_rent_exemption(USERNAME_RECORD_SPACE)
+            .map_err(|e| e.to_string())?;
+        let blockhash = rpc.get_latest_blockhash().map_err(|e| e.to_string())?;
+        Ok::<_, String>((profile_rent + username_rent, blockhash))
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC error: {e}")))?;
+
+    let fee_payer = state.feepayer.next();
+    let transfer_ix = system_instruction::transfer(&fee_payer.pubkey(), &wallet_pk, rent_lamports);
+
+    let message = Message::new(&[transfer_ix, init_ix], Some(&fee_payer.pubkey()));
+    let mut transaction = Transaction::new_unsigned(message);
+    transaction
+        .try_partial_sign(&[fee_payer], recent_blockhash)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("partial sign: {e}"),
+            )
+        })?;
+
+    let tx_bytes = bincode::serialize(&transaction)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {e}")))?;
+    let tx_b64 = general_purpose::STANDARD.encode(&tx_bytes);
+
+    let now = chrono::Utc::now().timestamp();
+    if let Err(e) = state.store.mark_profile_sponsored(&wallet, now).await {
+        tracing::warn!(
+            "[Auth] Failed to record profile sponsorship for {}: {}",
+            wallet,
+            e
+        );
+    }
+
+    info!(
+        "[Auth] Built sponsored init_profile_tx for {} username={} rent_lamports={}",
+        wallet_pk, req.username, rent_lamports
+    );
+    Ok(Json(InitProfileSponsoredResp {
         tx_b64,
         profile_pda: profile_pda.to_string(),
     }))

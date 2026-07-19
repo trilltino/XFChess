@@ -180,6 +180,10 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_019 = include_str!("../../migrations/019_job_queue.sql");
     run_script(&pools.session_pool, migration_019, "019").await?;
 
+    // ── Migration 020: casual games + sponsored profile-creation guard ───────
+    let migration_020 = include_str!("../../migrations/020_casual_games_and_sponsorship.sql");
+    run_script(&pools.session_pool, migration_020, "020").await?;
+
     info!("[Database] All migrations completed successfully");
     Ok(())
 }

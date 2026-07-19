@@ -437,21 +437,13 @@ pub(super) fn render_spectator_popup(
         >,
     >,
 ) {
-    let accent_color = egui::Color32::from_rgb(173, 92, 47);
-
     egui::Window::new("Spectator Mode")
         .collapsible(false)
         .resizable(false)
         .fixed_size(egui::Vec2::new(520.0, 380.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .title_bar(false)
-        .frame(egui::Frame {
-            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
-            corner_radius: egui::CornerRadius::same(4),
-            stroke: egui::Stroke::new(2.0, BEZEL_GREY),
-            inner_margin: egui::Margin::same(16),
-            ..egui::Frame::NONE
-        })
+        .frame(crate::ui::styles::StyledPanel::popup())
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
@@ -533,7 +525,7 @@ pub(super) fn render_spectator_popup(
             if ui.add_sized(
                 [ui.available_width(), 36.0],
                 egui::Button::new(egui::RichText::new("Close").size(14.0).color(egui::Color32::WHITE).strong())
-                    .fill(accent_color)
+                    .fill(crate::ui::styles::UiColors::ACCENT)
                     .corner_radius(4.0),
             ).clicked() {
                 competitive.show_spectator_popup = false;
@@ -723,10 +715,17 @@ fn render_create_tab(
             ("30 min", 1800, 0),
         ] {
             let selected = lobby.time_control_base == base && lobby.time_control_inc == inc;
-            if ui.selectable_label(selected, label).clicked() {
+            let response = crate::ui::styles::StyledButton::chip(
+                ui,
+                label,
+                selected,
+                egui::Vec2::new(0.0, 28.0),
+            );
+            if response.clicked() {
                 lobby.time_control_base = base;
                 lobby.time_control_inc = inc;
             }
+            ui.add_space(3.0);
         }
     });
 
@@ -741,12 +740,17 @@ fn render_create_tab(
                 EloMatchPref::Expanded,
                 EloMatchPref::Any,
             ] {
-                if ui
-                    .selectable_label(lobby.elo_pref == pref, pref.label())
-                    .clicked()
-                {
+                let selected = lobby.elo_pref == pref;
+                let response = crate::ui::styles::StyledButton::chip(
+                    ui,
+                    pref.label(),
+                    selected,
+                    egui::Vec2::new(0.0, 28.0),
+                );
+                if response.clicked() {
                     lobby.elo_pref = pref;
                 }
+                ui.add_space(3.0);
             }
         });
         Layout::small_space(ui);
@@ -1674,23 +1678,13 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                 ] {
                     let chip_val = value.map(|s| s.to_string());
                     let selected = current_filter == chip_val;
-                    let fill = if selected {
-                        egui::Color32::from_rgb(60, 120, 200)
-                    } else {
-                        egui::Color32::from_rgba_unmultiplied(60, 60, 80, 180)
-                    };
-                    let stroke = if selected {
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 160, 255))
-                    } else {
-                        egui::Stroke::new(1.0, egui::Color32::from_gray(80))
-                    };
-                    if ui.add(
-                        egui::Button::new(egui::RichText::new(*label).size(11.0).color(egui::Color32::WHITE))
-                            .fill(fill)
-                            .stroke(stroke)
-                            .corner_radius(10.0)
-                            .min_size(egui::vec2(58.0, 22.0)),
-                    ).clicked() {
+                    let response = crate::ui::styles::StyledButton::chip(
+                        ui,
+                        label,
+                        selected,
+                        egui::vec2(58.0, 24.0),
+                    );
+                    if response.clicked() {
                         if let Some(ref mut tc) = ctx.tournament_client {
                             tc.status_filter = chip_val.clone();
                         }
@@ -2196,11 +2190,22 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
     // (The welcome card moved to the startup main menu — see render_welcome_panel.)
     ui.vertical_centered(|ui| {
         ui.heading(
-            egui::RichText::new("Create Game")
-                .size(24.0)
-                .color(egui::Color32::from_rgb(100, 200, 255))
-                .strong(),
+            egui::RichText::new(if ctx.p2p_host.direct_mode {
+                "Direct Connection — Host"
+            } else {
+                "Create Game"
+            })
+            .size(24.0)
+            .color(egui::Color32::from_rgb(100, 200, 255))
+            .strong(),
         );
+        if ctx.p2p_host.direct_mode {
+            ui.label(
+                egui::RichText::new("Not listed anywhere — only whoever you give your ID to can join.")
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
+            );
+        }
         ui.add_space(16.0);
 
         ui.group(|ui| {
@@ -2241,17 +2246,17 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
                 ] {
                     let selected = ctx.p2p_host.base_time_minutes == base_min
                         && ctx.p2p_host.increment_seconds == inc_sec;
-                    let btn = egui::Button::new(egui::RichText::new(label).size(13.0)).fill(
-                        if selected {
-                            egui::Color32::from_rgb(40, 120, 200)
-                        } else {
-                            egui::Color32::from_rgb(40, 40, 50)
-                        },
+                    let response = crate::ui::styles::StyledButton::chip(
+                        ui,
+                        label,
+                        selected,
+                        egui::Vec2::new(0.0, 28.0),
                     );
-                    if ui.add(btn).clicked() {
+                    if response.clicked() {
                         ctx.p2p_host.base_time_minutes = base_min;
                         ctx.p2p_host.increment_seconds = inc_sec;
                     }
+                    ui.add_space(3.0);
                 }
             });
 
@@ -2341,45 +2346,53 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
                     })
                     .unwrap_or_default();
 
-                // Register with the host-side relay poller so we detect joiners via HTTP
-                if let Some(ref mut vps) = ctx.p2p_vps_state {
-                    vps.hosting_game_id = Some(game_id.clone());
-                    vps.hosting_node_id = Some(host_node_id.clone());
-                    vps.host_poll_last = None; // trigger immediately
-                    vps.hosting_stake_amount = 0.0;
-                    vps.hosting_base_secs = (ctx.p2p_host.base_time_minutes * 60) as u32;
-                    vps.hosting_inc = ctx.p2p_host.increment_seconds;
-                    vps.pending_joiner = None; // clear any stale joiner from previous session
-                }
-                {
-                    let gid = game_id.clone();
-                    let nid = host_node_id.clone();
-                    let dn = display_name.clone();
-                    let stake = 0.0_f64;
-                    let base_secs = (ctx.p2p_host.base_time_minutes * 60) as u32;
-                    let inc = ctx.p2p_host.increment_seconds as u16;
-                    std::thread::spawn(move || {
-                        match crate::multiplayer::vps_client::p2p_announce_game(
-                            gid,
-                            &nid,
-                            &dn,
-                            stake,
-                            "P2P",
-                            base_secs,
-                            inc,
-                            Some(dn.clone()),
-                            None,
-                            None,
-                        ) {
-                            Ok(()) => info!("[LOBBY] P2P game announced to VPS relay"),
-                            Err(e) => warn!("[LOBBY] P2P announce failed: {}", e),
-                        }
-                    });
+                // Direct Connection hosts skip the VPS-backed public lobby
+                // directory entirely — nothing is announced or discoverable;
+                // the host shares their raw node ID out of band instead.
+                if !ctx.p2p_host.direct_mode {
+                    // Register with the host-side relay poller so we detect joiners via HTTP
+                    if let Some(ref mut vps) = ctx.p2p_vps_state {
+                        vps.hosting_game_id = Some(game_id.clone());
+                        vps.hosting_node_id = Some(host_node_id.clone());
+                        vps.host_poll_last = None; // trigger immediately
+                        vps.hosting_stake_amount = 0.0;
+                        vps.hosting_base_secs = (ctx.p2p_host.base_time_minutes * 60) as u32;
+                        vps.hosting_inc = ctx.p2p_host.increment_seconds;
+                        vps.pending_joiner = None; // clear any stale joiner from previous session
+                    }
+                    {
+                        let gid = game_id.clone();
+                        let nid = host_node_id.clone();
+                        let dn = display_name.clone();
+                        let stake = 0.0_f64;
+                        let base_secs = (ctx.p2p_host.base_time_minutes * 60) as u32;
+                        let inc = ctx.p2p_host.increment_seconds as u16;
+                        std::thread::spawn(move || {
+                            match crate::multiplayer::vps_client::p2p_announce_game(
+                                gid,
+                                &nid,
+                                &dn,
+                                stake,
+                                "P2P",
+                                base_secs,
+                                inc,
+                                Some(dn.clone()),
+                                None,
+                                None,
+                            ) {
+                                Ok(()) => info!("[LOBBY] P2P game announced to VPS relay"),
+                                Err(e) => warn!("[LOBBY] P2P announce failed: {}", e),
+                            }
+                        });
+                    }
                 }
 
                 info!(
-                    "[LOBBY] Hosting P2P game: {} ({} + {})",
-                    game_id, ctx.p2p_host.base_time_minutes, ctx.p2p_host.increment_seconds
+                    "[LOBBY] Hosting P2P game: {} ({} + {}) direct_mode={}",
+                    game_id,
+                    ctx.p2p_host.base_time_minutes,
+                    ctx.p2p_host.increment_seconds,
+                    ctx.p2p_host.direct_mode
                 );
 
                 // Transition to Waiting Screen
@@ -2403,12 +2416,15 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
 }
 
 pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
-    // Heartbeat: keep the lobby alive on the backend every 60 seconds.
-    let should_heartbeat = ctx
-        .p2p_host
-        .last_heartbeat
-        .map(|t| t.elapsed().as_secs() >= 60)
-        .unwrap_or(false); // announce just happened, first heartbeat at 60s
+    // Heartbeat: keep the lobby alive on the backend every 60 seconds. Direct
+    // Connection hosts were never announced to the VPS lobby directory in
+    // the first place, so there's nothing to keep alive there.
+    let should_heartbeat = !ctx.p2p_host.direct_mode
+        && ctx
+            .p2p_host
+            .last_heartbeat
+            .map(|t| t.elapsed().as_secs() >= 60)
+            .unwrap_or(false); // announce just happened, first heartbeat at 60s
     if should_heartbeat {
         if let Some(game_id) = ctx.p2p_host.game_id.clone() {
             let node_id = ctx
@@ -2438,32 +2454,59 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
         );
         ui.add_space(20.0);
 
-        ui.label(
-            egui::RichText::new("Your game is now visible in the lobby.")
-                .size(14.0)
-                .color(egui::Color32::WHITE),
-        );
-        ui.add_space(8.0);
-
-        if let Some(game_id) = ctx.p2p_host.game_id.clone() {
+        if ctx.p2p_host.direct_mode {
+            ui.label(
+                egui::RichText::new("Send this ID to your friend so they can join you.")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE),
+            );
+            ui.add_space(8.0);
+            let node_id = crate::multiplayer::network::identity::node_id_b58();
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("Code: {}", game_id))
+                    egui::RichText::new(&node_id)
                         .size(12.0)
                         .color(egui::Color32::GRAY)
                         .monospace(),
                 );
                 if ui
                     .small_button("Copy")
-                    .on_hover_text("Copy game code to clipboard")
+                    .on_hover_text("Copy your node ID to clipboard")
                     .clicked()
                 {
                     ui.output_mut(|o| {
-                        o.commands
-                            .push(egui::OutputCommand::CopyText(game_id.clone()))
+                        o.commands.push(egui::OutputCommand::CopyText(node_id.clone()))
                     });
                 }
             });
+        } else {
+            ui.label(
+                egui::RichText::new("Your game is now visible in the lobby.")
+                    .size(14.0)
+                    .color(egui::Color32::WHITE),
+            );
+            ui.add_space(8.0);
+
+            if let Some(game_id) = ctx.p2p_host.game_id.clone() {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Code: {}", game_id))
+                            .size(12.0)
+                            .color(egui::Color32::GRAY)
+                            .monospace(),
+                    );
+                    if ui
+                        .small_button("Copy")
+                        .on_hover_text("Copy game code to clipboard")
+                        .clicked()
+                    {
+                        ui.output_mut(|o| {
+                            o.commands
+                                .push(egui::OutputCommand::CopyText(game_id.clone()))
+                        });
+                    }
+                });
+            }
         }
         ui.add_space(30.0);
 

@@ -65,6 +65,7 @@ pub enum NewMenuPanel {
     Tournaments,
     SolanaMultiplayer,
     SolanaConnect,
+    DirectConnection,
     HowToPlay,
     Settings,
     Profile,
@@ -79,9 +80,10 @@ impl NewMenuPanel {
             Self::Tournaments => 3,
             Self::SolanaMultiplayer => 4,
             Self::SolanaConnect => 5,
-            Self::HowToPlay => 6,
-            Self::Settings => 7,
-            Self::Profile => 8,
+            Self::DirectConnection => 6,
+            Self::HowToPlay => 7,
+            Self::Settings => 8,
+            Self::Profile => 9,
         }
     }
 }
@@ -466,13 +468,7 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             .resizable(false)
             .fixed_size(egui::Vec2::new(300.0, 120.0))
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .frame(egui::Frame {
-                fill: egui::Color32::from_rgba_unmultiplied(18, 18, 18, 250),
-                corner_radius: egui::CornerRadius::same(6),
-                stroke: egui::Stroke::new(1.5, egui::Color32::from_rgb(60, 60, 60)),
-                inner_margin: egui::Margin::same(24),
-                ..Default::default()
-            })
+            .frame(crate::ui::styles::StyledPanel::popup())
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.label(
@@ -538,6 +534,7 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                 NewMenuPanel::Puzzles => render_puzzles_panel(ui, cx),
                 NewMenuPanel::Tournaments => render_tournaments_panel(ui, cx),
                 NewMenuPanel::SolanaConnect => render_solana_connect_panel(ui, cx),
+                NewMenuPanel::DirectConnection => render_direct_connection_panel(ui, cx),
                 NewMenuPanel::HowToPlay => render_how_to_play_panel(ui, cx),
                 NewMenuPanel::Settings => render_settings_panel(ui, cx),
                 NewMenuPanel::Profile => render_profile_panel(ui, cx),
@@ -989,6 +986,7 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     if item(ui, "Create Lobby", W) {
         play_click(&mut cx.commands, snd);
+        cx.p2p_host.direct_mode = false;
         cx.menu_state.set(MenuState::HostConfig);
     }
     ui.add_space(SP);
@@ -1007,6 +1005,17 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         play_click(&mut cx.commands, snd);
         cx.competitive_menu.show_spectator_popup = true;
     }
+    ui.add_space(SP);
+
+    if item_expandable_tip(
+        ui,
+        "Direct Connection",
+        "This works by using an ID. You copy it and send it to your friend — no login, no lobby list.",
+        W,
+    ) {
+        play_click(&mut cx.commands, snd);
+        *cx.new_menu_panel = NewMenuPanel::DirectConnection;
+    }
     ui.add_space(SP + 4.0);
 
     if item_expandable(ui, "Tournaments", W) {
@@ -1018,6 +1027,139 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     if item_expandable(ui, "Solana Multiplayer", W) {
         play_click(&mut cx.commands, snd);
         *cx.new_menu_panel = NewMenuPanel::SolanaConnect;
+    }
+}
+
+/// Raw node-ID P2P connection — no account, no login, not listed anywhere.
+/// Distinct from "Create Lobby"/"Join Lobby" above, which go through the
+/// VPS-backed public lobby directory. This is chess-player language, not
+/// programmer language: "This works by using an ID. You copy it and send it
+/// to your friend." See docs/plans/identity-implementation-plan.md.
+fn render_direct_connection_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
+    const W: f32 = 280.0;
+
+    ui.horizontal(|ui| {
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
+            )
+            .clicked()
+        {
+            play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+            *cx.new_menu_panel = NewMenuPanel::PlayOnline;
+        }
+        ui.label(
+            egui::RichText::new("Direct Connection")
+                .size(10.0)
+                .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160))
+                .family(egui::FontFamily::Proportional)
+                .strong(),
+        );
+    });
+    ui.add_space(10.0);
+
+    ui.label(
+        egui::RichText::new(
+            "Play a friend directly — no account, no lobby list. One of you hosts and shares an ID; the other pastes it in to connect.",
+        )
+        .size(12.0)
+        .color(egui::Color32::from_rgb(200, 200, 215)),
+    );
+    ui.add_space(16.0);
+
+    let snd = cx.menu_sounds.as_deref();
+
+    ui.label(
+        egui::RichText::new("HOST")
+            .size(11.0)
+            .color(egui::Color32::from_rgb(120, 220, 140))
+            .strong(),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new("Start a game and get an ID to send to your friend.")
+            .size(11.0)
+            .color(egui::Color32::from_rgb(160, 160, 175)),
+    );
+    ui.add_space(6.0);
+    if item(ui, "Host a Game", W) {
+        play_click(&mut cx.commands, snd);
+        cx.p2p_host.direct_mode = true;
+        cx.menu_state.set(MenuState::HostConfig);
+    }
+
+    ui.add_space(20.0);
+    ui.label(
+        egui::RichText::new("JOIN")
+            .size(11.0)
+            .color(egui::Color32::from_rgb(120, 180, 255))
+            .strong(),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new("Paste the ID your friend sent you.")
+            .size(11.0)
+            .color(egui::Color32::from_rgb(160, 160, 175)),
+    );
+    ui.add_space(6.0);
+
+    if let Some(p2p_ui) = cx.p2p_ui.as_mut() {
+        ui.add(
+            egui::TextEdit::singleline(&mut p2p_ui.peer_input)
+                .hint_text("Friend's node ID")
+                .desired_width(W),
+        );
+        ui.add_space(8.0);
+
+        if let Some(err) = &p2p_ui.error_message {
+            ui.label(
+                egui::RichText::new(err)
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(240, 120, 120)),
+            );
+            ui.add_space(6.0);
+        }
+
+        if item(ui, "Connect", W) {
+            play_click(&mut cx.commands, snd);
+            match p2p_ui.validate_node_id() {
+                Ok(()) => {
+                    p2p_ui.clear_error();
+                    let peer_node_id = p2p_ui.peer_input.trim().to_string();
+                    if let Some(connect_events) = cx.connect_events.as_mut() {
+                        connect_events.write(crate::multiplayer::network::p2p::ConnectToPeerEvent {
+                            peer_node_id,
+                        });
+                    }
+                }
+                Err(e) => p2p_ui.set_error(e),
+            }
+        }
+    }
+
+    if let Some(p2p_state) = cx.p2p_state.as_ref() {
+        let status_text = match &p2p_state.status {
+            crate::multiplayer::network::p2p::P2PConnectionStatus::Connecting => {
+                Some(("Connecting…", egui::Color32::GOLD))
+            }
+            crate::multiplayer::network::p2p::P2PConnectionStatus::Connected => {
+                Some(("Connected!", egui::Color32::from_rgb(120, 220, 140)))
+            }
+            crate::multiplayer::network::p2p::P2PConnectionStatus::Error(msg) => {
+                Some((msg.as_str(), egui::Color32::from_rgb(240, 120, 120)))
+            }
+            _ => None,
+        };
+        if let Some((text, color)) = status_text {
+            ui.add_space(10.0);
+            ui.label(egui::RichText::new(text).size(12.0).color(color));
+        }
     }
 }
 
@@ -1074,7 +1216,14 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.add_space(4.0);
     if item(ui, "Solve Puzzles", W) {
         play_click(&mut cx.commands, snd);
-        let wallet = cx.player_identity.pubkey_str.clone().unwrap_or_default();
+        // No reward in Solve mode, so Guests can play too — fall back to the
+        // local node ID as an identifier when there's no wallet/account.
+        let wallet = cx
+            .player_identity
+            .pubkey_str
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(crate::multiplayer::network::identity::node_id_b58);
         cx.commands
             .insert_resource(crate::puzzle::PendingPuzzleRequest {
                 mode: crate::puzzle::PuzzleMode::Solve,
@@ -1519,6 +1668,32 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         });
         ui.add_space(2.0);
 
+        // Lichess ELO — a distinct, clearly-labeled second stat. Never
+        // merged with the on-chain ELO above.
+        if let Some(lichess_elo) = cx.player_identity.lichess_elo {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("LICHESS")
+                        .size(9.0)
+                        .color(egui::Color32::from_rgb(120, 140, 170)),
+                );
+                ui.label(
+                    egui::RichText::new(lichess_elo.to_string())
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(200, 255, 220))
+                        .strong(),
+                );
+                if cx.player_identity.lichess_verified {
+                    ui.label(
+                        egui::RichText::new("✓")
+                            .size(10.0)
+                            .color(egui::Color32::from_rgb(120, 220, 140)),
+                    );
+                }
+            });
+            ui.add_space(2.0);
+        }
+
         // Country
         if let Some(ref country) = cx.player_identity.country {
             ui.horizontal(|ui| {
@@ -1585,6 +1760,57 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                     }
                 }
             });
+        }
+
+        // Connect Lichess — links the on-chain profile to a Lichess account
+        // via the backend's existing PKCE OAuth flow (backend/src/signing/routes/lichess_oauth.rs).
+        // The backend's own callback page completes the exchange server-side
+        // and this game client just needs to open the browser; the next
+        // periodic /auth/me poll picks up the new lichess_blitz/verified
+        // fields once linking finishes — no dedicated listener needed here.
+        if cx.player_identity.lichess_elo.is_none() {
+            ui.add_space(SP);
+            if ui
+                .add_sized(
+                    [W, 34.0],
+                    egui::Button::new(
+                        egui::RichText::new("Connect Lichess")
+                            .size(11.0)
+                            .color(egui::Color32::WHITE)
+                            .strong()
+                            .family(egui::FontFamily::Proportional),
+                    )
+                    .fill(egui::Color32::from_rgb(30, 90, 60))
+                    .corner_radius(6.0),
+                )
+                .clicked()
+            {
+                play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+                if let Some(pubkey) = cx.wallet_bridge.known_pubkey.clone() {
+                    let base = crate::multiplayer::network::vps::vps_base();
+                    std::thread::spawn(move || {
+                        let client = reqwest::blocking::Client::new();
+                        // Base58 pubkeys are alphanumeric only — no percent-encoding needed.
+                        let url = format!("{base}/api/auth/lichess/init?wallet_pubkey={pubkey}");
+                        match client
+                            .get(url)
+                            .send()
+                            .and_then(|r| r.json::<serde_json::Value>())
+                        {
+                            Ok(body) => {
+                                if let Some(auth_url) = body["auth_url"].as_str() {
+                                    let _ = webbrowser::open(auth_url);
+                                } else {
+                                    tracing::warn!(
+                                        "[Lichess] /init response missing auth_url: {body}"
+                                    );
+                                }
+                            }
+                            Err(e) => tracing::warn!("[Lichess] /init request failed: {e}"),
+                        }
+                    });
+                }
+            }
         }
 
         ui.add_space(SP + 6.0);

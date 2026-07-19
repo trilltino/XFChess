@@ -49,7 +49,7 @@ pub fn spawn_background_tasks(
         config.program_id.clone(),
         config.solana_rpc_url.clone(),
         state.vps_authority.clone(),
-        state.host_treasury_pubkey,
+        state.tournament_fee_recipient,
     ));
     let trigger_tx = spawn_tournament_scheduler(tournament_store, gossip, on_chain);
     info!("[Tasks] Tournament scheduler spawned with async-fill and gossip broadcast");

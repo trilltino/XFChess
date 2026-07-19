@@ -101,7 +101,7 @@ pub struct AppState {
     pub tournament_store: Arc<TournamentStore>,
     pub swiss_service: Arc<SwissService>,
     pub tournament_gossip: Arc<TournamentGossipService>,
-    pub host_treasury_pubkey: Pubkey,
+    pub tournament_fee_recipient: Pubkey,
     pub usdc_mint_pubkey: Pubkey,
     pub pyth_oracle: Arc<PythOracle>,
     pub rate_cache: crate::signing::routes::rates::RateCache,
@@ -258,8 +258,8 @@ impl AppState {
         ));
 
         // Parse host treasury and USDC mint pubkeys
-        let host_treasury_pubkey = Pubkey::from_str(&config.host_treasury_pubkey)
-            .expect("Invalid host_treasury_pubkey in config");
+        let tournament_fee_recipient = Pubkey::from_str(&config.tournament_fee_recipient)
+            .expect("Invalid tournament_fee_recipient in config");
         let usdc_mint_pubkey =
             Pubkey::from_str(&config.usdc_mint_pubkey).expect("Invalid usdc_mint_pubkey in config");
 
@@ -297,7 +297,7 @@ impl AppState {
             tournament_store,
             swiss_service,
             tournament_gossip,
-            host_treasury_pubkey,
+            tournament_fee_recipient,
             usdc_mint_pubkey,
             pyth_oracle,
             rate_cache,
