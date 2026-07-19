@@ -8,9 +8,9 @@
 
 XFChess is a forever-free, open source 3D chess platform built with Rust, Bevy, Solana, MagicBlock, and Iroh/Braid networking. It supports local play, online multiplayer, tournaments, Solana-backed game state, wager escrow, session keys, spectators, and observability tooling.
 
-![Gameplay Screenshot](assets/screenshot_1.png)
-![Tournament Interface](assets/screenshot_2.png)
-![Multiplayer Match](assets/screenshot_3.png)
+![Gameplay Screenshot](docs/images/screenshot_1.png)
+![Tournament Interface](docs/images/screenshot_2.png)
+![Multiplayer Match](docs/images/screenshot_3.png)
 
 ## Docs
 

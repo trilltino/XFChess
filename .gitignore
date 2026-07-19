@@ -50,9 +50,13 @@ dist/
 build/
 release/
 
-# Stale committed web build at repo root (frontend is built fresh by CI / deploy.ps1)
+# Stale web build at repo root (frontend is built fresh by CI / deploy.ps1)
 /index.html
-/assets/
+
+# Bevy game assets (audio/fonts/models/pieces + icon/menu_click) are tracked via Git LFS
+# — see .gitattributes. Only ignore stray build output that used to land here.
+/assets/*.js
+/assets/*.css
 
 # Anchor
 .anchor/
