@@ -21,13 +21,14 @@ pub struct BraidIrohState {
     pub node_name: String,
 }
 
-/// Helper function to configure and spawn a Braid-Iroh Node
+/// Helper function to configure and spawn a Braid-Iroh Node.
+/// Callers subscribe to their real topics via `state.peer.subscribe(...)`.
 pub async fn spawn_node(
     name: &str,
     port: Option<u16>,
     secret_key_override: Option<iroh::SecretKey>,
     discovery: DiscoveryConfig,
-) -> anyhow::Result<(Arc<BraidIrohState>, iroh_gossip::api::GossipReceiver)> {
+) -> anyhow::Result<Arc<BraidIrohState>> {
     let secret_key = if let Some(sk) = secret_key_override {
         sk
     } else {
@@ -60,19 +61,13 @@ pub async fn spawn_node(
 
     tracing::info!("[INIT] Node ID: {}", peer_id);
 
-    // Initial default subscription (generic, no bootsrap peers yet)
-    let rx = peer
-        .subscribe("/demo-doc", vec![])
-        .await
-        .map_err(|e| anyhow::anyhow!("Subscribe failed: {}", e))?;
-
     let state = Arc::new(BraidIrohState {
         peer,
         node_id: format!("{}", peer_id),
         node_name: name.to_string(),
     });
 
-    Ok((state, rx))
+    Ok(state)
 }
 
 /// Helper to predictably derive keys for "alice" and "bob" or hash other names

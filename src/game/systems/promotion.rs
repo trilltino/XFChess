@@ -44,6 +44,9 @@ fn apply_selected_promotion(
                         MeshMaterial3d(material),
                         Transform::from_scale(Vec3::splat(PIECE_MESH_SCALE)),
                         bevy::picking::Pickable::default(),
+                        bevy::camera::visibility::RenderLayers::layer(
+                            crate::game::systems::camera::BOARD_LAYER,
+                        ),
                     ));
                 }
                 _ => {}

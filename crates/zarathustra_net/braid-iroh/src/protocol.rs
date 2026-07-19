@@ -59,34 +59,24 @@ async fn handle_get(
     // Check for Subscribe header (Subscription 209 Demo)
     if let Some(val) = headers.get("subscribe") {
         if val == "true" {
-            println!("[PROTOCOL] Received Subscribe request for {}", url);
+            tracing::debug!(url = url.as_str(), "received Subscribe request");
 
             // Try to get current content to send as initial state (latest version)
             let resources = state.resources.read().await;
-            println!(
-                "[PROTOCOL] Looking for resource in store, available keys: {:?}",
-                resources.keys().collect::<Vec<_>>()
-            );
+            tracing::trace!(keys = ?resources.keys().collect::<Vec<_>>(), "resource store keys");
             let initial_content = if let Some(history) = resources.get(&url) {
-                println!(
-                    "[PROTOCOL] Found history with {} entries for {}",
-                    history.len(),
-                    url
-                );
+                tracing::debug!(url = url.as_str(), entries = history.len(), "found history");
                 if let Some(latest) = history.last() {
                     let content = serde_json::to_string(latest).unwrap_or_default();
-                    println!(
-                        "[PROTOCOL] Sending initial content (len: {})",
-                        content.len()
-                    );
+                    tracing::debug!(len = content.len(), "sending initial content");
                     content
                 } else {
-                    println!("[PROTOCOL] History empty for {}", url);
+                    tracing::debug!(url = url.as_str(), "history empty");
                     String::new()
                 }
             } else {
                 // Empty initial state
-                println!("[PROTOCOL] Resource not found: {}", url);
+                tracing::debug!(url = url.as_str(), "resource not found");
                 String::new()
             };
 
@@ -161,23 +151,28 @@ async fn handle_put(
 ) -> impl IntoResponse {
     let url = format!("/{}", resource);
 
-    // Debug logging for Braid format
-    println!("\nINCOMING BRAID PUT:");
-    println!("PUT {} HTTP/3", url);
-    for (name, value) in &headers {
-        if name.as_str().starts_with("version")
-            || name.as_str().starts_with("parents")
-            || name.as_str().starts_with("merge-type")
-            || name.as_str().starts_with("content-type")
-            || name.as_str().starts_with("content-range")
-            || name.as_str().starts_with("braid-")
-        {
-            println!("{}: {}", name, value.to_str().unwrap_or("???"));
-        }
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        let braid_headers: Vec<(String, String)> = headers
+            .iter()
+            .filter(|(name, _)| {
+                let n = name.as_str();
+                n.starts_with("version")
+                    || n.starts_with("parents")
+                    || n.starts_with("merge-type")
+                    || n.starts_with("content-type")
+                    || n.starts_with("content-range")
+                    || n.starts_with("braid-")
+            })
+            .map(|(name, value)| {
+                (
+                    name.to_string(),
+                    value.to_str().unwrap_or("???").to_string(),
+                )
+            })
+            .collect();
+        tracing::debug!(url = url.as_str(), headers = ?braid_headers, "incoming braid PUT");
+        tracing::trace!(body = %body, "PUT body");
     }
-    println!();
-    println!("{}", body);
-    println!("----------------------------------------\n");
 
     // Parse the incoming update from headers
     let version = headers

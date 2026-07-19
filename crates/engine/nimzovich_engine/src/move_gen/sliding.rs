@@ -27,6 +27,12 @@ use crate::types::*;
 /// `dir_start..dir_end` selects which directions to use:
 ///   - Rook:   0..4  (orthogonal)
 ///   - Bishop: 4..8  (diagonal)
+///
+/// When `noisy_only` is set, only the capture on the blocking square (if
+/// any) is emitted — the empty squares along the way to it are skipped
+/// entirely, and rays with no blocker (nothing to capture) are skipped too.
+/// Used by quiescence search so it doesn't have to generate every quiet
+/// slide and then throw it away.
 pub fn generate_sliding_moves(
     game: &Game,
     from: i8,
@@ -34,6 +40,7 @@ pub fn generate_sliding_moves(
     dir_start: usize,
     dir_end: usize,
     moves: &mut Vec<KK>,
+    noisy_only: bool,
 ) {
     let occupancy = game.occupied.0;
 
@@ -50,7 +57,11 @@ pub fn generate_sliding_moves(
 
         let blockers = occupancy & mask;
         if blockers == 0 {
-            // No blockers, all squares in mask are valid
+            // No blockers on this ray — nothing to capture.
+            if noisy_only {
+                continue;
+            }
+            // All squares in mask are valid quiet moves.
             let mut temp_bb = mask;
             while temp_bb != 0 {
                 let dst = temp_bb.trailing_zeros() as i8;
@@ -90,15 +101,26 @@ pub fn generate_sliding_moves(
                 valid_mask &= upper_mask;
             }
 
-            // Finally, filter out own pieces on the blocker square
-            let mut temp_bb = valid_mask;
-            while temp_bb != 0 {
-                let dst = temp_bb.trailing_zeros() as i8;
-                let dest_piece = game.board[dst as usize];
-                if dest_piece == 0 || !piece_belongs_to(dest_piece, color) {
-                    moves.push(KK::new(from, dst, 0, 0));
+            if noisy_only {
+                // Every square in valid_mask except the blocker itself is
+                // guaranteed empty (that's what "blocker" means) — only the
+                // blocker square can possibly be a capture.
+                let dest_piece = game.board[blocker_sq as usize];
+                if dest_piece != 0 && !piece_belongs_to(dest_piece, color) {
+                    moves.push(KK::new(from, blocker_sq, 0, 0));
                 }
-                temp_bb &= temp_bb - 1;
+            } else {
+                // Filter out own pieces on the blocker square; everything
+                // else in valid_mask is an empty quiet square.
+                let mut temp_bb = valid_mask;
+                while temp_bb != 0 {
+                    let dst = temp_bb.trailing_zeros() as i8;
+                    let dest_piece = game.board[dst as usize];
+                    if dest_piece == 0 || !piece_belongs_to(dest_piece, color) {
+                        moves.push(KK::new(from, dst, 0, 0));
+                    }
+                    temp_bb &= temp_bb - 1;
+                }
             }
         }
     }

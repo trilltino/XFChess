@@ -60,6 +60,10 @@ mod tests {
             game_id: 12345,
             opponent: "opponent_wallet".to_string(),
             is_white: true,
+            matched_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("System time should be after UNIX_EPOCH")
+                .as_secs(),
         };
         assert!(serde_json::to_string(&result).is_ok());
     }

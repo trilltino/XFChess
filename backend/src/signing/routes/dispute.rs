@@ -145,12 +145,13 @@ pub async fn resolve_dispute(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Load dispute_authority keypair
+    // Load dispute_authority keypair — accepts either a JSON file path or a
+    // base58 string, same as every other authority key (see AppState::new).
     let authority_key = env::var("DISPUTE_AUTHORITY_KEYPAIR").map_err(|_| {
         error!("[dispute] DISPUTE_AUTHORITY_KEYPAIR not set");
         StatusCode::SERVICE_UNAVAILABLE
     })?;
-    let authority = solana_sdk::signature::Keypair::from_base58_string(&authority_key);
+    let authority = crate::signing::load_keypair_from_env_value(&authority_key);
 
     // Determine winner pubkey
     let winner: Option<Pubkey> = match req.decision.as_str() {

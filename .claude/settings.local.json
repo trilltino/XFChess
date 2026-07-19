@@ -10,7 +10,9 @@
       "Bash(grep -v \"//\\\\|test\\\\|\\\\.md\")",
       "Skill(claude-api)",
       "Skill(claude-api:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(cargo tree *)",
+      "Bash(xargs wc -l)"
     ]
   }
 }

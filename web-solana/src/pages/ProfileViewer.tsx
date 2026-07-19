@@ -351,7 +351,7 @@ export function ProfileViewer() {
       if (token) {
         try {
           const { username: synced } = await syncProfile(token);
-          localStorage.setItem('xfchess_username', synced);
+          if (synced) localStorage.setItem('xfchess_username', synced);
         } catch (syncErr) {
           console.warn('sync-profile failed (non-critical):', syncErr);
         }

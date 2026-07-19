@@ -283,8 +283,10 @@ pub async fn build_start_tournament_transactions(
         out.push(BASE64_STANDARD.encode(bincode::serialize(&tx)?));
     }
 
-    // Tx batches: initialize_match for every bracket slot
+    // Tx batches: initialize_match for every bracket slot. Round-1 matches
+    // carry their seeded players; later rounds are filled by advance_winner.
     let total_matches = tournament.max_players as usize - 1;
+    let round1_pairs = crate::tasks::tournament_scheduler::round1_pairings(&tournament);
     let mut match_idx = 0u16;
 
     for chunk in std::iter::repeat(())
@@ -299,13 +301,17 @@ pub async fn build_start_tournament_transactions(
                 // index — must match the store and on-chain final_match_index.
                 let (round, next, slot) =
                     crate::signing::solana::bracket_position(tournament.max_players, idx);
+                let (white, black) = round1_pairs
+                    .get(idx as usize)
+                    .cloned()
+                    .unwrap_or((None, None));
                 initialize_match_ix(
                     program_id,
                     tournament_id,
                     idx,
                     round,
-                    None, // players filled by backend via advance/record flows
-                    None,
+                    white.as_ref(),
+                    black.as_ref(),
                     next,
                     slot,
                     &authority.pubkey(),

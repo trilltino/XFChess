@@ -12,21 +12,17 @@ use anchor_spl::token::{self, Token, TokenAccount};
 /// Valid player counts (must be power of 2 for single-elimination, any for Swiss).
 const VALID_PLAYER_COUNTS: [u16; 8] = [2, 4, 8, 16, 32, 64, 128, 256];
 
+// The #[instruction(...)] list must be an in-order PREFIX of the actual
+// instruction args — Anchor deserializes exactly these leading fields inside
+// try_accounts. Skipping args from the middle (e.g. omitting `name` and
+// `entry_fee`) shifts every later field and fails with
+// InstructionDidNotDeserialize (102) before the handler runs.
 #[derive(Accounts)]
 #[instruction(
     tournament_id: u64,
-    max_players: u16,
-    tournament_type: TournamentType,
-    elo_min: u32,
-    elo_max: u32,
-    min_players: u16,
-    prize_shares: [u16; 10],
-    platform_fee: u64,
-    winner_takes_all: bool,
-    host_treasury: Pubkey,
-    usdc_mint: Option<Pubkey>,
-    base_time_seconds: u64,
-    increment_seconds: u16
+    name: String,
+    entry_fee: u64,
+    max_players: u16
 )]
 pub struct InitializeTournament<'info> {
     #[account(

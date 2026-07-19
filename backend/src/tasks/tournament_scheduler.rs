@@ -45,6 +45,37 @@ fn default_min_players(tournament: &TournamentRecord) -> usize {
         .unwrap_or_else(|| tournament.max_players.min(8)) as usize
 }
 
+/// Round-1 pairings for a full single-elimination bracket, in the same
+/// highest-vs-lowest seeding order the store's `generate_bracket` and the
+/// on-chain `start_tournament` use (ELO descending, stable on ties). Returns
+/// an empty vec for Swiss tournaments or non-full brackets — their round-1
+/// on-chain matches are then initialized without players.
+pub fn round1_pairings(
+    tournament: &TournamentRecord,
+) -> Vec<(
+    Option<solana_sdk::pubkey::Pubkey>,
+    Option<solana_sdk::pubkey::Pubkey>,
+)> {
+    use crate::signing::storage::tournament::TournamentFormat;
+
+    if tournament.format != TournamentFormat::SingleElimination
+        || tournament.players.len() != tournament.max_players as usize
+    {
+        return Vec::new();
+    }
+    let mut seeded: Vec<(&str, u32)> = tournament
+        .players
+        .iter()
+        .map(String::as_str)
+        .zip(tournament.player_elos.iter().copied())
+        .collect();
+    seeded.sort_by(|a, b| b.1.cmp(&a.1));
+    let n = seeded.len();
+    (0..n / 2)
+        .map(|i| (seeded[i].0.parse().ok(), seeded[n - 1 - i].0.parse().ok()))
+        .collect()
+}
+
 /// Messages that can trigger tournament actions via Braid pub/sub.
 #[derive(Debug, Clone)]
 pub enum TournamentTrigger {
@@ -285,12 +316,12 @@ impl TournamentScheduler {
     async fn start_tournament(&self, tournament_id: u64) {
         // ── On-chain: start_tournament + initialize_match × N ────────────────
         if let Some(cfg) = &self.on_chain {
-            let max_players = self
-                .store
-                .get(tournament_id)
-                .await
-                .map(|t| t.max_players)
-                .unwrap_or(0);
+            let record = self.store.get(tournament_id).await;
+            let max_players = record.as_ref().map(|t| t.max_players).unwrap_or(0);
+            let round1_pairs = record
+                .as_ref()
+                .map(|t| round1_pairings(t))
+                .unwrap_or_default();
 
             let program_id_str = cfg.program_id.clone();
             let rpc_url = cfg.rpc_url.clone();
@@ -325,19 +356,25 @@ impl TournamentScheduler {
                 // Tx batches: initialize_match (20 per batch). Linear bracket
                 // layout: round 1 first, final at the last index — must match
                 // the store's generate_bracket and on-chain final_match_index.
+                // Round-1 matches carry their seeded players; record_match_result
+                // rejects matches with empty player slots.
                 let mut idx = 0u16;
                 while (idx as usize) < total_matches {
                     let end = ((idx as usize + 20).min(total_matches)) as u16;
                     let ixs: Vec<_> = (idx..end)
                         .map(|i| {
                             let (round, next, slot) = bracket_position(max_players, i);
+                            let (white, black) = round1_pairs
+                                .get(i as usize)
+                                .cloned()
+                                .unwrap_or((None, None));
                             initialize_match_ix(
                                 &program_id,
                                 tournament_id,
                                 i,
                                 round,
-                                None,
-                                None,
+                                white.as_ref(),
+                                black.as_ref(),
                                 next,
                                 slot,
                                 &authority.pubkey(),
@@ -730,4 +767,52 @@ pub fn spawn_scheduled_start_ticker(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signing::storage::tournament::TournamentFormat;
+
+    fn record(n: usize) -> TournamentRecord {
+        let mut t = TournamentRecord::new(1, "t", 0);
+        t.max_players = n as u16;
+        t.format = TournamentFormat::SingleElimination;
+        for i in 0..n {
+            // Real pubkeys so parsing succeeds; descending ELO in insertion order.
+            t.players
+                .push(solana_sdk::pubkey::Pubkey::new_unique().to_string());
+            t.player_elos.push(2000 - i as u32);
+        }
+        t
+    }
+
+    #[test]
+    fn round1_pairings_two_players_single_final() {
+        let t = record(2);
+        let pairs = round1_pairings(&t);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0.unwrap().to_string(), t.players[0]);
+        assert_eq!(pairs[0].1.unwrap().to_string(), t.players[1]);
+    }
+
+    #[test]
+    fn round1_pairings_four_players_high_vs_low() {
+        let t = record(4);
+        let pairs = round1_pairings(&t);
+        assert_eq!(pairs.len(), 2);
+        // Seed 1 vs seed 4, seed 2 vs seed 3.
+        assert_eq!(pairs[0].0.unwrap().to_string(), t.players[0]);
+        assert_eq!(pairs[0].1.unwrap().to_string(), t.players[3]);
+        assert_eq!(pairs[1].0.unwrap().to_string(), t.players[1]);
+        assert_eq!(pairs[1].1.unwrap().to_string(), t.players[2]);
+    }
+
+    #[test]
+    fn round1_pairings_empty_for_partial_bracket() {
+        let mut t = record(4);
+        t.players.pop();
+        t.player_elos.pop();
+        assert!(round1_pairings(&t).is_empty());
+    }
 }

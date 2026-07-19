@@ -28,10 +28,39 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
+use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::signing::AppState;
+
+/// A `prepare`d session older than this with no matching `activate` is
+/// abandoned (wallet never signed) — drop it instead of leaking the
+/// keypair in memory for the life of the process.
+const PENDING_SESSION_TTL: Duration = Duration::from_secs(600);
+const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Periodically evicts stale `prepare`d-but-never-`activate`d sessions.
+pub fn spawn_pending_session_sweep(
+    pending: Arc<Mutex<HashMap<Pubkey, (Keypair, Instant)>>>,
+) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+            let mut sessions = pending.lock().await;
+            let before = sessions.len();
+            sessions.retain(|_, (_, prepared_at)| prepared_at.elapsed() < PENDING_SESSION_TTL);
+            let removed = before - sessions.len();
+            if removed > 0 {
+                info!("[global_session] swept {removed} abandoned pending session(s)");
+            }
+        }
+    });
+}
 
 // ── Route registration ────────────────────────────────────────────────────────
 
@@ -144,7 +173,7 @@ async fn prepare(
     // Store ephemeral keypair in AppState pending-sessions map
     {
         let mut sessions = state.pending_global_sessions.lock().await;
-        sessions.insert(wallet, session_kp);
+        sessions.insert(wallet, (session_kp, Instant::now()));
     }
 
     info!("global_session prepare: wallet={wallet} session={session_pubkey}");
@@ -179,7 +208,7 @@ async fn activate(
     // Promote from pending → active
     let session_kp = {
         let mut sessions = state.pending_global_sessions.lock().await;
-        sessions.remove(&wallet)
+        sessions.remove(&wallet).map(|(kp, _prepared_at)| kp)
     };
     let session_kp = match session_kp {
         Some(kp) => kp,

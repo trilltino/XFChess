@@ -34,8 +34,6 @@ use std::sync::Arc;
 
 #[path = "main_menu/board_animation.rs"]
 mod board_animation;
-#[path = "main_menu/cinematic.rs"]
-mod cinematic;
 #[path = "main_menu/modals.rs"]
 mod modals;
 #[path = "main_menu/music.rs"]
@@ -48,9 +46,9 @@ mod screens;
 use modals::{render_ai_setup_modal, render_controls_popup, render_pgn_input_modal};
 pub use new_menu::NewMenuPanel;
 use new_menu::{
-    menu_escape_system, orbit_camera_system, purge_stale_lights, render_intro_overlay,
-    render_new_style_panel, render_solana_splash, render_wallet_hud, setup_menu_fog,
-    spawn_menu_bg_board, spawn_menu_bg_lights, spawn_menu_bg_pieces,
+    menu_escape_system, orbit_camera_system, purge_stale_lights, render_new_style_panel,
+    render_solana_splash, render_wallet_hud, setup_menu_fog, spawn_menu_bg_board,
+    spawn_menu_bg_lights, spawn_menu_bg_pieces,
 };
 use screens::*;
 
@@ -59,173 +57,6 @@ use screens::*;
 pub enum MenuStyle {
     #[default]
     New,
-}
-
-/// Attract-loop gate for the main menu. While `awaiting_enter` is true the menu
-/// shows only the orbiting board + title + a "Press ENTER" prompt (no buttons,
-/// no welcome card, no cinematic). Pressing Enter clears it and cuts straight
-/// into the Immortal Game cinematic. See `menu_intro_enter_system`.
-#[derive(Resource)]
-pub struct MenuIntro {
-    pub awaiting_enter: bool,
-}
-
-impl Default for MenuIntro {
-    fn default() -> Self {
-        Self {
-            awaiting_enter: true,
-        }
-    }
-}
-
-/// Drives the post-Enter transition: a full-screen black overlay that fades from
-/// opaque to clear over `MENU_INTRO_FADE_SECS`, so the splash dissolves smoothly
-/// into the live main menu instead of cutting instantly. `remaining` counts down
-/// each frame; the overlay is inactive at 0.
-#[derive(Resource, Default)]
-pub struct MenuIntroFade {
-    pub remaining: f32,
-}
-
-/// Duration of the splash → main-menu fade-in, in seconds.
-const MENU_INTRO_FADE_SECS: f32 = 3.0;
-
-/// Run condition: true during the pre-Enter attract loop. Gates the cinematic
-/// showcase so it plays on the attract screen, then goes dormant once the player
-/// presses Enter and the live menu (ambient board + orbit) takes over.
-fn menu_awaiting(intro: Res<MenuIntro>) -> bool {
-    intro.awaiting_enter
-}
-
-/// Attract-loop input: while awaiting, Enter stops the cinematic showcase, tears
-/// down its pieces, and hands the menu back to the ambient `MenuBg` board + orbit
-/// camera. The `xf_animate` mini board keeps running for the whole `MainMenu`
-/// state, so nothing there needs re-arming.
-#[allow(clippy::too_many_arguments)]
-fn menu_intro_enter_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut intro: ResMut<MenuIntro>,
-    mut fade: ResMut<MenuIntroFade>,
-    mut cine: ResMut<cinematic::MenuCinematic>,
-    mut cine_board: ResMut<cinematic::CinematicBoard>,
-    mut anim: ResMut<board_animation::BoardAnimator>,
-    mut orbit: ResMut<new_menu::MenuCameraOrbit>,
-    mut commands: Commands,
-    cam: Res<crate::PersistentEguiCamera>,
-    cine_pieces_q: Query<Entity, With<cinematic::CinematicPiece>>,
-    mut ambient_q: Query<
-        (
-            Entity,
-            &board_animation::MenuBgPieceHome,
-            &mut Transform,
-            &mut Visibility,
-        ),
-        Without<cinematic::CinematicPiece>,
-    >,
-    mut projections: Query<&mut Projection, With<Camera3d>>,
-) {
-    if !intro.awaiting_enter {
-        return;
-    }
-    if !(keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter)) {
-        return;
-    }
-    intro.awaiting_enter = false;
-    // Begin the 3-second fade-in; the instant teardown below happens behind black.
-    fade.remaining = MENU_INTRO_FADE_SECS;
-
-    // 1) Tear down the cinematic showcase: despawn its pieces and go dormant so
-    //    `cinematic_fade_overlay`/`cinematic_camera_system` become no-ops.
-    for e in cine_pieces_q.iter() {
-        commands.entity(e).despawn();
-    }
-    cine_board.board = [[None; 8]; 8];
-    let last_cam_pos = cine.last_cam_pos;
-    *cine = cinematic::MenuCinematic::default();
-    cine.enabled = false; // do not re-arm the showcase once the live menu is up
-
-    // 2) Restore the ambient MenuBg board to its starting position, visible, and
-    //    rebuild the animator's entity map (mirrors the cinematic's own teardown).
-    anim.board = [[None; 8]; 8];
-    for (entity, home, mut transform, mut vis) in ambient_q.iter_mut() {
-        commands
-            .entity(entity)
-            .remove::<board_animation::MenuBgPieceAnim>();
-        transform.translation = Vec3::new(7.0 - home.file as f32, 0.05, home.rank as f32);
-        *vis = Visibility::Visible;
-        anim.board[home.rank as usize][home.file as usize] = Some(entity);
-    }
-    anim.ply_index = 0;
-    anim.move_timer = 3.0;
-    anim.end_pause = 0.0;
-    anim.active = true;
-
-    // 3) Hand the camera back to the orbit, continuing from the cinematic bearing
-    //    for a seamless cut, and restore the perspective projection.
-    orbit.ortho = false;
-    orbit.angle = (last_cam_pos.z - new_menu::BOARD_CENTER.z)
-        .atan2(last_cam_pos.x - new_menu::BOARD_CENTER.x);
-    if let Some(entity) = cam.entity {
-        if let Ok(mut proj) = projections.get_mut(entity) {
-            *proj = Projection::default();
-        }
-    }
-}
-
-/// Reversed reveal of the ambient board *pieces* only. During the attract loop
-/// the Immortal Game cinematic plays on the menu board, so the board surface and
-/// the `MenuBg` lights must stay visible (otherwise the showcase renders in the
-/// dark — see `render_intro_overlay`'s "logo over the orbiting board"). We
-/// therefore hide just the ambient starting pieces (`MenuBgPieceHome`) — the
-/// cinematic spawns its own — and reveal them once Enter hands the menu back to
-/// the ambient board. Lights, board surface, and cinematic pieces are untouched.
-fn apply_intro_board_visibility(
-    intro: Res<MenuIntro>,
-    mut was_awaiting: Local<bool>,
-    mut q: Query<&mut Visibility, With<board_animation::MenuBgPieceHome>>,
-) {
-    if intro.awaiting_enter {
-        for mut v in &mut q {
-            *v = Visibility::Hidden;
-        }
-        *was_awaiting = true;
-    } else if *was_awaiting {
-        for mut v in &mut q {
-            *v = Visibility::Visible;
-        }
-        *was_awaiting = false;
-    }
-}
-
-/// Full-screen black overlay that fades out over `MENU_INTRO_FADE_SECS` after the
-/// player presses Enter, dissolving the splash into the live main menu. Drawn on
-/// top of everything (including the menu UI) and self-disables when done.
-fn menu_intro_fade_overlay(
-    time: Res<Time>,
-    mut fade: ResMut<MenuIntroFade>,
-    mut contexts: EguiContexts,
-) {
-    if fade.remaining <= 0.0 {
-        return;
-    }
-    fade.remaining = (fade.remaining - time.delta_secs()).max(0.0);
-    let alpha = (fade.remaining / MENU_INTRO_FADE_SECS).clamp(0.0, 1.0);
-    let a = (alpha * 255.0) as u8;
-    let Ok(ctx) = contexts.ctx_mut() else {
-        return;
-    };
-    egui::Area::new("menu_intro_fade".into())
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .fixed_pos(egui::pos2(0.0, 0.0))
-        .show(ctx, |ui| {
-            let r = ctx.screen_rect();
-            ui.painter().rect_filled(
-                r,
-                egui::CornerRadius::same(0),
-                egui::Color32::from_black_alpha(a),
-            );
-        });
 }
 
 /// Plugin for main menu state.
@@ -239,10 +70,6 @@ impl Plugin for MainMenuPlugin {
             .init_resource::<new_menu::NewMenuPanel>()
             .init_resource::<new_menu::MenuExitConfirm>()
             .init_resource::<board_animation::BoardAnimator>()
-            .init_resource::<cinematic::MenuCinematic>()
-            .init_resource::<cinematic::CinematicBoard>()
-            .init_resource::<MenuIntro>()
-            .init_resource::<MenuIntroFade>()
             .init_resource::<music::MenuMusic>()
             .init_resource::<WalletBridgePoller>()
             .init_resource::<FontsLoaded>()
@@ -251,25 +78,9 @@ impl Plugin for MainMenuPlugin {
                 (
                     // Reset panel to Main every time we enter the menu (e.g. returning from a game)
                     |mut panel: ResMut<new_menu::NewMenuPanel>,
-                     mut exit_confirm: ResMut<new_menu::MenuExitConfirm>,
-                     intro: Res<MenuIntro>,
-                     mut cine: ResMut<cinematic::MenuCinematic>| {
+                     mut exit_confirm: ResMut<new_menu::MenuExitConfirm>| {
                         *panel = new_menu::NewMenuPanel::default();
                         exit_confirm.visible = false;
-                        // Separation of concerns: the splash/attract cinematic is a
-                        // one-time startup screen. `awaiting_enter` is true only until
-                        // the first Enter; we never re-arm it, so returning from a game
-                        // lands straight on the live main menu. Kick the cinematic only
-                        // while still on the splash.
-                        if intro.awaiting_enter {
-                            cine.enabled = true;
-                            // usize::MAX so the first `Cut` wraps to moment 0 (the moment
-                            // index advances during the black Cut — see cinematic.rs).
-                            cine.moment_index = usize::MAX;
-                            cine.fade_alpha = 0.0;
-                            cine.phase = cinematic::CinematicPhase::FadeOut;
-                            cine.timer = 0.3;
-                        }
                     },
                     purge_stale_lights,
                     setup_menu_camera,
@@ -305,10 +116,6 @@ impl Plugin for MainMenuPlugin {
                     }
                 },
             )
-            .add_systems(
-                OnExit(GameState::MainMenu),
-                cinematic::reset_cinematic_on_exit,
-            )
             .add_systems(OnEnter(GameState::MainMenu), music::start_menu_music)
             .init_resource::<BrandLogoState>()
             .init_resource::<SolanaLogoState>()
@@ -324,11 +131,7 @@ impl Plugin for MainMenuPlugin {
             .add_systems(
                 EguiPrimaryContextPass,
                 (
-                    // Draw the menu UI (incl. the attract-screen title + prompt) AFTER
-                    // the cinematic fade so the title stays on top of any black fade.
-                    main_menu_ui_wrapper
-                        .after(cinematic::cinematic_fade_overlay)
-                        .run_if(in_state(GameState::MainMenu)),
+                    main_menu_ui_wrapper.run_if(in_state(GameState::MainMenu)),
                     render_lobby_selection_popup
                         .run_if(in_state(crate::core::MenuState::LobbySelection))
                         .run_if(in_state(GameState::MainMenu)),
@@ -339,14 +142,8 @@ impl Plugin for MainMenuPlugin {
                     new_menu::menu_click_sound
                         .after(main_menu_ui_wrapper)
                         .run_if(in_state(GameState::MainMenu)),
-                    // Cinematic showcase: black fade overlay drawn over the board.
-                    cinematic::cinematic_fade_overlay.run_if(in_state(GameState::MainMenu)),
                     // Discrete now-playing widget (track title / skip / mute).
                     music::menu_music_widget.run_if(in_state(GameState::MainMenu)),
-                    // Post-Enter splash → menu fade, drawn on top of the menu UI.
-                    menu_intro_fade_overlay
-                        .after(main_menu_ui_wrapper)
-                        .run_if(in_state(GameState::MainMenu)),
                 ),
             )
             .add_systems(
@@ -360,27 +157,14 @@ impl Plugin for MainMenuPlugin {
                     orbit_camera_system,
                     spawn_menu_bg_pieces,
                     try_setup_fonts,
-                    // `animate_menu_pieces` runs the slide tween for both the cinematic
-                    // showcase pieces and the ambient board pieces.
+                    // Slide tween for the ambient board pieces.
                     board_animation::animate_menu_pieces,
-                    // Ambient Immortal-Zugzwang replay on the full-size MenuBg board,
-                    // active only after Enter (the cinematic owns the attract screen).
-                    board_animation::animate_ambient_board
-                        .run_if(|intro: Res<MenuIntro>| !intro.awaiting_enter),
+                    // Slow opacity fade for captured ambient pieces.
+                    board_animation::animate_menu_piece_fades,
+                    // Ambient Immortal-Zugzwang replay on the full-size MenuBg board.
+                    // Self-arms once `spawn_menu_bg_pieces` populates the animator.
+                    board_animation::animate_ambient_board,
                     menu_escape_system,
-                    // Attract loop: wait for Enter, then hand off to the cinematic.
-                    menu_intro_enter_system,
-                    // Reversed reveal: board hidden until Enter, then it rises in.
-                    apply_intro_board_visibility,
-                    // Cinematic showcase: advance the timeline, then drive the camera
-                    // (after the orbit system, which yields while a cinematic is active).
-                    // Both run ONLY during the pre-Enter attract loop; Enter tears the
-                    // showcase down and hands the camera to the orbit.
-                    cinematic::cinematic_director.run_if(menu_awaiting),
-                    cinematic::cinematic_camera_system
-                        .after(orbit_camera_system)
-                        .after(cinematic::cinematic_director)
-                        .run_if(menu_awaiting),
                     // Menu playlist: fades between tracks, advances on end / skip.
                     music::drive_menu_music,
                 )
@@ -1592,12 +1376,6 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
 fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     if !ctx_menu.loading_progress.complete {
         render_loading_screen_website(ctx, ctx_menu);
-        return;
-    }
-
-    // Attract loop: before Enter, show only the orbiting board + title + prompt.
-    if ctx_menu.menu_intro.awaiting_enter {
-        render_intro_overlay(ctx, ctx_menu);
         return;
     }
 

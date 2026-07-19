@@ -7,14 +7,14 @@ window management. App-level overview: [../README.md](../README.md).
 
 | Path | Contents |
 |------|----------|
-| [main.rs](main.rs) | Entry point: tray icon, `xfchess://` deep link, shared state (`WalletPubkey`, `WalletJwt`, `PendingTx`), and the Axum wallet bridge on `:7454` |
+| [main.rs](main.rs) | Entry point: `xfchess://` deep link, shared state (`WalletPubkey`, `WalletJwt`, `PendingTx`), and the Axum wallet bridge on `:7454` (no tray icon — windows open via the bridge API or `XFCHESS_OPEN_ADMIN=1`) |
 | [services/ipc.rs](services/ipc.rs) | All `#[tauri::command]` handlers (windows, notifications, clipboard, URL opening) |
 | [services/auth.rs](services/auth.rs) | Auth state management |
 | [services/config.rs](services/config.rs) | Env-based configuration (tests: [services/config_tests.rs](services/config_tests.rs)) |
-| [services/notification_poller.rs](services/notification_poller.rs) | Polls the backend for notifications → system tray |
+| [services/notification_poller.rs](services/notification_poller.rs) | Polls the backend for notifications → OS toast notifications (no tray icon) |
 | [types/](types/) | Serde types for auth, config, and IPC payloads |
-| [utils/](utils/) | [crypto.rs](utils/crypto.rs), [logging.rs](utils/logging.rs) (+ tests) |
-| [windows/](windows/) | Window builders: [wallet.rs](windows/wallet.rs), [tournament_admin.rs](windows/tournament_admin.rs), [popup.rs](windows/popup.rs) |
+| [utils/](utils/) | [logging.rs](utils/logging.rs) (+ tests) |
+| [windows/](windows/) | Window builders: [tournament_admin.rs](windows/tournament_admin.rs) (the wallet UI is a real Chrome `--app` popup opened via `open_in_browser` in main.rs, not a Tauri-managed window) |
 | [error.rs](error.rs) | Unified error type |
 
 ## Example

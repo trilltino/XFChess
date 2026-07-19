@@ -22,6 +22,13 @@ const ELO_PER_STEP: u32 = 50;
 /// Cap: after 5 minutes the window stops expanding (hard max ≈ 650 centiscale).
 const ELO_MAX: u32 = 650;
 
+/// Drop a queued ticket if nobody paired with it and the client never called
+/// `/leave` (e.g. tab closed, connection dropped) after this long.
+const STALE_QUEUE_SECS: u64 = 300;
+/// Drop a match result if the player never came back to `/status` and
+/// collect it (e.g. crashed right after being paired) after this long.
+const STALE_MATCH_SECS: u64 = 300;
+
 /// Return the allowed ELO difference for a ticket that joined `wait_secs` ago.
 fn elo_window(wait_secs: u64) -> u32 {
     let steps = wait_secs / 30;
@@ -45,6 +52,16 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
+        // Sweep stale match results every tick, independent of queue size —
+        // otherwise a player who crashes right after being paired leaves
+        // their (and their opponent's) MatchResult in memory forever.
+        match state.matches.lock() {
+            Ok(mut matches) => {
+                matches.retain(|_, m| now.saturating_sub(m.matched_at) < STALE_MATCH_SECS);
+            }
+            Err(e) => error!("[MATCHMAKING] Matches mutex poisoned during sweep: {}", e),
+        }
+
         let mut queue = match state.queue.lock() {
             Ok(q) => q,
             Err(e) => {
@@ -52,6 +69,11 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
                 continue;
             }
         };
+
+        // Drop tickets nobody ever paired with and the client never left
+        // (dropped connection, closed tab) instead of waiting forever.
+        queue.retain(|t| now.saturating_sub(t.joined_at) < STALE_QUEUE_SECS);
+
         if queue.len() < MATCHMAKING_MIN_PLAYERS {
             continue;
         }
@@ -121,6 +143,7 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
                         game_id,
                         opponent: p2.pubkey.clone(),
                         is_white: true,
+                        matched_at: now,
                     },
                 );
                 matches.insert(
@@ -129,6 +152,7 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
                         game_id,
                         opponent: p1.pubkey.clone(),
                         is_white: false,
+                        matched_at: now,
                     },
                 );
             }

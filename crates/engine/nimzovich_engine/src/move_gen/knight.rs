@@ -35,13 +35,24 @@ use crate::types::*;
 /// generate_knight_moves(&game, 1, COLOR_WHITE, &mut moves);
 /// // Moves now contains all valid knight moves from b1
 /// ```
-pub fn generate_knight_moves(game: &Game, from: i8, color: Color, moves: &mut Vec<KK>) {
+pub fn generate_knight_moves(
+    game: &Game,
+    from: i8,
+    color: Color,
+    moves: &mut Vec<KK>,
+    noisy_only: bool,
+) {
     // Knights can jump over pieces, so we just need to check destination squares
     for candidate in &game.knight[from as usize] {
         let dest_piece = game.board[candidate.dst as usize];
 
-        // Valid if destination is empty or contains opponent piece
-        if dest_piece == 0 || !piece_belongs_to(dest_piece, color) {
+        if noisy_only {
+            // Only a capture counts as noisy.
+            if dest_piece != 0 && !piece_belongs_to(dest_piece, color) {
+                moves.push(*candidate);
+            }
+        } else if dest_piece == 0 || !piece_belongs_to(dest_piece, color) {
+            // Valid if destination is empty or contains opponent piece
             moves.push(*candidate);
         }
     }

@@ -58,10 +58,17 @@ pub async fn announce_game(
     let game_id_clone = req.game_id.clone();
     let host_node_id_clone = req.host_node_id.clone();
 
-    let password_hash = req
-        .password
-        .as_deref()
-        .map(|p| bcrypt::hash(p, 10).unwrap_or_default());
+    let password_hash = req.password.as_deref().map(|p| {
+        use argon2::{
+            password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+            Argon2,
+        };
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(p.as_bytes(), &salt)
+            .map(|h| h.to_string())
+            .unwrap_or_default()
+    });
 
     let announcement = super::types::P2PGameAnnouncement {
         game_id: req.game_id,
@@ -203,16 +210,22 @@ pub async fn join_game(
 
     // Password check for private rooms
     if let Some(ref hash) = game.announcement.password_hash.clone() {
+        use argon2::{password_hash::PasswordHash, password_hash::PasswordVerifier, Argon2};
         let provided = req.password.as_deref().unwrap_or("");
-        match bcrypt::verify(provided, hash) {
-            Ok(true) => {}
-            _ => {
-                tracing::warn!("Wrong password for game {}", req.game_id);
-                return Ok(AxumJson(JoinGameResponse {
-                    success: false,
-                    host_node_id: None,
-                }));
-            }
+        let verified = PasswordHash::new(hash)
+            .ok()
+            .map(|parsed| {
+                Argon2::default()
+                    .verify_password(provided.as_bytes(), &parsed)
+                    .is_ok()
+            })
+            .unwrap_or(false);
+        if !verified {
+            tracing::warn!("Wrong password for game {}", req.game_id);
+            return Ok(AxumJson(JoinGameResponse {
+                success: false,
+                host_node_id: None,
+            }));
         }
     }
 

@@ -3,6 +3,7 @@
 pub mod camera;
 pub mod debug_transform;
 pub mod debug_visuals;
+pub mod first_move_timer;
 pub mod game_init;
 pub mod game_logic;
 pub mod input;

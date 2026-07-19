@@ -27,7 +27,6 @@ use super::sync::GameSyncPlugin;
 use super::system_sets::GameSystems;
 use super::systems::spectate_sync::SpectateSyncPlugin;
 use super::systems::*;
-use super::view_mode_systems::*;
 use crate::core::{debug_current_gamestate, GameMode, GameState};
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{
@@ -67,7 +66,6 @@ impl Plugin for GamePlugin {
             .init_resource::<Players>()
             .init_resource::<super::systems::camera::CameraRotationState>()
             .init_resource::<super::view_mode::ViewMode>()
-            .init_resource::<super::view_mode::PlayerViewPreferences>()
             .init_resource::<PendingPromotion>()
             .init_resource::<GameSounds>()
             .init_resource::<MenuSounds>()
@@ -129,6 +127,17 @@ impl Plugin for GamePlugin {
         // Add spectator sync plugin
         app.add_plugins(SpectateSyncPlugin);
 
+        // 30-second first-move grace period (online games only)
+        super::systems::first_move_timer::register(app);
+
+        // Clips the dedicated board camera's viewport to the board column
+        // between the fixed-width left/right egui side panels.
+        app.add_systems(
+            Update,
+            super::systems::camera::sync_board_camera_viewport
+                .run_if(in_state(GameState::InGame)),
+        );
+
         // Restore ambient when game ends so the board behind the popup looks neutral.
         app.add_systems(
             OnEnter(GameState::GameOver),
@@ -142,12 +151,14 @@ impl Plugin for GamePlugin {
         app.add_systems(
             OnEnter(GameState::InGame),
             (
+                purge_stale_board_visuals,
                 reset_game_resources,
                 initialize_players,
                 reset_in_game_hud_visibility,
                 reset_in_game_exit_confirmation,
                 setup_game_camera,
                 setup_game_scene,
+                super::systems::game_init::warmup_game_audio,
             )
                 .chain()
                 .run_if(not(in_mode(GameMode::PgnReplay))),
@@ -157,6 +168,7 @@ impl Plugin for GamePlugin {
         app.add_systems(
             OnEnter(GameState::InGame),
             (
+                purge_stale_board_visuals,
                 super::replay::setup_replay,
                 setup_game_camera,
                 setup_game_scene,
@@ -244,6 +256,8 @@ impl Plugin for GamePlugin {
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 crate::game::systems::network_move::handle_resign_events
                     .in_set(GameSystems::Execution),
+                crate::game::systems::network_move::handle_flag_timeout_events
+                    .in_set(GameSystems::Execution),
                 // Promotion detection and handling (disabled in TempleOS)
                 detect_pawn_promotion
                     .in_set(GameSystems::Execution)
@@ -264,11 +278,18 @@ impl Plugin for GamePlugin {
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 // animate_piece_movement is skipped entirely when no piece has a
                 // PieceMoveAnimation component (archetype cache lookup — zero cost).
-                animate_piece_movement.in_set(GameSystems::Visual),
-                // animate_capture_fade is skipped when nothing is mid-fade.
-                animate_capture_fade
-                    .in_set(GameSystems::Visual)
-                    .run_if(any_with_component::<FadingCapture>),
+                // Nested to stay under Bevy's tuple-arity limit for `.chain()`
+                // (the flat list above this point already has 19 systems) —
+                // this sub-tuple is itself chained, so overall ordering is
+                // unchanged from a flat 21-element chain.
+                (
+                    animate_piece_movement.in_set(GameSystems::Visual),
+                    // animate_capture_fade is skipped when nothing is mid-fade.
+                    animate_capture_fade
+                        .in_set(GameSystems::Visual)
+                        .run_if(any_with_component::<FadingCapture>),
+                )
+                    .chain(),
             ),
         );
 
@@ -283,7 +304,6 @@ impl Plugin for GamePlugin {
                 crate::ui::game::game_ui::post_game_overlay,
                 crate::ui::game_2d::render_2d_board,
                 crate::ui::game::promotion_ui::promotion_ui_system,
-                crate::ui::game::game_2d::blunder_indicator_ui,
             )
                 .chain()
                 .run_if(in_state(GameState::InGame))
@@ -299,15 +319,9 @@ impl Plugin for GamePlugin {
             crate::ui::game::game_2d::trigger_piece_anim_2d.run_if(in_state(GameState::InGame)),
         );
 
-        app.add_systems(
-            Update,
-            super::systems::camera::update_game_viewport.run_if(in_state(GameState::InGame)),
-        );
-
         // Eval bar resources and update system
         app.init_resource::<crate::ui::game::game_2d::EvalBarState>();
         app.init_resource::<crate::ui::game::game_2d::EvalHistory>();
-        app.init_resource::<crate::ui::game::game_2d::BlunderIndicatorState>();
         app.init_resource::<crate::ui::game::game_2d::BoardFocus>();
         app.init_resource::<crate::ui::game::game_2d::CheckmateFlashState>();
         app.init_resource::<crate::ui::game::game_2d::BoardFadeState>();
@@ -322,12 +336,7 @@ impl Plugin for GamePlugin {
         );
         app.add_systems(
             Update,
-            (
-                crate::ui::game::game_2d::update_eval_bar,
-                crate::ui::game::game_2d::detect_blunder_system,
-            )
-                .chain()
-                .run_if(in_state(GameState::InGame)),
+            crate::ui::game::game_2d::update_eval_bar.run_if(in_state(GameState::InGame)),
         );
 
         // Sync Board2DTheme and eval bar visibility from GameSettings on settings change
@@ -399,15 +408,8 @@ impl Plugin for GamePlugin {
             crate::ui::game::game_ui::increment_flash_system.run_if(in_state(GameState::InGame)),
         );
 
-        // Chat panel runs separately (shares EguiContexts with the chain above;
-        // Bevy allows multiple systems in the same pass to use EguiContexts as long
-        // as they are not chained with conflicting system-params).
-        app.add_systems(
-            bevy_egui::EguiPrimaryContextPass,
-            crate::ui::game::chat_panel_ui
-                .run_if(in_state(GameState::InGame))
-                .run_if(not(in_mode(GameMode::PgnReplay))),
-        );
+        // Chat now renders inline inside game_status_ui's left panel (see
+        // crate::ui::game::left_panel) — no standalone system needed here.
 
         // Item 3: session key expiry banner
         #[cfg(feature = "solana")]
@@ -508,11 +510,9 @@ impl Plugin for GamePlugin {
                 .run_if(in_state(GameState::InGame)),
         );
 
-        // Conditional 3D visibility system
         app.add_systems(
             Update,
-            (toggle_3d_visibility, toggle_in_game_hud, confirm_exit_game)
-                .run_if(in_state(GameState::InGame)),
+            (toggle_in_game_hud, confirm_exit_game).run_if(in_state(GameState::InGame)),
         );
 
         // Cinematic camera must run in both InGame and GameOver so the game-over

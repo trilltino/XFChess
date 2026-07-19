@@ -129,8 +129,11 @@ pub fn drive_menu_music(
         if !voice.outgoing {
             voice.target = if music.muted { 0.0 } else { music.volume };
         }
-        // Ease current volume toward target and apply it.
-        if voice.current < voice.target {
+        if music.muted && !voice.outgoing {
+            // Mute is instant — a 2.5s fade-out reads as "the button did nothing".
+            // Unmuting still eases back in via the normal ramp below.
+            voice.current = 0.0;
+        } else if voice.current < voice.target {
             voice.current = (voice.current + step).min(voice.target);
         } else if voice.current > voice.target {
             voice.current = (voice.current - step).max(voice.target);
@@ -172,16 +175,15 @@ pub fn drive_menu_music(
 }
 
 /// Discrete now-playing widget: a play/mute dot, the track title, and a skip
-/// button, anchored to the bottom-left. Hidden during the pre-Enter splash.
+/// button, anchored to the bottom-left.
 pub fn menu_music_widget(
     mut contexts: bevy_egui::EguiContexts,
     mut music: ResMut<MenuMusic>,
-    intro: Res<super::MenuIntro>,
 ) {
     use bevy_egui::egui;
 
-    if intro.awaiting_enter || music.widget_hidden {
-        return; // keep the splash screen clean / honour a closed widget
+    if music.widget_hidden {
+        return; // honour a closed widget
     }
     let Ok(ctx) = contexts.ctx_mut() else {
         return;

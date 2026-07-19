@@ -15,7 +15,7 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
     };
 
     // Create a top-right panel for wager info
-    egui::Window::new(" Wager Info")
+    egui::Window::new("Wager Info")
         .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
         .default_width(200.0)
         .collapsible(true)
@@ -114,7 +114,7 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                 if wager_state.has_wager() {
                     ui.separator();
                     ui.label(
-                        egui::RichText::new("? This is a real money game!")
+                        egui::RichText::new("This is a real money game!")
                             .color(egui::Color32::YELLOW)
                             .small(),
                     );

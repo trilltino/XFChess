@@ -170,7 +170,7 @@ pub struct TournamentRecord {
     /// Whether all entrants must have completed CACF KYC before joining
     #[serde(default)]
     pub kyc_required: bool,
-    /// Optional bcrypt hash of join password (if private). When `Some`, `/join` must supply matching password.
+    /// Optional argon2 hash of join password (if private). When `Some`, `/join` must supply matching password.
     pub password_hash: Option<String>,
     /// True once the on-chain prize distribution crank has paid the winners.
     #[serde(default)]

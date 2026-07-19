@@ -54,6 +54,9 @@ pub fn update_check_highlight_system(
             CheckHighlightLight,
             Name::new("Check Highlight Light"),
             crate::core::DespawnOnExit(crate::core::GameState::InGame),
+            bevy::camera::visibility::RenderLayers::layer(
+                crate::game::systems::camera::BOARD_LAYER,
+            ),
         ));
     } else {
         // Update position and pulse intensity

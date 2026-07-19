@@ -82,7 +82,7 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
 
             if state.status == SubmissionStatus::Success {
                 ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new(" Verification complete!").color(egui::Color32::GREEN).strong());
+                    ui.label(egui::RichText::new("Verification complete!").color(egui::Color32::GREEN).strong());
                     ui.add_space(10.0);
                     if ui.button("Continue to Game").clicked() {
                         state.show = false;
@@ -147,7 +147,7 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
 
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.button("? Back").clicked() {
+                    if ui.button("‹ Back").clicked() {
                         state.step = 1;
                         state.error_msg = None;
                     }

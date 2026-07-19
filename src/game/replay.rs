@@ -14,7 +14,7 @@ use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, PieceMoveAnimation};
 use crate::game::replay_shorts::{PuzzleOverlay, ReplayAnnotations, ScreenshotRequested};
 use crate::game::shorts_state::{ContentTier, HookStyle, HookText, ShortsState};
-use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
+use crate::game::view_mode::ViewMode;
 use crate::multiplayer::traits::MessageWriter;
 use crate::rendering::pieces::{
     Piece, Piece2DVisual, Piece3DVisual, PieceColor, PieceMeshes, PieceSpriteHandles, PieceType,
@@ -388,7 +388,7 @@ pub fn replay_ui_system(
     mut replay: ResMut<PgnReplayState>,
     mut parsed_pgn: Option<ResMut<ParsedPgnGameResource>>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut view_prefs: ResMut<PlayerViewPreferences>,
+    mut view_mode: ResMut<ViewMode>,
     game_mode: Res<GameMode>,
     eval_history: Option<Res<crate::ui::game::game_2d::EvalHistory>>,
     mut puzzle: ResMut<PuzzleOverlay>,
@@ -684,7 +684,7 @@ pub fn replay_ui_system(
                 ui.add_space(12.0);
 
                 // 2D/3D toggle
-                let view_label = match view_prefs.local_view {
+                let view_label = match *view_mode {
                     ViewMode::Standard2D => "3D",
                     ViewMode::Standard3D => "2D",
                     #[cfg(feature = "templeos")]
@@ -699,7 +699,7 @@ pub fn replay_ui_system(
                     )
                     .clicked()
                 {
-                    view_prefs.toggle_view();
+                    view_mode.toggle();
                     // Rebuild 3D annotations on view switch
                     annotations.dirty = true;
                 }
@@ -1340,6 +1340,9 @@ fn spawn_piece_at_replay(
             Visibility::default(),
             Name::new(name),
             DespawnOnExit(GameState::InGame),
+            bevy::camera::visibility::RenderLayers::layer(
+                crate::game::systems::camera::BOARD_LAYER,
+            ),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -1347,6 +1350,9 @@ fn spawn_piece_at_replay(
                 MeshMaterial3d(material),
                 Transform::default(),
                 Piece3DVisual,
+                bevy::camera::visibility::RenderLayers::layer(
+                    crate::game::systems::camera::BOARD_LAYER,
+                ),
             ));
 
             if let Some(handles) = sprite_handles {

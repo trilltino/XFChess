@@ -23,13 +23,28 @@ and, via the Tauri shell capability, an SSH quick-action to the production VPS
 
 ## Run
 
+The admin panel is desktop-only — it renders in the Tauri `tournament-admin`
+window, served from the loopback-only wallet bridge. It never runs as a
+standalone web/vite dev server.
+
 ```bash
-npm install
-npm run dev            # standalone in a browser (against a local backend)
-cargo tauri dev --features tournament-admin   # inside the desktop shell (from tauri/)
+just admin                          # from the repo root: opens the desktop window
+scripts\start-tournament-admin.bat  # same, plus starts a local backend
+```
+
+From a running dev stack (`just dev`): tray icon → **Tournament Admin**.
+
+After changing the UI, rebuild the static bundle:
+
+```bash
+npm run build               # here, or:
+just build-admin-ui-force   # from the repo root
 ```
 
 ## Invariants
+
+- Desktop-only: the UI is served from the built `dist/` by the Tauri shell's
+  loopback bridge — never add a vite dev server or expose it on a network port.
 
 - Every request goes through [src/services/api.ts](src/services/api.ts) so the admin
   key is attached in one place.

@@ -117,6 +117,7 @@ impl Plugin for CorePlugin {
                 update_panic_state_tracker,
                 log_menu_state_transitions,
                 periodic_entity_audit,
+                audit_cross_state_leaks,
                 verify_picking_scope,
             ),
         );

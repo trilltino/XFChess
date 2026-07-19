@@ -21,7 +21,7 @@ path = "src/signing_server.rs"
 # `signing-server-http`. It is the same maintained server as `signing-server`.
 [[bin]]
 name = "signing-server-http"
-path = "src/signing_server.rs"
+path = "src/signing_server_http.rs"
 
 [[bin]]
 name = "vps_admin"
@@ -42,7 +42,6 @@ tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "prop
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 serde = { version = "1.0.228", features = ["derive"] }
-bcrypt = { version = "=0.15.0", features = [] }
 serde_json = "1.0.149"
 argon2 = "0.5.3"
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }

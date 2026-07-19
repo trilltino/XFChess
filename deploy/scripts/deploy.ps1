@@ -366,8 +366,8 @@ if ($serverHasEnv) {
     Write-Host "  IDENTITY_SALT=<openssl rand -hex 32>"
     # Include the tournament-admin panel's Tauri origins so PRODUCTION mode (via
     # the SSH tunnel) is not CORS-blocked. tauri.localhost = packaged WebView2;
-    # localhost:7455/:1420 = dev.
-    Write-Host "  ALLOWED_ORIGINS=https://${TlsDomain},http://tauri.localhost,https://tauri.localhost,http://localhost:7455,http://localhost:1420"
+    # localhost:7454 = desktop panel served by the wallet bridge.
+    Write-Host "  ALLOWED_ORIGINS=https://${TlsDomain},http://tauri.localhost,https://tauri.localhost,http://localhost:7454"
     Write-Host "  SESSION_DB_URL=sqlite:///opt/xfchess/data/sessions.db?mode=rwc"
     Write-Host "  VAULT_DB_URL=sqlite:///opt/xfchess/data/vault.db?mode=rwc"
 }

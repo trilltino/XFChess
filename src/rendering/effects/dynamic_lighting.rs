@@ -185,6 +185,9 @@ fn sync_light_count(
                 Transform::from_xyz(x, height, z),
                 OrbitalLight { index: i },
                 DespawnOnExit(GameState::InGame),
+                bevy::camera::visibility::RenderLayers::layer(
+                    crate::game::systems::camera::BOARD_LAYER,
+                ),
                 Name::new(format!("Orbital Light {}", i)),
             ));
         }

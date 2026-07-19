@@ -152,6 +152,56 @@ impl Default for StateAuditTimer {
     }
 }
 
+/// Warns when domain entities leak across the state boundary they're scoped to —
+/// the exact signature of the bugs the state-separation plan targets:
+///   * game `Piece` entities present while NOT in gameplay (they're
+///     `DespawnOnExit(InGame)`, so they must be gone in MainMenu/Auth), and
+///   * menu `MenuBg` entities present while NOT on the main menu.
+///
+/// A hit means cleanup didn't run for that transition. Throttled to one warn per
+/// leak episode via a `Local` so it never spams. See
+/// `docs/plans/state-mode-view-separation.md`.
+pub fn audit_cross_state_leaks(
+    state: Res<State<GameState>>,
+    pieces: Query<(), With<crate::rendering::pieces::Piece>>,
+    menu_bg: Query<(), With<crate::states::main_menu::new_menu::MenuBg>>,
+    mut warned: Local<bool>,
+) {
+    let s = *state.get();
+    let piece_count = pieces.iter().count();
+    let menu_count = menu_bg.iter().count();
+
+    // Pieces are valid during gameplay (InGame/Paused/GameOver); a leak is a
+    // Piece surviving into MainMenu/Auth. MenuBg is valid only on MainMenu.
+    let pieces_leaked =
+        piece_count > 0 && matches!(s, GameState::MainMenu | GameState::Auth);
+    let menu_leaked = menu_count > 0 && !matches!(s, GameState::MainMenu);
+
+    if pieces_leaked || menu_leaked {
+        if !*warned {
+            if pieces_leaked {
+                warn!(
+                    "[STATE_AUDIT] LEAK: {} `Piece` entit{} present in {:?} — game pieces should be despawned outside gameplay (DespawnOnExit(InGame) didn't fire?).",
+                    piece_count,
+                    if piece_count == 1 { "y" } else { "ies" },
+                    s
+                );
+            }
+            if menu_leaked {
+                warn!(
+                    "[STATE_AUDIT] LEAK: {} `MenuBg` entit{} present in {:?} — menu visuals should only exist on MainMenu.",
+                    menu_count,
+                    if menu_count == 1 { "y" } else { "ies" },
+                    s
+                );
+            }
+            *warned = true;
+        }
+    } else {
+        *warned = false;
+    }
+}
+
 /// System that periodically audits all entities for leaks
 pub fn periodic_entity_audit(
     mut timer: ResMut<StateAuditTimer>,

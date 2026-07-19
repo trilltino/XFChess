@@ -263,3 +263,44 @@ pub fn handle_resign_events(
         );
     }
 }
+
+/// Resolves `FlagTimeoutEvent` into a terminal `GameOverState`.
+///
+/// If no move has been played yet (the 30-second first-move grace period
+/// expired, or an opponent disconnected before making any move) the game is
+/// aborted with no winner. Otherwise the flagged player's clock ran out
+/// mid-game and their opponent wins on time — this mirrors what
+/// `update_game_timer` already sets locally, so a remote `FlagTimeout`
+/// arriving here just confirms the same result on the other peer.
+pub fn handle_flag_timeout_events(
+    mut events: MessageReader<crate::game::events::FlagTimeoutEvent>,
+    mut game_over: ResMut<GameOverState>,
+    move_history: Res<MoveHistory>,
+) {
+    for event in events.read() {
+        if game_over.is_game_over() {
+            continue;
+        }
+
+        *game_over = if move_history.is_empty() {
+            GameOverState::Aborted
+        } else {
+            match event.flagged_player.as_str() {
+                "white" => GameOverState::BlackWonByTime,
+                "black" => GameOverState::WhiteWonByTime,
+                flagged => {
+                    warn!(
+                        "[FLAG] Unknown flagged_player '{}', ignoring flag timeout event",
+                        flagged
+                    );
+                    continue;
+                }
+            }
+        };
+
+        info!(
+            "[FLAG] Applied flag timeout for '{}' (remote={}) -> {:?}",
+            event.flagged_player, event.remote, *game_over
+        );
+    }
+}

@@ -754,7 +754,7 @@ function ProfileStep() {
                     });
                     if (r.ok) {
                         const { username: synced } = await r.json();
-                        localStorage.setItem('xfchess_username', synced);
+                        if (synced) localStorage.setItem('xfchess_username', synced);
                     }
                 } catch (e) {
                     console.warn('sync-profile non-critical:', e);

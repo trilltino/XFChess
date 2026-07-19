@@ -535,9 +535,16 @@ struct ProfileOnChain {
     pub username_set: bool,
 }
 
-/// POST /auth/sync-profile — reads the caller's on-chain PlayerProfile PDA,
-/// extracts the canonical username, and writes it back to the SQLite DB.
-/// Requires a valid Bearer JWT.  Safe to retry — idempotent.
+/// POST /auth/sync-profile — reads the caller's on-chain PlayerProfile PDA
+/// and returns its status. This is the single source of truth wallet-ui and
+/// the game client should both route on: whether an on-chain profile exists
+/// at all, whether a username has been chosen, and whether the account is
+/// KYC-verified (`is_verified`). "No profile yet" / "no username yet" are
+/// normal states for a new wallet, not errors — this always returns 200
+/// (barring a genuine auth/RPC failure) so callers can branch on the fields
+/// instead of on HTTP status. Requires a valid Bearer JWT. Safe to retry —
+/// idempotent; also mirrors the username into SQLite as a side effect once
+/// one is set on-chain.
 async fn sync_profile(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -564,15 +571,21 @@ async fn sync_profile(
         &program_id,
     );
 
-    // 3. Fetch account data from Solana RPC (uses SOLANA_RPC_URL — correct in prod)
+    // 3. Fetch account data from Solana RPC (uses SOLANA_RPC_URL — correct in prod).
+    // No account at this PDA yet is a normal "not registered" state, not an error.
     let rpc =
         solana_client::nonblocking::rpc_client::RpcClient::new(state.config.solana_rpc_url.clone());
-    let account = rpc.get_account(&profile_pda).await.map_err(|_| {
-        (
-            StatusCode::NOT_FOUND,
-            "On-chain profile not found. Create one first.".to_string(),
-        )
-    })?;
+    let account = match rpc.get_account(&profile_pda).await {
+        Ok(account) => account,
+        Err(_) => {
+            return Ok(Json(serde_json::json!({
+                "has_profile": false,
+                "username_set": false,
+                "is_verified": false,
+                "username": null,
+            })));
+        }
+    };
 
     // 4. Borsh-decode: skip 8-byte Anchor discriminator then deserialise
     if account.data.len() < 9 {
@@ -588,25 +601,29 @@ async fn sync_profile(
         )
     })?;
 
-    if !profile.username_set || profile.username.is_empty() {
-        return Err((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "No username set on-chain yet".to_string(),
-        ));
+    // 5. If a username is set, mirror it into SQLite as the canonical value.
+    if profile.username_set && !profile.username.is_empty() {
+        state
+            .store
+            .update_username(wallet, &profile.username)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        info!(
+            "[Auth] Synced on-chain username '{}' for {}",
+            profile.username, wallet
+        );
     }
 
-    // 5. Update SQLite — this is now the canonical username
-    state
-        .store
-        .update_username(wallet, &profile.username)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    info!(
-        "[Auth] Synced on-chain username '{}' for {}",
-        profile.username, wallet
-    );
-    Ok(Json(serde_json::json!({ "username": profile.username })))
+    Ok(Json(serde_json::json!({
+        "has_profile": true,
+        "username_set": profile.username_set && !profile.username.is_empty(),
+        "is_verified": profile._is_verified,
+        "username": if profile.username_set && !profile.username.is_empty() {
+            Some(profile.username)
+        } else {
+            None
+        },
+    })))
 }
 
 // ── POST /auth/init-profile-tx ────────────────────────────────────────────────

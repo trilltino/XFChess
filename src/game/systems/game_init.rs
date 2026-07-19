@@ -34,6 +34,29 @@ use crate::game::resources::*;
 use crate::rendering::pieces::{Piece, PieceColor};
 use bevy::prelude::*;
 
+/// Sweep any board visuals that survived a state transition into a new game:
+/// menu/cinematic pieces (`MenuBg`) or a stale `Piece` from a previous game.
+/// Leaked menu pieces on their home squares overlap the fresh spawn invisibly —
+/// only ones the ambient animation had moved show up, as "extra" pieces on
+/// non-start squares. Runs before piece spawning; logs each leak by name so
+/// the source transition is identifiable from the field.
+pub fn purge_stale_board_visuals(
+    mut commands: Commands,
+    leftovers: Query<
+        (Entity, Option<&Name>),
+        Or<(With<crate::states::main_menu::new_menu::MenuBg>, With<Piece>)>,
+    >,
+) {
+    for (entity, name) in leftovers.iter() {
+        warn!(
+            "[GAME_INIT] Purging stale board visual {:?} ({}) that leaked past a state transition",
+            entity,
+            name.map(|n| n.as_str()).unwrap_or("unnamed")
+        );
+        commands.entity(entity).despawn();
+    }
+}
+
 /// System that resets all game resources when entering InGame state
 ///
 /// This ensures each new game starts with clean state, preventing
@@ -128,6 +151,9 @@ pub fn reset_game_resources(
         .insert(Transform::from_xyz(3.5, 20.0, 3.5))
         .insert(GlobalTransform::default())
         .insert(DespawnOnExit(GameState::InGame))
+        .insert(bevy::camera::visibility::RenderLayers::layer(
+            crate::game::systems::camera::BOARD_LAYER,
+        ))
         .insert(Name::new("Overhead Light")); // Helpful for debugging
     info!(
         "[GAME_INIT] Turn state context reset: {:?}",
@@ -260,6 +286,26 @@ pub fn start_timer_when_ready(
     if *engine_inited && !move_history.is_empty() {
         game_timer.is_running = true;
         info!("[GAME_INIT] Timer started after first move played");
+    }
+}
+
+/// Pre-warm the move/capture sound decoders on game entry.
+///
+/// The first time an mp3 `AudioPlayer` is spawned, rodio decodes the file on the
+/// audio thread — a one-off cost that otherwise lands on the *first move*. We
+/// play the move + capture clips once, silent and self-despawning, when entering
+/// InGame so that decode happens during board setup instead of mid-first-move.
+pub fn warmup_game_audio(mut commands: Commands, sounds: Option<Res<crate::game::resources::sounds::GameSounds>>) {
+    let Some(sounds) = sounds else { return };
+    for handle in [sounds.move_piece.clone(), sounds.capture_piece.clone()] {
+        commands.spawn((
+            bevy::audio::AudioPlayer::new(handle),
+            bevy::audio::PlaybackSettings {
+                mode: bevy::audio::PlaybackMode::Despawn,
+                volume: bevy::audio::Volume::Linear(0.0),
+                ..default()
+            },
+        ));
     }
 }
 

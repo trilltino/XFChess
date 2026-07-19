@@ -44,7 +44,12 @@ use crate::multiplayer::types::{NetworkEvent, OnlineNetworkState};
 const NETMSG_PREFIX: &str = "NETMSG:";
 
 /// How often to poll the relay for incoming in-game messages.
-const POLL_INTERVAL: Duration = Duration::from_millis(400);
+///
+/// This only matters when direct Iroh gossip fails to link (NAT traversal
+/// failure) and delivery falls back entirely to this poller — every move
+/// then sits in the mailbox for up to one interval before being picked up.
+/// Kept short since each poll is a cheap short-lived HTTP GET.
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Base58 of the local Iroh node id — matches the id used to announce/join, which
 /// is what the backend relay keys mailboxes on.

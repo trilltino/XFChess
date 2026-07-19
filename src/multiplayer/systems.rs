@@ -784,8 +784,11 @@ pub fn emit_game_ended_event(
         GameOverState::BlackWon => (Some("black".to_string()), "checkmate"),
         GameOverState::BlackWonByTime => (Some("black".to_string()), "timeout"),
         GameOverState::BlackWonByResignation => (Some("black".to_string()), "resignation"),
+        GameOverState::WhiteWonByAbandonment => (Some("white".to_string()), "abandonment"),
+        GameOverState::BlackWonByAbandonment => (Some("black".to_string()), "abandonment"),
         GameOverState::Stalemate => (None, "stalemate"),
         GameOverState::InsufficientMaterial => (None, "insufficient_material"),
+        GameOverState::Aborted => (None, "aborted"),
         GameOverState::Playing => return,
     };
 
@@ -1046,6 +1049,7 @@ pub fn tick_heartbeat(
     network_state: Res<OnlineNetworkState>,
     session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
     game_mode: Res<crate::core::states::GameMode>,
+    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
     mut game_over: ResMut<crate::game::resources::history::game_over::GameOverState>,
     mut next_state: ResMut<NextState<crate::core::GameState>>,
 ) {
@@ -1111,10 +1115,17 @@ pub fn tick_heartbeat(
             "[NET] Heartbeat timeout — opponent disconnected after {:.0}s silence",
             heartbeat.since_last_pong
         );
-        // Treat as a win for the local player (opponent abandoned).
-        // The game-over screen will show the appropriate message.
-        *game_over = crate::game::resources::history::game_over::GameOverState::Stalemate;
-        next_state.set(crate::core::GameState::MainMenu);
+        // Treat as a win for the local player (opponent abandoned). Which color
+        // that is depends on which side we're playing, tracked on connect in
+        // `p2p::handle_network_events` (host=White, joiner=Black).
+        use crate::game::resources::history::game_over::GameOverState;
+        use crate::rendering::pieces::PieceColor;
+        *game_over = match p2p_conn.as_ref().and_then(|c| c.player_color) {
+            Some(PieceColor::White) => GameOverState::WhiteWonByAbandonment,
+            Some(PieceColor::Black) => GameOverState::BlackWonByAbandonment,
+            None => GameOverState::Aborted,
+        };
+        next_state.set(crate::core::GameState::GameOver);
     }
 }
 

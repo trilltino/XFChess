@@ -42,7 +42,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ui.vertical_centered(|ui| {
         Layout::section_space(ui);
 
-        if ui.button("? Back").clicked() {
+        if ui.button("‹ Back").clicked() {
             ctx.menu_state.set(crate::core::MenuState::ModeSelect);
             lobby.status = LobbyStatus::Idle;
         }
@@ -62,7 +62,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             ui.horizontal(|ui| {
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 220, 50),
-                    format!("? Active game found (ID: {})", rejoin_id),
+                    format!("Active game found (ID: {})", rejoin_id),
                 );
                 if ui.button("Rejoin").clicked() {
                     if let Some(ref mut sync) = ctx.solana_sync {
@@ -96,7 +96,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             );
         } else {
             ui.colored_label(egui::Color32::YELLOW, "Wallet not connected");
-            if ui.button(" Connect Wallet").clicked() {
+            if ui.button("Connect Wallet").clicked() {
                 tauri_signer::open_wallet_browser();
             }
         }
@@ -104,12 +104,18 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         Layout::item_space(ui);
 
         // Only show the create/join form while not in a post-transaction state.
-        let in_post_state = matches!(
-            lobby.status,
-            LobbyStatus::WaitingForOpponent { .. }
-                | LobbyStatus::OpponentJoined { .. }
-                | LobbyStatus::Success(_)
-        );
+        // These statuses only ever originate from the Create flow (see
+        // render_create_tab), so they should only hide the tab bar while
+        // Create is the active tab — otherwise a stale WaitingForOpponent
+        // left over from an earlier create attempt hides Join/Browse too
+        // when the user re-enters the lobby from the main menu.
+        let in_post_state = lobby.mode == LobbyMode::Create
+            && matches!(
+                lobby.status,
+                LobbyStatus::WaitingForOpponent { .. }
+                    | LobbyStatus::OpponentJoined { .. }
+                    | LobbyStatus::Success(_)
+            );
 
         if !in_post_state {
             // Tab switcher
@@ -185,7 +191,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             LobbyStatus::Pending => {
                 ui.spinner();
                 ui.label(
-                    egui::RichText::new("? Submitting transaction...")
+                    egui::RichText::new("Submitting transaction...")
                         .color(egui::Color32::from_rgb(200, 200, 50)),
                 );
             }
@@ -193,7 +199,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             LobbyStatus::WaitingForOpponent { game_id } => {
                 ui.spinner();
                 ui.label(
-                    egui::RichText::new("? Waiting for opponent to join...")
+                    egui::RichText::new("Waiting for opponent to join...")
                         .color(egui::Color32::from_rgb(255, 200, 80)),
                 );
                 Layout::small_space(ui);
@@ -326,7 +332,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 );
 
                 Layout::small_space(ui);
-                if ui.small_button(" Cancel").clicked() {
+                if ui.small_button("Cancel").clicked() {
                     ctx.lobby_chat.deactivate();
                     lobby.status = LobbyStatus::Idle;
                     lobby.opponent_poll_rx = None;
@@ -335,7 +341,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
             LobbyStatus::OpponentJoined { game_id } => {
                 ui.label(
-                    egui::RichText::new(" Opponent joined!")
+                    egui::RichText::new("Opponent joined!")
                         .color(egui::Color32::from_rgb(100, 255, 100))
                         .strong(),
                 );
@@ -346,7 +352,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                         .color(egui::Color32::LIGHT_GRAY),
                 );
                 Layout::small_space(ui);
-                if ui.button(" Host Game").clicked() {
+                if ui.button("Host Game").clicked() {
                     start_solana_braid_game(
                         &mut ctx.online_session,
                         &ctx.network_config,
@@ -377,12 +383,12 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
             LobbyStatus::Success(game_id) => {
                 ui.label(
-                    egui::RichText::new(" Game ready!")
+                    egui::RichText::new("Game ready!")
                         .color(egui::Color32::from_rgb(100, 255, 100))
                         .strong(),
                 );
                 Layout::small_space(ui);
-                if ui.button(" Start Game").clicked() {
+                if ui.button("Start Game").clicked() {
                     let is_host = lobby.mode == LobbyMode::Create;
                     start_solana_braid_game(
                         &mut ctx.online_session,
@@ -412,7 +418,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
             LobbyStatus::Error(msg) => {
                 ui.colored_label(egui::Color32::RED, format!(" {}", msg));
-                if ui.small_button("? Try Again").clicked() {
+                if ui.small_button("Try Again").clicked() {
                     lobby.status = LobbyStatus::Idle;
                 }
             }
@@ -592,7 +598,9 @@ fn render_create_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
     compliance: &mut crate::ui::compliance_modal::ComplianceState,
-    node_id: Option<&str>,
+    // Free games now go through spawn_create_game too, which reads
+    // lobby.cached_node_id directly — this param is no longer needed here.
+    _node_id: Option<&str>,
     gbp_per_sol: Option<f64>,
 ) {
     use crate::multiplayer::solana::lobby::EloMatchPref;
@@ -748,22 +756,22 @@ fn render_create_tab(
 
     let is_free_casual = lobby.wager_sol == 0.0 && lobby.match_type == 0;
     let is_free_rated = lobby.wager_sol == 0.0 && lobby.match_type == 1;
+    // Free games now go through the same signed on-chain create_game call as
+    // wagered games (wager_amount = 0 is a valid, zero-cost path on-chain), so
+    // they all require a connected wallet to sign.
     let can_create = !matches!(lobby.status, LobbyStatus::Pending)
-        && (is_free_casual
-            || (is_free_rated && wallet_connected)
-            || (wallet_connected
-                && lobby.wager_sol > 0.0
-                && (lobby.wager_sol as f64) <= balance - 0.002))
-        && !matches!(lobby.status, LobbyStatus::Pending);
+        && wallet_connected
+        && ((is_free_casual || is_free_rated)
+            || (lobby.wager_sol > 0.0 && (lobby.wager_sol as f64) <= balance - 0.002));
 
     let is_devnet = lobby.cached_rpc_url.contains("devnet");
 
     let create_btn_text = if is_free_casual {
-        " Host Free Game"
+        "Host Free Game"
     } else if is_free_rated {
-        " Host Free Rated Game"
+        "Host Free Rated Game"
     } else {
-        " Create Wagered Game"
+        "Create Wagered Game"
     };
 
     if ui
@@ -780,78 +788,35 @@ fn render_create_tab(
         .clicked()
         && can_create
     {
-        if is_free_casual {
-            // Free game: announce to VPS relay with stake 0.0, then go straight into game.
-            // No Solana transaction needed.
-            let game_id = format!("free_{}", rand::random::<u32>());
-            let display_name = lobby
-                .cached_keypair_bytes
-                .as_ref()
-                .map(|b| {
-                    // Show first 6 chars of hex as a display name.
-                    let hex: String = b.iter().take(3).map(|x| format!("{:02x}", x)).collect();
-                    format!("Player {}", &hex)
-                })
-                .unwrap_or_else(|| "Anonymous".to_string());
-
-            let host_node_id = node_id.unwrap_or("unknown_node_id");
-            match crate::multiplayer::vps_client::p2p_announce_game(
-                game_id.clone(),
-                host_node_id,
-                &display_name,
-                0.0,
-                "P2P",
-                300,
-                0,
-                Some(display_name.clone()),
-                None,
-                None,
-            ) {
-                Ok(()) => {
-                    info!(
-                        "[LOBBY] Free game announced (id={}). Waiting for opponent via VPS.",
-                        game_id
-                    );
-                    lobby.status = LobbyStatus::WaitingForOpponent { game_id: 0 };
-                }
-                Err(e) => {
-                    warn!(
-                        "[LOBBY] VPS announce failed ({}). Starting locally anyway.",
-                        e
-                    );
-                    lobby.status = LobbyStatus::WaitingForOpponent { game_id: 0 };
-                }
+        // Free and wagered games both go through the same signed on-chain
+        // create_game call (wager_amount = 0 for free) — only an actual wager
+        // on mainnet needs CARF compliance first.
+        let needs_compliance = !is_free_casual
+            && !is_devnet
+            && compliance.status != crate::ui::compliance_modal::SubmissionStatus::Success;
+        if needs_compliance {
+            compliance.show = true;
+            if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
+                compliance.pubkey = Some(wallet_pubkey.to_string());
             }
-        } else {
-            // Wagered game: enforce CARF compliance on mainnet, then spawn Solana TX.
-            if !is_devnet
-                && compliance.status != crate::ui::compliance_modal::SubmissionStatus::Success
-            {
-                compliance.show = true;
-                if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes)
-                {
-                    compliance.pubkey = Some(wallet_pubkey.to_string());
-                }
-            } else if let Some(wallet_pubkey) =
-                wallet_pubkey_from_cached(&lobby.cached_keypair_bytes)
-            {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                spawn_create_game(
-                    lobby.cached_rpc_url.clone(),
-                    wallet_pubkey,
-                    lobby.wager_lamports(),
-                    lobby.match_type,
-                    lobby.time_control_base,
-                    lobby.time_control_inc,
-                    tx,
-                );
-                lobby.tx_rx = Some(rx);
-                lobby.status = LobbyStatus::Pending;
-                info!(
-                    "[SOLANA_LOBBY] Creating wagered game ({} SOL)",
-                    lobby.wager_sol
-                );
-            }
+        } else if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes)
+        {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            spawn_create_game(
+                lobby.cached_rpc_url.clone(),
+                wallet_pubkey,
+                lobby.wager_lamports(),
+                lobby.match_type,
+                lobby.time_control_base,
+                lobby.time_control_inc,
+                tx,
+            );
+            lobby.tx_rx = Some(rx);
+            lobby.status = LobbyStatus::Pending;
+            info!(
+                "[SOLANA_LOBBY] Creating game ({} SOL wager)",
+                lobby.wager_sol
+            );
         }
     }
 
@@ -893,7 +858,7 @@ fn render_join_tab(
     if ui
         .add_sized(
             [ui.available_width(), 30.0],
-            egui::Button::new(" Manual Look Up"),
+            egui::Button::new("Manual Look Up"),
         )
         .clicked()
         && game_id_valid
@@ -935,7 +900,7 @@ fn render_join_tab(
         }
 
         if ui
-            .add_enabled(can_join, egui::Button::new(" Confirm Join"))
+            .add_enabled(can_join, egui::Button::new("Confirm Join"))
             .clicked()
         {
             if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
@@ -1184,11 +1149,7 @@ pub(super) fn render_lobby_selection_popup(
                                 tauri_signer::open_wallet_browser();
                             } else if state.profile_status != crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername {
                                 info!("[MENU] Profile missing or incomplete. Opening Tauri profile step.");
-                                std::thread::spawn(|| {
-                                    let _ = reqwest::blocking::Client::new()
-                                        .post("http://127.0.0.1:7454/api/open-profile-step")
-                                        .send();
-                                });
+                                tauri_signer::open_profile_step();
                             } else {
                                 menu_state.set(crate::core::MenuState::SolanaLobby);
                             }
@@ -1655,7 +1616,7 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
         ui.heading(egui::RichText::new("TOURNAMENTS").size(24.0).color(egui::Color32::from_rgb(255, 200, 50)).strong());
         ui.add_space(8.0);
 
-        if ui.button("? Back").clicked() {
+        if ui.button("‹ Back").clicked() {
             ctx.menu_state.set(crate::core::MenuState::Main);
         }
 
@@ -2321,14 +2282,21 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
         ui.add_space(24.0);
 
         ui.horizontal(|ui| {
+            // Center the button pair: pad by half the leftover width (fixed
+            // button sizes make the row width deterministic).
+            ui.spacing_mut().item_spacing.x = 12.0;
+            let (cancel_w, start_w) = (110.0, 190.0);
+            ui.add_space(((ui.available_width() - (cancel_w + 12.0 + start_w)) / 2.0).max(0.0));
+
             if ui
-                .button(egui::RichText::new("Cancel").size(16.0))
+                .add_sized(
+                    [cancel_w, 40.0],
+                    egui::Button::new(egui::RichText::new("Cancel").size(16.0)),
+                )
                 .clicked()
             {
                 ctx.menu_state.set(crate::core::MenuState::Main);
             }
-
-            ui.add_space(12.0);
 
             let node_id_ready = ctx
                 .network_state
@@ -2339,12 +2307,13 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
             let start_btn = ui.add_enabled(
                 node_id_ready,
                 egui::Button::new(
-                    egui::RichText::new(" Start Hosting")
+                    egui::RichText::new("Start Hosting")
                         .size(18.0)
                         .color(egui::Color32::WHITE)
                         .strong(),
                 )
-                .fill(egui::Color32::from_rgb(40, 140, 80)),
+                .fill(egui::Color32::from_rgb(40, 140, 80))
+                .min_size(egui::vec2(start_w, 44.0)),
             );
 
             if start_btn.clicked() {
@@ -2599,7 +2568,7 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
 
         if ui
             .button(
-                egui::RichText::new(" Cancel Hosting")
+                egui::RichText::new("Cancel Hosting")
                     .size(16.0)
                     .color(egui::Color32::from_rgb(255, 100, 100)),
             )

@@ -1,4 +1,13 @@
-// Rollup Network Bridge for MagicBlock ER
+//! Bridges Bevy game events to the MagicBlock Ephemeral Rollup lifecycle.
+//!
+//! On [`GameStartedEvent`], the creator (only) delegates the game PDA to the
+//! ER off the main thread ([`spawn_delegation_task`]/[`retry_pending_delegation`]),
+//! polled to completion by [`poll_delegation_tasks`]. On [`GameEndedEvent`], the
+//! reverse happens: the VPS is asked to undelegate ([`vps_client::vps_undelegate_game`]),
+//! this system waits for the game PDA to return to devnet, then fires the
+//! finalize/settlement flow. Free (non-wagered) games skip delegation entirely
+//! and update ELO directly. See `crates/CLAUDE.md` for how this fits with the
+//! Braid/P2P relay layer.
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
@@ -131,6 +140,10 @@ impl Plugin for RollupNetworkBridgePlugin {
         // PGN export: fetch Braid move log and build replay resource after game ends.
         app.add_systems(Update, handle_game_end_pgn_export);
         app.add_systems(Update, apply_pgn_export_result);
+        // Drop this game's causal-chain tracking state so it doesn't accumulate
+        // forever across a long client session (tournament play, many spectated
+        // games, etc.).
+        app.add_systems(Update, handle_game_end_causal_cleanup);
 
         info!("RollupNetworkBridgePlugin initialized with Magic Block ER support");
     }
@@ -830,6 +843,21 @@ fn retry_pending_delegation(
     );
 
     let _ = magicblock_events; // suppress unused warning
+}
+
+/// Drops [`CausalChainState`] entries for a finished game — otherwise
+/// `last_seq`/`head_version`/`roster` grow forever across a client session
+/// that plays or spectates many games (e.g. a tournament run).
+fn handle_game_end_causal_cleanup(
+    mut game_ended_events: MessageReader<GameEndedEvent>,
+    mut causal: ResMut<crate::multiplayer::types::CausalChainState>,
+) {
+    for event in game_ended_events.read() {
+        let game_id = event.game_id;
+        causal.last_seq.retain(|(gid, _), _| *gid != game_id);
+        causal.head_version.retain(|(gid, _), _| *gid != game_id);
+        causal.roster.remove(&game_id);
+    }
 }
 
 /// Handles game end events to undelegate the game PDA from the Ephemeral Rollup

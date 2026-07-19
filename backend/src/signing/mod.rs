@@ -32,8 +32,6 @@
 pub mod anticheat_enqueue;
 pub mod auth;
 pub mod blinks;
-pub mod blinks_funding;
-pub mod blinks_onboarding;
 pub mod cacf;
 pub mod config;
 pub mod elo_cache;
@@ -60,7 +58,7 @@ use crate::signing::auth_ws::handle_auth_websocket;
 use axum::routing::get;
 use axum::Router;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
+use solana_sdk::signature::{Keypair, Signer};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -114,7 +112,11 @@ pub struct AppState {
     pub metrics: Arc<crate::telemetry::metrics::Metrics>,
 
     // ── Global session management ──────────────────────────────────────────────
-    pub pending_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
+    /// Wallet → (session keypair, time it was prepared). The timestamp lets
+    /// a background sweep evict entries whose `activate` never came (wallet
+    /// never signed, user abandoned the flow) instead of leaking keypairs
+    /// in memory forever — see `routes::global_session::spawn_pending_session_sweep`.
+    pub pending_global_sessions: Arc<Mutex<HashMap<Pubkey, (Keypair, std::time::Instant)>>>,
     pub active_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
 
     pub solana_rpc_url: String,
@@ -144,6 +146,20 @@ const _: () = {
     let _ = assert_bounds::<AppState>;
 };
 
+/// Loads an authority keypair from an env var value that's either a JSON
+/// keypair file path or a raw base58-encoded secret key.
+pub fn load_keypair_from_env_value(val: &str) -> Keypair {
+    if std::path::Path::new(val).exists() {
+        let bytes: Vec<u8> = std::fs::read_to_string(val)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        Keypair::from_bytes(&bytes).unwrap_or_else(|_| Keypair::new())
+    } else {
+        Keypair::from_base58_string(val)
+    }
+}
+
 impl AppState {
     pub fn new(
         config: SigningConfig,
@@ -156,7 +172,6 @@ impl AppState {
             &config.fee_payer_keys,
         ));
         let jwt = Arc::new(auth::JwtIssuer::new(&config.jwt_secret));
-        let matchmaking = routes::matchmaking::SharedMatchmakingState::default();
 
         let identity_vault =
             identity::IdentityVault::new(&config.identity_encryption_key, &config.identity_salt)
@@ -172,19 +187,12 @@ impl AppState {
             std::time::Duration::from_secs(300),
             program_id,
         ));
+        // Matchmaking shares the same ELO cache rather than standing up its
+        // own separate, devnet-hardcoded one.
+        let matchmaking = routes::matchmaking::SharedMatchmakingState::new(elo_cache.clone());
 
-        // Parse authority keys — accepts either a JSON file path or a base58 string
-        let load_keypair = |val: &str| -> Keypair {
-            if std::path::Path::new(val).exists() {
-                let bytes: Vec<u8> = std::fs::read_to_string(val)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default();
-                Keypair::from_bytes(&bytes).unwrap_or_else(|_| Keypair::new())
-            } else {
-                Keypair::from_base58_string(val)
-            }
-        };
+        // Parse authority keys — accepts either a JSON file path or a base58 string.
+        let load_keypair = load_keypair_from_env_value;
 
         let vps_authority = Arc::new(
             config
@@ -222,6 +230,21 @@ impl AppState {
                 Keypair::new()
             }));
 
+        // Log which pubkey each authority key actually resolved to. These
+        // must match the corresponding hardcoded `Pubkey` constants in
+        // programs/xfchess-game/src/constants.rs exactly, or every
+        // privileged instruction that constrains on them (tournament
+        // creation, fee collection, treasury withdrawal, ...) fails on-chain
+        // with UnauthorizedAccess — a mismatch here is otherwise invisible
+        // until a real transaction hits the RPC.
+        tracing::info!(
+            "[VPS] Authority pubkeys — vps: {}, kyc: {}, link: {}, treasury: {}",
+            vps_authority.pubkey(),
+            kyc_authority.pubkey(),
+            link_authority.pubkey(),
+            treasury_authority.pubkey(),
+        );
+
         // Initialize Swiss service and attach Braid hub
         let braid_hub = Arc::new(ResourceHub::new());
         let mut _swiss = swiss::SwissService::new((*tournament_store).clone());
@@ -251,6 +274,12 @@ impl AppState {
         let friends = Arc::new(FriendManager::new(pool.clone()));
         let presence = Arc::new(PresenceStore::new());
 
+        let pending_global_sessions = Arc::new(Mutex::new(HashMap::new()));
+        routes::global_session::spawn_pending_session_sweep(pending_global_sessions.clone());
+
+        let invite_store = Arc::new(std::sync::RwLock::new(HashMap::new()));
+        social::routes::spawn_invite_store_sweep(invite_store.clone());
+
         Self {
             config: Arc::new(config),
             store,
@@ -277,7 +306,7 @@ impl AppState {
             braid_hub,
             chat_relay: routes::chat::new_chat_relay(),
             metrics,
-            pending_global_sessions: Arc::new(Mutex::new(HashMap::new())),
+            pending_global_sessions,
             active_global_sessions: Arc::new(Mutex::new(HashMap::new())),
             solana_rpc_url,
             program_id,
@@ -285,7 +314,7 @@ impl AppState {
             anticheat_queue: None,
             friends,
             presence,
-            invite_store: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            invite_store,
             siws_nonces: Arc::new(Mutex::new(HashMap::new())),
         }
     }

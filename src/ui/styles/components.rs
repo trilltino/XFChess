@@ -18,6 +18,12 @@ impl Layout {
     /// Small spacing
     pub const SMALL_SPACING: f32 = 8.0;
 
+    /// Fixed width for the in-game left/right side panels. Both panels use
+    /// this exact (non-resizable) width so the board column left between
+    /// them is identical in size regardless of which side is measured —
+    /// this is also what keeps the 2D and 3D board renders the same size.
+    pub const SIDE_PANEL_WIDTH: f32 = 280.0;
+
     /// Add section spacing
     pub fn section_space(ui: &mut egui::Ui) {
         ui.add_space(Self::SECTION_SPACING);
@@ -157,6 +163,35 @@ impl StyledPanel {
             stroke: egui::Stroke::NONE,
             inner_margin: egui::Margin::same(24),
             ..egui::Frame::NONE
+        }
+    }
+
+    /// Flat, borderless card used for sub-sections inside the in-game left
+    /// and right sidebars (player row, clock, move list, controls, chat).
+    /// No stroke — a lichess-style sidebar reads as one flat surface with
+    /// subtle fill differences between sections, not a stack of boxed panels.
+    pub fn sidebar_card() -> egui::Frame {
+        egui::Frame {
+            fill: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 35),
+            stroke: egui::Stroke::NONE,
+            corner_radius: egui::CornerRadius::same(6),
+            shadow: egui::epaint::Shadow::NONE,
+            inner_margin: egui::Margin::symmetric(12, 8),
+            outer_margin: egui::Margin::ZERO,
+        }
+    }
+
+    /// Transparent variant of [`Self::sidebar_card`] — same margins/radius
+    /// but no fill, for rows that shouldn't stand out from the panel behind
+    /// them (e.g. name rows sitting directly above a filled clock card).
+    pub fn sidebar_row() -> egui::Frame {
+        egui::Frame {
+            fill: egui::Color32::TRANSPARENT,
+            stroke: egui::Stroke::NONE,
+            corner_radius: egui::CornerRadius::ZERO,
+            shadow: egui::epaint::Shadow::NONE,
+            inner_margin: egui::Margin::symmetric(12, 6),
+            outer_margin: egui::Margin::ZERO,
         }
     }
 }

@@ -646,7 +646,10 @@ async fn tournament_escrow_balance(
     // Tournament escrow seed is "t_escrow" ("escrow" is the per-game wager seed).
     let seeds = &[b"t_escrow", &id.to_le_bytes()[..]];
     let (escrow_pda, _bump) = solana_sdk::pubkey::Pubkey::find_program_address(seeds, &program_id);
-    let balance = state.solana_rpc.get_balance(&escrow_pda).unwrap_or(0);
+    let rpc = state.solana_rpc.clone();
+    let balance = tokio::task::spawn_blocking(move || rpc.get_balance(&escrow_pda).unwrap_or(0))
+        .await
+        .unwrap_or(0);
     Ok(Json(json!({
         "tournament_id": id,
         "escrow_pda": escrow_pda.to_string(),

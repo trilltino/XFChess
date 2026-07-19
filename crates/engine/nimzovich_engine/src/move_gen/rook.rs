@@ -36,6 +36,12 @@ use crate::types::*;
 /// generate_rook_moves(&game, 0, COLOR_WHITE, &mut moves);
 /// // Moves now contains all valid rook moves from a1
 /// ```
-pub fn generate_rook_moves(game: &Game, from: i8, color: Color, moves: &mut Vec<KK>) {
-    sliding::generate_sliding_moves(game, from, color, 0, 4, moves); // orthogonal dirs only
+pub fn generate_rook_moves(
+    game: &Game,
+    from: i8,
+    color: Color,
+    moves: &mut Vec<KK>,
+    noisy_only: bool,
+) {
+    sliding::generate_sliding_moves(game, from, color, 0, 4, moves, noisy_only); // orthogonal dirs only
 }

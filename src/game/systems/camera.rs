@@ -38,11 +38,41 @@ use crate::game::camera_modes::{
     CameraControlsDisabled, CameraViewMode, CinematicSequence, TransitionType,
 };
 use crate::game::resources::{CurrentTurn, Players, Selection};
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
     prelude::*,
 };
 use std::f32::consts::PI;
+
+/// Render layer used exclusively by the in-game 3D board camera and the
+/// board/piece meshes it renders. The persistent (UI) camera has no
+/// `RenderLayers` component during gameplay, so it defaults to layer 0 and
+/// no longer renders these meshes directly — see [`BoardCamera`].
+pub const BOARD_LAYER: usize = 9;
+
+/// Sentinel render layer nothing is ever spawned on. Assigned to the
+/// persistent camera while it's UI-only (`GameState::InGame`) so it renders
+/// zero 3D geometry — including always-present entities like the global
+/// background cuboid (`setup_global_scene`) that would otherwise still be
+/// visible to it on the default layer and paint over the board camera's
+/// output, since a higher `order` + `ClearColorConfig::None` camera still
+/// draws (just doesn't clear) whatever 3D geometry it can see.
+pub const UI_ONLY_LAYER: usize = 30;
+
+/// Marks the dedicated 3D-world camera spawned for `GameState::InGame`.
+///
+/// Rendering is split in two during gameplay: this camera renders only the
+/// board/piece meshes (`RenderLayers::layer(BOARD_LAYER)`), clipped to the
+/// board column between the left/right egui side panels; the persistent
+/// `PrimaryEguiContext` camera becomes UI-only (`ClearColorConfig::None`,
+/// higher `order` so its egui/bevy_ui content composites on top). This is
+/// what keeps 2D and 3D board sizing consistent — see `sync_board_camera_viewport`.
+/// It carries `CameraController` (RTS orbit/zoom) instead of the persistent
+/// camera while active, and is despawned automatically on exiting `InGame`.
+#[derive(Component)]
+pub struct BoardCamera;
 
 /// Component marking a camera as player-controllable with RTS-style movement
 ///
@@ -825,13 +855,16 @@ mod tests {
     }
 }
 
-/// Configure the persistent camera for gameplay
-/// Use the existing Egui camera as the main game camera to avoid conflicts
+/// Configure the dedicated board camera for gameplay, spawning it on first
+/// use. Also demotes the persistent camera to UI-only for the duration of
+/// `GameState::InGame` (higher `order`, transparent clear) so it no longer
+/// competes with the board camera for the same pixels — see [`BoardCamera`].
 pub fn setup_game_camera(
     mut commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
     view_mode: Res<crate::game::view_mode::ViewMode>,
-    mut query: Query<(&mut Transform, &mut Camera)>,
+    mut ui_cam_query: Query<&mut Camera, Without<BoardCamera>>,
+    mut board_cam_query: Query<(Entity, &mut Transform, &mut Camera), With<BoardCamera>>,
     players: Res<Players>,
     current_turn: Res<CurrentTurn>,
     game_mode: Res<GameMode>,
@@ -858,109 +891,133 @@ pub fn setup_game_camera(
     rotation_state.is_rotating = false;
     rotation_state.last_turn_color = Some(current_turn.color);
 
+    let initial_height = 16.0;
+    let distance_behind = 8.0;
+
+    let xz_dist = distance_behind + 3.5;
+    let white_ref = board_center + Vec3::new(0.0, initial_height, -xz_dist);
+    let yaw_rot = Quat::from_rotation_y(initial_yaw);
+    let camera_pos = board_center + yaw_rot * (white_ref - board_center);
+
+    let new_transform = if is_2d {
+        let height = 16.0;
+        // Sit behind the player's back rank (same side as the 3D camera) so
+        // rank 1 stays at the bottom and files a–h run left to right.
+        // A pure top-down camera cannot achieve standard orientation in a
+        // right-handed coordinate system, so we use a steep (~7°) angle instead.
+        let z_behind = 2.0; // units behind the back rank
+        let camera_pos_2d = if is_black_view {
+            Vec3::new(3.5, height, 7.0 + z_behind) // behind black's rank 8
+        } else {
+            Vec3::new(3.5, height, -z_behind) // behind white's rank 1
+        };
+        Transform::from_translation(camera_pos_2d).looking_at(board_center, Vec3::Y)
+    } else {
+        Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y)
+    };
+
+    // Persistent camera becomes UI-only: draws after (higher order) the board
+    // camera and doesn't clear its output. Board/piece meshes no longer carry
+    // the default RenderLayers this camera renders, so it draws nothing 3D.
     if let Some(entity) = persistent_camera.entity {
-        if let Ok((mut transform, mut camera)) = query.get_mut(entity) {
-            let initial_height = 16.0;
-            let distance_behind = 8.0;
-
-            let xz_dist = distance_behind + 3.5;
-            let white_ref = board_center + Vec3::new(0.0, initial_height, -xz_dist);
-            let yaw_rot = Quat::from_rotation_y(initial_yaw);
-            let camera_pos = board_center + yaw_rot * (white_ref - board_center);
-
-            if is_2d {
-                let height = 16.0;
-                // Sit behind the player's back rank (same side as the 3D camera) so
-                // rank 1 stays at the bottom and files a–h run left to right.
-                // A pure top-down camera cannot achieve standard orientation in a
-                // right-handed coordinate system, so we use a steep (~7°) angle instead.
-                let z_behind = 2.0; // units behind the back rank
-                let camera_pos_2d = if is_black_view {
-                    Vec3::new(3.5, height, 7.0 + z_behind) // behind black's rank 8
-                } else {
-                    Vec3::new(3.5, height, -z_behind) // behind white's rank 1
-                };
-                *transform =
-                    Transform::from_translation(camera_pos_2d).looking_at(board_center, Vec3::Y);
-            } else {
-                *transform =
-                    Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y);
-            }
-
-            camera.order = 0;
-
-            commands.entity(entity).insert(CameraController {
-                current_zoom: transform.translation.y,
-                target_zoom: transform.translation.y,
-                min_zoom: if is_2d { 5.0 } else { 3.0 },
-                max_zoom: if is_2d { 20.0 } else { 30.0 },
-                initialized: false,
-                ..Default::default()
-            });
-
-            info!(
-                "[CAMERA] Positioned for {} view. is_black_view: {}",
-                if is_2d { "2D" } else { "3D" },
-                is_black_view
-            );
+        if let Ok(mut camera) = ui_cam_query.get_mut(entity) {
+            camera.order = 1;
+            camera.clear_color = ClearColorConfig::None;
         }
+        commands
+            .entity(entity)
+            .insert(RenderLayers::layer(UI_ONLY_LAYER));
     }
+
+    // Find the existing board camera (e.g. after a 'V' view-mode toggle) or
+    // spawn it fresh (first entry into InGame).
+    let mut board_entity = None;
+    if let Ok((entity, mut transform, mut camera)) = board_cam_query.single_mut() {
+        *transform = new_transform;
+        camera.order = 0;
+        board_entity = Some(entity);
+    }
+    let board_entity = board_entity.unwrap_or_else(|| {
+        commands
+            .spawn((
+                Camera3d::default(),
+                Camera {
+                    order: 0,
+                    clear_color: ClearColorConfig::Default,
+                    ..default()
+                },
+                RenderLayers::layer(BOARD_LAYER),
+                new_transform,
+                BoardCamera,
+                crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                Name::new("Board Camera"),
+            ))
+            .id()
+    });
+
+    commands.entity(board_entity).insert(CameraController {
+        current_zoom: new_transform.translation.y,
+        target_zoom: new_transform.translation.y,
+        min_zoom: if is_2d { 5.0 } else { 3.0 },
+        max_zoom: if is_2d { 20.0 } else { 30.0 },
+        initialized: false,
+        ..Default::default()
+    });
+
+    info!(
+        "[CAMERA] Board camera positioned for {} view. is_black_view: {}",
+        if is_2d { "2D" } else { "3D" },
+        is_black_view
+    );
 }
 
-/// Reset the persistent camera when exiting gameplay
+/// Reset the persistent camera to its normal (non-InGame) state on exit.
+/// The board camera itself is despawned automatically via `DespawnOnExit`.
 pub fn reset_game_camera(
     mut commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut query: Query<&mut Camera>,
 ) {
     if let Some(entity) = persistent_camera.entity {
-        // Remove RTS controls
-        commands.entity(entity).remove::<CameraController>();
-
-        // Reset order and viewport when leaving game
         if let Ok(mut camera) = query.get_mut(entity) {
             camera.order = 0;
             camera.viewport = None;
+            camera.clear_color = ClearColorConfig::default();
         }
+        commands.entity(entity).remove::<RenderLayers>();
 
-        info!("[CAMERA] Reset Persistent Camera (Removed Controls)");
+        info!("[CAMERA] Reset Persistent Camera to non-gameplay state");
     }
 }
 
-/// Restricts the 3D camera to the area not covered by the right game panel.
-/// The game_panel SidePanel has min_width(280) in logical pixels; without this
-/// system the board renders centered in the full window and appears offset right
-/// relative to the visible non-panel area.
-pub fn update_game_viewport(
-    persistent_camera: Res<crate::PersistentEguiCamera>,
-    mut cameras: Query<&mut Camera>,
+/// Clips the board camera's viewport to the board column between the fixed
+/// left/right egui side panels, converting the panel width (egui points) to
+/// physical pixels via the window's scale factor. Falls back to the full
+/// window if it's too narrow to leave a sensible board column.
+pub fn sync_board_camera_viewport(
     windows: Query<&bevy::window::Window, With<bevy::window::PrimaryWindow>>,
-    hud_visibility: Res<crate::ui::game::game_ui::InGameHudVisibility>,
-    game_mode: Res<crate::core::GameMode>,
+    mut cameras: Query<&mut Camera, With<BoardCamera>>,
 ) {
-    let Some(entity) = persistent_camera.entity else {
+    let Ok(mut camera) = cameras.single_mut() else {
         return;
     };
-    let Ok(mut camera) = cameras.get_mut(entity) else {
+    let Ok(window) = windows.single() else {
         return;
     };
-    let Ok(window) = windows.single() else { return };
 
-    // HUD hidden or PGN replay: full viewport, no panel offset
-    if !hud_visibility.visible || *game_mode == crate::core::GameMode::PgnReplay {
+    let scale = window.scale_factor() as f32;
+    let panel_px = (crate::ui::styles::Layout::SIDE_PANEL_WIDTH * scale).round() as u32;
+    let win_w = window.physical_width();
+    let win_h = window.physical_height();
+
+    if win_w <= panel_px * 2 + 2 || win_h == 0 {
         camera.viewport = None;
         return;
     }
 
-    let scale = window.scale_factor() as f32;
-    let window_w = window.physical_width();
-    let window_h = window.physical_height();
-    // game_panel has min_width(280) logical pixels and is non-resizable
-    let panel_phys = (280.0 * scale) as u32;
-
-    camera.viewport = Some(bevy::camera::Viewport {
-        physical_position: UVec2::ZERO,
-        physical_size: UVec2::new(window_w.saturating_sub(panel_phys), window_h),
+    camera.viewport = Some(Viewport {
+        physical_position: UVec2::new(panel_px, 0),
+        physical_size: UVec2::new(win_w - panel_px * 2, win_h),
         depth: 0.0..1.0,
     });
 }
@@ -1011,26 +1068,26 @@ pub fn camera_reset_system(
 /// System to handle 'V' key for toggling view mode during gameplay
 pub fn view_mode_toggle_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut view_preferences: ResMut<crate::game::view_mode::PlayerViewPreferences>,
     mut view_mode: ResMut<crate::game::view_mode::ViewMode>,
     commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
-    query: Query<(&mut Transform, &mut Camera)>,
+    ui_cam_query: Query<&mut Camera, Without<BoardCamera>>,
+    board_cam_query: Query<(Entity, &mut Transform, &mut Camera), With<BoardCamera>>,
     players: Res<Players>,
     current_turn: Res<CurrentTurn>,
     game_mode: Res<GameMode>,
     rotation_state: ResMut<CameraRotationState>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyV) {
-        view_preferences.toggle_view();
-        *view_mode = view_preferences.local_view;
+        view_mode.toggle();
         info!("[VIEW] Toggled view mode to {:?}", *view_mode);
 
         setup_game_camera(
             commands,
             persistent_camera,
             view_mode.into(),
-            query,
+            ui_cam_query,
+            board_cam_query,
             players,
             current_turn,
             game_mode,
@@ -1045,8 +1102,7 @@ pub fn camera_mode_cycle_system(
     mut camera_view_mode: ResMut<CameraViewMode>,
     mut cinematic_sequence: ResMut<CinematicSequence>,
     mut commands: Commands,
-    persistent_camera: Res<crate::PersistentEguiCamera>,
-    mut query: Query<(&mut Transform, &mut CameraController), With<Camera3d>>,
+    mut query: Query<(Entity, &mut Transform, &mut CameraController), With<Camera3d>>,
     players: Res<Players>,
     current_turn: Res<CurrentTurn>,
     game_mode: Res<GameMode>,
@@ -1062,8 +1118,8 @@ pub fn camera_mode_cycle_system(
         }
 
         // Apply camera position for the new mode
-        if let Some(camera_entity) = persistent_camera.entity {
-            if let Ok((mut transform, mut controller)) = query.get_mut(camera_entity) {
+        {
+            if let Ok((camera_entity, mut transform, mut controller)) = query.single_mut() {
                 let board_center = Vec3::new(3.5, 0.0, 3.5);
 
                 match next_mode {

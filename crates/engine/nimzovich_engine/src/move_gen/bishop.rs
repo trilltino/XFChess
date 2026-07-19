@@ -36,6 +36,12 @@ use crate::types::*;
 /// generate_bishop_moves(&game, 2, COLOR_WHITE, &mut moves);
 /// // Moves now contains all valid bishop moves from c1
 /// ```
-pub fn generate_bishop_moves(game: &Game, from: i8, color: Color, moves: &mut Vec<KK>) {
-    sliding::generate_sliding_moves(game, from, color, 4, 8, moves); // diagonal dirs only
+pub fn generate_bishop_moves(
+    game: &Game,
+    from: i8,
+    color: Color,
+    moves: &mut Vec<KK>,
+    noisy_only: bool,
+) {
+    sliding::generate_sliding_moves(game, from, color, 4, 8, moves, noisy_only); // diagonal dirs only
 }

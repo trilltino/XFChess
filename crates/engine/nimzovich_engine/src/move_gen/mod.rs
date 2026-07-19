@@ -96,44 +96,61 @@ use crate::types::*;
 /// println!("White has {} possible moves", moves.len());
 /// ```
 pub fn generate_pseudo_legal_moves(game: &Game, color: Color) -> Vec<KK> {
-    let mut moves = Vec::with_capacity(200); // Pre-allocate for typical position
+    generate_moves_impl(game, color, false)
+}
+
+/// Generate only "noisy" pseudo-legal moves: captures, en passant, and
+/// promotions. Used by quiescence search, which only ever wants to extend
+/// through noisy lines — generating (and immediately discarding) every
+/// quiet move at every quiescence node wastes both the allocation and the
+/// per-piece move-gen work, since quiescence nodes vastly outnumber main
+/// search nodes.
+pub fn generate_pseudo_legal_captures(game: &Game, color: Color) -> Vec<KK> {
+    generate_moves_impl(game, color, true)
+}
+
+fn generate_moves_impl(game: &Game, color: Color, noisy_only: bool) -> Vec<KK> {
+    // Quiet positions have far fewer captures than total moves; a smaller
+    // initial capacity avoids over-allocating on the (much more frequent)
+    // noisy_only path while still covering typical full-move counts.
+    let mut moves = Vec::with_capacity(if noisy_only { 32 } else { 200 });
 
     if color > 0 {
         // White pieces
         let mut bb = game.white_pawns.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            pawn::generate_pawn_moves(game, sq, color, &mut moves);
+            pawn::generate_pawn_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.white_knights.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            knight::generate_knight_moves(game, sq, color, &mut moves);
+            knight::generate_knight_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.white_bishops.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            bishop::generate_bishop_moves(game, sq, color, &mut moves);
+            bishop::generate_bishop_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.white_rooks.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            rook::generate_rook_moves(game, sq, color, &mut moves);
+            rook::generate_rook_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.white_queens.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            queen::generate_queen_moves(game, sq, color, &mut moves);
+            queen::generate_queen_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.white_kings.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            king::generate_king_moves(game, sq, color, &mut moves);
+            king::generate_king_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
     } else {
@@ -141,40 +158,132 @@ pub fn generate_pseudo_legal_moves(game: &Game, color: Color) -> Vec<KK> {
         let mut bb = game.black_pawns.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            pawn::generate_pawn_moves(game, sq, color, &mut moves);
+            pawn::generate_pawn_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.black_knights.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            knight::generate_knight_moves(game, sq, color, &mut moves);
+            knight::generate_knight_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.black_bishops.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            bishop::generate_bishop_moves(game, sq, color, &mut moves);
+            bishop::generate_bishop_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.black_rooks.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            rook::generate_rook_moves(game, sq, color, &mut moves);
+            rook::generate_rook_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.black_queens.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            queen::generate_queen_moves(game, sq, color, &mut moves);
+            queen::generate_queen_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
         bb = game.black_kings.0;
         while bb != 0 {
             let sq = bb.trailing_zeros() as i8;
-            king::generate_king_moves(game, sq, color, &mut moves);
+            king::generate_king_moves(game, sq, color, &mut moves, noisy_only);
             bb &= bb - 1;
         }
     }
 
     moves
+}
+
+#[cfg(all(test, feature = "std"))]
+mod noisy_generation_tests {
+    use super::*;
+    use crate::api::game::game_from_fen;
+
+    /// Sort key that ignores `score` (always 0 fresh out of move-gen on both
+    /// paths) so two move lists can be compared as sets regardless of the
+    /// per-piece iteration order they were produced in.
+    fn sort_key(m: &KK) -> (i8, i8, u8) {
+        (m.src, m.dst, m.nxt_dir_idx)
+    }
+
+    fn assert_captures_match_filtered_full(fen: &str, color: Color, label: &str) {
+        let game = game_from_fen(fen);
+
+        let mut direct = generate_pseudo_legal_captures(&game, color);
+        direct.sort_by_key(sort_key);
+
+        let mut filtered: Vec<KK> = generate_pseudo_legal_moves(&game, color)
+            .into_iter()
+            .filter(|m| game.board[m.dst as usize] != 0 || (m.nxt_dir_idx >> 4) != 0)
+            .collect();
+        filtered.sort_by_key(sort_key);
+
+        assert_eq!(
+            direct, filtered,
+            "{label}: generate_pseudo_legal_captures diverged from \
+             generate_pseudo_legal_moves filtered to captures/promotions \
+             (color={color}, fen={fen})"
+        );
+    }
+
+    // Standard perft test positions (see src/perft.rs / tests/perft_suite.rs)
+    // — chosen to cover quiet openings, mid-game tactics, and positions with
+    // live en passant and near-promotion pawns.
+    const START: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    const KIWIPETE: &str = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    const POS5_PROMOTION_HEAVY: &str =
+        "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1";
+    const NEAR_PROMOTION: &str = "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8";
+    const EN_PASSANT_ACTIVE: &str =
+        "r1bqkbnr/ppp1pppp/2n5/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3";
+
+    #[test]
+    fn captures_match_filtered_full_start() {
+        assert_captures_match_filtered_full(START, 1, "start (white)");
+        assert_captures_match_filtered_full(START, -1, "start (black)");
+    }
+
+    #[test]
+    fn captures_match_filtered_full_kiwipete() {
+        assert_captures_match_filtered_full(KIWIPETE, 1, "kiwipete (white)");
+        assert_captures_match_filtered_full(KIWIPETE, -1, "kiwipete (black)");
+    }
+
+    #[test]
+    fn captures_match_filtered_full_promotion_heavy() {
+        assert_captures_match_filtered_full(POS5_PROMOTION_HEAVY, 1, "pos5 (white)");
+        assert_captures_match_filtered_full(POS5_PROMOTION_HEAVY, -1, "pos5 (black)");
+    }
+
+    #[test]
+    fn captures_match_filtered_full_near_promotion() {
+        assert_captures_match_filtered_full(NEAR_PROMOTION, 1, "near-promotion (white)");
+        assert_captures_match_filtered_full(NEAR_PROMOTION, -1, "near-promotion (black)");
+    }
+
+    // Note: no `captures_match_filtered_full_en_passant` test — en passant
+    // is the one case where the two approaches are *expected* to diverge.
+    // An en-passant capture lands on an empty square (the captured pawn
+    // sits beside the destination, not on it), so the old quiescence filter
+    // `board[dst] != 0 || promotion` never actually recognized en passant
+    // as noisy and silently dropped it from quiescence search. The direct
+    // generator in pawn.rs always includes en passant (it's unconditionally
+    // noisy, not inferred from board state), which fixes that gap as a
+    // side effect. See `en_passant_capture_is_generated_directly` below.
+
+    /// The en-passant capture itself must actually be present in the
+    /// direct-generated list (not just "the two lists agree", which would
+    /// trivially pass if both omitted it the same way).
+    #[test]
+    fn en_passant_capture_is_generated_directly() {
+        let game = game_from_fen(EN_PASSANT_ACTIVE);
+        let captures = generate_pseudo_legal_captures(&game, 1);
+        // e5 pawn (square 36) capturing en passant onto d6 (square 43).
+        assert!(
+            captures.iter().any(|m| m.src == 36 && m.dst == 43),
+            "expected en passant capture e5xd6 in noisy-only generation, got {captures:?}"
+        );
+    }
 }

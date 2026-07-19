@@ -21,21 +21,18 @@ impl ViewMode {
         #[cfg(not(feature = "templeos"))]
         return false;
     }
-}
 
-/// Resource tracking player-specific view preferences
-#[derive(Resource, Debug, Clone, Default)]
-pub struct PlayerViewPreferences {
-    pub local_view: ViewMode,
-}
-
-impl PlayerViewPreferences {
-    pub fn toggle_view(&mut self) {
-        self.local_view = match self.local_view {
+    /// Cycle Standard3D ⇄ Standard2D (TempleOS collapses back to 3D).
+    ///
+    /// `ViewMode` is the single source of truth for which board view is live;
+    /// the piece-visibility system keys off `resource_changed::<ViewMode>`, so
+    /// mutating it here is all that's needed — there is no second copy to sync.
+    pub fn toggle(&mut self) {
+        *self = match *self {
             ViewMode::Standard3D => ViewMode::Standard2D,
             ViewMode::Standard2D => ViewMode::Standard3D,
             #[cfg(feature = "templeos")]
-            ViewMode::TempleOS => ViewMode::Standard3D, // TempleOS to 3D
+            ViewMode::TempleOS => ViewMode::Standard3D,
         };
     }
 }

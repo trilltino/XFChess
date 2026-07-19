@@ -1,4 +1,4 @@
-import { AnchorProvider, Program, type Idl, web3 } from '@coral-xyz/anchor';
+import { AnchorProvider, Program, type Idl, web3, BN } from '@coral-xyz/anchor';
 import { Connection, PublicKey } from '@solana/web3.js';
 import idl from './xfchess_game.json';
 
@@ -48,7 +48,7 @@ export async function createPlayerProfile(
   );
 
   return await (program.methods as any)
-    .initProfile(username, country, dateOfBirth)
+    .initProfile(username, country, new BN(dateOfBirth))
     .accounts({
       playerProfile: profilePda,
       usernameRecord: usernameRecord,

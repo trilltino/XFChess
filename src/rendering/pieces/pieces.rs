@@ -11,6 +11,7 @@ use crate::game::systems::input::{
 use crate::input::pointer::{on_piece_hover, on_piece_unhover};
 use bevy::color::Color;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::picking::pointer::PointerInteraction;
 use bevy::prelude::*;
 use std::f32;
@@ -636,6 +637,7 @@ macro_rules! spawn_piece_visual {
             piece_mesh_transform($offset),
             Piece3DVisual,
             bevy::picking::Pickable::default(), // actual mesh IS the 3D hit target
+            RenderLayers::layer(crate::game::systems::camera::BOARD_LAYER),
         ));
     };
 }
@@ -665,6 +667,7 @@ pub fn spawn_king(
             DespawnOnExit(GameState::InGame),
             PointerInteraction::default(),
             bevy::picking::Pickable::default(),
+            RenderLayers::layer(crate::game::systems::camera::BOARD_LAYER),
             Name::new(piece_name(PieceType::King, piece_color, file, rank)),
             HasMoved::default(),
         ))
@@ -705,6 +708,7 @@ pub fn spawn_knight(
             DespawnOnExit(GameState::InGame),
             PointerInteraction::default(),
             bevy::picking::Pickable::default(),
+            RenderLayers::layer(crate::game::systems::camera::BOARD_LAYER),
             Name::new(piece_name(PieceType::Knight, piece_color, file, rank)),
             HasMoved::default(),
         ))
@@ -745,6 +749,7 @@ pub fn spawn_queen(
             DespawnOnExit(GameState::InGame),
             PointerInteraction::default(),
             bevy::picking::Pickable::default(),
+            RenderLayers::layer(crate::game::systems::camera::BOARD_LAYER),
             Name::new(piece_name(PieceType::Queen, piece_color, file, rank)),
             HasMoved::default(),
         ))
@@ -785,6 +790,7 @@ pub fn spawn_bishop(
             DespawnOnExit(GameState::InGame),
             PointerInteraction::default(),
             bevy::picking::Pickable::default(),
+            RenderLayers::layer(crate::game::systems::camera::BOARD_LAYER),
             Name::new(piece_name(PieceType::Bishop, piece_color, file, rank)),
             HasMoved::default(),
         ))
@@ -825,6 +831,7 @@ pub fn spawn_rook(
             DespawnOnExit(GameState::InGame),
             PointerInteraction::default(),
             bevy::picking::Pickable::default(),
+            RenderLayers::layer(crate::game::systems::camera::BOARD_LAYER),
             Name::new(piece_name(PieceType::Rook, piece_color, file, rank)),
             HasMoved::default(),
         ))
@@ -865,6 +872,7 @@ pub fn spawn_pawn(
             DespawnOnExit(GameState::InGame),
             PointerInteraction::default(),
             bevy::picking::Pickable::default(),
+            RenderLayers::layer(crate::game::systems::camera::BOARD_LAYER),
             Name::new(piece_name(PieceType::Pawn, piece_color, file, rank)),
             HasMoved::default(),
         ))
@@ -943,6 +951,7 @@ fn on_piece_added(
                 Transform::from_xyz(0.0, 0.06, 0.0),
                 PiecePickingProxy2D,
                 bevy::picking::Pickable::IGNORE, // activated by view_mode_rendering_toggle_system
+                RenderLayers::layer(crate::game::systems::camera::BOARD_LAYER),
                 Name::new("Piece Picking Proxy 2D"),
             ));
         });
@@ -956,6 +965,10 @@ impl Plugin for PiecePlugin {
         app.add_systems(Startup, (load_piece_meshes, init_piece_picking_assets));
         app.add_systems(Update, create_pieces.run_if(in_state(GameState::InGame)));
         app.add_systems(OnExit(GameState::InGame), reset_pieces_spawned);
+        // Apply the current view mode's visibility on game entry (idempotent),
+        // then keep it applied whenever the mode changes or pieces (re)spawn.
+        // `ViewMode` is the single source of truth, so this can never desync.
+        app.add_systems(OnEnter(GameState::InGame), view_mode_rendering_toggle_system);
         app.add_systems(
             Update,
             view_mode_rendering_toggle_system.run_if(

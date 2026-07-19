@@ -5,7 +5,7 @@
 
 use crate::core::GameMode;
 use crate::game::replay::{ParsedPgnGameResource, PgnReplayState};
-use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
+use crate::game::view_mode::ViewMode;
 use crate::multiplayer::traits::{MessageReader, MessageWriter};
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
@@ -112,7 +112,6 @@ fn piece_sym(piece_type: PieceType, color: PieceColor) -> &'static str {
         (PieceType::Bishop, PieceColor::Black) => "♝",
         (PieceType::Knight, PieceColor::Black) => "♞",
         (PieceType::Pawn, PieceColor::Black) => "♟",
-        _ => "?",
     }
 }
 
@@ -126,7 +125,7 @@ pub fn replay_2d_annotation_system(
     mut contexts: EguiContexts,
     mut annotations: ResMut<ReplayAnnotations>,
     game_mode: Res<GameMode>,
-    view_prefs: Res<PlayerViewPreferences>,
+    view_mode: Res<ViewMode>,
     pieces: Query<&Piece>,
     keyboard: Res<ButtonInput<KeyCode>>,
     puzzle: Res<PuzzleOverlay>,
@@ -136,7 +135,7 @@ pub fn replay_2d_annotation_system(
     if *game_mode != GameMode::PgnReplay {
         return;
     }
-    if view_prefs.local_view != ViewMode::Standard2D {
+    if *view_mode != ViewMode::Standard2D {
         return;
     }
 
@@ -375,13 +374,13 @@ pub fn replay_3d_annotations_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     existing: Query<Entity, With<ReplayAnnotation3D>>,
-    view_prefs: Res<PlayerViewPreferences>,
+    view_mode: Res<ViewMode>,
     game_mode: Res<GameMode>,
 ) {
     if *game_mode != GameMode::PgnReplay {
         return;
     }
-    if view_prefs.local_view != ViewMode::Standard3D {
+    if *view_mode != ViewMode::Standard3D {
         // If the view switched to 2D, ensure 3D annotations are despawned
         if annotations.dirty {
             for e in existing.iter() {
@@ -419,6 +418,9 @@ pub fn replay_3d_annotations_system(
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
             ReplayAnnotation3D,
             bevy::picking::Pickable::IGNORE,
+            bevy::camera::visibility::RenderLayers::layer(
+                crate::game::systems::camera::BOARD_LAYER,
+            ),
         ));
     }
 
@@ -459,6 +461,9 @@ pub fn replay_3d_annotations_system(
             Transform::from_translation(shaft_mid).with_rotation(rotation),
             ReplayAnnotation3D,
             bevy::picking::Pickable::IGNORE,
+            bevy::camera::visibility::RenderLayers::layer(
+                crate::game::systems::camera::BOARD_LAYER,
+            ),
         ));
 
         // Cone head
@@ -473,6 +478,9 @@ pub fn replay_3d_annotations_system(
             Transform::from_translation(cone_center).with_rotation(rotation),
             ReplayAnnotation3D,
             bevy::picking::Pickable::IGNORE,
+            bevy::camera::visibility::RenderLayers::layer(
+                crate::game::systems::camera::BOARD_LAYER,
+            ),
         ));
     }
 }

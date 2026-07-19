@@ -66,11 +66,7 @@ pub fn profile_creation_ui_system(
 ) {
     let _ = (&mut contexts, &mut state, &wallet, &mut submission_events);
     // Open the Tauri profile step and return to main menu.
-    std::thread::spawn(|| {
-        let _ = reqwest::blocking::Client::new()
-            .post("http://127.0.0.1:7454/api/open-profile-step")
-            .send();
-    });
+    crate::multiplayer::solana::tauri_signer::open_profile_step();
     menu_state.set(MenuState::Main);
 }
 pub fn validate_username_system(

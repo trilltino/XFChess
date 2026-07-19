@@ -10,7 +10,8 @@ The XFChess backend is an Axum 0.8 HTTP server that sits between the game client
 
 | Binary | Entry point | Purpose |
 |--------|-------------|---------|
-| `signing-server` | `src/signing_server.rs` | The API server (alias: `signing-server-http`) |
+| `signing-server` | `src/signing_server.rs` → `backend::server::run` | The API server (local-dev name) |
+| `signing-server-http` | `src/signing_server_http.rs` → `backend::server::run` | Same server — deploy/prod name (systemd, CI) |
 | `backend` | `src/main.rs` | Stub — prints "use signing-server instead" |
 | `vps_admin` | `src/bin/vps_admin.rs` | VPS admin tasks |
 | `tournament_admin` | `src/bin/tournament_admin.rs` | CLI tournament management |
@@ -33,7 +34,9 @@ src/
 │   │   └── debug.rs     # Transaction inspection API
 │   ├── cacf/            # Compliance checks (UK, Brazil, Germany, Canada)
 │   ├── p2p_relay/       # Iroh-based relay for multiplayer
-│   ├── blinks*.rs       # Solana Blinks / actions API
+│   ├── social/          # Friends, presence, lobby invites
+│   ├── swiss/           # Swiss-pairing tournament orchestrator (wraps swiss-pairing crate)
+│   ├── blinks/           # Solana Blinks / actions API
 │   └── storage/tournament.rs  # SQLite-backed tournament store
 ├── db/                  # SQLite via SQLx
 ├── tasks/               # Background tasks (tournament auto-advancement, auto settlement, prize distribution)

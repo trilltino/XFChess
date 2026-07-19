@@ -23,7 +23,6 @@ npm run preview   # Serve production build locally
 | `@coral-xyz/anchor` | Solana program client (types from `xfchess-game` IDL) |
 | `@magicblock-labs/ephemeral-rollups-sdk` | ER transaction helpers |
 | `@solana/wallet-adapter-*` | Wallet connection (Phantom, WalletConnect, etc.) |
-| `@chakra-ui/react` v3 | UI component library |
 | `react-router-dom` v7 | Client-side routing |
 | `framer-motion` | Animations |
 

@@ -96,7 +96,7 @@ echo   - game.log  (per-player log)
 echo.
 echo Next steps:
 echo   1. Sign each instance in with a different wallet / test account
-echo   2. Open Tournament Admin: http://localhost:7454/tournament-admin/
+echo   2. Open Tournament Admin: Tauri tray icon -^> Tournament Admin
 echo   3. Create ^& start the tournament from the admin panel
 echo   4. Each instance joins via the Tournaments menu
 echo ========================================

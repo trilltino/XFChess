@@ -115,11 +115,7 @@ pub fn handle_profile_check_tasks(mut solana_state: ResMut<SolanaIntegrationStat
                     {
                         // Profile creation is handled in the Tauri popup — open it via bridge.
                         info!("[PROFILE] Profile incomplete — opening Tauri profile step");
-                        std::thread::spawn(|| {
-                            let _ = reqwest::blocking::Client::new()
-                                .post("http://127.0.0.1:7454/api/open-profile-step")
-                                .send();
-                        });
+                        crate::multiplayer::solana::tauri_signer::open_profile_step();
                     }
                 }
                 Err(e) => {

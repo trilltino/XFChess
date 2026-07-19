@@ -62,8 +62,13 @@ export function loginWithEmail(body: LoginRequest): Promise<LoginResponse> {
   return request('/api/auth/login', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** Sync the on-chain PlayerProfile username back into the backend DB. */
-export function syncProfile(token: string): Promise<{ username: string }> {
+/** Sync the on-chain PlayerProfile status back into the backend DB. */
+export function syncProfile(token: string): Promise<{
+  has_profile: boolean;
+  username_set: boolean;
+  is_verified: boolean;
+  username: string | null;
+}> {
   return request('/api/auth/sync-profile', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

@@ -51,7 +51,7 @@ signed updater, CSP) is tracked in [docs/TAURI_REMEDIATION.md](docs/TAURI_REMEDI
 ## Build & run
 
 ```bash
-cd wallet-ui && npm install && cd ../tournament-admin && npm install && cd ..
+cd wallet-ui && npm install && cd ../tournament-admin && npm install && npm run build && cd ..
 cargo tauri dev --features all        # dev mode
 cargo tauri build --features all      # release bundle -> src-tauri/target/release/bundle/
 cargo test                            # Rust unit tests (services::config, utils::logging)

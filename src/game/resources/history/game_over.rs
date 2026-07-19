@@ -144,6 +144,25 @@ pub enum GameOverState {
     ///
     /// White voluntarily resigned the game.
     BlackWonByResignation,
+
+    /// Game aborted before it properly began
+    ///
+    /// Online games only: the player to move (White) did not play the
+    /// game's first move within the grace period. No winner, no rating
+    /// impact — matches lichess's "aborted" outcome.
+    Aborted,
+
+    /// White won because Black's connection dropped and never recovered
+    ///
+    /// Online games only: the opponent's heartbeat (ping/pong) timed out
+    /// (or the P2P peer link dropped and stayed down) while it was their
+    /// turn. Treated as a win for White, not a draw.
+    WhiteWonByAbandonment,
+
+    /// Black won because White's connection dropped and never recovered
+    ///
+    /// Online games only: see [`GameOverState::WhiteWonByAbandonment`].
+    BlackWonByAbandonment,
 }
 
 impl GameOverState {
@@ -198,6 +217,9 @@ impl GameOverState {
             GameOverState::BlackWonByTime => "Black wins on time!",
             GameOverState::WhiteWonByResignation => "White wins by resignation!",
             GameOverState::BlackWonByResignation => "Black wins by resignation!",
+            GameOverState::Aborted => "Game aborted",
+            GameOverState::WhiteWonByAbandonment => "White wins — Black disconnected!",
+            GameOverState::BlackWonByAbandonment => "Black wins — White disconnected!",
         }
     }
 
@@ -229,6 +251,8 @@ impl GameOverState {
             GameOverState::BlackWon
             | GameOverState::BlackWonByTime
             | GameOverState::BlackWonByResignation => Some(PieceColor::Black),
+            GameOverState::WhiteWonByAbandonment => Some(PieceColor::White),
+            GameOverState::BlackWonByAbandonment => Some(PieceColor::Black),
             _ => None,
         }
     }
@@ -272,6 +296,10 @@ impl GameOverState {
             GameOverState::WhiteWonByTime | GameOverState::BlackWonByTime => "on timeout",
             GameOverState::Stalemate => "by stalemate",
             GameOverState::InsufficientMaterial => "insufficient material",
+            GameOverState::Aborted => "White didn't move in time",
+            GameOverState::WhiteWonByAbandonment | GameOverState::BlackWonByAbandonment => {
+                "opponent disconnected"
+            }
             GameOverState::Playing => "",
         }
     }
@@ -488,6 +516,18 @@ mod tests {
             GameOverState::Stalemate,
             GameOverState::InsufficientMaterial
         );
+    }
+
+    #[test]
+    fn test_aborted_is_game_over_with_no_winner_or_message() {
+        //! Aborted is terminal, has no winner, and carries its own message.
+        let state = GameOverState::Aborted;
+        assert!(state.is_game_over());
+        assert_eq!(state.winner(), None);
+        assert!(!state.is_checkmate());
+        assert!(!state.is_resignation());
+        assert!(!state.is_draw());
+        assert_eq!(state.message(), "Game aborted");
     }
 
     #[test]

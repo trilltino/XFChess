@@ -86,7 +86,7 @@ pub fn render_solana_panel(
 
                 ui.horizontal(|ui| {
                     if ui
-                        .button(egui::RichText::new(" Phantom").strong())
+                        .button(egui::RichText::new("Phantom").strong())
                         .on_hover_text("Connect via Phantom Extension")
                         .clicked()
                     {
@@ -95,7 +95,7 @@ pub fn render_solana_panel(
                     }
                     ui.add_space(5.0);
                     if ui
-                        .button(egui::RichText::new("? Solflare").strong())
+                        .button(egui::RichText::new("Solflare").strong())
                         .on_hover_text("Connect via Solflare Extension")
                         .clicked()
                     {

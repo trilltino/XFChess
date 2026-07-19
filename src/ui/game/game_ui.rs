@@ -147,7 +147,7 @@ use crate::ui::styles::*;
 use crate::ui::system_params::GameUIParams;
 use bevy::prelude::*;
 use bevy_egui::egui;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{self, Receiver, Sender};
 
 /// Flash resource that pulses the +increment label when a player gains time.
@@ -198,11 +198,19 @@ pub enum AvatarEntry {
 unsafe impl Send for AvatarCache {}
 unsafe impl Sync for AvatarCache {}
 
+/// Cap on distinct avatars held in memory at once — without this, a long
+/// session that browses lobbies/spectates/views standings accumulates one
+/// GPU texture per unique player name forever. Eviction is FIFO by first
+/// insertion (not true LRU): simple, and re-fetching an evicted-but-still-
+/// relevant avatar just costs one HTTP call, not a correctness issue.
+const MAX_AVATAR_CACHE_ENTRIES: usize = 200;
+
 /// Caches player avatars fetched from the backend.
 /// Key: player name / wallet address.
 #[derive(Resource)]
 pub struct AvatarCache {
     pub entries: HashMap<String, AvatarEntry>,
+    insertion_order: VecDeque<String>,
     rx: std::sync::Mutex<Receiver<(String, Vec<u8>)>>,
     pub tx: Sender<(String, Vec<u8>)>,
 }
@@ -212,6 +220,7 @@ impl Default for AvatarCache {
         let (tx, rx) = mpsc::channel();
         Self {
             entries: HashMap::new(),
+            insertion_order: VecDeque::new(),
             rx: std::sync::Mutex::new(rx),
             tx,
         }
@@ -224,7 +233,13 @@ impl AvatarCache {
         if self.entries.contains_key(name) {
             return;
         }
+        if self.entries.len() >= MAX_AVATAR_CACHE_ENTRIES {
+            if let Some(oldest) = self.insertion_order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
         self.entries.insert(name.to_string(), AvatarEntry::Loading);
+        self.insertion_order.push_back(name.to_string());
         let tx = self.tx.clone();
         let key = name.to_string();
         let base = crate::multiplayer::network::vps::vps_base();
@@ -368,7 +383,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
     // Decode any pending avatar bytes into egui textures.
     params.avatar_cache.flush_pending(&ctx);
 
-    // === CHECK/CHECKMATE BANNER ===
+    // === CHECK / CHECKMATE INDICATOR ===
     match params.game_state.game_phase.0 {
         GamePhase::Checkmate => render_checkmate_banner(&ctx, &params.game_state),
         GamePhase::Check => render_check_banner(&ctx),
@@ -432,8 +447,12 @@ pub fn game_status_ui(mut params: GameUIParams) {
                     ui.add_space(10.0);
                     ui.label(TextStyle::popup_body(confirmation_text));
                     ui.add_space(18.0);
-                    ui.horizontal_centered(|ui| {
+                    // horizontal_centered only centers vertically — pad manually
+                    // so the button pair sits centered in the popup.
+                    ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 14.0;
+                        let buttons_width = 120.0 * 2.0 + 14.0;
+                        ui.add_space(((ui.available_width() - buttons_width) / 2.0).max(0.0));
                         if ui
                             .add_sized(
                                 [120.0, 40.0],
@@ -473,6 +492,23 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 });
             });
     }
+
+    // === LEFT PANEL ===
+    // Game type / rated badge / time control, both players, inline chat
+    // (online games only). Declared before the central board panel so the
+    // board correctly reserves space for it — see left_panel.rs.
+    egui::SidePanel::left("game_info_panel")
+        .resizable(false)
+        .exact_width(Layout::SIDE_PANEL_WIDTH)
+        .frame(
+            egui::Frame::default()
+                .fill(UiColors::BG_OVERLAY)
+                .inner_margin(egui::Margin::symmetric(8, 10))
+                .stroke(egui::Stroke::NONE),
+        )
+        .show(&ctx, |ui| {
+            crate::ui::game::left_panel::render_game_left_panel(ui, &mut params);
+        });
 
     // === RIGHT PANELS ===
     // Solana competitive sidebar declared FIRST → gets rightmost position.
@@ -541,7 +577,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
     // --- Main game info panel (Lichess-style right sidebar) ---
     egui::SidePanel::right("game_panel")
         .resizable(false)
-        .min_width(280.0)
+        .exact_width(Layout::SIDE_PANEL_WIDTH)
         .frame(
             egui::Frame::default()
                 .fill(UiColors::BG_OVERLAY)
@@ -564,35 +600,15 @@ pub fn game_status_ui(mut params: GameUIParams) {
 
 // ── Lichess-style right panel helpers ────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
-fn render_game_right_panel(
-    ui: &mut egui::Ui,
-    params: &mut crate::ui::system_params::game_ui::GameUIParams,
-    show_timers: bool,
-    white_active: bool,
-    white_flagged: bool,
-    black_flagged: bool,
-    pulse_alpha: u8,
-    increment: f32,
-) {
-    use crate::game::resources::TurnPhase;
-
-    let local_color = params
-        .p2p_conn
-        .as_ref()
-        .and_then(|c| c.player_color)
-        .unwrap_or(PieceColor::White);
-    let opp_color = match local_color {
-        PieceColor::White => PieceColor::Black,
-        PieceColor::Black => PieceColor::White,
-    };
-    let is_spectating = *params.game_mode == crate::core::GameMode::Spectator;
-    let is_online = matches!(
-        *params.game_mode,
-        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
-    );
-
-    // Build name/elo for white and black from available sources.
+/// Resolve display name + ELO string for both colors from whichever source
+/// applies to the current game (spectator feed, Solana competitive match, or
+/// plain local `Players`). Shared by the right sidebar and the left game-info
+/// panel so both show identical player identity data.
+pub(crate) fn resolve_player_names(
+    params: &crate::ui::system_params::game_ui::GameUIParams,
+    local_color: PieceColor,
+    is_spectating: bool,
+) -> (String, String, String, String) {
     let white_name: String;
     let white_elo: String;
     let black_name: String;
@@ -643,6 +659,40 @@ fn render_game_right_panel(
             black_elo = String::new();
         }
     }
+
+    (white_name, white_elo, black_name, black_elo)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_game_right_panel(
+    ui: &mut egui::Ui,
+    params: &mut crate::ui::system_params::game_ui::GameUIParams,
+    show_timers: bool,
+    white_active: bool,
+    white_flagged: bool,
+    black_flagged: bool,
+    pulse_alpha: u8,
+    increment: f32,
+) {
+    use crate::game::resources::TurnPhase;
+
+    let local_color = params
+        .p2p_conn
+        .as_ref()
+        .and_then(|c| c.player_color)
+        .unwrap_or(PieceColor::White);
+    let opp_color = match local_color {
+        PieceColor::White => PieceColor::Black,
+        PieceColor::Black => PieceColor::White,
+    };
+    let is_spectating = *params.game_mode == crate::core::GameMode::Spectator;
+    let is_online = matches!(
+        *params.game_mode,
+        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
+    );
+
+    let (white_name, white_elo, black_name, black_elo) =
+        resolve_player_names(params, local_color, is_spectating);
 
     // Determine top (opponent) / bottom (local) layout.
     let (top_color, bot_color) = if is_spectating {
@@ -728,7 +778,7 @@ fn render_game_right_panel(
     // ── OPPONENT (top of panel) ───────────────────────────────────────────────
     // material tray
     if !top_cap.is_empty() || top_delta > 0 {
-        egui::Frame::none()
+        StyledPanel::sidebar_row()
             .inner_margin(egui::Margin::symmetric(12, 4))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -756,7 +806,7 @@ fn render_game_right_panel(
         );
     }
     // name row
-    egui::Frame::none().inner_margin(p).show(ui, |ui| {
+    StyledPanel::sidebar_row().inner_margin(p).show(ui, |ui| {
         render_compact_user_row(ui, top_name, top_elo, opponent_online);
     });
 
@@ -768,8 +818,7 @@ fn render_game_right_panel(
     let reserved = 28.0 * 2.0 + clock_h + 16.0 * 2.0 + 80.0 + 30.0;
     let move_height = (ui.available_height() - reserved).max(80.0);
 
-    egui::Frame::none()
-        .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 40))
+    StyledPanel::sidebar_card()
         .inner_margin(egui::Margin::symmetric(0, 0))
         .show(ui, |ui| {
             egui::ScrollArea::vertical()
@@ -777,10 +826,10 @@ fn render_game_right_panel(
                 .max_height(move_height)
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    egui::Frame::none()
+                    StyledPanel::sidebar_row()
                         .inner_margin(egui::Margin::symmetric(12, 8))
                         .show(ui, |ui| {
-                            render_move_list_paired(ui, &params.move_history, &params.eval_history);
+                            render_move_list_paired(ui, &params.move_history);
                         });
                 });
         });
@@ -788,8 +837,7 @@ fn render_game_right_panel(
     ui.add_space(4.0);
 
     // ── CONTROLS ─────────────────────────────────────────────────────────────
-    egui::Frame::none()
-        .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 30))
+    StyledPanel::sidebar_card()
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
             let is_game_over = params.game_state.game_over.is_game_over();
@@ -807,6 +855,7 @@ fn render_game_right_panel(
                                     .color(egui::Color32::from_rgb(220, 80, 80)),
                             )
                             .fill(egui::Color32::from_rgba_unmultiplied(60, 18, 18, 180))
+                            .corner_radius(egui::CornerRadius::same(6))
                             .min_size(egui::Vec2::new(90.0, 28.0)),
                         )
                         .clicked()
@@ -838,6 +887,7 @@ fn render_game_right_panel(
                                     .color(egui::Color32::from_rgb(180, 180, 80)),
                                 )
                                 .fill(egui::Color32::from_rgba_unmultiplied(45, 45, 12, 180))
+                                .corner_radius(egui::CornerRadius::same(6))
                                 .min_size(egui::Vec2::new(80.0, 28.0))
                                 .sense(if draw_offered {
                                     egui::Sense::hover()
@@ -865,7 +915,7 @@ fn render_game_right_panel(
             }
 
             // View toggle
-            let view_label = match params.view_preferences.local_view {
+            let view_label = match *params.view_mode {
                 crate::game::view_mode::ViewMode::Standard3D => "⬡  2D View",
                 _ => "⬡  3D View",
             };
@@ -877,12 +927,12 @@ fn render_game_right_panel(
                             .color(egui::Color32::from_gray(180)),
                     )
                     .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 55, 180))
+                    .corner_radius(egui::CornerRadius::same(6))
                     .min_size(egui::Vec2::new(90.0, 26.0)),
                 )
                 .clicked()
             {
-                params.view_preferences.toggle_view();
-                *params.view_mode = params.view_preferences.local_view;
+                params.view_mode.toggle();
             }
         });
 
@@ -890,7 +940,7 @@ fn render_game_right_panel(
 
     // ── LOCAL PLAYER (bottom of panel) ───────────────────────────────────────
     // name row
-    egui::Frame::none().inner_margin(p).show(ui, |ui| {
+    StyledPanel::sidebar_row().inner_margin(p).show(ui, |ui| {
         render_compact_user_row(ui, bot_name, bot_elo, None);
     });
     // clock
@@ -907,7 +957,7 @@ fn render_game_right_panel(
     }
     // material tray
     if !bot_cap.is_empty() || bot_delta > 0 {
-        egui::Frame::none()
+        StyledPanel::sidebar_row()
             .inner_margin(egui::Margin::symmetric(12, 4))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -924,7 +974,12 @@ fn render_game_right_panel(
     }
 }
 
-fn render_compact_user_row(ui: &mut egui::Ui, name: &str, elo: &str, online: Option<bool>) {
+pub(crate) fn render_compact_user_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    elo: &str,
+    online: Option<bool>,
+) {
     let display_name = if name.is_empty() { "Player" } else { name };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -1008,6 +1063,7 @@ fn render_clock_bar(
 
     egui::Frame::default()
         .fill(bg_fill)
+        .corner_radius(egui::CornerRadius::same(6))
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -1035,7 +1091,6 @@ fn render_clock_bar(
 fn render_move_list_paired(
     ui: &mut egui::Ui,
     history: &crate::game::resources::history::MoveHistory,
-    eval_history: &crate::ui::game::game_2d::EvalHistory,
 ) {
     if history.is_empty() {
         ui.label(
@@ -1062,15 +1117,8 @@ fn render_move_list_paired(
                 );
                 if white_idx < total {
                     let mv = &moves[white_idx];
-                    let mut text = format_move_algebraic(mv);
-                    if let Some((sym, _)) =
-                        annotate_move(white_idx, PieceColor::White, &eval_history.scores)
-                    {
-                        text.push(' ');
-                        text.push_str(sym);
-                    }
                     ui.label(
-                        egui::RichText::new(text)
+                        egui::RichText::new(move_notation(history, white_idx, mv))
                             .size(13.0)
                             .color(UiColors::TEXT_PRIMARY)
                             .strong(),
@@ -1080,15 +1128,8 @@ fn render_move_list_paired(
                 }
                 if black_idx < total {
                     let mv = &moves[black_idx];
-                    let mut text = format_move_algebraic(mv);
-                    if let Some((sym, _)) =
-                        annotate_move(black_idx, PieceColor::Black, &eval_history.scores)
-                    {
-                        text.push(' ');
-                        text.push_str(sym);
-                    }
                     ui.label(
-                        egui::RichText::new(text)
+                        egui::RichText::new(move_notation(history, black_idx, mv))
                             .size(13.0)
                             .color(UiColors::TEXT_SECONDARY)
                             .strong(),
@@ -1105,6 +1146,21 @@ fn render_move_list_paired(
                 ui.end_row();
             }
         });
+}
+
+/// Notation for the move at `index` — prefers the properly-disambiguated SAN
+/// recorded via `MoveHistory::add_move_with_san`, falling back to the
+/// simplified hand-rolled notation only for entries that predate/skip it
+/// (e.g. moves constructed directly in tests).
+fn move_notation(
+    history: &crate::game::resources::history::MoveHistory,
+    index: usize,
+    mv: &crate::game::components::MoveRecord,
+) -> String {
+    history
+        .san_at(index)
+        .map(str::to_string)
+        .unwrap_or_else(|| format_move_algebraic(mv))
 }
 
 // ── end Lichess panel helpers ─────────────────────────────────────────────────
@@ -1195,25 +1251,6 @@ fn render_captured_pieces_tray(
     });
 }
 
-fn annotate_move(
-    ply_idx: usize,
-    color: PieceColor,
-    scores: &[i16],
-) -> Option<(&'static str, egui::Color32)> {
-    use crate::ui::game::game_2d::MoveQuality;
-    if scores.len() <= ply_idx {
-        return None;
-    }
-    let after = scores[ply_idx];
-    let before = if ply_idx > 0 { scores[ply_idx - 1] } else { 0 };
-    let gain = if color == PieceColor::White {
-        after - before
-    } else {
-        before - after
-    };
-    MoveQuality::classify(gain).map(|q| (q.symbol(), q.color()))
-}
-
 /// Format a move record as algebraic notation
 fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
     use crate::rendering::pieces::PieceType;
@@ -1273,40 +1310,19 @@ fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
     notation
 }
 
-/// Render a sleek "CHECK" indicator at the top of the screen
+/// Plain "Check" text at top-centre — no box, in the game's serif font.
 fn render_check_banner(ctx: &egui::Context) {
-    egui::Window::new("check_banner")
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0]) // Slightly higher position
-        .frame(
-            egui::Frame::default()
-                .fill(egui::Color32::from_rgba_unmultiplied(173, 92, 47, 200)) // Primary bronze with transparency
-                .corner_radius(20.0) // Pill shape
-                .inner_margin(egui::Margin::symmetric(16, 8)) // Compact padding
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgba_unmultiplied(244, 187, 68, 150),
-                )), // Gold accent border
-        )
+    egui::Area::new("check_indicator".into())
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
         .show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
-                // Crown icon for check indication
-                ui.label(
-                    egui::RichText::new("")
-                        .size(16.0)
-                        .color(egui::Color32::from_rgb(244, 187, 68)), // Gold color
-                );
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new("CHECK")
-                        .size(13.0)
-                        .color(egui::Color32::WHITE)
-                        .strong()
-                        .extra_letter_spacing(1.0),
-                );
-            });
+            ui.label(
+                egui::RichText::new("Check")
+                    .size(30.0)
+                    .family(egui::FontFamily::Name("CinzelBold".into()))
+                    .color(egui::Color32::from_rgb(224, 96, 64)),
+            );
         });
 }
 
@@ -1378,6 +1394,8 @@ pub fn draw_offer_ui(
                 ui.add_space(12.0);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
+                    // horizontal_centered only centers vertically — pad to center the pair.
+                    ui.add_space(((ui.available_width() - (120.0 * 2.0 + 12.0)) / 2.0).max(0.0));
 
                     let local_player = p2p_conn
                         .as_ref()
@@ -1471,6 +1489,8 @@ pub fn rematch_offer_ui(
                 ui.add_space(12.0);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
+                    // horizontal_centered only centers vertically — pad to center the pair.
+                    ui.add_space(((ui.available_width() - (120.0 * 2.0 + 12.0)) / 2.0).max(0.0));
 
                     if ui
                         .add_sized(
@@ -1550,6 +1570,11 @@ pub fn post_game_overlay(
         crate::game::resources::GameOverState::WhiteWonByTime => "on Time",
         crate::game::resources::GameOverState::BlackWonByTime => "on Time",
         crate::game::resources::GameOverState::Stalemate => "Stalemate / Draw",
+        crate::game::resources::GameOverState::Aborted => "White didn't move in time",
+        crate::game::resources::GameOverState::WhiteWonByAbandonment
+        | crate::game::resources::GameOverState::BlackWonByAbandonment => {
+            "Opponent Disconnected"
+        }
         _ => "",
     };
 
@@ -1565,10 +1590,16 @@ pub fn post_game_overlay(
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 // Result header
-                let (result_color, icon) = match game_over.winner() {
-                    Some(PieceColor::White) => (egui::Color32::from_rgb(220, 220, 220), "♔"),
-                    Some(PieceColor::Black) => (egui::Color32::from_rgb(180, 140, 255), "♚"),
-                    None => (egui::Color32::GOLD, "="),
+                let (result_color, icon) = if *game_over
+                    == crate::game::resources::GameOverState::Aborted
+                {
+                    (egui::Color32::from_gray(150), "⊘")
+                } else {
+                    match game_over.winner() {
+                        Some(PieceColor::White) => (egui::Color32::from_rgb(220, 220, 220), "♔"),
+                        Some(PieceColor::Black) => (egui::Color32::from_rgb(180, 140, 255), "♚"),
+                        None => (egui::Color32::GOLD, "="),
+                    }
                 };
                 ui.label(egui::RichText::new(icon).size(36.0).color(result_color));
                 ui.add_space(4.0);
@@ -1593,6 +1624,9 @@ pub fn post_game_overlay(
 
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
+                    // horizontal_centered only centers vertically — pad to center the row.
+                    let row_w = if is_online { 120.0 * 2.0 + 12.0 } else { 120.0 };
+                    ui.add_space(((ui.available_width() - row_w) / 2.0).max(0.0));
 
                     // Rematch button (online only)
                     if is_online {

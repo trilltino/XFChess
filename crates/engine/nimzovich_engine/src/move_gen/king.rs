@@ -11,13 +11,28 @@ use crate::move_gen::attack::is_square_attacked;
 use crate::types::*;
 
 /// Generate king moves from a given square
-pub fn generate_king_moves(game: &Game, from: i8, color: Color, moves: &mut Vec<KK>) {
+pub fn generate_king_moves(
+    game: &Game,
+    from: i8,
+    color: Color,
+    moves: &mut Vec<KK>,
+    noisy_only: bool,
+) {
     // Standard king moves
     for candidate in &game.king[from as usize] {
         let dest_piece = game.board[candidate.dst as usize];
-        if dest_piece == 0 || !piece_belongs_to(dest_piece, color) {
+        if noisy_only {
+            if dest_piece != 0 && !piece_belongs_to(dest_piece, color) {
+                moves.push(*candidate);
+            }
+        } else if dest_piece == 0 || !piece_belongs_to(dest_piece, color) {
             moves.push(*candidate);
         }
+    }
+
+    // Castling is never a capture — skip entirely for quiescence.
+    if noisy_only {
+        return;
     }
 
     // Castling logic

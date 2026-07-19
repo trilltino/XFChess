@@ -37,8 +37,14 @@ use crate::types::*;
 /// generate_queen_moves(&game, 3, COLOR_WHITE, &mut moves);
 /// // Moves now contains all valid queen moves from d1 (diagonal + horizontal/vertical)
 /// ```
-pub fn generate_queen_moves(game: &Game, from: i8, color: Color, moves: &mut Vec<KK>) {
+pub fn generate_queen_moves(
+    game: &Game,
+    from: i8,
+    color: Color,
+    moves: &mut Vec<KK>,
+    noisy_only: bool,
+) {
     // Queen moves like both bishop and rook
-    bishop::generate_bishop_moves(game, from, color, moves);
-    rook::generate_rook_moves(game, from, color, moves);
+    bishop::generate_bishop_moves(game, from, color, moves, noisy_only);
+    rook::generate_rook_moves(game, from, color, moves, noisy_only);
 }

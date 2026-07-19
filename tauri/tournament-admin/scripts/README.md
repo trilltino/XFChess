@@ -1,37 +1,29 @@
 # Admin Panel Launch Scripts
 
-This directory contains scripts to easily launch the XFChess Tournament Admin panel.
+The tournament admin panel is **desktop-only**: the UI is built to `dist/` and
+rendered inside the Tauri `tournament-admin` window, served from the
+loopback-only wallet bridge. It never runs as a standalone web/vite dev server.
 
-## Usage
+## Launching
 
-### Option 1: NPM Script (Recommended)
+From the repo root:
+
 ```bash
-npm start
+just admin                          # opens the desktop admin window
+scripts\start-tournament-admin.bat  # same, plus starts a local backend
 ```
 
-### Option 2: Direct Node Script
+Or from a running dev stack (`just dev`): right-click the tray icon →
+**Tournament Admin**.
+
+## After changing the UI
+
+Rebuild the static bundle so the desktop window picks it up:
+
 ```bash
-node scripts/launch-admin.js
+npm run build          # from tauri/tournament-admin
+just build-admin-ui-force   # from the repo root
 ```
 
-### Option 3: Windows Batch Script
-```bash
-scripts\launch-admin.bat
-```
-
-## What the scripts do
-
-- **launch-admin.js**: Cross-platform Node.js script that starts the dev server and handles graceful shutdown
-- **launch-admin.bat**: Windows-specific batch script for quick launching
-
-Both scripts will:
-1. Change to the correct directory
-2. Start the Vite development server
-3. Open the admin panel at http://localhost:5173
-4. Handle Ctrl+C gracefully to shut down the server
-
-## Accessing the Admin Panel
-
-Once launched, open your browser and navigate to:
-- Local: http://localhost:5173/
-- The admin panel will prompt for a backend URL and admin token
+`launch-admin.bat` delegates to the desktop launcher; `launch-admin.js` is a
+tombstone that explains the desktop-only flow.

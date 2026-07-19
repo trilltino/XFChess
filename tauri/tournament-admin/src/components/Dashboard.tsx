@@ -16,9 +16,8 @@ function loadDeployHistory(): DeployEntry[] {
 const FEEPAYER_THRESHOLD_KEY = "feepayer_threshold_sol";
 function getFeepayerThreshold() { return parseFloat(localStorage.getItem(FEEPAYER_THRESHOLD_KEY) || "0.5"); }
 
-// Monitoring stack (Prometheus :9090, node_exporter :9100) is internal-only on
-// the VPS and not forwarded by the SSH tunnel, so those tiles reflect direct
-// reachability from this machine (typically offline behind the firewall).
+// Prometheus (:9090) is internal-only on the VPS and not forwarded by the SSH
+// tunnel, so the CPU/RAM numbers only populate when it's directly reachable.
 // Backend-served data (/health, /metrics) goes through the active env's
 // backend_url instead — that IS tunnel-aware.
 const serverIp = VPS_HOST;
@@ -46,9 +45,7 @@ export default function Dashboard() {
   const [dbStats, setDbStats] = useState<{ sessions_rows: number; games_rows: number; users_rows: number; db_mb: number } | null>(null);
   const [tlsExpiry, setTlsExpiry] = useState<{ domain: string; days_remaining: number | null; status: string }[]>([]);
   const [nodeChecks, setNodeChecks] = useState<NodeCheck[]>([
-    { label: "Backend API",   url: `${backendUrl}/health`,              status: "checking" },
-    { label: "Node Exporter", url: `http://${serverIp}:9100/metrics`,   status: "checking" },
-    { label: "Prometheus",    url: `http://${serverIp}:9090/-/healthy`, status: "checking" },
+    { label: "Backend API", url: `${backendUrl}/health`, status: "checking" },
   ]);
 
   const [ipBanInput, setIpBanInput] = useState({ ip: "", reason: "" });
@@ -402,7 +399,7 @@ export default function Dashboard() {
             <h4 style={{ color: "rgba(255,255,255,0.2)", margin: "0 0 16px", fontSize: "11px", letterSpacing: "1px" }}>PLATFORM WALLETS</h4>
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "12px", color: "var(--text-dim)" }}>
               {(["feepayer", "vps_signer", "kyc_signer"] as const).map(key => (
-                <WalletStatus key={key} label={key.replace("_", " ").toUpperCase()} data={(wallets as any)?.[key]} warn={key === "feepayer" && fpLow} />
+                <WalletStatus key={key} label={key.replace("_", " ").toUpperCase()} data={(wallets as any)?.[key]} warn={key === "feepayer" && fpLow} usdRate={rates.usd ?? rates.USD} />
               ))}
             </div>
           </div>
@@ -436,12 +433,16 @@ function MetricCard({ label, value, icon, color }: { label: string; value: strin
   );
 }
 
-function WalletStatus({ label, data, warn }: { label: string; data?: { pubkey: string; balance_sol: string }; warn?: boolean }) {
+function WalletStatus({ label, data, warn, usdRate }: { label: string; data?: { pubkey: string; balance_sol: string; balance_lamports: number }; warn?: boolean; usdRate?: number }) {
+  const usd = data && usdRate ? (data.balance_lamports / 1e9) * usdRate : null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <span style={{ fontWeight: "600", color: "var(--text)" }}>{label}</span>
-        <span style={{ color: warn ? "#f87171" : "var(--primary)", fontWeight: "bold" }}>{data ? data.balance_sol : "…"}</span>
+        <span style={{ color: warn ? "#f87171" : "var(--primary)", fontWeight: "bold" }}>
+          {data ? data.balance_sol : "…"}
+          {usd !== null && <span style={{ color: "var(--text-dim)", fontWeight: "normal", marginLeft: "6px" }}>(${usd.toFixed(2)})</span>}
+        </span>
       </div>
       <div style={{ fontSize: "9px", fontFamily: "monospace", color: "var(--text-dim)", opacity: 0.6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {data ? data.pubkey : "Connecting…"}

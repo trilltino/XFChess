@@ -370,11 +370,14 @@ pub fn initialize_tournament_ix(
     data.extend_from_slice(&entry_fee.to_le_bytes());
     data.extend_from_slice(&max_players.to_le_bytes());
 
-    // TournamentType Borsh encoding
-    data.push(tournament_type);
+    // TournamentType Borsh encoding — the on-chain enum declares
+    // `Swiss { rounds }` as variant 0 and `SingleElimination` as variant 1,
+    // the reverse of this function's 0=SingleElimination param convention.
     if tournament_type == 1 {
-        // Swiss
+        data.push(0); // TournamentType::Swiss { rounds }
         data.push(swiss_rounds);
+    } else {
+        data.push(1); // TournamentType::SingleElimination
     }
 
     data.extend_from_slice(&elo_min.to_le_bytes());

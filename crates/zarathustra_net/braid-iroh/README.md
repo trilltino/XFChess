@@ -28,8 +28,8 @@ use braid_iroh::{spawn_node, DiscoveryConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Spawn a node and get a gossip receiver for the default topic.
-    let (state, mut rx) = spawn_node(
+    // Spawn a node.
+    let state = spawn_node(
         "alice",                 // name (seeds a deterministic key for alice/bob; hashed otherwise)
         Some(8080),              // optional proxy port
         None,                    // optional explicit secret key
@@ -40,7 +40,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Subscribe to a game topic (optionally bootstrapping from known peers).
     let mut moves = state.peer.subscribe("/game/ABCD42/moves", vec![]).await?;
-    let _ = &mut rx;
     let _ = &mut moves;
     Ok(())
 }
@@ -51,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
 | `BraidIrohNode` | An Iroh endpoint speaking the Braid protocol; `spawn`, `subscribe(topic, bootstrap_peers)`, `node_id()` |
 | `BraidIrohState` | Shareable handle: `{ peer, node_id, node_name }` |
 | `BraidIrohConfig` | `{ discovery, secret_key, proxy_config, data_dir }` |
-| `spawn_node(name, port, key, discovery)` | Convenience constructor → `(Arc<BraidIrohState>, GossipReceiver)` |
+| `spawn_node(name, port, key, discovery)` | Convenience constructor → `Arc<BraidIrohState>` (subscribe to topics via `state.peer`) |
 | `get_or_create_secret_key(name)` | Deterministic keys for `alice`/`bob` in tests, blake3-hashed otherwise |
 | `DiscoveryConfig` | How peers are discovered |
 

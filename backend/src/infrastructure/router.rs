@@ -160,7 +160,12 @@ fn cors_layer() -> tower_http::cors::CorsLayer {
 
     let base = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            // Admin panel (tournament-admin webview) authenticates with X-API-Key.
+            header::HeaderName::from_static("x-api-key"),
+        ]);
 
     if origins.is_empty() {
         tracing::warn!(

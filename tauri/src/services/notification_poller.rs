@@ -4,7 +4,7 @@
 //! it can be started from the Tauri `setup` closure before Tauri's async
 //! runtime handle is fully initialised.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
@@ -20,9 +20,12 @@ pub struct NotificationState {
 
 /// Starts the background poller on a dedicated thread with its own runtime.
 ///
+/// `wallet_pubkey` is the *live* shared wallet state (not a one-time
+/// snapshot) — the app always starts disconnected, so reading it once at
+/// startup would mean the poller silently never runs for the whole session.
 /// Safe to call from the Tauri `setup` closure.
-pub fn startPoller(app: AppHandle, backendUrl: String, walletPubkey: Option<String>) {
-  let state = Arc::new(std::sync::Mutex::new(NotificationState::default()));
+pub fn start_poller(app: AppHandle, backend_url: String, wallet_pubkey: Arc<Mutex<Option<String>>>) {
+  let state = Arc::new(Mutex::new(NotificationState::default()));
 
   std::thread::spawn(move || {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -37,13 +40,13 @@ pub fn startPoller(app: AppHandle, backendUrl: String, walletPubkey: Option<Stri
       loop {
         ticker.tick().await;
 
-        let pubkey = match &walletPubkey {
-          Some(p) => p.clone(),
+        let pubkey = match wallet_pubkey.lock().unwrap().clone() {
+          Some(p) => p,
           None => continue,
         };
 
         // ── Poll tournaments ─────────────────────────────────────────
-        match poll_tournaments(&backendUrl).await {
+        match poll_tournaments(&backend_url).await {
           Ok(tournaments) => {
             for t in tournaments {
               let mut s = state.lock().unwrap();
@@ -62,7 +65,7 @@ pub fn startPoller(app: AppHandle, backendUrl: String, walletPubkey: Option<Stri
         }
 
         // ── Poll matchmaking status ──────────────────────────────────
-        match poll_matchmaking(&backendUrl, &pubkey).await {
+        match poll_matchmaking(&backend_url, &pubkey).await {
           Ok(status) => {
             let mut s = state.lock().unwrap();
             if status.match_found && !s.last_match_found {

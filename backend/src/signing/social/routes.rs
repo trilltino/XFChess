@@ -79,6 +79,39 @@ struct ErrorBody {
 
 type InviteStore = Arc<RwLock<HashMap<String, Vec<LobbyInvite>>>>;
 
+/// Cap on how many undelivered invites we keep per node_id — a node that
+/// never polls (or gets invited far more than it plays) shouldn't grow
+/// this list forever; oldest invites are dropped first.
+///
+/// Note: dropping from the front shifts every later invite's index, so a
+/// client's in-flight `since_index` cursor can end up pointing past invites
+/// it never actually saw. That's an acceptable trade-off here (the recipient
+/// just misses some already-old, low-stakes lobby invites — self-healing
+/// next poll, no panic, no security impact) in exchange for not having to
+/// track a cursor per poller server-side.
+const MAX_INVITES_PER_NODE: usize = 50;
+/// Invites older than this are swept even if the node never polled past
+/// them (e.g. the recipient never came back online). Same index-shift
+/// trade-off as the cap above.
+const INVITE_TTL: chrono::Duration = chrono::Duration::hours(24);
+const INVITE_SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Periodically drops invites older than [`INVITE_TTL`] across all node_ids.
+pub fn spawn_invite_store_sweep(store: InviteStore) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(INVITE_SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+            let cutoff = Utc::now() - INVITE_TTL;
+            let mut map = store.write().unwrap();
+            map.retain(|_, invites| {
+                invites.retain(|inv| inv.received_at > cutoff);
+                !invites.is_empty()
+            });
+        }
+    });
+}
+
 fn err(msg: impl Into<String>) -> (StatusCode, Json<ErrorBody>) {
     (
         StatusCode::BAD_REQUEST,
@@ -214,12 +247,16 @@ async fn push_lobby_invite(
         from_display: body.from_display,
         received_at: Utc::now(),
     };
-    store
-        .write()
-        .unwrap()
-        .entry(body.to_node_id)
-        .or_default()
-        .push(invite);
+    {
+        let mut map = store.write().unwrap();
+        let invites = map.entry(body.to_node_id).or_default();
+        invites.push(invite);
+        // Oldest-first: if we're over the cap, drop from the front.
+        if invites.len() > MAX_INVITES_PER_NODE {
+            let overflow = invites.len() - MAX_INVITES_PER_NODE;
+            invites.drain(0..overflow);
+        }
+    }
     StatusCode::OK
 }
 

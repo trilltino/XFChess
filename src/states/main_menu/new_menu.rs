@@ -130,15 +130,15 @@ pub fn spawn_menu_bg_board(
 ) {
     let mesh = meshes.add(Cuboid::new(1.0, 0.1, 1.0));
 
-    // Lichess palette: #f0d9b5 light / #b58863 dark — unlit for consistent color regardless of camera angle
+    // Match the in-game board exactly (see `SquareMaterials` in rendering/utils.rs):
+    // lit PBR materials, Cream light squares / Green dark squares. Lit (not unlit)
+    // so the board takes the same shading + piece shadows as during a game.
     let light = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.941, 0.851, 0.710),
-        unlit: true,
+        base_color: Color::srgb(0.93, 0.93, 0.82), // Cream
         ..default()
     });
     let dark = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.710, 0.533, 0.388),
-        unlit: true,
+        base_color: Color::srgb(0.46, 0.59, 0.34), // Green
         ..default()
     });
 
@@ -184,8 +184,11 @@ pub fn spawn_menu_bg_pieces(
         return; // meshes not loaded yet — retry next frame
     };
 
-    let white_mat = materials.add(crate::rendering::pieces::white_piece_material());
-    let black_mat = materials.add(crate::rendering::pieces::black_piece_material());
+    // Each piece gets its OWN material instance (not a shared handle) so a
+    // captured piece can fade its own alpha without affecting the others — see
+    // `MenuPieceFade` in board_animation.rs.
+    let white_mat = || crate::rendering::pieces::white_piece_material();
+    let black_mat = || crate::rendering::pieces::black_piece_material();
 
     const BACK: [PieceType; 8] = [
         PieceType::Rook,
@@ -214,7 +217,7 @@ pub fn spawn_menu_bg_pieces(
         let ew = commands
             .spawn((
                 Mesh3d(pm.get(pt, PieceColor::White)),
-                MeshMaterial3d(white_mat.clone()),
+                MeshMaterial3d(materials.add(white_mat())),
                 Transform::from_xyz(7.0 - f as f32, 0.05, 0.0).with_rotation(wr),
                 Visibility::Visible,
                 MenuBg,
@@ -228,7 +231,7 @@ pub fn spawn_menu_bg_pieces(
         let eb = commands
             .spawn((
                 Mesh3d(pm.get(pt, PieceColor::Black)),
-                MeshMaterial3d(black_mat.clone()),
+                MeshMaterial3d(materials.add(black_mat())),
                 Transform::from_xyz(7.0 - f as f32, 0.05, 7.0).with_rotation(br),
                 Visibility::Visible,
                 MenuBg,
@@ -245,7 +248,7 @@ pub fn spawn_menu_bg_pieces(
         let ewp = commands
             .spawn((
                 Mesh3d(pm.get(PieceType::Pawn, PieceColor::White)),
-                MeshMaterial3d(white_mat.clone()),
+                MeshMaterial3d(materials.add(white_mat())),
                 Transform::from_xyz(7.0 - f as f32, 0.05, 1.0).with_rotation(rot_w),
                 Visibility::Visible,
                 MenuBg,
@@ -259,7 +262,7 @@ pub fn spawn_menu_bg_pieces(
         let ebp = commands
             .spawn((
                 Mesh3d(pm.get(PieceType::Pawn, PieceColor::Black)),
-                MeshMaterial3d(black_mat.clone()),
+                MeshMaterial3d(materials.add(black_mat())),
                 Transform::from_xyz(7.0 - f as f32, 0.05, 6.0).with_rotation(rot_b),
                 Visibility::Visible,
                 MenuBg,
@@ -305,10 +308,11 @@ pub fn spawn_menu_bg_lights(
         commands.entity(entity).despawn();
     }
 
-    global_ambient.color = Color::WHITE;
+    // Match the in-game ambient tone (visual.rs: bluish, brightness 95).
+    global_ambient.color = Color::srgb(0.9, 0.92, 1.0);
     global_ambient.brightness = 95.0;
 
-    // Overhead point light — same as in-game "Angel Light"
+    // Overhead point light — identical to the in-game "Angel Light" (game_init.rs).
     commands.spawn((
         PointLight {
             intensity: 2_000_000.0,
@@ -322,19 +326,23 @@ pub fn spawn_menu_bg_lights(
         Name::new("MenuBg-OverheadLight"),
     ));
 
-    // Rim/fill light behind the black pieces so the back rank stays legible
+    // Camera-following fill "headlamp" — identical to the in-game fill (visual.rs).
+    // Tagged with the same `CameraFollowLight` marker so `update_board_fill_light`
+    // (registered to also run in MainMenu) keeps it at the orbiting camera's side,
+    // giving the menu the exact viewer-facing lighting a game has.
     commands.spawn((
         PointLight {
-            intensity: 900_000.0,
-            range: 60.0,
-            color: Color::srgb(0.72, 0.82, 1.0),
+            intensity: 600_000.0,
+            range: 80.0,
+            color: Color::srgb(0.95, 0.96, 1.0),
             shadow_maps_enabled: false,
             ..default()
         },
-        Transform::from_xyz(3.5, 7.0, 13.0),
+        Transform::from_xyz(3.5, 12.0, 3.5),
+        crate::game::systems::visual::CameraFollowLight,
         MenuBg,
         DespawnOnExit(GameState::MainMenu),
-        Name::new("MenuBg-RimLight"),
+        Name::new("MenuBg-FillLight (camera-follow)"),
     ));
 }
 
@@ -345,19 +353,14 @@ pub fn setup_menu_fog(_commands: Commands, _cam: Res<crate::PersistentEguiCamera
 
 /// Continuously orbits the camera around BOARD_CENTER.
 /// Press **V** to toggle a fixed isometric orthographic view of the board
-/// (the TempleOS-style projection) instead of the cinematic orbit.
+/// (the TempleOS-style projection) instead of the orbit.
 pub fn orbit_camera_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut orbit: ResMut<MenuCameraOrbit>,
     cam: Res<crate::PersistentEguiCamera>,
-    cinematic: Res<super::cinematic::MenuCinematic>,
     mut query: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
-    // While a cinematic is running, its camera system owns the Camera3d.
-    if cinematic.active() {
-        return;
-    }
     if keyboard.just_pressed(KeyCode::KeyV) {
         orbit.ortho = !orbit.ortho;
         info!(
@@ -425,30 +428,6 @@ pub fn menu_escape_system(
 }
 
 // ── egui panel ───────────────────────────────────────────────────────────────
-
-/// Attract-loop overlay shown before the player presses Enter: just the title
-/// logo over the orbiting board, plus a pulsing "Press ENTER to begin" prompt.
-/// No menu buttons, no welcome card, no cinematic (see `MenuIntro`).
-pub fn render_intro_overlay(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
-    render_title_logo(ctx, cx);
-
-    let t = ctx.input(|i| i.time) as f32;
-    let pulse = 0.55 + 0.45 * (t * 2.2).sin().abs();
-    let alpha = (pulse * 255.0) as u8;
-
-    egui::Area::new("intro_prompt".into())
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -90.0))
-        .show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new("Press Enter to Start")
-                    .size(22.0)
-                    .strong()
-                    .color(egui::Color32::from_white_alpha(alpha)),
-            );
-        });
-}
 
 /// Render the bottom-left button list.
 /// Modals (AI setup, controls popup) are rendered by the caller in `main_menu.rs`.
@@ -666,6 +645,12 @@ fn render_hint_bar(ctx: &egui::Context) {
                         .size(size)
                         .color(hint_color),
                 );
+                ui.label(egui::RichText::new("|").size(size).color(sep_color));
+                ui.label(
+                    egui::RichText::new("F11 - Minimise / Maximise")
+                        .size(size)
+                        .color(hint_color),
+                );
             });
         });
 }
@@ -764,14 +749,6 @@ fn render_welcome_panel(
                 });
             });
 
-            ui.add_space(2.0);
-            ui.label(
-                egui::RichText::new("Public alpha — now live")
-                    .size(11.0)
-                    .color(egui::Color32::from_rgb(80, 160, 100))
-                    .italics(),
-            );
-
             ui.add_space(8.0);
             ui.add(egui::Separator::default().horizontal());
             ui.add_space(8.0);
@@ -792,24 +769,32 @@ fn render_welcome_panel(
                         ui.add_space(8.0);
                     };
 
+                    // First line: bold "XFChess Alpha" inline (egui RichText can't
+                    // mix weights in one label, so compose it across segments).
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let seg = |t: &str| {
+                            egui::RichText::new(t)
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(210, 215, 225))
+                        };
+                        ui.label(seg("Welcome to "));
+                        ui.label(seg("XFChess Alpha").strong());
+                        ui.label(seg(" — thanks for being here early."));
+                    });
+                    ui.add_space(8.0);
                     para(
                         ui,
-                        "Welcome to XFChess, and thank you for being one of the first to \
-                         play. You're stepping into a very early build — the alpha — so \
-                         you're seeing the game take shape in real time.",
+                        "Play 3D chess against the engine, friends, or players online.",
                     );
                     para(
                         ui,
-                        "XFChess is a competitive 3D chess server: play against the engine \
-                         or a friend, jump into online matches, and compete in tournaments. \
-                         The goal is a chess experience that feels fast, fair, and a little \
-                         more alive than the usual board.",
+                        "Compete in matches and tournaments built for fast, fair \
+                         competition.",
                     );
                     para(
                         ui,
-                        "Things will break, move, and change as we go — that's the whole \
-                         point of an alpha. Your games and your feedback genuinely shape \
-                         what comes next, so don't be shy about telling us what feels off.",
+                        "Expect changes, report bugs, and help shape what XFChess becomes.",
                     );
 
                     ui.add_space(2.0);
@@ -879,25 +864,45 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     let snd = cx.menu_sounds.as_deref();
 
-    if item(ui, "Play Against a Computer", W) {
+    if item_tip(
+        ui,
+        "Play Against a Computer",
+        "Play offline against the engine — pick your side, difficulty, and time control.",
+        W,
+    ) {
         play_click(&mut cx.commands, snd);
         cx.competitive_menu.show_ai_setup = true;
     }
     ui.add_space(SP);
 
-    if item_expandable(ui, "Play Online", W) {
+    if item_expandable_tip(
+        ui,
+        "Play Online",
+        "Host or join a live game against a friend or a matched opponent.",
+        W,
+    ) {
         play_click(&mut cx.commands, snd);
         *cx.new_menu_panel = NewMenuPanel::PlayOnline;
     }
     ui.add_space(SP);
 
-    if item_expandable(ui, "Puzzles", W) {
+    if item_expandable_tip(
+        ui,
+        "Puzzles",
+        "Solve tactics puzzles, or take on puzzle challenges to earn rewards.",
+        W,
+    ) {
         play_click(&mut cx.commands, snd);
         *cx.new_menu_panel = NewMenuPanel::Puzzles;
     }
     ui.add_space(SP);
 
-    if item(ui, "PGN Replay", W) {
+    if item_tip(
+        ui,
+        "PGN Replay",
+        "Load a PGN and step through any game move by move.",
+        W,
+    ) {
         play_click(&mut cx.commands, snd);
         *cx.core_mode = GameMode::PgnReplay;
         cx.next_state.set(GameState::InGame);
@@ -907,23 +912,33 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     // TempleOS tribute mode — dev builds only (`--features templeos`).
     #[cfg(feature = "templeos")]
     {
-        if item(ui, "TempleOS", W) {
+        if item_tip(
+            ui,
+            "TempleOS",
+            "Single-player game in the retro TempleOS-style isometric view.",
+            W,
+        ) {
             play_click(&mut cx.commands, snd);
             *cx.view_mode = crate::game::view_mode::ViewMode::TempleOS;
-            cx.commands
-                .insert_resource(crate::game::view_mode::PlayerViewPreferences {
-                    local_view: crate::game::view_mode::ViewMode::TempleOS,
-                });
             *cx.core_mode = GameMode::SinglePlayer;
             cx.next_state.set(GameState::InGame);
         }
         ui.add_space(SP);
     }
 
-    if item(ui, "XFChess.com", W) {
+    if item_tip(
+        ui,
+        "XFChess.com",
+        "Open the XFChess website in your browser.",
+        W,
+    ) {
         play_click(&mut cx.commands, snd);
-        if let Err(e) = webbrowser::open("https://xfchess.com") {
-            tracing::warn!("[Menu] Failed to open XFChess.com: {}", e);
+        // Point at the locally deployed site when XFCHESS_WEB_URL is set (dev
+        // stack exports http://localhost:5173); otherwise the public site.
+        let url = std::env::var("XFCHESS_WEB_URL")
+            .unwrap_or_else(|_| "https://xfchess.com".to_string());
+        if let Err(e) = webbrowser::open(&url) {
+            tracing::warn!("[Menu] Failed to open {}: {}", url, e);
         }
     }
     ui.add_space(SP);
@@ -1325,7 +1340,7 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     const W: f32 = 280.0;
     const SP: f32 = 6.0;
 
-    let wallet_connected = cx.player_identity.username.is_some();
+    let wallet_connected = cx.wallet_bridge.enabled && cx.wallet_bridge.known_pubkey.is_some();
 
     // Connect Wallet is always the first item
     let connect_label = if wallet_connected {
@@ -1390,14 +1405,27 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         if item(ui, "Wagered PVP", W) {
             play_click(&mut cx.commands, snd);
             #[cfg(feature = "solana")]
-            if cx.player_identity.has_onchain_profile {
-                cx.menu_state.set(crate::core::MenuState::SolanaLobby);
-            } else {
-                std::thread::spawn(|| {
-                    let _ = reqwest::blocking::Client::new()
-                        .post("http://127.0.0.1:7454/api/open-profile-step")
-                        .send();
-                });
+            {
+                use crate::multiplayer::solana::integration::state::ProfileStatus;
+                let profile_ready = cx
+                    .solana_state
+                    .as_ref()
+                    .map(|s| s.profile_status == ProfileStatus::HasProfileWithUsername)
+                    .unwrap_or(false);
+                if profile_ready {
+                    if let Some(lobby) = cx.solana_lobby.as_mut() {
+                        lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
+                        // Fresh entry from the main menu should always show the
+                        // create-game form, not a stale WaitingForOpponent/Success
+                        // left over from an earlier create attempt this session.
+                        lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
+                    }
+                    cx.menu_state.set(crate::core::MenuState::SolanaLobby);
+                }
+                // If the profile isn't ready yet, do nothing here — the on-chain
+                // profile check (profile_check.rs) opens the Tauri profile step
+                // on its own as soon as it resolves. Firing a second popup here
+                // was the source of the "click Wagered PVP -> stray login popup" bug.
             }
             #[cfg(not(feature = "solana"))]
             cx.menu_state.set(crate::core::MenuState::BraidLobby);
@@ -1407,7 +1435,13 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         if item(ui, "Find Wagered Game", W) {
             play_click(&mut cx.commands, snd);
             #[cfg(feature = "solana")]
-            cx.menu_state.set(crate::core::MenuState::SolanaLobby);
+            {
+                if let Some(lobby) = cx.solana_lobby.as_mut() {
+                    lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Browse;
+                    lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
+                }
+                cx.menu_state.set(crate::core::MenuState::SolanaLobby);
+            }
             #[cfg(not(feature = "solana"))]
             cx.menu_state.set(crate::core::MenuState::BraidLobby);
         }
@@ -1860,6 +1894,11 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
 
 /// Same as [`item`] but draws a `›` chevron on the right to signal expansion.
 fn item_expandable(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
+    item_expandable_tip(ui, label, "", width)
+}
+
+/// Like [`item_expandable`] but shows `tip` as a hover tooltip when non-empty.
+fn item_expandable_tip(ui: &mut egui::Ui, label: &str, tip: &str, width: f32) -> bool {
     let btn_text = egui::Color32::from_rgb(218, 218, 232);
     let chevron_col = egui::Color32::from_rgb(120, 140, 180);
 
@@ -1911,11 +1950,19 @@ fn item_expandable(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
         egui::FontId::proportional(28.0),
         chevron_col,
     );
+    if !tip.is_empty() {
+        resp.clone().on_hover_text(tip);
+    }
     resp.clicked()
 }
 
 /// A transparent button with a left-side accent bar on hover.
 fn item(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
+    item_tip(ui, label, "", width)
+}
+
+/// Like [`item`] but shows `tip` as a hover tooltip when non-empty.
+fn item_tip(ui: &mut egui::Ui, label: &str, tip: &str, width: f32) -> bool {
     let btn_text = egui::Color32::from_rgb(218, 218, 232);
 
     // Reserve background shape slots BEFORE the button so highlights render behind text.
@@ -1957,5 +2004,8 @@ fn item(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
         );
     }
 
+    if !tip.is_empty() {
+        resp.clone().on_hover_text(tip);
+    }
     resp.clicked()
 }

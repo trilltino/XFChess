@@ -72,6 +72,12 @@ path = "tests/tournament_match_tests.rs"
 name = "tournament_prize_tests"
 path = "tests/tournament_prize_tests.rs"
 
+# Byte-level lock of instruction arg layouts that the backend and game-client
+# builders construct by hand (no IDL) — catches enum/arg drift at test time.
+[[test]]
+name = "instruction_layout_tests"
+path = "tests/instruction_layout_tests.rs"
+
 [dev-dependencies]
 tokio = { version = "=1", features = ["full"] }
 solana-program-test = "=2.2.1"

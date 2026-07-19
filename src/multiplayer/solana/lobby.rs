@@ -591,7 +591,14 @@ fn poll_lobby_tasks(
                     game_id, rollup_manager.is_creator
                 );
 
-                if lobby.mode == LobbyMode::Create && lobby.wager_sol > 0.0 {
+                if lobby.mode == LobbyMode::Create {
+                    // Every on-chain create (free or wagered) is announced to the
+                    // same P2P relay used by plain online multiplayer, so a joiner
+                    // finds it the same way regardless of stake. Free games (stake
+                    // 0) are tagged "P2P" so they surface in the normal browse
+                    // list rather than the Solana Browse tab's wagered-only filter.
+                    let is_wagered = lobby.wager_sol > 0.0;
+                    let game_type = if is_wagered { "solana_wager" } else { "P2P" };
                     let display_name = lobby
                         .cached_display_name
                         .clone()
@@ -607,7 +614,7 @@ fn poll_lobby_tasks(
                             &host_node_id,
                             &display_name,
                             lobby.wager_sol as f64,
-                            "solana_wager",
+                            game_type,
                             lobby.time_control_base,
                             lobby.time_control_inc as u16,
                             Some(display_name.clone()),
@@ -625,7 +632,7 @@ fn poll_lobby_tasks(
                             &host_node_id,
                             &display_name,
                             lobby.wager_sol as f64,
-                            "solana_wager",
+                            game_type,
                             lobby.time_control_base,
                             lobby.time_control_inc as u16,
                             Some(display_name.clone()),
@@ -639,11 +646,11 @@ fn poll_lobby_tasks(
                     };
                     if let Err(e) = announce_result {
                         warn!(
-                            "[LOBBY] Failed to announce wagered game {} to VPS: {}",
+                            "[LOBBY] Failed to announce game {} to VPS: {}",
                             game_id, e
                         );
                     } else {
-                        info!("[LOBBY] Announced wagered game {} to VPS relay", game_id);
+                        info!("[LOBBY] Announced game {} ({}) to VPS relay", game_id, game_type);
                     }
                 }
             }

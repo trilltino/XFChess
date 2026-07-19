@@ -112,6 +112,7 @@ pub fn apply_capture(
 }
 
 /// Updates ECS components for a moved piece (position, history, animation)
+#[allow(clippy::too_many_arguments)]
 pub fn update_piece_state(
     origin: &str,
     entity: Entity,
@@ -124,11 +125,16 @@ pub fn update_piece_state(
     commands: &mut Commands,
     pieces: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
     move_history: &mut MoveHistory,
+    engine: &ChessEngine,
 ) -> bool {
     let Ok((_, mut piece_component, mut has_moved)) = pieces.get_mut(entity) else {
         error!("[SHARED] {origin}: failed to access piece after move");
         return false;
     };
+
+    // SAN must be derived from the engine's position *before* this move is
+    // applied (engine.game is only advanced later, in execute_move's step 7).
+    let san = engine.move_to_san(from_pos, target, promotion);
 
     // Apply promotion if applicable
     if let Some(new_type) = promotion {
@@ -147,7 +153,7 @@ pub fn update_piece_state(
         is_check: false,
         is_checkmate: false,
     };
-    move_history.add_move(move_record);
+    move_history.add_move_with_san(move_record, san);
     piece_component.x = target.0;
     piece_component.y = target.1;
     // Use PIECE_ON_BOARD_Y so the animation stays on the board surface (y=0.05),
@@ -286,6 +292,7 @@ pub fn execute_move(
         commands,
         pieces_query,
         move_history,
+        engine,
     ) {
         return false;
     }

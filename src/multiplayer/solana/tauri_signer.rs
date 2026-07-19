@@ -23,13 +23,34 @@ use solana_sdk::{
 /// Maximum seconds to wait for the user to approve the transaction in Phantom.
 const SIGN_TIMEOUT_SECS: u64 = 60;
 
+/// HTTP port for this instance's Tauri wallet bridge, from XFCHESS_WALLET_PORT (default 7454).
+pub fn wallet_bridge_port() -> u16 {
+    std::env::var("XFCHESS_WALLET_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7454)
+}
+
+/// Base HTTP URL for this instance's Tauri wallet bridge, e.g. `http://127.0.0.1:7454`.
+/// Every call site that talks to the local Tauri sidecar must go through this so two
+/// dev instances on different `XFCHESS_WALLET_PORT` values never cross-talk.
+pub fn wallet_bridge_base_url() -> String {
+    format!("http://127.0.0.1:{}", wallet_bridge_port())
+}
+
+/// Fire-and-forget POST to this instance's Tauri bridge asking it to open the
+/// profile-creation step in the wallet popup.
+pub fn open_profile_step() {
+    std::thread::spawn(|| {
+        let url = format!("{}/api/open-profile-step", wallet_bridge_base_url());
+        let _ = reqwest::blocking::Client::new().post(url).send();
+    });
+}
+
 /// TCP port range derived from XFCHESS_WALLET_PORT (default 7454).
 /// The Tauri side binds TCP on (base-11)..=(base-2).
 fn tcp_port_range() -> std::ops::RangeInclusive<u16> {
-    let base: u16 = std::env::var("XFCHESS_WALLET_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(7454);
+    let base: u16 = wallet_bridge_port();
     base.saturating_sub(11)..=base.saturating_sub(2)
 }
 

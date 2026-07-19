@@ -1,10 +1,10 @@
-// Tournament types for XFChess admin interface
+﻿// Tournament types for XFChess admin interface
 
 export interface CreateTournamentReq {
   tournament_id: number;
   name: string;
   entry_fee_lamports: number;
-  max_players: 8 | 16 | 32 | 64 | 128 | 256;
+  max_players: 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256;
   format: "SingleElimination" | "Swiss";
   swiss_rounds?: number; // Required for Swiss format
   elo_min?: number;

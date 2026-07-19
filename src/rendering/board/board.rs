@@ -3,10 +3,12 @@
 //! Uses batch spawning pattern from Bevy examples (many_sprites.rs, bevymark.rs)
 //! to efficiently create all 64 board squares in a single operation.
 
+use crate::game::systems::camera::BOARD_LAYER;
 use crate::game::systems::input::on_square_click;
 use crate::game::view_mode::ViewMode;
 use crate::input::pointer::{on_square_hover, on_square_unhover};
 use crate::rendering::utils::Square;
+use bevy::camera::visibility::RenderLayers;
 use bevy::picking::pointer::PointerInteraction;
 use bevy::prelude::*;
 
@@ -120,6 +122,7 @@ pub fn create_board(
                 InheritedVisibility::default(),
                 PointerInteraction::default(),
                 bevy::picking::Pickable::default(),
+                RenderLayers::layer(BOARD_LAYER),
                 square,
                 board,
                 name,
@@ -135,6 +138,7 @@ pub fn create_board(
                     MeshMaterial3d(mat3d),
                     BoardSquare3DVisual,
                     bevy::picking::Pickable::IGNORE,
+                    RenderLayers::layer(BOARD_LAYER),
                 ));
 
                 parent.spawn((
@@ -144,6 +148,7 @@ pub fn create_board(
                     BoardSquare2DVisual,
                     Visibility::Hidden,
                     bevy::picking::Pickable::IGNORE,
+                    RenderLayers::layer(BOARD_LAYER),
                 ));
 
                 // Invisible flat plane at Y=0.06 (just above cuboid top).
@@ -155,6 +160,7 @@ pub fn create_board(
                         .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                     BoardSquareHitPlane,
                     bevy::picking::Pickable::default(),
+                    RenderLayers::layer(BOARD_LAYER),
                 ));
             });
     }

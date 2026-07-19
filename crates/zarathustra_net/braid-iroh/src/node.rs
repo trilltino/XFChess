@@ -11,8 +11,23 @@ use iroh_gossip::api::GossipReceiver;
 use iroh_gossip::net::Gossip;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
+
+/// Cap on stored `Update`s kept per resource URL — without this a
+/// long-running node accumulates every move/patch ever PUT to a resource
+/// for its whole process lifetime. Oldest entries are dropped first; a
+/// client whose `since_version` cursor points past the retained tail just
+/// gets a full resync (see `get_updates_since`), which is the expected,
+/// self-healing fallback for that case already.
+const MAX_UPDATES_PER_RESOURCE: usize = 500;
+
+/// How often the debounced persistence flush runs when `data_dir` is set.
+/// Writes are coalesced instead of cloning + serializing the *entire*
+/// resource map on every single `put()`.
+const PERSIST_FLUSH_INTERVAL: Duration = Duration::from_secs(10);
 
 use crate::discovery::{DiscoveryConfig, MockDiscoveryMap};
 #[cfg(feature = "proxy")]
@@ -95,6 +110,10 @@ pub struct BraidIrohNode {
     resources: Arc<RwLock<HashMap<String, Vec<Update>>>>,
     /// Optional directory for durable persistence of the resource store.
     data_dir: Option<PathBuf>,
+    /// Set on every write since the last persistence flush; the debounced
+    /// flush task clears it after writing. Avoids a full-map clone + disk
+    /// write on every single `put()`.
+    dirty: Arc<AtomicBool>,
 }
 
 impl BraidIrohNode {
@@ -183,12 +202,34 @@ impl BraidIrohNode {
             });
         }
 
+        let dirty = Arc::new(AtomicBool::new(false));
+
+        // Debounced persistence flush: only clone+write the resource map
+        // when something actually changed since the last tick, instead of
+        // doing a full-map clone + disk write on every single put().
+        if let Some(ref dir) = config.data_dir {
+            let dir = dir.clone();
+            let resources = resources.clone();
+            let dirty = dirty.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(PERSIST_FLUSH_INTERVAL);
+                loop {
+                    interval.tick().await;
+                    if dirty.swap(false, Ordering::AcqRel) {
+                        let snapshot = resources.read().await.clone();
+                        save_resources(&dir, &snapshot).await;
+                    }
+                }
+            });
+        }
+
         Ok(Self {
             endpoint,
             router,
             subscription_mgr,
             resources,
             data_dir: config.data_dir,
+            dirty,
         })
     }
 
@@ -209,16 +250,14 @@ impl BraidIrohNode {
         url: &str,
         bootstrap: Vec<EndpointId>,
     ) -> anyhow::Result<GossipReceiver> {
-        println!(
-            "[NODE] Subscribing to {} with {} bootstrap peers",
+        tracing::debug!(
             url,
-            bootstrap.len()
+            bootstrap_count = bootstrap.len(),
+            bootstrap = ?bootstrap,
+            "subscribing"
         );
-        for peer in &bootstrap {
-            println!("[NODE]   bootstrap: {}", peer);
-        }
         let (_sender, receiver) = self.subscription_mgr.subscribe(url, bootstrap).await?;
-        println!("[NODE] Subscribed successfully to {}", url);
+        tracing::debug!(url, "subscribed successfully");
         Ok(receiver)
     }
 
@@ -228,31 +267,29 @@ impl BraidIrohNode {
         // Normalize the URL for consistent storage (using same logic as SubscriptionManager)
         let normalized = crate::subscription::SubscriptionManager::normalize_url(url);
 
-        // Debug logging for Braid format
-        println!("\nOUTGOING BRAID PUT:");
-        println!("PUT {} HTTP/3", normalized);
-        println!("Version: {:?}", update.version);
-        if !update.parents.is_empty() {
-            println!("Parents: {:?}", update.parents);
+        tracing::debug!(
+            url = normalized.as_str(),
+            version = ?update.version,
+            parents = ?update.parents,
+            content_length = update.body.as_ref().map(|b| b.len()),
+            "outgoing braid PUT"
+        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            if let Some(body) = &update.body {
+                tracing::trace!(body = %String::from_utf8_lossy(body), "PUT body");
+            }
         }
-        if let Some(body) = &update.body {
-            println!("Content-Length: {}", body.len());
-            println!();
-            println!("{}", String::from_utf8_lossy(body));
-        }
-        println!("----------------------------------------\n");
 
         {
             let mut guard = self.resources.write().await;
-            guard
-                .entry(normalized.clone())
-                .or_insert_with(Vec::new)
-                .push(update.clone());
-            // Flush to disk if persistence is configured.
-            if let Some(ref dir) = self.data_dir {
-                let snapshot: HashMap<String, Vec<Update>> = guard.clone();
-                let dir = dir.clone();
-                tokio::spawn(async move { save_resources(&dir, &snapshot).await });
+            let history = guard.entry(normalized.clone()).or_insert_with(Vec::new);
+            history.push(update.clone());
+            if history.len() > MAX_UPDATES_PER_RESOURCE {
+                let overflow = history.len() - MAX_UPDATES_PER_RESOURCE;
+                history.drain(0..overflow);
+            }
+            if self.data_dir.is_some() {
+                self.dirty.store(true, Ordering::Release);
             }
         }
         self.subscription_mgr
@@ -263,12 +300,16 @@ impl BraidIrohNode {
 
     /// Store an update locally without broadcasting (for received gossip).
     pub async fn store_update(&self, url: &str, update: Update) {
-        self.resources
-            .write()
-            .await
-            .entry(url.to_string())
-            .or_insert_with(Vec::new)
-            .push(update);
+        let mut guard = self.resources.write().await;
+        let history = guard.entry(url.to_string()).or_insert_with(Vec::new);
+        history.push(update);
+        if history.len() > MAX_UPDATES_PER_RESOURCE {
+            let overflow = history.len() - MAX_UPDATES_PER_RESOURCE;
+            history.drain(0..overflow);
+        }
+        if self.data_dir.is_some() {
+            self.dirty.store(true, Ordering::Release);
+        }
     }
 
     /// GET the latest state of a resource from local storage.
@@ -364,10 +405,7 @@ impl BraidIrohNode {
 
     /// Join additional peers to an existing gossip topic.
     pub async fn join_peers(&self, url: &str, peers: Vec<EndpointId>) -> anyhow::Result<()> {
-        println!("[NODE] Joining {} peers to topic {}", peers.len(), url);
-        for peer in &peers {
-            println!("[NODE]   joining: {}", peer);
-        }
+        tracing::debug!(url, peer_count = peers.len(), peers = ?peers, "joining peers to topic");
         self.subscription_mgr.join_peers(url, peers).await
     }
 }

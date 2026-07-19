@@ -475,6 +475,14 @@ fn handle_network_events(
                     _ => {}
                 }
             }
+            NetworkEvent::PeerDisconnected(reason) => {
+                // Only meaningful mid-game: during lobby setup a dropped/failed
+                // link is already surfaced via explicit Error(...) transitions.
+                if connection_state.status == P2PConnectionStatus::InGame {
+                    warn!("PeerDisconnected during game: {}", reason);
+                    connection_state.status = P2PConnectionStatus::Disconnected;
+                }
+            }
             _ => {}
         }
     }

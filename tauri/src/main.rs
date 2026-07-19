@@ -26,9 +26,8 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
@@ -66,6 +65,12 @@ struct WalletJwt(Arc<Mutex<Option<String>>>);
 type PendingTxInner = Option<(Vec<u8>, oneshot::Sender<Result<Vec<u8>, String>>)>;
 type PendingTx = Arc<Mutex<PendingTxInner>>;
 
+/// How long to wait for the user to approve a transaction in the wallet
+/// popup before giving up. Must match `SIGN_TIMEOUT_SECS` in the game
+/// client's `src/multiplayer/solana/tauri_signer.rs` — that side sets the
+/// same read timeout on its end of this same TCP connection.
+const SIGN_TIMEOUT_SECS: u64 = 60;
+
 /// Get the HTTP port for the wallet signing service.
 fn http_port() -> u16 {
   std::env::var("XFCHESS_WALLET_PORT")
@@ -81,20 +86,24 @@ fn get_backend_url() -> String {
     .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string())
 }
 
-/// Path to the consent record on disk.
-fn consent_path() -> PathBuf {
+/// Per-instance cache directory, scoped by the wallet bridge port so that
+/// two dev sidecars (e.g. XFCHESS_WALLET_PORT=7454 and 7464) never share
+/// consent/wallet state.
+fn instance_cache_dir() -> PathBuf {
   dirs::data_local_dir()
     .unwrap_or_else(|| PathBuf::from("."))
     .join("xfchess")
-    .join("consent.json")
+    .join(format!("port-{}", http_port()))
+}
+
+/// Path to the consent record on disk.
+fn consent_path() -> PathBuf {
+  instance_cache_dir().join("consent.json")
 }
 
 /// Path where the last connected wallet pubkey is persisted.
 fn wallet_cache_path() -> PathBuf {
-  dirs::data_local_dir()
-    .unwrap_or_else(|| PathBuf::from("."))
-    .join("xfchess")
-    .join("wallet.json")
+  instance_cache_dir().join("wallet.json")
 }
 
 /// Persist the wallet pubkey (and optional username) to disk so it survives Tauri restarts.
@@ -108,12 +117,6 @@ fn save_persisted_wallet(pubkey: &str, username: Option<&str>) {
     obj["username"] = serde_json::Value::String(u.to_string());
   }
   let _ = std::fs::write(&path, obj.to_string());
-}
-
-/// Redirect authentication pages to the onboarding single-page application.
-#[allow(dead_code)]
-async fn redirect_to_onboard() -> impl IntoResponse {
-  axum::response::Redirect::to("/onboard")
 }
 
 // ---------------------------------------------------------------------------
@@ -209,8 +212,11 @@ async fn http_server(
     StatusCode::OK
   }
 
-  // POST /hide — no-op when wallet runs in Chrome (Chrome closes itself via window.close())
+  // POST /hide — close the wallet popup by killing the Chrome process we
+  // spawned for it (window.close() from inside is unreliable, see
+  // kill_wallet_popup doc-comment).
   async fn post_hide(_state: State<LocalState>) -> impl IntoResponse {
+    kill_wallet_popup();
     StatusCode::OK
   }
 
@@ -252,6 +258,19 @@ async fn http_server(
   }
 
   // Generic proxy helpers
+  // The backend is expected to always answer with JSON. If it doesn't (down,
+  // mid-restart, returned an HTML/plain-text error page), surface that
+  // plainly instead of forwarding reqwest's internal error text — that
+  // showed up in the UI verbatim as "error decoding response body".
+  fn backend_unreachable_msg(e: reqwest::Error) -> String {
+    tracing::warn!("[HTTP] backend request failed: {e}");
+    "Could not reach the backend service. Please check it's running and try again.".to_string()
+  }
+  fn backend_bad_response_msg(e: reqwest::Error) -> String {
+    tracing::warn!("[HTTP] backend returned a non-JSON response: {e}");
+    "The backend returned an unexpected response. Please try again in a moment.".to_string()
+  }
+
   async fn proxy_post(url: &str, body: serde_json::Value) -> axum::response::Response {
     let client = reqwest::Client::new();
     match client.post(url).json(&body).send().await {
@@ -260,10 +279,10 @@ async fn http_server(
           StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         match resp.json::<serde_json::Value>().await {
           Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (status, e.to_string()).into_response(),
+          Err(e) => (status, backend_bad_response_msg(e)).into_response(),
         }
       }
-      Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+      Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
 
@@ -285,10 +304,10 @@ async fn http_server(
           StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         match resp.json::<serde_json::Value>().await {
           Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+          Err(e) => (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response(),
         }
       }
-      Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+      Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
 
@@ -377,10 +396,10 @@ async fn http_server(
           StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         match resp.json::<serde_json::Value>().await {
           Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+          Err(e) => (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response(),
         }
       }
-      Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+      Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
   async fn api_set_username(
@@ -401,10 +420,10 @@ async fn http_server(
           StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         match resp.json::<serde_json::Value>().await {
           Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+          Err(e) => (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response(),
         }
       }
-      Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+      Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
 
@@ -489,62 +508,22 @@ async fn http_server(
           StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         match resp.json::<serde_json::Value>().await {
           Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+          Err(e) => (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response(),
         }
       }
-      Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+      Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
 
-  // Proxy /tournament-admin/* → vite dev server on :7455 (dev).
-  // Falls back to serving the pre-built dist/ when the dev server isn't running,
-  // so the window loads with `just dev` even without a separate `npm run dev`.
-  async fn proxy_tournament_admin(
+  // Serve the tournament admin UI from the pre-built dist/. The admin panel is
+  // desktop-only: it renders in the Tauri "tournament-admin" window, loaded from
+  // this loopback-only bridge — there is no standalone vite/web dev server.
+  // Rebuild the UI with: cd tauri/tournament-admin && npm run build
+  async fn serve_tournament_admin(
     State(s): State<LocalState>,
     uri: axum::http::Uri,
-    method: axum::http::Method,
-    headers: axum::http::HeaderMap,
-    body: axum::body::Bytes,
   ) -> impl IntoResponse {
-    let path = uri
-      .path_and_query()
-      .map(|pq| pq.as_str())
-      .unwrap_or("/tournament-admin/");
-    // Vite is configured with base: '/tournament-admin/' so it expects the full path.
-    let target = format!("http://127.0.0.1:7455{path}");
-    let client = reqwest::Client::new();
-    let mut req = client.request(
-      reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET),
-      &target,
-    );
-    for (k, v) in &headers {
-      if let Ok(v) = v.to_str() {
-        req = req.header(k.as_str(), v);
-      }
-    }
-    req = req.body(body);
-    match req.send().await {
-      Ok(resp) => {
-        let status =
-          StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-        let headers_out = resp.headers().clone();
-        match resp.bytes().await {
-          Ok(bytes) => {
-            let mut response = axum::response::Response::new(axum::body::Body::from(bytes));
-            *response.status_mut() = status;
-            for (k, v) in &headers_out {
-              response.headers_mut().insert(k, v.clone());
-            }
-            response
-          }
-          Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
-        }
-      }
-      Err(_) => {
-        // Dev server not running — fall back to pre-built dist/
-        serve_dist_file(&s.dist_path, path).await
-      }
-    }
+    serve_dist_file(&s.dist_path, uri.path()).await
   }
 
   async fn serve_dist_file(dist: &std::path::Path, url_path: &str) -> axum::response::Response {
@@ -670,18 +649,18 @@ async fn http_server(
     )
     .route("/api/open-profile-step", post(api_open_profile_step))
     .route("/api/needs-profile-step", get(api_needs_profile_step))
-    // Proxy tournament admin UI (vite dev on :7455, or built dist in prod)
+    // Tournament admin UI (built dist, rendered in the desktop admin window)
     .route(
       "/tournament-admin",
-      axum::routing::any(proxy_tournament_admin),
+      axum::routing::get(serve_tournament_admin),
     )
     .route(
       "/tournament-admin/",
-      axum::routing::any(proxy_tournament_admin),
+      axum::routing::get(serve_tournament_admin),
     )
     .route(
       "/tournament-admin/{*path}",
-      axum::routing::any(proxy_tournament_admin),
+      axum::routing::get(serve_tournament_admin),
     )
     .layer(cors)
     .with_state(state);
@@ -710,6 +689,15 @@ fn open_wallet_popup(_app: &tauri::AppHandle) {
 
 /// Open a URL in Chrome app-mode (compact popup, no address bar).
 /// Falls back to the system default browser if Chrome is not found.
+/// PID of the last Chrome process spawned for the wallet popup, so `/hide`
+/// can actually close it — `window.close()` from inside the popup is
+/// unreliable since Chrome treats a CLI-launched `--app` window as not
+/// script-opened and blocks it.
+fn wallet_popup_pid_cell() -> &'static std::sync::Mutex<Option<u32>> {
+  static CELL: std::sync::OnceLock<std::sync::Mutex<Option<u32>>> = std::sync::OnceLock::new();
+  CELL.get_or_init(|| std::sync::Mutex::new(None))
+}
+
 fn open_in_browser(url: &str) {
   let ts = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
@@ -720,6 +708,20 @@ fn open_in_browser(url: &str) {
 
   #[cfg(windows)]
   {
+    // Two independent things can ask for the wallet popup close together —
+    // the game client's "Connect Wallet" click, and its separate automatic
+    // on-chain profile check. If the popup we last spawned is still alive,
+    // refocus it instead of opening a genuine second Chrome window; wallet-ui
+    // manages its own step transitions internally, so the already-open
+    // window will show the right screen on its own.
+    if let Some(pid) = *wallet_popup_pid_cell().lock().unwrap() {
+      if process_is_alive(pid) {
+        tracing::debug!("[WalletPopup] popup (pid {pid}) still open — refocusing instead of spawning a duplicate");
+        std::thread::spawn(move || force_foreground_window(pid));
+        return;
+      }
+    }
+
     let chrome_paths = [
       r"C:\Program Files\Google\Chrome\Application\chrome.exe",
       r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -727,9 +729,17 @@ fn open_in_browser(url: &str) {
     let app_flag = format!("--app={}", url_ts);
     for path in &chrome_paths {
       if std::path::Path::new(path).exists() {
-        let _ = Command::new(path)
-          .args([&app_flag, "--window-size=420,600"])
-          .spawn();
+        match Command::new(path)
+          .args([&app_flag, "--window-size=460,720"])
+          .spawn()
+        {
+          Ok(child) => {
+            let pid = child.id();
+            *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
+            std::thread::spawn(move || force_foreground_window(pid));
+          }
+          Err(e) => tracing::warn!("[WalletPopup] failed to spawn chrome: {e}"),
+        }
         return;
       }
     }
@@ -740,6 +750,107 @@ fn open_in_browser(url: &str) {
   {
     let _ = open::that(&url_ts);
   }
+}
+
+/// Force-terminate the tracked wallet-popup Chrome process, if any.
+#[cfg(windows)]
+fn kill_wallet_popup() {
+  use ::windows::Win32::Foundation::CloseHandle;
+  use ::windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+  let Some(pid) = wallet_popup_pid_cell().lock().unwrap().take() else {
+    return;
+  };
+  unsafe {
+    match OpenProcess(PROCESS_TERMINATE, false, pid) {
+      Ok(handle) => {
+        let _ = TerminateProcess(handle, 0);
+        let _ = CloseHandle(handle);
+        tracing::info!("[WalletPopup] terminated chrome pid {pid}");
+      }
+      Err(e) => tracing::warn!("[WalletPopup] failed to open chrome pid {pid} for kill: {e}"),
+    }
+  }
+}
+
+#[cfg(not(windows))]
+fn kill_wallet_popup() {}
+
+/// Whether a process with this PID is still running. Used to decide whether
+/// a previously-spawned wallet popup can be refocused instead of duplicated.
+#[cfg(windows)]
+fn process_is_alive(pid: u32) -> bool {
+  use ::windows::Win32::Foundation::CloseHandle;
+  use ::windows::Win32::System::Threading::{
+    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+  };
+
+  unsafe {
+    let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+      return false;
+    };
+    let mut exit_code: u32 = 0;
+    let alive = GetExitCodeProcess(handle, &mut exit_code).is_ok()
+      && exit_code == ::windows::Win32::Foundation::STILL_ACTIVE.0 as u32;
+    let _ = CloseHandle(handle);
+    alive
+  }
+}
+
+/// Windows blocks background processes from stealing focus from the current
+/// foreground window (the game), so a freshly-spawned Chrome popup just
+/// flashes in the taskbar instead of coming to front. Poll for the new
+/// window by process id and force it forward via the standard
+/// AttachThreadInput dance once it appears.
+#[cfg(windows)]
+fn force_foreground_window(pid: u32) {
+  // Leading `::` needed: this crate's own `mod windows;` (window builders)
+  // shadows the external `windows` crate name.
+  use ::windows::core::BOOL;
+  use ::windows::Win32::Foundation::{HWND, LPARAM};
+  use ::windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+  use ::windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsWindowVisible,
+    SetForegroundWindow, ShowWindow, SW_RESTORE,
+  };
+
+  extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe {
+      let ctx = &mut *(lparam.0 as *mut (u32, HWND));
+      let mut owner_pid: u32 = 0;
+      GetWindowThreadProcessId(hwnd, Some(&mut owner_pid));
+      if owner_pid == ctx.0 && IsWindowVisible(hwnd).as_bool() {
+        ctx.1 = hwnd;
+        return BOOL(0); // stop enumeration
+      }
+      BOOL(1)
+    }
+  }
+
+  // Poll for up to ~3s — the child process needs a moment to create its window.
+  for _ in 0..60 {
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let mut ctx: (u32, HWND) = (pid, HWND(std::ptr::null_mut()));
+    unsafe {
+      let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
+    }
+
+    if !ctx.1 .0.is_null() {
+      unsafe {
+        let target = ctx.1;
+        let foreground = GetForegroundWindow();
+        let foreground_tid = GetWindowThreadProcessId(foreground, None);
+        let current_tid = GetCurrentThreadId();
+        let _ = AttachThreadInput(current_tid, foreground_tid, true);
+        let _ = ShowWindow(target, SW_RESTORE);
+        let _ = SetForegroundWindow(target);
+        let _ = AttachThreadInput(current_tid, foreground_tid, false);
+      }
+      return;
+    }
+  }
+  tracing::warn!("[WalletPopup] gave up waiting for chrome window (pid {pid}) to appear");
 }
 
 #[tauri::command]
@@ -753,14 +864,17 @@ fn open_tournament_admin(app: &tauri::AppHandle) {
   let app2 = app.clone();
   let _ = app.run_on_main_thread(move || {
     let app = app2;
-    const ADMIN_URL: &str = "http://localhost:7455/tournament-admin/";
+    // Served by the loopback-only wallet bridge from the built dist — the
+    // admin panel only exists inside this desktop window, never as a
+    // separate web process.
+    let admin_url = format!("http://localhost:{}/tournament-admin/", http_port());
     if let Some(win) = app.get_webview_window("tournament-admin") {
       tracing::info!("[TournamentAdmin] focusing existing window");
       let _ = win.show();
       let _ = win.set_focus();
     } else {
-      tracing::info!("[TournamentAdmin] creating window → {ADMIN_URL}");
-      let url = tauri::WebviewUrl::External(ADMIN_URL.parse().expect("valid URL"));
+      tracing::info!("[TournamentAdmin] creating window → {admin_url}");
+      let url = tauri::WebviewUrl::External(admin_url.parse().expect("valid URL"));
       match tauri::WebviewWindowBuilder::new(&app, "tournament-admin", url)
         .title("XFChess Tournament Admin")
         .inner_size(1200.0, 800.0)
@@ -834,10 +948,35 @@ fn main() {
         let _ = TournamentAdminWindow::new(app.handle());
       }
 
+      // ── Tournament admin auto-open (just dev / just admin / start-tournament-admin.bat) ──
+      // Retries until the window exists: on a cold start the event loop may not
+      // be able to create windows yet, and a single delayed attempt gets dropped.
+      if std::env::var("XFCHESS_OPEN_ADMIN").is_ok_and(|v| v == "1") {
+        let h = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+          for _ in 0..30 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if h.get_webview_window("tournament-admin").is_some() {
+              break;
+            }
+            open_tournament_admin(&h);
+          }
+        });
+      }
+
       // ── Wallet Bridge TCP listener ──────────────────────────────────────────
-      // Listens for "OPEN" sent by the game client to trigger the wallet popup.
+      // Two things arrive on this socket:
+      //   - the literal 4 bytes "OPEN", from open_wallet_browser() — just a
+      //     "show the popup" ping.
+      //   - a length-prefixed transaction from tauri_signer::send_to_tauri_blocking
+      //     ([4-byte LE length][tx bytes]) — a real signing request, which this
+      //     listener must hand off to wallet-ui (via the existing /pending +
+      //     /resolved HTTP bridge, same PendingTx the axum server uses) and
+      //     block on, then write [4-byte LE length][signed bytes] back — or
+      //     the 0xFFFFFFFF sentinel Bevy already treats as "rejected".
       {
         let app_handle = app.handle().clone();
+        let pending_for_tcp = pending_tx.clone();
         let base_port: u16 = std::env::var("XFCHESS_WALLET_PORT")
           .ok()
           .and_then(|v| v.parse().ok())
@@ -868,11 +1007,67 @@ fn main() {
             loop {
               if let Ok((mut stream, _)) = listener.accept().await {
                 let app2 = app_handle.clone();
+                let pending2 = pending_for_tcp.clone();
                 tokio::spawn(async move {
-                  let mut buf = [0u8; 16];
-                  if let Ok(n) = stream.read(&mut buf).await {
-                    if &buf[..n.min(4)] == b"OPEN" {
-                      open_wallet_popup(&app2);
+                  let mut prefix = [0u8; 4];
+                  if stream.read_exact(&mut prefix).await.is_err() {
+                    return;
+                  }
+
+                  if &prefix == b"OPEN" {
+                    open_wallet_popup(&app2);
+                    return;
+                  }
+
+                  // Otherwise `prefix` is a little-endian u32 byte length for
+                  // a signing request.
+                  const MAX_TX_LEN: usize = 64 * 1024; // real txs are a few KB
+                  let len = u32::from_le_bytes(prefix) as usize;
+                  if len == 0 || len > MAX_TX_LEN {
+                    tracing::warn!(
+                      "[WalletBridge] rejecting signing request with implausible length {len}"
+                    );
+                    return;
+                  }
+                  let mut tx_bytes = vec![0u8; len];
+                  if stream.read_exact(&mut tx_bytes).await.is_err() {
+                    tracing::warn!("[WalletBridge] failed to read full tx payload");
+                    return;
+                  }
+
+                  let (resp_tx, resp_rx) = oneshot::channel();
+                  {
+                    let mut guard = pending2.lock().unwrap();
+                    *guard = Some((tx_bytes, resp_tx));
+                  }
+                  // Ensure the popup is open/focused so the user can approve.
+                  // Dedup-guarded on the Rust side (see process_is_alive in
+                  // open_in_browser), so this is a no-op if one is already up.
+                  open_wallet_popup(&app2);
+
+                  let outcome = tokio::time::timeout(
+                    std::time::Duration::from_secs(SIGN_TIMEOUT_SECS),
+                    resp_rx,
+                  )
+                  .await;
+
+                  match outcome {
+                    Ok(Ok(Ok(signed_bytes))) => {
+                      let len_bytes = (signed_bytes.len() as u32).to_le_bytes();
+                      let _ = stream.write_all(&len_bytes).await;
+                      let _ = stream.write_all(&signed_bytes).await;
+                    }
+                    other => {
+                      if let Err(e) = &other {
+                        tracing::warn!("[WalletBridge] signing timed out: {e}");
+                      } else if let Ok(Ok(Err(e))) = &other {
+                        tracing::info!("[WalletBridge] signing rejected: {e}");
+                      }
+                      // Clear a stale pending entry left by a timeout — a
+                      // real /resolved call already takes() it, so this is a
+                      // no-op in that case.
+                      *pending2.lock().unwrap() = None;
+                      let _ = stream.write_all(&0xFFFF_FFFFu32.to_le_bytes()).await;
                     }
                   }
                 });
@@ -885,93 +1080,11 @@ fn main() {
       // ── Background Notification Poller ──────────────────────────────────────
       let backend_url =
         std::env::var("VITE_BACKEND_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
-      let pubkey_for_poller = wallet_pubkey.0.lock().unwrap().clone();
-      services::notification_poller::startPoller(
+      services::notification_poller::start_poller(
         app.handle().clone(),
         backend_url,
-        pubkey_for_poller,
+        wallet_pubkey.0.clone(),
       );
-
-      // ── System Tray ────────────────────────────────────────────────────────
-      let tray_menu = tauri::menu::MenuBuilder::new(app)
-        .item(
-          &tauri::menu::MenuItemBuilder::new("Show XFChess")
-            .id("show")
-            .build(app)?,
-        )
-        .separator()
-        .item(
-          &tauri::menu::MenuItemBuilder::new("Tournaments")
-            .id("tournaments")
-            .build(app)?,
-        )
-        .item(
-          &tauri::menu::MenuItemBuilder::new("Matchmaking")
-            .id("matchmaking")
-            .build(app)?,
-        )
-        .item(
-          &tauri::menu::MenuItemBuilder::new("Tournament Admin")
-            .id("tournament-admin")
-            .build(app)?,
-        )
-        .separator()
-        .item(
-          &tauri::menu::MenuItemBuilder::new("Quit")
-            .id("quit")
-            .build(app)?,
-        )
-        .build()?;
-
-      let _tray = TrayIconBuilder::new()
-        .icon(
-          app
-            .default_window_icon()
-            .cloned()
-            .expect("no default window icon configured"),
-        )
-        .tooltip("XFChess")
-        .menu(&tray_menu)
-        .show_menu_on_left_click(true)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-          "show" => {
-            if let Some(window) = app.get_webview_window("main") {
-              let _ = window.show();
-              let _ = window.set_focus();
-            }
-          }
-          "tournaments" => {
-            if let Some(window) = app.get_webview_window("main") {
-              let _ = window.show();
-              let _ = window.set_focus();
-              let _ = window.eval("window.location.href = '/tournaments';");
-            }
-          }
-          "matchmaking" => {
-            if let Some(window) = app.get_webview_window("main") {
-              let _ = window.show();
-              let _ = window.set_focus();
-              let _ = window.eval("window.location.href = '/pvp';");
-            }
-          }
-          "tournament-admin" => {
-            open_tournament_admin(app);
-          }
-          "quit" => {
-            app.exit(0);
-          }
-          _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-          if let TrayIconEvent::DoubleClick { .. } = event {
-            let app = tray.app_handle();
-            if let Some(window) = app.get_webview_window("main") {
-              let _ = window.show();
-              let _ = window.set_focus();
-            }
-          }
-        })
-        .build(app)?;
 
       Ok(())
     })

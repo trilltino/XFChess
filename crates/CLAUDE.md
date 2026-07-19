@@ -7,10 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Crate | Key constraint | Used by |
 |-------|---------------|---------|
 | `nimzovich_engine` | `std` feature for game client; `no_std`-compatible for on-chain | Game client, backend, `chess-logic-on-chain` |
+| `nimzovich-uci` | UCI protocol adapter binary for the engine | Match testing via `cutechess-cli`, not linked into the app |
 | `chess-logic-on-chain` | **must stay `no_std`** | Solana program (`move-validation` feature) |
-| `shared` | Bevy + serde types | Game client, backend |
+| `xfchess-anticheat` | Engine-move-correlation anti-cheat | Backend |
 | `backend-types` | Serde-only, no Bevy | Backend, web frontend (via JSON) |
 | `solana-chess-client` | Anchor + Solana SDK | Game client (`--features solana`) |
+| `er-cu-benchmark` | Compute-unit/RPC load-test binaries against MagicBlock ER | Standalone benchmarking tool, not linked into the app |
 | `braid-core` | Thin HTTP-209 Braid facade over `braid-http` | All braid-* crates |
 | `braid-http` | reqwest-based Braid-HTTP 209 client (Rust port of braid.org JS) | Game client |
 | `braid-iroh` | Iroh QUIC transport for Braid | Game client, backend |

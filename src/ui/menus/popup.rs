@@ -179,7 +179,7 @@ fn render_popups(
                             .monospace(),
                         );
                         if ui
-                            .small_button(egui::RichText::new(" Copy").size(11.0))
+                            .small_button(egui::RichText::new("Copy").size(11.0))
                             .on_hover_text("Copy address")
                             .clicked()
                         {

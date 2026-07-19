@@ -59,6 +59,9 @@ pub fn update_move_hints_system(
                     "Move Hint"
                 }),
                 crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                bevy::camera::visibility::RenderLayers::layer(
+                    crate::game::systems::camera::BOARD_LAYER,
+                ),
             ));
         }
     }

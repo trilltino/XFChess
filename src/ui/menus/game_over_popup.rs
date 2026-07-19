@@ -407,7 +407,9 @@ pub fn game_over_popup_system(
                             if new_tier != old_tier {
                                 if let Some(tier) = new_tier {
                                     ui.add_space(4.0);
-                                    ui.horizontal_centered(|ui| {
+                                    // vertical_centered centers children horizontally;
+                                    // horizontal_centered would leave the label left-aligned.
+                                    ui.vertical_centered(|ui| {
                                         ui.label(
                                             egui::RichText::new(format!("Tier Up!  {}", tier))
                                                 .size(14.0)
@@ -917,6 +919,8 @@ pub fn spectator_game_over_overlay(
                 ui.add_space(16.0);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
+                    // horizontal_centered only centers vertically — pad to center the pair.
+                    ui.add_space(((ui.available_width() - (130.0 + 10.0 + 100.0)) / 2.0).max(0.0));
                     if ui
                         .add_sized(
                             [130.0, 38.0],

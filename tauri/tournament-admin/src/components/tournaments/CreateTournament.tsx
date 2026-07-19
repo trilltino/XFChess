@@ -86,6 +86,27 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
     return sol.toFixed(4);
   };
 
+  // Mirrors the backend's default splits (signing/routes/tournament.rs) so a
+  // 2-player tournament never advertises a 3rd-place share it can't pay out.
+  const defaultSharesFor = (maxPlayers: number): number[] => {
+    if (maxPlayers <= 2) return [7000, 3000, 0, 0, 0, 0, 0, 0, 0, 0];
+    if (maxPlayers <= 64) return [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0];
+    if (maxPlayers === 128) return [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0];
+    return [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300];
+  };
+
+  const updateMaxPlayers = (capacity: number) => {
+    setFormData(prev => {
+      const untouched =
+        JSON.stringify(prev.prize_shares) === JSON.stringify(defaultSharesFor(prev.max_players));
+      return {
+        ...prev,
+        max_players: capacity as CreateTournamentRequest["max_players"],
+        prize_shares: (untouched ? defaultSharesFor(capacity) : prev.prize_shares) as any,
+      };
+    });
+  };
+
   const renderStep1 = () => (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <SectionTitle>Basic Infrastructure</SectionTitle>
@@ -229,9 +250,11 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
         <label style={labelStyle}>PLAYER CAPACITY</label>
         <select
           value={formData.max_players}
-          onChange={(e) => updateFormData("max_players", parseInt(e.target.value) as any)}
+          onChange={(e) => updateMaxPlayers(parseInt(e.target.value))}
           style={inputStyle}
         >
+          <option value={2}>2 PLAYER DOCK (HEAD-TO-HEAD)</option>
+          <option value={4}>4 PLAYER DOCK</option>
           <option value={8}>8 PLAYER DOCK</option>
           <option value={16}>16 PLAYER DOCK</option>
           <option value={32}>32 PLAYER DOCK</option>

@@ -67,6 +67,9 @@ pub fn highlight_possible_moves(
                 SelectedBorder,
                 Name::new("Selected Border"),
                 crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                bevy::camera::visibility::RenderLayers::layer(
+                    crate::game::systems::camera::BOARD_LAYER,
+                ),
             ));
         }
 
@@ -79,6 +82,9 @@ pub fn highlight_possible_moves(
                 MoveHint,
                 Name::new("Move Hint"),
                 crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                bevy::camera::visibility::RenderLayers::layer(
+                    crate::game::systems::camera::BOARD_LAYER,
+                ),
             ));
         }
     }
@@ -269,6 +275,9 @@ pub fn setup_game_scene(
             Transform::from_xyz(3.5, 12.0, 3.5),
             CameraFollowLight,
             DespawnOnExit(GameState::InGame),
+            bevy::camera::visibility::RenderLayers::layer(
+                crate::game::systems::camera::BOARD_LAYER,
+            ),
             Name::new("Board Fill Light (camera-follow)"),
         ));
     }
@@ -279,15 +288,21 @@ pub fn setup_game_scene(
 /// Keeps the board fill light at the viewer's position so pieces are lit evenly
 /// from the camera's side no matter how the player orbits or zooms. The overhead
 /// "Angel Light" and the ambient stay camera-independent; this is the moving fill.
+///
+/// Follows the dedicated board camera (`crate::game::systems::camera::BoardCamera`)
+/// rather than the persistent/UI camera, since orbit/zoom now live on the board
+/// camera during gameplay.
 pub fn update_board_fill_light(
-    persistent_camera: Res<crate::PersistentEguiCamera>,
-    cam_q: Query<&Transform, Without<CameraFollowLight>>,
+    cam_q: Query<
+        &Transform,
+        (
+            With<crate::game::systems::camera::BoardCamera>,
+            Without<CameraFollowLight>,
+        ),
+    >,
     mut light_q: Query<&mut Transform, With<CameraFollowLight>>,
 ) {
-    let Some(cam_entity) = persistent_camera.entity else {
-        return;
-    };
-    let Ok(cam) = cam_q.get(cam_entity) else {
+    let Ok(cam) = cam_q.single() else {
         return;
     };
     // Sit just above the camera so the viewer-facing side of every piece is lit.

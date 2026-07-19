@@ -1,3 +1,13 @@
+//! Wire protocol for peer-to-peer game messages.
+//!
+//! [`NetworkMessage`] is the single enum carried over both the Iroh/QUIC
+//! P2P transport and the HTTP relay fallback — variants cover move
+//! exchange, batch commit/confirmation for on-chain move batching,
+//! invites/matchmaking handshake (`GameInvite`/`InviteResponse`/`GameStart`),
+//! in-game signaling (`DrawOffer`, `Resign`, `FlagTimeout`, `Chat`, `Clock`),
+//! Braid-relay resync (`BraidResyncRequest`/`Response`, `GameSnapshot`), and
+//! liveness (`Ping`/`Pong`). [`SignedNetworkMessage`] wraps a message with
+//! its sender's signature for authenticity between peers.
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "solana")]
 use solana_sdk::pubkey::Pubkey;

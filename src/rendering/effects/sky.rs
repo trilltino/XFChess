@@ -47,12 +47,12 @@ impl Plugin for SkyPlugin {
     }
 }
 
-/// Spawn the atmosphere planet and attach atmosphere settings to the game camera.
+/// Spawn the atmosphere planet and attach atmosphere settings to the board camera.
 #[cfg(feature = "sky")]
 fn setup_sky(
     mut commands: Commands,
     mut media: ResMut<Assets<ScatteringMedium>>,
-    persistent_camera: Res<crate::PersistentEguiCamera>,
+    board_camera: Query<Entity, With<crate::game::systems::camera::BoardCamera>>,
 ) {
     // The medium describes how the air scatters light; `earth` gives a familiar
     // blue daytime sky. The resolutions are the values Bevy uses for Earth.
@@ -66,21 +66,26 @@ fn setup_sky(
         Name::new("Sky Atmosphere"),
     ));
 
-    // Attach per-camera atmosphere settings to the shared 3D camera. This also
-    // pulls in `Hdr` (required by `AtmosphereSettings`); `teardown_sky` strips
-    // both back off on exit so menu/pause rendering is unchanged.
-    if let Some(camera) = persistent_camera.entity {
+    // Attach per-camera atmosphere settings to the dedicated board camera (the
+    // one that renders the 3D world during gameplay — see `camera::BoardCamera`).
+    // This also pulls in `Hdr` (required by `AtmosphereSettings`); `teardown_sky`
+    // strips both back off on exit, though the board camera despawns on its own.
+    if let Ok(camera) = board_camera.single() {
         commands
             .entity(camera)
             .insert(AtmosphereSettings::default());
     }
 }
 
-/// Remove atmosphere settings (and the HDR requirement) from the shared camera
-/// when leaving the game, so non-game UI states render exactly as before.
+/// Remove atmosphere settings (and the HDR requirement) from the board camera
+/// when leaving the game. The board camera itself despawns via `DespawnOnExit`,
+/// so this is mostly a safety net in case it runs before that cleanup.
 #[cfg(feature = "sky")]
-fn teardown_sky(mut commands: Commands, persistent_camera: Res<crate::PersistentEguiCamera>) {
-    if let Some(camera) = persistent_camera.entity {
+fn teardown_sky(
+    mut commands: Commands,
+    board_camera: Query<Entity, With<crate::game::systems::camera::BoardCamera>>,
+) {
+    if let Ok(camera) = board_camera.single() {
         commands
             .entity(camera)
             .remove::<AtmosphereSettings>()

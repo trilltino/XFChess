@@ -139,13 +139,13 @@ timeout /t 2 /nobreak >nul
 echo [LAUNCH] 4/5 XFChess Game...
 start "XFChess Game" /D "%ROOT%" cmd /k "^"%RELEASE_DIR%\xfchess.exe^""
 
-echo [LAUNCH] 5/5 Frontends (Web ^& Admin)...
+echo [LAUNCH] 5/5 Web Frontend...
+:: Tournament admin is desktop-only: the Tauri host serves the built dist in its
+:: own window (tray icon -> Tournament Admin).
 if "!LAUNCH_CMD!"=="start" (
     start "XFChess Web" /D "%ROOT%\web-solana" cmd /k "npm run dev"
-    start "Tournament Admin" /D "%ROOT%\tauri\tournament-admin" cmd /k "npm run dev -- --port 7454"
 ) else (
     wt -w 0 nt --title "XFChess Web" -d "%ROOT%\web-solana" cmd /k "npm run dev"
-    wt -w 0 nt --title "Tournament Admin" -d "%ROOT%\tauri\tournament-admin" cmd /k "npm run dev -- --port 7454"
 )
 
 echo.
@@ -154,7 +154,7 @@ echo XFChess Local Environment Ready
 echo ========================================
 echo Backend:        http://127.0.0.1:8090
 echo Web Frontend:   http://localhost:5173
-echo Tournament Admin: http://localhost:7454/tournament-admin/
+echo Tournament Admin: desktop window (Tauri tray icon -^> Tournament Admin)
 echo Program ID:     %PROGRAM_ID%
 echo ========================================
 echo.

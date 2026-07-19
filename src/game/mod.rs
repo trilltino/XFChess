@@ -15,6 +15,5 @@ pub mod systems;
 pub mod time_control;
 pub mod types;
 pub mod view_mode;
-pub mod view_mode_systems;
 
 pub use plugin::GamePlugin;

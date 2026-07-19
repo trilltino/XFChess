@@ -837,11 +837,8 @@ pub fn render_profile_consent_modal(
                         consent_state.show = false;
                         next_state.set(GameState::MainMenu);
                         // Open Tauri profile step instead of in-game modal
-                        std::thread::spawn(|| {
-                            let _ = reqwest::blocking::Client::new()
-                                .post("http://127.0.0.1:7454/api/open-profile-step")
-                                .send();
-                        });
+                        #[cfg(feature = "solana")]
+                        crate::multiplayer::solana::tauri_signer::open_profile_step();
                     }
                     
                     ui.add_space(20.0);

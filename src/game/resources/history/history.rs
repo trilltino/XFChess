@@ -47,6 +47,13 @@ pub struct MoveHistory {
     /// Index 2 = Move 2 (White's move)
     /// etc.
     pub moves: Vec<MoveRecord>,
+
+    /// SAN (Standard Algebraic Notation) string for each move, parallel to
+    /// `moves` by index. Populated via [`Self::add_move_with_san`] at the
+    /// production call site (`nimzovich_engine`'s SAN generator); left empty
+    /// by plain [`Self::add_move`] calls (e.g. in tests), in which case the
+    /// UI falls back to its own simplified notation for that entry.
+    pub sans: Vec<String>,
 }
 
 impl MoveHistory {
@@ -62,6 +69,20 @@ impl MoveHistory {
     /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn add_move(&mut self, record: MoveRecord) {
         self.moves.push(record);
+    }
+
+    /// Same as [`Self::add_move`], but also records the move's SAN notation
+    /// at the matching index — the preferred entry point at the production
+    /// call site so the move list can render correct algebraic notation
+    /// (with disambiguation and promotion) without re-deriving it in the UI.
+    pub fn add_move_with_san(&mut self, record: MoveRecord, san: String) {
+        self.moves.push(record);
+        self.sans.push(san);
+    }
+
+    /// SAN notation for the move at `index`, if it was recorded with one.
+    pub fn san_at(&self, index: usize) -> Option<&str> {
+        self.sans.get(index).map(String::as_str)
     }
 
     /// Get the most recent move, if any
@@ -114,6 +135,7 @@ impl MoveHistory {
     /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn clear(&mut self) {
         self.moves.clear();
+        self.sans.clear();
     }
 
     /// Get a specific move by index (ply number)

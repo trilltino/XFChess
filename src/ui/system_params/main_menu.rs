@@ -108,7 +108,6 @@ pub struct MainMenuUIContext<'w, 's> {
     pub active_time_control:
         ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
     pub menu_style: ResMut<'w, crate::states::main_menu::MenuStyle>,
-    pub menu_intro: Res<'w, crate::states::main_menu::MenuIntro>,
     pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
     pub solana_logos: ResMut<'w, crate::states::main_menu::SolanaLogoState>,
     pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,

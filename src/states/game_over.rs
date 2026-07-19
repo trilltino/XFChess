@@ -7,7 +7,7 @@
 use crate::core::GameState;
 use crate::game::camera_modes::{CameraViewMode, CinematicSequence};
 use crate::game::resources::{GameOverState, MoveHistory};
-use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
+use crate::game::view_mode::ViewMode;
 use crate::ui::menus::game_over_popup::GameOverPopupPlugin;
 use bevy::prelude::*;
 
@@ -39,7 +39,7 @@ pub struct AutoCinematicMarker;
 fn setup_cinematic_camera(
     mut camera_view_mode: ResMut<CameraViewMode>,
     mut cinematic_sequence: ResMut<CinematicSequence>,
-    mut view_preferences: ResMut<PlayerViewPreferences>,
+    mut view_mode: ResMut<ViewMode>,
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut commands: Commands,
 ) {
@@ -47,7 +47,9 @@ fn setup_cinematic_camera(
 
     // Switch to cinematic camera mode
     *camera_view_mode = CameraViewMode::Cinematic;
-    view_preferences.local_view = ViewMode::Standard3D;
+    // Force the 3D board for the game-over cinematic. `ViewMode` is the single
+    // source of truth; the piece-visibility system keys off its change.
+    *view_mode = ViewMode::Standard3D;
 
     // Reset and start the cinematic sequence
     cinematic_sequence.reset();

@@ -83,16 +83,19 @@ pub mod link_authority {
 }
 
 /// The VPS/backend operational authority — the only signer allowed to call
-/// privileged instructions such as `update_elo` and `collect_fee`.
-/// Solflare wallet - user's main wallet for signing operations.
+/// privileged instructions such as `update_elo`, `collect_fee`, and
+/// tournament creation. Deliberately a dedicated key, separate from the
+/// program's upgrade authority, so a compromised backend can't touch the
+/// deployed program itself.
+/// Matches keys/vps_authority.json (HZTwvN9AUK1n9jmQydrh5vkpdCBZm13W7qD9jtPZJSQc).
+/// Must be funded with devnet SOL before it can sign/pay for tournament
+/// creation (it's the fee payer for the Tournament/Escrow/Shards PDAs).
 pub mod vps_authority {
     use super::*;
-    /// Benchmark master / tournament authority on devnet
-    /// Matches keys/program-authority.json (C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw)
     pub const ID: Pubkey = Pubkey::new_from_array([
-        0xa3, 0xad, 0x5c, 0x77, 0xf8, 0x52, 0xda, 0x8b, 0x75, 0x7c, 0x96, 0x7a, 0x26, 0xf5, 0xfa,
-        0x0b, 0x37, 0x57, 0xd5, 0xdc, 0xe0, 0xa9, 0xea, 0x9a, 0x53, 0xb0, 0x60, 0xe4, 0x74, 0x1a,
-        0x37, 0x68,
+        0xf6, 0x0c, 0x0b, 0xb0, 0xce, 0xb6, 0xfd, 0x2e, 0xc0, 0x67, 0x87, 0x02, 0x2f, 0x47, 0x5a,
+        0x17, 0xd5, 0xce, 0x14, 0x8b, 0x17, 0xe5, 0xda, 0xed, 0x35, 0x15, 0x76, 0x16, 0x0a, 0xa4,
+        0x40, 0x05,
     ]);
 }
 

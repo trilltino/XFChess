@@ -44,8 +44,19 @@ fn push_move(moves: &mut Vec<KK>, mv: KK, color: Color) {
     }
 }
 
-/// Generate pawn moves from a given square
-pub fn generate_pawn_moves(game: &Game, from: i8, color: Color, moves: &mut Vec<KK>) {
+/// Generate pawn moves from a given square.
+///
+/// When `noisy_only` is set (quiescence search), quiet forward pushes are
+/// skipped — except a single push that lands on the promotion rank, since
+/// that's "noisy" too (it changes material). Captures and en passant are
+/// always noisy and always included.
+pub fn generate_pawn_moves(
+    game: &Game,
+    from: i8,
+    color: Color,
+    moves: &mut Vec<KK>,
+    noisy_only: bool,
+) {
     let candidates = if color > 0 {
         &game.white_pawn[from as usize]
     } else {
@@ -75,17 +86,18 @@ pub fn generate_pawn_moves(game: &Game, from: i8, color: Color, moves: &mut Vec<
                     }
                 }
             }
-        } else {
+        } else if dest_piece == 0 {
             // Forward moves
-            if dest_piece == 0 {
-                if (to - from).abs() == 16 {
+            if (to - from).abs() == 16 {
+                // Double push can never be a promotion — always quiet.
+                if !noisy_only {
                     let intermediate = (from as i32 + forward_dir) as i8;
                     if game.board[intermediate as usize] == 0 {
-                        moves.push(*candidate); // Double push can never be a promotion
+                        moves.push(*candidate);
                     }
-                } else {
-                    push_move(moves, *candidate, color);
                 }
+            } else if !noisy_only || is_promotion(to, color) {
+                push_move(moves, *candidate, color);
             }
         }
     }

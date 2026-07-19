@@ -296,6 +296,19 @@ impl ChessEngine {
         !self.move_cache.is_empty()
     }
 
+    /// SAN (Standard Algebraic Notation) for a move about to be applied,
+    /// computed from the engine's *current* (pre-move) position — including
+    /// correct disambiguation (e.g. `Nbd2` vs `Nfd2`) and promotion suffix.
+    ///
+    /// Must be called before the engine's internal position advances past
+    /// this move (i.e. before `sync_ecs_to_engine*`/`refresh_position`).
+    pub fn move_to_san(&self, from: (u8, u8), to: (u8, u8), promotion: Option<PieceType>) -> String {
+        let src = Self::square_to_index(from.0, from.1);
+        let dst = Self::square_to_index(to.0, to.1);
+        let promo = promotion.map(Self::piece_type_to_id).unwrap_or(0);
+        nimzovich_engine::move_to_san(&self.game, src, dst, promo)
+    }
+
     pub fn legal_moves(&self) -> Vec<MoveWrapper> {
         self.move_cache
             .iter()

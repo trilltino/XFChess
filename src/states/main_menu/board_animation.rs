@@ -25,6 +25,56 @@ pub struct MenuBgPieceAnim {
     pub duration: f32,
 }
 
+/// Slow opacity fade for a captured menu piece. Instead of vanishing instantly,
+/// a captured piece fades its (per-piece) material alpha 1→0 over `duration`,
+/// then hides. Requires each menu piece to own its own material handle (see
+/// `spawn_menu_bg_pieces`) so fading one never affects the others.
+#[derive(Component)]
+pub struct MenuPieceFade {
+    pub elapsed: f32,
+    pub duration: f32,
+}
+
+/// Advances capture fades: lerps each fading piece's material alpha to 0, then
+/// hides it. Runs every frame while on the main menu.
+pub fn animate_menu_piece_fades(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut q: Query<(
+        Entity,
+        &mut MenuPieceFade,
+        &MeshMaterial3d<StandardMaterial>,
+        &mut Visibility,
+    )>,
+) {
+    for (e, mut fade, mat_handle, mut vis) in q.iter_mut() {
+        fade.elapsed += time.delta_secs();
+        let t = (fade.elapsed / fade.duration).clamp(0.0, 1.0);
+        let alpha = 1.0 - t;
+        if let Some(mut mat) = materials.get_mut(&mat_handle.0) {
+            // Blend while fading so the alpha actually shows.
+            mat.alpha_mode = AlphaMode::Blend;
+            let c = mat.base_color.with_alpha(alpha);
+            mat.base_color = c;
+        }
+        if t >= 1.0 {
+            *vis = Visibility::Hidden;
+            commands.entity(e).remove::<MenuPieceFade>();
+        }
+    }
+}
+
+/// Restores a piece's material to fully opaque (used on board reset/loop so a
+/// previously-captured piece comes back solid).
+fn restore_piece_material(materials: &mut Assets<StandardMaterial>, handle: &Handle<StandardMaterial>) {
+    if let Some(mut mat) = materials.get_mut(handle) {
+        let c = mat.base_color.with_alpha(1.0);
+        mat.base_color = c;
+        mat.alpha_mode = AlphaMode::Opaque;
+    }
+}
+
 /// Advances smooth movement animations for all in-flight menu background pieces.
 /// Uses cubic smooth-step easing with a gentle arc lift, matching the in-game feel.
 pub fn animate_menu_pieces(
@@ -166,13 +216,20 @@ fn zugzwang_steps() -> Vec<AmbientStep> {
     steps
 }
 
-/// Drives the Immortal-Zugzwang replay on the ambient `MenuBg` board. Gated by
-/// the caller to run only after Enter (the cinematic owns the attract screen).
+/// Drives the Immortal-Zugzwang replay on the ambient `MenuBg` board. Self-arms
+/// via `anim.active`, set once `spawn_menu_bg_pieces` populates the board map.
 pub fn animate_ambient_board(
     time: Res<Time>,
     mut commands: Commands,
     mut anim: ResMut<BoardAnimator>,
-    mut reset_q: Query<(Entity, &MenuBgPieceHome, &mut Transform, &mut Visibility)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut reset_q: Query<(
+        Entity,
+        &MenuBgPieceHome,
+        &mut Transform,
+        &mut Visibility,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
 ) {
     if !anim.active {
         return;
@@ -187,8 +244,13 @@ pub fn animate_ambient_board(
         anim.end_pause -= time.delta_secs();
         if anim.end_pause <= 0.0 {
             anim.board = [[None; 8]; 8];
-            for (e, home, mut t, mut v) in reset_q.iter_mut() {
-                commands.entity(e).remove::<MenuBgPieceAnim>();
+            for (e, home, mut t, mut v, mat) in reset_q.iter_mut() {
+                commands
+                    .entity(e)
+                    .remove::<MenuBgPieceAnim>()
+                    .remove::<MenuPieceFade>();
+                // Captured pieces faded to transparent — restore them solid.
+                restore_piece_material(&mut materials, &mat.0);
                 t.translation = sq_world(home.file as usize, home.rank as usize);
                 *v = Visibility::Visible;
                 anim.board[home.rank as usize][home.file as usize] = Some(e);
@@ -220,14 +282,22 @@ fn apply_ambient_step(commands: &mut Commands, anim: &mut BoardAnimator, step: A
     let (sf, sr) = (step.from.0 as usize, step.from.1 as usize);
     let (df, dr) = (step.to.0 as usize, step.to.1 as usize);
 
+    // Captured pieces fade out slowly rather than vanishing instantly.
+    const FADE_SECS: f32 = 1.2;
     if step.capture {
         if let Some(cap) = anim.board[dr][df].take() {
-            commands.entity(cap).insert(Visibility::Hidden);
+            commands.entity(cap).insert(MenuPieceFade {
+                elapsed: 0.0,
+                duration: FADE_SECS,
+            });
         }
     }
     if let Some((ef, er)) = step.ep_capture {
         if let Some(cap) = anim.board[er as usize][ef as usize].take() {
-            commands.entity(cap).insert(Visibility::Hidden);
+            commands.entity(cap).insert(MenuPieceFade {
+                elapsed: 0.0,
+                duration: FADE_SECS,
+            });
         }
     }
     if let Some(e) = anim.board[sr][sf].take() {

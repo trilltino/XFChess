@@ -18,7 +18,7 @@ pub struct P2PGameAnnouncement {
     pub username: Option<String>,
     pub elo: Option<u16>,
     pub region: Option<String>,
-    /// bcrypt hash of the room password; None = public room
+    /// argon2 hash of the room password; None = public room
     pub password_hash: Option<String>,
 }
 
@@ -87,7 +87,7 @@ pub struct AnnounceGameRequest {
     pub username: Option<String>,
     pub elo: Option<u16>,
     pub region: Option<String>,
-    /// Optional plaintext password; hashed server-side with bcrypt
+    /// Optional plaintext password; hashed server-side with argon2
     pub password: Option<String>,
 }
 

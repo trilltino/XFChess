@@ -97,8 +97,6 @@ pub enum MatchType {
 }
 
 impl Game {
-    pub const LEGACY_LEN_DO_NOT_USE: usize = 32 + 32 + 8 + 8 + 1 + 1 + 8 + 8 + 32 + 1 + 32 + 8;
-
     pub fn phase(&self) -> Result<GamePhase> {
         match (self.status, self.is_delegated) {
             (GameStatus::WaitingForOpponent, false) => Ok(GamePhase::WaitingBase),

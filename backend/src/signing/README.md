@@ -23,9 +23,9 @@ Root files: [auth.rs](auth.rs)/[auth_ws.rs](auth_ws.rs) (JWT + WebSocket auth),
 pool), [identity.rs](identity.rs) (encrypted KYC vault), [pyth_oracle.rs](pyth_oracle.rs)
 (SOL/USD rates), [ws_subscriber.rs](ws_subscriber.rs) (live game subscription,
 `ws_subscriber` feature), [tee_relayer.rs](tee_relayer.rs),
-[blinks_funding.rs](blinks_funding.rs) / [blinks_onboarding.rs](blinks_onboarding.rs)
-(route-level blinks endpoints), [elo_cache.rs](elo_cache.rs), [linkage.rs](linkage.rs),
-[anticheat_enqueue.rs](anticheat_enqueue.rs).
+[elo_cache.rs](elo_cache.rs), [linkage.rs](linkage.rs),
+[anticheat_enqueue.rs](anticheat_enqueue.rs). Blinks routes live entirely under
+[blinks/](blinks/) — see its own README.
 
 ## Example
 

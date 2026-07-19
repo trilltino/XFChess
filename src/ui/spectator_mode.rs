@@ -73,7 +73,7 @@ fn spectator_ui_system(
         Err(_) => return,
     };
 
-    egui::Window::new(" Spectator Mode")
+    egui::Window::new("Spectator Mode")
         .default_size([800.0, 600.0])
         .resizable(true)
         .show(ctx, |ui| {
@@ -82,9 +82,9 @@ fn spectator_ui_system(
                 ui.heading(format!("Game: {}", spectator.game_id));
 
                 if spectator.connected {
-                    ui.colored_label(egui::Color32::GREEN, "? Live");
+                    ui.colored_label(egui::Color32::GREEN, "Live");
                 } else {
-                    ui.colored_label(egui::Color32::RED, "? Disconnected");
+                    ui.colored_label(egui::Color32::RED, "Disconnected");
                 }
             });
 
@@ -283,7 +283,7 @@ pub fn spectator_menu_ui(
                         ui.horizontal(|ui| {
                             ui.label(format!("Game #{}", game_id));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button(" WATCH").clicked() {
+                                if ui.button("WATCH").clicked() {
                                     spectator.game_id = game_id.to_string();
                                     spectator.active = true;
                                     spectator.connected = true;

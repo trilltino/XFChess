@@ -15,10 +15,6 @@ and funding.
 | [funding.rs](funding.rs) / [onboarding.rs](onboarding.rs) | Wallet funding and first-time-user actions |
 | [pda.rs](pda.rs) | PDA derivation helpers for action targets |
 
-Route-level entry points [../blinks_funding.rs](../blinks_funding.rs) and
-[../blinks_onboarding.rs](../blinks_onboarding.rs) sit next to this module and expose
-these flows on the API surface.
-
 ## Invariants
 
 - Responses must stay conformant to the Solana Actions spec (wallets validate CORS

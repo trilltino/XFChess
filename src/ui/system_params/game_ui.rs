@@ -2,7 +2,7 @@ use crate::core::{GameMode as CoreGameMode, GameState, PreviousState};
 use crate::game::resources::{AIParams, GameStateParams};
 use crate::game::resources::{CurrentTurn, GameTimer, MoveHistory, Players};
 use crate::game::systems::input::InGameExitConfirmation;
-use crate::game::view_mode::{PlayerViewPreferences, ViewMode};
+use crate::game::view_mode::ViewMode;
 #[cfg(feature = "solana")]
 use crate::multiplayer::rollup::bridge::RecentTransactions;
 #[cfg(feature = "solana")]
@@ -33,7 +33,6 @@ pub struct GameUIParams<'w, 's> {
     pub next_state: ResMut<'w, NextState<GameState>>,
     pub previous_state: ResMut<'w, PreviousState>,
     pub game_mode: Res<'w, CoreGameMode>,
-    pub view_preferences: ResMut<'w, PlayerViewPreferences>,
     pub view_mode: ResMut<'w, ViewMode>,
     pub hud_visibility: Res<'w, InGameHudVisibility>,
     #[cfg(feature = "solana")]
@@ -72,4 +71,8 @@ pub struct GameUIParams<'w, 's> {
     pub turn_ctx: Res<'w, crate::game::resources::TurnStateContext>,
     pub resign_writer: bevy::prelude::MessageWriter<'w, crate::game::events::ResignEvent>,
     pub draw_writer: bevy::prelude::MessageWriter<'w, crate::game::events::DrawOfferEvent>,
+    pub first_move_deadline: Res<'w, crate::game::resources::FirstMoveDeadline>,
+    pub chat_state: ResMut<'w, crate::ui::game::chat_ui::ChatState>,
+    pub chat_writer: bevy::prelude::MessageWriter<'w, crate::multiplayer::network::PublishOnlineChat>,
+    pub player_identity: Option<Res<'w, crate::states::main_menu::PlayerIdentity>>,
 }

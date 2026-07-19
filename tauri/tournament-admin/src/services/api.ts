@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API client for XFChess Tournament Admin
  * Provides centralized API communication with authentication, error handling, and response formatting
  */
@@ -251,7 +251,7 @@ class ApiClient {
   }
  
   // Download an archive via an authenticated fetch (X-API-Key header) and save
-  // it through a blob URL. The token is never placed in the URL — the download
+  // it through a blob URL. The token is never placed in the URL â€” the download
   // route is behind require_api_key, which only reads the header, so a plain
   // window.open() navigation (which can't set headers) would 401 anyway.
   async downloadArchive(type: "games" | "wallets"): Promise<void> {
@@ -306,7 +306,7 @@ class ApiClient {
     return this.request<any>("/api/rates/all");
   }
 
-  // ── Puzzles (admin) ───────────────────────────────────────────────────────
+  // â”€â”€ Puzzles (admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async listPuzzles(q: {
     eloMin?: number; eloMax?: number; name?: string; theme?: string;
     limit?: number; offset?: number;
@@ -439,7 +439,7 @@ export interface CreateTournamentRequest {
   name: string;
   entry_fee_lamports: number;
   platform_fee_lamports: number;
-  max_players: 8 | 16 | 32 | 64 | 128 | 256;
+  max_players: 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256;
   format: "SingleElimination" | "Swiss";
   swiss_rounds?: number;
   elo_min?: number;

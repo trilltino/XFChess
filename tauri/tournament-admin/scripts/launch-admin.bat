@@ -1,9 +1,5 @@
-﻿@echo off
-echo  Starting XFChess Tournament Admin Panel...
+@echo off
+echo The tournament admin panel is desktop-only (no web dev server).
+echo Delegating to the desktop launcher...
 
-cd /d "%~dp0.."
-
-call npm run dev
-
-pause
-
+call "%~dp0..\..\..\scripts\start-tournament-admin.bat"

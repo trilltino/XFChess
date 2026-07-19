@@ -9,8 +9,6 @@ Shared UI components used across [../pages/](../pages/README.md).
 | [KycModal.tsx](KycModal.tsx) | KYC prompt for wager-gated actions |
 | [MatchHistory.tsx](MatchHistory.tsx) | Player match list from the archive API |
 | [LichessLinkCard.tsx](LichessLinkCard.tsx) | Linked external-rating card |
-| [TournamentFeeInfo.tsx](TournamentFeeInfo.tsx) | Entry-fee / prize-split breakdown |
-| [CodeViewer.tsx](CodeViewer.tsx) | Syntax-highlighted source viewer |
 | [Footer.tsx](Footer.tsx) | Site footer |
 
 Components stay presentation-focused: data fetching lives in the pages or

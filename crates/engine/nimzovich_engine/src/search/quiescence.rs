@@ -55,11 +55,16 @@ fn quiescence_recursive(
 
     let in_check = is_in_check(game, color);
 
-    // Generate moves: captures only unless in check
-    let mut moves = generate_pseudo_legal_moves(game, color);
-    if !in_check {
-        moves.retain(|m| game.board[m.dst as usize] != 0 || (m.nxt_dir_idx >> 4) != 0);
-    }
+    // Generate moves: captures/promotions only unless in check (evasions
+    // need every legal move, not just noisy ones). Generating captures
+    // directly — instead of generating everything and retaining noisy
+    // moves afterward — matters here because quiescence nodes vastly
+    // outnumber main search nodes.
+    let mut moves = if in_check {
+        generate_pseudo_legal_moves(game, color)
+    } else {
+        generate_pseudo_legal_captures(game, color)
+    };
 
     if moves.is_empty() {
         return Ok(stand_pat);

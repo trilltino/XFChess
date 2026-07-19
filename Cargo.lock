@@ -1375,7 +1375,6 @@ dependencies = [
  "async-stream",
  "axum 0.8.8",
  "base64 0.22.1",
- "bcrypt",
  "bincode",
  "borsh 1.5.7",
  "braid-iroh",
@@ -1477,19 +1476,6 @@ name = "base64ct"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
-
-[[package]]
-name = "bcrypt"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d1c9c15093eb224f0baa400f38fcd713fc1391a6f1c389d886beef146d60a3"
-dependencies = [
- "base64 0.21.7",
- "blowfish",
- "getrandom 0.2.17",
- "subtle",
- "zeroize",
-]
 
 [[package]]
 name = "bevy"
@@ -3148,16 +3134,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blowfish"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7"
-dependencies = [
- "byteorder",
- "cipher",
-]
-
-[[package]]
 name = "borsh"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3275,7 +3251,6 @@ dependencies = [
  "blake3",
  "braid-core",
  "bytes",
- "clap",
  "futures",
  "http 1.4.0",
  "iroh",
@@ -3283,7 +3258,6 @@ dependencies = [
  "iroh-h3-axum",
  "iroh-h3-client",
  "n0-future",
- "parking_lot",
  "rand 0.10.0",
  "rand 0.9.2",
  "serde",
@@ -3294,7 +3268,6 @@ dependencies = [
  "tower 0.5.3",
  "tower-http",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -8408,9 +8381,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "10.3.0"
+version = "10.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
+checksum = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.1.1",
@@ -8427,6 +8400,7 @@ dependencies = [
  "sha2 0.10.9",
  "signature 2.2.0",
  "simple_asn1",
+ "zeroize",
 ]
 
 [[package]]
@@ -13359,16 +13333,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
-]
-
-[[package]]
-name = "shared"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bincode",
- "serde",
- "uuid",
 ]
 
 [[package]]
@@ -22016,17 +21980,13 @@ name = "xfchess-tauri"
 version = "0.1.0"
 dependencies = [
  "axum 0.8.8",
- "backend",
  "base64 0.22.1",
- "bs58",
  "dirs 5.0.1",
  "dotenvy",
  "open",
- "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "sqlx",
  "tauri",
  "tauri-build",
@@ -22039,8 +21999,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "url",
- "winreg 0.55.0",
+ "windows 0.61.3",
 ]
 
 [[package]]
