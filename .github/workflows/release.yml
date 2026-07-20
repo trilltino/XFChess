@@ -14,13 +14,37 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Production endpoints baked into the installers. CHANGE for real releases.
-  BACKEND_URL: https://api.xfchess.com
-  SIGNING_URL: https://api.xfchess.com
+  # Production endpoints baked into the installers/launchers. nginx serves the
+  # frontend + API from the same domain (see deploy/nginx/nginx.conf) — there's
+  # no separate api.* subdomain.
+  BACKEND_URL: https://xfchess.com
+  SIGNING_URL: https://xfchess.com
+  # Actual production backend today (xfchess.com has no DNS yet). Update this
+  # to https://xfchess.com/health once DNS + nginx are live, and drop this env.
+  BACKEND_HEALTH_URL: http://178.104.55.19/health
 
 jobs:
+  # ─────────────────────── Verify backend is up ───────────────────────
+  verify-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check production backend health
+        run: |
+          for i in 1 2 3 4 5; do
+            code=$(curl -sS -m 10 -o /tmp/health.json -w '%{http_code}' "$BACKEND_HEALTH_URL" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Backend healthy: $(cat /tmp/health.json)"
+              exit 0
+            fi
+            echo "Attempt $i: backend returned $code, retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Production backend at $BACKEND_HEALTH_URL is not responding — refusing to cut a release."
+          exit 1
+
   # ───────────────────────────── Windows ─────────────────────────────
   windows:
+    needs: verify-backend
     runs-on: windows-latest
     env:
       AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
@@ -115,8 +139,99 @@ jobs:
         with:
           files: release/XFChess-Setup-*.exe
 
+  # ───────────────────────────── Linux ─────────────────────────────
+  # Native ubuntu-latest build of the game client (xfchess), matching the
+  # Docker-based build proven out manually under docker/game-linux.Dockerfile.
+  # Scope note: this builds the plain Bevy client only, not xfchess-tauri (the
+  # wallet-bridge companion) — Tauri's Linux build needs webkit2gtk/gtk3/
+  # appindicator system deps that haven't been validated here yet. Wallet-linked
+  # flows that rely on the bridge process may not work in this build; core
+  # gameplay, multiplayer, and Solana session-key moves do.
+  linux:
+    needs: verify-backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux build + runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev \
+            libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+            libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
+            libxkbcommon-x11-0 mesa-vulkan-drivers libgl1-mesa-dri xvfb
+
+      - name: Build binary (release)
+        run: cargo build --release --bin xfchess --features solana
+
+      - name: Stage payload
+        run: |
+          mkdir -p release/linux/assets
+          cp -r assets/* release/linux/assets/
+          cp target/release/xfchess release/linux/xfchess
+          chmod +x release/linux/xfchess
+          cat > release/linux/launch.sh <<EOF
+          #!/bin/sh
+          SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+          export BACKEND_URL="\${BACKEND_URL:-${{ env.BACKEND_URL }}}"
+          export SIGNING_SERVICE_URL="\${SIGNING_SERVICE_URL:-${{ env.SIGNING_URL }}}"
+          exec "\$SCRIPT_DIR/xfchess" "\$@"
+          EOF
+          chmod +x release/linux/launch.sh
+
+      - name: Download Stockfish (best-effort — AI features degrade gracefully without it)
+        continue-on-error: true
+        run: |
+          curl -sSL -m 60 -o /tmp/sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-ubuntu-x86-64-modern.tar
+          tar -xf /tmp/sf.tar -C /tmp stockfish/stockfish-ubuntu-x86-64-modern
+          cp /tmp/stockfish/stockfish-ubuntu-x86-64-modern release/linux/stockfish
+          chmod +x release/linux/stockfish
+
+      - name: E2E smoke test (headless, connects to production backend)
+        env:
+          BACKEND_URL: ${{ env.BACKEND_URL }}
+          SIGNING_SERVICE_URL: ${{ env.SIGNING_URL }}
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 &
+          sleep 1
+          cd release/linux
+          set +e
+          DISPLAY=:99 timeout 15 ./xfchess
+          code=$?
+          set -e
+          if [ "$code" != "124" ] && [ "$code" != "0" ]; then
+            echo "::error::xfchess exited with code $code — see crash log below"
+            cat logs/crash_*.log 2>/dev/null || true
+            exit 1
+          fi
+          echo "Smoke test passed (exit $code)"
+
+      - name: Package tarball
+        run: |
+          cd release
+          tar -czf "XFChess-linux-x86_64-${{ steps.ver.outputs.version }}.tar.gz" linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: release/XFChess-linux-x86_64-*.tar.gz
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/XFChess-linux-x86_64-*.tar.gz
+
   # ───────────────────────────── macOS ─────────────────────────────
   macos:
+    needs: verify-backend
     runs-on: macos-latest
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
