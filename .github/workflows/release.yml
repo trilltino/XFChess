@@ -65,7 +65,12 @@ jobs:
         env:
           VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
         run: |
-          (cd web-solana && npm ci && npm run build)
+          # web-solana's package-lock has an unresolved peer conflict between
+          # @solana/kit versions pulled in by @privy-io/react-auth vs
+          # @solana-program/system — legacy-peer-deps avoids strict ERESOLVE
+          # failures on npm ci without changing what actually gets installed
+          # for a normal `npm install` locally.
+          (cd web-solana && npm ci --legacy-peer-deps && npm run build)
           (cd tauri/wallet-ui && npm ci && npm run build)
           (cd tauri/tournament-admin && npm ci && npm run build) || echo "tournament-admin build skipped"
 
@@ -264,7 +269,12 @@ jobs:
         env:
           VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
         run: |
-          (cd web-solana && npm ci && npm run build)
+          # web-solana's package-lock has an unresolved peer conflict between
+          # @solana/kit versions pulled in by @privy-io/react-auth vs
+          # @solana-program/system — legacy-peer-deps avoids strict ERESOLVE
+          # failures on npm ci without changing what actually gets installed
+          # for a normal `npm install` locally.
+          (cd web-solana && npm ci --legacy-peer-deps && npm run build)
           (cd tauri/wallet-ui && npm ci && npm run build)
           (cd tauri/tournament-admin && npm ci && npm run build) || echo "tournament-admin build skipped"
 
