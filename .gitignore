@@ -102,8 +102,11 @@ tauri/gen/
 # Package lock files (keep only root)
 **/package-lock.json
 
-# Generated JSON files
+# Generated JSON files — except the Anchor IDL, which the frontend imports
+# directly and which a fresh checkout has no way to regenerate without a full
+# Solana/Anchor toolchain (CI builds the web frontend without one).
 web-solana/src/lib/*.json
+!web-solana/src/lib/xfchess_game.json
 
 # WASM package
 xfchess-wasm/pkg/
