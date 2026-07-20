@@ -33,8 +33,8 @@ cp "$ROOT/tauri/icons/icon.icns" "$APPDIR/Contents/Resources/icon.icns" 2>/dev/n
 cat > "$APPDIR/Contents/MacOS/launch" <<'EOF'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export BACKEND_URL="${BACKEND_URL:-https://api.xfchess.com}"
-export SIGNING_SERVICE_URL="${SIGNING_SERVICE_URL:-https://api.xfchess.com}"
+export BACKEND_URL="${BACKEND_URL:-https://xfchess.com}"
+export SIGNING_SERVICE_URL="${SIGNING_SERVICE_URL:-https://xfchess.com}"
 "$DIR/xfchess-tauri" &
 exec "$DIR/xfchess"
 EOF
