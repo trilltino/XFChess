@@ -22,7 +22,9 @@ use crate::rendering::pieces::{
 };
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use nimzovich_engine::{do_move_with_promo, game_from_fen, game_to_fen, new_game, san_to_move};
+use nimzovich_engine::{
+    do_move_with_promo, game_from_fen_no_tt, game_to_fen, new_game_no_tt, san_to_move,
+};
 
 // ---------------------------------------------------------------------------
 // Resources
@@ -83,7 +85,7 @@ pub struct PgnReplayState {
 impl Default for PgnReplayState {
     fn default() -> Self {
         Self {
-            engine: new_game(),
+            engine: new_game_no_tt(),
             fen_snapshots: vec![
                 "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
             ],
@@ -136,10 +138,10 @@ pub fn setup_replay(
 
     // Reset replay state
     *replay = PgnReplayState::default();
-    replay.engine = new_game();
+    replay.engine = new_game_no_tt();
 
     // Pre-generate all FEN snapshots by applying moves sequentially
-    let mut temp_engine = new_game();
+    let mut temp_engine = new_game_no_tt();
     replay.fen_snapshots.clear();
     replay
         .fen_snapshots
@@ -242,7 +244,7 @@ pub fn replay_apply_move_system(
     // If we have a FEN snapshot, rebuild from it (handles both forward and backward)
     if target_ply < replay.fen_snapshots.len() {
         let fen = replay.fen_snapshots[target_ply].clone();
-        replay.engine = game_from_fen(&fen);
+        replay.engine = game_from_fen_no_tt(&fen);
         // Trigger piece re-spawn so the board visuals update.
         replay.board_ready = false;
     } else {
@@ -358,8 +360,10 @@ pub fn replay_spawn_pieces_system(
             }
         }
         if let (Some(src), Some(dst)) = (src_sq, dst_sq) {
-            let src_world = Vec3::new((src % 8) as f32, PIECE_ON_BOARD_Y, (src / 8) as f32);
-            let dst_world = Vec3::new((dst % 8) as f32, PIECE_ON_BOARD_Y, (dst / 8) as f32);
+            // World X is mirrored (7 - file), matching spawn_piece_at_replay /
+            // execute_move's PieceMoveAnimation targets — see pieces.rs:484.
+            let src_world = Vec3::new(7.0 - (src % 8) as f32, PIECE_ON_BOARD_Y, (src / 8) as f32);
+            let dst_world = Vec3::new(7.0 - (dst % 8) as f32, PIECE_ON_BOARD_Y, (dst / 8) as f32);
             if let Some(&ent) = entity_at_sq.get(&dst) {
                 let duration = 0.3 / slow_factor.max(0.05);
                 commands
@@ -459,7 +463,7 @@ pub fn replay_ui_system(
                         match nimzovich_engine::parse_pgn(&replay.pgn_input_text) {
                             Ok(pgn) => {
                                 // Build FEN snapshots inline
-                                let mut temp = new_game();
+                                let mut temp = new_game_no_tt();
                                 let mut snapshots = vec!["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()];
                                 for (i, san) in pgn.moves.iter().enumerate() {
                                     match san_to_move(&mut temp, san) {
@@ -800,10 +804,10 @@ pub fn replay_ui_system(
                             .add_sized([60.0, 22.0], egui::Button::new("Load"))
                             .clicked()
                     {
-                        use nimzovich_engine::game_from_fen;
+                        use nimzovich_engine::game_from_fen_no_tt;
                         let fen = puzzle.fen_input.trim().to_string();
                         if !fen.is_empty() {
-                            replay.engine = game_from_fen(&fen);
+                            replay.engine = game_from_fen_no_tt(&fen);
                             replay.fen_snapshots = vec![fen.clone()];
                             replay.current_ply = 0;
                             replay.board_ready = false;

@@ -1,144 +1,5 @@
 //! In-game UI for chess game display
 
-/// Classify an opening by its first few moves.
-/// Moves encoded as ((from_file, from_rank), (to_file, to_rank)).
-pub fn classify_opening(moves: &[((u8, u8), (u8, u8))]) -> Option<&'static str> {
-    // Helper: check if `prefix` is a prefix of `moves`.
-    let has = |prefix: &[((u8, u8), (u8, u8))]| moves.starts_with(prefix);
-
-    // Coordinate shorthands: (file 0=a..7=h, rank 0=1..7=8)
-    let e2e4 = ((4, 1), (4, 3));
-    let e7e5 = ((4, 6), (4, 4));
-    let d2d4 = ((3, 1), (3, 3));
-    let d7d5 = ((3, 6), (3, 4));
-    let c2c4 = ((2, 1), (2, 3));
-    let c7c5 = ((2, 6), (2, 4));
-    let g1f3 = ((6, 0), (5, 2));
-    let g8f6 = ((6, 7), (5, 5));
-    let b8c6 = ((1, 7), (2, 5));
-    let f1b5 = ((5, 0), (1, 4));
-    let f1c4 = ((5, 0), (2, 3));
-    let _d2d3 = ((3, 1), (3, 2));
-    let e7e6 = ((4, 6), (4, 5));
-    let c7c6 = ((2, 6), (2, 5));
-    let d7d6 = ((3, 6), (3, 5));
-    let g7g6 = ((6, 6), (6, 5));
-    let f2f4 = ((5, 1), (5, 3));
-    let b2b3 = ((1, 1), (1, 2));
-    let g2g3 = ((6, 1), (6, 2));
-
-    // ── 1.e4 lines ──────────────────────────────────────────────────────
-    if has(&[e2e4, e7e5]) {
-        if has(&[e2e4, e7e5, f2f4]) {
-            return Some("King's Gambit");
-        }
-        if has(&[e2e4, e7e5, g1f3, b8c6, f1b5]) {
-            return Some("Ruy Lopez");
-        }
-        if has(&[e2e4, e7e5, g1f3, b8c6, f1c4]) {
-            return Some("Italian Game");
-        }
-        if has(&[e2e4, e7e5, g1f3, b8c6, d2d4]) {
-            return Some("Scotch Game");
-        }
-        if has(&[e2e4, e7e5, g1f3, g8f6]) {
-            return Some("Russian Game");
-        }
-        if has(&[e2e4, e7e5, g1f3]) {
-            return Some("Open Game");
-        }
-        return Some("Open Game");
-    }
-    if has(&[e2e4, c7c5]) {
-        if has(&[e2e4, c7c5, g1f3, d7d6]) {
-            return Some("Sicilian: Najdorf setup");
-        }
-        if has(&[e2e4, c7c5, g1f3, b8c6]) {
-            return Some("Sicilian: Open");
-        }
-        if has(&[e2e4, c7c5, g1f3, e7e6]) {
-            return Some("Sicilian: Kan/Taimanov");
-        }
-        return Some("Sicilian Defense");
-    }
-    if has(&[e2e4, e7e6]) {
-        return Some("French Defense");
-    }
-    if has(&[e2e4, c7c6]) {
-        if has(&[e2e4, c7c6, d2d4, d7d5]) {
-            return Some("Caro-Kann Defense");
-        }
-        return Some("Caro-Kann Defense");
-    }
-    if has(&[e2e4, d7d5]) {
-        return Some("Scandinavian Defense");
-    }
-    if has(&[e2e4, g8f6]) {
-        return Some("Alekhine's Defense");
-    }
-    if has(&[e2e4, g7g6]) {
-        return Some("Modern Defense");
-    }
-    if has(&[e2e4, b8c6]) {
-        return Some("Nimzowitsch Defense");
-    }
-    if has(&[e2e4]) {
-        return Some("King's Pawn Opening");
-    }
-
-    // ── 1.d4 lines ──────────────────────────────────────────────────────
-    if has(&[d2d4, d7d5]) {
-        if has(&[d2d4, d7d5, c2c4, e7e6]) {
-            return Some("Queen's Gambit Declined");
-        }
-        if has(&[d2d4, d7d5, c2c4, c7c6]) {
-            return Some("Slav Defense");
-        }
-        if has(&[d2d4, d7d5, c2c4]) {
-            return Some("Queen's Gambit");
-        }
-        return Some("Queen's Pawn: Closed");
-    }
-    if has(&[d2d4, g8f6]) {
-        if has(&[d2d4, g8f6, c2c4, g7g6]) {
-            return Some("King's Indian Defense");
-        }
-        if has(&[d2d4, g8f6, c2c4, e7e6]) {
-            return Some("Nimzo/QGD Indian");
-        }
-        if has(&[d2d4, g8f6, c2c4, c7c5]) {
-            return Some("Benoni Defense");
-        }
-        if has(&[d2d4, g8f6, c2c4]) {
-            return Some("Indian Defense");
-        }
-        return Some("Queen's Pawn: Indian setup");
-    }
-    let f7f5: ((u8, u8), (u8, u8)) = ((5, 6), (5, 4));
-    if has(&[d2d4, f7f5]) {
-        return Some("Dutch Defense");
-    }
-    if has(&[d2d4]) {
-        return Some("Queen's Pawn Opening");
-    }
-
-    // ── 1.c4 / 1.Nf3 / others ───────────────────────────────────────────
-    if has(&[c2c4]) {
-        return Some("English Opening");
-    }
-    if has(&[g1f3]) {
-        return Some("Réti Opening");
-    }
-    if has(&[g2g3]) {
-        return Some("King's Fianchetto");
-    }
-    if has(&[b2b3]) {
-        return Some("Larsen's Opening");
-    }
-
-    None
-}
-
 use crate::core::GameMode;
 use crate::game::components::GamePhase;
 use crate::game::resources::system_params::GameStateParams;
@@ -390,38 +251,6 @@ pub fn game_status_ui(mut params: GameUIParams) {
         _ => {}
     }
 
-    // === OPENING NAME ===
-    // Show once the first move has been played; hide after move 10 (most openings set by then).
-    let move_count = params.move_history.moves.len();
-    if move_count >= 1 && move_count <= 20 {
-        let seq: Vec<((u8, u8), (u8, u8))> = params
-            .move_history
-            .moves
-            .iter()
-            .map(|m| (m.from, m.to))
-            .collect();
-        if let Some(name) = classify_opening(&seq) {
-            egui::Window::new("opening_name")
-                .title_bar(false)
-                .resizable(false)
-                .collapsible(false)
-                .anchor(egui::Align2::LEFT_TOP, [12.0, 12.0])
-                .frame(
-                    egui::Frame::default()
-                        .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 28, 200))
-                        .corner_radius(6.0)
-                        .inner_margin(egui::Margin::symmetric(8, 4)),
-                )
-                .show(&ctx, |ui| {
-                    ui.label(
-                        egui::RichText::new(name)
-                            .size(11.5)
-                            .color(egui::Color32::from_rgb(180, 180, 220)),
-                    );
-                });
-        }
-    }
-
     if params.exit_confirmation.visible && !params.game_state.game_over.is_game_over() {
         let is_online = matches!(
             *params.game_mode,
@@ -499,6 +328,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
     // board correctly reserves space for it — see left_panel.rs.
     egui::SidePanel::left("game_info_panel")
         .resizable(false)
+        .show_separator_line(false)
         .exact_width(Layout::SIDE_PANEL_WIDTH)
         .frame(
             egui::Frame::default()
@@ -527,6 +357,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
             egui::SidePanel::right("solana_sidebar")
                 .resizable(true)
                 .default_width(250.0)
+                .show_separator_line(false)
                 .show(&ctx, |ui| {
                     egui::ScrollArea::vertical()
                         .max_height(f32::INFINITY)
@@ -577,6 +408,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
     // --- Main game info panel (Lichess-style right sidebar) ---
     egui::SidePanel::right("game_panel")
         .resizable(false)
+        .show_separator_line(false)
         .exact_width(Layout::SIDE_PANEL_WIDTH)
         .frame(
             egui::Frame::default()
@@ -676,6 +508,7 @@ fn render_game_right_panel(
 ) {
     use crate::game::resources::TurnPhase;
 
+    vertically_center(ui, egui::Id::new("right_panel_vcenter"), |ui| {
     let local_color = params
         .p2p_conn
         .as_ref()
@@ -972,6 +805,7 @@ fn render_game_right_panel(
                 });
             });
     }
+    });
 }
 
 pub(crate) fn render_compact_user_row(

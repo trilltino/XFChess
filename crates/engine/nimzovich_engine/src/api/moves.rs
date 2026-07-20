@@ -388,32 +388,42 @@ pub fn is_legal_move(game: &mut Game, src: i8, dst: i8, color: Color) -> bool {
     let moves = generate_pseudo_legal_moves(game, color);
     for mv in moves {
         if mv.src == src && mv.dst == dst {
-            // Simulate move safely
-            let board_before = game.board;
-            let ep_before = game.en_passant_target;
-            let halfmove_before = game.halfmove_clock;
-            let move_counter_before = game.move_counter;
-            #[cfg(feature = "search")]
-            let hash_before = game.current_hash;
-
-            do_move(game, src, dst, false);
-            let legal = !is_in_check(game, color);
-
-            // Restore state (do_move pushed a hash-history entry — pop it)
-            game.board = board_before;
-            game.en_passant_target = ep_before;
-            game.halfmove_clock = halfmove_before;
-            game.move_counter = move_counter_before;
-            crate::board::init_bitboards(game);
-            #[cfg(feature = "search")]
-            {
-                game.hash_history.pop();
-                game.current_hash = hash_before;
-            }
-
-            return legal;
+            return is_legal_move_unchecked(game, src, dst, color);
         }
     }
 
     false
+}
+
+/// Like `is_legal_move`, but skips the pseudo-legal-move regeneration and the
+/// bounds/ownership checks. Callers must guarantee `(src, dst)` is already a
+/// pseudo-legal move for `color` (e.g. one just produced by the caller's own
+/// `generate_pseudo_legal_moves` pass) — this is the hot path used by
+/// `rebuild_legal_move_cache`, which would otherwise regenerate the entire
+/// move list once per candidate move (O(n^2) instead of O(n)).
+pub fn is_legal_move_unchecked(game: &mut Game, src: i8, dst: i8, color: Color) -> bool {
+    // Simulate move safely
+    let board_before = game.board;
+    let ep_before = game.en_passant_target;
+    let halfmove_before = game.halfmove_clock;
+    let move_counter_before = game.move_counter;
+    #[cfg(feature = "search")]
+    let hash_before = game.current_hash;
+
+    do_move(game, src, dst, false);
+    let legal = !is_in_check(game, color);
+
+    // Restore state (do_move pushed a hash-history entry — pop it)
+    game.board = board_before;
+    game.en_passant_target = ep_before;
+    game.halfmove_clock = halfmove_before;
+    game.move_counter = move_counter_before;
+    crate::board::init_bitboards(game);
+    #[cfg(feature = "search")]
+    {
+        game.hash_history.pop();
+        game.current_hash = hash_before;
+    }
+
+    legal
 }

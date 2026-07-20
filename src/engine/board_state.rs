@@ -10,8 +10,8 @@ use crate::game::components::HasMoved;
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
 use nimzovich_engine::{
-    game_from_fen, generate_pseudo_legal_moves, is_legal_move, set_game_from_fen, Game, BISHOP_ID,
-    KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID,
+    game_from_fen_no_tt, generate_pseudo_legal_moves, is_legal_move, is_legal_move_unchecked,
+    set_game_from_fen, Game, BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID,
 };
 use std::collections::HashMap;
 
@@ -71,7 +71,11 @@ impl ToString for UciSquare {
 
 impl Default for ChessEngine {
     fn default() -> Self {
-        let game = game_from_fen(STARTING_FEN);
+        // No search ever runs on this Game (only move validation/legality via
+        // `is_legal_move_unchecked`/`generate_pseudo_legal_moves`/`is_in_check`
+        // and SAN via `move_to_san`) — skip the multi-GB transposition table
+        // `game_from_fen` would otherwise allocate for the app's entire lifetime.
+        let game = game_from_fen_no_tt(STARTING_FEN);
         Self {
             fen: STARTING_FEN.to_string(),
             game,
@@ -236,7 +240,7 @@ impl ChessEngine {
         let side = if self.fen.contains(" w ") { 1 } else { -1 };
         let moves = generate_pseudo_legal_moves(&self.game, side);
         for mv in moves {
-            if is_legal_move(&mut self.game, mv.src, mv.dst, side) {
+            if is_legal_move_unchecked(&mut self.game, mv.src, mv.dst, side) {
                 let from = Self::index_to_coords(mv.src);
                 let to = Self::index_to_coords(mv.dst);
                 self.move_cache.entry(from).or_default().push(to);
@@ -302,11 +306,16 @@ impl ChessEngine {
     ///
     /// Must be called before the engine's internal position advances past
     /// this move (i.e. before `sync_ecs_to_engine*`/`refresh_position`).
-    pub fn move_to_san(&self, from: (u8, u8), to: (u8, u8), promotion: Option<PieceType>) -> String {
+    pub fn move_to_san(
+        &mut self,
+        from: (u8, u8),
+        to: (u8, u8),
+        promotion: Option<PieceType>,
+    ) -> String {
         let src = Self::square_to_index(from.0, from.1);
         let dst = Self::square_to_index(to.0, to.1);
         let promo = promotion.map(Self::piece_type_to_id).unwrap_or(0);
-        nimzovich_engine::move_to_san(&self.game, src, dst, promo)
+        nimzovich_engine::move_to_san(&mut self.game, src, dst, promo)
     }
 
     pub fn legal_moves(&self) -> Vec<MoveWrapper> {

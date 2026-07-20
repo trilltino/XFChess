@@ -33,6 +33,46 @@ pub fn render_game_left_panel(
         GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
     );
 
+    if is_online {
+        render_info_and_players(ui, params, local_color, opp_color, is_spectating);
+    } else {
+        // No chat below to fill the panel, so center the compact info +
+        // players block in the panel instead of leaving it pinned to the top.
+        vertically_center(ui, egui::Id::new("left_panel_vcenter"), |ui| {
+            render_info_and_players(ui, params, local_color, opp_color, is_spectating);
+        });
+    }
+
+    // ── Chat (online games only) ───────────────────────────────────────────
+    if is_online {
+        ui.add_space(6.0);
+        let remaining_height = ui.available_height() - 8.0;
+        StyledPanel::sidebar_card()
+            .inner_margin(egui::Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                let player_name = params
+                    .player_identity
+                    .as_ref()
+                    .map(|p| p.display_name().to_string())
+                    .unwrap_or_else(|| "me".to_string());
+                crate::ui::game::chat_ui::render_chat_section(
+                    ui,
+                    &mut params.chat_state,
+                    &mut params.chat_writer,
+                    &player_name,
+                    (remaining_height - 90.0).max(80.0),
+                );
+            });
+    }
+}
+
+fn render_info_and_players(
+    ui: &mut egui::Ui,
+    params: &mut crate::ui::system_params::game_ui::GameUIParams,
+    local_color: PieceColor,
+    opp_color: PieceColor,
+    is_spectating: bool,
+) {
     // ── Game-type card ──────────────────────────────────────────────────────
     StyledPanel::sidebar_card()
         .inner_margin(egui::Margin::symmetric(12, 10))
@@ -116,26 +156,4 @@ pub fn render_game_left_panel(
         .show(ui, |ui| {
             render_compact_user_row(ui, bot_name, bot_elo, None);
         });
-
-    // ── Chat (online games only) ───────────────────────────────────────────
-    if is_online {
-        ui.add_space(6.0);
-        let remaining_height = ui.available_height() - 8.0;
-        StyledPanel::sidebar_card()
-            .inner_margin(egui::Margin::symmetric(12, 8))
-            .show(ui, |ui| {
-                let player_name = params
-                    .player_identity
-                    .as_ref()
-                    .map(|p| p.display_name().to_string())
-                    .unwrap_or_else(|| "me".to_string());
-                crate::ui::game::chat_ui::render_chat_section(
-                    ui,
-                    &mut params.chat_state,
-                    &mut params.chat_writer,
-                    &player_name,
-                    (remaining_height - 90.0).max(80.0),
-                );
-            });
-    }
 }

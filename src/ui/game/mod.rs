@@ -1,7 +1,6 @@
 pub mod chat_ui;
 pub mod game_2d;
 pub mod game_ui;
-pub mod hud;
 pub mod left_panel;
 pub mod promotion_ui;
 

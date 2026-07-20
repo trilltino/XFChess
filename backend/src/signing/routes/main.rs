@@ -841,7 +841,7 @@ async fn generate_san(
     move_uci: &str,
     move_number: i32,
 ) -> anyhow::Result<String> {
-    use nimzovich_engine::{do_move, game_from_fen, move_to_san};
+    use nimzovich_engine::{do_move, game_from_fen_no_tt, move_to_san};
 
     // Get previous FEN: last move's fen_after, or start position
     let prev_fen = if move_number <= 1 {
@@ -857,7 +857,10 @@ async fn generate_san(
             })
     };
 
-    let mut game = game_from_fen(&prev_fen);
+    // No search ever runs on this Game (just replay + SAN), so skip the
+    // multi-GB transposition table `game_from_fen` would otherwise allocate
+    // per HTTP request.
+    let mut game = game_from_fen_no_tt(&prev_fen);
 
     // Parse UCI: e.g., "e2e4" -> src=12, dst=28, promo=0
     let bytes = move_uci.as_bytes();
@@ -899,7 +902,7 @@ async fn generate_san(
     do_move(&mut game, src, dst, true);
 
     // Generate SAN
-    let san = move_to_san(&game, src, dst, promo);
+    let san = move_to_san(&mut game, src, dst, promo);
     Ok(san)
 }
 

@@ -253,10 +253,11 @@ pub mod book;
 // Re-export public API
 #[cfg(feature = "search")]
 pub use api::reply;
-pub use api::{do_move, do_move_with_promo, get_game_state, is_legal_move};
+pub use api::{do_move, do_move_with_promo, get_game_state, is_legal_move, is_legal_move_unchecked};
 #[cfg(feature = "std")]
 pub use api::{
-    game_from_fen, game_to_fen, new_game, reset_game, set_game_from_fen, set_tt_size_mb,
+    game_from_fen, game_from_fen_no_tt, game_to_fen, new_game, new_game_no_tt, reset_game,
+    set_game_from_fen, set_tt_size_mb,
 };
 pub use error::{ChessEngineError, ChessEngineResult};
 #[cfg(feature = "std")]

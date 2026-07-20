@@ -32,6 +32,10 @@ impl UiColors {
     /// Primary accent (gold - for important buttons and highlights)
     pub const ACCENT_GOLD: egui::Color32 = egui::Color32::from_rgb(218, 165, 32);
 
+    /// Burnt-orange accent used for selected option "chips" (strength, time
+    /// control, engine, side/color, filters) across every setup popup.
+    pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(173, 92, 47); // #ad5c2f
+
     /// Error/danger color (red)
     pub const DANGER: egui::Color32 = egui::Color32::from_rgb(220, 50, 50);
 
@@ -56,9 +60,6 @@ impl UiColors {
     pub const BORDER: egui::Color32 = egui::Color32::from_rgb(60, 60, 65);
 
     // === Popup / Modal tokens ===
-
-    /// Deep near-black background used by all modal popups
-    pub const BG_POPUP: egui::Color32 = egui::Color32::from_rgba_premultiplied(8, 10, 18, 252);
 
     /// Muted blue-gray body/subtitle text inside popups
     pub const TEXT_POPUP_BODY: egui::Color32 = egui::Color32::from_rgb(155, 158, 175);

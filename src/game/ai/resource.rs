@@ -292,6 +292,39 @@ impl AIDifficulty {
             Self::Level8 => "Master (2500+ ELO)",
         }
     }
+
+    /// Longer hover-tooltip text describing how this level actually plays,
+    /// grounded in its real search depth/movetime (see
+    /// [`Self::stockfish_depth`] / [`Self::stockfish_movetime_ms`]) rather
+    /// than just restating the ELO number.
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::Level1 => {
+                "Beginner · 400 ELO\nLooks only 1 move ahead and replies almost instantly. Expect frequent blunders and missed tactics."
+            }
+            Self::Level2 => {
+                "Casual · 700 ELO\n2-ply search, ~150ms per move. Still misses most tactics, but avoids the worst one-move blunders."
+            }
+            Self::Level3 => {
+                "Amateur · 1000 ELO\n4-ply search, ~300ms per move. Spots simple tactics and short-term threats."
+            }
+            Self::Level4 => {
+                "Club · 1300 ELO (default)\n6-ply search, ~600ms per move. Solid club-level play with occasional tactical slips."
+            }
+            Self::Level5 => {
+                "Intermediate · 1600 ELO\n10-ply search, up to 1s per move. Reliable positional and tactical play."
+            }
+            Self::Level6 => {
+                "Advanced · 1900 ELO\n14-ply search, up to 1.5s per move. Strong tactical vision, few mistakes."
+            }
+            Self::Level7 => {
+                "Expert · 2200 ELO\n18-ply search, up to 2s per move. Near-master accuracy, very hard to outplay tactically."
+            }
+            Self::Level8 => {
+                "Master · 2500+ ELO\n24-ply search, up to 3s per move. Engine-strength play — expect precise, punishing chess."
+            }
+        }
+    }
 }
 
 #[cfg(test)]

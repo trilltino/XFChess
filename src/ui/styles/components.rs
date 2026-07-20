@@ -5,6 +5,27 @@
 use super::colors::UiColors;
 use bevy_egui::egui;
 
+/// Vertically centers `add_contents` within the remaining space of `ui`.
+///
+/// Immediate-mode UI can't know a block's height before laying it out, so
+/// this pads with the *previous frame's* measured height (via egui's
+/// per-id temp storage) and re-measures after. Content settles into place
+/// within a frame or two of first appearing and stays stable thereafter.
+pub fn vertically_center<R>(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let available = ui.available_height();
+    let last_height = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
+    let top_pad = ((available - last_height) * 0.5).max(0.0);
+    ui.add_space(top_pad);
+    let inner = ui.vertical(add_contents);
+    ui.ctx()
+        .data_mut(|d| d.insert_temp(id, inner.response.rect.height()));
+    inner.inner
+}
+
 /// Helper functions for spacing and layout
 pub struct Layout;
 
@@ -102,6 +123,40 @@ impl StyledButton {
             .stroke(egui::Stroke::new(1.0, UiColors::BORDER));
         ui.add(button)
     }
+
+    /// Toggle-style "chip" button for option rows (strength, time control,
+    /// engine, color/side, filters, ...). One shared look for every such
+    /// row across every popup, instead of each screen hand-rolling its own
+    /// fill/stroke/radius combination.
+    ///
+    /// `min_size` lets callers keep per-row sizing (e.g. wider engine-name
+    /// chips vs. square strength-number chips) while sharing colors/shape.
+    pub fn chip(ui: &mut egui::Ui, text: &str, selected: bool, min_size: egui::Vec2) -> egui::Response {
+        let accent = UiColors::ACCENT;
+        let button = egui::Button::new(
+            egui::RichText::new(text).size(13.5).color(if selected {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 160)
+            }),
+        )
+        .min_size(min_size)
+        .corner_radius(6.0)
+        .fill(if selected {
+            accent
+        } else {
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 8)
+        })
+        .stroke(egui::Stroke::new(
+            1.0,
+            if selected {
+                accent
+            } else {
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20)
+            },
+        ));
+        ui.add(button)
+    }
 }
 
 /// Helper functions for creating styled panels
@@ -144,14 +199,23 @@ impl StyledPanel {
         }
     }
 
-    /// Standard modal/popup frame — matches the Connect Wallet look.
+    /// Standard modal/popup frame — the single look shared by every popup in
+    /// the app (menu setup modals, lobby/tournament/host-config screens,
+    /// in-game promotion/resign/draw/game-over dialogs), so no popup reads as
+    /// visually distinct from another.
     pub fn popup() -> egui::Frame {
         egui::Frame {
-            fill: UiColors::BG_POPUP,
-            corner_radius: egui::CornerRadius::same(14),
-            stroke: egui::Stroke::NONE,
-            inner_margin: egui::Margin::same(26),
-            ..egui::Frame::NONE
+            fill: egui::Color32::from_rgba_unmultiplied(18, 18, 22, 242),
+            inner_margin: egui::Margin::same(20),
+            outer_margin: egui::Margin::ZERO,
+            corner_radius: egui::CornerRadius::same(8),
+            stroke: egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(80, 80, 100, 180)),
+            shadow: egui::Shadow {
+                blur: 24,
+                spread: 4,
+                color: egui::Color32::from_black_alpha(180),
+                offset: [0, 4],
+            },
         }
     }
 

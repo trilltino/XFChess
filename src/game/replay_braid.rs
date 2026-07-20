@@ -11,7 +11,7 @@
 //! existing replay UI plays it back immediately (no PGN text round-trip needed).
 
 use braid_chess::MovePayload;
-use nimzovich_engine::{do_move_with_promo, move_to_san, new_game, parse_uci, ParsedPgnGame};
+use nimzovich_engine::{do_move_with_promo, move_to_san, new_game_no_tt, parse_uci, ParsedPgnGame};
 use std::collections::BTreeMap;
 use tracing::{info, warn};
 
@@ -29,7 +29,9 @@ pub fn braid_move_log_to_parsed_pgn(
         return None;
     }
 
-    let mut engine = new_game();
+    // No search ever runs on this Game (just replay + SAN), so skip the
+    // multi-GB transposition table `new_game` would otherwise allocate.
+    let mut engine = new_game_no_tt();
     let mut san_moves: Vec<String> = Vec::with_capacity(moves.len());
 
     for (idx, payload) in moves.iter().enumerate() {
@@ -51,7 +53,7 @@ pub fn braid_move_log_to_parsed_pgn(
             }
         };
 
-        let san = move_to_san(&engine, src, dst, promo);
+        let san = move_to_san(&mut engine, src, dst, promo);
         let is_promo = promo != 0;
         do_move_with_promo(&mut engine, src, dst, is_promo, promo);
         san_moves.push(san);

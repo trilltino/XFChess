@@ -26,11 +26,10 @@ pub(super) fn render_ai_setup_modal(
     next_state: &mut NextState<GameState>,
     active_tc: &mut crate::game::resources::active_time_control::ActiveTimeControl,
 ) {
-    let accent_color = egui::Color32::from_rgb(173, 92, 47); // #ad5c2f
-
     egui::Window::new("Game Setup")
         .collapsible(false)
         .resizable(false)
+        .title_bar(false)
         .fixed_size(egui::Vec2::new(380.0, 420.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .frame(StyledPanel::popup())
@@ -65,35 +64,20 @@ pub(super) fn render_ai_setup_modal(
             );
             ui.add_space(6.0);
 
-            // Strength grid (1-8) - compact
-            let elos = [0, 400, 700, 1000, 1300, 1600, 1900, 2200, 2500];
+            // Strength grid (1-8) - compact. Each chip's tooltip explains how
+            // that level actually plays (search depth/movetime), not just its
+            // ELO number, so the difference between e.g. 1 and 3 is legible.
             ui.horizontal(|ui| {
                 for lvl in 1..=8 {
-                    let response = ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(format!("{}", lvl)).size(14.0).color(
-                                if competitive.ai_difficulty == lvl {
-                                    egui::Color32::WHITE
-                                } else {
-                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 160)
-                                },
-                            ),
-                        )
-                        .min_size(egui::Vec2::new(32.0, 32.0))
-                        .fill(if competitive.ai_difficulty == lvl {
-                            accent_color
-                        } else {
-                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
-                        })
-                        .corner_radius(4.0)
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            if competitive.ai_difficulty == lvl {
-                                accent_color
-                            } else {
-                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
-                            },
-                        )),
+                    let selected = competitive.ai_difficulty == lvl;
+                    let response = StyledButton::chip(
+                        ui,
+                        &format!("{}", lvl),
+                        selected,
+                        egui::Vec2::new(32.0, 32.0),
+                    )
+                    .on_hover_text(
+                        crate::game::ai::resource::AIDifficulty::from_u8(lvl).tooltip(),
                     );
 
                     if response.clicked() {
@@ -106,10 +90,12 @@ pub(super) fn render_ai_setup_modal(
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!(
-                        "{} ELO",
-                        elos[competitive.ai_difficulty as usize]
-                    ))
+                    egui::RichText::new(
+                        crate::game::ai::resource::AIDifficulty::from_u8(
+                            competitive.ai_difficulty,
+                        )
+                        .description(),
+                    )
                     .size(11.0)
                     .color(egui::Color32::from_rgb(150, 150, 150)),
                 );
@@ -138,27 +124,9 @@ pub(super) fn render_ai_setup_modal(
             ui.horizontal_wrapped(|ui| {
                 for (label, tc) in tc_presets {
                     let selected = competitive.ai_time_control == tc;
-                    let btn = egui::Button::new(
-                        egui::RichText::new(label)
-                            .size(13.0)
-                            .color(egui::Color32::WHITE),
-                    )
-                    .min_size(egui::Vec2::new(44.0, 28.0))
-                    .corner_radius(4.0)
-                    .fill(if selected {
-                        accent_color
-                    } else {
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
-                    })
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        if selected {
-                            accent_color
-                        } else {
-                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
-                        },
-                    ));
-                    if ui.add(btn).clicked() {
+                    let response =
+                        StyledButton::chip(ui, label, selected, egui::Vec2::new(44.0, 28.0));
+                    if response.clicked() {
                         competitive.ai_time_control = tc;
                     }
                     ui.add_space(3.0);
@@ -184,23 +152,9 @@ pub(super) fn render_ai_setup_modal(
                     ),
                 ] {
                     let selected = competitive.ai_engine == engine;
-                    let btn = egui::Button::new(egui::RichText::new(label).size(13.0))
-                        .min_size(egui::Vec2::new(100.0, 28.0))
-                        .corner_radius(4.0)
-                        .fill(if selected {
-                            accent_color
-                        } else {
-                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
-                        })
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            if selected {
-                                accent_color
-                            } else {
-                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
-                            },
-                        ));
-                    if ui.add(btn).clicked() {
+                    let response =
+                        StyledButton::chip(ui, label, selected, egui::Vec2::new(100.0, 28.0));
+                    if response.clicked() {
                         competitive.ai_engine = engine;
                     }
                     ui.add_space(8.0);
@@ -221,23 +175,9 @@ pub(super) fn render_ai_setup_modal(
                     ("White", AISide::White),
                 ] {
                     let selected = competitive.ai_side == side;
-                    let btn = egui::Button::new(egui::RichText::new(label).size(14.0))
-                        .min_size(egui::Vec2::new(70.0, 40.0))
-                        .corner_radius(4.0)
-                        .fill(if selected {
-                            accent_color
-                        } else {
-                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)
-                        })
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            if selected {
-                                accent_color
-                            } else {
-                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
-                            },
-                        ));
-                    if ui.add(btn).clicked() {
+                    let response =
+                        StyledButton::chip(ui, label, selected, egui::Vec2::new(70.0, 40.0));
+                    if response.clicked() {
                         competitive.ai_side = side;
                     }
                     ui.add_space(8.0);

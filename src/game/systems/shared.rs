@@ -103,8 +103,7 @@ pub fn apply_capture(
     let tilt_axis = Vec3::new(knockback.z, 0.0, -knockback.x).normalize();
 
     commands.entity(target.entity).insert(FadingCapture {
-        // Fast, impactful animation (0.35s)
-        timer: bevy::time::Timer::from_seconds(0.35, bevy::time::TimerMode::Once),
+        timer: bevy::time::Timer::from_seconds(0.75, bevy::time::TimerMode::Once),
         initial_pos: current_pos,
         knockback_dir: knockback,
         tilt_axis,
@@ -125,7 +124,7 @@ pub fn update_piece_state(
     commands: &mut Commands,
     pieces: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
     move_history: &mut MoveHistory,
-    engine: &ChessEngine,
+    engine: &mut ChessEngine,
 ) -> bool {
     let Ok((_, mut piece_component, mut has_moved)) = pieces.get_mut(entity) else {
         error!("[SHARED] {origin}: failed to access piece after move");
@@ -264,10 +263,12 @@ pub fn execute_move(
     // 2. Handle Capture
     if let Some(target_cap) = ctx.capture {
         // The captured piece stands on ctx.target — derive world position
-        // using the same formula as piece spawning (x=file, z=rank, y=board surface).
-        let cap_world_pos = Vec3::new(ctx.target.0 as f32, PIECE_ON_BOARD_Y, ctx.target.1 as f32);
-        let move_dir =
-            cap_world_pos - Vec3::new(from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32);
+        // using the same formula as piece spawning: X is mirrored (7 - file)
+        // so the a-file renders on White's left; Z = rank, Y = board surface.
+        let cap_world_pos =
+            Vec3::new(7.0 - ctx.target.0 as f32, PIECE_ON_BOARD_Y, ctx.target.1 as f32);
+        let move_dir = cap_world_pos
+            - Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32);
         apply_capture(
             commands,
             captured_pieces,

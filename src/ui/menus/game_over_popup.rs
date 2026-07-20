@@ -127,6 +127,7 @@ pub struct CachedGamePgn {
 pub fn cache_pgn_on_game_over(
     history: Res<MoveHistory>,
     game_over: Res<GameOverState>,
+    game_mode: Res<crate::core::GameMode>,
     mut cached: ResMut<CachedGamePgn>,
 ) {
     let pgn_result = match game_over.winner() {
@@ -138,7 +139,15 @@ pub fn cache_pgn_on_game_over(
     cached.pgn_string = pgn_to_string(&pgn);
     cached.final_fen = build_final_fen(&history);
     cached.pgn = Some(pgn);
-    cached.braid_pgn_ready = false; // Braid VPS fetch will set this true when it arrives
+    // Online games wait for the authoritative Braid/VPS move log (set by
+    // apply_pgn_export_result); every other mode has no such fetch coming,
+    // so the locally-built PGN above is already final — mark it ready now,
+    // otherwise Review/Save would stay disabled forever.
+    let is_online = matches!(
+        *game_mode,
+        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
+    );
+    cached.braid_pgn_ready = !is_online;
 }
 
 // ── PGN helpers ───────────────────────────────────────────────────────────────
@@ -146,9 +155,9 @@ pub fn cache_pgn_on_game_over(
 /// Replay all moves and return the final position as a FEN string.
 fn build_final_fen(history: &MoveHistory) -> String {
     use crate::game::components::PieceType;
-    use nimzovich_engine::{do_move_with_promo, game_to_fen, new_game};
+    use nimzovich_engine::{do_move_with_promo, game_to_fen, new_game_no_tt};
 
-    let mut game = new_game();
+    let mut game = new_game_no_tt();
     for rec in &history.moves {
         let src = rec.from.1 as i8 * 8 + rec.from.0 as i8;
         let dst = rec.to.1 as i8 * 8 + rec.to.0 as i8;
@@ -178,10 +187,12 @@ fn elo_tier(elo: u32) -> Option<&'static str> {
 /// MoveRecord doesn't store the promoted-to piece.
 fn build_pgn(history: &MoveHistory, result_str: &str) -> nimzovich_engine::ParsedPgnGame {
     use crate::game::components::PieceType;
-    use nimzovich_engine::{do_move_with_promo, move_to_san, new_game};
+    use nimzovich_engine::{do_move_with_promo, move_to_san, new_game_no_tt};
     use std::collections::BTreeMap;
 
-    let mut game = new_game();
+    // No search ever runs on this Game (just replay + SAN), so skip the
+    // multi-GB transposition table `new_game` would otherwise allocate.
+    let mut game = new_game_no_tt();
     let mut san_moves: Vec<String> = Vec::with_capacity(history.moves.len());
 
     for rec in &history.moves {
@@ -191,7 +202,7 @@ fn build_pgn(history: &MoveHistory, result_str: &str) -> nimzovich_engine::Parse
         let is_promo = rec.piece_type == PieceType::Pawn && (rec.to.1 == 7 || rec.to.1 == 0);
         let promo: i8 = if is_promo { 5 } else { 0 };
 
-        let san = move_to_san(&game, src, dst, promo);
+        let san = move_to_san(&mut game, src, dst, promo);
         san_moves.push(san);
         do_move_with_promo(&mut game, src, dst, true, promo);
     }

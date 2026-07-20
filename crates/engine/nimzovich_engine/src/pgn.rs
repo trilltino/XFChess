@@ -19,14 +19,19 @@ use crate::types::*;
 /// Convert a move to Standard Algebraic Notation (SAN).
 ///
 /// # Arguments
-/// * `game` - Game state *before* the move is applied
+/// * `game` - Game state *before* the move is applied. Takes `&mut Game` so the
+///   check/checkmate suffix can be derived via a trial `do_move` + restore in
+///   place — cloning `Game` here would also deep-copy its multi-GB `tt` (see
+///   [`crate::api::moves::is_legal_move_unchecked`] for the same pattern), which
+///   made this function the dominant per-move cost when called from the hot
+///   path (`ChessEngine::move_to_san`, invoked on every human/AI move).
 /// * `src` - Source square (0-63)
 /// * `dst` - Destination square (0-63)
 /// * `promo` - Promotion piece ID (0 = none, 2-5 = N/B/R/Q)
 ///
 /// # Returns
 /// SAN string (e.g., "Nxf7+", "e8=Q", "O-O-O")
-pub fn move_to_san(game: &Game, src: i8, dst: i8, promo: i8) -> String {
+pub fn move_to_san(game: &mut Game, src: i8, dst: i8, promo: i8) -> String {
     let piece = game.board[src as usize];
     let piece_type = piece.abs() as usize;
     let color = if piece > 0 { COLOR_WHITE } else { COLOR_BLACK };
@@ -102,12 +107,42 @@ pub fn move_to_san(game: &Game, src: i8, dst: i8, promo: i8) -> String {
         san.push(piece_letter(promo.abs() as usize));
     }
 
-    // Check / checkmate suffix (requires simulating the move)
-    let mut game_copy = game.clone();
-    crate::api::moves::do_move(&mut game_copy, src, dst, true);
+    // Check / checkmate suffix — simulate the move in place and restore
+    // afterward rather than cloning `Game` (whose `tt` field alone is ~2 GB).
+    let board_before = game.board;
+    let ep_before = game.en_passant_target;
+    let halfmove_before = game.halfmove_clock;
+    let move_counter_before = game.move_counter;
+    let wk_before = game.white_king_has_moved;
+    let bk_before = game.black_king_has_moved;
+    let wr0_before = game.white_rook_0_has_moved;
+    let wr7_before = game.white_rook_7_has_moved;
+    let br56_before = game.black_rook_56_has_moved;
+    let br63_before = game.black_rook_63_has_moved;
+    #[cfg(feature = "search")]
+    let hash_before = game.current_hash;
+
+    crate::api::moves::do_move(game, src, dst, true);
     let opponent = -color;
-    let in_check = is_in_check(&game_copy, opponent);
-    let has_legal = has_any_legal_move(&mut game_copy, opponent);
+    let in_check = is_in_check(game, opponent);
+    let has_legal = has_any_legal_move(game, opponent);
+
+    game.board = board_before;
+    game.en_passant_target = ep_before;
+    game.halfmove_clock = halfmove_before;
+    game.move_counter = move_counter_before;
+    game.white_king_has_moved = wk_before;
+    game.black_king_has_moved = bk_before;
+    game.white_rook_0_has_moved = wr0_before;
+    game.white_rook_7_has_moved = wr7_before;
+    game.black_rook_56_has_moved = br56_before;
+    game.black_rook_63_has_moved = br63_before;
+    crate::board::init_bitboards(game);
+    #[cfg(feature = "search")]
+    {
+        game.hash_history.pop();
+        game.current_hash = hash_before;
+    }
 
     if in_check && !has_legal {
         san.push('#');
@@ -148,9 +183,14 @@ fn has_any_legal_move(game: &mut Game, color: Color) -> bool {
         let captured = game.board[mv.dst as usize];
         game.board[mv.dst as usize] = game.board[mv.src as usize];
         game.board[mv.src as usize] = 0;
+        // is_in_check reads bitboards, not the mailbox — they must be kept in
+        // sync with the trial board or every iteration silently checks the
+        // pre-loop position instead of the candidate move.
+        crate::board::init_bitboards(game);
         let legal = !is_in_check(game, color);
         game.board[mv.src as usize] = game.board[mv.dst as usize];
         game.board[mv.dst as usize] = captured;
+        crate::board::init_bitboards(game);
         if legal {
             return true;
         }
@@ -918,5 +958,38 @@ fn rank_char_to_u8(c: char) -> Option<u8> {
         Some(c as u8 - b'1')
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod san_tests {
+    use super::*;
+    use crate::api::game::new_game;
+
+    fn sq(file: i8, rank: i8) -> i8 {
+        rank * 8 + file
+    }
+
+    /// Fool's Mate: 1. f3 e5 2. g4 Qh4# — the final move must be reported
+    /// with '#', not '+'. Regression test for `move_to_san` no longer
+    /// cloning `Game` and for the `has_any_legal_move` bitboard-staleness fix
+    /// (both used to be exercised only via a full `game.clone()`).
+    #[test]
+    fn fools_mate_reports_checkmate_suffix() {
+        let mut game = new_game();
+        crate::api::moves::do_move(&mut game, sq(5, 1), sq(5, 2), true); // f2-f3
+        crate::api::moves::do_move(&mut game, sq(4, 6), sq(4, 4), true); // e7-e5
+        crate::api::moves::do_move(&mut game, sq(6, 1), sq(6, 3), true); // g2-g4
+
+        let san = move_to_san(&mut game, sq(3, 7), sq(7, 3), 0); // Qd8-h4
+        assert_eq!(san, "Qh4#");
+    }
+
+    /// A check with a legal king escape must be reported with '+', not '#'.
+    #[test]
+    fn check_with_escape_reports_check_suffix_not_mate() {
+        let mut game = crate::api::game::game_from_fen("4k3/8/8/8/8/8/8/4R1K1 w - - 0 1");
+        let san = move_to_san(&mut game, sq(4, 0), sq(4, 6), 0); // Re1-e7+
+        assert_eq!(san, "Re7+");
     }
 }
