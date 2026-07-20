@@ -29,7 +29,6 @@ import { ProfileViewer } from './pages/ProfileViewer';
 import { LichessCallback } from './pages/LichessCallback';
 import { Features } from './pages/Features';
 import { Waitlist } from './pages/Waitlist';
-import { PrivyAuthButton } from './privy/PrivyAuthButton';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
 import { Menu, X, ChevronDown, Sun, Moon } from 'lucide-react';
@@ -218,7 +217,6 @@ function AppContent() {
                     <Link to="/home" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Home</Link>
                     <Link to="/play" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
                     <Link to="/waitlist" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Waitlist</Link>
-                    <PrivyAuthButton />
                     <div className="nav-legal-dropdown">
                         <button className="nav-link dropdown-toggle" onClick={() => { setIsGameTypesOpen(v => !v); setIsCommunityOpen(false); setIsLegalOpen(false); }}>
                             Game <ChevronDown size={14} className={`dropdown-icon ${isGameTypesOpen ? 'open' : ''}`} />
