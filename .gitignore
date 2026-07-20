@@ -99,8 +99,12 @@ id.json
 # Tauri generated
 tauri/gen/
 
-# Package lock files (keep only root)
+# Package lock files — kept for the npm projects CI actually builds
+# (npm ci requires a committed lockfile; there is no root npm project).
 **/package-lock.json
+!web-solana/package-lock.json
+!tauri/wallet-ui/package-lock.json
+!tauri/tournament-admin/package-lock.json
 
 # Generated JSON files — except the Anchor IDL, which the frontend imports
 # directly and which a fresh checkout has no way to regenerate without a full

@@ -140,18 +140,15 @@ jobs:
           files: release/XFChess-Setup-*.exe
 
   # ───────────────────────────── Linux ─────────────────────────────
-  # Native ubuntu-latest build of the game client (xfchess), matching the
-  # Docker-based build proven out manually under docker/game-linux.Dockerfile.
-  # Scope note: this builds the plain Bevy client only, not xfchess-tauri (the
-  # wallet-bridge companion) — Tauri's Linux build needs webkit2gtk/gtk3/
-  # appindicator system deps that haven't been validated here yet. Wallet-linked
-  # flows that rely on the bridge process may not work in this build; core
-  # gameplay, multiplayer, and Solana session-key moves do.
+  # Native ubuntu-latest build of both the game client (xfchess) and the
+  # wallet-bridge companion (xfchess-tauri), matching Windows/macOS parity.
   linux:
     needs: verify-backend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -166,22 +163,38 @@ jobs:
             pkg-config libasound2-dev libudev-dev \
             libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
             libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
-            libxkbcommon-x11-0 mesa-vulkan-drivers libgl1-mesa-dri xvfb
+            libxkbcommon-x11-0 mesa-vulkan-drivers libgl1-mesa-dri xvfb \
+            libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: Build binary (release)
-        run: cargo build --release --bin xfchess --features solana
+      - name: Build web frontends
+        env:
+          VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+        run: |
+          (cd tauri/wallet-ui && npm ci && npm run build)
+          (cd tauri/tournament-admin && npm ci && npm run build) || echo "tournament-admin build skipped"
+
+      - name: Build binaries (release)
+        run: |
+          cargo build --release --bin xfchess --features solana
+          cargo build --release -p xfchess-tauri
 
       - name: Stage payload
         run: |
           mkdir -p release/linux/assets
           cp -r assets/* release/linux/assets/
           cp target/release/xfchess release/linux/xfchess
-          chmod +x release/linux/xfchess
+          cp target/release/xfchess-tauri release/linux/xfchess-tauri
+          chmod +x release/linux/xfchess release/linux/xfchess-tauri
+          if [ -d tauri/tournament-admin/dist ]; then
+            mkdir -p release/linux/tournament-admin/dist
+            cp -r tauri/tournament-admin/dist/* release/linux/tournament-admin/dist/
+          fi
           cat > release/linux/launch.sh <<EOF
           #!/bin/sh
           SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
           export BACKEND_URL="\${BACKEND_URL:-${{ env.BACKEND_URL }}}"
           export SIGNING_SERVICE_URL="\${SIGNING_SERVICE_URL:-${{ env.SIGNING_URL }}}"
+          "\$SCRIPT_DIR/xfchess-tauri" &
           exec "\$SCRIPT_DIR/xfchess" "\$@"
           EOF
           chmod +x release/linux/launch.sh
@@ -203,15 +216,23 @@ jobs:
           sleep 1
           cd release/linux
           set +e
+          DISPLAY=:99 timeout 15 ./xfchess-tauri &
+          bridge_pid=$!
           DISPLAY=:99 timeout 15 ./xfchess
           code=$?
+          wait $bridge_pid
+          bridge_code=$?
           set -e
           if [ "$code" != "124" ] && [ "$code" != "0" ]; then
             echo "::error::xfchess exited with code $code — see crash log below"
             cat logs/crash_*.log 2>/dev/null || true
             exit 1
           fi
-          echo "Smoke test passed (exit $code)"
+          if [ "$bridge_code" != "124" ] && [ "$bridge_code" != "0" ]; then
+            echo "::error::xfchess-tauri exited with code $bridge_code"
+            exit 1
+          fi
+          echo "Smoke test passed (xfchess=$code, xfchess-tauri=$bridge_code)"
 
       - name: Package tarball
         run: |
