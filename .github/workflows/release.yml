@@ -50,6 +50,8 @@ jobs:
       AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - uses: dtolnay/rust-toolchain@stable
@@ -147,6 +149,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - uses: dtolnay/rust-toolchain@stable
@@ -258,6 +262,8 @@ jobs:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - uses: dtolnay/rust-toolchain@stable
