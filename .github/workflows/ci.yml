@@ -72,6 +72,18 @@ jobs:
             libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
             libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
             libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Install Solana CLI (cargo build-sbf)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      # programs/xfchess-game/tests/{er_delegation,er_move,init_profile_sponsored,
+      # tournament_round_advancement,treasury}_tests.rs spin up a simulated
+      # validator (solana-program-test) and load the compiled on-chain program —
+      # they need target/deploy/xfchess_game.so to exist before `cargo test`.
+      - name: Build on-chain program (.so for solana-program-test)
+        run: |
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
       - name: Run tests
         run: cargo test --workspace
 
