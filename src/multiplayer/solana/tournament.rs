@@ -65,6 +65,15 @@ pub struct TournamentClientState {
         crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentSummary>>,
     >,
     pub last_list_poll: Option<Instant>,
+    /// On-chain games created by the backend orchestrator across all
+    /// tournaments (bracket matches with a Solana game_id) — feeds the
+    /// per-tournament "Watch Live" list in the browser.
+    pub tournament_games: Vec<crate::multiplayer::network::vps::TournamentGameListing>,
+    /// Receiver for the background tournament-games fetch.
+    pub games_rx: Option<
+        crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentGameListing>>,
+    >,
+    pub last_games_poll: Option<Instant>,
     pub bracket_fired_rx: Option<crossbeam_channel::Receiver<BracketFiredEvent>>,
     pub bracket_ready: bool,
     pub password_input: String,
@@ -119,6 +128,9 @@ impl Default for TournamentClientState {
             tx_rx: None,
             list_rx: None,
             last_list_poll: None,
+            tournament_games: Vec::new(),
+            games_rx: None,
+            last_games_poll: None,
             bracket_fired_rx: None,
             bracket_ready: false,
             password_input: String::new(),
@@ -532,6 +544,58 @@ fn poll_tournament_list(
         .detach();
 }
 
+/// Polls the on-chain tournament-games list (bracket matches with a Solana
+/// game_id) while the Tournaments browser is open, every 10 seconds. Feeds the
+/// per-tournament "Watch Live" list.
+fn poll_tournament_games_list(
+    mut tournament: ResMut<TournamentClientState>,
+    menu_state: Option<Res<State<crate::core::MenuState>>>,
+) {
+    if let Some(ref rx) = tournament.games_rx {
+        match rx.try_recv() {
+            Ok(games) => {
+                tournament.tournament_games = games;
+                tournament.games_rx = None;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => {
+                tournament.games_rx = None;
+            }
+        }
+    }
+
+    // Only fetch while the browser is actually open — the fetch walks one
+    // bracket request per advertised tournament.
+    let is_tournaments_active = menu_state
+        .map(|s| *s.get() == crate::core::MenuState::Tournaments)
+        .unwrap_or(false);
+    if !is_tournaments_active || tournament.games_rx.is_some() {
+        return;
+    }
+    let should_poll = tournament
+        .last_games_poll
+        .map(|t| t.elapsed().as_secs() >= 10)
+        .unwrap_or(true);
+    if !should_poll {
+        return;
+    }
+
+    tournament.last_games_poll = Some(Instant::now());
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    tournament.games_rx = Some(rx);
+
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            match crate::multiplayer::network::vps::list_tournament_games() {
+                Ok(games) => {
+                    let _ = tx.send(games);
+                }
+                Err(e) => warn!("[TOURNAMENT] list_tournament_games failed: {}", e),
+            }
+        })
+        .detach();
+}
+
 fn poll_bracket_fired(mut tournament: ResMut<TournamentClientState>) {
     let Some(ref rx) = tournament.bracket_fired_rx else {
         return;
@@ -561,6 +625,7 @@ impl Plugin for TournamentClientPlugin {
                 (
                     poll_tournament_tasks,
                     poll_tournament_list,
+                    poll_tournament_games_list,
                     poll_bracket_fired,
                 ),
             )

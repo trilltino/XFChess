@@ -20,6 +20,8 @@ pub enum LobbyMode {
     Create,
     Join,
     Browse,
+    /// On-chain games created by the backend tournament orchestrator.
+    Tournament,
 }
 
 /// ELO range matching preference for matchmaking.
@@ -83,6 +85,9 @@ impl Default for LobbyStatus {
 #[derive(Resource)]
 pub struct SolanaLobbyState {
     pub mode: LobbyMode,
+    /// Whether the "Create Game" tab is shown. True when the lobby is entered
+    /// via "Wagered PVP"; false via "Find Wagered Game" (join/browse only).
+    pub allow_create: bool,
     /// SOL amount chosen by creator (default 0.05).
     pub wager_sol: f32,
     /// Match type: 0=Free Casual, 1=Free Rated (ELO), 2=Wagered.
@@ -130,12 +135,21 @@ pub struct SolanaLobbyState {
     pub browse_rx: Option<
         crossbeam_channel::Receiver<Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>>,
     >,
+    /// Cached backend-tournament games for the Tournament tab (only matches
+    /// with an on-chain Solana game_id).
+    pub tournament_games: Vec<crate::multiplayer::network::vps::TournamentGameListing>,
+    /// Last time the tournament-games list was fetched.
+    pub tournament_last_fetch: Option<std::time::Instant>,
+    /// Receiver for background tournament-games fetch.
+    pub tournament_rx:
+        Option<crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentGameListing>>>,
 }
 
 impl Default for SolanaLobbyState {
     fn default() -> Self {
         Self {
             mode: LobbyMode::default(),
+            allow_create: true,
             wager_sol: 0.05,
             match_type: 0,
             game_id_input: String::new(),
@@ -160,6 +174,9 @@ impl Default for SolanaLobbyState {
             browse_games: Vec::new(),
             browse_last_fetch: None,
             browse_rx: None,
+            tournament_games: Vec::new(),
+            tournament_last_fetch: None,
+            tournament_rx: None,
         }
     }
 }
@@ -186,6 +203,7 @@ impl Plugin for SolanaLobbyPlugin {
                     poll_lobby_tasks,
                     poll_rejoin_check,
                     poll_solana_browse,
+                    poll_tournament_games,
                 )
                     .chain(),
             );
@@ -780,6 +798,42 @@ fn poll_rejoin_check(mut lobby: ResMut<SolanaLobbyState>) {
             }
         }
     }
+}
+
+/// Poll background tournament-games fetch and auto-refresh every 10 seconds
+/// while the Tournament tab is active. Lists only backend-tournament matches
+/// that have an on-chain Solana game_id.
+pub fn poll_tournament_games(mut lobby: ResMut<SolanaLobbyState>) {
+    // Drain result if pending.
+    if let Some(ref rx) = lobby.tournament_rx {
+        if let Ok(games) = rx.try_recv() {
+            lobby.tournament_games = games;
+            lobby.tournament_rx = None;
+        }
+    }
+
+    if lobby.mode != LobbyMode::Tournament {
+        return;
+    }
+    let should_refresh = lobby
+        .tournament_last_fetch
+        .map(|t| t.elapsed().as_secs() >= 10)
+        .unwrap_or(true);
+    if !should_refresh || lobby.tournament_rx.is_some() {
+        return;
+    }
+    lobby.tournament_last_fetch = Some(std::time::Instant::now());
+
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    lobby.tournament_rx = Some(rx);
+    std::thread::spawn(move || {
+        match crate::multiplayer::network::vps::list_tournament_games() {
+            Ok(games) => {
+                let _ = tx.send(games);
+            }
+            Err(e) => warn!("[SOLANA_TOURNEY] Failed to fetch tournament games: {}", e),
+        }
+    });
 }
 
 /// Poll background browse-list fetch and auto-refresh every 10 seconds.

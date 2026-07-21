@@ -5,7 +5,6 @@
 //! base URL comes from `SIGNING_SERVICE_URL` (runtime) or `BACKEND_URL`
 //! (compile-time), defaulting to local dev.
 
-use serde::Deserialize;
 use std::sync::RwLock;
 
 const VPS_PROD_URL: &str = "http://178.104.55.19";
@@ -71,30 +70,52 @@ pub fn client() -> Result<reqwest::blocking::Client, String> {
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
 }
 
-/// Backend response payload for the live SOL/GBP rate endpoint.
-#[derive(Debug, Clone, Deserialize)]
-pub struct SolGbpRateResponse {
-    /// SOL purchasable for 1 GBP.
-    pub sol_per_gbp: f64,
-    /// GBP per 1 SOL.
-    pub gbp_per_sol: f64,
+/// Backend response payload for the cached multi-currency rate endpoint
+/// (`GET /api/rates/all`), narrowed to the USD figures — USD is the primary
+/// display/input currency across the game client and admin panel.
+#[derive(Debug, Clone)]
+pub struct SolUsdRateResponse {
+    /// SOL purchasable for 1 USD.
+    pub sol_per_usd: f64,
+    /// USD per 1 SOL.
+    pub usd_per_sol: f64,
     /// Unix timestamp when the rate was fetched.
     pub fetched_at: i64,
 }
 
-/// Fetch the cached live SOL/GBP rate from the signing backend.
-pub fn fetch_sol_gbp_rate() -> Result<SolGbpRateResponse, String> {
+/// Fetch the cached live SOL/USD rate from the signing backend's
+/// `/api/rates/all` (same cache the admin panel and tournament creation use).
+pub fn fetch_sol_usd_rate() -> Result<SolUsdRateResponse, String> {
     let resp = client()?
-        .get(format!("{}/api/rates/sol-gbp", vps_base()))
+        .get(format!("{}/api/rates/all", vps_base()))
         .send()
-        .map_err(|e| format!("vps fetch_sol_gbp_rate: {e}"))?;
+        .map_err(|e| format!("vps fetch_sol_usd_rate: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(format!("vps fetch_sol_gbp_rate: HTTP {status} - {body}"));
+        return Err(format!("vps fetch_sol_usd_rate: HTTP {status} - {body}"));
     }
 
-    resp.json::<SolGbpRateResponse>()
-        .map_err(|e| format!("vps fetch_sol_gbp_rate parse: {e}"))
+    let json: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("vps fetch_sol_usd_rate parse: {e}"))?;
+
+    let usd_per_sol = json["rates"]["usd"]
+        .as_f64()
+        .ok_or("vps fetch_sol_usd_rate: missing rates.usd")?;
+    let sol_per_usd = json["sol_per_fiat"]["usd"]
+        .as_f64()
+        .unwrap_or(if usd_per_sol > 0.0 {
+            1.0 / usd_per_sol
+        } else {
+            0.0
+        });
+    let fetched_at = json["fetched_at"].as_i64().unwrap_or(0);
+
+    Ok(SolUsdRateResponse {
+        sol_per_usd,
+        usd_per_sol,
+        fetched_at,
+    })
 }

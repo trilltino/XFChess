@@ -118,11 +118,19 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             );
 
         if !in_post_state {
+            // Entered via "Find Wagered Game" ⇒ join/browse only; never let the
+            // hidden Create tab stay active.
+            if !lobby.allow_create && lobby.mode == LobbyMode::Create {
+                lobby.mode = LobbyMode::Browse;
+                lobby.browse_last_fetch = None;
+            }
+
             // Tab switcher
             ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(lobby.mode == LobbyMode::Create, "Create Game")
-                    .clicked()
+                if lobby.allow_create
+                    && ui
+                        .selectable_label(lobby.mode == LobbyMode::Create, "Create Game")
+                        .clicked()
                 {
                     lobby.mode = LobbyMode::Create;
                     lobby.status = LobbyStatus::Idle;
@@ -142,6 +150,14 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     lobby.status = LobbyStatus::Idle;
                     lobby.browse_last_fetch = None; // trigger immediate refresh
                 }
+                if ui
+                    .selectable_label(lobby.mode == LobbyMode::Tournament, "Tournament")
+                    .clicked()
+                {
+                    lobby.mode = LobbyMode::Tournament;
+                    lobby.status = LobbyStatus::Idle;
+                    lobby.tournament_last_fetch = None; // trigger immediate refresh
+                }
             });
 
             ui.separator();
@@ -151,21 +167,24 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 ns.node_id
                     .map(|id| bs58::encode(id.as_bytes()).into_string())
             });
-            let gbp_per_sol = ctx
-                .sol_gbp_rate
+            let usd_per_sol = ctx
+                .sol_usd_wager_rate
                 .as_ref()
                 .and_then(|r| r.current.as_ref())
-                .map(|s| s.gbp_per_sol);
+                .map(|s| s.usd_per_sol);
             match lobby.mode {
                 LobbyMode::Create => render_create_tab(
                     ui,
                     lobby,
                     &mut ctx.compliance,
                     node_id_b58.as_deref(),
-                    gbp_per_sol,
+                    usd_per_sol,
                 ),
-                LobbyMode::Join => render_join_tab(ui, lobby, node_id_b58.as_deref(), gbp_per_sol),
+                LobbyMode::Join => render_join_tab(ui, lobby, node_id_b58.as_deref(), usd_per_sol),
                 LobbyMode::Browse => render_solana_browse_tab(ui, lobby),
+                LobbyMode::Tournament => {
+                    render_solana_tournament_tab(ui, lobby, &mut ctx.spectate_events)
+                }
             }
         }
 
@@ -508,7 +527,13 @@ pub(super) fn render_spectator_popup(
                                         egui::RichText::new("Watch").size(11.0).color(egui::Color32::WHITE).strong()
                                     ).fill(egui::Color32::from_rgb(60, 100, 160)).corner_radius(4.0)).clicked() {
                                         if let Some(ref mut w) = spectate_writer {
-                                            w.write(crate::multiplayer::spectator::SpectateViaLinkEvent { game_id: game_id.clone() });
+                                            w.write(crate::multiplayer::spectator::SpectateViaLinkEvent {
+                                                game_id: game_id.clone(),
+                                                details: Some(crate::multiplayer::spectator::SpectatorMatchDetails {
+                                                    white: Some(game.username.clone().unwrap_or_else(|| game.display_name.clone())),
+                                                    ..Default::default()
+                                                }),
+                                            });
                                             competitive.show_spectator_popup = false;
                                         }
                                     }
@@ -593,7 +618,7 @@ fn render_create_tab(
     // Free games now go through spawn_create_game too, which reads
     // lobby.cached_node_id directly — this param is no longer needed here.
     _node_id: Option<&str>,
-    gbp_per_sol: Option<f64>,
+    usd_per_sol: Option<f64>,
 ) {
     use crate::multiplayer::solana::lobby::EloMatchPref;
 
@@ -650,22 +675,47 @@ fn render_create_tab(
         lobby.wager_sol = 0.0;
     }
 
-    ui.label(egui::RichText::new("Wager amount (SOL)").size(14.0));
+    // SOL (`lobby.wager_sol`) stays the on-chain source of truth — only the
+    // control the player drags is USD-denominated, converted live via
+    // usd_per_sol. Falls back to a SOL slider when no rate has loaded yet
+    // (startup, or the backend rate fetch is down) so hosting a game is
+    // never blocked on a third-party price feed.
+    let live_rate = usd_per_sol.filter(|r| *r > 0.0);
 
     if wallet_connected {
-        ui.add(
-            egui::Slider::new(&mut lobby.wager_sol, 0.0..=max_wager.max(0.001))
-                .step_by(0.001)
-                .fixed_decimals(3),
-        );
-        // Clamp after slider interaction
-        lobby.wager_sol = lobby.wager_sol.clamp(0.0, max_wager);
+        if let Some(rate) = live_rate {
+            ui.label(egui::RichText::new("Wager amount (USD)").size(14.0));
+            let max_wager_usd = (max_wager as f64 * rate) as f32;
+            let mut wager_usd = (lobby.wager_sol as f64 * rate) as f32;
+            ui.add(
+                egui::Slider::new(&mut wager_usd, 0.0..=max_wager_usd.max(0.01))
+                    .step_by(0.01)
+                    .fixed_decimals(2)
+                    .prefix("$"),
+            );
+            lobby.wager_sol = (wager_usd as f64 / rate).clamp(0.0, max_wager as f64) as f32;
+        } else {
+            ui.label(egui::RichText::new("Wager amount (SOL)").size(14.0));
+            ui.add(
+                egui::Slider::new(&mut lobby.wager_sol, 0.0..=max_wager.max(0.001))
+                    .step_by(0.001)
+                    .fixed_decimals(3),
+            );
+            lobby.wager_sol = lobby.wager_sol.clamp(0.0, max_wager);
+            ui.label(
+                egui::RichText::new("(USD rate loading — showing SOL for now)")
+                    .size(10.0)
+                    .color(egui::Color32::from_rgb(160, 130, 80))
+                    .italics(),
+            );
+        }
     } else {
         // Greyed-out disabled slider at 0
+        ui.label(egui::RichText::new("Wager amount (USD)").size(14.0));
         let mut zero: f32 = 0.0;
         ui.add_enabled(
             false,
-            egui::Slider::new(&mut zero, 0.0..=1.0).fixed_decimals(3),
+            egui::Slider::new(&mut zero, 0.0..=1.0).fixed_decimals(2),
         );
         ui.label(
             egui::RichText::new("(Connect wallet to add a wager)")
@@ -675,23 +725,22 @@ fn render_create_tab(
         );
     }
 
-    // GBP label + rough USD (1 GBP ≈ 1.27 USD)
-    let fiat_str = gbp_per_sol
-        .map(|rate| {
-            let gbp = lobby.wager_sol as f64 * rate;
-            let usd = gbp * 1.27;
-            format!(" (£{:.2} / ~${:.2})", gbp, usd)
-        })
-        .unwrap_or_default();
+    let sol_str = format!(" (≈{:.4} SOL)", lobby.wager_sol);
     let label_text = if lobby.wager_sol == 0.0 && lobby.match_type == 1 {
         "Free Rated game — ELO tracked, no SOL at stake".to_string()
     } else if lobby.wager_sol == 0.0 {
         "Free casual game — no SOL at stake".to_string()
+    } else if let Some(rate) = live_rate {
+        format!(
+            "Escrow: ${:.2}{}  |  Pot: ${:.2}",
+            lobby.wager_sol as f64 * rate,
+            sol_str,
+            lobby.wager_sol as f64 * 2.0 * rate,
+        )
     } else {
         format!(
-            "Escrow: {:.4} SOL{}  |  Pot: {:.4} SOL",
+            "Escrow: {:.4} SOL  |  Pot: {:.4} SOL",
             lobby.wager_sol,
-            fiat_str,
             lobby.wager_sol * 2.0
         )
     };
@@ -837,7 +886,7 @@ fn render_join_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
     node_id: Option<&str>,
-    gbp_per_sol: Option<f64>,
+    usd_per_sol: Option<f64>,
 ) {
     ui.label(egui::RichText::new("Enter Game ID:").size(14.0));
     ui.text_edit_singleline(&mut lobby.game_id_input);
@@ -881,20 +930,25 @@ fn render_join_tab(
     if let LobbyStatus::Fetched { wager_sol, game_id } = lobby.status {
         ui.separator();
         Layout::small_space(ui);
-        let gbp_str = gbp_per_sol
-            .map(|r| format!(" (£{:.2})", wager_sol * r))
-            .unwrap_or_default();
-        ui.label(
-            egui::RichText::new(format!(
-                "Game #{} requires {:.4} SOL{} wager",
-                game_id, wager_sol, gbp_str
-            ))
-            .color(egui::Color32::GOLD),
-        );
-        ui.label(
-            egui::RichText::new(format!("Your balance: {:.4} SOL", lobby.cached_balance))
-                .size(12.0),
-        );
+        let wager_line = match usd_per_sol.filter(|r| *r > 0.0) {
+            Some(rate) => format!(
+                "Game #{} requires ${:.2} (≈{:.4} SOL) wager",
+                game_id,
+                wager_sol * rate,
+                wager_sol
+            ),
+            None => format!("Game #{} requires {:.4} SOL wager", game_id, wager_sol),
+        };
+        ui.label(egui::RichText::new(wager_line).color(egui::Color32::GOLD));
+        let balance_line = match usd_per_sol.filter(|r| *r > 0.0) {
+            Some(rate) => format!(
+                "Your balance: ${:.2} (≈{:.4} SOL)",
+                lobby.cached_balance * rate,
+                lobby.cached_balance
+            ),
+            None => format!("Your balance: {:.4} SOL", lobby.cached_balance),
+        };
+        ui.label(egui::RichText::new(balance_line).size(12.0));
 
         let sufficient = lobby.cached_balance >= wager_sol + 0.002;
         let can_join = lobby.cached_keypair_bytes.is_some() && sufficient;
@@ -1067,6 +1121,149 @@ fn render_solana_browse_tab(
                                     }
                                 }
                             }
+                        });
+                    });
+                });
+            ui.add_space(4.0);
+        }
+    });
+}
+
+/// Tournament tab: lists only the Solana games created by the backend
+/// tournament orchestrator (bracket matches with an on-chain game_id).
+/// Active games get a Watch button that enters delay-gated spectator mode.
+#[cfg(feature = "solana")]
+fn render_solana_tournament_tab(
+    ui: &mut egui::Ui,
+    lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
+    spectate_writer: &mut Option<
+        crate::multiplayer::traits::MessageWriter<
+            crate::multiplayer::spectator::SpectateViaLinkEvent,
+        >,
+    >,
+) {
+    let is_loading = lobby.tournament_rx.is_some();
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Tournament Games")
+                .size(14.0)
+                .strong()
+                .color(egui::Color32::GOLD),
+        );
+        if is_loading {
+            ui.spinner();
+        } else if ui.small_button("Refresh").clicked() {
+            lobby.tournament_last_fetch = None;
+        }
+    });
+    ui.add_space(6.0);
+
+    if is_loading && lobby.tournament_games.is_empty() {
+        ui.label(
+            egui::RichText::new("Loading…")
+                .size(12.0)
+                .color(egui::Color32::GRAY)
+                .italics(),
+        );
+        return;
+    }
+
+    if lobby.tournament_games.is_empty() {
+        ui.label(
+            egui::RichText::new("No on-chain tournament games right now.")
+                .size(12.0)
+                .color(egui::Color32::GRAY),
+        );
+        return;
+    }
+
+    let games = lobby.tournament_games.clone();
+    egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+        for game in &games {
+            let status_color = match game.status.as_str() {
+                "Active" => egui::Color32::from_rgb(120, 220, 120),
+                "Completed" => egui::Color32::GRAY,
+                _ => egui::Color32::from_rgb(220, 200, 120),
+            };
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgba_unmultiplied(25, 30, 45, 220))
+                .corner_radius(6.0)
+                .inner_margin(egui::Margin::symmetric(10, 8))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 80, 130)))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(&game.tournament_name)
+                                    .size(13.0)
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            );
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("Round {}", game.round + 1))
+                                        .size(11.0)
+                                        .color(egui::Color32::from_rgb(160, 190, 255)),
+                                );
+                                ui.label(egui::RichText::new("·").size(11.0).color(egui::Color32::GRAY));
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} vs {}",
+                                        game.white_label(),
+                                        game.black_label()
+                                    ))
+                                    .size(11.0)
+                                    .color(egui::Color32::LIGHT_GRAY),
+                                );
+                                ui.label(egui::RichText::new("·").size(11.0).color(egui::Color32::GRAY));
+                                ui.label(
+                                    egui::RichText::new(format!("Game {}", game.game_id))
+                                        .size(11.0)
+                                        .color(egui::Color32::from_rgb(200, 160, 255)),
+                                );
+                            });
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let is_active = game.status == "Active";
+                            if ui
+                                .add_enabled(
+                                    is_active,
+                                    egui::Button::new(
+                                        egui::RichText::new("Watch")
+                                            .size(12.0)
+                                            .color(egui::Color32::WHITE)
+                                            .strong(),
+                                    )
+                                    .fill(if is_active {
+                                        egui::Color32::from_rgb(60, 100, 160)
+                                    } else {
+                                        egui::Color32::from_rgb(60, 60, 60)
+                                    })
+                                    .corner_radius(4.0)
+                                    .min_size(egui::vec2(60.0, 28.0)),
+                                )
+                                .clicked()
+                            {
+                                if let Some(ref mut w) = spectate_writer {
+                                    w.write(crate::multiplayer::spectator::SpectateViaLinkEvent {
+                                        game_id: game.game_id.to_string(),
+                                        details: Some(
+                                            crate::multiplayer::spectator::SpectatorMatchDetails {
+                                                tournament_name: Some(game.tournament_name.clone()),
+                                                round: Some(game.round),
+                                                white: Some(game.white_label()),
+                                                black: Some(game.black_label()),
+                                            },
+                                        ),
+                                    });
+                                }
+                            }
+                            ui.label(
+                                egui::RichText::new(&game.status)
+                                    .size(11.0)
+                                    .color(status_color)
+                                    .strong(),
+                            );
                         });
                     });
                 });
@@ -1919,19 +2116,52 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                     }
                                 }
 
-                                // Watch button stub — shown for active tournaments
+                                // Watch Live — on-chain games of this tournament, spectatable
+                                // through the delay-gated feed while Active.
                                 if t.status.to_lowercase().contains("active") {
+                                    let games: Vec<_> = ctx.tournament_client.as_ref()
+                                        .map(|tc| tc.tournament_games.iter()
+                                            .filter(|g| g.tournament_id == t.tournament_id)
+                                            .cloned()
+                                            .collect())
+                                        .unwrap_or_default();
                                     ui.add_space(6.0);
-                                    let watch_btn = ui.add_enabled(
-                                        false,
-                                        egui::Button::new(
-                                            egui::RichText::new("  Watch Live").size(12.0).color(egui::Color32::from_gray(120)).strong()
-                                        )
-                                        .fill(egui::Color32::from_rgb(40, 40, 60))
-                                        .corner_radius(5.0)
-                                        .min_size(egui::vec2(120.0, 28.0)),
-                                    );
-                                    watch_btn.on_disabled_hover_text("Live spectating — coming soon");
+                                    if games.is_empty() {
+                                        ui.label(egui::RichText::new("No games on-chain yet for this round.").size(11.0).color(egui::Color32::from_gray(140)).italics());
+                                    }
+                                    for game in &games {
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new(format!(
+                                                "R{}  {} vs {}",
+                                                game.round + 1,
+                                                game.white_label(),
+                                                game.black_label(),
+                                            )).size(11.0).color(egui::Color32::from_gray(190)));
+                                            let is_active = game.status == "Active";
+                                            let label = if is_active { "Watch Live" } else { &game.status };
+                                            if ui.add_enabled(
+                                                is_active,
+                                                egui::Button::new(
+                                                    egui::RichText::new(label).size(11.0).color(egui::Color32::WHITE).strong()
+                                                )
+                                                .fill(if is_active { egui::Color32::from_rgb(60, 100, 160) } else { egui::Color32::from_rgb(50, 50, 60) })
+                                                .corner_radius(5.0)
+                                                .min_size(egui::vec2(90.0, 24.0)),
+                                            ).clicked() {
+                                                if let Some(ref mut w) = ctx.spectate_events {
+                                                    w.write(crate::multiplayer::spectator::SpectateViaLinkEvent {
+                                                        game_id: game.game_id.to_string(),
+                                                        details: Some(crate::multiplayer::spectator::SpectatorMatchDetails {
+                                                            tournament_name: Some(game.tournament_name.clone()),
+                                                            round: Some(game.round),
+                                                            white: Some(game.white_label()),
+                                                            black: Some(game.black_label()),
+                                                        }),
+                                                    });
+                                                }
+                                            }
+                                        });
+                                    }
                                 }
 
                                 // Register button — only shown when status is "registration"

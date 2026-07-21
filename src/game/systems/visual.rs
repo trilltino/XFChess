@@ -144,7 +144,7 @@ pub fn animate_piece_movement(
 
 /// System to animate captured pieces with a parabolic arc, spin, and scale-to-zero.
 ///
-/// # Animation phases (all simultaneous over 0.45 s)
+/// # Animation phases (all simultaneous over the `FadingCapture` timer's duration, 0.75 s)
 ///
 /// - **Arc**: piece rises to `arc_height` at t=0.5, then falls back toward the board.
 ///   Uses a parabolic curve: `y_offset = arc_height * 4t(1-t)`.

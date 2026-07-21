@@ -20,10 +20,28 @@ use crate::multiplayer::traits::{Message, MessageReader, MessageWriter};
 use crate::multiplayer::TokioRuntime;
 use bevy::prelude::*;
 
+/// Who/what is being watched — carried alongside a spectate request when the
+/// UI knows it (tournament lists), absent for bare deep links.
+#[derive(Debug, Clone, Default)]
+pub struct SpectatorMatchDetails {
+    pub tournament_name: Option<String>,
+    /// 0-based round index (display as round + 1).
+    pub round: Option<u8>,
+    /// Display labels (username or truncated pubkey).
+    pub white: Option<String>,
+    pub black: Option<String>,
+}
+
+/// Resource holding the current spectated match's details for the HUD.
+#[derive(Resource, Default)]
+pub struct SpectatorMatchInfo(pub SpectatorMatchDetails);
+
 /// Deep-link event fired when OS / CLI passes `xfchess://spectate/{game_id}`.
 #[derive(Message, Debug, Clone)]
 pub struct SpectateViaLinkEvent {
     pub game_id: String,
+    /// Match context when known (tournament watch buttons); None for deep links.
+    pub details: Option<SpectatorMatchDetails>,
 }
 
 /// Parse a spectate link.
@@ -87,6 +105,7 @@ impl Plugin for SpectatorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpectatorSession>()
             .init_resource::<SpectatorClockState>()
+            .init_resource::<SpectatorMatchInfo>()
             .add_message::<SpectateViaLinkEvent>()
             .add_systems(
                 Update,
@@ -111,12 +130,14 @@ impl Plugin for SpectatorPlugin {
 fn handle_spectate_link(
     mut events: MessageReader<SpectateViaLinkEvent>,
     mut session: ResMut<SpectatorSession>,
+    mut match_info: ResMut<SpectatorMatchInfo>,
     mut game_mode: ResMut<GameMode>,
     mut next_state: ResMut<NextState<GameState>>,
     tokio: Res<TokioRuntime>,
 ) {
     for ev in events.read() {
         info!("[spectator] Starting spectate for game {}", ev.game_id);
+        match_info.0 = ev.details.clone().unwrap_or_default();
         session.game_id = Some(ev.game_id.clone());
         session.applied_move_count = 0;
         session.poll_timer = 0.0;

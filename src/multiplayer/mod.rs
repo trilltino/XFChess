@@ -88,7 +88,7 @@ impl Plugin for MultiplayerPlugin {
             rollup::bridge::RollupNetworkBridgePlugin,
             solana::integration::SolanaIntegrationPlugin,
             solana::lobby::SolanaLobbyPlugin,
-            solana::wager_rate::SolGbpRatePlugin,
+            solana::wager_rate::SolUsdRatePlugin,
         ));
 
         // 3. Register core orchestration systems

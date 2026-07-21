@@ -449,12 +449,6 @@ async fn http_server(
     .await
   }
 
-  // POST /api/open-tournament-admin — opens the tournament admin window from within the game
-  async fn api_open_tournament_admin(State(s): State<LocalState>) -> impl IntoResponse {
-    open_tournament_admin(&s.app);
-    StatusCode::OK
-  }
-
   // POST /api/open-profile-step — game client calls this when user tries to wager without
   // an on-chain profile. Sets a flag that the wallet-ui polls, and opens the popup.
   async fn api_open_profile_step(State(s): State<LocalState>) -> impl IntoResponse {
@@ -643,10 +637,6 @@ async fn http_server(
     .route("/api/auth/init-profile-tx", post(api_init_profile_tx))
     .route("/api/auth/broadcast-tx", post(api_broadcast_tx))
     .route("/api/game/launch", post(api_game_launch))
-    .route(
-      "/api/open-tournament-admin",
-      post(api_open_tournament_admin),
-    )
     .route("/api/open-profile-step", post(api_open_profile_step))
     .route("/api/needs-profile-step", get(api_needs_profile_step))
     // Tournament admin UI (built dist, rendered in the desktop admin window)
@@ -722,12 +712,28 @@ fn open_in_browser(url: &str) {
       }
     }
 
-    let chrome_paths = [
-      r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-      r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-    ];
+    // Chrome's per-user (non-admin) installer puts the binary under
+    // %LOCALAPPDATA% instead of Program Files — that's actually the more
+    // common layout on end-user machines than the two Program Files paths
+    // below, so check it first. Fall back to Edge (bundled with every
+    // Windows 10/11 install) in --app mode before giving up on a compact
+    // popup entirely — without one of these, a Chrome-less machine falls
+    // through to `open::that`, which opens a normal maximized browser tab
+    // instead of the small popup this UI is designed for.
+    let local_appdata_chrome = std::env::var("LOCALAPPDATA")
+      .ok()
+      .map(|v| format!(r"{v}\Google\Chrome\Application\chrome.exe"));
+    let mut browser_paths: Vec<&str> = Vec::new();
+    if let Some(ref p) = local_appdata_chrome {
+      browser_paths.push(p.as_str());
+    }
+    browser_paths.push(r"C:\Program Files\Google\Chrome\Application\chrome.exe");
+    browser_paths.push(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe");
+    browser_paths.push(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe");
+    browser_paths.push(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe");
+
     let app_flag = format!("--app={}", url_ts);
-    for path in &chrome_paths {
+    for path in &browser_paths {
       if std::path::Path::new(path).exists() {
         match Command::new(path)
           .args([&app_flag, "--window-size=460,720"])
@@ -738,12 +744,15 @@ fn open_in_browser(url: &str) {
             *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
             std::thread::spawn(move || force_foreground_window(pid));
           }
-          Err(e) => tracing::warn!("[WalletPopup] failed to spawn chrome: {e}"),
+          Err(e) => tracing::warn!("[WalletPopup] failed to spawn {path}: {e}"),
         }
         return;
       }
     }
-    // Fallback: default browser (cross-platform via the `open` crate).
+    // Last resort: default browser (cross-platform via the `open` crate).
+    // This opens a normal, non-compact browser window/tab — expected only
+    // when neither Chrome nor Edge is found at any known path.
+    tracing::warn!("[WalletPopup] no Chrome/Edge found at known paths — falling back to default browser (will not be a compact popup)");
     let _ = open::that(&url_ts);
   }
   #[cfg(not(windows))]

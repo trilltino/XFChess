@@ -279,7 +279,7 @@ pub fn spawn_menu_bg_pieces(
     // Fresh starting position ⇒ reset the replay so a (re)spawn always starts the
     // Immortal-Zugzwang sequence from move 1 rather than resuming a stale ply.
     anim.ply_index = 0;
-    anim.end_pause = 0.0;
+    anim.reset = super::board_animation::ResetPhase::Idle;
     anim.move_timer = 2.5;
     anim.active = true;
 }
@@ -441,6 +441,7 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
 
     render_title_logo(ctx, cx);
     render_hint_bar(ctx);
+    render_board_caption(ctx);
 
     // ── Per-panel fade-in ────────────────────────────────────────────────────
     // Detect panel changes via egui temp storage; when the panel changes,
@@ -612,6 +613,22 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
+        });
+}
+
+/// Caption under the ambient board naming the game it replays
+/// (Sämisch vs. Nimzowitsch, Copenhagen 1923 — the Immortal Zugzwang Game).
+/// The board is horizontally centred on screen, so bottom-center sits under it.
+fn render_board_caption(ctx: &egui::Context) {
+    egui::Area::new("board_caption".into())
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0))
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new("Sämisch vs. Nimzowitsch, Copenhagen 1923")
+                    .size(13.0)
+                    .italics()
+                    .color(egui::Color32::from_rgba_unmultiplied(216, 202, 168, 185)),
+            );
         });
 }
 
@@ -1386,7 +1403,6 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ui.add_space(14.0);
 
     const W: f32 = 280.0;
-    const SP: f32 = 6.0;
 
     let snd = cx.menu_sounds.as_deref();
 
@@ -1395,30 +1411,6 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     if item(ui, "Keyboard Shortcuts", W) {
         play_click(&mut cx.commands, snd);
         cx.competitive_menu.show_controls_popup = true;
-    }
-    ui.add_space(SP + 4.0);
-
-    section(ui, "Admin");
-
-    if item(ui, "Tournament Admin", W) {
-        play_click(&mut cx.commands, snd);
-        std::thread::spawn(|| {
-            let port: u16 = std::env::var("XFCHESS_WALLET_PORT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(7454);
-            if let Ok(client) = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(2))
-                .build()
-            {
-                let _ = client
-                    .post(format!(
-                        "http://127.0.0.1:{}/api/open-tournament-admin",
-                        port
-                    ))
-                    .send();
-            }
-        });
     }
 }
 
@@ -1555,26 +1547,20 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             play_click(&mut cx.commands, snd);
             #[cfg(feature = "solana")]
             {
-                use crate::multiplayer::solana::integration::state::ProfileStatus;
-                let profile_ready = cx
-                    .solana_state
-                    .as_ref()
-                    .map(|s| s.profile_status == ProfileStatus::HasProfileWithUsername)
-                    .unwrap_or(false);
-                if profile_ready {
-                    if let Some(lobby) = cx.solana_lobby.as_mut() {
-                        lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
-                        // Fresh entry from the main menu should always show the
-                        // create-game form, not a stale WaitingForOpponent/Success
-                        // left over from an earlier create attempt this session.
-                        lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
-                    }
-                    cx.menu_state.set(crate::core::MenuState::SolanaLobby);
+                if let Some(lobby) = cx.solana_lobby.as_mut() {
+                    lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
+                    lobby.allow_create = true;
+                    // Fresh entry from the main menu should always show the
+                    // create-game form, not a stale WaitingForOpponent/Success
+                    // left over from an earlier create attempt this session.
+                    lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
                 }
-                // If the profile isn't ready yet, do nothing here — the on-chain
-                // profile check (profile_check.rs) opens the Tauri profile step
-                // on its own as soon as it resolves. Firing a second popup here
-                // was the source of the "click Wagered PVP -> stray login popup" bug.
+                // Always open the lobby screen. If the on-chain profile isn't
+                // ready yet, the profile check (profile_check.rs) opens the
+                // Tauri profile step on its own as soon as it resolves — do NOT
+                // fire a popup from here (that was the "click Wagered PVP ->
+                // stray login popup" bug).
+                cx.menu_state.set(crate::core::MenuState::SolanaLobby);
             }
             #[cfg(not(feature = "solana"))]
             cx.menu_state.set(crate::core::MenuState::BraidLobby);
@@ -1587,6 +1573,8 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             {
                 if let Some(lobby) = cx.solana_lobby.as_mut() {
                     lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Browse;
+                    // Finding a game is join/browse only — hide the Create tab.
+                    lobby.allow_create = false;
                     lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
                 }
                 cx.menu_state.set(crate::core::MenuState::SolanaLobby);
@@ -2033,24 +2021,16 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         .map(|d| (d.sol_usd_rate, d.sol_gbp_rate))
         .unwrap_or((0.0, 0.0));
 
-    // 0 = SOL, 1 = USD, 2 = GBP — persisted in egui temp storage across frames.
+    // 0 = USD (default — the primary display currency throughout the app),
+    // 1 = SOL, 2 = GBP — persisted in egui temp storage across frames.
     let currency_id = egui::Id::new("balance_currency");
     let currency_mode = ctx.data(|d| d.get_temp::<u8>(currency_id).unwrap_or(0));
 
     let (balance_text, balance_color) = match currency_mode {
-        1 => {
-            if sol_usd_rate > 0.0 {
-                (
-                    format!("${:.2}", sol_balance * sol_usd_rate),
-                    egui::Color32::from_rgb(20, 241, 149),
-                )
-            } else {
-                (
-                    format!("{:.3} SOL", sol_balance),
-                    egui::Color32::from_rgb(20, 241, 149),
-                )
-            }
-        }
+        1 => (
+            format!("{:.3} SOL", sol_balance),
+            egui::Color32::from_rgb(20, 241, 149),
+        ),
         2 => {
             if sol_gbp_rate > 0.0 {
                 (
@@ -2064,10 +2044,19 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                 )
             }
         }
-        _ => (
-            format!("{:.3} SOL", sol_balance),
-            egui::Color32::from_rgb(20, 241, 149),
-        ),
+        _ => {
+            if sol_usd_rate > 0.0 {
+                (
+                    format!("${:.2}", sol_balance * sol_usd_rate),
+                    egui::Color32::from_rgb(20, 241, 149),
+                )
+            } else {
+                (
+                    format!("{:.3} SOL", sol_balance),
+                    egui::Color32::from_rgb(20, 241, 149),
+                )
+            }
+        }
     };
 
     egui::Area::new("wallet_hud".into())

@@ -184,6 +184,10 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_020 = include_str!("../../migrations/020_casual_games_and_sponsorship.sql");
     run_script(&pools.session_pool, migration_020, "020").await?;
 
+    // ── Migration 021: active_sessions table (disconnect recovery) ───────────
+    let migration_021 = include_str!("../../migrations/021_active_sessions.sql");
+    run_script(&pools.session_pool, migration_021, "021").await?;
+
     info!("[Database] All migrations completed successfully");
     Ok(())
 }

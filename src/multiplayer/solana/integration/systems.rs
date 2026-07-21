@@ -218,6 +218,7 @@ pub fn update_wallet_balance(
 /// Background-fetch SOL/USD rate from CoinGecko and cache it in [`SolanaIntegrationState`].
 pub fn update_wallet_usd_rate(
     mut solana_state: ResMut<SolanaIntegrationState>,
+    tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
     time: Res<Time>,
     mut timer: Local<f32>,
     mut rx: Local<Option<crossbeam_channel::Receiver<Result<f64, String>>>>,
@@ -256,46 +257,44 @@ pub fn update_wallet_usd_rate(
     let (tx, receiver) = crossbeam_channel::bounded(1);
     *rx = Some(receiver);
 
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            let _ = tx.send(fetch_sol_usd_rate().await);
-        })
-        .detach();
+    tokio_runtime.0.spawn(async move {
+        let _ = tx.send(fetch_sol_usd_rate().await);
+    });
 }
 
-const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
-
+/// Fetches the live SOL/USD rate from the signing backend's cached
+/// `/api/rates/all` — the same cache the admin panel, tournament creation,
+/// and the in-game wager UI all read, so every USD figure in the app comes
+/// from one source instead of each surface hitting its own third-party feed.
 async fn fetch_sol_usd_rate() -> Result<f64, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
         .map_err(|e| format!("HTTP client build error: {}", e))?;
 
-    // Jupiter price API — no key required, returns derived price from on-chain liquidity
-    let url = format!("https://api.jup.ag/price/v2?ids={}", SOL_MINT);
+    let url = format!(
+        "{}/api/rates/all",
+        crate::multiplayer::network::vps::vps_base()
+    );
 
     let resp = client
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("Jupiter fetch error: {}", e))?;
+        .map_err(|e| format!("backend rates fetch error: {}", e))?;
 
     if !resp.status().is_success() {
-        return Err(format!("Jupiter HTTP {}", resp.status()));
+        return Err(format!("backend rates HTTP {}", resp.status()));
     }
 
     let json: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("Jupiter JSON parse error: {}", e))?;
+        .map_err(|e| format!("backend rates JSON parse error: {}", e))?;
 
-    let price = json
-        .get("data")
-        .and_then(|d| d.get(SOL_MINT))
-        .and_then(|token| token.get("price"))
-        .and_then(|p| p.as_str())
-        .and_then(|s| s.parse::<f64>().ok())
-        .ok_or("Missing price in Jupiter response")?;
+    let price = json["rates"]["usd"]
+        .as_f64()
+        .ok_or("Missing rates.usd in backend response")?;
 
     info!("[SOLANA] SOL/USD: ${:.2}", price);
     Ok(price)

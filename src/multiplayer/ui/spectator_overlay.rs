@@ -5,9 +5,9 @@
 //! - Live white/black clocks (interpolated locally between Braid broadcasts)
 //! - A rolling chat log fed by `OnlineChatMessage` events
 
-use crate::core::states::GameMode;
+use crate::core::states::{GameMode, GameState};
 use crate::multiplayer::network::online_game_session::OnlineChatMessage;
-use crate::multiplayer::spectator::{SpectatorClockState, SpectatorSession};
+use crate::multiplayer::spectator::{SpectatorClockState, SpectatorMatchInfo, SpectatorSession};
 use crate::multiplayer::traits::MessageReader;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -49,18 +49,23 @@ fn drain_braid_chat_to_spectator_log(
 
 pub fn spectator_hud_system(
     mut contexts: EguiContexts,
-    game_mode: Res<GameMode>,
-    session: Res<SpectatorSession>,
+    mut game_mode: ResMut<GameMode>,
+    mut session: ResMut<SpectatorSession>,
+    match_info: Res<SpectatorMatchInfo>,
     clock: Res<SpectatorClockState>,
-    chat_log: Res<SpectatorChatLog>,
+    mut chat_log: ResMut<SpectatorChatLog>,
+    mut next_state: ResMut<NextState<GameState>>,
 ) {
     if *game_mode != GameMode::Spectator {
         return;
     }
-    let Some(ref game_id) = session.game_id else {
+    let Some(game_id) = session.game_id.clone() else {
         return;
     };
     let Ok(ctx) = contexts.ctx_mut() else { return };
+
+    let info = &match_info.0;
+    let mut leave_clicked = false;
 
     egui::TopBottomPanel::bottom("spectator_hud")
         .frame(egui::Frame {
@@ -70,28 +75,44 @@ pub fn spectator_hud_system(
         })
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // Left: "Spectating" label + proxy URL for web viewers
+                // Left: matchup (player names when known) + tournament context.
+                let title = match (&info.white, &info.black) {
+                    (Some(w), Some(b)) => format!("{} vs {}", w, b),
+                    (Some(w), None) => format!("Watching {}", w),
+                    _ => format!("Spectating game {}", game_id),
+                };
                 ui.label(
-                    egui::RichText::new(format!("Spectating game {}", game_id))
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(180, 180, 180))
-                        .italics(),
+                    egui::RichText::new(title)
+                        .size(13.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
                 );
-                ui.label(
-                    egui::RichText::new(format!(
-                        "  •  http://localhost:8181/xfchess-game/{}/moves",
-                        game_id
-                    ))
-                    .size(10.0)
-                    .color(egui::Color32::from_rgb(100, 160, 100))
-                    .monospace(),
-                );
+                if let Some(ref tname) = info.tournament_name {
+                    let round_str = info
+                        .round
+                        .map(|r| format!(" · Round {}", r + 1))
+                        .unwrap_or_default();
+                    ui.label(
+                        egui::RichText::new(format!("{}{}", tname, round_str))
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(255, 200, 100))
+                            .italics(),
+                    );
+                }
+
+                // Feed badge: delayed (anti-ghosting HTTP feed) vs live gossip.
+                let (badge, badge_color) = if !session.delay_checked {
+                    ("· CONNECTING", egui::Color32::GRAY)
+                } else if session.delayed {
+                    ("· DELAYED FEED", egui::Color32::from_rgb(220, 180, 60))
+                } else {
+                    ("· LIVE", egui::Color32::from_rgb(120, 220, 120))
+                };
+                ui.label(egui::RichText::new(badge).size(11.0).color(badge_color).strong());
 
                 ui.separator();
 
-                // Centre: clocks
-                let white_s = clock.white_ms / 1000;
-                let black_s = clock.black_ms / 1000;
+                // Centre: clocks, labelled with names when known.
                 let fmt_clock = |ms: u64| -> String {
                     let s = ms / 1000;
                     format!("{:02}:{:02}", s / 60, s % 60)
@@ -106,22 +127,40 @@ pub fn spectator_hud_system(
                 } else {
                     egui::Color32::GRAY
                 };
+                let white_tag = info.white.as_deref().unwrap_or("White");
+                let black_tag = info.black.as_deref().unwrap_or("Black");
                 ui.label(
-                    egui::RichText::new(format!("⬜ {}", fmt_clock(clock.white_ms)))
+                    egui::RichText::new(format!("⬜ {} {}", white_tag, fmt_clock(clock.white_ms)))
                         .size(13.0)
                         .color(white_color)
                         .strong(),
                 );
                 ui.label(
-                    egui::RichText::new(format!("⬛ {}", fmt_clock(clock.black_ms)))
+                    egui::RichText::new(format!("⬛ {} {}", black_tag, fmt_clock(clock.black_ms)))
                         .size(13.0)
                         .color(black_color)
                         .strong(),
                 );
 
-                // Suppress unused variable warnings when clocks are zero.
-                let _ = white_s;
-                let _ = black_s;
+                // Right: leave spectating.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Leave")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            )
+                            .fill(egui::Color32::from_rgb(120, 50, 50))
+                            .corner_radius(4.0)
+                            .min_size(egui::vec2(60.0, 24.0)),
+                        )
+                        .clicked()
+                    {
+                        leave_clicked = true;
+                    }
+                });
             });
 
             // Chat log (last N messages)
@@ -144,4 +183,15 @@ pub fn spectator_hud_system(
                 }
             }
         });
+
+    // Leave: tear down the spectator session and return to the main menu.
+    if leave_clicked {
+        session.game_id = None;
+        session.pending_moves.clear();
+        session.applied_move_count = 0;
+        session.delay_result = None;
+        chat_log.messages.clear();
+        *game_mode = GameMode::SinglePlayer;
+        next_state.set(GameState::MainMenu);
+    }
 }

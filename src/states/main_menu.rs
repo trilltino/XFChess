@@ -912,9 +912,13 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
         return (0.0, 0.0, 0.0);
     }
 
-    // Fetch both USD and GBP rates from the local backend in one call
+    // Fetch both USD and GBP rates from the backend in one call. Must go
+    // through vps_base() (not a hardcoded localhost URL) — release builds
+    // run against the production backend, and a literal 127.0.0.1 here
+    // always fails for real players, silently losing the USD conversion.
+    let rates_url = format!("{}/api/rates/all", crate::multiplayer::network::vps::vps_base());
     let rates_json = client
-        .get("http://127.0.0.1:8090/api/rates/all")
+        .get(rates_url)
         .send()
         .ok()
         .and_then(|r| r.json::<serde_json::Value>().ok());

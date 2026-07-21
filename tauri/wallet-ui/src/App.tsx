@@ -67,6 +67,43 @@ async function fetchProfileStatus(token: string): Promise<ProfileStatus> {
   return resp.json();
 }
 
+async function fetchMe(token: string): Promise<{ username: string }> {
+  const resp = await fetch(`${API_BASE}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) throw new Error(`auth/me failed: ${resp.status}`);
+  return resp.json();
+}
+
+/**
+ * Whether this wallet already has a real, user-chosen display name — checked
+ * two ways because "profile" means two different things here:
+ *  - on-chain PlayerProfile.username_set (ProfileStatus) — only becomes true
+ *    once the player's first wager creates the on-chain profile.
+ *  - the off-chain account username (GET /auth/me) — set immediately by
+ *    ProfileStep's PATCH /api/auth/username, with no wager required.
+ * A player who already completed ProfileStep but hasn't wagered yet has a
+ * real off-chain name and an unset on-chain one — checking sync-profile
+ * alone would re-show "Choose Your Handle" on every reconnect. Wallet
+ * registration also seeds a throwaway `pubkey.slice(0, 8)` placeholder
+ * (see WalletStep's /api/auth/register call) into that same off-chain
+ * field, so it must be excluded here or every fresh wallet would look like
+ * it already has a name.
+ */
+async function resolveExistingUsername(
+  token: string,
+  pubkey: string,
+  onChain: ProfileStatus,
+): Promise<string | null> {
+  if (onChain.username_set && onChain.username) return onChain.username;
+  try {
+    const me = await fetchMe(token);
+    const registrationPlaceholder = pubkey.slice(0, 8);
+    if (me.username && me.username !== registrationPlaceholder) return me.username;
+  } catch { /* /auth/me unavailable — caller falls back to needsProfile */ }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -985,19 +1022,22 @@ function Onboarding() {
           if (token) {
             try {
               const profileStatus = await fetchProfileStatus(token);
-              if (profileStatus.username_set && profileStatus.username) {
-                resolvedUsername = profileStatus.username;
+              const existing = await resolveExistingUsername(token, pk, profileStatus);
+              if (existing) {
+                resolvedUsername = existing;
                 localStorage.setItem("xfchess_username", resolvedUsername);
                 needsProfile = false;
               }
             } catch { /* on-chain lookup failed — treat as needing profile */ }
           }
 
-          // 3. If the game explicitly asked for profile creation, or the
-          // on-chain profile isn't complete, go straight to the profile step
-          // — never guess a name and launch past it.
-          const forcedStep = new URLSearchParams(window.location.search).get("step");
-          if (forcedStep === "profile" || needsProfile) {
+          // 3. Only show the profile step when we genuinely don't have a name
+          // yet. The game client can force `?step=profile` open (e.g. from
+          // "Wagered PVP", which only checks the on-chain profile), but that
+          // must never override a name we already resolved above — otherwise
+          // a player who already picked a handle gets asked to invent a new
+          // one every time, just because they haven't wagered yet.
+          if (needsProfile) {
             setReady(true);
             setStep("profile");
             return;
@@ -1069,18 +1109,19 @@ function Onboarding() {
       // `user` here may just be the throwaway pubkey-slice placeholder
       // WalletStep sends as a required-but-unchosen value on first
       // registration (see handleConnect's register call) — never treat it
-      // as a real display name. The wallet signature above is the only
-      // barrier to get here — from here on, routing is decided purely by
-      // the on-chain PlayerProfile (via sync-profile, which decodes it
-      // directly), not by any backend heuristic or that placeholder. That's
-      // what the game client's own profile check also uses, so the two
-      // can't disagree and pop conflicting screens.
+      // as a real display name directly. resolveExistingUsername checks
+      // both the on-chain PlayerProfile (sync-profile) and the off-chain
+      // account username (auth/me, set by a prior ProfileStep completion
+      // that hasn't been followed by a wager yet), excluding that same
+      // placeholder — so a returning player with a chosen handle but no
+      // on-chain profile isn't asked to pick a new one.
       let resolvedUser = user;
       let needsProfile = true;
       try {
         const status = await fetchProfileStatus(token);
-        if (status.username_set && status.username) {
-          resolvedUser = status.username;
+        const existing = await resolveExistingUsername(token, nextPubkey, status);
+        if (existing) {
+          resolvedUser = existing;
           localStorage.setItem("xfchess_username", resolvedUser);
           setUsername(resolvedUser);
           needsProfile = false;

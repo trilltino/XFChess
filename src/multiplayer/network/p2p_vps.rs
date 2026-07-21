@@ -434,6 +434,7 @@ fn handle_vps_responses(
                             lobby.game_id_input = game_id.clone();
                             lobby.wager_sol = stake as f32;
                             lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
+                            lobby.allow_create = true;
                         }
                     }
                     #[cfg(not(feature = "solana"))]

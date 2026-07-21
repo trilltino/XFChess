@@ -51,8 +51,15 @@ pub struct GameOverPayoutInfo {
 }
 
 impl GameOverPayoutInfo {
-    fn format_sol(lamports: u64) -> String {
-        format!("{:.3} SOL", lamports as f64 / 1_000_000_000.0)
+    /// USD-primary formatting for a lamport amount — SOL stays the secondary,
+    /// parenthetical figure. Falls back to SOL-only when no live rate is
+    /// cached yet (this popup should never block on a price feed).
+    fn format_sol_usd(lamports: u64, usd_per_sol: Option<f64>) -> String {
+        let sol = lamports as f64 / 1_000_000_000.0;
+        match usd_per_sol.filter(|r| *r > 0.0) {
+            Some(rate) => format!("${:.2} (≈{:.3} SOL)", sol * rate, sol),
+            None => format!("{:.3} SOL", sol),
+        }
     }
 
     pub fn is_wager_game(&self) -> bool {
@@ -288,7 +295,15 @@ pub fn game_over_popup_system(
     time: Res<Time>,
     mut commands: Commands,
     tokio_runtime: Option<Res<crate::multiplayer::TokioRuntime>>,
+    #[cfg(feature = "solana")] sol_usd_rate: Option<
+        Res<crate::multiplayer::solana::wager_rate::SolUsdRate>,
+    >,
 ) {
+    #[cfg(feature = "solana")]
+    let usd_per_sol = sol_usd_rate.as_ref().and_then(|r| r.snapshot()).map(|s| s.usd_per_sol);
+    #[cfg(not(feature = "solana"))]
+    let usd_per_sol: Option<f64> = None;
+
     anim.elapsed += time.delta_secs();
     let t = anim.t();
     let alpha = (220.0 * t) as u8;
@@ -466,8 +481,9 @@ pub fn game_over_popup_system(
                                         let sign = if *lamports < 0 { "- " } else { "+ " };
                                         let color =
                                             if *is_positive { text_green } else { text_red };
-                                        let sol = GameOverPayoutInfo::format_sol(
+                                        let sol = GameOverPayoutInfo::format_sol_usd(
                                             (*lamports).unsigned_abs(),
+                                            usd_per_sol,
                                         );
                                         ui.label(
                                             egui::RichText::new(format!("{}{}", sign, sol))
@@ -512,9 +528,12 @@ pub fn game_over_popup_system(
                                         );
                                     } else {
                                         ui.label(
-                                            egui::RichText::new(GameOverPayoutInfo::format_sol(
-                                                info.player_winnings(),
-                                            ))
+                                            egui::RichText::new(
+                                                GameOverPayoutInfo::format_sol_usd(
+                                                    info.player_winnings(),
+                                                    usd_per_sol,
+                                                ),
+                                            )
                                             .size(16.0)
                                             .strong()
                                             .color(text_gold),
@@ -541,7 +560,10 @@ pub fn game_over_popup_system(
                                 ui.label(
                                     egui::RichText::new(format!(
                                         "Both players receive: {}",
-                                        GameOverPayoutInfo::format_sol(info.player_winnings())
+                                        GameOverPayoutInfo::format_sol_usd(
+                                            info.player_winnings(),
+                                            usd_per_sol
+                                        )
                                     ))
                                     .size(11.0)
                                     .italics()

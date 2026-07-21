@@ -113,9 +113,12 @@ pub fn handle_profile_check_tasks(mut solana_state: ResMut<SolanaIntegrationStat
                     if status == ProfileStatus::NoProfile
                         || status == ProfileStatus::HasProfileNoUsername
                     {
-                        // Profile creation is handled in the Tauri popup — open it via bridge.
-                        info!("[PROFILE] Profile incomplete — opening Tauri profile step");
-                        crate::multiplayer::solana::tauri_signer::open_profile_step();
+                        // Only cache the status here. Opening the Tauri profile
+                        // popup is reserved for explicit user actions (e.g.
+                        // clicking Wagered PVP) — auto-opening from this
+                        // background check raced the wallet sign-in popup and
+                        // showed "Choose Your Handle" before auth completed.
+                        info!("[PROFILE] Profile incomplete — will prompt when the user starts a wagered flow");
                     }
                 }
                 Err(e) => {

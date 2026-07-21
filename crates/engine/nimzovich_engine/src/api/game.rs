@@ -17,6 +17,22 @@ use crate::utils;
 /// Create a new game with initial position
 #[cfg(feature = "std")]
 pub fn new_game() -> Game {
+    new_game_with_tt_capacity(TTE_SIZE)
+}
+
+/// Like [`new_game`], but allocates no transposition table (zero-capacity).
+///
+/// The TT (`tt: Vec<TTE>`) is the dominant cost of `new_game` — at `TTE_SIZE`
+/// native entries it's a multi-GB allocation + zero-fill. Callers that only
+/// replay moves for SAN/eval/PGN purposes (never call `reply`/search on this
+/// `Game`) don't need it at all; use this instead to skip that cost entirely.
+#[cfg(feature = "std")]
+pub fn new_game_no_tt() -> Game {
+    new_game_with_tt_capacity(0)
+}
+
+#[cfg(feature = "std")]
+fn new_game_with_tt_capacity(tt_capacity: usize) -> Game {
     let mut game = Game {
         board: init_board(),
         move_counter: 0,
@@ -38,9 +54,9 @@ pub fn new_game() -> Game {
         black_pawn: utils::create_empty_move_table_array(),
 
         #[cfg(feature = "search")]
-        tt: vec![TTE::default(); TTE_SIZE],
+        tt: vec![TTE::default(); tt_capacity],
         #[cfg(feature = "search")]
-        tt_capacity: TTE_SIZE,
+        tt_capacity,
 
         #[cfg(feature = "search")]
         zobrist_table: [[0u64; 64]; 12],
@@ -56,7 +72,7 @@ pub fn new_game() -> Game {
         tte_hit: 0,
         tte_put: 0,
         tte_miss: 0,
-        cache_size_bytes: core::mem::size_of::<TTE>() * TTE_SIZE,
+        cache_size_bytes: core::mem::size_of::<TTE>() * tt_capacity,
 
         #[cfg(feature = "search")]
         killer_moves: [[None; 2]; MAX_DEPTH + 1],
@@ -166,6 +182,15 @@ pub fn reset_game(game: &mut Game) {
 #[cfg(feature = "std")]
 pub fn game_from_fen(fen: &str) -> Game {
     let mut game = new_game();
+    set_game_from_fen(&mut game, fen);
+    game
+}
+
+/// Like [`game_from_fen`], but via [`new_game_no_tt`] — no transposition table.
+/// For callers that only replay/inspect moves (SAN, eval) and never search.
+#[cfg(feature = "std")]
+pub fn game_from_fen_no_tt(fen: &str) -> Game {
+    let mut game = new_game_no_tt();
     set_game_from_fen(&mut game, fen);
     game
 }

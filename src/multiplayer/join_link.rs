@@ -71,7 +71,10 @@ pub fn dispatch_deep_link(
             host_node_id: node_id,
         });
     } else if let Some(game_id) = parse_spectate_link(url) {
-        spectate_events(SpectateViaLinkEvent { game_id });
+        spectate_events(SpectateViaLinkEvent {
+            game_id,
+            details: None,
+        });
     }
 }
 

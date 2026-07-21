@@ -25,14 +25,16 @@ pub struct MenuBgPieceAnim {
     pub duration: f32,
 }
 
-/// Slow opacity fade for a captured menu piece. Instead of vanishing instantly,
-/// a captured piece fades its (per-piece) material alpha 1→0 over `duration`,
-/// then hides. Requires each menu piece to own its own material handle (see
-/// `spawn_menu_bg_pieces`) so fading one never affects the others.
+/// Slow opacity fade for a menu piece. With `fade_in: false` (captures) the
+/// (per-piece) material alpha goes 1→0 over `duration`, then the piece hides.
+/// With `fade_in: true` (board reset) alpha goes 0→1, then the material is
+/// restored to opaque. Requires each menu piece to own its own material handle
+/// (see `spawn_menu_bg_pieces`) so fading one never affects the others.
 #[derive(Component)]
 pub struct MenuPieceFade {
     pub elapsed: f32,
     pub duration: f32,
+    pub fade_in: bool,
 }
 
 /// Advances capture fades: lerps each fading piece's material alpha to 0, then
@@ -51,7 +53,7 @@ pub fn animate_menu_piece_fades(
     for (e, mut fade, mat_handle, mut vis) in q.iter_mut() {
         fade.elapsed += time.delta_secs();
         let t = (fade.elapsed / fade.duration).clamp(0.0, 1.0);
-        let alpha = 1.0 - t;
+        let alpha = if fade.fade_in { t } else { 1.0 - t };
         if let Some(mut mat) = materials.get_mut(&mat_handle.0) {
             // Blend while fading so the alpha actually shows.
             mat.alpha_mode = AlphaMode::Blend;
@@ -59,7 +61,11 @@ pub fn animate_menu_piece_fades(
             mat.base_color = c;
         }
         if t >= 1.0 {
-            *vis = Visibility::Hidden;
+            if fade.fade_in {
+                restore_piece_material(&mut materials, &mat_handle.0);
+            } else {
+                *vis = Visibility::Hidden;
+            }
             commands.entity(e).remove::<MenuPieceFade>();
         }
     }
@@ -95,6 +101,20 @@ pub fn animate_menu_pieces(
     }
 }
 
+/// End-of-replay reset sequence: hang on the final position, fade every piece
+/// out, teleport them home while invisible, fade them back in, then loop.
+#[derive(Clone, Copy, PartialEq)]
+pub enum ResetPhase {
+    /// Replay in progress (or not yet finished).
+    Idle,
+    /// Holding on the final position; countdown in seconds.
+    Hang(f32),
+    /// Pieces fading out on the final position; countdown in seconds.
+    FadeOut(f32),
+    /// Pieces snapped home and fading back in; countdown in seconds.
+    FadeIn(f32),
+}
+
 /// Drives the Immortal Zugzwang Game animation on the menu background board.
 /// The move sequence itself is applied by the cinematic system.
 #[derive(Resource)]
@@ -103,8 +123,8 @@ pub struct BoardAnimator {
     pub ply_index: usize,
     /// Countdown (seconds) until the next ply is applied.
     pub move_timer: f32,
-    /// Countdown after the last move before the board resets.
-    pub end_pause: f32,
+    /// End-of-game reset sequence state.
+    pub reset: ResetPhase,
     /// Sparse entity map: board\[rank\]\[file\] = piece entity.
     pub board: [[Option<Entity>; 8]; 8],
     /// False until `spawn_menu_bg_pieces` populates `board`.
@@ -116,7 +136,7 @@ impl Default for BoardAnimator {
         Self {
             ply_index: 0,
             move_timer: 2.5,
-            end_pause: 0.0,
+            reset: ResetPhase::Idle,
             board: [[None; 8]; 8],
             active: false,
         }
@@ -139,8 +159,9 @@ pub(super) const ZUGZWANG_PGN: &str = "
 //
 // Replays ZUGZWANG_PGN on the full-size `MenuBg` board once the player presses
 // Enter. Captured pieces are *hidden* (not despawned) so the whole game can loop
-// without re-spawning: at the trailing pause every piece is snapped back to its
-// `MenuBgPieceHome` and revealed.
+// without re-spawning: after the final move the board hangs on the position,
+// then every piece fades out, is moved back to its `MenuBgPieceHome` while
+// invisible, and fades back in for the next loop.
 
 /// World position of a square on the `MenuBg` board (x = 7 − file, z = rank).
 /// Matches `spawn_menu_bg_pieces` and the cinematic's `square_to_world`.
@@ -171,11 +192,13 @@ fn ambient_plan() -> &'static [AmbientStep] {
 }
 
 fn zugzwang_steps() -> Vec<AmbientStep> {
-    use nimzovich_engine::{do_move, new_game, parse_pgn, san_to_move};
+    use nimzovich_engine::{do_move, new_game_no_tt, parse_pgn, san_to_move};
     let Ok(parsed) = parse_pgn(ZUGZWANG_PGN) else {
         return Vec::new();
     };
-    let mut game = new_game();
+    // No search ever runs on this Game (just replaying a fixed decorative
+    // PGN), so skip the multi-GB transposition table `new_game` allocates.
+    let mut game = new_game_no_tt();
     let mut steps = Vec::with_capacity(parsed.moves.len());
     for san in &parsed.moves {
         let Ok((s, d, _promo)) = san_to_move(&mut game, san) else {
@@ -239,31 +262,82 @@ pub fn animate_ambient_board(
         return;
     }
 
-    // Trailing pause after the final ply, then snap everything home and loop.
-    if anim.end_pause > 0.0 {
-        anim.end_pause -= time.delta_secs();
-        if anim.end_pause <= 0.0 {
-            anim.board = [[None; 8]; 8];
-            for (e, home, mut t, mut v, mat) in reset_q.iter_mut() {
-                commands
-                    .entity(e)
-                    .remove::<MenuBgPieceAnim>()
-                    .remove::<MenuPieceFade>();
-                // Captured pieces faded to transparent — restore them solid.
-                restore_piece_material(&mut materials, &mat.0);
-                t.translation = sq_world(home.file as usize, home.rank as usize);
-                *v = Visibility::Visible;
-                anim.board[home.rank as usize][home.file as usize] = Some(e);
-            }
-            anim.ply_index = 0;
-            anim.move_timer = 2.0;
-        }
-        return;
-    }
+    // How long the board hangs on the final position before resetting, and how
+    // long each side of the reset crossfade takes.
+    const HANG_SECS: f32 = 15.0;
+    const CROSSFADE_SECS: f32 = 1.5;
 
-    if anim.ply_index >= plan.len() {
-        anim.end_pause = 4.0;
-        return;
+    // End-of-game reset: hang → fade out → snap home invisible → fade in → loop.
+    match anim.reset {
+        ResetPhase::Idle => {
+            if anim.ply_index >= plan.len() {
+                anim.reset = ResetPhase::Hang(HANG_SECS);
+                return;
+            }
+        }
+        ResetPhase::Hang(t) => {
+            let t = t - time.delta_secs();
+            if t > 0.0 {
+                anim.reset = ResetPhase::Hang(t);
+            } else {
+                // Fade out every piece still on the board (captured pieces are
+                // already hidden).
+                for (e, _, _, vis, _) in reset_q.iter_mut() {
+                    if *vis != Visibility::Hidden {
+                        commands.entity(e).remove::<MenuBgPieceAnim>().insert(MenuPieceFade {
+                            elapsed: 0.0,
+                            duration: CROSSFADE_SECS,
+                            fade_in: false,
+                        });
+                    }
+                }
+                anim.reset = ResetPhase::FadeOut(CROSSFADE_SECS);
+            }
+            return;
+        }
+        ResetPhase::FadeOut(t) => {
+            let t = t - time.delta_secs();
+            if t > 0.0 {
+                anim.reset = ResetPhase::FadeOut(t);
+            } else {
+                // Everything is invisible now — snap pieces home at alpha 0 and
+                // fade the starting position back in.
+                anim.board = [[None; 8]; 8];
+                for (e, home, mut tr, mut v, mat) in reset_q.iter_mut() {
+                    commands
+                        .entity(e)
+                        .remove::<MenuBgPieceAnim>()
+                        .remove::<MenuPieceFade>();
+                    // Start fully transparent so the fade-in has no one-frame flash.
+                    if let Some(mut m) = materials.get_mut(&mat.0) {
+                        m.alpha_mode = AlphaMode::Blend;
+                        let c = m.base_color.with_alpha(0.0);
+                        m.base_color = c;
+                    }
+                    tr.translation = sq_world(home.file as usize, home.rank as usize);
+                    *v = Visibility::Visible;
+                    commands.entity(e).insert(MenuPieceFade {
+                        elapsed: 0.0,
+                        duration: CROSSFADE_SECS,
+                        fade_in: true,
+                    });
+                    anim.board[home.rank as usize][home.file as usize] = Some(e);
+                }
+                anim.reset = ResetPhase::FadeIn(CROSSFADE_SECS);
+            }
+            return;
+        }
+        ResetPhase::FadeIn(t) => {
+            let t = t - time.delta_secs();
+            if t > 0.0 {
+                anim.reset = ResetPhase::FadeIn(t);
+            } else {
+                anim.reset = ResetPhase::Idle;
+                anim.ply_index = 0;
+                anim.move_timer = 2.0;
+            }
+            return;
+        }
     }
 
     anim.move_timer -= time.delta_secs();
@@ -289,6 +363,7 @@ fn apply_ambient_step(commands: &mut Commands, anim: &mut BoardAnimator, step: A
             commands.entity(cap).insert(MenuPieceFade {
                 elapsed: 0.0,
                 duration: FADE_SECS,
+                fade_in: false,
             });
         }
     }
@@ -297,6 +372,7 @@ fn apply_ambient_step(commands: &mut Commands, anim: &mut BoardAnimator, step: A
             commands.entity(cap).insert(MenuPieceFade {
                 elapsed: 0.0,
                 duration: FADE_SECS,
+                fade_in: false,
             });
         }
     }

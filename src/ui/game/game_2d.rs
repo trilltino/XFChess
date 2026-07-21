@@ -290,7 +290,7 @@ pub fn update_eval_bar(
         return;
     }
     use crate::game::components::PieceType;
-    use nimzovich_engine::{do_move_with_promo, evaluate_position, new_game};
+    use nimzovich_engine::{do_move_with_promo, evaluate_position, new_game_no_tt};
 
     let moves = &history.moves;
     let cached_count = eval_history.scores.len();
@@ -307,8 +307,14 @@ pub fn update_eval_bar(
     }
 
     // Start from the cached game state and apply only the new moves.
+    // Uses `new_game_no_tt` (not `new_game`) — this Game only ever runs
+    // `do_move_with_promo` + `evaluate_position`, never `reply`/search, so the
+    // multi-GB transposition table `new_game` allocates would be pure waste.
+    // Allocating it here, synchronously on the first `MoveHistory` change
+    // (i.e. the first move of the game), was the exact cause of the
+    // first-move-only stutter — every move after that reuses `cached_game`.
     let start = eval_history.scores.len();
-    let mut game = eval_history.cached_game.take().unwrap_or_else(new_game);
+    let mut game = eval_history.cached_game.take().unwrap_or_else(new_game_no_tt);
     for rec in &moves[start..] {
         let src = rec.from.1 as i8 * 8 + rec.from.0 as i8;
         let dst = rec.to.1 as i8 * 8 + rec.to.0 as i8;

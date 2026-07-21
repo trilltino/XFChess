@@ -17,7 +17,7 @@ use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::lobby::SolanaLobbyState;
 #[cfg(feature = "solana")]
-use crate::multiplayer::solana::wager_rate::SolGbpRate;
+use crate::multiplayer::solana::wager_rate::SolUsdRate;
 use crate::multiplayer::spectator::SpectateViaLinkEvent;
 use crate::multiplayer::{BraidSubscriptionConfig, NetworkConfig, OnlineNetworkState};
 use crate::states::main_menu::new_menu::MenuExitConfirm;
@@ -89,7 +89,7 @@ pub struct MainMenuUIContext<'w, 's> {
     #[cfg(feature = "solana")]
     pub solana_state: Option<Res<'w, SolanaIntegrationState>>,
     #[cfg(feature = "solana")]
-    pub sol_gbp_rate: Option<Res<'w, SolGbpRate>>,
+    pub sol_usd_wager_rate: Option<Res<'w, SolUsdRate>>,
     #[cfg(feature = "solana")]
     pub tournament_client:
         Option<ResMut<'w, crate::multiplayer::solana::tournament::TournamentClientState>>,
