@@ -8,9 +8,10 @@ and play, spectating, KYC, and Solana Blinks integration. Talks to the backend A
 
 The browser counterpart to the native Bevy client: account/tournament management and
 browser play, while the desktop app handles native play. It completes and signs the
-partially-built transactions the backend returns, and sends Ephemeral Rollup moves to
-the MagicBlock RPC via `@magicblock-labs/ephemeral-rollups-sdk`
-([src/lib/magicblock.ts](src/lib/magicblock.ts), setup: [MAGICBLOCK_SETUP.md](MAGICBLOCK_SETUP.md)).
+partially-built transactions the backend returns. Ephemeral Rollup moves are submitted
+by the backend, not the browser directly — see [MAGICBLOCK.md](../MAGICBLOCK.md) at the
+repo root for the base-RPC-vs-Magic-Router routing the backend does on the web client's
+behalf.
 
 ## Commands
 

@@ -21,7 +21,7 @@ This is a forked/modified version of the official iroh-gossip crate with potenti
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────┐
 │   braid-iroh        │
 │   (Braid layer)     │

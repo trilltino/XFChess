@@ -44,12 +44,12 @@ pub use game_ix::{
 pub use governance_ix::{ClaimStaleDispute, DisputeGame, ResolveDispute};
 pub use moves_ix::RecordMove;
 pub use tournament_ix::{
-    AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx, CancelTournament,
-    ClaimTournamentPrize, CloseTournament, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize,
-    InitializeMatch, InitializeShardsMedium, InitializeShardsSmall, InitializeTournament,
-    InitializeTournamentEscrow, InitializeTournamentShards, LeaveTournament, RecordMatchResult,
-    RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx, SessionCreateGame,
-    SessionJoinGame, StartTournament, SwissMatchResult,
+    AdvanceRound, AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
+    CancelTournament, ClaimTournamentPrize, CloseTournament, DistributeTournamentPrizes,
+    FundSolPrize, FundUsdcPrize, InitializeMatch, InitializeShardsMedium, InitializeShardsSmall,
+    InitializeTournament, InitializeTournamentEscrow, InitializeTournamentShards, LeaveTournament,
+    RecordMatchResult, RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx,
+    SessionCreateGame, SessionJoinGame, StartTournament, SwissMatchResult,
 };
 
 // Anchor 0.32 #[program] generates `pub use crate::__client_accounts_<snake>::*` at the crate
@@ -178,6 +178,9 @@ pub mod __client_accounts_fund_sol_prize {
 }
 pub mod __client_accounts_record_swiss_result {
     pub use crate::tournament_ix::matches::record_swiss_result::__client_accounts_record_swiss_result::*;
+}
+pub mod __client_accounts_advance_round {
+    pub use crate::tournament_ix::matches::advance_round::__client_accounts_advance_round::*;
 }
 pub mod __client_accounts_authorize_tournament_session_ctx {
     pub use crate::tournament_ix::session::authorize_tournament_session::__client_accounts_authorize_tournament_session_ctx::*;
@@ -624,6 +627,14 @@ pub mod xfchess_game {
             board,
             result,
         )
+    }
+
+    /// Advance a Swiss tournament to its next round once every board in the
+    /// current round has reported (see `advance_round::handler` for why this
+    /// is permissionless — the point is a tournament can progress without
+    /// the backend scheduler alive to decide "the round is over").
+    pub fn advance_round(ctx: Context<AdvanceRound>, tournament_id: u64) -> Result<()> {
+        crate::tournament_ix::matches::advance_round::handler(ctx, tournament_id)
     }
 
     // ── Tournament-scoped session delegation ───────────────────────────────

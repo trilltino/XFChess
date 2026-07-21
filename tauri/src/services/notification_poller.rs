@@ -24,7 +24,11 @@ pub struct NotificationState {
 /// snapshot) — the app always starts disconnected, so reading it once at
 /// startup would mean the poller silently never runs for the whole session.
 /// Safe to call from the Tauri `setup` closure.
-pub fn start_poller(app: AppHandle, backend_url: String, wallet_pubkey: Arc<Mutex<Option<String>>>) {
+pub fn start_poller(
+  app: AppHandle,
+  backend_url: String,
+  wallet_pubkey: Arc<Mutex<Option<String>>>,
+) {
   let state = Arc::new(Mutex::new(NotificationState::default()));
 
   std::thread::spawn(move || {

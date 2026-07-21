@@ -50,6 +50,8 @@ jobs:
       AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - uses: dtolnay/rust-toolchain@stable
@@ -58,7 +60,9 @@ jobs:
       - name: Derive version from tag
         id: ver
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
 
       - name: Build web frontends
         shell: bash
@@ -109,7 +113,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          & "$env:ProgramFiles(x86)\NSIS\makensis.exe" `
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" `
             "/DAPP_VERSION=${{ steps.ver.outputs.version }}" `
             "/DBACKEND_URL=${{ env.BACKEND_URL }}" `
             "/DSIGNING_URL=${{ env.SIGNING_URL }}" `
@@ -147,6 +151,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - uses: dtolnay/rust-toolchain@stable
@@ -154,7 +160,9 @@ jobs:
 
       - name: Derive version from tag
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
 
       - name: Install Linux build + runtime dependencies
         run: |
@@ -258,6 +266,8 @@ jobs:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - uses: dtolnay/rust-toolchain@stable
@@ -265,7 +275,9 @@ jobs:
 
       - name: Derive version from tag
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
 
       - name: Import signing certificate
         if: env.APPLE_CERTIFICATE != ''

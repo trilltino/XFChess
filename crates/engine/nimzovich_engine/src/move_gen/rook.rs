@@ -43,5 +43,6 @@ pub fn generate_rook_moves(
     moves: &mut Vec<KK>,
     noisy_only: bool,
 ) {
-    sliding::generate_sliding_moves(game, from, color, 0, 4, moves, noisy_only); // orthogonal dirs only
+    sliding::generate_sliding_moves(game, from, color, 0, 4, moves, noisy_only);
+    // orthogonal dirs only
 }

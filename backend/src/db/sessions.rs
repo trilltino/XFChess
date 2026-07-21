@@ -70,9 +70,9 @@ impl SessionStore {
 
         sqlx::query(
             r#"
-            INSERT OR REPLACE INTO active_sessions 
-            (session_id, game_id, player_white, player_black, current_fen, 
-             move_history, white_time_ms, black_time_ms, last_activity, 
+            INSERT OR REPLACE INTO active_sessions
+            (session_id, game_id, player_white, player_black, current_fen,
+             move_history, white_time_ms, black_time_ms, last_activity,
              grace_period_ends, status)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             "#,
@@ -103,7 +103,7 @@ impl SessionStore {
 
         let row = sqlx::query(
             r#"
-            SELECT * FROM active_sessions 
+            SELECT * FROM active_sessions
             WHERE (player_white = ?1 OR player_black = ?1)
             AND status = 'resumable'
             AND grace_period_ends > ?2

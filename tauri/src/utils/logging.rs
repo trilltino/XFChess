@@ -74,6 +74,16 @@ pub fn log_security_event(event: &str, details: &str) {
 mod tests {
   use super::*;
   use std::env;
+  use std::sync::Once;
+
+  // init_logging() installs a process-global tracing subscriber via
+  // tracing_subscriber::fmt()....init(), which panics if called more than
+  // once — correct for real app startup, but multiple tests below need to
+  // exercise it and `cargo test` runs them concurrently in one process.
+  static INIT: Once = Once::new();
+  fn ensure_logging_init() {
+    INIT.call_once(init_logging);
+  }
 
   /// Test that logging can be initialized without panicking
   #[test]
@@ -81,7 +91,7 @@ mod tests {
     // This test ensures that the logging system can be initialized
     // without panicking. In a real scenario, this would be called
     // at application startup.
-    init_logging();
+    ensure_logging_init();
 
     // If we reach this point, initialization succeeded
     assert!(true);
@@ -93,7 +103,7 @@ mod tests {
     env::set_var("RUST_LOG", "debug");
 
     // This should not panic even with custom log level
-    init_logging();
+    ensure_logging_init();
 
     env::remove_var("RUST_LOG");
     assert!(true);
@@ -105,7 +115,7 @@ mod tests {
     env::set_var("RUST_LOG", "invalid_level");
 
     // Should fall back to default level
-    init_logging();
+    ensure_logging_init();
 
     env::remove_var("RUST_LOG");
     assert!(true);
@@ -195,7 +205,7 @@ mod tests {
   /// Test all logging functions work together
   #[test]
   fn test_all_logging_functions() {
-    init_logging();
+    ensure_logging_init();
 
     log_window_event("main", "ready", Some("DOM loaded"));
     log_ipc_command("get_info", Some("main"));

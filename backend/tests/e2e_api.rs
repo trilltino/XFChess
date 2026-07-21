@@ -165,6 +165,10 @@ async fn metrics_endpoint_exposes_worker_counters() {
         body.contains("xfchess_prize_distribution_held_total"),
         "missing prize metric"
     );
+    assert!(
+        body.contains("xfchess_settlement_stale_delegated_gauge"),
+        "missing stale-delegation gauge (persistency plan Phase 5 monitoring)"
+    );
 }
 
 // ── Blur telemetry parity (anti-cheat input boundary) ─────────────────────────
@@ -538,7 +542,20 @@ async fn dual_accept_auth_guards_signing_endpoints() {
         "own-wallet session must pass authz"
     );
 
+    // (f) Secret genuinely unset + no auth at all → the guard fails OPEN
+    // (`require_relay_or_jwt`'s "neither configured" branch in
+    // auth_middleware.rs), not closed. This is the property the persistency
+    // plan depends on: gameplay-critical routes must never hard-require
+    // backend auth, so the game is still playable if the JWT/relay-secret
+    // layer is entirely unconfigured. Regressing this to a 401 would
+    // silently turn an optional auth layer into a mandatory backend gate.
     std::env::remove_var("RELAY_SHARED_SECRET");
+    let (status, _) = app.post_json("/move/record", &move_body).await;
+    assert_ne!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "fail-open: unset secret + no JWT must not be rejected by the auth guard"
+    );
 }
 
 #[tokio::test]

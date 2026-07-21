@@ -100,10 +100,18 @@ fn render_info_and_players(
                         .color(UiColors::TEXT_PRIMARY),
                 );
                 if let Some((text, color)) = badge {
-                    ui.label(egui::RichText::new("•").size(13.0).color(UiColors::TEXT_TERTIARY));
+                    ui.label(
+                        egui::RichText::new("•")
+                            .size(13.0)
+                            .color(UiColors::TEXT_TERTIARY),
+                    );
                     ui.label(egui::RichText::new(text).size(12.5).color(color));
                 }
-                ui.label(egui::RichText::new("•").size(13.0).color(UiColors::TEXT_TERTIARY));
+                ui.label(
+                    egui::RichText::new("•")
+                        .size(13.0)
+                        .color(UiColors::TEXT_TERTIARY),
+                );
                 ui.label(
                     egui::RichText::new(mode_label)
                         .size(12.5)

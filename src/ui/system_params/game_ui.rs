@@ -73,6 +73,7 @@ pub struct GameUIParams<'w, 's> {
     pub draw_writer: bevy::prelude::MessageWriter<'w, crate::game::events::DrawOfferEvent>,
     pub first_move_deadline: Res<'w, crate::game::resources::FirstMoveDeadline>,
     pub chat_state: ResMut<'w, crate::ui::game::chat_ui::ChatState>,
-    pub chat_writer: bevy::prelude::MessageWriter<'w, crate::multiplayer::network::PublishOnlineChat>,
+    pub chat_writer:
+        bevy::prelude::MessageWriter<'w, crate::multiplayer::network::PublishOnlineChat>,
     pub player_identity: Option<Res<'w, crate::states::main_menu::PlayerIdentity>>,
 }

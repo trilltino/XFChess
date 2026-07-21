@@ -73,8 +73,10 @@ mod tests {
         let _router = matchmaking_routes();
     }
 
-    #[test]
-    fn test_shared_matchmaking_state_default() {
+    #[tokio::test]
+    async fn test_shared_matchmaking_state_default() {
+        // Default() builds a lazy (unconnected) SQLite pool, which needs a
+        // Tokio context to construct even though it doesn't connect eagerly.
         let state = SharedMatchmakingState::default();
         assert_eq!(state.queue.lock().expect("Mutex lock").len(), 0);
         assert_eq!(state.matches.lock().expect("Mutex lock").len(), 0);

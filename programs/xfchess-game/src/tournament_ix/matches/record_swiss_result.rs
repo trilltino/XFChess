@@ -89,6 +89,10 @@ pub fn handler(
     require!(round <= t.total_rounds, GameErrorCode::InvalidGameStatus);
     let boards_per_round = t.num_registered_players.max(2) / 2;
     require!(board < boards_per_round, GameErrorCode::InvalidArgument);
+    require!(
+        !crate::tournament_ix::matches::round_bitmap::is_set(&t.round_boards_reported, board),
+        GameErrorCode::BoardAlreadyRecorded
+    );
 
     // Collect the present shards (1-3 are optional — small/medium tournaments
     // only initialize shard 0 or 0-1). Presence is prefix-closed, so the
@@ -188,9 +192,12 @@ pub fn handler(
         );
     }
 
-    // Round advancement is deliberately not inferred from board index. The
-    // backend/authority must advance rounds only after every board result for
-    // the round is known; otherwise a forged last-board call can skip results.
+    // Mark this board reported for the round so `advance_round` (permissionless
+    // — see tournament_ix::matches::advance_round) can verify completeness
+    // purely from on-chain state instead of trusting an off-chain caller.
+    // Round advancement itself still isn't inferred here: a single call can
+    // only ever set its own board's bit, never skip ahead.
+    crate::tournament_ix::matches::round_bitmap::set(&mut t.round_boards_reported, board);
 
     msg!(
         "Swiss result recorded: player {} vs opponent {} result {:?}",

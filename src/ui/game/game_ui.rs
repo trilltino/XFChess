@@ -509,302 +509,303 @@ fn render_game_right_panel(
     use crate::game::resources::TurnPhase;
 
     vertically_center(ui, egui::Id::new("right_panel_vcenter"), |ui| {
-    let local_color = params
-        .p2p_conn
-        .as_ref()
-        .and_then(|c| c.player_color)
-        .unwrap_or(PieceColor::White);
-    let opp_color = match local_color {
-        PieceColor::White => PieceColor::Black,
-        PieceColor::Black => PieceColor::White,
-    };
-    let is_spectating = *params.game_mode == crate::core::GameMode::Spectator;
-    let is_online = matches!(
-        *params.game_mode,
-        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
-    );
-
-    let (white_name, white_elo, black_name, black_elo) =
-        resolve_player_names(params, local_color, is_spectating);
-
-    // Determine top (opponent) / bottom (local) layout.
-    let (top_color, bot_color) = if is_spectating {
-        (PieceColor::Black, PieceColor::White)
-    } else {
-        (opp_color, local_color)
-    };
-
-    let (top_name, top_elo) = if top_color == PieceColor::White {
-        (white_name.as_str(), white_elo.as_str())
-    } else {
-        (black_name.as_str(), black_elo.as_str())
-    };
-    let (bot_name, bot_elo) = if bot_color == PieceColor::White {
-        (white_name.as_str(), white_elo.as_str())
-    } else {
-        (black_name.as_str(), black_elo.as_str())
-    };
-
-    let top_is_active = top_color == PieceColor::White && white_active
-        || top_color == PieceColor::Black && !white_active;
-    let top_flagged = if top_color == PieceColor::White {
-        white_flagged
-    } else {
-        black_flagged
-    };
-    let bot_flagged = if bot_color == PieceColor::White {
-        white_flagged
-    } else {
-        black_flagged
-    };
-
-    let top_time = if top_color == PieceColor::White {
-        params.game_timer.white_time_left
-    } else {
-        params.game_timer.black_time_left
-    };
-    let bot_time = if bot_color == PieceColor::White {
-        params.game_timer.white_time_left
-    } else {
-        params.game_timer.black_time_left
-    };
-
-    let cap = &*params.game_state.captured;
-    // white_captured = dark pieces taken by white; black_captured = light pieces taken by black.
-    let (top_cap, top_is_dark) = if top_color == PieceColor::White {
-        (cap.white_captured.as_slice(), false)
-    } else {
-        (cap.black_captured.as_slice(), true)
-    };
-    let (bot_cap, bot_is_dark) = if bot_color == PieceColor::White {
-        (cap.white_captured.as_slice(), false)
-    } else {
-        (cap.black_captured.as_slice(), true)
-    };
-    let mat_adv = cap.material_advantage();
-    let top_delta = if top_color == PieceColor::White {
-        mat_adv.max(0)
-    } else {
-        (-mat_adv).max(0)
-    };
-    let bot_delta = if bot_color == PieceColor::White {
-        mat_adv.max(0)
-    } else {
-        (-mat_adv).max(0)
-    };
-
-    let opponent_online: Option<bool> = if is_online {
-        params.p2p_conn.as_ref().map(|c| {
-            matches!(
-                c.status,
-                crate::multiplayer::network::p2p::P2PConnectionStatus::Connected
-                    | crate::multiplayer::network::p2p::P2PConnectionStatus::InGame
-            )
-        })
-    } else {
-        None
-    };
-
-    let p = egui::Margin::symmetric(12, 6);
-    let bot_is_active = !top_is_active;
-
-    // ── OPPONENT (top of panel) ───────────────────────────────────────────────
-    // material tray
-    if !top_cap.is_empty() || top_delta > 0 {
-        StyledPanel::sidebar_row()
-            .inner_margin(egui::Margin::symmetric(12, 4))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    render_captured_pieces_tray(ui, top_cap, top_is_dark);
-                    if top_delta > 0 {
-                        ui.label(
-                            egui::RichText::new(format!("+{}", top_delta))
-                                .size(11.0)
-                                .color(UiColors::TEXT_TERTIARY),
-                        );
-                    }
-                });
-            });
-    }
-    // clock
-    if show_timers {
-        render_clock_bar(
-            ui,
-            top_time,
-            top_is_active,
-            top_flagged,
-            pulse_alpha,
-            increment,
-            &params.increment_flash,
+        let local_color = params
+            .p2p_conn
+            .as_ref()
+            .and_then(|c| c.player_color)
+            .unwrap_or(PieceColor::White);
+        let opp_color = match local_color {
+            PieceColor::White => PieceColor::Black,
+            PieceColor::Black => PieceColor::White,
+        };
+        let is_spectating = *params.game_mode == crate::core::GameMode::Spectator;
+        let is_online = matches!(
+            *params.game_mode,
+            crate::core::GameMode::OnlineMultiplayer
+                | crate::core::GameMode::MultiplayerCompetitive
         );
-    }
-    // name row
-    StyledPanel::sidebar_row().inner_margin(p).show(ui, |ui| {
-        render_compact_user_row(ui, top_name, top_elo, opponent_online);
-    });
 
-    ui.add_space(6.0);
+        let (white_name, white_elo, black_name, black_elo) =
+            resolve_player_names(params, local_color, is_spectating);
 
-    // ── MOVE LIST ─────────────────────────────────────────────────────────────
-    // Estimate reserved height: name row (~28) + clock (~62) + mat (~16) + controls (~70) + spacing × 3
-    let clock_h = if show_timers { 62.0 * 2.0 } else { 0.0 };
-    let reserved = 28.0 * 2.0 + clock_h + 16.0 * 2.0 + 80.0 + 30.0;
-    let move_height = (ui.available_height() - reserved).max(80.0);
+        // Determine top (opponent) / bottom (local) layout.
+        let (top_color, bot_color) = if is_spectating {
+            (PieceColor::Black, PieceColor::White)
+        } else {
+            (opp_color, local_color)
+        };
 
-    StyledPanel::sidebar_card()
-        .inner_margin(egui::Margin::symmetric(0, 0))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("game_moves_scroll")
-                .max_height(move_height)
-                .stick_to_bottom(true)
+        let (top_name, top_elo) = if top_color == PieceColor::White {
+            (white_name.as_str(), white_elo.as_str())
+        } else {
+            (black_name.as_str(), black_elo.as_str())
+        };
+        let (bot_name, bot_elo) = if bot_color == PieceColor::White {
+            (white_name.as_str(), white_elo.as_str())
+        } else {
+            (black_name.as_str(), black_elo.as_str())
+        };
+
+        let top_is_active = top_color == PieceColor::White && white_active
+            || top_color == PieceColor::Black && !white_active;
+        let top_flagged = if top_color == PieceColor::White {
+            white_flagged
+        } else {
+            black_flagged
+        };
+        let bot_flagged = if bot_color == PieceColor::White {
+            white_flagged
+        } else {
+            black_flagged
+        };
+
+        let top_time = if top_color == PieceColor::White {
+            params.game_timer.white_time_left
+        } else {
+            params.game_timer.black_time_left
+        };
+        let bot_time = if bot_color == PieceColor::White {
+            params.game_timer.white_time_left
+        } else {
+            params.game_timer.black_time_left
+        };
+
+        let cap = &*params.game_state.captured;
+        // white_captured = dark pieces taken by white; black_captured = light pieces taken by black.
+        let (top_cap, top_is_dark) = if top_color == PieceColor::White {
+            (cap.white_captured.as_slice(), false)
+        } else {
+            (cap.black_captured.as_slice(), true)
+        };
+        let (bot_cap, bot_is_dark) = if bot_color == PieceColor::White {
+            (cap.white_captured.as_slice(), false)
+        } else {
+            (cap.black_captured.as_slice(), true)
+        };
+        let mat_adv = cap.material_advantage();
+        let top_delta = if top_color == PieceColor::White {
+            mat_adv.max(0)
+        } else {
+            (-mat_adv).max(0)
+        };
+        let bot_delta = if bot_color == PieceColor::White {
+            mat_adv.max(0)
+        } else {
+            (-mat_adv).max(0)
+        };
+
+        let opponent_online: Option<bool> = if is_online {
+            params.p2p_conn.as_ref().map(|c| {
+                matches!(
+                    c.status,
+                    crate::multiplayer::network::p2p::P2PConnectionStatus::Connected
+                        | crate::multiplayer::network::p2p::P2PConnectionStatus::InGame
+                )
+            })
+        } else {
+            None
+        };
+
+        let p = egui::Margin::symmetric(12, 6);
+        let bot_is_active = !top_is_active;
+
+        // ── OPPONENT (top of panel) ───────────────────────────────────────────────
+        // material tray
+        if !top_cap.is_empty() || top_delta > 0 {
+            StyledPanel::sidebar_row()
+                .inner_margin(egui::Margin::symmetric(12, 4))
                 .show(ui, |ui| {
-                    StyledPanel::sidebar_row()
-                        .inner_margin(egui::Margin::symmetric(12, 8))
-                        .show(ui, |ui| {
-                            render_move_list_paired(ui, &params.move_history);
-                        });
+                    ui.horizontal(|ui| {
+                        render_captured_pieces_tray(ui, top_cap, top_is_dark);
+                        if top_delta > 0 {
+                            ui.label(
+                                egui::RichText::new(format!("+{}", top_delta))
+                                    .size(11.0)
+                                    .color(UiColors::TEXT_TERTIARY),
+                            );
+                        }
+                    });
                 });
+        }
+        // clock
+        if show_timers {
+            render_clock_bar(
+                ui,
+                top_time,
+                top_is_active,
+                top_flagged,
+                pulse_alpha,
+                increment,
+                &params.increment_flash,
+            );
+        }
+        // name row
+        StyledPanel::sidebar_row().inner_margin(p).show(ui, |ui| {
+            render_compact_user_row(ui, top_name, top_elo, opponent_online);
         });
 
-    ui.add_space(4.0);
+        ui.add_space(6.0);
 
-    // ── CONTROLS ─────────────────────────────────────────────────────────────
-    StyledPanel::sidebar_card()
-        .inner_margin(egui::Margin::symmetric(12, 8))
-        .show(ui, |ui| {
-            let is_game_over = params.game_state.game_over.is_game_over();
-            let is_waiting = params.turn_ctx.phase == TurnPhase::WaitingForInput;
+        // ── MOVE LIST ─────────────────────────────────────────────────────────────
+        // Estimate reserved height: name row (~28) + clock (~62) + mat (~16) + controls (~70) + spacing × 3
+        let clock_h = if show_timers { 62.0 * 2.0 } else { 0.0 };
+        let reserved = 28.0 * 2.0 + clock_h + 16.0 * 2.0 + 80.0 + 30.0;
+        let move_height = (ui.available_height() - reserved).max(80.0);
 
-            if !is_game_over {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    // Resign — red text button
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new("✕  Resign")
-                                    .size(12.0)
-                                    .color(egui::Color32::from_rgb(220, 80, 80)),
-                            )
-                            .fill(egui::Color32::from_rgba_unmultiplied(60, 18, 18, 180))
-                            .corner_radius(egui::CornerRadius::same(6))
-                            .min_size(egui::Vec2::new(90.0, 28.0)),
-                        )
-                        .clicked()
-                        && is_waiting
-                    {
-                        let winner = match params.current_turn.color {
-                            PieceColor::White => "black".to_string(),
-                            PieceColor::Black => "white".to_string(),
-                        };
-                        params
-                            .resign_writer
-                            .write(crate::game::events::ResignEvent {
-                                winner,
-                                remote: false,
+        StyledPanel::sidebar_card()
+            .inner_margin(egui::Margin::symmetric(0, 0))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("game_moves_scroll")
+                    .max_height(move_height)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        StyledPanel::sidebar_row()
+                            .inner_margin(egui::Margin::symmetric(12, 8))
+                            .show(ui, |ui| {
+                                render_move_list_paired(ui, &params.move_history);
                             });
-                    }
+                    });
+            });
 
-                    if is_online {
-                        let draw_offered = params.pending_draw.from_player.is_some();
+        ui.add_space(4.0);
+
+        // ── CONTROLS ─────────────────────────────────────────────────────────────
+        StyledPanel::sidebar_card()
+            .inner_margin(egui::Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                let is_game_over = params.game_state.game_over.is_game_over();
+                let is_waiting = params.turn_ctx.phase == TurnPhase::WaitingForInput;
+
+                if !is_game_over {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        // Resign — red text button
                         if ui
                             .add(
                                 egui::Button::new(
-                                    egui::RichText::new(if draw_offered {
-                                        "½  Sent"
-                                    } else {
-                                        "½  Draw"
-                                    })
-                                    .size(12.0)
-                                    .color(egui::Color32::from_rgb(180, 180, 80)),
+                                    egui::RichText::new("✕  Resign")
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(220, 80, 80)),
                                 )
-                                .fill(egui::Color32::from_rgba_unmultiplied(45, 45, 12, 180))
+                                .fill(egui::Color32::from_rgba_unmultiplied(60, 18, 18, 180))
                                 .corner_radius(egui::CornerRadius::same(6))
-                                .min_size(egui::Vec2::new(80.0, 28.0))
-                                .sense(if draw_offered {
-                                    egui::Sense::hover()
-                                } else {
-                                    egui::Sense::click()
-                                }),
+                                .min_size(egui::Vec2::new(90.0, 28.0)),
                             )
                             .clicked()
-                            && !draw_offered
+                            && is_waiting
                         {
-                            let player = match params.current_turn.color {
-                                PieceColor::White => "white".to_string(),
-                                PieceColor::Black => "black".to_string(),
+                            let winner = match params.current_turn.color {
+                                PieceColor::White => "black".to_string(),
+                                PieceColor::Black => "white".to_string(),
                             };
                             params
-                                .draw_writer
-                                .write(crate::game::events::DrawOfferEvent {
-                                    player,
+                                .resign_writer
+                                .write(crate::game::events::ResignEvent {
+                                    winner,
                                     remote: false,
                                 });
                         }
-                    }
-                });
-                ui.add_space(6.0);
-            }
 
-            // View toggle
-            let view_label = match *params.view_mode {
-                crate::game::view_mode::ViewMode::Standard3D => "⬡  2D View",
-                _ => "⬡  3D View",
-            };
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new(view_label)
-                            .size(12.0)
-                            .color(egui::Color32::from_gray(180)),
+                        if is_online {
+                            let draw_offered = params.pending_draw.from_player.is_some();
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(if draw_offered {
+                                            "½  Sent"
+                                        } else {
+                                            "½  Draw"
+                                        })
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(180, 180, 80)),
+                                    )
+                                    .fill(egui::Color32::from_rgba_unmultiplied(45, 45, 12, 180))
+                                    .corner_radius(egui::CornerRadius::same(6))
+                                    .min_size(egui::Vec2::new(80.0, 28.0))
+                                    .sense(if draw_offered {
+                                        egui::Sense::hover()
+                                    } else {
+                                        egui::Sense::click()
+                                    }),
+                                )
+                                .clicked()
+                                && !draw_offered
+                            {
+                                let player = match params.current_turn.color {
+                                    PieceColor::White => "white".to_string(),
+                                    PieceColor::Black => "black".to_string(),
+                                };
+                                params
+                                    .draw_writer
+                                    .write(crate::game::events::DrawOfferEvent {
+                                        player,
+                                        remote: false,
+                                    });
+                            }
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+
+                // View toggle
+                let view_label = match *params.view_mode {
+                    crate::game::view_mode::ViewMode::Standard3D => "⬡  2D View",
+                    _ => "⬡  3D View",
+                };
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(view_label)
+                                .size(12.0)
+                                .color(egui::Color32::from_gray(180)),
+                        )
+                        .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 55, 180))
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .min_size(egui::Vec2::new(90.0, 26.0)),
                     )
-                    .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 55, 180))
-                    .corner_radius(egui::CornerRadius::same(6))
-                    .min_size(egui::Vec2::new(90.0, 26.0)),
-                )
-                .clicked()
-            {
-                params.view_mode.toggle();
-            }
-        });
-
-    ui.add_space(4.0);
-
-    // ── LOCAL PLAYER (bottom of panel) ───────────────────────────────────────
-    // name row
-    StyledPanel::sidebar_row().inner_margin(p).show(ui, |ui| {
-        render_compact_user_row(ui, bot_name, bot_elo, None);
-    });
-    // clock
-    if show_timers {
-        render_clock_bar(
-            ui,
-            bot_time,
-            bot_is_active,
-            bot_flagged,
-            pulse_alpha,
-            increment,
-            &params.increment_flash,
-        );
-    }
-    // material tray
-    if !bot_cap.is_empty() || bot_delta > 0 {
-        StyledPanel::sidebar_row()
-            .inner_margin(egui::Margin::symmetric(12, 4))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    render_captured_pieces_tray(ui, bot_cap, bot_is_dark);
-                    if bot_delta > 0 {
-                        ui.label(
-                            egui::RichText::new(format!("+{}", bot_delta))
-                                .size(11.0)
-                                .color(UiColors::TEXT_TERTIARY),
-                        );
-                    }
-                });
+                    .clicked()
+                {
+                    params.view_mode.toggle();
+                }
             });
-    }
+
+        ui.add_space(4.0);
+
+        // ── LOCAL PLAYER (bottom of panel) ───────────────────────────────────────
+        // name row
+        StyledPanel::sidebar_row().inner_margin(p).show(ui, |ui| {
+            render_compact_user_row(ui, bot_name, bot_elo, None);
+        });
+        // clock
+        if show_timers {
+            render_clock_bar(
+                ui,
+                bot_time,
+                bot_is_active,
+                bot_flagged,
+                pulse_alpha,
+                increment,
+                &params.increment_flash,
+            );
+        }
+        // material tray
+        if !bot_cap.is_empty() || bot_delta > 0 {
+            StyledPanel::sidebar_row()
+                .inner_margin(egui::Margin::symmetric(12, 4))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        render_captured_pieces_tray(ui, bot_cap, bot_is_dark);
+                        if bot_delta > 0 {
+                            ui.label(
+                                egui::RichText::new(format!("+{}", bot_delta))
+                                    .size(11.0)
+                                    .color(UiColors::TEXT_TERTIARY),
+                            );
+                        }
+                    });
+                });
+        }
     });
 }
 
@@ -1406,9 +1407,7 @@ pub fn post_game_overlay(
         crate::game::resources::GameOverState::Stalemate => "Stalemate / Draw",
         crate::game::resources::GameOverState::Aborted => "White didn't move in time",
         crate::game::resources::GameOverState::WhiteWonByAbandonment
-        | crate::game::resources::GameOverState::BlackWonByAbandonment => {
-            "Opponent Disconnected"
-        }
+        | crate::game::resources::GameOverState::BlackWonByAbandonment => "Opponent Disconnected",
         _ => "",
     };
 

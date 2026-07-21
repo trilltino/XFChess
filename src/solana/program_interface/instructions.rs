@@ -534,7 +534,8 @@ pub fn initialize_tournament_ix(
     data.extend_from_slice(&increment_seconds.to_le_bytes());
 
     let token_program: Pubkey = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".parse()?;
-    let associated_token_program: Pubkey = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL".parse()?;
+    let associated_token_program: Pubkey =
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL".parse()?;
 
     Ok(Instruction {
         program_id,

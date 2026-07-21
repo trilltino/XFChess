@@ -1,15 +1,15 @@
 //! Cookie middleware for the HTTP/3 client.
 //!
 //! This module provides [`CookieJar`], a simple, thread-safe, per-peer cookie
-//! store used by the `IrohH3Client` middleware system.  
+//! store used by the `IrohH3Client` middleware system.
 //!
 //! # Overview
 //!
 //! The [`CookieJar`] middleware:
 //!
-//! - Automatically attaches stored cookies to outgoing requests  
+//! - Automatically attaches stored cookies to outgoing requests
 //!   (`Cookie:` header).
-//! - Extracts cookies from incoming responses  
+//! - Extracts cookies from incoming responses
 //!   (`Set-Cookie:` headers).
 //! - Stores cookies _per peer_ using the peer’s [`EndpointId`].
 //! - Uses the [`cookie`] crate to perform correct RFC-compliant parsing.

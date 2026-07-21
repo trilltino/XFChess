@@ -37,7 +37,12 @@ fn username_record_pda(username: &str) -> Pubkey {
     Pubkey::find_program_address(&[b"username", username.as_bytes()], &xfchess_game::ID).0
 }
 
-fn init_profile_ix(player: &Pubkey, username: &str, country: &str, date_of_birth: i64) -> Instruction {
+fn init_profile_ix(
+    player: &Pubkey,
+    username: &str,
+    country: &str,
+    date_of_birth: i64,
+) -> Instruction {
     let accounts = xfchess_game::__client_accounts_init_profile::InitProfile {
         player_profile: profile_pda(player),
         username_record: username_record_pda(username),
@@ -79,10 +84,10 @@ async fn sponsored_profile_is_owned_by_player_not_backend() {
     // getMinimumBalanceForRentExemption before building this transaction.
     let rent = Rent::default();
     let profile_rent = rent.minimum_balance(8 + 257); // discriminator + PlayerProfile::INIT_SPACE
-    // The account struct constraint is `space = 8 + UsernameRecord::LEN`, and
-    // UsernameRecord::LEN (48) already includes its own discriminator — so
-    // the real allocated space is 56 bytes, not 48. Caught by this test
-    // failing on-chain with "insufficient lamports" before this fix.
+                                                      // The account struct constraint is `space = 8 + UsernameRecord::LEN`, and
+                                                      // UsernameRecord::LEN (48) already includes its own discriminator — so
+                                                      // the real allocated space is 56 bytes, not 48. Caught by this test
+                                                      // failing on-chain with "insufficient lamports" before this fix.
     let username_rent = rent.minimum_balance(8 + 48);
     let transfer_ix = system_instruction::transfer(
         &backend.pubkey(),
@@ -122,7 +127,11 @@ async fn sponsored_profile_is_owned_by_player_not_backend() {
 
     // The backend — not the player — is the one who actually paid: it's out
     // the rent it fronted plus the transaction fee.
-    let backend_balance = ctx.banks_client.get_balance(backend.pubkey()).await.unwrap();
+    let backend_balance = ctx
+        .banks_client
+        .get_balance(backend.pubkey())
+        .await
+        .unwrap();
     assert!(
         backend_balance < 10_000_000_000 - (profile_rent + username_rent),
         "backend must have paid the rent it fronted plus the tx fee"

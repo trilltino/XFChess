@@ -32,7 +32,7 @@ pub fn create_coordinate_labels(
     // Black text style for labels (visible on yellow background)
     // Use default font (works if default_font feature is enabled, otherwise will need a font file)
     let text_style = TextFont {
-        font_size: 24.0,
+        font_size: FontSize::from(24.0),
         ..default() // Uses default font
     };
 

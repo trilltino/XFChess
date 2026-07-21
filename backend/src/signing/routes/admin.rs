@@ -603,7 +603,10 @@ async fn treasury_refund(
             add_audit(
                 "treasury_refund",
                 &req.wallet,
-                &format!("{} lamports reason={} sig={}", req.lamports, req.reason, sig),
+                &format!(
+                    "{} lamports reason={} sig={}",
+                    req.lamports, req.reason, sig
+                ),
             );
             info!(
                 "[admin] treasury_refund {} lamports -> {} ({}) sig {}",
@@ -628,7 +631,9 @@ async fn treasury_refund(
             error!("[admin] treasury_refund on-chain submit failed: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "ok": false, "error": "onchain_submit_failed", "detail": e.to_string() })),
+                Json(
+                    json!({ "ok": false, "error": "onchain_submit_failed", "detail": e.to_string() }),
+                ),
             )
         }
         Err(e) => (

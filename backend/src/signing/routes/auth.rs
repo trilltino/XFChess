@@ -124,7 +124,10 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/add-email", post(add_email))
         .route("/sync-profile", post(sync_profile))
         .route("/init-profile-tx", post(init_profile_tx))
-        .route("/init-profile-sponsored-tx", post(init_profile_sponsored_tx))
+        .route(
+            "/init-profile-sponsored-tx",
+            post(init_profile_sponsored_tx),
+        )
         .route("/broadcast-tx", post(broadcast_tx))
         .route("/username", axum::routing::patch(set_username))
         .route("/check-username/{username}", get(check_username))

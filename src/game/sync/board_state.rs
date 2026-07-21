@@ -182,11 +182,7 @@ pub fn broadcast_state_system(
 
 /// System to receive and apply remote state.
 /// TODO: wire a braid-iroh reader; apply updates via `BoardStateSync::apply_remote_state`.
-pub fn receive_state_system(
-    _board_sync: ResMut<BoardStateSync>,
-    _engine: ResMut<ChessEngine>,
-) {
-}
+pub fn receive_state_system(_board_sync: ResMut<BoardStateSync>, _engine: ResMut<ChessEngine>) {}
 
 /// Initialize BoardStateSync on startup
 pub fn init_board_state_sync(mut commands: Commands) {

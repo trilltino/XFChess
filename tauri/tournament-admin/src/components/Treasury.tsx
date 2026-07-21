@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { apiClient } from "../services/api";
+import { lamportsToUsd, solInputToLamports, usdInputToLamports } from "../services/sol";
+import { useSolUsdRate } from "../hooks/useSolUsdRate";
 
 interface Payout { game_id: string; winner: string; amount_sol: number; tx_sig: string; settled_at: number; }
 interface FeeReport { total_fee_sol: number; total_fee_lamports: number; total_wagered_sol: number; game_count: number; period: string; }
@@ -12,11 +14,12 @@ export default function Treasury() {
 
   // Manual refund form
   const [refundWallet, setRefundWallet] = useState("");
-  const [refundLamports, setRefundLamports] = useState("");
+  const [refundSol, setRefundSol] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundAdminToken, setRefundAdminToken] = useState("");
   const [refundMsg, setRefundMsg] = useState<string | null>(null);
   const [refundTx, setRefundTx] = useState<string | null>(null);
+  const solUsdRate = useSolUsdRate();
 
   useEffect(() => { loadData(); }, [period]);
 
@@ -29,15 +32,17 @@ export default function Treasury() {
   };
 
   const handleRefund = async () => {
-    const lam = parseInt(refundLamports);
-    if (!refundWallet || isNaN(lam) || !refundReason || !refundAdminToken) return;
+    const lam = solUsdRate != null
+      ? usdInputToLamports(refundSol, solUsdRate)
+      : solInputToLamports(refundSol);
+    if (!refundWallet || lam <= 0 || !refundReason || !refundAdminToken) return;
     const r = await apiClient.manualRefund(refundWallet, lam, refundReason, refundAdminToken);
     if (r.ok) {
       // Backend now signs + submits withdraw_treasury with treasury_authority and
       // returns the confirmed on-chain signature (no more client-side signing).
       setRefundMsg(`Refund submitted on-chain. Sig: ${r.data?.signature ?? "—"}`);
       setRefundTx(r.data?.signature ?? null);
-      setRefundWallet(""); setRefundLamports(""); setRefundReason(""); setRefundAdminToken("");
+      setRefundWallet(""); setRefundSol(""); setRefundReason(""); setRefundAdminToken("");
     } else {
       setRefundMsg(`Error: ${r.error?.message}`);
     }
@@ -113,7 +118,9 @@ export default function Treasury() {
         <div style={{ display: "flex", gap: "10px", marginBottom: "10px", flexWrap: "wrap" }}>
           <input value={refundWallet} onChange={e => setRefundWallet(e.target.value)} placeholder="Recipient wallet…"
             style={{ flex: 2, minWidth: "180px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
-          <input value={refundLamports} onChange={e => setRefundLamports(e.target.value)} type="number" placeholder="Lamports…"
+          <input value={refundSol} onChange={e => setRefundSol(e.target.value)} type="number"
+            step={solUsdRate != null ? "0.01" : "0.0001"} min="0"
+            placeholder={solUsdRate != null ? "Amount (USD)…" : "Amount (SOL)…"}
             style={{ flex: 1, minWidth: "120px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
           <input value={refundReason} onChange={e => setRefundReason(e.target.value)} placeholder="Reason…"
             style={{ flex: 2, minWidth: "160px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
@@ -121,6 +128,18 @@ export default function Treasury() {
             style={{ flex: 2, minWidth: "180px", background: "rgba(255,255,255,0.06)", border: "1px solid #f59e0b55", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
           <button onClick={handleRefund} style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>SUBMIT REFUND</button>
         </div>
+        {refundSol && (() => {
+          const lam = solUsdRate != null
+            ? usdInputToLamports(refundSol, solUsdRate)
+            : solInputToLamports(refundSol);
+          const usd = lamportsToUsd(lam, solUsdRate);
+          return (
+            <div style={{ fontSize: "11px", color: "var(--text-dim)", marginBottom: "10px" }}>
+              {lam.toLocaleString()} lamports ({(lam / 1_000_000_000).toFixed(4)} SOL)
+              {usd != null ? ` · ≈ $${usd.toFixed(2)} USD` : ""}
+            </div>
+          );
+        })()}
         {refundMsg && <div style={{ fontSize: "12px", color: refundMsg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{refundMsg}</div>}
         {refundTx && (
           <div style={{ marginTop: "12px" }}>

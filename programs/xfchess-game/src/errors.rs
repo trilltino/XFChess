@@ -271,6 +271,17 @@ pub enum GameErrorCode {
     InvalidFriendPair, // party_a >= party_b (covers self-friend and bad ordering)
     #[msg("Friend request is not pending.")]
     FriendNotPending, // accept called on a non-pending edge
+
+    // ── Tournament round advancement ─────────────────────────────────────────
+    // Appended at the end, not inserted alongside the other Tournament
+    // variants above — inserting mid-enum shifts every later variant's
+    // numeric error code (Anchor assigns codes by declaration order starting
+    // at 6000), which breaks anything matching on the numeric code.
+    #[msg("This board's result has already been recorded for the current round.")]
+    BoardAlreadyRecorded, // record_swiss_result called twice for the same board/round
+
+    #[msg("Not every board has reported a result for the current round yet.")]
+    TournamentRoundIncomplete, // advance_round called before all boards are in
 }
 
 // Alias so the rest of the codebase can use either name.

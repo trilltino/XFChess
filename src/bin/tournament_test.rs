@@ -317,10 +317,10 @@ async fn generate_html_report(result: &TournamentResult) -> Result<(), Box<dyn s
 <body>
     <h1 class="header"> XFChess Tournament Report</h1>
     <h2 class="header">Champion: {}</h2>
-    
+
     <h3>Match Results</h3>
     {}
-    
+
     <p>Generated: {}</p>
 </body>
 </html>

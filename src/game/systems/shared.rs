@@ -265,10 +265,13 @@ pub fn execute_move(
         // The captured piece stands on ctx.target — derive world position
         // using the same formula as piece spawning: X is mirrored (7 - file)
         // so the a-file renders on White's left; Z = rank, Y = board surface.
-        let cap_world_pos =
-            Vec3::new(7.0 - ctx.target.0 as f32, PIECE_ON_BOARD_Y, ctx.target.1 as f32);
-        let move_dir = cap_world_pos
-            - Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32);
+        let cap_world_pos = Vec3::new(
+            7.0 - ctx.target.0 as f32,
+            PIECE_ON_BOARD_Y,
+            ctx.target.1 as f32,
+        );
+        let move_dir =
+            cap_world_pos - Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32);
         apply_capture(
             commands,
             captured_pieces,

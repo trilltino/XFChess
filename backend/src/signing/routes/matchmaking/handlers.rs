@@ -107,13 +107,28 @@ pub async fn join(
         joined_at: now,
     };
 
-    let mut queue = state
-        .queue
-        .lock()
-        .expect("Mutex lock should not be poisoned");
-    // Remove if already in queue to prevent duplicates
-    queue.retain(|t| t.pubkey != req.pubkey);
-    queue.push(ticket);
+    {
+        let mut queue = state
+            .queue
+            .lock()
+            .expect("Mutex lock should not be poisoned");
+        // Remove if already in queue to prevent duplicates
+        queue.retain(|t| t.pubkey != req.pubkey);
+        queue.push(ticket.clone());
+    }
+
+    // Persist so a backend restart doesn't drop this ticket (migration 022).
+    if let Err(e) = sqlx::query(
+        "INSERT OR REPLACE INTO matchmaking_queue (pubkey, elo, joined_at) VALUES (?, ?, ?)",
+    )
+    .bind(&ticket.pubkey)
+    .bind(ticket.elo as i64)
+    .bind(ticket.joined_at as i64)
+    .execute(&app_state.store.pool())
+    .await
+    {
+        tracing::error!("[Matchmaking] Failed to persist queue ticket: {e}");
+    }
 
     info!(
         "[Matchmaking] Player {} joined queue with ELO {} (country: {})",
@@ -129,11 +144,24 @@ pub async fn status(
     Path(pubkey): Path<String>,
 ) -> Result<Json<Option<MatchResult>>, (StatusCode, String)> {
     let state = &app_state.matchmaking;
-    let mut matches = state
-        .matches
-        .lock()
-        .expect("Mutex lock should not be poisoned");
-    if let Some(res) = matches.remove(&pubkey) {
+    let removed = {
+        let mut matches = state
+            .matches
+            .lock()
+            .expect("Mutex lock should not be poisoned");
+        matches.remove(&pubkey)
+    };
+
+    if let Some(res) = removed {
+        // One-time retrieval — clear the persisted copy too (migration 022).
+        if let Err(e) = sqlx::query("DELETE FROM matchmaking_matches WHERE pubkey = ?")
+            .bind(&pubkey)
+            .execute(&app_state.store.pool())
+            .await
+        {
+            tracing::error!("[Matchmaking] Failed to clear persisted match: {e}");
+        }
+
         info!(
             "[Matchmaking] Player {} retrieved match {}",
             pubkey, res.game_id
@@ -159,11 +187,21 @@ pub async fn leave(
         return Err((StatusCode::UNAUTHORIZED, "Invalid Signature".to_string()));
     }
 
-    let mut queue = state
-        .queue
-        .lock()
-        .expect("Mutex lock should not be poisoned");
-    queue.retain(|t| t.pubkey != req.pubkey);
+    {
+        let mut queue = state
+            .queue
+            .lock()
+            .expect("Mutex lock should not be poisoned");
+        queue.retain(|t| t.pubkey != req.pubkey);
+    }
+
+    if let Err(e) = sqlx::query("DELETE FROM matchmaking_queue WHERE pubkey = ?")
+        .bind(&req.pubkey)
+        .execute(&app_state.store.pool())
+        .await
+    {
+        tracing::error!("[Matchmaking] Failed to clear persisted queue ticket: {e}");
+    }
 
     info!("[Matchmaking] Player {} left queue", req.pubkey);
 

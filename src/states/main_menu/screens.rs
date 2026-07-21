@@ -852,8 +852,7 @@ fn render_create_tab(
             if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
                 compliance.pubkey = Some(wallet_pubkey.to_string());
             }
-        } else if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes)
-        {
+        } else if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
             let (tx, rx) = tokio::sync::oneshot::channel();
             spawn_create_game(
                 lobby.cached_rpc_url.clone(),
@@ -1178,52 +1177,62 @@ fn render_solana_tournament_tab(
     }
 
     let games = lobby.tournament_games.clone();
-    egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
-        for game in &games {
-            let status_color = match game.status.as_str() {
-                "Active" => egui::Color32::from_rgb(120, 220, 120),
-                "Completed" => egui::Color32::GRAY,
-                _ => egui::Color32::from_rgb(220, 200, 120),
-            };
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgba_unmultiplied(25, 30, 45, 220))
-                .corner_radius(6.0)
-                .inner_margin(egui::Margin::symmetric(10, 8))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 80, 130)))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new(&game.tournament_name)
-                                    .size(13.0)
-                                    .color(egui::Color32::WHITE)
-                                    .strong(),
-                            );
-                            ui.horizontal(|ui| {
+    egui::ScrollArea::vertical()
+        .max_height(280.0)
+        .show(ui, |ui| {
+            for game in &games {
+                let status_color = match game.status.as_str() {
+                    "Active" => egui::Color32::from_rgb(120, 220, 120),
+                    "Completed" => egui::Color32::GRAY,
+                    _ => egui::Color32::from_rgb(220, 200, 120),
+                };
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgba_unmultiplied(25, 30, 45, 220))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 80, 130)))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
                                 ui.label(
-                                    egui::RichText::new(format!("Round {}", game.round + 1))
+                                    egui::RichText::new(&game.tournament_name)
+                                        .size(13.0)
+                                        .color(egui::Color32::WHITE)
+                                        .strong(),
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(format!("Round {}", game.round + 1))
+                                            .size(11.0)
+                                            .color(egui::Color32::from_rgb(160, 190, 255)),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("·")
+                                            .size(11.0)
+                                            .color(egui::Color32::GRAY),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} vs {}",
+                                            game.white_label(),
+                                            game.black_label()
+                                        ))
                                         .size(11.0)
-                                        .color(egui::Color32::from_rgb(160, 190, 255)),
-                                );
-                                ui.label(egui::RichText::new("·").size(11.0).color(egui::Color32::GRAY));
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} vs {}",
-                                        game.white_label(),
-                                        game.black_label()
-                                    ))
-                                    .size(11.0)
-                                    .color(egui::Color32::LIGHT_GRAY),
-                                );
-                                ui.label(egui::RichText::new("·").size(11.0).color(egui::Color32::GRAY));
-                                ui.label(
-                                    egui::RichText::new(format!("Game {}", game.game_id))
-                                        .size(11.0)
-                                        .color(egui::Color32::from_rgb(200, 160, 255)),
-                                );
+                                        .color(egui::Color32::LIGHT_GRAY),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("·")
+                                            .size(11.0)
+                                            .color(egui::Color32::GRAY),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!("Game {}", game.game_id))
+                                            .size(11.0)
+                                            .color(egui::Color32::from_rgb(200, 160, 255)),
+                                    );
+                                });
                             });
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let is_active = game.status == "Active";
                             if ui
                                 .add_enabled(
@@ -1265,11 +1274,11 @@ fn render_solana_tournament_tab(
                                     .strong(),
                             );
                         });
+                        });
                     });
-                });
-            ui.add_space(4.0);
-        }
-    });
+                ui.add_space(4.0);
+            }
+        });
 }
 
 #[cfg(feature = "solana")]
@@ -1310,12 +1319,12 @@ pub(super) fn render_lobby_selection_popup(
                     .size(20.0)
                     .color(egui::Color32::from_rgb(230, 57, 70))
                     .strong());
-                
+
                 ui.add_space(12.0);
                 ui.label(egui::RichText::new("Select how you want to play against others.")
                     .color(egui::Color32::GRAY)
                     .size(13.0));
-                
+
                 ui.add_space(32.0);
 
                 // Local Button
@@ -1330,9 +1339,9 @@ pub(super) fn render_lobby_selection_popup(
                 if reg_btn.clicked() {
                     menu_state.set(crate::core::MenuState::BraidLobby);
                 }
-                
+
                 ui.add_space(16.0);
-                
+
                 // Solana Wager P2P Button (only available with solana feature)
                 #[cfg(feature = "solana")]
                 {
@@ -1357,7 +1366,7 @@ pub(super) fn render_lobby_selection_popup(
                         }
                     }
                 }
-                
+
                 #[cfg(not(feature = "solana"))]
                 {
                     ui.add_enabled_ui(false, |ui| {
@@ -1368,13 +1377,13 @@ pub(super) fn render_lobby_selection_popup(
                         ).on_hover_text("Solana feature not enabled in this build");
                     });
                 }
-                
+
                 ui.add_space(32.0);
-                
+
                 if ui.button(egui::RichText::new("Cancel").color(egui::Color32::GRAY)).clicked() {
                     menu_state.set(crate::core::MenuState::Main);
                 }
-                
+
                 ui.add_space(8.0);
             });
         });
@@ -2431,9 +2440,11 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
         );
         if ctx.p2p_host.direct_mode {
             ui.label(
-                egui::RichText::new("Not listed anywhere — only whoever you give your ID to can join.")
-                    .size(12.0)
-                    .color(egui::Color32::GRAY),
+                egui::RichText::new(
+                    "Not listed anywhere — only whoever you give your ID to can join.",
+                )
+                .size(12.0)
+                .color(egui::Color32::GRAY),
             );
         }
         ui.add_space(16.0);
@@ -2705,7 +2716,8 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     .clicked()
                 {
                     ui.output_mut(|o| {
-                        o.commands.push(egui::OutputCommand::CopyText(node_id.clone()))
+                        o.commands
+                            .push(egui::OutputCommand::CopyText(node_id.clone()))
                     });
                 }
             });

@@ -254,11 +254,12 @@ async fn check_kyc_status(
     let pool = &state.vault_pool;
 
     // Check if user exists and get basic info (without decrypting PII)
-    let row = sqlx::query("SELECT registered_at, blind_index_hash FROM vault_users WHERE pubkey = ?")
-        .bind(&pubkey)
-        .fetch_optional(&**pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row =
+        sqlx::query("SELECT registered_at, blind_index_hash FROM vault_users WHERE pubkey = ?")
+            .bind(&pubkey)
+            .fetch_optional(&**pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let verified = row.is_some();
     let verified_at = row.as_ref().map(|r| r.get::<i64, _>("registered_at"));

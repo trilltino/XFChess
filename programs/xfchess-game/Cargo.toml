@@ -76,6 +76,12 @@ path = "tests/tournament_match_tests.rs"
 name = "tournament_prize_tests"
 path = "tests/tournament_prize_tests.rs"
 
+# Permissionless Swiss round advancement (persistency: a round can advance
+# from player signatures + a third-party crank, no backend/authority needed).
+[[test]]
+name = "tournament_round_advancement_tests"
+path = "tests/tournament_round_advancement_tests.rs"
+
 # Byte-level lock of instruction arg layouts that the backend and game-client
 # builders construct by hand (no IDL) — catches enum/arg drift at test time.
 [[test]]

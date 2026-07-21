@@ -16,6 +16,14 @@ pub static SETTLEMENT_FINALIZED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_UNDELEGATED_TOTAL: AtomicU64 = AtomicU64::new(0);
 /// Batched `getMultipleAccounts` calls issued by the settlement worker.
 pub static SETTLEMENT_RPC_CALLS_TOTAL: AtomicU64 = AtomicU64::new(0);
+/// Currently-delegated games with no on-chain activity for longer than
+/// `STALE_DELEGATION_SECS` (settlement_worker.rs) — a signal that the ER
+/// validator may not be committing/undelegating as expected. This is a
+/// monitoring signal only: XFChess has no way to force a delegated game back
+/// to the base layer without the ER's cooperation (see the persistency
+/// roadmap's MagicBlock section), so the response to this metric firing is
+/// operational (page, investigate, contact MagicBlock), not automatic.
+pub static SETTLEMENT_STALE_DELEGATED_GAUGE: AtomicU64 = AtomicU64::new(0);
 
 // ── Anti-cheat enqueue ────────────────────────────────────────────────────────
 pub static ANTICHEAT_ENQUEUED_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -62,6 +70,9 @@ pub fn render_prometheus() -> String {
          # HELP xfchess_settlement_rpc_calls_total Batched account-fetch RPC calls\n\
          # TYPE xfchess_settlement_rpc_calls_total counter\n\
          xfchess_settlement_rpc_calls_total {}\n\
+         # HELP xfchess_settlement_stale_delegated_gauge Delegated games with no on-chain activity beyond the expected window (possible stuck ER delegation)\n\
+         # TYPE xfchess_settlement_stale_delegated_gauge gauge\n\
+         xfchess_settlement_stale_delegated_gauge {}\n\
          # HELP xfchess_anticheat_enqueued_total Games queued for anti-cheat analysis\n\
          # TYPE xfchess_anticheat_enqueued_total counter\n\
          xfchess_anticheat_enqueued_total {}\n\
@@ -107,6 +118,7 @@ pub fn render_prometheus() -> String {
         c(&SETTLEMENT_FINALIZED_TOTAL),
         c(&SETTLEMENT_UNDELEGATED_TOTAL),
         c(&SETTLEMENT_RPC_CALLS_TOTAL),
+        c(&SETTLEMENT_STALE_DELEGATED_GAUGE),
         c(&ANTICHEAT_ENQUEUED_TOTAL),
         c(&ANTICHEAT_DROPPED_TOTAL),
         c(&ANTICHEAT_SCREENED_OUT_TOTAL),

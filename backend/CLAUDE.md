@@ -56,6 +56,8 @@ src/
 
 **CACF compliance**: Before building a wager transaction, the signing routes check the player's country code against `cacf/` rules. Adding new restricted jurisdictions means adding a file in that directory.
 
+**JWT/email auth is cosmetic, not a gameplay gate**: `signing/routes/auth.rs`'s username/email/JWT login is an optional identity/UX layer on top of wallet identity — the wallet *is* the identity. `require_relay_or_jwt` (`infrastructure/auth_middleware.rs`), which guards the session-key/move/finalize routes, deliberately **fails open** when neither a JWT nor `RELAY_SHARED_SECRET` is present, so a game is fully playable with the backend's auth layer entirely unconfigured. This is load-bearing for persistency (see root `docs/` or the persistency roadmap plan): don't "fix" the fail-open branch into a hard requirement without realizing it breaks that guarantee. Covered by `dual_accept_auth_guards_signing_endpoints` in `tests/e2e_api.rs`.
+
 **Feature flags**:
 - `ws_subscriber` (default) — enables WebSocket-based live game subscription
 - `polling` — alternative polling mode for environments without WebSocket support

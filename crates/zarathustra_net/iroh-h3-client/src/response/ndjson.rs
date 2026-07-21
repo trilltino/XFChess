@@ -19,7 +19,7 @@
 //!
 //! - Handles arbitrary chunking and frame boundaries.
 //! - Reassembles complete `\n`-terminated lines.
-//! - Deserializes each line using [`serde_json::from_slice`].  
+//! - Deserializes each line using [`serde_json::from_slice`].
 //! - Emits values as soon as they are complete (no buffering the whole body).
 //! - Propagates both HTTP body errors and JSON parsing errors.
 //!

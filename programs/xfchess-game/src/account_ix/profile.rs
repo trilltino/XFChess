@@ -151,7 +151,7 @@ pub fn handler(
 pub struct VerifyProfile<'info> {
     #[account(
         mut,
-        seeds = [PROFILE_SEED, player.key().as_ref()], 
+        seeds = [PROFILE_SEED, player.key().as_ref()],
         bump
     )]
     pub player_profile: Account<'info, PlayerProfile>,

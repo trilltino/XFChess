@@ -96,6 +96,16 @@ impl FromStr for ContentRange {
     }
 }
 
+#[cfg(feature = "fuzzing")]
+impl<'a> arbitrary::Arbitrary<'a> for ContentRange {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(ContentRange {
+            unit: u.arbitrary()?,
+            range: u.arbitrary()?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

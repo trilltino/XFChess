@@ -4,7 +4,6 @@
 pub mod core;
 pub mod multiplayer;
 pub mod program_interface;
-pub mod routing;
 pub mod session;
 pub mod wallet;
 

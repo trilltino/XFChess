@@ -300,7 +300,10 @@ pub fn game_over_popup_system(
     >,
 ) {
     #[cfg(feature = "solana")]
-    let usd_per_sol = sol_usd_rate.as_ref().and_then(|r| r.snapshot()).map(|s| s.usd_per_sol);
+    let usd_per_sol = sol_usd_rate
+        .as_ref()
+        .and_then(|r| r.snapshot())
+        .map(|s| s.usd_per_sol);
     #[cfg(not(feature = "solana"))]
     let usd_per_sol: Option<f64> = None;
 

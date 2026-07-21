@@ -137,9 +137,13 @@ pub fn render_chat_section(
         let btn_clicked = ui
             .add_enabled(
                 can_send,
-                egui::Button::new(egui::RichText::new("Send").size(11.5).color(egui::Color32::WHITE))
-                    .fill(egui::Color32::from_rgb(40, 120, 60))
-                    .corner_radius(4.0),
+                egui::Button::new(
+                    egui::RichText::new("Send")
+                        .size(11.5)
+                        .color(egui::Color32::WHITE),
+                )
+                .fill(egui::Color32::from_rgb(40, 120, 60))
+                .corner_radius(4.0),
             )
             .clicked();
 

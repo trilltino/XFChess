@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiClient, type CreateTournamentRequest } from "../../services/api";
+import { lamportsToSolInput, lamportsToUsd, lamportsToUsdInput, solInputToLamports, usdInputToLamports } from "../../services/sol";
+import { useSolUsdRate } from "../../hooks/useSolUsdRate";
 
 interface CreateTournamentProps {
   onTournamentCreated: () => void;
@@ -10,6 +12,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const solUsdRate = useSolUsdRate();
 
   // Form state
   const [formData, setFormData] = useState<CreateTournamentRequest>({
@@ -28,6 +31,28 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
     scheduled_at: undefined,
     kyc_required: false,
   });
+
+  // Text mirrors of the two lamport fields, kept as separate string state so
+  // the input can hold in-progress text ("0.", "0.00") that parseFloat would
+  // otherwise mangle if it round-tripped through the lamport value on every
+  // keystroke. USD is primary (via the live rate); falls back to SOL input
+  // when no rate has loaded yet so tournament creation is never blocked on
+  // a price feed.
+  const [entryFeeUsdInput, setEntryFeeUsdInput] = useState("");
+  const [platformFeeUsdInput, setPlatformFeeUsdInput] = useState("");
+  const [entryFeeSolInput, setEntryFeeSolInput] = useState(() => lamportsToSolInput(formData.entry_fee_lamports));
+  const [platformFeeSolInput, setPlatformFeeSolInput] = useState(() => lamportsToSolInput(formData.platform_fee_lamports || 0));
+
+  // Populate the USD mirrors once the live rate first loads — the initial
+  // lamport defaults above were set before any rate was known. Guarded by
+  // `prev ||` so a later rate refresh doesn't clobber whatever the admin
+  // has since typed.
+  useEffect(() => {
+    if (solUsdRate == null) return;
+    setEntryFeeUsdInput(prev => prev || lamportsToUsdInput(formData.entry_fee_lamports, solUsdRate));
+    setPlatformFeeUsdInput(prev => prev || lamportsToUsdInput(formData.platform_fee_lamports || 0, solUsdRate));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solUsdRate]);
 
   const updateFormData = (field: keyof CreateTournamentRequest, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -79,11 +104,6 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
     } finally {
       setLoading(false);
     }
-  };
-
-  const formatLamports = (lamports: number) => {
-    const sol = lamports / 1_000_000_000;
-    return sol.toFixed(4);
   };
 
   // Mirrors the backend's default splits (signing/routes/tournament.rs) so a
@@ -140,31 +160,67 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
       <SectionTitle>Economics & Rewards</SectionTitle>
       
       <div>
-        <label style={labelStyle}>ENTRY FEE (LAMPORTS)</label>
-        <input
-          type="number"
-          value={formData.entry_fee_lamports}
-          onChange={(e) => updateFormData("entry_fee_lamports", parseInt(e.target.value) || 0)}
-          style={inputStyle}
-          placeholder="0 for FREE tournament"
-        />
-        <div style={{ color: "var(--accent)", fontSize: "11px", marginTop: "8px", fontWeight: "700" }}>
-          EQUIVALENT: {formatLamports(formData.entry_fee_lamports)} SOL
-        </div>
+        <label style={labelStyle}>ENTRY FEE {solUsdRate != null ? "(USD)" : "(SOL — rate loading)"}</label>
+        {solUsdRate != null ? (
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={entryFeeUsdInput}
+            onChange={(e) => {
+              setEntryFeeUsdInput(e.target.value);
+              updateFormData("entry_fee_lamports", usdInputToLamports(e.target.value, solUsdRate));
+            }}
+            style={inputStyle}
+            placeholder="0 for FREE tournament"
+          />
+        ) : (
+          <input
+            type="number"
+            step="0.0001"
+            min="0"
+            value={entryFeeSolInput}
+            onChange={(e) => {
+              setEntryFeeSolInput(e.target.value);
+              updateFormData("entry_fee_lamports", solInputToLamports(e.target.value));
+            }}
+            style={inputStyle}
+            placeholder="0 for FREE tournament"
+          />
+        )}
+        <FeeEquivalent lamports={formData.entry_fee_lamports} solUsdRate={solUsdRate} color="var(--accent)" />
       </div>
- 
+
       <div>
-        <label style={labelStyle}>PLATFORM FEE (LAMPORTS)</label>
-        <input
-          type="number"
-          value={formData.platform_fee_lamports}
-          onChange={(e) => updateFormData("platform_fee_lamports", parseInt(e.target.value) || 0)}
-          style={inputStyle}
-          placeholder="Service fee (e.g. 4000000 for ~50p)"
-        />
-        <div style={{ color: "var(--primary)", fontSize: "11px", marginTop: "8px", fontWeight: "700" }}>
-          EQUIVALENT: {formatLamports(formData.platform_fee_lamports || 0)} SOL
-        </div>
+        <label style={labelStyle}>PLATFORM FEE {solUsdRate != null ? "(USD)" : "(SOL — rate loading)"}</label>
+        {solUsdRate != null ? (
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={platformFeeUsdInput}
+            onChange={(e) => {
+              setPlatformFeeUsdInput(e.target.value);
+              updateFormData("platform_fee_lamports", usdInputToLamports(e.target.value, solUsdRate));
+            }}
+            style={inputStyle}
+            placeholder="Service fee (e.g. $0.50)"
+          />
+        ) : (
+          <input
+            type="number"
+            step="0.0001"
+            min="0"
+            value={platformFeeSolInput}
+            onChange={(e) => {
+              setPlatformFeeSolInput(e.target.value);
+              updateFormData("platform_fee_lamports", solInputToLamports(e.target.value));
+            }}
+            style={inputStyle}
+            placeholder="Service fee (e.g. 0.004 SOL for ~50p)"
+          />
+        )}
+        <FeeEquivalent lamports={formData.platform_fee_lamports || 0} solUsdRate={solUsdRate} color="var(--primary)" />
       </div>
 
       <div style={{ 
@@ -446,6 +502,17 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <h2 style={{ color: "#fff", fontSize: "24px", fontWeight: "800", marginBottom: "0.5rem" }}>{children}</h2>
 );
+
+/** Shows lamports + a best-effort USD equivalent under a SOL input; omits the
+ * USD half until a rate has loaded rather than showing a stale/wrong figure. */
+const FeeEquivalent = ({ lamports, solUsdRate, color }: { lamports: number; solUsdRate: number | null; color: string }) => {
+  const usd = lamportsToUsd(lamports, solUsdRate);
+  return (
+    <div style={{ color, fontSize: "11px", marginTop: "8px", fontWeight: "700" }}>
+      {lamports.toLocaleString()} LAMPORTS{usd != null ? ` · ≈ $${usd.toFixed(2)} USD` : ""}
+    </div>
+  );
+};
 
 const labelStyle: React.CSSProperties = {
   display: "block",

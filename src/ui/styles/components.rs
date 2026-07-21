@@ -131,15 +131,18 @@ impl StyledButton {
     ///
     /// `min_size` lets callers keep per-row sizing (e.g. wider engine-name
     /// chips vs. square strength-number chips) while sharing colors/shape.
-    pub fn chip(ui: &mut egui::Ui, text: &str, selected: bool, min_size: egui::Vec2) -> egui::Response {
+    pub fn chip(
+        ui: &mut egui::Ui,
+        text: &str,
+        selected: bool,
+        min_size: egui::Vec2,
+    ) -> egui::Response {
         let accent = UiColors::ACCENT;
-        let button = egui::Button::new(
-            egui::RichText::new(text).size(13.5).color(if selected {
-                egui::Color32::WHITE
-            } else {
-                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 160)
-            }),
-        )
+        let button = egui::Button::new(egui::RichText::new(text).size(13.5).color(if selected {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 160)
+        }))
         .min_size(min_size)
         .corner_radius(6.0)
         .fill(if selected {

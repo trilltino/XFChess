@@ -108,7 +108,12 @@ pub fn spectator_hud_system(
                 } else {
                     ("· LIVE", egui::Color32::from_rgb(120, 220, 120))
                 };
-                ui.label(egui::RichText::new(badge).size(11.0).color(badge_color).strong());
+                ui.label(
+                    egui::RichText::new(badge)
+                        .size(11.0)
+                        .color(badge_color)
+                        .strong(),
+                );
 
                 ui.separator();
 

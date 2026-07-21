@@ -92,6 +92,14 @@ pub struct Tournament {
     pub increment_seconds: u16,
     /// Winner takes all flag.
     pub winner_takes_all: bool,
+    /// Bitmap: bit `board` is set once `record_swiss_result` has recorded
+    /// that board's result for `current_round`. Reset to all-zero whenever
+    /// `advance_round` bumps `current_round`. Sized for the worst case (a
+    /// 256-player Swiss tournament has up to 128 boards per round).
+    /// Lets `advance_round` verify a round is actually complete purely from
+    /// on-chain state instead of trusting an off-chain caller — the whole
+    /// point being that round progression doesn't need the backend alive.
+    pub round_boards_reported: [u8; 16],
 }
 
 /// Prize distribution type

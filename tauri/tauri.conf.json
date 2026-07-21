@@ -49,8 +49,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../assets/**/*",
-      "../stockfish.exe"
+      "../assets/**/*"
     ]
   },
   "plugins": {

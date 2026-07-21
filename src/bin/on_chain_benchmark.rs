@@ -6,15 +6,11 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-use xfchess::nimzovich_engine::{validate_and_apply, CompactBoard, OnChainGame};
-use xfchess::solana::instructions::{
-    authorize_session_key_ix, create_game_ix, finalize_game_ix, init_profile_ix, join_game_ix,
-    record_move_ix, PROGRAM_ID,
-};
+use nimzovich_engine::{validate_and_apply, CompactBoard};
+use xfchess::solana::instructions::{record_move_ix, PROGRAM_ID};
 
 const DEVNET_RPC: &str = "https://api.devnet.solana.com";
 
@@ -47,7 +43,6 @@ async fn main() -> Result<()> {
 
     // 1. Setup Players
     let white = fee_payer; // Use same key for simplicity in bench
-    let black = Keypair::new(); // Temporary black player
 
     // 2. Create Game
     let game_id = std::time::SystemTime::now()
@@ -86,8 +81,7 @@ async fn main() -> Result<()> {
         move_bytes[..len].copy_from_slice(&bytes[..len]);
 
         let mut oc_game = cb.to_on_chain_game();
-        let outcome =
-            validate_and_apply(&mut oc_game, &move_bytes).expect("Illegal move in bench sequence");
+        validate_and_apply(&mut oc_game, &move_bytes).expect("Illegal move in bench sequence");
         let next_cb = oc_game.to_compact_board();
 
         nonce += 1;

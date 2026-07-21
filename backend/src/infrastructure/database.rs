@@ -188,6 +188,10 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_021 = include_str!("../../migrations/021_active_sessions.sql");
     run_script(&pools.session_pool, migration_021, "021").await?;
 
+    // ── Migration 022: matchmaking queue/matches (restart survival) ──────────
+    let migration_022 = include_str!("../../migrations/022_matchmaking_queue.sql");
+    run_script(&pools.session_pool, migration_022, "022").await?;
+
     info!("[Database] All migrations completed successfully");
     Ok(())
 }

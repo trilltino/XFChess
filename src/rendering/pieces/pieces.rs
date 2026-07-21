@@ -968,7 +968,10 @@ impl Plugin for PiecePlugin {
         // Apply the current view mode's visibility on game entry (idempotent),
         // then keep it applied whenever the mode changes or pieces (re)spawn.
         // `ViewMode` is the single source of truth, so this can never desync.
-        app.add_systems(OnEnter(GameState::InGame), view_mode_rendering_toggle_system);
+        app.add_systems(
+            OnEnter(GameState::InGame),
+            view_mode_rendering_toggle_system,
+        );
         app.add_systems(
             Update,
             view_mode_rendering_toggle_system.run_if(

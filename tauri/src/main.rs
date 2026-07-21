@@ -706,7 +706,9 @@ fn open_in_browser(url: &str) {
     // window will show the right screen on its own.
     if let Some(pid) = *wallet_popup_pid_cell().lock().unwrap() {
       if process_is_alive(pid) {
-        tracing::debug!("[WalletPopup] popup (pid {pid}) still open — refocusing instead of spawning a duplicate");
+        tracing::debug!(
+          "[WalletPopup] popup (pid {pid}) still open — refocusing instead of spawning a duplicate"
+        );
         std::thread::spawn(move || force_foreground_window(pid));
         return;
       }

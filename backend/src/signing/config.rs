@@ -17,7 +17,9 @@ pub struct SigningConfig {
     pub solana_rpc_url: String,
     /// MagicBlock Execution Rollup RPC URL (default: devnet EU endpoint)
     pub er_rpc_url: String,
-    /// Magic Router RPC URL. Falls back to ER_RPC_URL when unset.
+    /// Magic Router RPC URL — MagicBlock's generic per-transaction router
+    /// (default: devnet router endpoint). Used for ER writes (record_move,
+    /// undelegate); base writes use `solana_rpc_url`.
     pub magic_router_rpc_url: String,
     /// XFChess program ID on Solana
     pub program_id: String,
@@ -86,10 +88,7 @@ impl SigningConfig {
                 .unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into()),
             magic_router_rpc_url: env::var("MAGIC_ROUTER_RPC_URL")
                 .or_else(|_| env::var("MAGIC_ROUTER_URL"))
-                .unwrap_or_else(|_| {
-                    env::var("ER_RPC_URL")
-                        .unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into())
-                }),
+                .unwrap_or_else(|_| "https://devnet-router.magicblock.app".into()),
             // Canonical program ID — matches `declare_id!` in programs/xfchess-game
             // and the deployed devnet program. Override with PROGRAM_ID for other
             // clusters/deployments.
