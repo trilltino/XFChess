@@ -23,11 +23,11 @@ pub fn create_templeos_quote_ui(mut commands: Commands, view_mode: Res<ViewMode>
     commands.spawn((
         Text::new("there's nothing better to do with your time than kill time with Mr. God and enjoy divine intellect all day long."),
         TextFont {
-            font_size: 14.0,
+            font_size: FontSize::from(14.0),
             ..default()
         },
         TextColor(Color::srgb(0.0, 0.0, 0.0)), // Black text
-        TextLayout::new_with_justify(bevy::text::Justify::Center),
+        TextLayout::justify(bevy::text::Justify::Center),
         Node {
             position_type: PositionType::Absolute,
             bottom: px(50),
@@ -45,11 +45,11 @@ pub fn create_templeos_quote_ui(mut commands: Commands, view_mode: Res<ViewMode>
     commands.spawn((
         Text::new("Terry.A.Davis"),
         TextFont {
-            font_size: 12.0,
+            font_size: FontSize::from(12.0),
             ..default()
         },
         TextColor(Color::srgb(0.0, 0.0, 0.0)), // Black text
-        TextLayout::new_with_justify(bevy::text::Justify::Center),
+        TextLayout::justify(bevy::text::Justify::Center),
         Node {
             position_type: PositionType::Absolute,
             bottom: px(40),
@@ -66,11 +66,11 @@ pub fn create_templeos_quote_ui(mut commands: Commands, view_mode: Res<ViewMode>
     commands.spawn((
         Text::new("1969 - 2018"),
         TextFont {
-            font_size: 12.0,
+            font_size: FontSize::from(12.0),
             ..default()
         },
         TextColor(Color::srgb(0.0, 0.0, 0.0)), // Black text
-        TextLayout::new_with_justify(bevy::text::Justify::Center),
+        TextLayout::justify(bevy::text::Justify::Center),
         Node {
             position_type: PositionType::Absolute,
             bottom: px(25),
