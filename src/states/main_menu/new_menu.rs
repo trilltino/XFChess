@@ -1442,6 +1442,41 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         play_click(&mut cx.commands, snd);
         cx.competitive_menu.show_controls_popup = true;
     }
+
+    if cx.player_identity.username.is_some() {
+        ui.add_space(14.0);
+        section(ui, "Account");
+
+        if ui
+            .add_sized(
+                [W, 34.0],
+                egui::Button::new(
+                    egui::RichText::new("Logout")
+                        .size(10.8)
+                        .color(egui::Color32::WHITE)
+                        .family(egui::FontFamily::Proportional),
+                )
+                .fill(egui::Color32::from_rgb(100, 40, 40))
+                .corner_radius(6.0),
+            )
+            .clicked()
+        {
+            play_click(&mut cx.commands, snd);
+            cx.wallet_bridge.enabled = false;
+            cx.wallet_bridge.known_pubkey = None;
+            cx.wallet_bridge.timer = 0.0;
+            cx.wallet_bridge.status_rx = None;
+            cx.wallet_bridge.balance_rx = None;
+            if let Ok(mut d) = cx.wallet_bridge.data.lock() {
+                d.sol_balance = 0.0;
+                d.usd_balance = None;
+            }
+            *cx.player_identity = crate::states::main_menu::PlayerIdentity::default();
+            *cx.auth_state = Default::default();
+            *cx.new_menu_panel = NewMenuPanel::Main;
+            cx.next_state.set(GameState::Auth);
+        }
+    }
 }
 
 fn section(ui: &mut egui::Ui, title: &str) {
