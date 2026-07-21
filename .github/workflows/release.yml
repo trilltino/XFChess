@@ -113,7 +113,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          & "$env:ProgramFiles(x86)\NSIS\makensis.exe" `
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" `
             "/DAPP_VERSION=${{ steps.ver.outputs.version }}" `
             "/DBACKEND_URL=${{ env.BACKEND_URL }}" `
             "/DSIGNING_URL=${{ env.SIGNING_URL }}" `
