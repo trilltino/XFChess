@@ -124,6 +124,17 @@ impl Default for Version {
     }
 }
 
+#[cfg(feature = "fuzzing")]
+impl<'a> arbitrary::Arbitrary<'a> for Version {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        if u.arbitrary()? {
+            Ok(Version::String(u.arbitrary()?))
+        } else {
+            Ok(Version::Integer(u.arbitrary()?))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

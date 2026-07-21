@@ -26,12 +26,13 @@ sfv = "0.14"
 gloo-timers = { version = "0.3", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }
+arbitrary = { version = "1", optional = true }
 
 [features]
 default = ["native"]
 native = []
 wasm = ["dep:gloo-timers", "dep:wasm-bindgen-futures", "dep:js-sys"]
-fuzzing = []
+fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

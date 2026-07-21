@@ -560,6 +560,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3219,6 +3225,7 @@ dependencies = [
 name = "braid-http"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "async-channel 2.5.0",
  "async-trait",
  "bytes",
