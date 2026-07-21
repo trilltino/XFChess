@@ -11,7 +11,6 @@
 
 pub mod debug;
 pub mod instructions;
-pub mod routing;
 pub mod rpc;
 pub mod telemetry;
 pub mod transactions;
@@ -24,7 +23,6 @@ pub use instructions::{
     link_external_elo_ix, record_move_ix, record_result_ix, required_shards, start_tournament_ix,
     undelegate_game_ix, verify_profile_ix, withdraw_treasury_ix,
 };
-pub use routing::{magic_router_url, route_for_game_write, routed_rpc, TxRoute};
 pub use rpc::{fallback_rpc_url, make_rpc, read_with_failover, redact_url, rpc_url_or_devnet};
 pub use telemetry::{
     submit_er_with_telemetry, submit_with_telemetry, TxErrorCategory, TxErrorDetail,

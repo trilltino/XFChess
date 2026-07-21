@@ -391,7 +391,7 @@ impl GameRepository {
 
         let game = sqlx::query_as::<_, GameRecord>(
             r#"
-            UPDATE games 
+            UPDATE games
             SET winner = ?, final_fen = ?, status = ?, end_time = ?
             WHERE id = ?
             RETURNING *

@@ -635,9 +635,10 @@ impl TournamentStore {
             }
 
             // Advance the winner into their next-round match slot (if any).
-            let next = t.matches[match_index]
-                .as_ref()
-                .and_then(|m| m.next_match_for_winner.map(|n| (n as usize, m.next_match_slot)));
+            let next = t.matches[match_index].as_ref().and_then(|m| {
+                m.next_match_for_winner
+                    .map(|n| (n as usize, m.next_match_slot))
+            });
             if let Some((next_idx, slot)) = next {
                 if next_idx < t.matches.len() {
                     if let Some(nm) = t.matches[next_idx].as_mut() {

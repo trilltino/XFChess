@@ -52,23 +52,16 @@ use new_menu::{
 };
 use screens::*;
 
-/// Visual style marker — only the 3D board style exists now.
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MenuStyle {
-    #[default]
-    New,
-}
-
 /// Plugin for main menu state.
 pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MenuStyle>()
-            .init_resource::<new_menu::MenuCameraOrbit>()
+        app.init_resource::<new_menu::MenuCameraOrbit>()
             .init_resource::<new_menu::MenuBgPiecesSpawned>()
             .init_resource::<new_menu::NewMenuPanel>()
             .init_resource::<new_menu::MenuExitConfirm>()
+            .init_resource::<new_menu::MenuFocusMode>()
             .init_resource::<board_animation::BoardAnimator>()
             .init_resource::<music::MenuMusic>()
             .init_resource::<WalletBridgePoller>()
@@ -78,9 +71,11 @@ impl Plugin for MainMenuPlugin {
                 (
                     // Reset panel to Main every time we enter the menu (e.g. returning from a game)
                     |mut panel: ResMut<new_menu::NewMenuPanel>,
-                     mut exit_confirm: ResMut<new_menu::MenuExitConfirm>| {
+                     mut exit_confirm: ResMut<new_menu::MenuExitConfirm>,
+                     mut focus_mode: ResMut<new_menu::MenuFocusMode>| {
                         *panel = new_menu::NewMenuPanel::default();
                         exit_confirm.visible = false;
+                        focus_mode.active = false;
                     },
                     purge_stale_lights,
                     setup_menu_camera,
@@ -97,6 +92,7 @@ impl Plugin for MainMenuPlugin {
                  mut fl: ResMut<FontsLoaded>,
                  mut anim: ResMut<board_animation::BoardAnimator>,
                  mut panel: ResMut<new_menu::NewMenuPanel>,
+                 mut focus_mode: ResMut<new_menu::MenuFocusMode>,
                  mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>,
                  mut orbit: ResMut<new_menu::MenuCameraOrbit>,
                  cam: Res<crate::PersistentEguiCamera>,
@@ -105,6 +101,7 @@ impl Plugin for MainMenuPlugin {
                     fl.0 = false;
                     *anim = board_animation::BoardAnimator::default();
                     *panel = new_menu::NewMenuPanel::default();
+                    focus_mode.active = false;
                     *global_ambient = bevy::light::GlobalAmbientLight::default();
                     // Restore perspective so in-game cameras don't inherit the
                     // menu's V-toggled orthographic projection.
@@ -916,7 +913,10 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
     // through vps_base() (not a hardcoded localhost URL) — release builds
     // run against the production backend, and a literal 127.0.0.1 here
     // always fails for real players, silently losing the USD conversion.
-    let rates_url = format!("{}/api/rates/all", crate::multiplayer::network::vps::vps_base());
+    let rates_url = format!(
+        "{}/api/rates/all",
+        crate::multiplayer::network::vps::vps_base()
+    );
     let rates_json = client
         .get(rates_url)
         .send()
@@ -1391,11 +1391,17 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
     info!("[MAIN_MENU] Fonts registered successfully");
 }
 
-/// Render the main menu — dispatches to new-style (3D board) or classic website layout
-/// depending on the current [`MenuStyle`] resource.
+/// Render the main menu: loading screen while assets load, the "Learn" focus
+/// mode (board caption only), the Solana splash panel, or the 3D-board menu
+/// — the only menu layout that exists.
 fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     if !ctx_menu.loading_progress.complete {
         render_loading_screen_website(ctx, ctx_menu);
+        return;
+    }
+
+    if ctx_menu.focus_mode.active {
+        new_menu::render_board_caption(ctx);
         return;
     }
 

@@ -2,7 +2,7 @@
 //!
 //! `iroh-h3-client` is a Rust library for building and sending HTTP/3 requests using the QUIC-based
 //! HTTP/3 protocol. It provides a high-level, ergonomic API for constructing requests, setting
-//! headers and body content, and receiving responses asynchronously.  
+//! headers and body content, and receiving responses asynchronously.
 //!
 //! ## Features
 //!

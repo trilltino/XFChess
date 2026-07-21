@@ -76,9 +76,7 @@ pub(super) fn render_ai_setup_modal(
                         selected,
                         egui::Vec2::new(32.0, 32.0),
                     )
-                    .on_hover_text(
-                        crate::game::ai::resource::AIDifficulty::from_u8(lvl).tooltip(),
-                    );
+                    .on_hover_text(crate::game::ai::resource::AIDifficulty::from_u8(lvl).tooltip());
 
                     if response.clicked() {
                         competitive.ai_difficulty = lvl;
@@ -91,10 +89,8 @@ pub(super) fn render_ai_setup_modal(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(
-                        crate::game::ai::resource::AIDifficulty::from_u8(
-                            competitive.ai_difficulty,
-                        )
-                        .description(),
+                        crate::game::ai::resource::AIDifficulty::from_u8(competitive.ai_difficulty)
+                            .description(),
                     )
                     .size(11.0)
                     .color(egui::Color32::from_rgb(150, 150, 150)),

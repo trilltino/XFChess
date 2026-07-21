@@ -90,13 +90,7 @@ pub fn run_tournament(
 
     // ── Players: ephemeral keypairs, highest ELO first ──────────────────────
     let players: Vec<(String, Keypair, u32)> = (0..player_count)
-        .map(|i| {
-            (
-                format!("P{}", i + 1),
-                Keypair::new(),
-                2800 - 50 * i as u32,
-            )
-        })
+        .map(|i| (format!("P{}", i + 1), Keypair::new(), 2800 - 50 * i as u32))
         .collect();
 
     // Fund the players (chunked — a single tx can't hold 64 transfers).
@@ -130,7 +124,10 @@ pub fn run_tournament(
         let shards = initialize_shards_ix(program_id, admin.pubkey(), tournament_id, player_count)?;
         if std::env::var("XFCHESS_E2E_DEBUG").is_ok() {
             let hex: String = init.data.iter().map(|b| format!("{b:02x}")).collect();
-            eprintln!("[debug] initialize_tournament data ({} bytes): {hex}", init.data.len());
+            eprintln!(
+                "[debug] initialize_tournament data ({} bytes): {hex}",
+                init.data.len()
+            );
         }
         let sig = send(&rpc, &[init, escrow, shards], admin, &[])?;
         push_step(&mut steps, "Tournament created (init+escrow+shards)", &sig);
@@ -236,22 +233,15 @@ pub fn run_tournament(
             bail!("match {i} has an unfilled slot — bracket advancement failed");
         };
         // Higher seed = earlier position in `seeded`.
-        let (winner, loser) = if seeded.iter().position(|p| *p == white)
-            < seeded.iter().position(|p| *p == black)
-        {
-            (white, black)
-        } else {
-            (black, white)
-        };
+        let (winner, loser) =
+            if seeded.iter().position(|p| *p == white) < seeded.iter().position(|p| *p == black) {
+                (white, black)
+            } else {
+                (black, white)
+            };
 
-        let record = record_match_result_ix(
-            program_id,
-            admin.pubkey(),
-            tournament_id,
-            i,
-            winner,
-            loser,
-        )?;
+        let record =
+            record_match_result_ix(program_id, admin.pubkey(), tournament_id, i, winner, loser)?;
         let (_, next, slot) = bracket_position(player_count, i);
         let mut ixs = vec![record];
         if let Some(next_idx) = next {

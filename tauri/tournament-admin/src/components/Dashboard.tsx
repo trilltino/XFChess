@@ -16,17 +16,20 @@ function loadDeployHistory(): DeployEntry[] {
 const FEEPAYER_THRESHOLD_KEY = "feepayer_threshold_sol";
 function getFeepayerThreshold() { return parseFloat(localStorage.getItem(FEEPAYER_THRESHOLD_KEY) || "0.5"); }
 
-// Prometheus (:9090) is internal-only on the VPS and not forwarded by the SSH
-// tunnel, so the CPU/RAM numbers only populate when it's directly reachable.
-// Backend-served data (/health, /metrics) goes through the active env's
-// backend_url instead — that IS tunnel-aware.
-const serverIp = VPS_HOST;
-
 export default function Dashboard() {
   type MainTab = "CONSOLE" | "MODERATION" | "AUDIT" | "INFRA";
   const [activeTab, setActiveTab] = useState<MainTab>("CONSOLE");
   const { authState } = useAuth();
   const backendUrl = authState.backend_url;
+  // Prometheus (:9090) is internal-only on the VPS and not forwarded by the
+  // SSH tunnel, so it's only ever reached directly — never through
+  // backend_url. In PRODUCTION that means the VPS IP (best-effort: only
+  // populates when :9090 is directly reachable from this machine). In LOCAL
+  // it must stay on loopback — pointing a local session at the VPS IP made
+  // every 5s poll hang for the OS's full TCP connect timeout instead of
+  // failing fast, since an unreachable-but-not-actively-refusing remote host
+  // doesn't reject the way a closed local port does.
+  const promHost = authState.env === "production" ? VPS_HOST : "127.0.0.1";
 
   const [activeSessions, setActiveSessions] = useState(0);
   const [totalGames, setTotalGames] = useState(0);
@@ -67,7 +70,17 @@ export default function Dashboard() {
 
         const promQuery = async (q: string) => {
           try {
-            const r = await fetch(`http://${serverIp}:9090/api/v1/query?query=${encodeURIComponent(q)}`).then(r => r.json());
+            // Bound the wait ourselves — an unreachable-but-not-refusing
+            // remote host (e.g. production Prometheus with no route from
+            // this machine) otherwise hangs for the OS's full TCP connect
+            // timeout, stalling this 5s poll loop for far longer than that.
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 3000);
+            const r = await fetch(
+              `http://${promHost}:9090/api/v1/query?query=${encodeURIComponent(q)}`,
+              { signal: controller.signal },
+            ).then(r => r.json());
+            clearTimeout(timeout);
             return r.data.result[0]?.value[1] || "0";
           } catch { return "0"; }
         };

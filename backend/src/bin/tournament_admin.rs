@@ -936,14 +936,104 @@ fn calculate_prizes() {
     }
 }
 
+// ── Recovery (direct RPC, no backend) ───────────────────────────────────────
+//
+// Everything above this section talks to the backend's HTTP API. This one
+// command deliberately doesn't: it's the "break glass" path from the
+// persistency plan — round advancement for a Swiss tournament is a
+// permissionless on-chain instruction (`advance_round`) specifically so a
+// stalled tournament can be pushed forward even if the backend that would
+// normally do this automatically is gone for good. Needs only an RPC URL and
+// a funded keypair to pay the (tiny) transaction fee — the keypair does not
+// need any special authority, since the program validates completeness from
+// on-chain state, not from who calls it.
+
+/// Program ID pinned in root CLAUDE.md (localnet + devnet).
+const DEFAULT_PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
+
+fn advance_tournament_round_directly() {
+    use sha2::{Digest, Sha256};
+    use solana_sdk::{
+        instruction::{AccountMeta, Instruction},
+        pubkey::Pubkey,
+        signature::{read_keypair_file, Signer},
+        transaction::Transaction,
+    };
+    use std::str::FromStr;
+
+    let tournament_id = read_u64("Tournament ID");
+    let rpc_url = prompt_default(
+        "Solana RPC URL",
+        &env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
+    );
+    let program_id = match Pubkey::from_str(&prompt_default("Program ID", DEFAULT_PROGRAM_ID)) {
+        Ok(p) => p,
+        Err(e) => return println!("  [ERROR] Invalid program ID: {e}"),
+    };
+    let keypair_path = prompt("Path to a funded keypair JSON file (pays the tx fee only)");
+    let cranker = match read_keypair_file(&keypair_path) {
+        Ok(kp) => kp,
+        Err(e) => return println!("  [ERROR] Could not read keypair: {e}"),
+    };
+
+    let (tournament_pda, _) =
+        Pubkey::find_program_address(&[b"tournament", &tournament_id.to_le_bytes()], &program_id);
+
+    // Anchor discriminator = sha256("global:advance_round")[..8], followed by
+    // the single `tournament_id: u64` arg (borsh little-endian).
+    let mut hasher = Sha256::new();
+    hasher.update(b"global:advance_round");
+    let disc: [u8; 8] = hasher.finalize()[..8].try_into().unwrap();
+    let mut data = disc.to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    // Account order must match `AdvanceRound`: tournament, cranker.
+    let accounts = vec![
+        AccountMeta::new(tournament_pda, false),
+        AccountMeta::new_readonly(cranker.pubkey(), true),
+    ];
+    let ix = Instruction {
+        program_id,
+        accounts,
+        data,
+    };
+
+    let rpc = solana_client::rpc_client::RpcClient::new(rpc_url);
+    let blockhash = match rpc.get_latest_blockhash() {
+        Ok(h) => h,
+        Err(e) => return println!("  [ERROR] Could not fetch blockhash: {e}"),
+    };
+    let tx =
+        Transaction::new_signed_with_payer(&[ix], Some(&cranker.pubkey()), &[&cranker], blockhash);
+
+    match rpc.send_and_confirm_transaction(&tx) {
+        Ok(sig) => println!("  [OK] Round advanced. Signature: {sig}"),
+        Err(e) => println!(
+            "  [ERROR] {e}\n  (a TournamentRoundIncomplete error means not every board in the \
+             current round has reported a result yet — nothing to do until they have)"
+        ),
+    }
+}
+
 // ── Menu ──────────────────────────────────────────────────────────────────────
 
 fn print_header() {
     println!("\n╔═══════════════════════════════════════════════════════════════════╗");
     println!("║         XFChess Tournament Admin CLI                              ║");
     println!("╚═══════════════════════════════════════════════════════════════════╝");
-    println!("  Server : {}", server_url());
-    println!("  API key: {}…\n", &api_key()[..api_key().len().min(8)]);
+    // Everything except menu option 11 (direct-RPC recovery) needs a backend
+    // + admin key. Don't hard-require either up front — option 11 exists
+    // specifically for when there's no backend to talk to.
+    match env::var("ADMIN_API_KEY") {
+        Ok(key) => {
+            println!("  Server : {}", server_url());
+            println!("  API key: {}…\n", &key[..key.len().min(8)]);
+        }
+        Err(_) => {
+            println!("  [!] ADMIN_API_KEY not set — only option 11 (direct-RPC recovery,");
+            println!("      no backend needed) will work.\n");
+        }
+    }
 }
 
 fn print_menu() {
@@ -961,6 +1051,8 @@ fn print_menu() {
     println!("│  9.  Batch KYC check (multiple wallets)                           │");
     println!("├── Finance ─────────────────────────────────────────────────────────┤");
     println!("│  10. Calculate prize payout                                       │");
+    println!("├── Recovery (direct RPC — works with no backend running) ─────────┤");
+    println!("│  11. Advance a stalled Swiss tournament's round                  │");
     println!("│                                                                   │");
     println!("│  0.  Exit                                                         │");
     println!("└───────────────────────────────────────────────────────────────────┘");
@@ -989,6 +1081,7 @@ fn main() {
             "8" => check_kyc(),
             "9" => batch_kyc_check(),
             "10" => calculate_prizes(),
+            "11" => advance_tournament_round_directly(),
             "0" | "q" | "quit" | "exit" => {
                 println!("  Goodbye.\n");
                 break;

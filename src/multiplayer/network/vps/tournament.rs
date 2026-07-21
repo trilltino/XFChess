@@ -113,7 +113,11 @@ pub fn list_tournament_games() -> Result<Vec<TournamentGameListing>, String> {
     let mut out = Vec::new();
     for t in tournaments.into_iter().filter(|t| t.is_tournament) {
         let resp = match client()?
-            .get(format!("{}/tournament/{}/bracket", vps_base(), t.tournament_id))
+            .get(format!(
+                "{}/tournament/{}/bracket",
+                vps_base(),
+                t.tournament_id
+            ))
             .send()
         {
             Ok(r) if r.status().is_success() => r,

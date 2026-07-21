@@ -57,7 +57,11 @@ impl SubscriptionManager {
                 topics.retain(|_, entry| entry.last_active.elapsed() < TOPIC_IDLE_TIMEOUT);
                 let removed = before - topics.len();
                 if removed > 0 {
-                    tracing::debug!(removed, remaining = topics.len(), "swept idle gossip topics");
+                    tracing::debug!(
+                        removed,
+                        remaining = topics.len(),
+                        "swept idle gossip topics"
+                    );
                 }
             }
         });

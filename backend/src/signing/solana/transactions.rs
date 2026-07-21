@@ -63,6 +63,7 @@ pub fn sign_and_submit_er(
         skip_preflight: true,
         ..Default::default()
     };
+    let start = Instant::now();
     let sig = rpc
         .send_transaction_with_config(&tx, config)
         .map_err(|e| anyhow!(e))?;
@@ -74,7 +75,21 @@ pub fn sign_and_submit_er(
             return Err(anyhow!("ER record_move confirmation timeout for {sig}"));
         }
         match rpc.get_signature_status_with_commitment(&sig, commitment) {
-            Ok(Some(Ok(()))) => return Ok(sig),
+            Ok(Some(Ok(()))) => {
+                // Landing latency for this exact endpoint/client combo — the thing
+                // MagicBlock's docs imply only their SDK wrappers guarantee. Logged
+                // here so live devnet validation shows it for free, no separate
+                // script needed. Sub-second/low-hundreds-ms means it actually
+                // executed on the ER; if this creeps toward Solana's ~400ms+ base
+                // block time or higher, that's a sign the router isn't doing what
+                // we assume.
+                tracing::info!(
+                    "[ER] tx {sig} confirmed via {} in {}ms",
+                    crate::signing::solana::redact_url(&rpc.url()),
+                    start.elapsed().as_millis()
+                );
+                return Ok(sig);
+            }
             Ok(Some(Err(e))) => return Err(anyhow!("ER record_move failed: {e:?}")),
             Ok(None) => std::thread::sleep(Duration::from_millis(400)),
             Err(e) => {

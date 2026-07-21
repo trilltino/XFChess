@@ -196,33 +196,12 @@ After undelegation, `finalize_game` performs the value-moving settlement on base
 
 ## Routing: Base RPC vs Magic Router
 
-Delegated accounts need different transaction routing than normal base-layer accounts. XFChess keeps the decision behind routing adapters.
+Delegated accounts need different transaction routing than normal base-layer accounts. XFChess sends each instruction to a statically-known endpoint rather than inspecting delegation state per transaction — MagicBlock's own **Magic Router** (a hosted RPC that inspects writable-account ownership and forwards each tx to base or ER automatically) does the generic routing job; XFChess just needs to point ER-hot-path writes at it.
 
-Backend routing lives in `backend/src/signing/solana/routing.rs`:
+The actual call sites:
 
-```rust
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TxRoute {
-    Base,
-    MagicRouter,
-}
-
-pub fn magic_router_url(er_rpc_url: &str) -> String {
-    std::env::var("MAGIC_ROUTER_RPC_URL")
-        .or_else(|_| std::env::var("MAGIC_ROUTER_URL"))
-        .unwrap_or_else(|_| er_rpc_url.to_string())
-}
-
-pub fn route_for_game_write(is_delegated: bool) -> TxRoute {
-    if is_delegated {
-        TxRoute::MagicRouter
-    } else {
-        TxRoute::Base
-    }
-}
-```
-
-Native client routing mirrors this in `src/solana/routing.rs`. Base settlement always uses base RPC. Game writes use Magic Router when delegated.
+- `backend/src/signing/routes/main.rs` (`/vps/record_move`, `/vps/undelegate`) and `backend/src/tasks/settlement_worker.rs` (auto-undelegate) build their RPC client from `state.config.magic_router_rpc_url` — these are the only instructions that ever touch a delegated `Game` PDA.
+- Everything else (`create_game`, `join_game`, `finalize_game`, tournament/treasury instructions) uses `state.config.solana_rpc_url` (base layer) directly, and the program rejects those instructions on a still-delegated game (see `programs/xfchess-game/src/magicblock/routing.rs`'s `GAME_WRITES_ONLY_ROUTING_INVARIANT`) — so there is no mixed delegated/non-delegated write to route.
 
 Useful environment variables:
 
@@ -230,51 +209,15 @@ Useful environment variables:
 SOLANA_RPC_URL=https://api.devnet.solana.com
 SOLANA_RPC_FALLBACK_URL=https://api.devnet.solana.com
 ER_RPC_URL=https://devnet-eu.magicblock.app/
-MAGIC_ROUTER_RPC_URL=https://devnet-eu.magicblock.app/
+MAGIC_ROUTER_RPC_URL=https://devnet-router.magicblock.app
 PROGRAM_ID=8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU
 ```
 
-`MAGIC_ROUTER_RPC_URL` and `MAGIC_ROUTER_URL` are optional. If neither is set, the backend falls back to `ER_RPC_URL`.
+`MAGIC_ROUTER_RPC_URL` and `MAGIC_ROUTER_URL` are optional overrides. If neither is set, the backend defaults `magic_router_rpc_url` to MagicBlock's devnet router (`https://devnet-router.magicblock.app`) — not to `ER_RPC_URL`.
 
-## Web Client Dual Connections
+## Web Client
 
-The React frontend keeps both a base connection and an ER connection in `web-solana/src/lib/magicblock.ts`:
-
-```ts
-this.baseConnection = new Connection(BASE_LAYER_ENDPOINT, 'confirmed');
-
-this.erConnection = new Connection(EPHEMERAL_ROLLUP_ENDPOINT, {
-  wsEndpoint: EPHEMERAL_WS_ENDPOINT,
-  commitment: 'confirmed',
-});
-
-const baseProvider = new AnchorProvider(
-  this.baseConnection,
-  wallet,
-  { preflightCommitment: 'confirmed' },
-);
-
-const erProvider = new AnchorProvider(
-  this.erConnection,
-  wallet,
-  {
-    preflightCommitment: 'confirmed',
-    skipPreflight: true,
-  },
-);
-```
-
-Delegation is detected by checking the base-layer account owner:
-
-```ts
-async isDelegated(pda: PublicKey): Promise<boolean> {
-  const accountInfo = await this.baseConnection.getAccountInfo(pda);
-  if (!accountInfo) return false;
-  return accountInfo.owner.equals(DELEGATION_PROGRAM_ID);
-}
-```
-
-That keeps the UI from guessing whether a move should be sent to base or to the ER.
+The React frontend does not talk to base RPC or the ER directly — per `web-solana/CLAUDE.md`, all game transactions go through the backend API, which does the routing described above. There is no separate client-side delegation-aware routing layer to maintain in `web-solana/`.
 
 ## Backend Settlement Worker
 
@@ -289,6 +232,18 @@ Settlement flow:
 5. Check escrow, treasury, player balances, ELO, and stats.
 
 Never patch a payout with a one-off lamport transfer in an instruction handler. All settlement goes through the canonical settlement path.
+
+## Failure Mode: ER Unavailability (Persistency)
+
+XFChess aims for no single point of failure (see the persistency roadmap plan), and the ER dependency is the one gap that can't be closed from this repo alone.
+
+Normal undelegation (`delegation_ix/delegate.rs`'s `handler_undelegate_game`) CPIs `commit_and_undelegate_accounts`, which only *schedules* work for the ER validator to execute — the transaction itself must still reach the ER. If the ER validator is unreachable, this path (and `claim_timeout`, and the crank-based idle checks, which also execute against the delegation-program-owned PDA via the ER) is equally unreachable. `ephemeral-rollups-sdk` 0.13.0 does expose a base-layer forced-undelegate builder (`dlp_api::instruction_builder::undelegate_confined_account`), but it's gated by a MagicBlock delegation-program **admin** key that XFChess does not hold — there is currently no self-serve way for XFChess to force a stuck delegated `Game` PDA back to base layer.
+
+Mitigations actually available to us:
+
+- **Shrink the exposure window.** The settlement worker commits+undelegates as soon as a game concludes (see above), so the time any given `Game` PDA sits delegated with funds at risk is normally minutes, not hours.
+- **Monitor for it.** `xfchess_settlement_stale_delegated_gauge` (Prometheus, `/metrics`) counts currently-delegated games with no on-chain activity for more than 20 minutes (`STALE_DELEGATION_SECS` in `backend/src/tasks/settlement_worker.rs`) — a proxy for "the ER may not be committing/undelegating as expected." This turns a silent stuck-delegation incident into something on-call can see and act on (page, investigate, contact MagicBlock) — it does not and cannot auto-recover the game.
+- **Track upstream.** Worth periodically checking whether MagicBlock exposes a self-serve or timeout-based forced-undelegate to dApp authorities in a future SDK version — that's the only real fix, and it's outside this repo's control.
 
 ## Live Devnet Validation
 

@@ -1,5 +1,5 @@
 //! Unit tests for logging utilities.
-//! 
+//!
 //! This module contains comprehensive tests for the logging utilities
 //! in utils/logging.rs to ensure proper initialization and functionality.
 
@@ -15,7 +15,7 @@ mod tests {
         // without panicking. In a real scenario, this would be called
         // at application startup.
         init_logging();
-        
+
         // If we reach this point, initialization succeeded
         assert!(true);
     }
@@ -24,10 +24,10 @@ mod tests {
     #[test]
     fn test_logging_init_with_custom_level() {
         env::set_var("RUST_LOG", "debug");
-        
+
         // This should not panic even with custom log level
         init_logging();
-        
+
         env::remove_var("RUST_LOG");
         assert!(true);
     }
@@ -36,10 +36,10 @@ mod tests {
     #[test]
     fn test_logging_init_with_invalid_level() {
         env::set_var("RUST_LOG", "invalid_level");
-        
+
         // Should fall back to default level
         init_logging();
-        
+
         env::remove_var("RUST_LOG");
         assert!(true);
     }
@@ -50,7 +50,7 @@ mod tests {
         // This test ensures the window event logging function
         // doesn't panic and formats correctly
         log_window_event("main", "show", Some("window shown successfully"));
-        
+
         assert!(true);
     }
 
@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn test_log_window_event_no_details() {
         log_window_event("main", "hide", None);
-        
+
         assert!(true);
     }
 
@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn test_log_ipc_command() {
         log_ipc_command("show_window", Some("tournament-admin"));
-        
+
         assert!(true);
     }
 
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn test_log_ipc_command_no_window() {
         log_ipc_command("generic_command", None);
-        
+
         assert!(true);
     }
 
@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn test_log_auth_event() {
         log_auth_event("login_success", Some("user123"));
-        
+
         assert!(true);
     }
 
@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn test_log_auth_event_no_user() {
         log_auth_event("logout", None);
-        
+
         assert!(true);
     }
 
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn test_log_error() {
         log_error("window_manager", "Failed to create window", Some("Invalid parameters"));
-        
+
         assert!(true);
     }
 
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn test_log_error_no_details() {
         log_error("ipc_handler", "Command failed", None);
-        
+
         assert!(true);
     }
 
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn test_log_security_event() {
         log_security_event("unauthorized_access", "Attempted to access admin without permissions");
-        
+
         assert!(true);
     }
 
@@ -122,13 +122,13 @@ mod tests {
     #[test]
     fn test_all_logging_functions() {
         init_logging();
-        
+
         log_window_event("main", "ready", Some("DOM loaded"));
         log_ipc_command("get_info", Some("main"));
         log_auth_event("session_start", Some("user456"));
         log_error("network", "Connection failed", Some("timeout"));
         log_security_event("rate_limit", "Too many requests from IP");
-        
+
         assert!(true);
     }
 }

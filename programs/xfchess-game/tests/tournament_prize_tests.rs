@@ -55,6 +55,7 @@ fn tournament(winner: Pubkey, prizes_claimed: u16) -> Tournament {
         base_time_seconds: 0,
         increment_seconds: 0,
         winner_takes_all: false,
+        round_boards_reported: [0u8; 16],
     }
 }
 

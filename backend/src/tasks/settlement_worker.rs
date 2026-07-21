@@ -27,6 +27,14 @@ use tracing::{error, info, warn};
 /// How often the worker scans active sessions.
 const SETTLEMENT_TICK: Duration = Duration::from_secs(30);
 
+/// A delegated game with no on-chain activity for longer than this is
+/// flagged as possibly stuck (see `SETTLEMENT_STALE_DELEGATED_GAUGE`).
+/// Generous on purpose — normal games settle in minutes, so this is chosen
+/// to comfortably clear any real game's `base_time_seconds` + increment
+/// budget while still catching a genuinely stalled ER delegation within a
+/// reasonable ops window.
+const STALE_DELEGATION_SECS: i64 = 20 * 60;
+
 /// GameStatus discriminants (borsh enum tags, see programs/.../state/game.rs).
 const STATUS_FINISHED: u8 = 5;
 const STATUS_SETTLED: u8 = 6;
@@ -50,6 +58,9 @@ struct GameSnapshot {
     increment_seconds: u16,
     is_delegated: bool,
     tournament_id: Option<u64>,
+    /// Unix timestamp of the game's last on-chain update (last move, or last
+    /// commit while delegated). Used only for the stale-delegation gauge.
+    updated_at: i64,
 }
 
 /// Walks the borsh layout of the Game account (8-byte Anchor discriminator,
@@ -81,6 +92,7 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
     o += 2; // move_count
     o += 2; // turn (u16)
     o += 8; // created_at
+    let updated_at = i64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
     o += 8; // updated_at
     let wager_amount = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
     o += 8;
@@ -120,6 +132,7 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
         increment_seconds,
         is_delegated,
         tournament_id,
+        updated_at,
     })
 }
 
@@ -217,6 +230,11 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
 
     // Indices of games whose devnet copy says they're delegated to the ER.
     let mut delegated: Vec<usize> = Vec::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut stale_delegated: u64 = 0;
 
     for (i, f) in fetched.iter().enumerate() {
         let game_id = game_ids[i];
@@ -247,7 +265,18 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
                             None => warn!("[settlement] game {}: session disappeared", game_id),
                         }
                     }
-                    _ if snap.is_delegated => delegated.push(i),
+                    _ if snap.is_delegated => {
+                        if now.saturating_sub(snap.updated_at) > STALE_DELEGATION_SECS {
+                            stale_delegated += 1;
+                            warn!(
+                                "[settlement] game {} has been delegated with no on-chain \
+                                 activity for over {}m — possible stuck ER delegation",
+                                game_id,
+                                STALE_DELEGATION_SECS / 60
+                            );
+                        }
+                        delegated.push(i)
+                    }
                     _ => {} // still in progress
                 }
             }
@@ -272,6 +301,9 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
             }
         }
     }
+
+    worker_metrics::SETTLEMENT_STALE_DELEGATED_GAUGE
+        .store(stale_delegated, std::sync::atomic::Ordering::Relaxed);
 
     Ok(game_ids.len() as u64)
 }
@@ -413,6 +445,7 @@ mod tests {
         wager_token: Option<Pubkey>,
         is_delegated: bool,
         tournament_id: Option<u64>,
+        updated_at: i64,
     ) -> Vec<u8> {
         let mut d = vec![0u8; 8]; // discriminator
         d.extend_from_slice(&42u64.to_le_bytes()); // game_id
@@ -430,7 +463,7 @@ mod tests {
         d.extend_from_slice(&10u16.to_le_bytes()); // move_count
         d.extend_from_slice(&1u16.to_le_bytes()); // turn (u16)
         d.extend_from_slice(&0i64.to_le_bytes()); // created_at
-        d.extend_from_slice(&0i64.to_le_bytes()); // updated_at
+        d.extend_from_slice(&updated_at.to_le_bytes()); // updated_at
         d.extend_from_slice(&1_000u64.to_le_bytes()); // wager_amount
         match wager_token {
             Some(m) => {
@@ -470,6 +503,7 @@ mod tests {
             None,
             false,
             None,
+            0,
         );
         let snap = parse_game_account(&data).expect("should parse");
         assert_eq!(snap.white, white);
@@ -499,6 +533,7 @@ mod tests {
             Some(Pubkey::new_unique()),
             true,
             Some(99),
+            0,
         );
         let snap = parse_game_account(&data).expect("should parse");
         assert_eq!(snap.status, 2);
@@ -506,6 +541,34 @@ mod tests {
         assert_eq!(snap.winner, None);
         assert_eq!(snap.tournament_id, Some(99));
         assert!(snap.is_delegated);
+    }
+
+    /// The stale-delegation gauge (Phase 5 of the persistency roadmap) is
+    /// only as good as `updated_at` actually round-tripping through the
+    /// borsh layout — this pins that down so a future field reorder in
+    /// `state/game.rs` is caught here instead of silently breaking the
+    /// on-call signal.
+    #[test]
+    fn parses_updated_at_for_staleness_check() {
+        let white = Pubkey::new_unique();
+        let black = Pubkey::new_unique();
+        let long_ago = 1_700_000_000i64;
+        let data = build_game_data(
+            white,
+            black,
+            2,
+            None,
+            RESULT_NONE,
+            None,
+            true,
+            None,
+            long_ago,
+        );
+        let snap = parse_game_account(&data).expect("should parse");
+        assert_eq!(snap.updated_at, long_ago);
+
+        let now = long_ago + STALE_DELEGATION_SECS + 1;
+        assert!(now.saturating_sub(snap.updated_at) > STALE_DELEGATION_SECS);
     }
 
     #[test]

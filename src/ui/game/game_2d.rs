@@ -314,7 +314,10 @@ pub fn update_eval_bar(
     // (i.e. the first move of the game), was the exact cause of the
     // first-move-only stutter — every move after that reuses `cached_game`.
     let start = eval_history.scores.len();
-    let mut game = eval_history.cached_game.take().unwrap_or_else(new_game_no_tt);
+    let mut game = eval_history
+        .cached_game
+        .take()
+        .unwrap_or_else(new_game_no_tt);
     for rec in &moves[start..] {
         let src = rec.from.1 as i8 * 8 + rec.from.0 as i8;
         let dst = rec.to.1 as i8 * 8 + rec.to.0 as i8;

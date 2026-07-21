@@ -818,18 +818,18 @@ pub fn render_profile_consent_modal(
                 ui.heading(egui::RichText::new("Verification Required")
                     .color(egui::Color32::from_rgb(220, 140, 60))
                     .size(24.0));
-                
+
                 ui.add_space(20.0);
-                
+
                 ui.label(egui::RichText::new("In order to participate in Wager matches KYC and a Solana Wallet is required do you wish to proceed?")
                     .size(14.0)
                     .color(egui::Color32::WHITE));
-                
+
                 ui.add_space(30.0);
-                
+
                 ui.horizontal(|ui| {
                     ui.add_space(20.0);
-                    
+
                     // Yes button
                     if ui.add_sized([160.0, 40.0], egui::Button::new(
                         egui::RichText::new("Yes").strong().size(16.0)
@@ -840,9 +840,9 @@ pub fn render_profile_consent_modal(
                         #[cfg(feature = "solana")]
                         crate::multiplayer::solana::tauri_signer::open_profile_step();
                     }
-                    
+
                     ui.add_space(20.0);
-                    
+
                     // No button with italic text
                     if ui.add_sized([160.0, 40.0], egui::Button::new(
                         egui::RichText::new("No, I want to play local-online").italics()

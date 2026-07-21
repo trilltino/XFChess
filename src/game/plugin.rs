@@ -134,8 +134,7 @@ impl Plugin for GamePlugin {
         // between the fixed-width left/right egui side panels.
         app.add_systems(
             Update,
-            super::systems::camera::sync_board_camera_viewport
-                .run_if(in_state(GameState::InGame)),
+            super::systems::camera::sync_board_camera_viewport.run_if(in_state(GameState::InGame)),
         );
 
         // Restore ambient when game ends so the board behind the popup looks neutral.

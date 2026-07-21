@@ -1,7 +1,7 @@
 //! HTTP/3 response handling.
 //!
 //! This module defines the [`Response`] type, which provides access to HTTP/3 response headers
-//! and bodies.  
+//! and bodies.
 //!
 //! Features include:
 //! - Reading the full response body as [`Bytes`] or [`String`]

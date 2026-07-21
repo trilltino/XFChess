@@ -201,9 +201,14 @@ async fn exchange_code(
         return Err((StatusCode::FORBIDDEN, "Invalid code_verifier".to_string()));
     }
 
-    complete_link(&state, &req.code, &pkce_state.code_verifier, &req.wallet_pubkey)
-        .await
-        .map(Json)
+    complete_link(
+        &state,
+        &req.code,
+        &pkce_state.code_verifier,
+        &req.wallet_pubkey,
+    )
+    .await
+    .map(Json)
 }
 
 /// GET /api/auth/lichess/callback?code=...&state=...
@@ -246,9 +251,14 @@ async fn handle_callback(
         entry
     };
 
-    complete_link(state, code, &pkce_state.code_verifier, &pkce_state.wallet_pubkey)
-        .await
-        .map_err(|(_, msg)| msg)
+    complete_link(
+        state,
+        code,
+        &pkce_state.code_verifier,
+        &pkce_state.wallet_pubkey,
+    )
+    .await
+    .map_err(|(_, msg)| msg)
 }
 
 fn render_callback_page(result: Result<ExchangeResponse, String>) -> String {
@@ -264,10 +274,18 @@ fn render_callback_page(result: Result<ExchangeResponse, String>) -> String {
         ),
         Err(msg) => (false, serde_json::json!({ "error": msg })),
     };
-    let message_json = serde_json::json!({ "type": "xfchess-lichess-linked", "ok": ok, "payload": payload }).to_string();
+    let message_json =
+        serde_json::json!({ "type": "xfchess-lichess-linked", "ok": ok, "payload": payload })
+            .to_string();
     let human = match &result {
-        Ok(r) => format!("Linked Lichess account '{}'. This window will close automatically.", r.lichess_username),
-        Err(msg) => format!("Lichess linking failed: {}. This window will close automatically.", msg),
+        Ok(r) => format!(
+            "Linked Lichess account '{}'. This window will close automatically.",
+            r.lichess_username
+        ),
+        Err(msg) => format!(
+            "Lichess linking failed: {}. This window will close automatically.",
+            msg
+        ),
     };
     format!(
         r#"<!doctype html><html><head><meta charset="utf-8"><title>XFChess — Lichess link</title></head>
@@ -351,7 +369,10 @@ async fn complete_link(
             )
         })?;
 
-    info!("[LichessOAuth] Got access token for wallet {}", wallet_pubkey);
+    info!(
+        "[LichessOAuth] Got access token for wallet {}",
+        wallet_pubkey
+    );
 
     // ── Step 2: Fetch authenticated user profile ─────────────────────────────
     let profile_resp = client

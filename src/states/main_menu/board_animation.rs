@@ -73,7 +73,10 @@ pub fn animate_menu_piece_fades(
 
 /// Restores a piece's material to fully opaque (used on board reset/loop so a
 /// previously-captured piece comes back solid).
-fn restore_piece_material(materials: &mut Assets<StandardMaterial>, handle: &Handle<StandardMaterial>) {
+fn restore_piece_material(
+    materials: &mut Assets<StandardMaterial>,
+    handle: &Handle<StandardMaterial>,
+) {
     if let Some(mut mat) = materials.get_mut(handle) {
         let c = mat.base_color.with_alpha(1.0);
         mat.base_color = c;
@@ -284,11 +287,14 @@ pub fn animate_ambient_board(
                 // already hidden).
                 for (e, _, _, vis, _) in reset_q.iter_mut() {
                     if *vis != Visibility::Hidden {
-                        commands.entity(e).remove::<MenuBgPieceAnim>().insert(MenuPieceFade {
-                            elapsed: 0.0,
-                            duration: CROSSFADE_SECS,
-                            fade_in: false,
-                        });
+                        commands
+                            .entity(e)
+                            .remove::<MenuBgPieceAnim>()
+                            .insert(MenuPieceFade {
+                                elapsed: 0.0,
+                                duration: CROSSFADE_SECS,
+                                fade_in: false,
+                            });
                     }
                 }
                 anim.reset = ResetPhase::FadeOut(CROSSFADE_SECS);

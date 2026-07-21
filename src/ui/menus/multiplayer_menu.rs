@@ -192,13 +192,13 @@ pub fn multiplayer_menu_system(
                                         if t.status == "Registration" {
                                             ui.horizontal(|ui| {
                                                 if ui.add_enabled(false, egui::Button::new(format!("Waiting for Players ({}/{})", t.registered, t.max_players))).clicked() {}
-                                                
+
                                                 let is_leaving = menu_state.leaving_tournament == Some(t.tournament_id);
                                                 if ui.add_enabled(!is_leaving, egui::Button::new("Leave")).clicked() {
                                                     menu_state.leaving_tournament = Some(t.tournament_id);
                                                     let t_id = t.tournament_id;
                                                     let wallet_ready = wallet_opt.as_ref().map(|w| w.pubkey.is_some()).unwrap_or(false);
-                                                    
+
                                                     if wallet_ready {
                                                         let Some(wallet) = wallet_opt.as_ref() else {
                                                             warn!("[MENU] Wallet not available for leave");
@@ -214,34 +214,34 @@ pub fn multiplayer_menu_system(
                                                             return;
                                                         };
                                                         let sender = channel.sender.clone(); // Reuse sender for refresh
-                                                        
+
                                                         #[cfg(feature = "solana")]
                                                         std::thread::spawn(move || {
                                                             let vps_url = std::env::var("SIGNING_SERVICE_URL")
                                                                 .or_else(|_| std::env::var("BACKEND_URL"))
                                                                 .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
-                                                            
+
                                                             // 1. Build Leave Transaction
                                                             let build_url = format!("{}/tournament/{}/build-leave-tx", vps_url, t_id);
                                                             let client = reqwest::blocking::Client::new();
                                                             let resp = client.post(&build_url)
                                                                 .json(&serde_json::json!({ "player": pubkey_str }))
                                                                 .send();
-                                                                
+
                                                             if let Ok(r) = resp {
                                                                 if r.status().is_success() {
                                                                     if let Ok(data) = r.json::<serde_json::Value>() {
                                                                         if let Some(tx_b64) = data["transaction"].as_str() {
                                                                             // 2. Sign and Send via Tauri bridge
                                                                             let sign_res = crate::multiplayer::solana::tauri_signer::sign_and_send_b64_via_tauri(crate::multiplayer::solana::integration::state::DEVNET_RPC_URL, tx_b64);
-                                                                            
+
                                                                             if sign_res.is_ok() {
                                                                                 // 3. Confirm with backend
                                                                                 let leave_url = format!("{}/tournament/{}/leave", vps_url, t_id);
                                                                                 let _ = client.post(&leave_url)
                                                                                     .json(&serde_json::json!({ "player": pubkey_str }))
                                                                                     .send();
-                                                                                    
+
                                                                                 // 4. Refresh tournaments list
                                                                                 let refresh_url = format!("{}/tournament/my?player={}", vps_url, pubkey_str);
                                                                                 if let Ok(refresh_resp) = reqwest::blocking::get(&refresh_url) {
@@ -255,7 +255,7 @@ pub fn multiplayer_menu_system(
                                                                 }
                                                             }
                                                         });
-                                                        
+
                                                         #[cfg(not(feature = "solana"))]
                                                         {
                                                             let _ = t_id;
@@ -285,7 +285,7 @@ pub fn multiplayer_menu_system(
                                         menu_state.loading_tournaments = true;
                                         let pubkey_str = pubkey.to_string();
                                         let tx = channel.sender.clone();
-                                        
+
                                         std::thread::spawn(move || {
                                             let vps_url = std::env::var("SIGNING_SERVICE_URL")
                                                 .or_else(|_| std::env::var("BACKEND_URL"))

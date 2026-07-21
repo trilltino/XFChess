@@ -26,10 +26,10 @@ use crate::signing::solana::{
     initialize_escrow_ix, initialize_shards_ix, initialize_tournament_ix, record_result_ix,
     sign_and_submit,
 };
-use crate::signing::storage::vault::VaultStore;
 use crate::signing::storage::tournament::{
     MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus,
 };
+use crate::signing::storage::vault::VaultStore;
 use crate::signing::{AppState, TournamentTrigger};
 
 // ── Request / Response types ──────────────────────────────────────────────────

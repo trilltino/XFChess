@@ -178,6 +178,7 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
 
     tournament.status = TournamentStatus::Active;
     tournament.current_round = 0;
+    tournament.round_boards_reported = [0u8; 16];
     tournament.started_at = Some(Clock::get()?.unix_timestamp);
 
     Ok(())

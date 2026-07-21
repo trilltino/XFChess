@@ -130,6 +130,7 @@ pub fn handler(
         TournamentType::Swiss { rounds } => rounds,
         TournamentType::SingleElimination => 0,
     };
+    t.round_boards_reported = [0u8; 16];
     t.total_matches = total_matches;
     t.final_match_index = total_matches - 1;
     t.elo_min = elo_min;

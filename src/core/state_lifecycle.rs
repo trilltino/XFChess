@@ -173,8 +173,7 @@ pub fn audit_cross_state_leaks(
 
     // Pieces are valid during gameplay (InGame/Paused/GameOver); a leak is a
     // Piece surviving into MainMenu/Auth. MenuBg is valid only on MainMenu.
-    let pieces_leaked =
-        piece_count > 0 && matches!(s, GameState::MainMenu | GameState::Auth);
+    let pieces_leaked = piece_count > 0 && matches!(s, GameState::MainMenu | GameState::Auth);
     let menu_leaked = menu_count > 0 && !matches!(s, GameState::MainMenu);
 
     if pieces_leaked || menu_leaked {

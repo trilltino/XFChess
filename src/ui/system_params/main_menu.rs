@@ -20,7 +20,7 @@ use crate::multiplayer::solana::lobby::SolanaLobbyState;
 use crate::multiplayer::solana::wager_rate::SolUsdRate;
 use crate::multiplayer::spectator::SpectateViaLinkEvent;
 use crate::multiplayer::{BraidSubscriptionConfig, NetworkConfig, OnlineNetworkState};
-use crate::states::main_menu::new_menu::MenuExitConfirm;
+use crate::states::main_menu::new_menu::{MenuExitConfirm, MenuFocusMode};
 use crate::states::main_menu::{CompetitiveMenuState, PlayerColorChoice};
 use crate::ui::account::auth::AuthState;
 use bevy::ecs::system::SystemParam;
@@ -107,11 +107,11 @@ pub struct MainMenuUIContext<'w, 's> {
     pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
     pub active_time_control:
         ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
-    pub menu_style: ResMut<'w, crate::states::main_menu::MenuStyle>,
     pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
     pub solana_logos: ResMut<'w, crate::states::main_menu::SolanaLogoState>,
     pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,
     pub menu_sounds: Option<Res<'w, MenuSounds>>,
     pub exit_confirm: ResMut<'w, MenuExitConfirm>,
+    pub focus_mode: ResMut<'w, MenuFocusMode>,
     pub spectate_events: Option<MessageWriter<'w, SpectateViaLinkEvent>>,
 }

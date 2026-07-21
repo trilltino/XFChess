@@ -108,8 +108,7 @@ pub fn handler<'a, 'b, 'c, 'info>(
     // Collect all players from all present shards (shards 1-3 are optional —
     // small/medium tournaments only initialize shard 0 or 0-1).
     let mut all_players: Vec<Pubkey> = Vec::new();
-    let mut shards: Vec<&TournamentPlayersShard> =
-        vec![&ctx.accounts.tournament_players_shard_0];
+    let mut shards: Vec<&TournamentPlayersShard> = vec![&ctx.accounts.tournament_players_shard_0];
     if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
         shards.push(s);
     }

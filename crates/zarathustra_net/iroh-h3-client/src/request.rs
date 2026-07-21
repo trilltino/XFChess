@@ -1,7 +1,7 @@
 //! HTTP/3 request building and sending.
 //!
 //! This module provides [`RequestBuilder`] and [`Request`] types for constructing HTTP/3 requests
-//! and sending them via an [`IrohH3Client`].  
+//! and sending them via an [`IrohH3Client`].
 //!
 //! Features include:
 //! - Setting headers and extensions

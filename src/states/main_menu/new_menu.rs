@@ -55,6 +55,13 @@ pub struct MenuExitConfirm {
     pub visible: bool,
 }
 
+/// "Learn" focus mode — toggled with **L**. While active, every menu UI
+/// element is hidden except the ambient board caption.
+#[derive(Resource, Default)]
+pub struct MenuFocusMode {
+    pub active: bool,
+}
+
 /// Which panel the new-style menu is currently showing.
 #[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
 pub enum NewMenuPanel {
@@ -406,12 +413,28 @@ pub fn orbit_camera_system(
 }
 
 /// Handle keyboard shortcuts on the main menu.
-/// H → Guide, G → Settings, ESC → back-navigate / exit.
+/// H → Guide, G → Settings, L → toggle Learn focus mode, ESC → back-navigate / exit.
 pub fn menu_escape_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut panel: ResMut<NewMenuPanel>,
     mut exit_confirm: ResMut<MenuExitConfirm>,
+    mut focus_mode: ResMut<MenuFocusMode>,
 ) {
+    if keyboard.just_pressed(KeyCode::KeyL) {
+        focus_mode.active = !focus_mode.active;
+        return;
+    }
+    if focus_mode.active {
+        // Any other shortcut first drops out of focus mode rather than
+        // acting underneath the hidden UI.
+        if keyboard.just_pressed(KeyCode::KeyH)
+            || keyboard.just_pressed(KeyCode::KeyG)
+            || keyboard.just_pressed(KeyCode::Escape)
+        {
+            focus_mode.active = false;
+        }
+        return;
+    }
     if keyboard.just_pressed(KeyCode::KeyH) {
         *panel = NewMenuPanel::HowToPlay;
         return;
@@ -619,7 +642,7 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
 /// Caption under the ambient board naming the game it replays
 /// (Sämisch vs. Nimzowitsch, Copenhagen 1923 — the Immortal Zugzwang Game).
 /// The board is horizontally centred on screen, so bottom-center sits under it.
-fn render_board_caption(ctx: &egui::Context) {
+pub(super) fn render_board_caption(ctx: &egui::Context) {
     egui::Area::new("board_caption".into())
         .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0))
         .show(ctx, |ui| {
@@ -637,9 +660,10 @@ fn render_hint_bar(ctx: &egui::Context) {
     egui::Area::new("hint_bar".into())
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
         .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
             ui.horizontal(|ui| {
                 let hint_color = egui::Color32::WHITE;
-                let size = 13.0;
+                let size = 10.5;
                 let sep_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120);
 
                 ui.label(
@@ -662,6 +686,12 @@ fn render_hint_bar(ctx: &egui::Context) {
                 ui.label(egui::RichText::new("|").size(size).color(sep_color));
                 ui.label(
                     egui::RichText::new("F11 - Minimise / Maximise")
+                        .size(size)
+                        .color(hint_color),
+                );
+                ui.label(egui::RichText::new("|").size(size).color(sep_color));
+                ui.label(
+                    egui::RichText::new("L - Learn")
                         .size(size)
                         .color(hint_color),
                 );
@@ -949,8 +979,8 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         play_click(&mut cx.commands, snd);
         // Point at the locally deployed site when XFCHESS_WEB_URL is set (dev
         // stack exports http://localhost:5173); otherwise the public site.
-        let url = std::env::var("XFCHESS_WEB_URL")
-            .unwrap_or_else(|_| "https://xfchess.com".to_string());
+        let url =
+            std::env::var("XFCHESS_WEB_URL").unwrap_or_else(|_| "https://xfchess.com".to_string());
         if let Err(e) = webbrowser::open(&url) {
             tracing::warn!("[Menu] Failed to open {}: {}", url, e);
         }
@@ -1150,9 +1180,9 @@ fn render_direct_connection_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext)
                     p2p_ui.clear_error();
                     let peer_node_id = p2p_ui.peer_input.trim().to_string();
                     if let Some(connect_events) = cx.connect_events.as_mut() {
-                        connect_events.write(crate::multiplayer::network::p2p::ConnectToPeerEvent {
-                            peer_node_id,
-                        });
+                        connect_events.write(
+                            crate::multiplayer::network::p2p::ConnectToPeerEvent { peer_node_id },
+                        );
                     }
                 }
                 Err(e) => p2p_ui.set_error(e),

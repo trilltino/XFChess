@@ -355,7 +355,7 @@ async fn create_swiss_tournament(client: &Client, base_url: &str) -> u64 {
         .expect("Failed to create tournament");
 
     assert!(response.status().is_success(), "Failed to create tournament: {:?}", response.status());
-    
+
     let tournament: TournamentCreateResponse = response.json().await.expect("Failed to parse response");
     tournament.tournament_id
 }
@@ -557,10 +557,10 @@ async fn test_swiss_pairing_properties() {
     // - No player plays the same opponent twice
     // - Players with similar scores are paired together
     // - Color balance is maintained (roughly equal white/black)
-    
+
     // Note: This is a placeholder for more detailed property-based tests
     // that would be implemented with the swiss-pairing crate directly
-    
+
     info!("Swiss pairing properties test - placeholder");
 }
 
@@ -571,7 +571,7 @@ async fn test_tournament_scheduler_triggers() {
     // - PlayerJoined trigger after threshold starts tournament
     // - AdminStart always starts tournament
     // - ScheduledStart triggers at scheduled time
-    
+
     info!("Tournament scheduler trigger test - placeholder");
 }
 

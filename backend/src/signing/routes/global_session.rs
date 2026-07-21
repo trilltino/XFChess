@@ -44,9 +44,7 @@ const PENDING_SESSION_TTL: Duration = Duration::from_secs(600);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Periodically evicts stale `prepare`d-but-never-`activate`d sessions.
-pub fn spawn_pending_session_sweep(
-    pending: Arc<Mutex<HashMap<Pubkey, (Keypair, Instant)>>>,
-) {
+pub fn spawn_pending_session_sweep(pending: Arc<Mutex<HashMap<Pubkey, (Keypair, Instant)>>>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(SWEEP_INTERVAL);
         loop {

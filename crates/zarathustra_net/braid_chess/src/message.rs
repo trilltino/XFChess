@@ -1,6 +1,6 @@
 //! Typed chess game messages carried over Braid-HTTP.
 //!
-//! Each [`ChessMessage`] variant represents a distinct game event.  
+//! Each [`ChessMessage`] variant represents a distinct game event.
 //! Messages are serialised as JSON and used as the body of Braid PUT requests.
 
 use serde::{Deserialize, Serialize};

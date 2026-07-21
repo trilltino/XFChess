@@ -288,7 +288,7 @@ pub fn spectator_menu_ui(
                                     spectator.active = true;
                                     spectator.connected = true;
                                     spectator.current_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
-                                    
+
                                     // Transition to Full Spectator Mode
                                     {
                                         let next_mode = crate::core::states::GameMode::Spectator;

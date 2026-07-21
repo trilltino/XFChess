@@ -44,7 +44,10 @@ pub fn purge_stale_board_visuals(
     mut commands: Commands,
     leftovers: Query<
         (Entity, Option<&Name>),
-        Or<(With<crate::states::main_menu::new_menu::MenuBg>, With<Piece>)>,
+        Or<(
+            With<crate::states::main_menu::new_menu::MenuBg>,
+            With<Piece>,
+        )>,
     >,
 ) {
     for (entity, name) in leftovers.iter() {
@@ -295,7 +298,10 @@ pub fn start_timer_when_ready(
 /// audio thread — a one-off cost that otherwise lands on the *first move*. We
 /// play the move + capture clips once, silent and self-despawning, when entering
 /// InGame so that decode happens during board setup instead of mid-first-move.
-pub fn warmup_game_audio(mut commands: Commands, sounds: Option<Res<crate::game::resources::sounds::GameSounds>>) {
+pub fn warmup_game_audio(
+    mut commands: Commands,
+    sounds: Option<Res<crate::game::resources::sounds::GameSounds>>,
+) {
     let Some(sounds) = sounds else { return };
     for handle in [sounds.move_piece.clone(), sounds.capture_piece.clone()] {
         commands.spawn((

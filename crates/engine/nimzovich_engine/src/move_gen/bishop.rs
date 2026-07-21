@@ -43,5 +43,6 @@ pub fn generate_bishop_moves(
     moves: &mut Vec<KK>,
     noisy_only: bool,
 ) {
-    sliding::generate_sliding_moves(game, from, color, 4, 8, moves, noisy_only); // diagonal dirs only
+    sliding::generate_sliding_moves(game, from, color, 4, 8, moves, noisy_only);
+    // diagonal dirs only
 }

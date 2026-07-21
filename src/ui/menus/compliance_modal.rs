@@ -176,8 +176,8 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
 
                             let url = "http://127.0.0.1:3000/identity/register".to_string(); // Assuming dev server
                             state.status = SubmissionStatus::Submitting;
-                            
-                            // Because we can't easily spawn a Bevy task from inside the UI closure without 
+
+                            // Because we can't easily spawn a Bevy task from inside the UI closure without
                             // a system param wrapper, we'll spawn a native thread that shoots the request.
                             std::thread::spawn(move || {
                                 let client = reqwest::blocking::Client::new();
@@ -187,7 +187,7 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
                                 // We don't poll back the exact success yet in this snippet to keep it simple,
                                 // we'd normally wire a oneshot::channel back to Bevy.
                             });
-                            
+
                             // Mock instant success for UI demo purposes since thread is fire-and-forget
                             state.status = SubmissionStatus::Success;
                         }

@@ -141,8 +141,9 @@ pub struct SolanaLobbyState {
     /// Last time the tournament-games list was fetched.
     pub tournament_last_fetch: Option<std::time::Instant>,
     /// Receiver for background tournament-games fetch.
-    pub tournament_rx:
-        Option<crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentGameListing>>>,
+    pub tournament_rx: Option<
+        crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentGameListing>>,
+    >,
 }
 
 impl Default for SolanaLobbyState {
@@ -663,12 +664,12 @@ fn poll_lobby_tasks(
                         )
                     };
                     if let Err(e) = announce_result {
-                        warn!(
-                            "[LOBBY] Failed to announce game {} to VPS: {}",
-                            game_id, e
-                        );
+                        warn!("[LOBBY] Failed to announce game {} to VPS: {}", game_id, e);
                     } else {
-                        info!("[LOBBY] Announced game {} ({}) to VPS relay", game_id, game_type);
+                        info!(
+                            "[LOBBY] Announced game {} ({}) to VPS relay",
+                            game_id, game_type
+                        );
                     }
                 }
             }
@@ -826,14 +827,14 @@ pub fn poll_tournament_games(mut lobby: ResMut<SolanaLobbyState>) {
 
     let (tx, rx) = crossbeam_channel::bounded(1);
     lobby.tournament_rx = Some(rx);
-    std::thread::spawn(move || {
-        match crate::multiplayer::network::vps::list_tournament_games() {
+    std::thread::spawn(
+        move || match crate::multiplayer::network::vps::list_tournament_games() {
             Ok(games) => {
                 let _ = tx.send(games);
             }
             Err(e) => warn!("[SOLANA_TOURNEY] Failed to fetch tournament games: {}", e),
-        }
-    });
+        },
+    );
 }
 
 /// Poll background browse-list fetch and auto-refresh every 10 seconds.

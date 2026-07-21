@@ -188,8 +188,10 @@ impl AppState {
             program_id,
         ));
         // Matchmaking shares the same ELO cache rather than standing up its
-        // own separate, devnet-hardcoded one.
-        let matchmaking = routes::matchmaking::SharedMatchmakingState::new(elo_cache.clone());
+        // own separate, devnet-hardcoded one. It also gets the session pool
+        // so its queue/matches survive a backend restart (migration 022).
+        let matchmaking =
+            routes::matchmaking::SharedMatchmakingState::new(elo_cache.clone(), pool.clone());
 
         // Parse authority keys — accepts either a JSON file path or a base58 string.
         let load_keypair = load_keypair_from_env_value;

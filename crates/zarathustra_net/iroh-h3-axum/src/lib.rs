@@ -1,7 +1,7 @@
 //! # iroh-h3-axum
 //!
 //! This crate provides an integration between the Axum web framework and the
-//! iroh peer-to-peer library using HTTP/3.  
+//! iroh peer-to-peer library using HTTP/3.
 //! It allows you to serve Axum routers over iroh, reusing connections and
 //! handling multiple concurrent HTTP/3 streams efficiently.
 //!

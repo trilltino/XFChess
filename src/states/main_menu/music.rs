@@ -176,10 +176,7 @@ pub fn drive_menu_music(
 
 /// Discrete now-playing widget: a play/mute dot, the track title, and a skip
 /// button, anchored to the bottom-left.
-pub fn menu_music_widget(
-    mut contexts: bevy_egui::EguiContexts,
-    mut music: ResMut<MenuMusic>,
-) {
+pub fn menu_music_widget(mut contexts: bevy_egui::EguiContexts, mut music: ResMut<MenuMusic>) {
     use bevy_egui::egui;
 
     if music.widget_hidden {
