@@ -590,13 +590,20 @@ fn poll_wallet_bridge(
             poller.status_rx = None;
             if let Some(pk) = pubkey_opt {
                 poller.show_connect_overlay = false;
-                // Always update username from bridge if we have one
-                if let Some(ref uname) = username_opt {
-                    if !uname.is_empty()
-                        && player_identity.username.as_deref() != Some(uname.as_str())
-                    {
-                        info!("[WalletBridge] Username from bridge: {}", uname);
-                        player_identity.username = Some(uname.clone());
+                // Bridge username is only a provisional value for the brief window
+                // before the authoritative `/auth/me` fetch resolves. The bridge's
+                // in-memory cache can go stale relative to the account's real,
+                // backend-stored username (e.g. across Tauri sidecar restarts), so
+                // once we have a real identity it must never be silently clobbered
+                // by this — otherwise the profile-retry loop below (which only
+                // runs while `username` is `None`) never gets a chance to correct
+                // it, and the game display can drift from the website permanently.
+                if player_identity.username.is_none() {
+                    if let Some(ref uname) = username_opt {
+                        if !uname.is_empty() {
+                            info!("[WalletBridge] Username from bridge (provisional): {}", uname);
+                            player_identity.username = Some(uname.clone());
+                        }
                     }
                 }
 
