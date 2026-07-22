@@ -196,7 +196,7 @@ Write-Host "tunnel user created (nologin; may only forward to 127.0.0.1:8090)." 
 Write-Host "`n=== Hardening SSH ===" -ForegroundColor Green
 Run-Remote "sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config"
 Run-Remote "sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config"
-Run-Remote "sshd -t && systemctl reload sshd"
+Run-Remote "sshd -t && (systemctl reload ssh 2>/dev/null || systemctl reload sshd)"
 Write-Host "Root password login disabled; key-based root access retained for this deploy." -ForegroundColor DarkGray
 
 # ── Step 2c: UFW firewall ─────────────────────────────────────────────────────
