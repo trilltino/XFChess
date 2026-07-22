@@ -25,7 +25,12 @@ if (-not (Test-Path $SSH_KEY)) {
     ssh-keygen -t ed25519 -f $SSH_KEY -N '""' -C xfchess-deploy
     Write-Host "SSH key generated at $SSH_KEY" -ForegroundColor Green
 } else {
-    $testKey = & ssh-keygen -y -P "" -f $SSH_KEY 2>&1
+    # Windows' bundled ssh-keygen.exe (System32\OpenSSH) rejects `-y -P ""` together
+    # ("Too many arguments") regardless of whether the key has a passphrase — that
+    # false positive was wiping a perfectly good key on every run. Piping empty
+    # stdin instead: a real passphrase prompt reads EOF and fails fast; a
+    # passphrase-less key just succeeds, ignoring stdin entirely.
+    $testKey = "" | & ssh-keygen -y -f $SSH_KEY 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Existing key has passphrase; regenerating without passphrase for automation." -ForegroundColor Yellow
         Remove-Item $SSH_KEY
@@ -36,11 +41,20 @@ if (-not (Test-Path $SSH_KEY)) {
 
 Write-Host "`nCopying SSH key to server..." -ForegroundColor Yellow
 $authKeysCmd = 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
-Get-Content "$SSH_KEY.pub" | & ssh -o StrictHostKeyChecking=accept-new $DEST $authKeysCmd
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Failed to copy key — you may need to enter the password once." -ForegroundColor Yellow
+# Try the bootstrapped key itself first (BatchMode=yes fails fast, no hang) — if it's
+# already trusted (e.g. installed out-of-band), this succeeds instantly and we skip
+# the password prompt entirely. Only a truly untrusted key falls through to the
+# interactive password bootstrap below (needs a real TTY — not safe to background).
+$null = & ssh @SSH_ARGS -o BatchMode=yes -o ConnectTimeout=5 $DEST "echo key_works" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "Key already trusted — skipping password bootstrap." -ForegroundColor Green
 } else {
-    Write-Host "SSH key copied." -ForegroundColor Green
+    Get-Content "$SSH_KEY.pub" | & ssh -o StrictHostKeyChecking=accept-new $DEST $authKeysCmd
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Failed to copy key — you may need to enter the password once." -ForegroundColor Yellow
+    } else {
+        Write-Host "SSH key copied." -ForegroundColor Green
+    }
 }
 
 function Test-SSHKey {
