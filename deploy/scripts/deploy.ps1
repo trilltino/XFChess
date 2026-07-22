@@ -276,11 +276,7 @@ Write-Host "logrotate configured (14-day, daily); journald capped at 1 GB." -For
 
 # ── Step 2f: Offsite backup (rclone → Backblaze B2) ──────────────────────────
 Write-Host "`n=== Setting up offsite backup ===" -ForegroundColor Green
-Run-Remote @"
-if ! command -v rclone >/dev/null 2>&1; then
-    curl -fsSL https://rclone.org/install.sh | bash -s -- --install-only
-fi
-"@
+Run-Remote "command -v rclone >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq rclone)"
 # The rclone remote 'b2xfchess' must be configured manually once:
 #   ssh root@SERVER rclone config
 #   Choose: New remote -> name: b2xfchess -> type: b2 -> enter account/key
