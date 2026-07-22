@@ -343,7 +343,12 @@ Run-Remote "cp /opt/xfchess/signing-server-http /opt/xfchess/signing-server-http
 if (-not $SkipBuild) {
     Write-Host "`n=== Installing Linux backend binary ===" -ForegroundColor Green
     # Workspace target dir is at the repo root, not backend/target.
-    Run-Remote "cp /opt/xfchess/src/target/release/signing-server-http /opt/xfchess/signing-server-http"
+    # Copy to a temp name + atomic rename: the target is the currently-running
+    # service's executable, and a plain in-place `cp` fails with "Text file busy"
+    # (Linux won't let you write into a busy inode). `mv` replaces the directory
+    # entry instead, which the kernel allows — the old process keeps running on
+    # its now-unlinked inode until `systemctl restart` below picks up the new one.
+    Run-Remote "cp /opt/xfchess/src/target/release/signing-server-http /opt/xfchess/signing-server-http.new && mv /opt/xfchess/signing-server-http.new /opt/xfchess/signing-server-http"
     Run-Remote "chmod +x /opt/xfchess/signing-server-http && chown xfchess:xfchess /opt/xfchess/signing-server-http"
 }
 
