@@ -1,7 +1,39 @@
 ﻿import { motion } from 'framer-motion';
-import { ArrowLeft, X, Rocket, Download } from 'lucide-react';
+import { ArrowLeft, X, Rocket, Download, BookOpen } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
+
+const GITHUB_REPO = 'trilltino/XFChess';
+const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
+const INSTRUCTIONS_URL = `https://github.com/${GITHUB_REPO}/blob/main/docs/INSTALL.md`;
+
+// Asset filenames embed the version (e.g. XFChess-Setup-1.2.0.exe), so a
+// direct link can't be hardcoded — resolve the latest release via the GitHub
+// API and match by pattern, per docs/INSTALL.md's documented naming scheme.
+const ASSET_PATTERNS: Record<'windows' | 'macos' | 'linux', RegExp> = {
+  windows: /^XFChess-Setup-.*\.exe$/i,
+  macos: /^XFChess-.*\.dmg$/i,
+  linux: /^XFChess-linux-x86_64-.*\.tar\.gz$/i,
+};
+
+const downloadPlatform = async (platform: 'windows' | 'macos' | 'linux') => {
+  // Open the tab synchronously on click so browsers don't treat the later
+  // async navigation as a popup and block it.
+  const tab = window.open('', '_blank');
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+    if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
+    const release = await res.json();
+    const asset = (release.assets || []).find((a: { name: string }) => ASSET_PATTERNS[platform].test(a.name));
+    if (!asset) throw new Error(`No ${platform} asset found on latest release`);
+    if (tab) tab.location.href = asset.browser_download_url;
+    else window.location.href = asset.browser_download_url;
+  } catch (err) {
+    console.error('[XFChess Download] Falling back to releases page', err);
+    if (tab) tab.location.href = RELEASES_URL;
+    else window.open(RELEASES_URL, '_blank');
+  }
+};
 
 const PlayPage = () => {
   const [showNotice, setShowNotice] = useState(true);
@@ -137,8 +169,9 @@ const PlayPage = () => {
             Launch Desktop App
           </button>
 
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <button
+                onClick={() => downloadPlatform('windows')}
                 style={{
                   padding: '16px 24px',
                   background: 'rgba(255, 255, 255, 0.05)',
@@ -157,6 +190,7 @@ const PlayPage = () => {
                 Windows
               </button>
               <button
+                onClick={() => downloadPlatform('macos')}
                 style={{
                   padding: '16px 24px',
                   background: 'rgba(255, 255, 255, 0.05)',
@@ -174,6 +208,47 @@ const PlayPage = () => {
                 <Download size={18} />
                 macOS
               </button>
+              <button
+                onClick={() => downloadPlatform('linux')}
+                style={{
+                  padding: '16px 24px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  color: '#fff',
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <Download size={18} />
+                Linux
+              </button>
+              <a
+                href={INSTRUCTIONS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  padding: '16px 24px',
+                  background: 'transparent',
+                  color: 'var(--text-dim)',
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  textDecoration: 'none'
+                }}
+              >
+                <BookOpen size={18} />
+                Instructions
+              </a>
           </div>
         </div>
 
