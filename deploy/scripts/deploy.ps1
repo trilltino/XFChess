@@ -421,18 +421,31 @@ Run-Remote "mkdir -p /var/www/certbot"
 # SSL certificate: prefer Let's Encrypt (real domain), fall back to self-signed (IP)
 if ($Domain) {
     Write-Host "`n=== Obtaining Let's Encrypt certificate for $Domain ===" -ForegroundColor Green
-    # First bring nginx up in HTTP-only mode so ACME challenge works
-    # `nginx -t` alone only checks syntax — it never applies the newly uploaded
-    # config, so the ACME HTTP-01 challenge was hitting whatever config was
-    # already loaded in memory (stale routing, wrong headers). Reload first so
-    # the live server actually serves the /.well-known/acme-challenge/ webroot
-    # this new config defines. This will 502/whatever on HTTPS momentarily since
-    # no cert exists yet for this domain — fine, certbot only needs port 80.
-    Run-Remote @"
+    $certExists = (& ssh @SSH_ARGS $DEST "test -f /etc/letsencrypt/live/$Domain/fullchain.pem && echo yes" 2>$null) -eq "yes"
+    if (-not $certExists) {
+        # Chicken-and-egg: the just-uploaded xfchess config's HTTPS block already
+        # references /etc/letsencrypt/live/$Domain/fullchain.pem, which doesn't
+        # exist until certbot runs — so `nginx -t` on the real config fails and
+        # nothing ever reloads to serve the ACME webroot. Swap in an HTTP-only
+        # bootstrap config just for the challenge; the real config (already on
+        # disk at sites-available/xfchess) gets symlinked back and reloaded below
+        # once the cert exists.
+        Run-Remote @"
+cat > /etc/nginx/sites-available/xfchess-bootstrap << 'BOOTEOF'
+server {
+    listen 80 default_server;
+    server_name _;
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 200 'bootstrapping'; }
+}
+BOOTEOF
+ln -sf /etc/nginx/sites-available/xfchess-bootstrap /etc/nginx/sites-enabled/xfchess
 nginx -t && systemctl reload nginx
-test -f /etc/letsencrypt/live/${Domain}/fullchain.pem || \
-  certbot certonly --webroot -w /var/www/certbot -d ${Domain} --non-interactive --agree-tos -m admin@${Domain} --quiet
 "@
+        Run-Remote "certbot certonly --webroot -w /var/www/certbot -d ${Domain} --non-interactive --agree-tos -m admin@${Domain} --quiet"
+        Run-Remote "rm -f /etc/nginx/sites-enabled/xfchess-bootstrap /etc/nginx/sites-available/xfchess-bootstrap"
+        Run-Remote "ln -sf /etc/nginx/sites-available/xfchess /etc/nginx/sites-enabled/xfchess"
+    }
     Run-Remote "nginx -t && systemctl reload nginx && systemctl restart nginx"
     # Auto-renew hook
     # Single-quoted PS string ('' = literal '); \" becomes a literal " on the server
