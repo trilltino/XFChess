@@ -73,9 +73,7 @@ fn fetch_stats_system(
     // Mark attempted so we don't re-dispatch every frame while waiting
     stats.last_updated = now;
 
-    let vps_url = std::env::var("SIGNING_SERVICE_URL")
-        .or_else(|_| std::env::var("BACKEND_URL"))
-        .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
+    let vps_url = crate::multiplayer::network::vps::vps_base();
     let tx = channel.sender.clone();
 
     std::thread::spawn(move || {

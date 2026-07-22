@@ -12,8 +12,11 @@ fn main() {
     // Check wallet mode (Tauri vs standalone)
     let wallet_mode = std::env::var("XFCHESS_WALLET_MODE").unwrap_or_default() == "tauri";
     if !wallet_mode {
-        println!(" XFChess running in standalone mode — using external HTTP backend at http://localhost:8090");
-        println!("   (Embedded signing server disabled - use start_xfchess.bat to start backend)");
+        println!(
+            " XFChess running in standalone mode — backend: {}",
+            xfchess::multiplayer::network::vps::vps_base()
+        );
+        println!("   (override with SIGNING_SERVICE_URL or BACKEND_URL env vars)");
     } else {
         println!(" XFChess running in Tauri mode — using system-provided signing server.");
     }

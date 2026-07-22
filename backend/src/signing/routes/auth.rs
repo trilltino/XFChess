@@ -429,7 +429,8 @@ async fn me(
         Some(c) => vault.cacf_can_wager(&user.0, c).await,
         None => true,
     };
-    let can_wager = wallet_linked && has_kyc && cacf_ok;
+    // Devnet bypass mirrors kyc.rs::user_status — see is_devnet() doc comment.
+    let can_wager = state.config.is_devnet() || (wallet_linked && has_kyc && cacf_ok);
 
     // Check whether an on-chain PlayerProfile PDA exists for this wallet.
     let has_onchain_profile = if wallet_linked {

@@ -211,9 +211,10 @@ pub struct NetworkConfig {
 
 impl Default for NetworkConfig {
     fn default() -> Self {
+        let base = crate::multiplayer::network::vps::vps_base();
         Self {
-            vps_base_url: "http://178.104.55.19".to_string(), // Unified production IP
-            relay_base_url: "http://178.104.55.19".to_string(),
+            vps_base_url: base.clone(),
+            relay_base_url: base,
         }
     }
 }

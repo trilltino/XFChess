@@ -325,8 +325,7 @@ pub fn spawn_swiss_subscription(
             use braid_iroh::BraidIrohNode;
             use braid_iroh::DiscoveryConfig;
 
-            let vps_url =
-                std::env::var("VPS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+            let vps_url = crate::multiplayer::network::vps::vps_base();
 
             // Get Iroh node ID from VPS
             let client = reqwest::Client::new();

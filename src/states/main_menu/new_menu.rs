@@ -1914,7 +1914,11 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                 .clicked()
             {
                 play_click(&mut cx.commands, cx.menu_sounds.as_deref());
-                let _ = webbrowser::open("http://localhost:5174/create-profile");
+                // Same override pattern as the "XFChess.com" button above:
+                // XFCHESS_WEB_URL for the local dev stack, else the public site.
+                let base = std::env::var("XFCHESS_WEB_URL")
+                    .unwrap_or_else(|_| "https://xfchess.com".to_string());
+                let _ = webbrowser::open(&format!("{base}/create-profile"));
             }
             ui.add_space(SP);
         }

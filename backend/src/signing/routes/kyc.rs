@@ -157,7 +157,10 @@ pub async fn user_status(
     //   1. A wallet-linked account in users_v2 (proves wallet ownership was verified).
     //   2. An active KYC record in the vault (full_name, dob, tax_id stored).
     //   3. CACF compliance for their jurisdiction (or not a CACF-covered country).
-    let can_wager = has_wallet_account && has_kyc && cacf_ok;
+    // On devnet, the gate is bypassed outright — there's no real money at
+    // stake, so onboarding/KYC shouldn't block testing. Mainnet always
+    // evaluates the full check above.
+    let can_wager = state.config.is_devnet() || (has_wallet_account && has_kyc && cacf_ok);
 
     Json(UserStatus {
         has_profile: has_wallet_account || has_kyc,

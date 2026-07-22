@@ -217,9 +217,7 @@ pub fn multiplayer_menu_system(
 
                                                         #[cfg(feature = "solana")]
                                                         std::thread::spawn(move || {
-                                                            let vps_url = std::env::var("SIGNING_SERVICE_URL")
-                                                                .or_else(|_| std::env::var("BACKEND_URL"))
-                                                                .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
+                                                            let vps_url = crate::multiplayer::network::vps::vps_base();
 
                                                             // 1. Build Leave Transaction
                                                             let build_url = format!("{}/tournament/{}/build-leave-tx", vps_url, t_id);
@@ -287,9 +285,7 @@ pub fn multiplayer_menu_system(
                                         let tx = channel.sender.clone();
 
                                         std::thread::spawn(move || {
-                                            let vps_url = std::env::var("SIGNING_SERVICE_URL")
-                                                .or_else(|_| std::env::var("BACKEND_URL"))
-                                                .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
+                                            let vps_url = crate::multiplayer::network::vps::vps_base();
                                             let url = format!("{}/tournament/my?player={}", vps_url, pubkey_str);
                                             match reqwest::blocking::get(&url) {
                                                 Ok(resp) if resp.status().is_success() => {

@@ -41,12 +41,10 @@ impl Plugin for AuthWebSocketPlugin {
 
 /// Start WebSocket connection to backend for authentication sync
 fn start_auth_websocket(mut auth_ws: ResMut<AuthWebSocket>) {
-    let backend_url = env::var("BACKEND_URL").unwrap_or_else(|_| "ws://localhost:8090".to_string());
-    let ws_url = if backend_url.starts_with("http") {
-        backend_url.replace("http", "ws") + "/ws/auth"
-    } else {
-        format!("{}/ws/auth", backend_url)
-    };
+    let ws_url = format!(
+        "{}/ws/auth",
+        crate::multiplayer::network::vps::vps_ws_base()
+    );
     info!("Starting WebSocket connection to {}", ws_url);
 
     let Some(tx) = auth_ws.tx.take() else {

@@ -7,9 +7,7 @@ use futures_lite::future;
 use serde::Deserialize;
 
 fn auth_base_url() -> String {
-    std::env::var("SIGNING_SERVICE_URL")
-        .or_else(|_| std::env::var("BACKEND_URL"))
-        .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string())
+    crate::multiplayer::network::vps::vps_base()
 }
 
 // --- Resources ---

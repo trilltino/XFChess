@@ -174,7 +174,10 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
                                 "signature": "1111111111111111111111111111111111111111111111111111111111111111" // mock signature for now
                             });
 
-                            let url = "http://127.0.0.1:3000/identity/register".to_string(); // Assuming dev server
+                            let url = format!(
+                                "{}/identity/register",
+                                crate::multiplayer::network::vps::vps_base()
+                            );
                             state.status = SubmissionStatus::Submitting;
 
                             // Because we can't easily spawn a Bevy task from inside the UI closure without

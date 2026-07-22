@@ -32,7 +32,9 @@ pub mod social;
 pub mod tournament;
 
 // Re-exports preserving the flat `crate::multiplayer::network::vps::*` API.
-pub use client::{client, fetch_sol_usd_rate, set_auth_token, vps_base, SolUsdRateResponse};
+pub use client::{
+    client, fetch_sol_usd_rate, set_auth_token, vps_base, vps_ws_base, SolUsdRateResponse,
+};
 pub use game::{
     fetch_move_log, get_active_game_for_wallet, get_broadcast_delay, get_game_moves_for_spectator,
     record_move, report_blur, vps_fetch_move_nonce, vps_finalize_game, vps_submit_dispute,

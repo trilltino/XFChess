@@ -61,6 +61,13 @@ pub struct SigningConfig {
 }
 
 impl SigningConfig {
+    /// True when `solana_rpc_url` points at a devnet cluster. Used to bypass
+    /// the profile/KYC/CACF wager-eligibility gate for test SOL — mainnet
+    /// stays fully gated regardless of this flag.
+    pub fn is_devnet(&self) -> bool {
+        self.solana_rpc_url.contains("devnet")
+    }
+
     /// Loads configuration from environment variables.
     ///
     /// # Environment Variables

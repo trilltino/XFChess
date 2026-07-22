@@ -2,13 +2,15 @@
 //!
 //! Every VPS endpoint helper in this module group goes through [`client`]
 //! so headers, timeouts, and the ngrok bypass header stay consistent. The
-//! base URL comes from `SIGNING_SERVICE_URL` (runtime) or `BACKEND_URL`
-//! (compile-time), defaulting to local dev.
+//! base URL always resolves to the production Hetzner backend
+//! (`VPS_PROD_URL`) — for both debug and release builds — unless overridden
+//! at runtime via `SIGNING_SERVICE_URL` or `BACKEND_URL` (checked in that
+//! order), e.g. `SIGNING_SERVICE_URL=http://127.0.0.1:8090 cargo run` to
+//! develop against a local backend instead.
 
 use std::sync::RwLock;
 
-const VPS_PROD_URL: &str = "http://178.104.55.19";
-const VPS_LOCAL_URL: &str = "http://127.0.0.1:8090";
+const VPS_PROD_URL: &str = "https://xfchess.com";
 
 /// The current backend JWT, set after wallet login (SIWS/bridge). When present,
 /// it is sent as `Authorization: Bearer …` on every VPS call, which is the
@@ -26,14 +28,20 @@ pub fn set_auth_token(token: Option<String>) {
 pub fn vps_base() -> String {
     std::env::var("SIGNING_SERVICE_URL")
         .or_else(|_| std::env::var("BACKEND_URL"))
-        .unwrap_or_else(|_| {
-            // Debug builds default to local backend; release builds hit production.
-            if cfg!(debug_assertions) {
-                VPS_LOCAL_URL.to_string()
-            } else {
-                VPS_PROD_URL.to_string()
-            }
-        })
+        .unwrap_or_else(|_| VPS_PROD_URL.to_string())
+}
+
+/// Same resolution as [`vps_base`] but as a `ws(s)://` URL, for websocket
+/// endpoints (e.g. `/ws/auth`).
+pub fn vps_ws_base() -> String {
+    let base = vps_base();
+    if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        base
+    }
 }
 
 pub fn client() -> Result<reqwest::blocking::Client, String> {

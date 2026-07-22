@@ -273,9 +273,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 // Pre-game lobby chat
                 let game_id_str = game_id.to_string();
                 if !ctx.lobby_chat.active || ctx.lobby_chat.game_id != game_id_str {
-                    let backend_url = std::env::var("BACKEND_URL")
-                        .or_else(|_| std::env::var("SIGNING_SERVICE_URL"))
-                        .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
+                    let backend_url = crate::multiplayer::network::vps::vps_base();
                     let display = lobby
                         .cached_display_name
                         .clone()
@@ -341,9 +339,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                                 );
                                 ctx.lobby_chat.draft.clear();
                                 let gid = game_id_str.clone();
-                                let backend_url = std::env::var("BACKEND_URL")
-                                    .or_else(|_| std::env::var("SIGNING_SERVICE_URL"))
-                                    .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
+                                let backend_url = crate::multiplayer::network::vps::vps_base();
                                 std::thread::spawn(move || {
                                     let _ = reqwest::blocking::Client::new()
                                         .post(format!("{}/chat/{}", backend_url, gid))
