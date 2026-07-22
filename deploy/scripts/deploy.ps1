@@ -407,6 +407,11 @@ Run-Remote "systemctl restart xfchess-backend"
 # ── Step 7: Upload frontend ───────────────────────────────────────────────────
 Write-Host "`n=== Uploading frontend ===" -ForegroundColor Green
 Upload "$ROOT\web-solana\dist\*" "/opt/xfchess/web/"
+# scp/sftp can create subdirectories (assets/, fonts/) as owner-only (700),
+# which silently blocks nginx (runs as www-data, not xfchess) from traversing
+# them — every asset request then 404s internally and falls back to
+# index.html, served as text/html instead of the real JS/CSS MIME type.
+Run-Remote "chmod -R o+rX /opt/xfchess/web"
 
 # ── Step 8: Configure nginx ───────────────────────────────────────────────────
 Write-Host "`n=== Configuring nginx ===" -ForegroundColor Green
