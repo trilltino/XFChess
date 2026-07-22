@@ -422,9 +422,14 @@ Run-Remote "mkdir -p /var/www/certbot"
 if ($Domain) {
     Write-Host "`n=== Obtaining Let's Encrypt certificate for $Domain ===" -ForegroundColor Green
     # First bring nginx up in HTTP-only mode so ACME challenge works
+    # `nginx -t` alone only checks syntax — it never applies the newly uploaded
+    # config, so the ACME HTTP-01 challenge was hitting whatever config was
+    # already loaded in memory (stale routing, wrong headers). Reload first so
+    # the live server actually serves the /.well-known/acme-challenge/ webroot
+    # this new config defines. This will 502/whatever on HTTPS momentarily since
+    # no cert exists yet for this domain — fine, certbot only needs port 80.
     Run-Remote @"
-nginx -t 2>/dev/null || true
-# Temporarily serve HTTP for certbot if HTTPS certs don't exist yet
+nginx -t && systemctl reload nginx
 test -f /etc/letsencrypt/live/${Domain}/fullchain.pem || \
   certbot certonly --webroot -w /var/www/certbot -d ${Domain} --non-interactive --agree-tos -m admin@${Domain} --quiet
 "@
