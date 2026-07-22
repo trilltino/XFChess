@@ -151,12 +151,14 @@ pub fn require_wager_eligibility(wallet_pubkey: &str) -> Result<(), String> {
     if status.can_wager {
         return Ok(());
     }
+    // Note: `has_email` is deliberately not checked here — the backend's
+    // `can_wager` formula (backend/src/signing/routes/kyc.rs) never factors
+    // in email, since email/JWT auth is cosmetic, not a gameplay gate. Listing
+    // it as a blocking reason would tell the user to fix something that
+    // doesn't affect eligibility.
     let mut missing = Vec::new();
     if !status.has_profile {
         missing.push("profile");
-    }
-    if !status.has_email {
-        missing.push("email");
     }
     if !status.has_kyc {
         missing.push("KYC");
