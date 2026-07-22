@@ -8,7 +8,6 @@
 ;   xfchess-tauri.exe    (wallet bridge companion)
 ;   stockfish.exe        (chess engine)
 ;   assets\              (game assets)
-;   tournament-admin\dist\ (admin UI, served by the bridge)
 ; All .exe files MUST already be Authenticode-signed before makensis runs, then
 ; the resulting Setup.exe is signed too. See DISTRIBUTION.md.
 
@@ -70,10 +69,6 @@ Section "Install"
   SetOutPath "$INSTDIR\assets"
   File /r "${PAYLOAD_DIR}\assets\*.*"
 
-  ; Tournament-admin UI dist served by the wallet bridge (optional)
-  SetOutPath "$INSTDIR\tournament-admin\dist"
-  File /nonfatal /r "${PAYLOAD_DIR}\tournament-admin\dist\*.*"
-
   ; Launcher: sets production endpoints, starts the wallet bridge, then the game.
   ; This completes the dev .bat (which started only the bridge).
   SetOutPath "$INSTDIR"
@@ -114,7 +109,6 @@ Section "Uninstall"
   Delete "$INSTDIR\launch.bat"
   Delete "$INSTDIR\uninstall.exe"
   RMDir /r "$INSTDIR\assets"
-  RMDir /r "$INSTDIR\tournament-admin"
   RMDir "$INSTDIR"
 
   Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"

@@ -71,7 +71,6 @@ jobs:
         run: |
           (cd web-solana && npm ci && npm run build)
           (cd tauri/wallet-ui && npm ci && npm run build)
-          (cd tauri/tournament-admin && npm ci && npm run build) || echo "tournament-admin build skipped"
 
       - name: Build binaries (release)
         run: |
@@ -87,10 +86,6 @@ jobs:
           Copy-Item -Force target/release/xfchess.exe "$stage/"
           Copy-Item -Force target/release/xfchess-tauri.exe "$stage/"
           if (Test-Path stockfish.exe) { Copy-Item -Force stockfish.exe "$stage/" }
-          if (Test-Path tauri/tournament-admin/dist) {
-            New-Item -ItemType Directory -Force -Path "$stage/tournament-admin/dist" | Out-Null
-            Copy-Item -Recurse -Force tauri/tournament-admin/dist/* "$stage/tournament-admin/dist/"
-          }
 
       # Sign the binaries BEFORE packaging. Azure Trusted Signing path:
       - name: Sign binaries (Azure Trusted Signing)
@@ -179,7 +174,6 @@ jobs:
           VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
         run: |
           (cd tauri/wallet-ui && npm ci && npm run build)
-          (cd tauri/tournament-admin && npm ci && npm run build) || echo "tournament-admin build skipped"
 
       - name: Build binaries (release)
         run: |
@@ -193,10 +187,6 @@ jobs:
           cp target/release/xfchess release/linux/xfchess
           cp target/release/xfchess-tauri release/linux/xfchess-tauri
           chmod +x release/linux/xfchess release/linux/xfchess-tauri
-          if [ -d tauri/tournament-admin/dist ]; then
-            mkdir -p release/linux/tournament-admin/dist
-            cp -r tauri/tournament-admin/dist/* release/linux/tournament-admin/dist/
-          fi
           cat > release/linux/launch.sh <<EOF
           #!/bin/sh
           SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
@@ -299,7 +289,6 @@ jobs:
         run: |
           (cd web-solana && npm ci && npm run build)
           (cd tauri/wallet-ui && npm ci && npm run build)
-          (cd tauri/tournament-admin && npm ci && npm run build) || echo "tournament-admin build skipped"
 
       - name: Build binaries (release)
         run: |
