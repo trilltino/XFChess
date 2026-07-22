@@ -64,7 +64,7 @@ src/
 
 ## Database
 
-SQLite with SQLx 0.8. Migrations live in `backend/migrations/`. Run them with:
+SQLite with SQLx 0.9. Migrations live in `backend/migrations/`. Run them with:
 
 ```bash
 sqlx migrate run

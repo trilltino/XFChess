@@ -8,9 +8,9 @@ XFChess is a 3D chess game built with Rust + Bevy and Solana blockchain integrat
 
 | Component | Path | Tech |
 |-----------|------|------|
-| Game client | `src/` | Bevy 0.18, ECS, Iroh P2P |
-| Backend API | `backend/` | Axum 0.8, SQLite/SQLx, Tokio |
-| Solana program | `programs/xfchess-game/` | Anchor 0.31, Ephemeral Rollups |
+| Game client | `src/` | Bevy 0.19, ECS, Iroh P2P |
+| Backend API | `backend/` | Axum 0.8, SQLite/SQLx 0.9, Tokio |
+| Solana program | `programs/xfchess-game/` | Anchor 1.1, Ephemeral Rollups |
 | Web frontend | `web-solana/` | React 19, Vite, Chakra UI |
 | Desktop wrapper | `tauri/` | Tauri 2.1 |
 
@@ -156,7 +156,7 @@ The backend holds in-memory P2P relay state via `braid-iroh`. The `signing/` mod
 
 ### Solana program (`programs/xfchess-game/`)
 
-Anchor 0.31 program. Program ID: `8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU` (localnet + devnet).
+Anchor 1.1 program. Program ID: `8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU` (localnet + devnet).
 
 Instruction groups (each in its own subdirectory under `src/`):
 
