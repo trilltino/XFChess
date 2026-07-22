@@ -16,10 +16,13 @@ solana-client.workspace = true
 solana-sdk.workspace = true
 solana-program.workspace = true
 # Not in the workspace table — pin locally, matched to the solana-* versions above.
-solana-transaction-status = "=2.2.1"
+solana-transaction-status = { workspace = true }
+solana-system-interface = { version = "3", features = ["bincode"] }
+solana-commitment-config = "3"
+solana-compute-budget-interface = "3"
 sha2 = "0.10"
 nimzovich_engine = { path = "../../engine/nimzovich_engine" }
-ephemeral-rollups-sdk = { version = "0.13.0" }
+ephemeral-rollups-sdk = { workspace = true }
 # Async HTTP for the raw-JSON-RPC load test (precise 429 detection + concurrency).
 reqwest.workspace = true
 # StreamExt for the WebSocket pubsub stream probe (pure Rust, no toolchain).

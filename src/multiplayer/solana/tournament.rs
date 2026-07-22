@@ -60,9 +60,15 @@ pub struct TournamentClientState {
     pub join_status: TournamentJoinStatus,
     /// Oneshot receiver for an in-flight `register_player` transaction.
     pub tx_rx: Option<oneshot::Receiver<Result<usize, String>>>,
-    /// Channel for receiving background tournament list polls.
+    /// Channel for receiving background tournament list polls. Carries the
+    /// real fetch/parse error on failure — this used to be dropped in favor
+    /// of a generic "channel closed" message, which made a real backend
+    /// outage or a schema mismatch indistinguishable from a genuinely empty
+    /// tournament list.
     pub list_rx: Option<
-        crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentSummary>>,
+        crossbeam_channel::Receiver<
+            Result<Vec<crate::multiplayer::network::vps::TournamentSummary>, String>,
+        >,
     >,
     pub last_list_poll: Option<Instant>,
     /// On-chain games created by the backend orchestrator across all
@@ -286,21 +292,24 @@ pub struct BracketFiredEvent {
     pub started_at: i64,
 }
 
+/// Spawn the real on-chain `register_player` transaction (deposits the entry
+/// fee into escrow and adds the player to their tournament shard) on a
+/// background thread. This is separate from — and should run before —
+/// `vps::join_tournament`, which only maintains the off-chain bracket/roster
+/// and never touches the chain. `password` is unused here (password gating
+/// lives entirely in the off-chain join call); kept for signature stability.
 pub fn spawn_register_tournament(
     tournament_id: u64,
     wallet_pubkey: Pubkey,
-    password: Option<String>,
+    _password: Option<String>,
 ) -> oneshot::Receiver<Result<usize, String>> {
     let (tx, rx) = oneshot::channel();
-    let pk = wallet_pubkey.to_string();
     let rpc_url = std::env::var("SOLANA_RPC_URL")
         .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            let res = register_tournament(tournament_id, &pk, &rpc_url, password.as_deref()).await;
-            let _ = tx.send(res.map(|slot| slot as usize));
-        })
-        .detach();
+    std::thread::spawn(move || {
+        let res = register_tournament(tournament_id, wallet_pubkey, &rpc_url);
+        let _ = tx.send(res.map(|_| 0usize));
+    });
     rx
 }
 
@@ -500,14 +509,19 @@ fn poll_tournament_list(
 
     if let Some(ref rx) = tournament.list_rx {
         match rx.try_recv() {
-            Ok(list) => {
+            Ok(Ok(list)) => {
                 tournament.available_tournaments = list;
                 tournament.last_poll_error = None;
                 tournament.list_rx = None;
             }
+            Ok(Err(e)) => {
+                tournament.last_poll_error = Some(e);
+                tournament.list_rx = None;
+            }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
             Err(_) => {
-                tournament.last_poll_error = Some("List poll channel closed".to_string());
+                tournament.last_poll_error =
+                    Some("List poll task ended without responding".to_string());
                 tournament.list_rx = None;
             }
         }
@@ -532,14 +546,11 @@ fn poll_tournament_list(
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            match crate::multiplayer::network::vps::list_tournaments() {
-                Ok(list) => {
-                    let _ = tx.send(list);
-                }
-                Err(e) => {
-                    warn!("[TOURNAMENT] list_tournaments failed: {}", e);
-                }
+            let result = crate::multiplayer::network::vps::list_tournaments();
+            if let Err(ref e) = result {
+                warn!("[TOURNAMENT] list_tournaments failed: {}", e);
             }
+            let _ = tx.send(result);
         })
         .detach();
 }
@@ -844,12 +855,75 @@ fn announce_or_join_tournament_relay(
     });
 }
 
-async fn register_tournament(
-    _tournament_id: u64,
-    _wallet_pubkey: &str,
-    _rpc_url: &str,
-    _password: Option<&str>,
+/// Registration info needed to build `register_player_ix`, fetched from the
+/// backend rather than derived locally — `host_treasury` isn't something the
+/// client can compute (it's the VPS operator's own key, stamped onto the
+/// on-chain Tournament account at creation).
+#[derive(Deserialize)]
+struct RegistrationInfo {
+    program_id: String,
+    max_players: u16,
+    host_treasury: String,
+}
+
+fn fetch_registration_info(rpc_base: &str, tournament_id: u64) -> Result<RegistrationInfo, String> {
+    let resp = crate::multiplayer::network::vps::client()?
+        .get(format!(
+            "{}/tournament/{}/registration-info",
+            rpc_base, tournament_id
+        ))
+        .send()
+        .map_err(|e| format!("fetch registration-info: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "fetch registration-info: HTTP {}",
+            resp.status()
+        ));
+    }
+    resp.json::<RegistrationInfo>()
+        .map_err(|e| format!("parse registration-info: {e}"))
+}
+
+/// Submits the real on-chain `register_player` transaction: fetches the data
+/// needed to build it (program ID, tournament size, host treasury) from the
+/// backend, builds the instruction client-side, signs it via the Tauri
+/// wallet bridge (the same "one popup" mechanism used for wagered games —
+/// see `lobby::async_create_game`), and confirms on-chain before returning.
+pub fn register_tournament(
+    tournament_id: u64,
+    wallet_pubkey: Pubkey,
+    rpc_url: &str,
 ) -> Result<u64, String> {
-    // implement register_tournament logic here
+    use crate::multiplayer::network::vps::vps_base;
+    use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
+    use crate::multiplayer::solana::tournament_session::build_register_player_ix;
+    use std::str::FromStr;
+
+    let info = fetch_registration_info(&vps_base(), tournament_id)?;
+    let program_id = Pubkey::from_str(&info.program_id).map_err(|e| format!("bad program_id: {e}"))?;
+    let host_treasury =
+        Pubkey::from_str(&info.host_treasury).map_err(|e| format!("bad host_treasury: {e}"))?;
+
+    // Matches the ELO the off-chain roster join call already uses (see
+    // `vps::join_tournament`) — real ELO-based seeding is a future
+    // enhancement, not something this registration tx needs to solve.
+    const DEFAULT_ELO: u32 = 1200;
+
+    let ix = build_register_player_ix(
+        &program_id,
+        tournament_id,
+        info.max_players,
+        &wallet_pubkey,
+        &host_treasury,
+        DEFAULT_ELO,
+    );
+
+    let sig = sign_and_send_via_tauri(rpc_url, wallet_pubkey, &[ix], &[])
+        .map_err(|e| format!("register_player tx: {e}"))?;
+
+    info!(
+        "[TOURNAMENT] register_player confirmed for tournament {} ({})",
+        tournament_id, sig
+    );
     Ok(0)
 }

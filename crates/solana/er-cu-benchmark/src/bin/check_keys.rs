@@ -5,12 +5,12 @@ use std::fs;
 fn main() {
     let master_data: Vec<u8> =
         serde_json::from_str(&fs::read_to_string("keys/er-cu-master.json").unwrap()).unwrap();
-    let master = Keypair::from_bytes(&master_data).unwrap();
+    let master = Keypair::try_from(master_data.as_slice()).unwrap();
     println!("MASTER_PUBKEY={}", master.pubkey());
 
     let auth_data: Vec<u8> =
         serde_json::from_str(&fs::read_to_string("keys/program-authority.json").unwrap()).unwrap();
-    let auth = Keypair::from_bytes(&auth_data).unwrap();
+    let auth = Keypair::try_from(auth_data.as_slice()).unwrap();
     println!("PROGRAM_AUTH_PUBKEY={}", auth.pubkey());
 
     let vps_bytes: [u8; 32] = [

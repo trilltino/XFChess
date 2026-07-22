@@ -24,9 +24,9 @@ use solana_sdk::{
     pubkey::Pubkey,
     rent::Rent,
     signature::{Keypair, Signer},
-    system_instruction,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use xfchess_game::state::PlayerProfile;
 
 fn profile_pda(player: &Pubkey) -> Pubkey {
@@ -47,7 +47,7 @@ fn init_profile_ix(
         player_profile: profile_pda(player),
         username_record: username_record_pda(username),
         player: *player,
-        system_program: solana_sdk::system_program::ID,
+        system_program: solana_system_interface::program::ID,
     }
     .to_account_metas(None);
     let data = xfchess_game::instruction::InitProfile {

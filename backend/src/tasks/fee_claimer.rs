@@ -4,7 +4,7 @@
 use crate::signing::{solana, FeepayerPool};
 /// accumulated fees when the threshold is reached.
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signer;
 use std::str::FromStr;

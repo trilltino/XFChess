@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiClient, type CreateTournamentRequest } from "../../services/api";
-import { lamportsToSolInput, lamportsToUsd, lamportsToUsdInput, solInputToLamports, usdInputToLamports } from "../../services/sol";
+import { lamportsToUsd, lamportsToUsdInput, usdInputToLamports } from "../../services/sol";
 import { useSolUsdRate } from "../../hooks/useSolUsdRate";
 
 interface CreateTournamentProps {
@@ -35,13 +35,10 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
   // Text mirrors of the two lamport fields, kept as separate string state so
   // the input can hold in-progress text ("0.", "0.00") that parseFloat would
   // otherwise mangle if it round-tripped through the lamport value on every
-  // keystroke. USD is primary (via the live rate); falls back to SOL input
-  // when no rate has loaded yet so tournament creation is never blocked on
-  // a price feed.
+  // keystroke. USD is the only unit shown; the inputs stay disabled until
+  // the live rate loads since there's no lamport value to compute without it.
   const [entryFeeUsdInput, setEntryFeeUsdInput] = useState("");
   const [platformFeeUsdInput, setPlatformFeeUsdInput] = useState("");
-  const [entryFeeSolInput, setEntryFeeSolInput] = useState(() => lamportsToSolInput(formData.entry_fee_lamports));
-  const [platformFeeSolInput, setPlatformFeeSolInput] = useState(() => lamportsToSolInput(formData.platform_fee_lamports || 0));
 
   // Populate the USD mirrors once the live rate first loads — the initial
   // lamport defaults above were set before any rate was known. Guarded by
@@ -63,7 +60,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
       case 1:
         return formData.tournament_id > 0 && formData.name.trim() !== "";
       case 2:
-        return formData.entry_fee_lamports >= 0;
+        return formData.entry_fee_lamports >= 0 && prizeShareTotalBps(formData.prize_shares) <= 10000;
       case 3:
         return true;
       case 4:
@@ -160,66 +157,38 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
       <SectionTitle>Economics & Rewards</SectionTitle>
       
       <div>
-        <label style={labelStyle}>ENTRY FEE {solUsdRate != null ? "(USD)" : "(SOL — rate loading)"}</label>
-        {solUsdRate != null ? (
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={entryFeeUsdInput}
-            onChange={(e) => {
-              setEntryFeeUsdInput(e.target.value);
-              updateFormData("entry_fee_lamports", usdInputToLamports(e.target.value, solUsdRate));
-            }}
-            style={inputStyle}
-            placeholder="0 for FREE tournament"
-          />
-        ) : (
-          <input
-            type="number"
-            step="0.0001"
-            min="0"
-            value={entryFeeSolInput}
-            onChange={(e) => {
-              setEntryFeeSolInput(e.target.value);
-              updateFormData("entry_fee_lamports", solInputToLamports(e.target.value));
-            }}
-            style={inputStyle}
-            placeholder="0 for FREE tournament"
-          />
-        )}
+        <label style={labelStyle}>ENTRY FEE (USD)</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={entryFeeUsdInput}
+          disabled={solUsdRate == null}
+          onChange={(e) => {
+            setEntryFeeUsdInput(e.target.value);
+            updateFormData("entry_fee_lamports", usdInputToLamports(e.target.value, solUsdRate));
+          }}
+          style={{ ...inputStyle, ...(solUsdRate == null ? disabledInputStyle : {}) }}
+          placeholder={solUsdRate == null ? "Loading rate…" : "0 for FREE tournament"}
+        />
         <FeeEquivalent lamports={formData.entry_fee_lamports} solUsdRate={solUsdRate} color="var(--accent)" />
       </div>
 
       <div>
-        <label style={labelStyle}>PLATFORM FEE {solUsdRate != null ? "(USD)" : "(SOL — rate loading)"}</label>
-        {solUsdRate != null ? (
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={platformFeeUsdInput}
-            onChange={(e) => {
-              setPlatformFeeUsdInput(e.target.value);
-              updateFormData("platform_fee_lamports", usdInputToLamports(e.target.value, solUsdRate));
-            }}
-            style={inputStyle}
-            placeholder="Service fee (e.g. $0.50)"
-          />
-        ) : (
-          <input
-            type="number"
-            step="0.0001"
-            min="0"
-            value={platformFeeSolInput}
-            onChange={(e) => {
-              setPlatformFeeSolInput(e.target.value);
-              updateFormData("platform_fee_lamports", solInputToLamports(e.target.value));
-            }}
-            style={inputStyle}
-            placeholder="Service fee (e.g. 0.004 SOL for ~50p)"
-          />
-        )}
+        <label style={labelStyle}>PLATFORM FEE (USD)</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={platformFeeUsdInput}
+          disabled={solUsdRate == null}
+          onChange={(e) => {
+            setPlatformFeeUsdInput(e.target.value);
+            updateFormData("platform_fee_lamports", usdInputToLamports(e.target.value, solUsdRate));
+          }}
+          style={{ ...inputStyle, ...(solUsdRate == null ? disabledInputStyle : {}) }}
+          placeholder={solUsdRate == null ? "Loading rate…" : "Service fee (e.g. $0.50)"}
+        />
         <FeeEquivalent lamports={formData.platform_fee_lamports || 0} solUsdRate={solUsdRate} color="var(--primary)" />
       </div>
 
@@ -247,25 +216,35 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
           borderRadius: "16px",
           border: "1px solid var(--border)"
         }}>
-          <label style={labelStyle}>PRIZE DISTRIBUTION [BPS]</label>
+          <label style={labelStyle}>PRIZE DISTRIBUTION [%]</label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "1rem" }}>
             {[1, 2, 3, 4, 5].map(i => (
               <div key={i}>
                 <label style={{ color: "var(--text-dim)", fontSize: "10px", marginBottom: "4px", display: "block" }}>
                   RANK {i}
                 </label>
-                <input
-                  type="number"
-                  value={formData.prize_shares?.[i - 1] || 0}
-                  onChange={(e) => {
-                    const newShares = [...(formData.prize_shares || [])];
-                    newShares[i - 1] = parseInt(e.target.value) || 0;
-                    updateFormData("prize_shares", newShares as any);
-                  }}
-                  style={{ ...inputStyle, padding: "0.5rem" }}
-                />
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={bpsToPercentInput(formData.prize_shares?.[i - 1] ?? 0)}
+                    onChange={(e) => {
+                      const newShares = [...(formData.prize_shares || [])];
+                      newShares[i - 1] = percentInputToBps(e.target.value);
+                      updateFormData("prize_shares", newShares as any);
+                    }}
+                    style={{ ...inputStyle, padding: "0.5rem 1.5rem 0.5rem 0.5rem" }}
+                  />
+                  <span style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", fontSize: "12px", pointerEvents: "none" }}>%</span>
+                </div>
               </div>
             ))}
+          </div>
+          <div style={{ marginTop: "10px", fontSize: "11px", fontWeight: "700", color: prizeShareTotalBps(formData.prize_shares) > 10000 ? "#ef4444" : "var(--text-dim)" }}>
+            TOTAL: {(prizeShareTotalBps(formData.prize_shares) / 100).toFixed(2)}%
+            {prizeShareTotalBps(formData.prize_shares) > 10000 ? " — exceeds 100%" : ""}
           </div>
         </div>
       )}
@@ -364,15 +343,41 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
 
       <div>
         <label style={labelStyle}>SCHEDULED ACTIVATION</label>
-        <input
-          type="datetime-local"
-          value={formData.scheduled_at ? new Date(formData.scheduled_at * 1000).toISOString().slice(0, 16) : ""}
-          onChange={(e) => {
-            const date = new Date(e.target.value);
-            updateFormData("scheduled_at", date.getTime() / 1000);
-          }}
-          style={inputStyle}
-        />
+        <div style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="datetime-local"
+            value={formData.scheduled_at ? new Date(formData.scheduled_at * 1000).toISOString().slice(0, 16) : ""}
+            onChange={(e) => {
+              if (!e.target.value) { updateFormData("scheduled_at", undefined); return; }
+              const date = new Date(e.target.value);
+              updateFormData("scheduled_at", date.getTime() / 1000);
+            }}
+            style={{ ...inputStyle, flex: 1 }}
+          />
+          <button
+            type="button"
+            onClick={() => updateFormData("scheduled_at", undefined)}
+            title="Clear the date — registration opens the moment INITIALIZE TOURNAMENT succeeds"
+            style={{
+              padding: "0 1.25rem",
+              borderRadius: "12px",
+              border: formData.scheduled_at ? "1px solid var(--border)" : "1px solid var(--primary)",
+              background: formData.scheduled_at ? "transparent" : "rgba(173,92,47,0.15)",
+              color: formData.scheduled_at ? "var(--text-dim)" : "var(--primary)",
+              fontWeight: 700,
+              fontSize: "12px",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            INSTANT
+          </button>
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "6px", fontStyle: "italic" }}>
+          {formData.scheduled_at
+            ? "Registration opens at the scheduled time above."
+            : "No date set — registration opens immediately once created."}
+        </div>
       </div>
     </div>
   );
@@ -503,6 +508,23 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <h2 style={{ color: "#fff", fontSize: "24px", fontWeight: "800", marginBottom: "0.5rem" }}>{children}</h2>
 );
 
+/** The on-chain program and backend store prize shares in basis points
+ * (10000 = 100%); these three helpers keep that the wire format while the
+ * UI reads/writes plain percentages. */
+const bpsToPercentInput = (bps: number): string => {
+  const pct = bps / 100;
+  return pct === 0 ? "0" : String(pct);
+};
+
+const percentInputToBps = (raw: string): number => {
+  const pct = parseFloat(raw);
+  if (!Number.isFinite(pct) || pct < 0) return 0;
+  return Math.round(pct * 100);
+};
+
+const prizeShareTotalBps = (shares?: number[]): number =>
+  (shares || []).reduce((sum, v) => sum + (v || 0), 0);
+
 /** Shows lamports + a best-effort USD equivalent under a SOL input; omits the
  * USD half until a rate has loaded rather than showing a stale/wrong figure. */
 const FeeEquivalent = ({ lamports, solUsdRate, color }: { lamports: number; solUsdRate: number | null; color: string }) => {
@@ -533,4 +555,12 @@ const inputStyle: React.CSSProperties = {
   fontSize: "14px",
   outline: "none",
   transition: "border-color 0.2s ease"
+};
+
+/** Applied on top of inputStyle while a USD field has no rate to convert
+ * against yet — visibly inert rather than a plain disabled input that reads
+ * as broken. */
+const disabledInputStyle: React.CSSProperties = {
+  opacity: 0.5,
+  cursor: "not-allowed"
 };

@@ -12,7 +12,8 @@
       "Skill(claude-api:*)",
       "WebSearch",
       "Bash(cargo tree *)",
-      "Bash(xargs wc -l)"
+      "Bash(xargs wc -l)",
+      "Bash(npm outdated *)"
     ]
   }
 }

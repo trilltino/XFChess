@@ -40,7 +40,7 @@ pub(super) fn render_ai_setup_modal(
                     if ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new("✕")
+                                egui::RichText::new("X")
                                     .size(12.0)
                                     .color(UiColors::TEXT_POPUP_BODY),
                             )
@@ -67,22 +67,26 @@ pub(super) fn render_ai_setup_modal(
             // Strength grid (1-8) - compact. Each chip's tooltip explains how
             // that level actually plays (search depth/movetime), not just its
             // ELO number, so the difference between e.g. 1 and 3 is legible.
-            ui.horizontal(|ui| {
-                for lvl in 1..=8 {
-                    let selected = competitive.ai_difficulty == lvl;
-                    let response = StyledButton::chip(
-                        ui,
-                        &format!("{}", lvl),
-                        selected,
-                        egui::Vec2::new(32.0, 32.0),
-                    )
-                    .on_hover_text(crate::game::ai::resource::AIDifficulty::from_u8(lvl).tooltip());
+            ui.vertical_centered(|ui| {
+                ui.horizontal(|ui| {
+                    for lvl in 1..=8 {
+                        let selected = competitive.ai_difficulty == lvl;
+                        let response = StyledButton::chip(
+                            ui,
+                            &format!("{}", lvl),
+                            selected,
+                            egui::Vec2::new(32.0, 32.0),
+                        )
+                        .on_hover_text(
+                            crate::game::ai::resource::AIDifficulty::from_u8(lvl).tooltip(),
+                        );
 
-                    if response.clicked() {
-                        competitive.ai_difficulty = lvl;
+                        if response.clicked() {
+                            competitive.ai_difficulty = lvl;
+                        }
+                        ui.add_space(4.0);
                     }
-                    ui.add_space(4.0);
-                }
+                });
             });
 
             ui.add_space(8.0);
@@ -117,16 +121,18 @@ pub(super) fn render_ai_setup_modal(
                 ("10+0", TimeControl::Rapid),
                 ("30m", TimeControl::Classical),
             ];
-            ui.horizontal_wrapped(|ui| {
-                for (label, tc) in tc_presets {
-                    let selected = competitive.ai_time_control == tc;
-                    let response =
-                        StyledButton::chip(ui, label, selected, egui::Vec2::new(44.0, 28.0));
-                    if response.clicked() {
-                        competitive.ai_time_control = tc;
+            ui.vertical_centered(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for (label, tc) in tc_presets {
+                        let selected = competitive.ai_time_control == tc;
+                        let response =
+                            StyledButton::chip(ui, label, selected, egui::Vec2::new(44.0, 28.0));
+                        if response.clicked() {
+                            competitive.ai_time_control = tc;
+                        }
+                        ui.add_space(3.0);
                     }
-                    ui.add_space(3.0);
-                }
+                });
             });
 
             ui.add_space(16.0);
@@ -139,22 +145,24 @@ pub(super) fn render_ai_setup_modal(
             );
             ui.add_space(6.0);
 
-            ui.horizontal(|ui| {
-                for (label, engine) in [
-                    ("Stockfish", crate::game::ai::resource::AIEngine::Stockfish),
-                    (
-                        "XFChessEngine",
-                        crate::game::ai::resource::AIEngine::XFChessEngine,
-                    ),
-                ] {
-                    let selected = competitive.ai_engine == engine;
-                    let response =
-                        StyledButton::chip(ui, label, selected, egui::Vec2::new(100.0, 28.0));
-                    if response.clicked() {
-                        competitive.ai_engine = engine;
+            ui.vertical_centered(|ui| {
+                ui.horizontal(|ui| {
+                    for (label, engine) in [
+                        ("Stockfish", crate::game::ai::resource::AIEngine::Stockfish),
+                        (
+                            "XFChessEngine",
+                            crate::game::ai::resource::AIEngine::XFChessEngine,
+                        ),
+                    ] {
+                        let selected = competitive.ai_engine == engine;
+                        let response =
+                            StyledButton::chip(ui, label, selected, egui::Vec2::new(100.0, 28.0));
+                        if response.clicked() {
+                            competitive.ai_engine = engine;
+                        }
+                        ui.add_space(8.0);
                     }
-                    ui.add_space(8.0);
-                }
+                });
             });
 
             ui.add_space(16.0);
@@ -164,20 +172,22 @@ pub(super) fn render_ai_setup_modal(
 
             // Side selection — clicking a side immediately starts the game with
             // that side as the player's choice (no separate Play button).
-            ui.horizontal(|ui| {
-                for (label, side) in [
-                    ("Black", AISide::Black),
-                    ("Random", AISide::Random),
-                    ("White", AISide::White),
-                ] {
-                    let selected = competitive.ai_side == side;
-                    let response =
-                        StyledButton::chip(ui, label, selected, egui::Vec2::new(70.0, 40.0));
-                    if response.clicked() {
-                        competitive.ai_side = side;
+            ui.vertical_centered(|ui| {
+                ui.horizontal(|ui| {
+                    for (label, side) in [
+                        ("Black", AISide::Black),
+                        ("Random", AISide::Random),
+                        ("White", AISide::White),
+                    ] {
+                        let selected = competitive.ai_side == side;
+                        let response =
+                            StyledButton::chip(ui, label, selected, egui::Vec2::new(70.0, 40.0));
+                        if response.clicked() {
+                            competitive.ai_side = side;
+                        }
+                        ui.add_space(8.0);
                     }
-                    ui.add_space(8.0);
-                }
+                });
             });
 
             ui.add_space(24.0);
@@ -241,7 +251,7 @@ pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut Compe
                     if ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new("✕")
+                                egui::RichText::new("X")
                                     .size(12.0)
                                     .color(UiColors::TEXT_POPUP_BODY),
                             )
@@ -310,7 +320,7 @@ pub(super) fn render_pgn_input_modal(
             ui.horizontal(|ui| {
                 ui.label(TextStyle::popup_title("PGN PLAYER"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("✕").size(12.0).color(UiColors::TEXT_POPUP_BODY))
+                    if ui.add(egui::Button::new(egui::RichText::new("X").size(12.0).color(UiColors::TEXT_POPUP_BODY))
                         .fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)).clicked() {
                         competitive.show_pgn_input = false;
                     }

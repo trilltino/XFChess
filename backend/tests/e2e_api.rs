@@ -41,6 +41,7 @@ fn test_config() -> SigningConfig {
     SigningConfig {
         port: 0,
         solana_rpc_url: "http://127.0.0.1:9".into(),
+        solana_mainnet_rpc_url: None,
         er_rpc_url: "http://127.0.0.1:9".into(),
         magic_router_rpc_url: "http://127.0.0.1:9".into(),
         program_id: "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into(),

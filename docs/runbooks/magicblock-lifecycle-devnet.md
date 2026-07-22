@@ -4,11 +4,11 @@ Use this runbook for live MagicBlock validation. The full happy path depends on 
 
 ## Pinned Toolchain
 
-- Anchor `0.31.1`
-- Solana `2.2.1`
-- `ephemeral-rollups-sdk` `0.13.0`
+- Anchor `1.1.2`
+- Solana `3.1.12` (Agave)
+- `ephemeral-rollups-sdk` `0.16.2`
 
-Do not upgrade to SDK `0.15.x` as part of lifecycle cleanup; that belongs with an Anchor 1.0 / Solana 3.x migration.
+The Anchor 1.0 / Solana 3.x migration landed 2026-07-22, which also unblocked the `ephemeral-rollups-sdk` bump to `0.16.2` — the version fixing the 2026-07-22 undelegation-buffer disclosure (`undelegate_account()` now checks that `buffer` is the canonical PDA for `delegated_account`, closing the arbitrary-account-overwrite path). Confirmed present in the resolved dependency and covered by `er_delegation_tests.rs`/`er_move_tests.rs`.
 
 ## Flow
 

@@ -4,6 +4,15 @@ import { apiClient } from "../services/api";
 export default function MatchManagement() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [abortMsg, setAbortMsg] = useState<string | null>(null);
+
+  // There is no on-chain "void/abort a live game" instruction — only
+  // resolve_dispute (winner or draw) exists, and that requires the game to
+  // actually be disputed first. This button used to do nothing at all when
+  // clicked; it now says so honestly instead of silently no-oping.
+  const handleForceAbort = (gameId: number) => {
+    setAbortMsg(`Game #${gameId}: force-abort isn't wired to an on-chain instruction. For a stuck/disputed game, use the Dashboard's dispute resolution instead.`);
+  };
 
   useEffect(() => {
     loadSessions();
@@ -36,6 +45,12 @@ export default function MatchManagement() {
           <button onClick={loadSessions} className="primary" style={{ padding: "0.6rem 1.5rem", borderRadius: "100px" }}>REFRESH</button>
         </div>
       </div>
+
+      {abortMsg && (
+        <div style={{ marginBottom: "1.5rem", padding: "0.75rem 1.25rem", backgroundColor: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "12px", color: "#f59e0b", fontSize: "12px" }}>
+          {abortMsg}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(400px, 1fr))", gap: "1.5rem" }}>
         {loading && sessions.length === 0 ? (
@@ -79,7 +94,7 @@ export default function MatchManagement() {
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: "10px", color: "var(--text-dim)" }}>LAST MOVE: {new Date(session.last_activity * 1000).toLocaleTimeString()}</span>
-                <button style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.2)", color: "#ef4444", padding: "4px 12px", borderRadius: "100px", fontSize: "11px", cursor: "pointer" }}>
+                <button onClick={() => handleForceAbort(session.game_id)} style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.2)", color: "#ef4444", padding: "4px 12px", borderRadius: "100px", fontSize: "11px", cursor: "pointer" }}>
                   FORCE ABORT
                 </button>
               </div>

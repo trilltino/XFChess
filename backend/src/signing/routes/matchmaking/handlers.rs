@@ -65,6 +65,11 @@ pub async fn join(
         return Err((StatusCode::BAD_REQUEST, "Timestamp too old".to_string()));
     }
 
+    let bans = crate::db::repository::BanRepository::new(app_state.store.pool());
+    if bans.is_banned(&req.pubkey).await.unwrap_or(false) {
+        return Err((StatusCode::FORBIDDEN, "This wallet is banned.".to_string()));
+    }
+
     // Fetch ELO from on-chain profile via cache
     let cached_elo = state.elo_cache.get_elo(&req.pubkey).await.map_err(|e| {
         (

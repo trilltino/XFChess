@@ -188,7 +188,7 @@ impl SessionKeyManager {
             .into_vec()
             .map_err(|e| format!("Failed to decode private key: {}", e))?;
 
-        let keypair = Keypair::from_bytes(&private_key_bytes)
+        let keypair = Keypair::try_from(private_key_bytes.as_slice())
             .map_err(|e| format!("Failed to reconstruct keypair: {}", e))?;
 
         Ok(Self {

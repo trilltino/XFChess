@@ -42,7 +42,7 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     if game.wager_amount > 0 && game.wager_token.is_none() {
         anchor_lang::system_program::transfer(
             CpiContext::new(
-                ctx.accounts.system_program.to_account_info(),
+                System::id(),
                 anchor_lang::system_program::Transfer {
                     from: ctx.accounts.player.to_account_info(),
                     to: ctx.accounts.escrow_pda.to_account_info(),

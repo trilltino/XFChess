@@ -369,7 +369,7 @@ async fn finalize_on_chain(
     let rpc_url = state.config.solana_rpc_url.clone();
     let kp_bytes = session_kp.to_bytes();
     let sig = tokio::task::spawn_blocking(move || {
-        let kp = solana_sdk::signature::Keypair::from_bytes(&kp_bytes)
+        let kp = solana_sdk::signature::Keypair::try_from(kp_bytes.as_slice())
             .map_err(|e| format!("bad keypair: {e}"))?;
         let rpc = solana::make_rpc(&rpc_url);
         solana::sign_and_submit(&rpc, &kp, &[ix]).map_err(|e| format!("finalize: {e}"))

@@ -11,9 +11,9 @@
 
 use clap::Parser;
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use std::time::Duration;
 use tokio::time::sleep;
@@ -351,5 +351,5 @@ async fn generate_html_report(result: &TournamentResult) -> Result<(), Box<dyn s
 
 fn read_keypair_file(path: &str) -> Result<Keypair, Box<dyn std::error::Error>> {
     let data = std::fs::read(path)?;
-    Ok(Keypair::from_bytes(&data)?)
+    Ok(Keypair::try_from(data.as_slice())?)
 }

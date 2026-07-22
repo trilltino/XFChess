@@ -88,8 +88,8 @@ pub struct CancelTournament<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler<'a, 'b, 'c, 'info>(
-    ctx: Context<'a, 'b, 'c, 'info, CancelTournament<'info>>,
+pub fn handler<'info>(
+    ctx: Context<'info, CancelTournament<'info>>,
     tournament_id: u64,
 ) -> Result<()> {
     require!(
@@ -151,7 +151,7 @@ pub fn handler<'a, 'b, 'c, 'info>(
 
             token::transfer(
                 CpiContext::new_with_signer(
-                    ctx.accounts.token_program.to_account_info(),
+                    Token::id(),
                     Transfer {
                         from: usdc_prize_escrow.to_account_info(),
                         to: operator_usdc_ata.to_account_info(),
@@ -209,7 +209,7 @@ pub fn handler<'a, 'b, 'c, 'info>(
                 // System-owned treasury wallet: system transfer (host_treasury signs).
                 anchor_lang::system_program::transfer(
                     CpiContext::new(
-                        ctx.accounts.system_program.to_account_info(),
+                        System::id(),
                         anchor_lang::system_program::Transfer {
                             from: ctx.accounts.host_treasury.to_account_info(),
                             to: player_wallet.to_account_info(),

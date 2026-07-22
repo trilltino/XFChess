@@ -149,7 +149,7 @@ impl SolanaIntegrationState {
         match GlobalSessionKeyManager::load(wallet) {
             Ok(mgr) => {
                 let arc_kp = mgr.signer();
-                if let Ok(kp) = Keypair::from_bytes(&arc_kp.to_bytes()) {
+                if let Ok(kp) = Keypair::try_from(arc_kp.to_bytes().as_slice()) {
                     self.global_session_keypair = Some(kp);
                     self.global_session_active = true;
                 }

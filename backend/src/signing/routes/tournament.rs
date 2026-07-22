@@ -11,10 +11,11 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use borsh::BorshDeserialize;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{message::Message, pubkey::Pubkey, signature::Signer, transaction::Transaction};
 use std::collections::HashMap;
@@ -23,8 +24,8 @@ use tracing::{error, info, warn};
 
 use crate::db::repository::GameRepository;
 use crate::signing::solana::{
-    initialize_escrow_ix, initialize_shards_ix, initialize_tournament_ix, record_result_ix,
-    sign_and_submit,
+    cancel_tournament_ix, initialize_escrow_ix, initialize_shards_ix, initialize_tournament_ix,
+    record_result_ix, sign_and_submit,
 };
 use crate::signing::storage::tournament::{
     MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus,
@@ -122,6 +123,13 @@ pub struct SetMatchGameIdReq {
 }
 
 /// Tournament summary for listing.
+///
+/// Field set must match the game client's `TournamentSummary`
+/// (`src/multiplayer/network/vps/tournament.rs`) — `is_private` and
+/// `is_tournament` are non-optional there (no `#[serde(default)]`), so
+/// omitting either makes deserialization fail on *every* response and the
+/// client silently shows "No tournaments available" regardless of what's
+/// actually in the store. Keep the two in sync.
 #[derive(Serialize)]
 pub struct TournamentSummary {
     pub tournament_id: u64,
@@ -131,6 +139,13 @@ pub struct TournamentSummary {
     pub max_players: u16,
     pub registered: usize,
     pub status: String,
+    pub is_private: bool,
+    /// Always true here — this endpoint only ever lists bracket/Swiss
+    /// tournaments, never posted 1v1 wager games.
+    pub is_tournament: bool,
+    pub usdc_mint: Option<String>,
+    pub min_elo: u32,
+    pub max_elo: u32,
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -275,57 +290,118 @@ async fn create_tournament(
 
     let prize_shares = req.prize_shares.unwrap_or(default_shares);
 
+    // A tournament_id that already has a store row was already fully created
+    // (successfully or as a resumed retry, below) — including ones that have
+    // since been cancelled or completed. Reject reuse here rather than
+    // falling into the on-chain idempotency skip below, which would
+    // otherwise treat "this PDA exists" as "safe to resume" and silently
+    // write a fresh Registration-status store row while the real on-chain
+    // tournament is still whatever state (e.g. Cancelled) it was left in —
+    // an admin picking a stale ID by mistake needs a loud error, not a
+    // tournament that looks fresh in this panel but is dead on-chain.
+    if store.get(req.tournament_id).await.is_some() {
+        warn!(
+            "[tournament] Refusing to create {} — tournament_id already in use",
+            req.tournament_id
+        );
+        return Err(StatusCode::CONFLICT);
+    }
+
     // ── On-chain setup (3 sequential VPS-signed transactions) ────────────────
-    // All three must confirm before writing to the store. Failure returns 500
-    // without any store mutation so the admin can safely retry.
+    // Each step is skipped if its PDA already exists on-chain, so a retry
+    // after a partial failure (e.g. tx 1 confirmed, tx 2's RPC call dropped,
+    // before the store write below ever ran) resumes instead of permanently
+    // failing with "account already in use". This only fires for tournament
+    // IDs with no store row yet, per the guard just above.
     let program_id = Pubkey::from_str(&state.config.program_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let authority = &*state.vps_authority;
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
 
+    let tid_bytes = req.tournament_id.to_le_bytes();
+    let (tournament_pda, _) = Pubkey::find_program_address(&[b"tournament", &tid_bytes], &program_id);
+    let (escrow_pda, _) = Pubkey::find_program_address(&[b"t_escrow", &tid_bytes], &program_id);
+    let (shard0_pda, _) =
+        Pubkey::find_program_address(&[b"tourney_players", &[0u8], &tid_bytes], &program_id);
+    let account_exists = |pda: &Pubkey| rpc.get_account(pda).is_ok();
+
     // 1. initialize_tournament
-    let ix1 = initialize_tournament_ix(
-        &program_id,
-        &authority.pubkey(),
-        req.tournament_id,
-        &req.name,
-        entry_fee_lamports,
-        platform_fee_lamports,
-        req.max_players,
-        match format {
-            TournamentFormat::Swiss { .. } => 1,
-            _ => 0,
-        },
-        match format {
-            TournamentFormat::Swiss { rounds } => rounds,
-            _ => 0,
-        },
-        req.elo_min.unwrap_or(0),
-        req.elo_max.unwrap_or(u32::MAX),
-        req.min_players.unwrap_or(req.max_players),
-        prize_shares,
-        false,
-        &authority.pubkey(),
-    );
-    sign_and_submit(&rpc, authority, &[ix1]).map_err(|e| {
-        error!(
-            "[tournament] initialize_tournament tx failed for {}: {}",
-            req.tournament_id, e
+    if !account_exists(&tournament_pda) {
+        let ix1 = initialize_tournament_ix(
+            &program_id,
+            &authority.pubkey(),
+            req.tournament_id,
+            &req.name,
+            entry_fee_lamports,
+            platform_fee_lamports,
+            req.max_players,
+            match format {
+                TournamentFormat::Swiss { .. } => 1,
+                _ => 0,
+            },
+            match format {
+                TournamentFormat::Swiss { rounds } => rounds,
+                _ => 0,
+            },
+            req.elo_min.unwrap_or(0),
+            req.elo_max.unwrap_or(u32::MAX),
+            req.min_players.unwrap_or(req.max_players),
+            prize_shares,
+            false,
+            &authority.pubkey(),
         );
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+        sign_and_submit(&rpc, authority, &[ix1]).map_err(|e| {
+            error!(
+                "[tournament] initialize_tournament tx failed for {}: {}",
+                req.tournament_id, e
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    } else {
+        info!(
+            "[tournament] {} already initialized on-chain, resuming from step 2",
+            req.tournament_id
+        );
+    }
 
     // 2. initialize_escrow
-    let ix2 = initialize_escrow_ix(&program_id, req.tournament_id, &authority.pubkey());
-    sign_and_submit(&rpc, authority, &[ix2]).map_err(|e| {
-        error!(
-            "[tournament] initialize_escrow tx failed for {}: {}",
-            req.tournament_id, e
-        );
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    if !account_exists(&escrow_pda) {
+        let ix2 = initialize_escrow_ix(&program_id, req.tournament_id, &authority.pubkey());
+        sign_and_submit(&rpc, authority, &[ix2]).map_err(|e| {
+            error!(
+                "[tournament] initialize_escrow tx failed for {}: {}",
+                req.tournament_id, e
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    }
 
-    // 3. initialize_shards (variant chosen by max_players)
+    // 3. initialize_shards (variant chosen by max_players) — a single atomic
+    // tx creates every required shard, so checking shard 0 alone tells us
+    // whether this step landed.
+    if account_exists(&shard0_pda) {
+        store
+            .create(TournamentRecord::with_config(
+                req.tournament_id,
+                req.name.clone(),
+                entry_fee_lamports,
+                platform_fee_lamports,
+                req.max_players,
+                prize_shares,
+                format.clone(),
+                req.elo_min,
+                req.elo_max,
+                req.min_players,
+                req.scheduled_at,
+                req.kyc_required,
+            ))
+            .await;
+        info!(
+            "[tournament] {} fully on-chain already (resumed retry) — store written",
+            req.tournament_id
+        );
+        return Ok(Json(serde_json::json!({ "ok": true, "tournament_id": req.tournament_id, "resumed": true })));
+    }
     let ix3 = initialize_shards_ix(
         &program_id,
         req.tournament_id,
@@ -387,6 +463,11 @@ async fn list_tournaments(State(state): State<AppState>) -> Json<Vec<TournamentS
             max_players: t.max_players,
             registered: t.players.len(),
             status: format!("{:?}", t.status),
+            is_private: t.password_hash.is_some(),
+            is_tournament: true,
+            usdc_mint: None,
+            min_elo: t.elo_min.unwrap_or(0),
+            max_elo: t.elo_max.unwrap_or(u32::MAX),
         })
         .collect();
     Json(summaries)
@@ -412,6 +493,11 @@ async fn list_my_tournaments(
             max_players: t.max_players,
             registered: t.players.len(),
             status: format!("{:?}", t.status),
+            is_private: t.password_hash.is_some(),
+            is_tournament: true,
+            usdc_mint: None,
+            min_elo: t.elo_min.unwrap_or(0),
+            max_elo: t.elo_max.unwrap_or(u32::MAX),
         })
         .collect();
 
@@ -429,6 +515,29 @@ async fn get_tournament(
         .await
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// GET /tournament/:id/registration-info — public, read-only data the game
+/// client needs to build its own `register_player` instruction (the actual
+/// on-chain registration + entry-fee-escrow deposit). `host_treasury` is not
+/// secret — it's the same public key stamped into the on-chain Tournament
+/// account at creation (see `create_tournament`'s doc comment) — this just
+/// saves the client from having to separately fetch and decode that account.
+async fn get_registration_info(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let tournament = state
+        .tournament_store
+        .get(id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(serde_json::json!({
+        "tournament_id": id,
+        "program_id": state.config.program_id,
+        "max_players": tournament.max_players,
+        "host_treasury": state.vps_authority.pubkey().to_string(),
+    })))
 }
 
 /// POST /tournament/:id/register-node - Registers a player's P2P node ID.
@@ -775,16 +884,39 @@ async fn initialize_swiss_tournament(
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
+    // Fire the same on-chain start sequence the single-elimination auto-start
+    // path uses (start_tournament_ix + initialize_match batches) — without
+    // this, Swiss tournaments showed Active in the store while on-chain they
+    // stayed in Registration forever, so entry fees never got swept to
+    // host_treasury. Async/fire-and-forget on the scheduler task, same
+    // pattern already used for TournamentTrigger::PlayerJoined below —
+    // failures are logged server-side rather than surfaced in this response.
+    let mut on_chain_started = false;
+    if let Some(ref trigger_tx) = state.tournament_trigger {
+        if let Err(e) = trigger_tx
+            .send(TournamentTrigger::AdminStart { tournament_id: id })
+            .await
+        {
+            error!(
+                "[tournament] Failed to send AdminStart trigger for Swiss tournament {}: {}",
+                id, e
+            );
+        } else {
+            on_chain_started = true;
+        }
+    }
+
     info!(
-        "[tournament] Swiss tournament {} initialized with {} players, {} rounds",
-        id, current_players, rounds
+        "[tournament] Swiss tournament {} initialized with {} players, {} rounds (on-chain start queued: {})",
+        id, current_players, rounds, on_chain_started
     );
 
     Ok(Json(serde_json::json!({
         "ok": true,
         "tournament_id": id,
         "players": current_players,
-        "rounds": rounds
+        "rounds": rounds,
+        "on_chain_start_queued": on_chain_started,
     })))
 }
 
@@ -808,6 +940,20 @@ async fn join_tournament(
 
     // Load tournament early so we can check kyc_required before mutating state.
     let tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    // ── Ban gate ─────────────────────────────────────────────────────────────
+    let bans = crate::db::repository::BanRepository::new(state.store.pool());
+    if bans.is_banned(player).await.unwrap_or(false) {
+        info!(
+            "[tournament] Banned wallet {} rejected from tournament {}",
+            player, id
+        );
+        return Ok(Json(serde_json::json!({
+            "ok": false,
+            "banned": true,
+            "message": "This wallet is banned."
+        })));
+    }
 
     // ── CACF KYC gate ────────────────────────────────────────────────────────
     // When kyc_required is true every entrant must have an active kyc_records
@@ -1021,67 +1167,262 @@ fn seed_players_by_elo(t: &mut TournamentRecord) {
     t.player_elos = seeded_elos;
 }
 
-/// Request to build a fund prize transaction.
-#[derive(Deserialize)]
-pub struct FundPrizeReq {
-    pub amount: u64,
-}
+// NOTE: prize funding lives at POST /admin/tournament/{id}/fund-prize in
+// admin.rs (`fund_tournament_prize`) — that one actually signs+submits
+// `fund_sol_prize_ix`. A dead duplicate stub used to live here
+// (`/fund-prize-tx`, returned a literal "placeholder" transaction) and has
+// been removed to avoid anyone wiring the wrong route.
 
-/// Response with base64-encoded transaction.
-#[derive(Serialize)]
-pub struct FundPrizeRes {
-    pub transaction: String,
-    pub tournament_id: u64,
-    pub amount: u64,
-}
-
-/// POST /admin/tournament/{id}/fund-prize-tx - Build transaction to fund USDC prize pool.
-async fn build_fund_prize_transaction(
-    Path(id): Path<u64>,
-    State(state): State<AppState>,
-    Json(req): Json<FundPrizeReq>,
-) -> Result<Json<FundPrizeRes>, StatusCode> {
-    info!(
-        "[tournament] Building fund prize tx for tournament {} amount {}",
-        id, req.amount
-    );
-
-    // Verify tournament exists
-    state
-        .tournament_store
-        .get(id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    // Build transaction (simplified - actual implementation would use solana_sdk)
-    let transaction_base64 = "placeholder".to_string();
-
-    Ok(Json(FundPrizeRes {
-        transaction: transaction_base64,
-        tournament_id: id,
-        amount: req.amount,
-    }))
-}
-
-/// POST /admin/tournament/{id}/cancel - Build transaction to cancel tournament.
+/// POST /admin/tournament/{id}/cancel - Cancel a tournament on-chain: refunds
+/// entry fees to registered players and returns the guaranteed prize to the
+/// operator, then marks the tournament Cancelled in the store. Signed and
+/// submitted directly by the backend's own operator key (`vps_authority`),
+/// same as `create_tournament` — the tournament's on-chain `host_treasury`
+/// is always set to that same key at creation, so it can satisfy both
+/// Signer slots the instruction requires.
 async fn build_cancel_transaction(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    info!("[tournament] Building cancel tx for tournament {}", id);
+    info!("[tournament] Cancelling tournament {}", id);
 
-    // Verify tournament exists
     let tournament = state
         .tournament_store
         .get(id)
         .await
         .ok_or(StatusCode::NOT_FOUND)?;
 
+    if tournament.status != TournamentStatus::Registration
+        && tournament.status != TournamentStatus::Active
+    {
+        warn!(
+            "[tournament] Refusing to cancel tournament {} in status {:?}",
+            id, tournament.status
+        );
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let players: Vec<Pubkey> = tournament
+        .players
+        .iter()
+        .map(|p| Pubkey::from_str(p))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            error!(
+                "[tournament] Malformed player pubkey in tournament {} store: {}",
+                id, e
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let program_id = Pubkey::from_str(&state.config.program_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let authority = &*state.vps_authority;
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+
+    let ix = cancel_tournament_ix(
+        &program_id,
+        id,
+        tournament.max_players,
+        &authority.pubkey(),
+        &authority.pubkey(),
+        &players,
+    );
+    // A DB row can only exist here if `create_tournament` already confirmed all
+    // 3 on-chain init txs, so a missing `tournament` PDA means the account was
+    // wiped after the fact — e.g. a local validator got reset while the
+    // (durable) SQLite store kept the row. Treat that as "already gone
+    // on-chain" and just settle the store, rather than 500ing forever on a
+    // tournament the admin UI can never otherwise get rid of.
+    let signature = match sign_and_submit(&rpc, authority, &[ix]) {
+        Ok(sig) => Some(sig),
+        Err(e) if is_missing_tournament_account_error(&e) => {
+            warn!(
+                "[tournament] Tournament {} PDA not found on-chain (stale store row) — \
+                 cancelling in the store only, no on-chain refund possible",
+                id
+            );
+            None
+        }
+        Err(e) => {
+            error!("[tournament] cancel_tournament tx failed for {}: {}", id, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    state
+        .tournament_store
+        .update(id, |t| {
+            t.status = TournamentStatus::Cancelled;
+            t.prize_pool = 0;
+        })
+        .await;
+
+    info!(
+        "[tournament] Cancelled tournament {} (on_chain: {}), refunded {} players",
+        id,
+        signature.is_some(),
+        if signature.is_some() { players.len() } else { 0 }
+    );
+
     Ok(Json(serde_json::json!({
-        "transaction": "placeholder",
+        "ok": true,
         "tournament_id": id,
-        "players_to_refund": tournament.players.len(),
+        "on_chain": signature.is_some(),
+        "signature": signature.map(|s| s.to_string()),
+        "players_refunded": if signature.is_some() { players.len() } else { 0 },
     })))
+}
+
+/// Detects the specific `AccountNotInitialized` Anchor error on the
+/// `tournament` account from a failed `cancel_tournament` simulation — the
+/// signal that the on-chain PDA this store row references no longer exists.
+fn is_missing_tournament_account_error(e: &impl std::fmt::Display) -> bool {
+    let msg = e.to_string();
+    msg.contains("account: tournament") && msg.contains("AccountNotInitialized")
+}
+
+/// Mirrors the on-chain `Tournament` account's leading fields (up to and
+/// including `status`) just closely enough to decode them with Borsh —
+/// trailing fields (win places, prize_shares, etc.) are irrelevant here and
+/// left undecoded, which Borsh allows (it only reads what the struct asks
+/// for). `authority`/`fee_payer`-style Pubkeys are read as raw `[u8; 32]`
+/// since only byte-for-byte layout matters, not the Pubkey type itself.
+#[derive(BorshDeserialize)]
+struct OnChainTournamentPrefix {
+    tournament_id: u64,
+    authority: [u8; 32],
+    name: String,
+    entry_fee: u64,
+    platform_fee: u64,
+    prize_pool: u64,
+    max_players: u16,
+    player_count: u16,
+    num_registered_players: u16,
+    status: OnChainTournamentStatus,
+}
+
+/// Mirrors `programs/xfchess-game/src/state/tournament.rs`'s `TournamentStatus`
+/// — variant order must match exactly (Borsh encodes the tag as a plain u8
+/// index in declaration order).
+#[derive(BorshDeserialize, Debug, Clone, Copy, PartialEq)]
+enum OnChainTournamentStatus {
+    Registration,
+    Active,
+    Completed,
+    Closed,
+    Cancelled,
+}
+
+impl OnChainTournamentStatus {
+    fn to_store_status(self) -> TournamentStatus {
+        match self {
+            OnChainTournamentStatus::Registration => TournamentStatus::Registration,
+            OnChainTournamentStatus::Active => TournamentStatus::Active,
+            OnChainTournamentStatus::Completed | OnChainTournamentStatus::Closed => {
+                TournamentStatus::Completed
+            }
+            OnChainTournamentStatus::Cancelled => TournamentStatus::Cancelled,
+        }
+    }
+}
+
+/// POST /admin/tournament/{id}/sync-status — reads the real on-chain
+/// Tournament account and overwrites the store's status to match it.
+///
+/// The store and on-chain state can drift apart (e.g. a partially-failed
+/// request, a store row surviving a chain rollback/redeploy on a test
+/// validator) with no built-in way to reconcile them — cancel/register
+/// requests would then keep failing against on-chain state the admin panel
+/// can't see. This is the fix: pull chain truth and make the store agree
+/// with it, so subsequent actions (cancel, delete, registration) work
+/// against a consistent picture again.
+async fn sync_tournament_status(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let tournament = state
+        .tournament_store
+        .get(id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let store_status_before = format!("{:?}", tournament.status);
+
+    let program_id = Pubkey::from_str(&state.config.program_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let (tournament_pda, _) =
+        Pubkey::find_program_address(&[b"tournament", &id.to_le_bytes()], &program_id);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+
+    let account = rpc.get_account(&tournament_pda).map_err(|e| {
+        warn!(
+            "[tournament] sync-status: on-chain account for {} not found: {}",
+            id, e
+        );
+        StatusCode::NOT_FOUND
+    })?;
+    if account.data.len() < 8 {
+        error!("[tournament] sync-status: account data for {} too short", id);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    let decoded = OnChainTournamentPrefix::deserialize(&mut &account.data[8..]).map_err(|e| {
+        error!(
+            "[tournament] sync-status: failed to decode on-chain tournament {}: {}",
+            id, e
+        );
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let on_chain_status = decoded.status.to_store_status();
+    let on_chain_status_str = format!("{:?}", on_chain_status);
+
+    state
+        .tournament_store
+        .update(id, |t| {
+            t.status = on_chain_status;
+        })
+        .await;
+
+    info!(
+        "[tournament] Synced {} status: store was {:?}, on-chain is {:?}",
+        id, store_status_before, on_chain_status_str
+    );
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "tournament_id": id,
+        "store_status_before": store_status_before,
+        "on_chain_status": on_chain_status_str,
+    })))
+}
+
+/// DELETE /admin/tournament/{id} — removes a Cancelled or Completed
+/// tournament's row from the store so it stops cluttering the admin panel's
+/// list. On-chain state is untouched (there's nothing left to manage once a
+/// tournament is in either of those terminal states); this is purely a local
+/// housekeeping action, not a chain operation.
+async fn delete_tournament(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let tournament = state
+        .tournament_store
+        .get(id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    if tournament.status != TournamentStatus::Cancelled
+        && tournament.status != TournamentStatus::Completed
+    {
+        warn!(
+            "[tournament] Refusing to delete {} — status {:?} is not terminal",
+            id, tournament.status
+        );
+        return Err(StatusCode::CONFLICT);
+    }
+
+    state.tournament_store.delete(id).await;
+    info!("[tournament] Deleted store row for tournament {}", id);
+    Ok(Json(serde_json::json!({ "ok": true, "tournament_id": id })))
 }
 
 /// GET /admin/tournament/:id/gossip-status - Check if gossip topic is registered.
@@ -1117,6 +1458,7 @@ pub fn tournament_gossip_routes() -> Router<AppState> {
 pub fn tournament_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}", get(get_tournament))
+        .route("/{id}/registration-info", get(get_registration_info))
         .route("/{id}/join", post(join_tournament))
         .route("/{id}/register-node", post(register_node))
         .route("/{id}/my-match", get(get_my_match))
@@ -1214,8 +1556,9 @@ pub fn admin_tournament_routes() -> Router<AppState> {
         .route("/{id}/record-result", post(record_result))
         .route("/{id}/set-match-game-id", post(set_match_game_id))
         .route("/{id}/initialize-swiss", post(initialize_swiss_tournament))
-        .route("/{id}/fund-prize-tx", post(build_fund_prize_transaction))
         .route("/{id}/cancel", post(build_cancel_transaction))
+        .route("/{id}/sync-status", post(sync_tournament_status))
+        .route("/{id}", delete(delete_tournament))
         .route("/{id}/gossip-status", get(get_gossip_status))
         .route("/{id}/advance-round", post(advance_round))
         .route("/{id}/reseed", post(reseed_players))
@@ -1412,10 +1755,60 @@ mod tests {
             max_players: 16,
             registered: 8,
             status: "Active".to_string(),
+            is_private: false,
+            is_tournament: true,
+            usdc_mint: None,
+            min_elo: 0,
+            max_elo: u32::MAX,
         };
 
         let json = serde_json::to_string(&summary);
         assert!(json.is_ok());
+    }
+
+    /// Regression test for a real bug: the game client's `TournamentSummary`
+    /// (`src/multiplayer/network/vps/tournament.rs`) requires `is_private`
+    /// and `is_tournament` with no `#[serde(default)]`, so if this backend
+    /// struct ever drops a field the client expects, every `/tournaments`
+    /// response silently fails to parse client-side and the game shows "No
+    /// tournaments available" no matter what's actually in the store. Assert
+    /// the exact field set the client needs stays present here.
+    #[test]
+    fn test_tournament_summary_has_fields_client_requires() {
+        let summary = TournamentSummary {
+            tournament_id: 1,
+            name: "Test".to_string(),
+            entry_fee_lamports: 0,
+            prize_pool: 0,
+            max_players: 2,
+            registered: 0,
+            status: "Registration".to_string(),
+            is_private: false,
+            is_tournament: true,
+            usdc_mint: None,
+            min_elo: 0,
+            max_elo: u32::MAX,
+        };
+        let json: serde_json::Value = serde_json::to_value(&summary).unwrap();
+        for field in [
+            "tournament_id",
+            "name",
+            "entry_fee_lamports",
+            "prize_pool",
+            "max_players",
+            "registered",
+            "status",
+            "is_private",
+            "is_tournament",
+            "min_elo",
+            "max_elo",
+        ] {
+            assert!(
+                json.get(field).is_some(),
+                "TournamentSummary is missing field '{field}' the game client's \
+                 deserializer requires — this breaks the tournament list in the live game"
+            );
+        }
     }
 
     #[tokio::test]

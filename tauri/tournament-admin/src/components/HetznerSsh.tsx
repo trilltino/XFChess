@@ -68,12 +68,12 @@ export default function HetznerSsh() {
     }
   };
 
-  const quickActions: { label: string; cmd: string }[] = [
+  const quickActions: { label: string; cmd: string; confirm?: boolean }[] = [
     { label: "UPTIME", cmd: "uptime && free -h" },
     { label: "JOURNAL ERRORS", cmd: "journalctl -p err -n 30 --no-pager" },
     { label: "BACKEND STATUS", cmd: "systemctl status xfchess-backend --no-pager -l" },
     { label: "DISK USAGE", cmd: "df -h" },
-    { label: "RESTART BACKEND", cmd: "sudo systemctl restart xfchess-backend && echo 'backend restarted'" },
+    { label: "RESTART BACKEND", cmd: "sudo systemctl restart xfchess-backend && echo 'backend restarted'", confirm: true },
     { label: "NGINX ERRORS", cmd: "tail -n 50 /var/log/nginx/error.log" },
   ];
 
@@ -108,8 +108,13 @@ export default function HetznerSsh() {
       {/* Quick actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "1.25rem" }}>
         {quickActions.map(qa => (
-          <button key={qa.label} onClick={() => runSshCommand(qa.cmd)} disabled={running}
-            style={{ padding: "6px 14px", borderRadius: "100px", backgroundColor: "rgba(255,255,255,0.05)", color: "var(--text-dim)", border: "1px solid var(--border)", fontSize: "10px", fontWeight: "800", letterSpacing: "1px", cursor: running ? "default" : "pointer", opacity: running ? 0.5 : 1 }}>
+          <button key={qa.label}
+            onClick={() => {
+              if (qa.confirm && !window.confirm(`Run on the live server now?\n\n${qa.cmd}`)) return;
+              runSshCommand(qa.cmd);
+            }}
+            disabled={running}
+            style={{ padding: "6px 14px", borderRadius: "100px", backgroundColor: qa.confirm ? "rgba(239,68,68,0.1)" : "rgba(255,255,255,0.05)", color: qa.confirm ? "#f87171" : "var(--text-dim)", border: "1px solid var(--border)", fontSize: "10px", fontWeight: "800", letterSpacing: "1px", cursor: running ? "default" : "pointer", opacity: running ? 0.5 : 1 }}>
             {qa.label}
           </button>
         ))}

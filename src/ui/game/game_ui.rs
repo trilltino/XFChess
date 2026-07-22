@@ -457,6 +457,46 @@ pub(crate) fn resolve_player_names(
             .map(|p| p.username.clone())
             .unwrap_or_else(|| "Black".to_string());
         black_elo = b.map(|p| format!("{}", p.rating)).unwrap_or_default();
+    } else if *params.game_mode == crate::core::GameMode::SinglePlayer {
+        // vs Computer: one side is the AI (named "Computer", ELO from the
+        // selected difficulty), the other is the local human — identified by
+        // their logged-in name/ELO (on-chain and/or Lichess) when signed in,
+        // or just their color when playing as a guest.
+        let ai_color = params.ai_params.ai_config.mode.ai_color();
+        let human_color = match ai_color {
+            PieceColor::White => PieceColor::Black,
+            PieceColor::Black => PieceColor::White,
+        };
+        let ai_name = "Computer".to_string();
+        let ai_elo = params.ai_params.ai_config.difficulty.elo_label().to_string();
+        let human_name = params
+            .player_identity
+            .as_ref()
+            .filter(|id| !id.is_guest && id.username.is_some())
+            .map(|id| id.display_name().to_string())
+            .unwrap_or_else(|| match human_color {
+                PieceColor::White => "White".to_string(),
+                PieceColor::Black => "Black".to_string(),
+            });
+        let human_elo = params
+            .player_identity
+            .as_ref()
+            .map(|id| id.hud_elo_label())
+            .unwrap_or_default();
+        match ai_color {
+            PieceColor::White => {
+                white_name = ai_name;
+                white_elo = ai_elo;
+                black_name = human_name;
+                black_elo = human_elo;
+            }
+            PieceColor::Black => {
+                white_name = human_name;
+                white_elo = human_elo;
+                black_name = ai_name;
+                black_elo = ai_elo;
+            }
+        }
     } else {
         #[cfg(feature = "solana")]
         {
@@ -620,7 +660,7 @@ fn render_game_right_panel(
                         if top_delta > 0 {
                             ui.label(
                                 egui::RichText::new(format!("+{}", top_delta))
-                                    .size(11.0)
+                                    .size(13.0)
                                     .color(UiColors::TEXT_TERTIARY),
                             );
                         }
@@ -684,12 +724,12 @@ fn render_game_right_panel(
                         if ui
                             .add(
                                 egui::Button::new(
-                                    egui::RichText::new("✕  Resign")
-                                        .size(12.0)
+                                    egui::RichText::new("Resign")
+                                        .size(13.0)
                                         .color(egui::Color32::from_rgb(220, 80, 80)),
                                 )
-                                .fill(egui::Color32::from_rgba_unmultiplied(60, 18, 18, 180))
-                                .corner_radius(egui::CornerRadius::same(6))
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE)
                                 .min_size(egui::Vec2::new(90.0, 28.0)),
                             )
                             .clicked()
@@ -713,15 +753,15 @@ fn render_game_right_panel(
                                 .add(
                                     egui::Button::new(
                                         egui::RichText::new(if draw_offered {
-                                            "½  Sent"
+                                            "Draw Sent"
                                         } else {
-                                            "½  Draw"
+                                            "Offer Draw"
                                         })
-                                        .size(12.0)
+                                        .size(13.0)
                                         .color(egui::Color32::from_rgb(180, 180, 80)),
                                     )
-                                    .fill(egui::Color32::from_rgba_unmultiplied(45, 45, 12, 180))
-                                    .corner_radius(egui::CornerRadius::same(6))
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .stroke(egui::Stroke::NONE)
                                     .min_size(egui::Vec2::new(80.0, 28.0))
                                     .sense(if draw_offered {
                                         egui::Sense::hover()
@@ -750,18 +790,18 @@ fn render_game_right_panel(
 
                 // View toggle
                 let view_label = match *params.view_mode {
-                    crate::game::view_mode::ViewMode::Standard3D => "⬡  2D View",
-                    _ => "⬡  3D View",
+                    crate::game::view_mode::ViewMode::Standard3D => "2D View",
+                    _ => "3D View",
                 };
                 if ui
                     .add(
                         egui::Button::new(
                             egui::RichText::new(view_label)
-                                .size(12.0)
+                                .size(13.0)
                                 .color(egui::Color32::from_gray(180)),
                         )
-                        .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 55, 180))
-                        .corner_radius(egui::CornerRadius::same(6))
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE)
                         .min_size(egui::Vec2::new(90.0, 26.0)),
                     )
                     .clicked()
@@ -799,7 +839,7 @@ fn render_game_right_panel(
                         if bot_delta > 0 {
                             ui.label(
                                 egui::RichText::new(format!("+{}", bot_delta))
-                                    .size(11.0)
+                                    .size(13.0)
                                     .color(UiColors::TEXT_TERTIARY),
                             );
                         }
@@ -855,8 +895,8 @@ pub(crate) fn render_compact_user_row(
                 .color(UiColors::TEXT_PRIMARY)
                 .strong(),
         );
-        // ELO — right-aligned if present
-        if !elo.is_empty() {
+        // ELO — right-aligned if present (never show a bare "0" placeholder)
+        if !elo.is_empty() && elo != "0" {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
                     egui::RichText::new(elo)
@@ -939,22 +979,22 @@ fn render_move_list_paired(
     let total = moves.len();
     egui::Grid::new("move_list_grid")
         .num_columns(3)
-        .min_col_width(28.0)
-        .spacing([2.0, 1.0])
+        .min_col_width(44.0)
+        .spacing([10.0, 4.0])
         .show(ui, |ui| {
             for move_num in 1..=((total + 1) / 2) {
                 let white_idx = (move_num - 1) * 2;
                 let black_idx = white_idx + 1;
                 ui.label(
                     egui::RichText::new(format!("{}.", move_num))
-                        .size(11.0)
+                        .size(13.0)
                         .color(UiColors::TEXT_TERTIARY),
                 );
                 if white_idx < total {
                     let mv = &moves[white_idx];
                     ui.label(
                         egui::RichText::new(move_notation(history, white_idx, mv))
-                            .size(13.0)
+                            .size(16.0)
                             .color(UiColors::TEXT_PRIMARY)
                             .strong(),
                     );
@@ -965,14 +1005,14 @@ fn render_move_list_paired(
                     let mv = &moves[black_idx];
                     ui.label(
                         egui::RichText::new(move_notation(history, black_idx, mv))
-                            .size(13.0)
+                            .size(16.0)
                             .color(UiColors::TEXT_SECONDARY)
                             .strong(),
                     );
                 } else if white_idx < total {
                     ui.label(
                         egui::RichText::new("…")
-                            .size(13.0)
+                            .size(16.0)
                             .color(UiColors::TEXT_TERTIARY),
                     );
                 } else {
@@ -1081,7 +1121,7 @@ fn render_captured_pieces_tray(
                     PieceType::King => "♔",
                 }
             };
-            ui.label(egui::RichText::new(sym).size(12.0).color(sym_color));
+            ui.label(egui::RichText::new(sym).size(17.0).color(sym_color));
         }
     });
 }

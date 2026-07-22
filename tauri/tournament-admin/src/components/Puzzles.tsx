@@ -213,7 +213,9 @@ export default function Puzzles() {
           <button style={{ ...btn, backgroundColor: "#22c55e" }} onClick={fund}>BUILD &amp; FUND</button>
         </div>
         <p style={{ color: "#777", fontSize: 11, marginBottom: 0 }}>
-          Funds are locked against the VPS authority budget; a server-verified solve pays the reward.
+          This budget is tracked off-chain as a spend cap only — no SOL is escrowed or moved now.
+          A server-verified solve pays the reward directly from the live VPS wallet balance at
+          that time, checked against this cap.
         </p>
       </div>
 

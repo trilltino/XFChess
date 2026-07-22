@@ -59,7 +59,7 @@ pub fn handler(ctx: Context<WithdrawTreasury>, amount: u64) -> Result<()> {
     let signer: &[&[&[u8]]] = &[&[TREASURY_VAULT_SEED, &[bump]]];
     system_program::transfer(
         CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
+            System::id(),
             Transfer {
                 from: ctx.accounts.treasury_vault.to_account_info(),
                 to: ctx.accounts.destination.to_account_info(),

@@ -369,6 +369,12 @@ test-backend:
 test-e2e:
     cargo test -p backend --test e2e_api
 
+# Live RPC smoke tests (Tier T2) — hits whatever SOLANA_RPC_URL is actually set
+# to (Triton One in prod/staging). Needs a real RPC URL exported first; each
+# test skips itself harmlessly if unset. See backend/tests/e2e_rpc_live.rs.
+test-rpc-live:
+    cargo test -p backend --test e2e_rpc_live -- --ignored --nocapture
+
 # Run Solana program tests
 test-program:
     cargo test -p xfchess-game

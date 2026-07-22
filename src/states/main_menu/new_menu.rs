@@ -930,29 +930,6 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
     ui.add_space(SP);
 
-    if item_expandable_tip(
-        ui,
-        "Puzzles",
-        "Solve tactics puzzles, or take on puzzle challenges to earn rewards.",
-        W,
-    ) {
-        play_click(&mut cx.commands, snd);
-        *cx.new_menu_panel = NewMenuPanel::Puzzles;
-    }
-    ui.add_space(SP);
-
-    if item_tip(
-        ui,
-        "PGN Replay",
-        "Load a PGN and step through any game move by move.",
-        W,
-    ) {
-        play_click(&mut cx.commands, snd);
-        *cx.core_mode = GameMode::PgnReplay;
-        cx.next_state.set(GameState::InGame);
-    }
-    ui.add_space(SP);
-
     // TempleOS tribute mode — dev builds only (`--features templeos`).
     #[cfg(feature = "templeos")]
     {
@@ -1646,6 +1623,16 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             }
             #[cfg(not(feature = "solana"))]
             cx.menu_state.set(crate::core::MenuState::BraidLobby);
+        }
+        ui.add_space(SP);
+
+        // Same tournament browser as the general "Tournaments" menu (Play
+        // Online → Tournaments → Join Tournament) — every tournament here is
+        // already Solana-escrowed on-chain, this just gives wallet-connected
+        // players a shortcut to it from the Solana submenu too.
+        if item(ui, "Tournaments", W) {
+            play_click(&mut cx.commands, snd);
+            cx.menu_state.set(MenuState::Tournaments);
         }
     } else {
         ui.add_space(8.0);

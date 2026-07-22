@@ -169,6 +169,50 @@ class ApiClient {
     return this.request<any>(`/admin/tournament/${tournamentId}/escrow-balance`);
   }
 
+  async setRoundDeadline(tournamentId: number, deadlineAt: number | null) {
+    return this.request<any>(`/admin/tournament/${tournamentId}/set-round-deadline`, {
+      method: "POST",
+      body: JSON.stringify({ deadline_at: deadlineAt }),
+    });
+  }
+
+  async importPlayersCsv(tournamentId: number, csvText: string) {
+    return this.request<{ ok: boolean; results: { player: string; status: string }[] }>(
+      `/admin/tournament/${tournamentId}/import-players-csv`,
+      { method: "POST", headers: { "Content-Type": "text/plain" }, body: csvText }
+    );
+  }
+
+  // Locks the guaranteed SOL prize for a tournament in its escrow PDA. Must be
+  // called after creation but BEFORE the first registration — paid
+  // tournaments (entry_fee_lamports > 0) reject registration on-chain until
+  // this has run at least once.
+  async fundTournamentPrize(tournamentId: number, amountLamports: number) {
+    return this.request<{ ok: boolean; tournament_id: number; amount_lamports: number; signature: string }>(
+      `/admin/tournament/${tournamentId}/fund-prize`,
+      { method: "POST", body: JSON.stringify({ amount_lamports: amountLamports }) }
+    );
+  }
+
+  // Cancels the tournament on-chain (refunds entry fees + returns the
+  // guaranteed prize to the operator) and marks it Cancelled in the store.
+  async cancelTournament(tournamentId: number) {
+    return this.request<{ ok: boolean; signature: string; players_refunded: number }>(
+      `/admin/tournament/${tournamentId}/cancel`,
+      { method: "POST", body: JSON.stringify({}) }
+    );
+  }
+
+  // Removes a Cancelled/Completed tournament from this list — local
+  // housekeeping only, does not touch on-chain state (backend rejects this
+  // for any tournament not already in one of those terminal states).
+  async deleteTournament(tournamentId: number) {
+    return this.request<{ ok: boolean; tournament_id: number }>(
+      `/admin/tournament/${tournamentId}`,
+      { method: "DELETE" }
+    );
+  }
+
   // Player management
   async getPlayerHistory(wallet: string) {
     return this.request<any>(`/admin/players/${wallet}/history`);
@@ -191,8 +235,15 @@ class ApiClient {
     return this.request<any>(`/admin/games/${gameId}/flag`, { method: "POST", body: JSON.stringify({ reason }) });
   }
 
+  // Real Stockfish-derived verdict from anticheat_verdicts (aggregate per
+  // game — no move-by-move eval curve exists yet). `analysed: false` means
+  // the anti-cheat worker hasn't processed this game.
   async getGameEval(gameId: number) {
-    return this.request<any>(`/admin/anti-cheat/game/${gameId}/eval`);
+    return this.request<{
+      game_id: number; analysed: boolean; analysed_at?: number;
+      white?: { pubkey: string; verdict: string; score: number; signals: Record<string, number> };
+      black?: { pubkey: string; verdict: string; score: number; signals: Record<string, number> };
+    }>(`/admin/anti-cheat/game/${gameId}/eval`);
   }
 
   // Audit + logs
@@ -222,11 +273,32 @@ class ApiClient {
     return this.request<any>("/admin/moderation/ip-ban", { method: "POST", body: JSON.stringify({ ip, reason }) });
   }
   async getIpBans() { return this.request<any>("/admin/moderation/ip-bans"); }
-  async whitelistPlayer(wallet: string) {
-    return this.request<any>("/admin/moderation/whitelist", { method: "POST", body: JSON.stringify({ wallet }) });
-  }
   async assignDispute(gameId: number, reviewer: string) {
     return this.request<any>(`/admin/disputes/${gameId}/assign`, { method: "POST", body: JSON.stringify({ reviewer }) });
+  }
+
+  // Resolves a disputed game on-chain (WHITE_WINS/BLACK_WINS/DRAW/DISMISS).
+  // admin_token is a second factor (ADMIN_TOKEN env var), distinct from the
+  // X-API-Key header this client already sends on every request.
+  async resolveDispute(
+    gameId: number,
+    decision: "WHITE_WINS" | "BLACK_WINS" | "DRAW" | "DISMISS",
+    resolutionText: string,
+    whiteWallet: string,
+    blackWallet: string,
+    adminToken: string
+  ) {
+    return this.request<{ ok: boolean; tx_sig: string }>("/admin/dispute/resolve", {
+      method: "POST",
+      body: JSON.stringify({
+        game_id: gameId,
+        decision,
+        resolution_text: resolutionText,
+        admin_token: adminToken,
+        white_wallet: whiteWallet,
+        black_wallet: blackWallet,
+      }),
+    });
   }
 
   // Game history endpoints
@@ -292,8 +364,14 @@ class ApiClient {
     return this.request<any>("/admin/anti-cheat/reports");
   }
  
+  // KYC verification is fully automatic at player self-registration
+  // (POST /identity/register submits the on-chain verify_profile_ix as part
+  // of that flow) — there is no separate backend concept of manual admin
+  // approval, so this is a read-only status lookup.
   async getKycStatus(wallet: string) {
-    return this.request<any>(`/admin/kyc/status/${wallet}`);
+    return this.request<{ verified: boolean; verified_at: number | null; country: string | null; requires_kyc: boolean }>(
+      `/identity/status/${wallet}`
+    );
   }
 
   // Health check

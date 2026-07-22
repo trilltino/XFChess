@@ -39,8 +39,8 @@ pub struct DistributeTournamentPrizes<'info> {
 /// `remaining_accounts` must contain the winners' (writable) wallet accounts in
 /// any order; places whose wallet is absent are skipped and remain claimable.
 /// Idempotent: re-cranking after full distribution is a no-op.
-pub fn handler<'a, 'b, 'c, 'info>(
-    ctx: Context<'a, 'b, 'c, 'info, DistributeTournamentPrizes<'info>>,
+pub fn handler<'info>(
+    ctx: Context<'info, DistributeTournamentPrizes<'info>>,
     _tournament_id: u64,
 ) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;

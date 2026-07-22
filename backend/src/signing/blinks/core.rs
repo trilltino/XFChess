@@ -512,7 +512,7 @@ fn build_register_player_instruction(
         optional_shard(shard_2),
         optional_shard(shard_3),
         AccountMeta::new(*host_treasury, false),
-        AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        AccountMeta::new_readonly(solana_system_interface::program::id(), false),
     ];
 
     Ok(Instruction {

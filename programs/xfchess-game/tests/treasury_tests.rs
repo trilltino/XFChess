@@ -15,9 +15,9 @@ use solana_sdk::{
     instruction::{Instruction, InstructionError},
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signer},
-    system_program,
     transaction::{Transaction, TransactionError},
 };
+use solana_system_interface::program as system_program;
 use xfchess_game::errors::GameErrorCode;
 use xfchess_game::state::{PayoutType, Tournament, TournamentStatus, TournamentType};
 

@@ -16,6 +16,7 @@ code (each directory's README); this tree holds the cross-cutting material.
 | [ENVIRONMENTS.md](ENVIRONMENTS.md) | Environment matrix (local / staging / prod) |
 | [GIT_WORKFLOW.md](GIT_WORKFLOW.md) | Branch and commit conventions |
 | [PUBLISHING.md](PUBLISHING.md) | Cutting a Win/Mac/Linux release; known CI/release landmines and how they were fixed |
+| [INSTALL.md](INSTALL.md) | End-user install steps per platform from GitHub Releases (SmartScreen/Gatekeeper bypass, Linux runtime deps) |
 | [PRODUCTION_REALITY_PLAN.md](PRODUCTION_REALITY_PLAN.md) | Production-hardening master plan |
 
 Deployment docs live in [deploy/](../deploy/README.md); the MagicBlock ER guide is

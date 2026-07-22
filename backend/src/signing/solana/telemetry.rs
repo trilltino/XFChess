@@ -4,9 +4,8 @@
 
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig, signature::Signature, transaction::Transaction,
-};
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::{signature::Signature, transaction::Transaction};
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 

@@ -55,6 +55,10 @@ export default function Dashboard() {
   const [ipBanMsg, setIpBanMsg] = useState<string | null>(null);
   const [assigningDispute, setAssigningDispute] = useState<number | null>(null);
   const [assignedMsg, setAssignedMsg] = useState<Record<number, string>>({});
+  const [disputeAdminToken, setDisputeAdminToken] = useState("");
+  const [resolutionNotes, setResolutionNotes] = useState<Record<number, string>>({});
+  const [resolvingDispute, setResolvingDispute] = useState<number | null>(null);
+  const [resolvedMsg, setResolvedMsg] = useState<Record<number, string>>({});
   const [auditEntries, setAuditEntries] = useState<{ timestamp: number; actor: string; action: string; target: string; result: string }[]>([]);
 
   const feepayerThreshold = getFeepayerThreshold();
@@ -92,7 +96,7 @@ export default function Dashboard() {
 
         const wb = await apiClient.getWalletBalances(); if (wb.ok) setWallets(wb.data);
         const rr = await apiClient.getExchangeRates();  if (rr.ok) setRates(rr.data.rates);
-        const ar = await apiClient.getAntiCheatReports(); if (ar.ok) setReports(ar.data.reports);
+        const ar = await apiClient.getAntiCheatReports(); if (ar.ok && ar.data) setReports(ar.data.reports);
       } catch {}
     };
     poll();
@@ -155,7 +159,7 @@ export default function Dashboard() {
   const handleIpBan = async () => {
     if (!ipBanInput.ip || !ipBanInput.reason) return;
     const r = await apiClient.ipBan(ipBanInput.ip, ipBanInput.reason);
-    setIpBanMsg(r.ok ? `Banned ${ipBanInput.ip}` : `Error: ${r.error?.message}`);
+    setIpBanMsg(r.ok ? `Recorded ${ipBanInput.ip}.` : `Error: ${r.error?.message}`);
     if (r.ok) setIpBanInput({ ip: "", reason: "" });
   };
 
@@ -164,12 +168,31 @@ export default function Dashboard() {
     const r = await apiClient.assignDispute(gameId, "admin");
     setAssignedMsg(prev => ({ ...prev, [gameId]: r.ok ? "Assigned to you." : `Error: ${r.error?.message}` }));
     setAssigningDispute(null);
-    const ar = await apiClient.getAntiCheatReports(); if (ar.ok) setReports(ar.data.reports);
+    const ar = await apiClient.getAntiCheatReports(); if (ar.ok && ar.data) setReports(ar.data.reports);
   };
 
-  const resolveDispute = async (gameId: number, action: "refund" | "winner") => {
-    addLog(`ResolveDispute game ${gameId} action=${action}`);
-    alert(`Signed ResolveDispute for game ${gameId}. Action: ${action === "refund" ? "Refund victim" : "False positive"}`);
+  // "refund" = the suspect's flag stands and the (non-suspect) victim is
+  // awarded the win; "winner" = false positive, the original result is
+  // upheld and the dispute is dismissed with no on-chain outcome change.
+  const resolveDispute = async (report: Report, action: "refund" | "winner") => {
+    const note = resolutionNotes[report.game_id]?.trim();
+    if (!disputeAdminToken || !note) {
+      setResolvedMsg(prev => ({ ...prev, [report.game_id]: "Error: admin token and a resolution note are both required." }));
+      return;
+    }
+    const victimIsWhite = report.suspect === report.black;
+    const decision = action === "winner" ? "DISMISS" : (victimIsWhite ? "WHITE_WINS" : "BLACK_WINS");
+    setResolvingDispute(report.game_id);
+    const r = await apiClient.resolveDispute(report.game_id, decision, note, report.white, report.black, disputeAdminToken);
+    if (r.ok && r.data) {
+      const txSig = r.data.tx_sig;
+      addLog(`ResolveDispute game ${report.game_id} decision=${decision} tx=${txSig}`);
+      setResolvedMsg(prev => ({ ...prev, [report.game_id]: `Resolved (${decision}). Tx: ${txSig}` }));
+      const ar = await apiClient.getAntiCheatReports(); if (ar.ok && ar.data) setReports(ar.data.reports);
+    } else {
+      setResolvedMsg(prev => ({ ...prev, [report.game_id]: `Error: ${r.error?.message}` }));
+    }
+    setResolvingDispute(null);
   };
 
   const now = Date.now() / 1000;
@@ -243,7 +266,8 @@ export default function Dashboard() {
           {activeTab === "MODERATION" && (
             <div style={{ flex: 1, padding: "1.5rem", overflowY: "auto", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
               <div style={{ padding: "1rem 1.25rem", backgroundColor: "rgba(255,255,255,0.03)", borderRadius: "12px", border: "1px solid var(--border)" }}>
-                <div style={{ fontSize: "10px", color: "var(--text-dim)", fontWeight: "800", letterSpacing: "1px", marginBottom: "10px" }}>IP BAN</div>
+                <div style={{ fontSize: "10px", color: "var(--text-dim)", fontWeight: "800", letterSpacing: "1px", marginBottom: "4px" }}>IP BAN</div>
+                <div style={{ fontSize: "10px", color: "var(--text-dim)", marginBottom: "10px", fontStyle: "italic" }}>Recorded here for reference only — not yet enforced at the network layer (no request-blocking middleware is wired up).</div>
                 <div style={{ display: "flex", gap: "8px" }}>
                   <input value={ipBanInput.ip} onChange={e => setIpBanInput(p => ({ ...p, ip: e.target.value }))} placeholder="IP address…"
                     style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "6px 10px", fontSize: "12px" }} />
@@ -252,6 +276,12 @@ export default function Dashboard() {
                   <button onClick={handleIpBan} style={{ padding: "6px 14px", borderRadius: "8px", backgroundColor: "#ef4444", color: "#fff", border: "none", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>BAN IP</button>
                 </div>
                 {ipBanMsg && <div style={{ marginTop: "6px", fontSize: "11px", color: ipBanMsg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{ipBanMsg}</div>}
+              </div>
+
+              <div style={{ padding: "1rem 1.25rem", backgroundColor: "rgba(255,255,255,0.03)", borderRadius: "12px", border: "1px solid var(--border)" }}>
+                <div style={{ fontSize: "10px", color: "var(--text-dim)", fontWeight: "800", letterSpacing: "1px", marginBottom: "10px" }}>DISPUTE RESOLUTION — 2ND FACTOR</div>
+                <input value={disputeAdminToken} onChange={e => setDisputeAdminToken(e.target.value)} type="password" placeholder="ADMIN_TOKEN (required to resolve any dispute below)…"
+                  style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", boxSizing: "border-box" }} />
               </div>
 
               {reports.length === 0
@@ -284,6 +314,10 @@ export default function Dashboard() {
                           {r.reason}
                         </div>
                         {assignedMsg[r.game_id] && <div style={{ fontSize: "11px", color: "#4ade80" }}>{assignedMsg[r.game_id]}</div>}
+                        <input value={resolutionNotes[r.game_id] ?? ""} onChange={e => setResolutionNotes(prev => ({ ...prev, [r.game_id]: e.target.value }))}
+                          placeholder="Resolution note (required, emailed to both players)…"
+                          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "6px 10px", fontSize: "12px" }} />
+                        {resolvedMsg[r.game_id] && <div style={{ fontSize: "11px", color: resolvedMsg[r.game_id].startsWith("Error") ? "#f87171" : "#4ade80", wordBreak: "break-all" }}>{resolvedMsg[r.game_id]}</div>}
                         <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
                           {!r.assigned_to && (
                             <button onClick={() => handleAssignDispute(r.game_id)} disabled={assigningDispute === r.game_id}
@@ -291,8 +325,14 @@ export default function Dashboard() {
                               {assigningDispute === r.game_id ? "…" : "Assign to me"}
                             </button>
                           )}
-                          <button onClick={() => resolveDispute(r.game_id, "winner")} style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text)", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}>False Positive</button>
-                          <button onClick={() => resolveDispute(r.game_id, "refund")} style={{ background: "#ef4444", border: "none", color: "#fff", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}>Refund Victim</button>
+                          <button onClick={() => resolveDispute(r, "winner")} disabled={resolvingDispute === r.game_id}
+                            style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text)", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}>
+                            {resolvingDispute === r.game_id ? "…" : "False Positive (dismiss)"}
+                          </button>
+                          <button onClick={() => resolveDispute(r, "refund")} disabled={resolvingDispute === r.game_id}
+                            style={{ background: "#ef4444", border: "none", color: "#fff", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}>
+                            {resolvingDispute === r.game_id ? "…" : "Award Win to Victim"}
+                          </button>
                         </div>
                       </div>
                     );

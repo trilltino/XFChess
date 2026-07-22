@@ -66,7 +66,7 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
 
             token::transfer(
                 CpiContext::new_with_signer(
-                    token_program.to_account_info(),
+                    Token::id(),
                     Transfer {
                         from: vault_ata.to_account_info(),
                         to: player_ata.to_account_info(),
@@ -83,7 +83,7 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
             let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[escrow_bump]]];
             anchor_lang::system_program::transfer(
                 CpiContext::new_with_signer(
-                    ctx.accounts.system_program.to_account_info(),
+                    System::id(),
                     anchor_lang::system_program::Transfer {
                         from: ctx.accounts.escrow_pda.to_account_info(),
                         to: ctx.accounts.player.to_account_info(),

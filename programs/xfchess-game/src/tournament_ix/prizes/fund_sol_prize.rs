@@ -55,7 +55,7 @@ pub fn handler(ctx: Context<FundSolPrize>, tournament_id: u64, amount: u64) -> R
 
     anchor_lang::system_program::transfer(
         CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
+            System::id(),
             anchor_lang::system_program::Transfer {
                 from: ctx.accounts.operator.to_account_info(),
                 to: ctx.accounts.escrow_pda.to_account_info(),

@@ -6,7 +6,7 @@ description = "UCI protocol adapter for the nimzovich chess engine (match testin
 
 [dependencies]
 nimzovich_engine = { workspace = true }
-futures-lite = "2.0"
+futures-lite = { workspace = true }
 
 [[bin]]
 name = "nimzovich-uci"

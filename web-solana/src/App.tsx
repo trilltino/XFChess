@@ -30,6 +30,7 @@ import { LichessCallback } from './pages/LichessCallback';
 import { Features } from './pages/Features';
 import { Waitlist } from './pages/Waitlist';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
+import { getUserStatus } from './lib/api';
 import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
 import { Menu, X, ChevronDown, Sun, Moon } from 'lucide-react';
 import { Footer } from './components/Footer';
@@ -53,7 +54,17 @@ const isTauri = typeof window !== 'undefined' && (window as unknown as { __TAURI
 
 export default function App() {
     const network = WalletAdapterNetwork.Devnet;
-    const endpoint = useMemo(() => clusterApiUrl(network), [network]);
+    // api.devnet.solana.com is a shared, rate-limited, load-balanced public
+    // cluster — reads against it can be inconsistent (an account that
+    // genuinely exists on-chain intermittently comes back "does not exist"
+    // from AccountClient.fetch depending on which backend node answers).
+    // Prefer the already-configured Helius devnet endpoint when available;
+    // fall back to the public URL so the app still works without a key set.
+    const heliusKey = import.meta.env.VITE_HELIUS_API_KEY as string | undefined;
+    const endpoint = useMemo(
+        () => (heliusKey ? `https://devnet.helius-rpc.com/?api-key=${heliusKey}` : clusterApiUrl(network)),
+        [network, heliusKey]
+    );
 
     const wallets = useMemo(
         () => [
@@ -114,6 +125,8 @@ function AppContent() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
     const [username, setUsername] = useState<string | null>(null);
+    const [hasKyc, setHasKyc] = useState<boolean | null>(null);
+    const [hasAccount, setHasAccount] = useState<boolean | null>(null);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [_userEmail, setUserEmail] = useState<string | null>(null);
     const [isLegalOpen, setIsLegalOpen] = useState(false);
@@ -196,6 +209,38 @@ function AppContent() {
         load();
         return () => { isMounted = false; };
     }, [connected, publicKey, connection]);
+
+    // Nav-level KYC nudge — independent of the on-chain profile fetch above
+    // since KYC lives in the backend vault, not the on-chain PlayerProfile.
+    useEffect(() => {
+        let isMounted = true;
+        const refetch = () => {
+            if (!connected || !publicKey) {
+                setHasKyc(null);
+                setHasAccount(null);
+                return;
+            }
+            getUserStatus(publicKey.toBase58())
+                .then((status) => {
+                    if (!isMounted) return;
+                    setHasKyc(status.has_kyc);
+                    setHasAccount(status.has_profile);
+                })
+                .catch(() => {
+                    if (!isMounted) return;
+                    setHasKyc(null);
+                    setHasAccount(null);
+                });
+        };
+        refetch();
+        // ProfileViewer fires this right after a successful KYC submission so
+        // the pill clears without waiting for a reconnect/reload.
+        window.addEventListener('xfchess:kyc-updated', refetch);
+        return () => {
+            isMounted = false;
+            window.removeEventListener('xfchess:kyc-updated', refetch);
+        };
+    }, [connected, publicKey]);
 
 
     return (
@@ -325,9 +370,54 @@ function AppContent() {
                                     Create Profile
                                 </Link>
                             )}
+                            {hasAccount === true && hasKyc === false && (
+                                <Link
+                                    to="/profile"
+                                    className="nav-link"
+                                    title="Wagered play requires KYC verification"
+                                    style={{
+                                        color: '#1a1a1a',
+                                        fontWeight: 700,
+                                        fontSize: '12px',
+                                        background: '#ffb020',
+                                        padding: '5px 12px',
+                                        borderRadius: '6px',
+                                        letterSpacing: '0.02em',
+                                    }}
+                                    onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}
+                                >
+                                    Complete KYC
+                                </Link>
+                            )}
                             <span style={{ color: 'var(--text-dim)', fontSize: '12px', fontWeight: 600 }}>
                                 {balanceLoading ? '...' : totalUsdValue !== null ? `$${totalUsdValue.toFixed(2)}` : ''}
                             </span>
+                            {publicKey && (
+                                <button
+                                    onClick={async () => {
+                                        // autoConnect silently reconnects to whichever wallet/account
+                                        // was last used — this is the only way to confirm which one
+                                        // is actually active and pick a different one if it's wrong.
+                                        await disconnect();
+                                        setIsModalOpen(true);
+                                        setIsMenuOpen(false);
+                                    }}
+                                    title="Connected wallet — click to switch"
+                                    className="nav-link"
+                                    style={{
+                                        fontSize: '11px',
+                                        fontFamily: 'monospace',
+                                        color: 'var(--text-dim)',
+                                        background: 'transparent',
+                                        border: '1px solid rgba(255,255,255,0.15)',
+                                        borderRadius: '6px',
+                                        padding: '3px 8px',
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    {publicKey.toBase58().slice(0, 4)}…{publicKey.toBase58().slice(-4)}
+                                </button>
+                            )}
                         </div>
                     )}
 

@@ -143,7 +143,7 @@ async fn prepare(
     let accounts = vec![
         solana_sdk::instruction::AccountMeta::new(session_pda, false),
         solana_sdk::instruction::AccountMeta::new(wallet, true),
-        solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        solana_sdk::instruction::AccountMeta::new_readonly(solana_system_interface::program::id(), false),
     ];
     let ix = solana_sdk::instruction::Instruction {
         program_id,
@@ -154,7 +154,7 @@ async fn prepare(
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
     let (recent_blockhash, _) = tokio::task::spawn_blocking(move || {
         rpc.get_latest_blockhash_with_commitment(
-            solana_sdk::commitment_config::CommitmentConfig::confirmed(),
+            solana_commitment_config::CommitmentConfig::confirmed(),
         )
     })
     .await

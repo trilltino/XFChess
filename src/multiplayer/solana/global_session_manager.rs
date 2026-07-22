@@ -15,7 +15,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 #[allow(deprecated)]
-use solana_sdk::system_program;
+use solana_system_interface::program as system_program;
 use solana_sdk::{
     instruction::AccountMeta,
     pubkey::Pubkey,
@@ -141,7 +141,7 @@ impl GlobalSessionKeyManager {
         let bytes = bs58::decode(&data.session_private_key)
             .into_vec()
             .map_err(|e| format!("decode key: {e}"))?;
-        let kp = Keypair::from_bytes(&bytes).map_err(|e| format!("keypair: {e}"))?;
+        let kp = Keypair::try_from(bytes.as_slice()).map_err(|e| format!("keypair: {e}"))?;
         Ok(Self {
             keypair: Arc::new(kp),
             encryption_key: key,

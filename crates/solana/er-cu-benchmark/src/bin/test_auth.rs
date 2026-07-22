@@ -1,5 +1,5 @@
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::transaction::Transaction;
@@ -14,11 +14,11 @@ fn main() {
 
     let deployer_bytes: Vec<u8> =
         serde_json::from_str(&fs::read_to_string("keys/program-authority.json").unwrap()).unwrap();
-    let deployer = Keypair::from_bytes(&deployer_bytes).unwrap();
+    let deployer = Keypair::try_from(deployer_bytes.as_slice()).unwrap();
 
     let children_data = fs::read_to_string("keys/er-cu-children.json").unwrap();
     let children_arr: Vec<Vec<u8>> = serde_json::from_str(&children_data).unwrap();
-    let player = Keypair::from_bytes(&children_arr[0]).unwrap();
+    let player = Keypair::try_from(children_arr[0].as_slice()).unwrap();
 
     let program_id: Pubkey = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
         .parse()

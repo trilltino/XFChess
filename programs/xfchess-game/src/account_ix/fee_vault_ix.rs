@@ -54,7 +54,7 @@ pub fn handler_collect_fee(ctx: Context<CollectFee>, amount: u64) -> Result<()> 
     // Transfer fee from payer to vault PDA
     anchor_lang::system_program::transfer(
         CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
+            System::id(),
             anchor_lang::system_program::Transfer {
                 from: ctx.accounts.payer.to_account_info(),
                 to: ctx.accounts.fee_vault.to_account_info(),

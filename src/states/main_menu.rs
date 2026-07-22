@@ -1008,6 +1008,24 @@ impl PlayerIdentity {
             .map(|e| e.to_string())
             .unwrap_or_else(|| "—".to_string())
     }
+
+    /// Combined ELO label for the in-game HUD name row: on-chain/backend
+    /// rating and Lichess rating (if linked), shown together when both are
+    /// present. Empty for guests or logged-in players with no rating yet —
+    /// the HUD hides the ELO slot entirely rather than showing a placeholder.
+    pub fn hud_elo_label(&self) -> String {
+        if self.is_guest {
+            return String::new();
+        }
+        let mut parts = Vec::new();
+        if let Some(e) = self.elo {
+            parts.push(e.to_string());
+        }
+        if let Some(le) = self.lichess_elo {
+            parts.push(format!("{le} (Lichess)"));
+        }
+        parts.join(" · ")
+    }
 }
 
 /// Cached NEWS banner texture loaded from the local screenshot file.

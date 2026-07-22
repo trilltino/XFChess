@@ -2045,6 +2045,24 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                                     }
                                                 };
                                                 std::thread::spawn(move || {
+                                                    // Real on-chain registration (entry-fee escrow deposit) must land
+                                                    // before the off-chain roster join — otherwise a player could
+                                                    // show up in the bracket having never actually paid.
+                                                    let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
+                                                    let on_chain_ok = match wallet {
+                                                        Ok(w) => {
+                                                            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                                                                .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+                                                            match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
+                                                                Ok(_) => true,
+                                                                Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); false }
+                                                            }
+                                                        }
+                                                        Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); false }
+                                                    };
+                                                    if !on_chain_ok {
+                                                        return;
+                                                    }
                                                     match crate::multiplayer::network::vps::join_tournament(tid, &pk, None) {
                                                         Ok(slot) => info!("[TOURNAMENT] Joined tournament {} slot {}", tid, slot),
                                                         Err(e) => warn!("[TOURNAMENT] Join failed: {}", e),
@@ -2217,6 +2235,21 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                                 } else {
                                                     let pk = wallet_pubkey.clone().unwrap_or_default();
                                                     std::thread::spawn(move || {
+                                                        let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
+                                                        let on_chain_ok = match wallet {
+                                                            Ok(w) => {
+                                                                let rpc_url = std::env::var("SOLANA_RPC_URL")
+                                                                    .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+                                                                match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
+                                                                    Ok(_) => true,
+                                                                    Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); false }
+                                                                }
+                                                            }
+                                                            Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); false }
+                                                        };
+                                                        if !on_chain_ok {
+                                                            return;
+                                                        }
                                                         match crate::multiplayer::network::vps::join_tournament(tid, &pk, None) {
                                                             Ok(slot) => info!("[TOURNAMENT] Registered for {} slot {}", tid, slot),
                                                             Err(e) => warn!("[TOURNAMENT] Register failed: {}", e),
@@ -2345,6 +2378,21 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                             let pk = wallet_pubkey.clone().unwrap_or_default();
                                             let password = tc.password_input.clone();
                                             std::thread::spawn(move || {
+                                                let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
+                                                let on_chain_ok = match wallet {
+                                                    Ok(w) => {
+                                                        let rpc_url = std::env::var("SOLANA_RPC_URL")
+                                                            .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+                                                        match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
+                                                            Ok(_) => true,
+                                                            Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); false }
+                                                        }
+                                                    }
+                                                    Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); false }
+                                                };
+                                                if !on_chain_ok {
+                                                    return;
+                                                }
                                                 match crate::multiplayer::network::vps::join_tournament(tid, &pk, Some(&password)) {
                                                     Ok(slot) => info!("[TOURNAMENT] Joined private tournament {} slot {}", tid, slot),
                                                     Err(e) => warn!("[TOURNAMENT] Private join failed: {}", e),

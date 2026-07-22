@@ -18,14 +18,6 @@ use tracing::{error, info, warn};
 // ── In-memory state for features that don't yet have DB backing ──────────────
 
 #[derive(Clone, Serialize)]
-struct BanEntry {
-    wallet: String,
-    reason: String,
-    duration_days: Option<u32>,
-    banned_at: u64,
-}
-
-#[derive(Clone, Serialize)]
 struct IpBanEntry {
     ip: String,
     reason: String,
@@ -41,15 +33,9 @@ struct AuditEntry {
     result: String,
 }
 
-static PLAYER_BANS: Lazy<Mutex<HashMap<String, BanEntry>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
 static ELO_OVERRIDES: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static IP_BANS: Lazy<Mutex<Vec<IpBanEntry>>> = Lazy::new(|| Mutex::new(Vec::new()));
-static WHITELIST: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
 static AUDIT_LOG: Lazy<Mutex<Vec<AuditEntry>>> = Lazy::new(|| Mutex::new(Vec::new()));
-static FLAGGED_GAMES: Lazy<Mutex<HashMap<u64, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-static DISPUTE_ASSIGNMENTS: Lazy<Mutex<HashMap<u64, String>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -125,11 +111,6 @@ struct IpBanReq {
 }
 
 #[derive(Deserialize)]
-struct WhitelistReq {
-    wallet: String,
-}
-
-#[derive(Deserialize)]
 struct AssignDisputeReq {
     reviewer: String,
 }
@@ -198,7 +179,6 @@ pub fn admin_routes() -> Router<AppState> {
         // Moderation
         .route("/admin/moderation/ip-ban", post(ip_ban))
         .route("/admin/moderation/ip-bans", get(list_ip_bans))
-        .route("/admin/moderation/whitelist", post(whitelist_player))
         // Disputes
         .route("/admin/disputes/{game_id}/assign", post(assign_dispute))
 }
@@ -206,52 +186,85 @@ pub fn admin_routes() -> Router<AppState> {
 // ── Handler implementations ───────────────────────────────────────────────────
 
 async fn anti_cheat_reports(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     // Real data only. This used to prepend two hardcoded fake reports (game 1001,
     // 1045), which is fabricated data on a compliance/moderation surface. Report
-    // only genuinely flagged games (from flag_game / FLAGGED_GAMES).
-    let flagged = FLAGGED_GAMES.lock().map(|f| f.clone()).unwrap_or_default();
-    let mut reports: Vec<serde_json::Value> = Vec::new();
-    for (game_id, reason) in &flagged {
-        reports.push(json!({
-            "game_id": game_id,
-            "white": "—",
-            "black": "—",
-            "suspect": "Unknown",
-            "verdict": "Flag",
-            "wager": "—",
-            "score": 0.0,
-            "reason": reason,
-            "status": "Flagged",
-            "created_at": now_secs()
-        }));
-    }
-    let assignments = DISPUTE_ASSIGNMENTS
-        .lock()
-        .map(|d| d.clone())
-        .unwrap_or_default();
-    let reports_with_assignments: Vec<_> = reports
+    // only genuinely flagged games, persisted in flagged_games (migration 024).
+    let flagged_repo = crate::db::repository::FlaggedGameRepository::new(state.store.pool());
+    let flagged = flagged_repo.list().await.unwrap_or_default();
+    let reports: Vec<serde_json::Value> = flagged
         .into_iter()
-        .map(|mut r| {
-            if let Some(game_id) = r["game_id"].as_u64() {
-                if let Some(reviewer) = assignments.get(&game_id) {
-                    r["assigned_to"] = json!(reviewer);
-                }
-            }
-            r
+        .map(|f| {
+            json!({
+                "game_id": f.game_id,
+                "white": "—",
+                "black": "—",
+                "suspect": "Unknown",
+                "verdict": "Flag",
+                "wager": "—",
+                "score": 0.0,
+                "reason": f.reason,
+                "status": "Flagged",
+                "created_at": f.flagged_at,
+                "assigned_to": f.assigned_to,
+            })
         })
         .collect();
-    Ok(Json(json!({ "reports": reports_with_assignments })))
+    Ok(Json(json!({ "reports": reports })))
 }
 
-async fn get_game_eval(Path(game_id): Path<u64>) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Mock centipawn eval series; real impl would run Stockfish via anticheat crate
-    let evals: Vec<serde_json::Value> = (0..20).map(|i| {
-        let cp = (i as f64 * 13.0 + (i as f64).sin() * 80.0) as i64 - 40;
-        json!({ "move_number": i + 1, "centipawns": cp, "best_move_cp": cp + (i as i64 % 3) * 20 })
-    }).collect();
-    Ok(Json(json!({ "game_id": game_id, "evals": evals })))
+#[derive(sqlx::FromRow)]
+struct AnticheatVerdictRow {
+    white_pubkey: String,
+    black_pubkey: String,
+    white_verdict: String,
+    black_verdict: String,
+    white_score: f64,
+    black_score: f64,
+    white_signals: String,
+    black_signals: String,
+    analysed_at: i64,
+}
+
+/// GET /admin/anti-cheat/game/{id}/eval — real Stockfish-derived verdict for a
+/// game, from `anticheat_verdicts` (populated by `tasks/anticheat_worker.rs`
+/// after finalization). Aggregate per-game only — no move-by-move eval curve
+/// is stored today, so this reports the verdict/score/signals the worker
+/// actually computed rather than fabricating a per-move series.
+async fn get_game_eval(
+    Path(game_id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let row = sqlx::query_as::<_, AnticheatVerdictRow>(
+        "SELECT white_pubkey, black_pubkey, white_verdict, black_verdict, \
+         white_score, black_score, white_signals, black_signals, analysed_at \
+         FROM anticheat_verdicts WHERE game_id = ? ORDER BY analysed_at DESC LIMIT 1",
+    )
+    .bind(game_id.to_string())
+    .fetch_optional(&state.store.pool())
+    .await
+    .map_err(|e| {
+        error!("[admin] eval query failed for game {}: {}", game_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    match row {
+        None => Ok(Json(json!({ "game_id": game_id, "analysed": false }))),
+        Some(r) => {
+            let white_signals: serde_json::Value =
+                serde_json::from_str(&r.white_signals).unwrap_or(json!({}));
+            let black_signals: serde_json::Value =
+                serde_json::from_str(&r.black_signals).unwrap_or(json!({}));
+            Ok(Json(json!({
+                "game_id": game_id,
+                "analysed": true,
+                "white": { "pubkey": r.white_pubkey, "verdict": r.white_verdict, "score": r.white_score, "signals": white_signals },
+                "black": { "pubkey": r.black_pubkey, "verdict": r.black_verdict, "score": r.black_score, "signals": black_signals },
+                "analysed_at": r.analysed_at,
+            })))
+        }
+    }
 }
 
 async fn list_players(
@@ -265,7 +278,14 @@ async fn list_players(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let bans = PLAYER_BANS.lock().map(|b| b.clone()).unwrap_or_default();
+    let ban_repo = crate::db::repository::BanRepository::new(state.store.pool());
+    let bans: HashMap<String, crate::db::repository::BanRecord> = ban_repo
+        .list()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| (b.wallet.clone(), b))
+        .collect();
     let elo_overrides = ELO_OVERRIDES.lock().map(|e| e.clone()).unwrap_or_default();
 
     let players_json: Vec<_> = players
@@ -312,6 +332,11 @@ async fn list_players(
     Ok(Json(json!({ "players": players_json })))
 }
 
+// No per-game ELO snapshot is recorded anywhere (on-chain PlayerProfile only
+// keeps the current rating, not a history) — this used to fabricate a
+// +12/-8/0 cycling delta series. Real per-game outcomes are all that's
+// actually available, so that's what this reports instead of inventing an
+// ELO curve.
 async fn get_player_elo_history(
     Path(wallet): Path<String>,
     State(state): State<AppState>,
@@ -321,38 +346,38 @@ async fn get_player_elo_history(
         .get_games_by_player(&wallet, 50)
         .await
         .unwrap_or_default();
-    let mut elo = 1200i32;
     let history: Vec<_> = games
         .iter()
-        .enumerate()
-        .map(|(i, _g)| {
-            let delta = if i % 3 == 0 {
-                12
-            } else if i % 3 == 1 {
-                -8
-            } else {
-                0
+        .map(|g| {
+            let result = match &g.winner {
+                None if g.status != "completed" => "in_progress",
+                None => "draw",
+                Some(w) if w == &wallet => "win",
+                Some(_) => "loss",
             };
-            elo += delta;
-            json!({ "game_number": i + 1, "elo": elo })
+            json!({
+                "game_id": g.id,
+                "result": result,
+                "stake_amount": g.stake_amount,
+                "ended_at": g.end_time,
+            })
         })
         .collect();
-    Ok(Json(json!({ "wallet": wallet, "history": history })))
+    Ok(Json(json!({ "wallet": wallet, "history": history, "elo_history_available": false })))
 }
 
 async fn ban_player(
+    State(state): State<AppState>,
     Path(wallet): Path<String>,
     Json(req): Json<BanReq>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let entry = BanEntry {
-        wallet: wallet.clone(),
-        reason: req.reason.clone(),
-        duration_days: req.duration_days,
-        banned_at: now_secs(),
-    };
-    if let Ok(mut bans) = PLAYER_BANS.lock() {
-        bans.insert(wallet.clone(), entry);
-    }
+    let bans = crate::db::repository::BanRepository::new(state.store.pool());
+    bans.ban(&wallet, &req.reason, req.duration_days)
+        .await
+        .map_err(|e| {
+            error!("[admin] Failed to persist ban for {}: {}", wallet, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     add_audit("ban_player", &wallet, "ok");
     info!("[admin] Banned player {} reason={}", wallet, req.reason);
     Ok(Json(json!({ "ok": true, "wallet": wallet })))
@@ -470,12 +495,18 @@ async fn force_resign(
 }
 
 async fn flag_game(
+    State(state): State<AppState>,
     Path(game_id): Path<u64>,
     Json(req): Json<FlagGameReq>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    if let Ok(mut flags) = FLAGGED_GAMES.lock() {
-        flags.insert(game_id, req.reason.clone());
-    }
+    let flagged_repo = crate::db::repository::FlaggedGameRepository::new(state.store.pool());
+    flagged_repo
+        .flag(game_id as i64, &req.reason)
+        .await
+        .map_err(|e| {
+            error!("[admin] Failed to persist flag for game {}: {}", game_id, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     add_audit("flag_game", &format!("game_{}", game_id), &req.reason);
     info!("[admin] Flagged game {} reason={}", game_id, req.reason);
     Ok(Json(json!({ "ok": true, "game_id": game_id })))
@@ -785,7 +816,7 @@ async fn tls_expiry() -> Result<Json<serde_json::Value>, StatusCode> {
 }
 
 async fn rotate_token() -> Result<Json<serde_json::Value>, StatusCode> {
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = [0u8; 24];
     rand::rng().fill_bytes(&mut bytes);
     let new_token = format!("xf_admin_{}", hex::encode(bytes));
@@ -815,25 +846,22 @@ async fn list_ip_bans() -> Result<Json<serde_json::Value>, StatusCode> {
     Ok(Json(json!({ "bans": bans })))
 }
 
-async fn whitelist_player(
-    Json(req): Json<WhitelistReq>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    if let Ok(mut wl) = WHITELIST.lock() {
-        if !wl.contains(&req.wallet) {
-            wl.push(req.wallet.clone());
-        }
-    }
-    add_audit("whitelist", &req.wallet, "added");
-    Ok(Json(json!({ "ok": true, "wallet": req.wallet })))
-}
-
 async fn assign_dispute(
+    State(state): State<AppState>,
     Path(game_id): Path<u64>,
     Json(req): Json<AssignDisputeReq>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    if let Ok(mut assigns) = DISPUTE_ASSIGNMENTS.lock() {
-        assigns.insert(game_id, req.reviewer.clone());
-    }
+    let flagged_repo = crate::db::repository::FlaggedGameRepository::new(state.store.pool());
+    flagged_repo
+        .assign(game_id as i64, &req.reviewer)
+        .await
+        .map_err(|e| {
+            error!(
+                "[admin] Failed to persist dispute assignment for game {}: {}",
+                game_id, e
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     add_audit(
         "assign_dispute",
         &format!("game_{}", game_id),

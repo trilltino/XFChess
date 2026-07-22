@@ -154,7 +154,7 @@ pub fn load_keypair_from_env_value(val: &str) -> Keypair {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        Keypair::from_bytes(&bytes).unwrap_or_else(|_| Keypair::new())
+        Keypair::try_from(bytes.as_slice()).unwrap_or_else(|_| Keypair::new())
     } else {
         Keypair::from_base58_string(val)
     }

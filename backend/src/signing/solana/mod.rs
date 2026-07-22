@@ -17,7 +17,7 @@ pub mod transactions;
 
 pub use debug::{debug_transaction, format_debug_info, parse_program_error, TransactionDebugInfo};
 pub use instructions::{
-    advance_winner_ix, bracket_position, claim_fees_ix, claim_prize_ix,
+    advance_winner_ix, bracket_position, cancel_tournament_ix, claim_fees_ix, claim_prize_ix,
     distribute_tournament_prizes_ix, finalize_game_ix, fund_sol_prize_ix, initialize_escrow_ix,
     initialize_match_ix, initialize_shards_ix, initialize_tournament_ix, leave_tournament_ix,
     link_external_elo_ix, record_move_ix, record_result_ix, required_shards, start_tournament_ix,

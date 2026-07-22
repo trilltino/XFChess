@@ -164,7 +164,7 @@ fn record_swiss_result_ix(round: u8, board: u16, player: Pubkey, opponent: Pubke
         tournament_players_shard_3: None,
         player,
         opponent,
-        system_program: solana_sdk::system_program::ID,
+        system_program: solana_system_interface::program::ID,
     }
     .to_account_metas(None);
     let data = xfchess_game::instruction::RecordSwissResult {

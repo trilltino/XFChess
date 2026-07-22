@@ -162,7 +162,7 @@ pub fn system_account(lamports: u64) -> Account {
     Account {
         lamports,
         data: Vec::new(),
-        owner: solana_sdk::system_program::ID,
+        owner: solana_system_interface::program::ID,
         executable: false,
         rent_epoch: 0,
     }
@@ -250,6 +250,31 @@ pub fn undelegate_ix(
     }
     .to_account_metas(None);
     let data = xfchess_game::instruction::UndelegateGame { game_id }.data();
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data,
+    }
+}
+
+/// `process_undelegation` instruction — the ER-infra callback that restores a
+/// delegated account. `buffer` is caller-chosen here so tests can exercise the
+/// canonical-buffer-PDA rejection (see `magicblock::delegation::undelegate_buffer_pda`).
+pub fn process_undelegation_ix(
+    game_id: u64,
+    payer: Pubkey,
+    buffer: Pubkey,
+    account_seeds: Vec<Vec<u8>>,
+) -> Instruction {
+    let accounts =
+        xfchess_game::__client_accounts_initialize_after_undelegation::InitializeAfterUndelegation {
+            base_account: game_pda(game_id).0,
+            buffer,
+            payer,
+            system_program: solana_system_interface::program::ID,
+        }
+        .to_account_metas(None);
+    let data = xfchess_game::instruction::ProcessUndelegation { account_seeds }.data();
     Instruction {
         program_id: xfchess_game::ID,
         accounts,

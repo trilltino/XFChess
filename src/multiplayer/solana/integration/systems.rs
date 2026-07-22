@@ -76,8 +76,8 @@ pub fn initialize_solana_integration(
                                         "[SESSION] Loaded existing session key: {}",
                                         session_manager.pubkey()
                                     );
-                                    match solana_sdk::signature::Keypair::from_bytes(
-                                        &session_manager.signer().to_bytes(),
+                                    match solana_sdk::signature::Keypair::try_from(
+                                        session_manager.signer().to_bytes().as_slice(),
                                     ) {
                                         Ok(kp) => solana_state.session_keypair = Some(kp),
                                         Err(e) => {
@@ -90,8 +90,8 @@ pub fn initialize_solana_integration(
                                     // Create new session key
                                     let session_manager = SessionKeyManager::new(&pubkey);
                                     let session_pubkey = session_manager.pubkey();
-                                    match solana_sdk::signature::Keypair::from_bytes(
-                                        &session_manager.signer().to_bytes(),
+                                    match solana_sdk::signature::Keypair::try_from(
+                                        session_manager.signer().to_bytes().as_slice(),
                                     ) {
                                         Ok(kp) => solana_state.session_keypair = Some(kp),
                                         Err(e) => {
@@ -497,7 +497,7 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
             Ok(contents) => {
                 // Try to parse as JSON byte array (standard solana-keygen format)
                 match serde_json::from_str::<Vec<u8>>(&contents) {
-                    Ok(bytes) => match Keypair::from_bytes(&bytes) {
+                    Ok(bytes) => match Keypair::try_from(bytes.as_slice()) {
                         Ok(kp) => return Some(kp),
                         Err(e) => error!("[WALLET] Failed to parse keypair from bytes: {}", e),
                     },

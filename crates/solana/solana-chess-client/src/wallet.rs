@@ -26,7 +26,7 @@ impl KeypairWallet {
     pub fn load_from_file(path: &PathBuf) -> Result<Self> {
         let data = fs::read_to_string(path)?;
         let bytes: Vec<u8> = serde_json::from_str(&data)?;
-        let keypair = Keypair::from_bytes(&bytes)?;
+        let keypair = Keypair::try_from(bytes.as_slice())?;
         Ok(Self { keypair })
     }
 

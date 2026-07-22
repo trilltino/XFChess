@@ -514,7 +514,7 @@ async fn complete_link(
 /// Generates a PKCE code_verifier: 128 random bytes → base64url (no padding).
 fn generate_code_verifier() -> String {
     use base64::{engine::general_purpose, Engine as _};
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = vec![0u8; 128];
     rand::rng().fill_bytes(&mut bytes);
     general_purpose::URL_SAFE_NO_PAD.encode(&bytes)
@@ -530,7 +530,7 @@ fn code_challenge(verifier: &str) -> String {
 
 /// Generates a random state parameter for CSRF protection.
 fn generate_state() -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = vec![0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     hex::encode(bytes)

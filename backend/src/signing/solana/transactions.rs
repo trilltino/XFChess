@@ -2,10 +2,8 @@
 
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
-#[allow(deprecated)]
-use solana_sdk::system_instruction;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     instruction::Instruction,
     message::Message,
     pubkey::Pubkey,
@@ -13,6 +11,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::{Transaction, VersionedTransaction},
 };
+use solana_system_interface::instruction as system_instruction;
 use tracing::warn;
 
 /// Funds `dest` with `lamports` from `payer`, submit to `rpc_url`.

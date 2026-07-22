@@ -526,7 +526,10 @@ async fn anticheat_gate(
     // Any of this tournament's games still awaiting analysis?
     let pending: i64 = {
         let sql = format!("SELECT COUNT(*) FROM anticheat_queue WHERE game_id IN ({placeholders})");
-        let mut q = sqlx::query_as::<_, (i64,)>(&sql);
+        // SAFETY: the only dynamic part is `placeholders`, a run of literal
+        // "?" bind markers sized to `game_ids.len()` — every actual value is
+        // bound below, never interpolated into the SQL text.
+        let mut q = sqlx::query_as::<_, (i64,)>(sqlx::AssertSqlSafe(sql));
         for id in &game_ids {
             q = q.bind(id);
         }
@@ -548,7 +551,8 @@ async fn anticheat_gate(
              FROM anticheat_verdicts WHERE game_id IN ({placeholders})
              AND (white_verdict = 'Flag' OR black_verdict = 'Flag')"
         );
-        let mut q = sqlx::query_as::<_, (String, String, String, String)>(&sql);
+        // SAFETY: same as above — only the "?" placeholder run is dynamic.
+        let mut q = sqlx::query_as::<_, (String, String, String, String)>(sqlx::AssertSqlSafe(sql));
         for id in &game_ids {
             q = q.bind(id);
         }

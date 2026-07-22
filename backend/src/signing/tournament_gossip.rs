@@ -149,7 +149,7 @@ impl TournamentGossipService {
             .players
             .iter()
             .filter(|p| *p != requesting_player)
-            .choose_multiple(&mut rand::rng(), 4);
+            .sample(&mut rand::rng(), 4);
 
         for player in other_players {
             if let Some(node_id_str) = tournament.node_ids.get(player) {

@@ -4,9 +4,9 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    system_instruction,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use solana_transaction_status::{option_serializer::OptionSerializer, UiTransactionEncoding};
 
 use crate::{

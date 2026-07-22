@@ -15,15 +15,20 @@ interface PlayerDetailProps {
   onClose: () => void;
 }
 
+interface GameResultEntry { game_id: string; result: "win" | "loss" | "draw" | "in_progress"; stake_amount: number; ended_at: number | null; }
+
 function PlayerDetail({ wallet, onClose }: PlayerDetailProps) {
-  const [history, setHistory] = useState<{ game_number: number; elo: number }[]>([]);
+  // No per-game ELO snapshot is recorded anywhere (on-chain PlayerProfile
+  // only keeps the current rating) — this used to show a fabricated sparkline.
+  // Real per-game outcomes are what's actually available.
+  const [history, setHistory] = useState<GameResultEntry[]>([]);
   const [newElo, setNewElo] = useState("");
   const [eloReason, setEloReason] = useState("");
   const [banReason, setBanReason] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    apiClient.getPlayerHistory(wallet).then(r => { if (r.ok) setHistory(r.data.history ?? []); });
+    apiClient.getPlayerHistory(wallet).then(r => { if (r.ok && r.data) setHistory(r.data.history ?? []); });
   }, [wallet]);
 
   const handleEloOverride = async () => {
@@ -39,14 +44,8 @@ function PlayerDetail({ wallet, onClose }: PlayerDetailProps) {
     setMsg(r.ok ? "Player banned." : `Error: ${r.error?.message}`);
   };
 
-  const handleWhitelist = async () => {
-    const r = await apiClient.whitelistPlayer(wallet);
-    setMsg(r.ok ? "Added to rate-limit whitelist." : `Error: ${r.error?.message}`);
-  };
 
-  const minElo = history.length ? Math.min(...history.map(h => h.elo)) : 1200;
-  const maxElo = history.length ? Math.max(...history.map(h => h.elo)) : 1200;
-  const range = maxElo - minElo || 1;
+  const resultColor = { win: "#4ade80", loss: "#ef4444", draw: "var(--text-dim)", in_progress: "#3b82f6" } as const;
 
   return (
     <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
@@ -57,31 +56,28 @@ function PlayerDetail({ wallet, onClose }: PlayerDetailProps) {
         </div>
         <div style={{ fontFamily: "monospace", fontSize: "12px", color: "var(--text-dim)", marginBottom: "1.5rem", wordBreak: "break-all" }}>{wallet}</div>
 
-        {/* ELO sparkline */}
+        {/* Recent game results (no ELO-per-game history is tracked anywhere) */}
         <div style={{ marginBottom: "1.5rem" }}>
-          <div style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "8px" }}>ELO HISTORY</div>
+          <div style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "8px" }}>RECENT RESULTS</div>
           {history.length === 0
             ? <div style={{ color: "var(--text-dim)", fontStyle: "italic", fontSize: "12px" }}>No game history.</div>
-            : <svg width="100%" height="60" viewBox={`0 0 ${history.length * 20} 60`} preserveAspectRatio="none" style={{ display: "block" }}>
-                <polyline
-                  points={history.map((h, i) => `${i * 20},${60 - ((h.elo - minElo) / range) * 50 - 5}`).join(" ")}
-                  fill="none" stroke="var(--primary)" strokeWidth="2" />
+            : <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                 {history.map((h, i) => (
-                  <circle key={i} cx={i * 20} cy={60 - ((h.elo - minElo) / range) * 50 - 5} r="2" fill="var(--primary)" />
+                  <span key={i} title={`${h.result}${h.ended_at ? " — " + new Date(h.ended_at * 1000).toLocaleDateString() : ""}`}
+                    style={{ fontSize: "10px", fontWeight: "800", padding: "3px 8px", borderRadius: "100px",
+                      background: `${resultColor[h.result]}22`, color: resultColor[h.result] }}>
+                    {h.result.toUpperCase()}
+                  </span>
                 ))}
-              </svg>
+              </div>
           }
-          {history.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--text-dim)", marginTop: "4px" }}>
-              <span>Game 1 — ELO {history[0]?.elo}</span>
-              <span>Latest — ELO {history[history.length - 1]?.elo}</span>
-            </div>
-          )}
         </div>
 
-        {/* ELO override */}
+        {/* ELO override — display-only: this does not touch the real elo
+            column, on-chain rating, or matchmaking/tournament elo gating. */}
         <div style={{ marginBottom: "1.5rem", padding: "1rem", background: "rgba(255,255,255,0.04)", borderRadius: "12px", border: "1px solid var(--border)" }}>
-          <div style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "10px" }}>MANUAL ELO OVERRIDE</div>
+          <div style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "4px" }}>ADMIN-PANEL DISPLAY OVERRIDE (COSMETIC)</div>
+          <div style={{ fontSize: "10px", color: "var(--text-dim)", marginBottom: "10px", fontStyle: "italic" }}>Only changes what this panel shows for this player — does not affect matchmaking, tournament ELO gating, or the on-chain rating.</div>
           <div style={{ display: "flex", gap: "8px", marginBottom: "6px" }}>
             <input value={newElo} onChange={e => setNewElo(e.target.value)} type="number" placeholder="New ELO…"
               style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "6px 10px", fontSize: "12px" }} />
@@ -100,10 +96,6 @@ function PlayerDetail({ wallet, onClose }: PlayerDetailProps) {
             <button onClick={handleBan} style={{ padding: "6px 14px", borderRadius: "8px", backgroundColor: "#ef4444", color: "#fff", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>BAN</button>
           </div>
         </div>
-
-        <button onClick={handleWhitelist} style={{ padding: "8px 18px", borderRadius: "8px", background: "rgba(255,255,255,0.06)", color: "var(--text-dim)", border: "1px solid var(--border)", fontSize: "12px", cursor: "pointer" }}>
-          Whitelist (remove rate limit)
-        </button>
 
         {msg && <div style={{ marginTop: "12px", fontSize: "12px", color: msg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{msg}</div>}
       </div>

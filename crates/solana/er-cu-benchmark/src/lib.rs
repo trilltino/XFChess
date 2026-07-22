@@ -9,7 +9,8 @@ pub mod moves;
 pub mod rpc_bench;
 
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
 /// Program ID for XFChess on devnet.
@@ -77,17 +78,17 @@ pub fn parse_pubkey(s: &str) -> Result<Pubkey, String> {
 
 /// Build a compute budget CU limit instruction.
 pub fn compute_budget_limit(cu_limit: u32) -> solana_sdk::instruction::Instruction {
-    solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(cu_limit)
+    solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(cu_limit)
 }
 
 /// Build a compute budget CU price instruction.
 pub fn compute_budget_price(micro_lamports: u64) -> solana_sdk::instruction::Instruction {
-    solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_price(micro_lamports)
+    solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_price(micro_lamports)
 }
 
 /// Build a compute budget heap frame instruction.
 pub fn compute_budget_heap(heap_size: u32) -> solana_sdk::instruction::Instruction {
-    solana_sdk::compute_budget::ComputeBudgetInstruction::request_heap_frame(heap_size)
+    solana_compute_budget_interface::ComputeBudgetInstruction::request_heap_frame(heap_size)
 }
 
 /// Apply compute budget optimizations to a transaction.
@@ -115,7 +116,7 @@ where
                 eprintln!("   RPC attempt {} failed: {}", attempt + 1, e);
                 if let solana_client::client_error::ClientErrorKind::RpcError(
                     solana_client::rpc_request::RpcError::RpcResponseError { data, .. },
-                ) = &e.kind
+                ) = &*e.kind
                 {
                     eprintln!("   RPC ERROR DATA: {:?}", data);
                     use solana_client::rpc_request::RpcResponseErrorData;

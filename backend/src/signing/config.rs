@@ -15,6 +15,11 @@ pub struct SigningConfig {
     pub port: u16,
     /// Solana RPC URL for mainnet/devnet (default: devnet)
     pub solana_rpc_url: String,
+    /// Optional dedicated mainnet RPC URL, for reads that are independent of the
+    /// game program (which is devnet-only): price feeds, USDC balance checks for
+    /// the fiat onramp, ad hoc lookups. `None` when unset — callers should fall
+    /// back to a public mainnet endpoint or skip the mainnet-only feature.
+    pub solana_mainnet_rpc_url: Option<String>,
     /// MagicBlock Execution Rollup RPC URL (default: devnet EU endpoint)
     pub er_rpc_url: String,
     /// Magic Router RPC URL — MagicBlock's generic per-transaction router
@@ -61,6 +66,7 @@ impl SigningConfig {
     /// # Environment Variables
     /// - `SIGNING_PORT` - Server port (default: 8090)
     /// - `SOLANA_RPC_URL` - Solana RPC endpoint (default: devnet)
+    /// - `SOLANA_MAINNET_RPC_URL` - Optional dedicated mainnet RPC endpoint (default: unset)
     /// - `ER_RPC_URL` - MagicBlock ER endpoint (default: devnet EU)
     /// - `PROGRAM_ID` - XFChess program ID
     /// - `JWT_SECRET` - JWT signing secret
@@ -84,6 +90,7 @@ impl SigningConfig {
                 .unwrap_or(8090),
             solana_rpc_url: env::var("SOLANA_RPC_URL")
                 .unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
+            solana_mainnet_rpc_url: env::var("SOLANA_MAINNET_RPC_URL").ok(),
             er_rpc_url: env::var("ER_RPC_URL")
                 .unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into()),
             magic_router_rpc_url: env::var("MAGIC_ROUTER_RPC_URL")

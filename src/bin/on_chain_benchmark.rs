@@ -1,7 +1,7 @@
 use anyhow::Result;
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     let fee_payer = if std::path::Path::new("keys/fee-payer.json").exists() {
         let data = std::fs::read_to_string("keys/fee-payer.json")?;
         let bytes: Vec<u8> = serde_json::from_str(&data)?;
-        Keypair::from_bytes(&bytes)?
+        Keypair::try_from(bytes.as_slice())?
     } else {
         println!("❌ keys/fee-payer.json not found!");
         return Ok(());

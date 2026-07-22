@@ -101,7 +101,12 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
             if statement.is_empty() {
                 continue;
             }
-            if let Err(e) = sqlx::query(statement).execute(pool).await {
+            // SAFETY: `statement` comes from splitting one of this module's own
+            // hardcoded `migration_NNN` const literals on `;` — never user input.
+            if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(statement))
+                .execute(pool)
+                .await
+            {
                 // For ALTER TABLE, we ignore "duplicate column" errors
                 let err_msg = e.to_string().to_lowercase();
                 if err_msg.contains("duplicate column") || err_msg.contains("already exists") {
@@ -191,6 +196,14 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     // ── Migration 022: matchmaking queue/matches (restart survival) ──────────
     let migration_022 = include_str!("../../migrations/022_matchmaking_queue.sql");
     run_script(&pools.session_pool, migration_022, "022").await?;
+
+    // ── Migration 023: player_bans (persistent, enforced bans) ───────────────
+    let migration_023 = include_str!("../../migrations/023_player_bans.sql");
+    run_script(&pools.session_pool, migration_023, "023").await?;
+
+    // ── Migration 024: flagged_games (persistent flag/assign queue) ──────────
+    let migration_024 = include_str!("../../migrations/024_flagged_games.sql");
+    run_script(&pools.session_pool, migration_024, "024").await?;
 
     info!("[Database] All migrations completed successfully");
     Ok(())

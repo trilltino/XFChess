@@ -149,7 +149,10 @@ impl SessionStore {
         }
         query.push_str(" WHERE session_id = ?");
 
-        let mut q = sqlx::query(&query).bind(status.to_string());
+        // SAFETY: `query` only ever grows by appending the static literal
+        // ", grace_period_ends = ?2" above; every actual value is bound, never
+        // interpolated. No user input reaches the SQL text itself.
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(query)).bind(status.to_string());
 
         if let Some(gpe) = grace_period_ends {
             q = q.bind(gpe);

@@ -645,6 +645,138 @@ impl DisputeRepository {
     }
 }
 
+/// A persisted player ban (migration 023).
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct BanRecord {
+    pub wallet: String,
+    pub reason: String,
+    pub duration_days: Option<i64>,
+    pub banned_at: i64,
+    pub expires_at: Option<i64>,
+}
+
+/// Repository for persisted, enforced player bans. Replaces the old
+/// process-local `HashMap` in admin.rs, which nothing outside that file ever
+/// read — bans didn't survive a restart and never blocked login,
+/// matchmaking, or tournament registration.
+pub struct BanRepository {
+    pool: SqlitePool,
+}
+
+impl BanRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn ban(&self, wallet: &str, reason: &str, duration_days: Option<u32>) -> Result<()> {
+        let banned_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+        let expires_at = duration_days.map(|d| banned_at + d as i64 * 86400);
+        sqlx::query(
+            "INSERT INTO player_bans (wallet, reason, duration_days, banned_at, expires_at) \
+             VALUES (?, ?, ?, ?, ?) \
+             ON CONFLICT(wallet) DO UPDATE SET reason=excluded.reason, \
+             duration_days=excluded.duration_days, banned_at=excluded.banned_at, \
+             expires_at=excluded.expires_at",
+        )
+        .bind(wallet)
+        .bind(reason)
+        .bind(duration_days.map(|d| d as i64))
+        .bind(banned_at)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// True if `wallet` has a ban row that hasn't expired (no `expires_at` = permanent).
+    pub async fn is_banned(&self, wallet: &str) -> Result<bool> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+        let rec = sqlx::query_as::<_, BanRecord>("SELECT * FROM player_bans WHERE wallet = ?")
+            .bind(wallet)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(match rec {
+            None => false,
+            Some(b) => b.expires_at.map(|e| e > now).unwrap_or(true),
+        })
+    }
+
+    pub async fn list(&self) -> Result<Vec<BanRecord>> {
+        let recs = sqlx::query_as::<_, BanRecord>("SELECT * FROM player_bans")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(recs)
+    }
+}
+
+/// A flagged game + optional reviewer assignment (migration 024).
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct FlaggedGameRecord {
+    pub game_id: i64,
+    pub reason: String,
+    pub flagged_at: i64,
+    pub assigned_to: Option<String>,
+}
+
+/// Repository for the anti-cheat flag/reviewer-assignment queue (Dashboard's
+/// MODERATION tab). Replaces the old process-local `FLAGGED_GAMES` /
+/// `DISPUTE_ASSIGNMENTS` HashMaps in admin.rs, which reset on every restart.
+pub struct FlaggedGameRepository {
+    pool: SqlitePool,
+}
+
+impl FlaggedGameRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn flag(&self, game_id: i64, reason: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+        sqlx::query(
+            "INSERT INTO flagged_games (game_id, reason, flagged_at) VALUES (?, ?, ?) \
+             ON CONFLICT(game_id) DO UPDATE SET reason=excluded.reason, flagged_at=excluded.flagged_at",
+        )
+        .bind(game_id)
+        .bind(reason)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Assigns a reviewer, auto-flagging the game first if it wasn't already
+    /// (an admin can assign themselves to a game before anyone's flagged it).
+    pub async fn assign(&self, game_id: i64, reviewer: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+        sqlx::query(
+            "INSERT INTO flagged_games (game_id, reason, flagged_at, assigned_to) \
+             VALUES (?, 'assigned', ?, ?) \
+             ON CONFLICT(game_id) DO UPDATE SET assigned_to=excluded.assigned_to",
+        )
+        .bind(game_id)
+        .bind(now)
+        .bind(reviewer)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list(&self) -> Result<Vec<FlaggedGameRecord>> {
+        let recs = sqlx::query_as::<_, FlaggedGameRecord>("SELECT * FROM flagged_games")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(recs)
+    }
+}
+
 /// New move for batch insertion
 #[derive(Debug, Clone)]
 pub struct NewMove {

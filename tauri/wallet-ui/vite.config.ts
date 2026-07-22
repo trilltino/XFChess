@@ -29,9 +29,13 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ["react", "react-dom"],
-          solana: ["@solana/web3.js"],
+        manualChunks(id) {
+          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
+            return "vendor";
+          }
+          if (id.includes("node_modules/@solana/web3.js")) {
+            return "solana";
+          }
         },
       },
     },

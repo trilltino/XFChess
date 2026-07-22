@@ -279,6 +279,22 @@ impl AIDifficulty {
         self.stockfish_movetime_ms().unwrap_or(0) as f32 / 1000.0
     }
 
+    /// Approximate ELO rating for this difficulty, for display next to the
+    /// "Computer" name in the in-game HUD (see [`Self::description`] for the
+    /// combined name+ELO string used elsewhere).
+    pub fn elo_label(self) -> &'static str {
+        match self {
+            Self::Level1 => "400",
+            Self::Level2 => "700",
+            Self::Level3 => "1000",
+            Self::Level4 => "1300",
+            Self::Level5 => "1600",
+            Self::Level6 => "1900",
+            Self::Level7 => "2200",
+            Self::Level8 => "2500+",
+        }
+    }
+
     /// Friendly description for UI with ELO equivalent
     pub fn description(self) -> &'static str {
         match self {

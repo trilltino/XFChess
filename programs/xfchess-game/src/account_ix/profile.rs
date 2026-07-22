@@ -91,7 +91,7 @@ pub fn handler(
         // 2. Ensure enough space (Realloc if needed for legacy accounts)
         let required_space = 8 + PlayerProfile::INIT_SPACE;
         if profile_info.data_len() < required_space {
-            profile_info.realloc(required_space, false)?;
+            profile_info.resize(required_space)?;
 
             // Adjust lamports for rent exemption
             let rent = Rent::get()?;

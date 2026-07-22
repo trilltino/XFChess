@@ -48,7 +48,7 @@ pub fn load_or_create() -> SecretKey {
         }
     }
 
-    let key = SecretKey::generate(&mut rand::rng());
+    let key = SecretKey::generate();
     let bytes = key.to_bytes();
     if let Err(e) = std::fs::write(&path, bytes) {
         warn!("[identity] Failed to save node_key: {e}");

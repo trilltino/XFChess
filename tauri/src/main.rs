@@ -101,24 +101,6 @@ fn consent_path() -> PathBuf {
   instance_cache_dir().join("consent.json")
 }
 
-/// Path where the last connected wallet pubkey is persisted.
-fn wallet_cache_path() -> PathBuf {
-  instance_cache_dir().join("wallet.json")
-}
-
-/// Persist the wallet pubkey (and optional username) to disk so it survives Tauri restarts.
-fn save_persisted_wallet(pubkey: &str, username: Option<&str>) {
-  let path = wallet_cache_path();
-  if let Some(parent) = path.parent() {
-    let _ = std::fs::create_dir_all(parent);
-  }
-  let mut obj = serde_json::json!({ "pubkey": pubkey });
-  if let Some(u) = username {
-    obj["username"] = serde_json::Value::String(u.to_string());
-  }
-  let _ = std::fs::write(&path, obj.to_string());
-}
-
 // ---------------------------------------------------------------------------
 // In-process HTTP bridge — serves /pending, /resolved, /wallet, /hide,
 // and proxies /api/** calls to the Hetzner backend at :8090.
@@ -200,14 +182,6 @@ async fn http_server(
         *s.wallet_username.0.lock().unwrap() = Some(username.clone());
       }
       tracing::info!("[HTTP] Wallet connected: {pk} username={username}");
-      save_persisted_wallet(
-        pk,
-        if username.is_empty() {
-          None
-        } else {
-          Some(&username)
-        },
-      );
     }
     StatusCode::OK
   }
@@ -482,10 +456,6 @@ async fn http_server(
     if let Some(username) = body["username"].as_str() {
       if !username.is_empty() {
         *s.wallet_username.0.lock().unwrap() = Some(username.to_string());
-        // Persist so it survives bridge restart.
-        if let Some(pk) = body["pubkey"].as_str() {
-          save_persisted_wallet(pk, Some(username));
-        }
       }
     }
     StatusCode::OK
@@ -763,24 +733,81 @@ fn open_in_browser(url: &str) {
   }
 }
 
-/// Force-terminate the tracked wallet-popup Chrome process, if any.
+/// Close the wallet-popup window.
+///
+/// This does NOT use the PID `open_in_browser` recorded from `Command::spawn`.
+/// Chrome (and Edge) enforce one process per user-data-dir: if the user
+/// already has a browser window open — normal for almost everyone — our
+/// `--app=` invocation just forwards the request to that *already-running*
+/// process via Chrome's own single-instance IPC and immediately exits, so
+/// the spawned PID we tracked belongs to a process that's already dead by
+/// the time this runs. `TerminateProcess` on it is therefore a silent no-op,
+/// which is exactly the "Continue doesn't close the window" bug.
+///
+/// Deliberately not using an isolated `--user-data-dir` to sidestep that —
+/// the wallet popup depends on the user's real Chrome profile for the
+/// Phantom/Solflare extensions it talks to via `window.phantom`/`window.solflare`;
+/// a fresh profile would have neither installed.
+///
+/// Instead: find the actual top-level window by title (the page is always
+/// titled "XFChess" — see `tauri/wallet-ui/index.html`) whose owning process
+/// is chrome.exe/msedge.exe (never the main game, which is a native window
+/// under `xfchess.exe`, so this can't ever match the wrong "XFChess"-titled
+/// window), and post it a real `WM_CLOSE`.
 #[cfg(windows)]
 fn kill_wallet_popup() {
-  use ::windows::Win32::Foundation::CloseHandle;
-  use ::windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-
-  let Some(pid) = wallet_popup_pid_cell().lock().unwrap().take() else {
-    return;
+  use ::windows::core::BOOL;
+  use ::windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
+  use ::windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION,
   };
-  unsafe {
-    match OpenProcess(PROCESS_TERMINATE, false, pid) {
-      Ok(handle) => {
-        let _ = TerminateProcess(handle, 0);
-        let _ = CloseHandle(handle);
-        tracing::info!("[WalletPopup] terminated chrome pid {pid}");
+  use ::windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowTextW, GetWindowThreadProcessId, PostMessageW, WM_CLOSE,
+  };
+
+  extern "system" fn enum_proc(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+    unsafe {
+      let mut title_buf = [0u16; 256];
+      let len = GetWindowTextW(hwnd, &mut title_buf);
+      if len <= 0 {
+        return BOOL(1); // keep enumerating
       }
-      Err(e) => tracing::warn!("[WalletPopup] failed to open chrome pid {pid} for kill: {e}"),
+      if String::from_utf16_lossy(&title_buf[..len as usize]) != "XFChess" {
+        return BOOL(1);
+      }
+
+      let mut pid: u32 = 0;
+      GetWindowThreadProcessId(hwnd, Some(&mut pid));
+      if pid == 0 {
+        return BOOL(1);
+      }
+
+      if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+        let mut name_buf = [0u16; 260];
+        let mut size = name_buf.len() as u32;
+        let queried = QueryFullProcessImageNameW(
+          handle,
+          PROCESS_NAME_WIN32,
+          ::windows::core::PWSTR(name_buf.as_mut_ptr()),
+          &mut size,
+        )
+        .is_ok();
+        let _ = CloseHandle(handle);
+        if queried {
+          let path = String::from_utf16_lossy(&name_buf[..size as usize]).to_lowercase();
+          if path.ends_with("chrome.exe") || path.ends_with("msedge.exe") {
+            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+            tracing::info!("[WalletPopup] closed popup window (hwnd owned by {path})");
+          }
+        }
+      }
+      BOOL(1) // a stray unrelated "XFChess"-titled window shouldn't stop the search
     }
+  }
+
+  unsafe {
+    let _ = EnumWindows(Some(enum_proc), LPARAM(0));
   }
 }
 

@@ -61,11 +61,13 @@ export default function DeploymentManager() {
       
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
         <ActionCard title="QUICK OPS">
-          <button style={actionButtonStyle}>PING REMOTE TARGET</button>
-          <button style={actionButtonStyle}>RESTART NGINX GATEWAY</button>
-          <button style={actionButtonStyle}>FETCH SERVICE LOGS</button>
+          <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: 0 }}>
+            Ping, restart, and log-tail commands run for real from the <strong>Hetzner Server</strong>
+            tab (live SSH terminal) — this card previously had three buttons here that did nothing
+            when clicked.
+          </p>
         </ActionCard>
-        
+
         <ActionCard title="MONITORING ENDPOINTS">
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             <EndpointRow label="PROMETHEUS" url="http://178.104.55.19:9090" />
@@ -90,20 +92,6 @@ const ActionCard = ({ title, children }: { title: string, children: React.ReactN
     {children}
   </div>
 );
-
-const actionButtonStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.75rem",
-  marginBottom: "8px",
-  backgroundColor: "rgba(255,255,255,0.03)",
-  color: "#fff",
-  border: "1px solid var(--border)",
-  borderRadius: "100px",
-  cursor: "pointer",
-  fontSize: "11px",
-  fontWeight: "700",
-  transition: "all 0.2s ease"
-};
 
 const EndpointRow = ({ label, url }: { label: string, url: string }) => (
   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

@@ -1,6 +1,5 @@
 ﻿import { useState, useEffect, type CSSProperties } from "react";
 import bs58 from "bs58";
-import nacl from "tweetnacl";
 
 // ---------------------------------------------------------------------------
 // REST API bridge � works in Chrome AND Tauri webview
@@ -165,11 +164,6 @@ const KEYFRAMES = `
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 `;
-
-// ---------------------------------------------------------------------------
-// Environment detection
-// ---------------------------------------------------------------------------
-const isTauri = !!(window as any).__TAURI__;
 
 // ---------------------------------------------------------------------------
 // Layout helpers
@@ -610,51 +604,38 @@ function WalletStep({
     solflare: { label: "Solflare", icon: "", installUrl: "https://solflare.com/", provider: () => (window as any).solflare },
   };
 
-  const handleConnect = async (walletName: "phantom" | "solflare" | "hot") => {
+  const handleConnect = async (walletName: "phantom" | "solflare") => {
     setError(null);
-    setConnecting(walletName === "hot" ? null : walletName);
+    setConnecting(walletName);
     try {
       let pubkey: string;
       let provider: any;
-      // Every path (including the local hot wallet) signs to prove key
-      // ownership before we treat the user as logged in — a hot wallet is
-      // just a locally-generated keypair, not an exemption from that.
+      // Always signs to prove key ownership before we treat the user as
+      // logged in — no path (there used to be a "hot" local-keypair option
+      // that self-signed silently, with no wallet popup at all) skips this.
       let signRaw: (msg: string) => Promise<string>;
 
-      if (walletName === "hot") {
-        const kp = web3.Keypair.generate();
-        pubkey = kp.publicKey.toBase58();
-        const secretArr = Array.from(kp.secretKey);
-        sessionStorage.setItem("xfchess_session_key", JSON.stringify(secretArr));
-        signRaw = async (msg: string): Promise<string> => {
-          const bytes = new TextEncoder().encode(msg);
-          const sig = nacl.sign.detached(bytes, kp.secretKey);
-          return bs58.encode(sig);
-        };
-      } else {
-        provider = WALLET_META[walletName].provider();
-        if (!provider) {
-          throw new Error(`${WALLET_META[walletName].label} extension not detected.`);
-        }
-        const resp = await provider.connect();
-        // Phantom: publicKey is on the response object
-        // Solflare: publicKey is on the provider after connect, not on resp
-        pubkey = resp?.publicKey?.toBase58?.()
-          ?? resp?.publicKey?.toString?.()
-          ?? provider.publicKey?.toBase58?.()
-          ?? provider.publicKey?.toString?.();
-        // Signs raw bytes — no "utf8" arg to avoid Phantom>=0.16 off-chain prefix.
-        signRaw = async (msg: string): Promise<string> => {
-          const bytes = new TextEncoder().encode(msg);
-          const { signature: sig } = await provider.signMessage(bytes);
-          return bs58.encode(sig);
-        };
+      provider = WALLET_META[walletName].provider();
+      if (!provider) {
+        throw new Error(`${WALLET_META[walletName].label} extension not detected.`);
       }
+      const resp = await provider.connect();
+      // Phantom: publicKey is on the response object
+      // Solflare: publicKey is on the provider after connect, not on resp
+      pubkey = resp?.publicKey?.toBase58?.()
+        ?? resp?.publicKey?.toString?.()
+        ?? provider.publicKey?.toBase58?.()
+        ?? provider.publicKey?.toString?.();
+      // Signs raw bytes — no "utf8" arg to avoid Phantom>=0.16 off-chain prefix.
+      signRaw = async (msg: string): Promise<string> => {
+        const bytes = new TextEncoder().encode(msg);
+        const { signature: sig } = await provider.signMessage(bytes);
+        return bs58.encode(sig);
+      };
 
       if (!pubkey) throw new Error("No public key returned from wallet");
       localStorage.setItem("xfchess_wallet", pubkey);
       const _walletUsername = localStorage.getItem("xfchess_username") ?? "";
-      await apiPost("/wallet", { pubkey, username: _walletUsername });
 
       // Check registration status first — avoids redundant signing requests.
       const checkResp = await fetch(`${API_BASE}/api/auth/check-wallet/${pubkey}`);
@@ -675,6 +656,14 @@ function WalletStep({
           username: pubkey.slice(0, 8),
         });
       }
+
+      // Only tell the bridge (and thus the game client's /status poll) that
+      // a wallet is "connected" once ownership has been proven by a valid
+      // signature — posting this earlier (e.g. right after provider.connect())
+      // let a rejected sign-message prompt still leave the game client
+      // believing the wallet was connected and unlocking wagered play.
+      await apiPost("/wallet", { pubkey, username: _walletUsername });
+
       onAuth(auth.token, auth.username, pubkey);
 
       onContinue(pubkey, provider ?? null);
@@ -706,17 +695,6 @@ function WalletStep({
       {error && <ErrorMsg msg={error} />}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Hot Wallet Option � Primary for Tauri */}
-        {isTauri && (
-          <button
-            style={{ ...walletBtnStyle, borderColor: PRIMARY_BORDER, background: PRIMARY_DIM }}
-            onClick={() => handleConnect("hot")}
-          >
-            <span style={{ flex: 1 }}>Software Wallet (Hot Wallet)</span>
-            <span style={{ fontSize: 11, color: PRIMARY, fontWeight: 800 }}>RECOMMENDED</span>
-          </button>
-        )}
-
         {(["phantom", "solflare"] as const).map((w) => {
           const meta = WALLET_META[w];
           const isInstalled = !!meta.provider();
@@ -922,7 +900,6 @@ function ProfileStep({
 }: {
   onComplete: (handle: string) => void;
   pubkey?: string | null;
-  isHotWallet?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   walletProvider?: any;
   onClose?: () => void;
@@ -998,65 +975,19 @@ function Onboarding() {
   const [username, setUsername] = useState("Player");
   const [ready, setReady] = useState(false);
   const [pubkey, setPubkey] = useState<string | null>(null);
-  const [path, setPath] = useState<"wallet" | "email" | "hot" | null>(null);
+  const [path, setPath] = useState<"wallet" | "email" | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [walletProvider, setWalletProvider] = useState<any>(null);
 
   useEffect(() => {
+    // Every launch starts at a fresh login — no auto-reconnect to a
+    // previous session, no cached wallet, no skip-straight-to-game. The
+    // bridge's /status + wallet.json used to let a stale in-memory or
+    // on-disk pubkey silently re-launch the game without a new signature,
+    // which also meant a leftover Phantom session could hijack a launch
+    // where the player meant to use Solflare instead. Ownership must be
+    // re-proven (a real signMessage) every single time.
     const init = async () => {
-      // 1. Check if the wallet is already connected from a previous session.
-      try {
-        const status = await apiGet<{ connected: boolean; pubkey: string | null; username: string | null }>("/status");
-        if (status.connected && status.pubkey) {
-          const pk = status.pubkey;
-          setPubkey(pk);
-          setPath("wallet");
-
-          // 2. Resolve profile status directly from the on-chain PlayerProfile
-          // (same source of truth the game client's own profile check uses) —
-          // not a guess from cached/bridge state.
-          const token = localStorage.getItem("xfchess_token");
-          let needsProfile = true;
-          let resolvedUsername: string | null = null;
-
-          if (token) {
-            try {
-              const profileStatus = await fetchProfileStatus(token);
-              const existing = await resolveExistingUsername(token, pk, profileStatus);
-              if (existing) {
-                resolvedUsername = existing;
-                localStorage.setItem("xfchess_username", resolvedUsername);
-                needsProfile = false;
-              }
-            } catch { /* on-chain lookup failed — treat as needing profile */ }
-          }
-
-          // 3. Only show the profile step when we genuinely don't have a name
-          // yet. The game client can force `?step=profile` open (e.g. from
-          // "Wagered PVP", which only checks the on-chain profile), but that
-          // must never override a name we already resolved above — otherwise
-          // a player who already picked a handle gets asked to invent a new
-          // one every time, just because they haven't wagered yet.
-          if (needsProfile) {
-            setReady(true);
-            setStep("profile");
-            return;
-          }
-
-          setUsername(resolvedUsername!);
-
-          // 4. Launch directly — no need to show the wallet flow again.
-          const launchToken = localStorage.getItem("xfchess_token");
-          try {
-            await apiPost("/api/game/launch", { pubkey: pk, hot: false, username: resolvedUsername, token: launchToken });
-          } catch (e) { console.error("[API] auto-launch failed:", e); }
-          setStep("splash");
-          setReady(true);
-          return;
-        }
-      } catch { /* bridge not ready yet or no persisted wallet — fall through */ }
-
-      // 4. No persisted wallet: check consent and show normal flow.
       try {
         const record = await apiGet<ConsentRecord | null>("/api/consent");
         if (record && record.version >= CONSENT_VERSION) {
@@ -1136,7 +1067,7 @@ function Onboarding() {
         setStep("profile");
       } else {
         setStep("splash");
-        handleGameLaunch(nextPubkey, false, resolvedUser);
+        handleGameLaunch(nextPubkey, resolvedUser);
       }
       return;
     }
@@ -1161,15 +1092,17 @@ function Onboarding() {
   const handleProfileComplete = (handle: string) => {
     setUsername(handle);
     setStep("splash");
-    handleGameLaunch(pubkey || "dummy", path === "hot", handle);
+    handleGameLaunch(pubkey || "dummy", handle);
   };
 
-  const handleGameLaunch = async (pk: string, hot: boolean, user: string) => {
+  const handleGameLaunch = async (pk: string, user: string) => {
     const token = localStorage.getItem("xfchess_token");
-    try { 
-      await apiPost("/api/game/launch", { pubkey: pk, hot, username: user, token }); 
-    } catch (e) { 
-      console.error("[API] launch_game failed:", e); 
+    try {
+      // "hot" (guest/local-keypair) launches no longer exist — every launch
+      // is backed by a real wallet that signed to prove ownership.
+      await apiPost("/api/game/launch", { pubkey: pk, hot: false, username: user, token });
+    } catch (e) {
+      console.error("[API] launch_game failed:", e);
     }
   };
 
@@ -1208,7 +1141,6 @@ function Onboarding() {
         <ProfileStep
           onComplete={handleProfileComplete}
           pubkey={pubkey}
-          isHotWallet={path === "hot"}
           walletProvider={walletProvider}
           onClose={closePopup}
           defaultHandle={username !== "Player" ? username : undefined}

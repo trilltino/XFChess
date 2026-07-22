@@ -282,6 +282,10 @@ pub enum GameErrorCode {
 
     #[msg("Not every board has reported a result for the current round yet.")]
     TournamentRoundIncomplete, // advance_round called before all boards are in
+
+    // ── MagicBlock ER undelegation ────────────────────────────────────────────
+    #[msg("Buffer account is not the canonical undelegate-buffer for this account.")]
+    InvalidUndelegationBuffer, // buffer isn't this delegated account's own buffer PDA
 }
 
 // Alias so the rest of the codebase can use either name.

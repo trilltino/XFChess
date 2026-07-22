@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { apiClient } from "../services/api";
 
-interface EvalPoint { move_number: number; eval_cp: number; best_move?: string; played_move?: string; deviation?: number; }
+interface VerdictSide { pubkey: string; verdict: string; score: number; signals: Record<string, number>; }
+interface GameEvalResult { game_id: number; analysed: boolean; analysed_at?: number; white?: VerdictSide; black?: VerdictSide; }
 
 export default function GameExplorer() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -13,10 +14,9 @@ export default function GameExplorer() {
   const [moves, setMoves] = useState<any[]>([]);
   const [scrubberIdx, setScrubberIdx] = useState(0);
   const [archiveStats, setArchiveStats] = useState<any>(null);
-  const [evalData, setEvalData] = useState<EvalPoint[]>([]);
+  const [evalData, setEvalData] = useState<GameEvalResult | null>(null);
   const [evalLoading, setEvalLoading] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
-  const evalRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => { loadArchiveStats(); }, []);
 
@@ -40,7 +40,7 @@ export default function GameExplorer() {
   };
 
   const selectGame = async (game: any) => {
-    setSelectedGame(game); setMoves([]); setScrubberIdx(0); setEvalData([]); setActionMsg(null);
+    setSelectedGame(game); setMoves([]); setScrubberIdx(0); setEvalData(null); setActionMsg(null);
     setLoading(true);
     try {
       const r = await apiClient.getGameMoves(game.id);
@@ -57,7 +57,7 @@ export default function GameExplorer() {
     if (!selectedGame) return;
     setEvalLoading(true);
     const r = await apiClient.getGameEval(selectedGame.id);
-    if (r.ok) setEvalData(r.data.evals || []);
+    if (r.ok && r.data) setEvalData(r.data);
     setEvalLoading(false);
   };
 
@@ -84,7 +84,6 @@ export default function GameExplorer() {
     ? "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     : moves[scrubberIdx - 1]?.fen ?? moves[scrubberIdx - 1]?.position ?? "—";
 
-  const evalMax = evalData.length ? Math.max(...evalData.map(e => Math.abs(e.eval_cp ?? 0)), 500) : 500;
 
   const inputS: React.CSSProperties = {
     background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff",
@@ -254,45 +253,41 @@ export default function GameExplorer() {
               }
             </div>
 
-            {/* Eval graph */}
+            {/* Anti-cheat verdict */}
             <div style={{ backgroundColor: "var(--surface)", borderRadius: "24px", border: "1px solid var(--border)", padding: "1.25rem 1.5rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                <div style={{ fontSize: "11px", color: "var(--primary)", fontWeight: "800", letterSpacing: "1.5px" }}>EVAL DEVIATION GRAPH</div>
+                <div style={{ fontSize: "11px", color: "var(--primary)", fontWeight: "800", letterSpacing: "1.5px" }}>ANTI-CHEAT VERDICT</div>
                 <button onClick={loadEval} style={{ ...inputS, padding: "5px 14px", cursor: "pointer", fontSize: "11px", fontWeight: "700" }} disabled={evalLoading}>
-                  {evalLoading ? "LOADING…" : "LOAD EVAL"}
+                  {evalLoading ? "LOADING…" : "LOAD VERDICT"}
                 </button>
               </div>
-              {evalData.length === 0
-                ? <div style={{ color: "var(--text-dim)", fontStyle: "italic", fontSize: "12px" }}>Click LOAD EVAL to analyze this game.</div>
-                : (() => {
-                  const W = 600; const H = 100;
-                  const pts = evalData.map((e, i) => {
-                    const x = (i / (evalData.length - 1)) * W;
-                    const y = H / 2 - Math.max(-evalMax, Math.min(evalMax, e.eval_cp ?? 0)) / evalMax * (H / 2 - 4);
-                    return `${x},${y}`;
-                  }).join(" ");
-                  const devPts = evalData.map((e, i) => {
-                    const x = (i / (evalData.length - 1)) * W;
-                    const d = Math.min(evalMax, Math.abs(e.deviation ?? 0));
-                    return { x, y: H - d / evalMax * (H / 2 - 4), d: e.deviation ?? 0 };
-                  });
-                  return (
-                    <div>
-                      <svg ref={evalRef} viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: "block", borderRadius: "8px", background: "rgba(0,0,0,0.3)" }}>
-                        <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
-                        <polyline points={pts} fill="none" stroke="var(--primary)" strokeWidth="1.5" />
-                        {devPts.map((p, i) => p.d > 50 && (
-                          <circle key={i} cx={p.x} cy={p.y} r="3" fill={p.d > 150 ? "#ef4444" : "#f59e0b"} opacity="0.8" />
+              {evalData === null
+                ? <div style={{ color: "var(--text-dim)", fontStyle: "italic", fontSize: "12px" }}>Click LOAD VERDICT to check the anti-cheat worker's analysis.</div>
+                : !evalData.analysed
+                ? <div style={{ color: "var(--text-dim)", fontStyle: "italic", fontSize: "12px" }}>Not yet analysed by the anti-cheat worker.</div>
+                : (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                    {([["WHITE", evalData.white], ["BLACK", evalData.black]] as const).map(([label, side]) => side && (
+                      <div key={label} style={{ background: "rgba(0,0,0,0.3)", borderRadius: "12px", padding: "10px 14px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                          <span style={{ fontSize: "10px", color: "var(--text-dim)", fontWeight: "800" }}>{label}</span>
+                          <span style={{ fontSize: "10px", fontWeight: "800", padding: "2px 8px", borderRadius: "100px",
+                            background: side.verdict === "Flag" ? "rgba(239,68,68,0.15)" : side.verdict === "Review" ? "rgba(245,158,11,0.15)" : "rgba(74,222,128,0.15)",
+                            color: side.verdict === "Flag" ? "#ef4444" : side.verdict === "Review" ? "#f59e0b" : "#4ade80" }}>
+                            {side.verdict.toUpperCase()}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "11px", fontFamily: "monospace", color: "var(--text-dim)", marginBottom: "6px" }}>{side.pubkey.slice(0, 10)}…</div>
+                        <div style={{ fontSize: "11px", color: "#fff", marginBottom: "6px" }}>Score: {(side.score * 100).toFixed(0)}%</div>
+                        {Object.entries(side.signals).map(([k, v]) => (
+                          <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--text-dim)" }}>
+                            <span>{k}</span><span>{typeof v === "number" ? v.toFixed(2) : String(v)}</span>
+                          </div>
                         ))}
-                      </svg>
-                      <div style={{ display: "flex", gap: "16px", marginTop: "8px", fontSize: "11px", color: "var(--text-dim)" }}>
-                        <span><span style={{ color: "#ef4444" }}>●</span> Blunder (&gt;150cp)</span>
-                        <span><span style={{ color: "#f59e0b" }}>●</span> Mistake (50-150cp)</span>
-                        <span>Highest dev: {Math.max(...evalData.map(e => Math.abs(e.deviation ?? 0))).toFixed(0)} cp</span>
                       </div>
-                    </div>
-                  );
-                })()
+                    ))}
+                  </div>
+                )
               }
             </div>
           </div>

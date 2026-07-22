@@ -170,7 +170,7 @@ pub fn finalize_game_ix(
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(treasury_vault, false),
             AccountMeta::new(*fee_payer, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }
@@ -248,7 +248,7 @@ pub fn claim_fees_ix(program_id: &Pubkey, caller: &Pubkey, host_wallet: &Pubkey)
             AccountMeta::new(*caller, true),
             AccountMeta::new(fee_vault_pda, false),
             AccountMeta::new(*host_wallet, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }
@@ -278,7 +278,7 @@ pub fn withdraw_treasury_ix(
             AccountMeta::new(treasury_vault, false),
             AccountMeta::new(*authority, true),
             AccountMeta::new(*destination, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }
@@ -336,7 +336,7 @@ pub fn leave_tournament_ix(
             shard(3),
             AccountMeta::new(*player, true),
             AccountMeta::new(escrow_pda, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }
@@ -424,7 +424,7 @@ pub fn initialize_tournament_ix(
             AccountMeta::new(*admin, true),
             AccountMeta::new_readonly(token_program, false),
             AccountMeta::new_readonly(associated_token_program, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }
@@ -455,7 +455,7 @@ pub fn initialize_escrow_ix(
             AccountMeta::new_readonly(tournament_pda, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(*authority, true),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
             AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
         ],
         data,
@@ -507,7 +507,7 @@ pub fn initialize_shards_ix(
                 AccountMeta::new_readonly(tournament_pda, false),
                 AccountMeta::new(shard(0), false),
                 AccountMeta::new(*authority, true),
-                AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                AccountMeta::new_readonly(solana_system_interface::program::id(), false),
                 AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
             ]
         } else if max_players <= 128 {
@@ -516,7 +516,7 @@ pub fn initialize_shards_ix(
                 AccountMeta::new(shard(0), false),
                 AccountMeta::new(shard(1), false),
                 AccountMeta::new(*authority, true),
-                AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                AccountMeta::new_readonly(solana_system_interface::program::id(), false),
                 AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
             ]
         } else {
@@ -527,7 +527,7 @@ pub fn initialize_shards_ix(
                 AccountMeta::new(shard(2), false),
                 AccountMeta::new(shard(3), false),
                 AccountMeta::new(*authority, true),
-                AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                AccountMeta::new_readonly(solana_system_interface::program::id(), false),
                 AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
             ]
         },
@@ -625,8 +625,90 @@ pub fn start_tournament_ix(
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(*host_treasury, false),
             AccountMeta::new(*authority, true),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
+        data,
+    }
+}
+
+/// Builds a `cancel_tournament` instruction.
+/// Halts a Registration- or Active-phase tournament: refunds entry fees to
+/// `players` (from escrow during Registration, from `host_treasury` if the
+/// tournament already started and swept fees there) and returns the
+/// guaranteed SOL prize to the operator. `players` must be passed in the
+/// same order they were registered on-chain — the handler matches each
+/// remaining account positionally against the shard-recorded player list.
+/// Shard PDAs absent for this tournament size are passed as the program ID
+/// (Anchor's `None` marker), matching `start_tournament_ix`. USDC prize
+/// accounts are also passed as the program ID — this builder only supports
+/// SOL-only tournaments, matching `initialize_tournament_ix`'s default.
+pub fn cancel_tournament_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+    authority: &Pubkey,
+    host_treasury: &Pubkey,
+    players: &[Pubkey],
+) -> Instruction {
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    )
+    .0;
+    let usdc_prize_escrow_authority = Pubkey::find_program_address(
+        &[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    )
+    .0;
+    let token_program: Pubkey = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        .parse()
+        .expect("spl token id");
+
+    let present = required_shards(max_players);
+    let shard = |idx: u8| {
+        if idx < present {
+            let pda = Pubkey::find_program_address(
+                &[
+                    TOURNAMENT_PLAYERS_SEED,
+                    &[idx],
+                    &tournament_id.to_le_bytes(),
+                ],
+                program_id,
+            )
+            .0;
+            AccountMeta::new_readonly(pda, false)
+        } else {
+            AccountMeta::new_readonly(*program_id, false)
+        }
+    };
+
+    let mut data = anchor_discriminator("cancel_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    let mut accounts = vec![
+        AccountMeta::new(tournament_pda, false),
+        shard(0),
+        shard(1),
+        shard(2),
+        shard(3),
+        AccountMeta::new_readonly(usdc_prize_escrow_authority, false),
+        AccountMeta::new_readonly(*program_id, false), // usdc_prize_escrow: None
+        AccountMeta::new_readonly(*program_id, false), // operator_usdc_ata: None
+        AccountMeta::new_readonly(*program_id, false), // usdc_mint: None
+        AccountMeta::new(escrow_pda, false),
+        AccountMeta::new(*host_treasury, true),
+        AccountMeta::new(*authority, true),
+        AccountMeta::new_readonly(token_program, false),
+        AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+    ];
+    accounts.extend(players.iter().map(|p| AccountMeta::new(*p, false)));
+
+    Instruction {
+        program_id: *program_id,
+        accounts,
         data,
     }
 }
@@ -661,7 +743,7 @@ pub fn fund_sol_prize_ix(
             AccountMeta::new(tournament_pda, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(*operator, true),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }
@@ -773,7 +855,7 @@ pub fn initialize_match_ix(
             AccountMeta::new(tournament_pda, false),
             AccountMeta::new(match_pda, false),
             AccountMeta::new(*authority, true),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }
@@ -900,7 +982,7 @@ pub fn claim_prize_ix(program_id: &Pubkey, tournament_id: u64, claimant: &Pubkey
                     .expect("spl token id"),
                 false,
             ),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }

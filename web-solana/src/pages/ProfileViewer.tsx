@@ -37,10 +37,14 @@ interface SignupFormProps {
   setEmail: (v: string) => void;
   country: string;
   setCountry: (v: string) => void;
+  dob: string;
+  setDob: (v: string) => void;
   usernameError: string | null;
   setUsernameError: (v: string | null) => void;
   emailError: string | null;
   setEmailError: (v: string | null) => void;
+  dobError: string | null;
+  setDobError: (v: string | null) => void;
   creationLoading: boolean;
   handleCreateProfile: (e: React.FormEvent) => void;
 }
@@ -63,6 +67,19 @@ const validateEmail = (email: string): string | null => {
   return null;
 };
 
+// Mirrors the on-chain 18+ gate in programs/xfchess-game/src/account_ix/profile.rs
+// (EIGHTEEN_YEARS_SECS) — checked client-side too so an underage entry fails here
+// instead of burning a transaction on an on-chain UnderagePlayer rejection.
+const validateDob = (dob: string): string | null => {
+  if (!dob) return 'Date of birth is required';
+  const dobDate = new Date(`${dob}T00:00:00Z`);
+  if (Number.isNaN(dobDate.getTime())) return 'Enter a valid date';
+  const eighteenYearsAgo = new Date();
+  eighteenYearsAgo.setUTCFullYear(eighteenYearsAgo.getUTCFullYear() - 18);
+  if (dobDate > eighteenYearsAgo) return 'You must be 18 or older to create an account';
+  return null;
+};
+
 function SignupForm({
   newUsername,
   setNewUsername,
@@ -70,10 +87,14 @@ function SignupForm({
   setEmail,
   country,
   setCountry,
+  dob,
+  setDob,
   usernameError,
   setUsernameError,
   emailError,
   setEmailError,
+  dobError,
+  setDobError,
   creationLoading,
   handleCreateProfile,
 }: SignupFormProps) {
@@ -87,6 +108,11 @@ function SignupForm({
   const handleEmailChange = (value: string) => {
     setEmail(value);
     setEmailError(validateEmail(value));
+  };
+
+  const handleDobChange = (value: string) => {
+    setDob(value);
+    setDobError(validateDob(value));
   };
 
   // Debounced backend uniqueness check (500ms after user stops typing)
@@ -105,7 +131,8 @@ function SignupForm({
     return () => clearTimeout(timer);
   }, [newUsername, setUsernameError]);
 
-  const isFormValid = !usernameError && !emailError && newUsername && email && country && !checkingUsername;
+  const isFormValid =
+    !usernameError && !emailError && !dobError && newUsername && email && country && dob && !checkingUsername;
 
   return (
     <form
@@ -167,6 +194,36 @@ function SignupForm({
         </select>
       </div>
 
+      {/* Date of birth field with validation (on-chain 18+ gate) */}
+      <div style={{ marginBottom: '12px' }}>
+        <input
+          type="date"
+          value={dob}
+          onChange={(e) => handleDobChange(e.target.value)}
+          required
+          max={new Date().toISOString().slice(0, 10)}
+          style={{
+            ...inputStyle,
+            borderColor: dobError ? '#ff4444' : dob ? '#ffffff' : 'var(--border)',
+            width: '100%',
+            textAlign: 'center',
+            colorScheme: 'dark',
+          }}
+        />
+        {dobError && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ff4444', justifyContent: 'center' }}>
+            <AlertCircle size={14} />
+            {dobError}
+          </div>
+        )}
+        {!dobError && dob && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ffffff', justifyContent: 'center' }}>
+            <CheckCircle2 size={14} />
+            Date of birth confirmed
+          </div>
+        )}
+      </div>
+
       {/* Email field with validation */}
       <div style={{ marginBottom: '12px' }}>
         <input
@@ -225,9 +282,11 @@ export function ProfileViewer() {
   const [newUsername, setNewUsername] = useState('');
   const [email, setEmail] = useState('');
   const [country, setCountry] = useState('');
+  const [dob, setDob] = useState('');
   const [creationLoading, setCreationLoading] = useState(false);
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [dobError, setDobError] = useState<string | null>(null);
 
   // Verification state
   const [status, setStatus] = useState<UserStatus | null>(null);
@@ -304,6 +363,11 @@ export function ProfileViewer() {
   const handleCreateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!wallet.connected || !wallet.publicKey || !wallet.signMessage) return;
+    const dobValidationError = validateDob(dob);
+    if (dobValidationError) {
+      setDobError(dobValidationError);
+      return;
+    }
     setCreationLoading(true);
     setError(null);
     try {
@@ -315,9 +379,13 @@ export function ProfileViewer() {
         return;
       }
 
-      // 2. Create on-chain Anchor profile
+      // 2. Create on-chain Anchor profile. dobTimestamp is Unix seconds at UTC
+      // midnight of the entered date — the program enforces its own 18+ check
+      // (account_ix/profile.rs) so this only needs to be a faithful timestamp,
+      // not re-validated here.
+      const dobTimestamp = Math.floor(new Date(`${dob}T00:00:00Z`).getTime() / 1000);
       const program = getAnchorProgram(connection, wallet);
-      await createPlayerProfile(program, wallet.publicKey, newUsername, country, 0);
+      await createPlayerProfile(program, wallet.publicKey, newUsername, country, dobTimestamp);
 
       // 3. Register in backend DB (wallet signature proves ownership, no password)
       const timestamp = Math.floor(Date.now() / 1000);
@@ -432,10 +500,14 @@ export function ProfileViewer() {
             setEmail={setEmail}
             country={country}
             setCountry={setCountry}
+            dob={dob}
+            setDob={setDob}
             usernameError={usernameError}
             setUsernameError={setUsernameError}
             emailError={emailError}
             setEmailError={setEmailError}
+            dobError={dobError}
+            setDobError={setDobError}
             creationLoading={creationLoading}
             handleCreateProfile={handleCreateProfile}
           />
@@ -638,6 +710,10 @@ export function ProfileViewer() {
           onSuccess={() => {
             setKycOpen(false);
             refreshStatus();
+            // Nudges the nav bar's "Complete KYC" pill (App.tsx) to refetch —
+            // it has its own independent status fetch tied to wallet connect,
+            // not to this page's local `status` state.
+            window.dispatchEvent(new Event('xfchess:kyc-updated'));
           }}
         />
       )}

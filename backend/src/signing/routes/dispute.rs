@@ -273,7 +273,7 @@ async fn submit_resolve_dispute_tx(
         AccountMeta::new(white, false),
         AccountMeta::new(black, false),
         AccountMeta::new(treasury_vault, false),
-        AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        AccountMeta::new_readonly(solana_system_interface::program::id(), false),
     ];
 
     let ix = Instruction {

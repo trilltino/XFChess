@@ -4,9 +4,9 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signer},
-    system_instruction,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use std::fs;
 use std::path::Path;
 
@@ -19,7 +19,7 @@ pub fn load_or_generate_master_keypair() -> anyhow::Result<Keypair> {
     if path.exists() {
         let data = fs::read_to_string(path)?;
         let bytes: Vec<u8> = serde_json::from_str(&data)?;
-        let keypair = Keypair::from_bytes(&bytes)?;
+        let keypair = Keypair::try_from(bytes.as_slice())?;
         println!("   Loaded existing master keypair: {}", keypair.pubkey());
         return Ok(keypair);
     }
@@ -49,7 +49,7 @@ pub fn generate_child_keypairs(count: usize) -> Vec<Keypair> {
             if let Ok(arr) = serde_json::from_str::<Vec<Vec<u8>>>(&data) {
                 let keypairs: Vec<Keypair> = arr
                     .iter()
-                    .filter_map(|b| Keypair::from_bytes(b).ok())
+                    .filter_map(|b| Keypair::try_from(b.as_slice()).ok())
                     .collect();
                 if keypairs.len() == count {
                     println!(

@@ -3,7 +3,9 @@
 //! Provides cached SOL rates for multiple fiat currencies (USD, GBP, EUR, CAD, BRL)
 //! so the frontend can display accurate wager tiers and dashboard metrics.
 
-use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
+use axum::{
+    extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router,
+};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -92,6 +94,9 @@ impl RateCache {
 async fn fetch_sol_rates_from_coingecko() -> Result<HashMap<String, f64>, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
+        // CoinGecko's public API 403s any request without a descriptive
+        // User-Agent (reqwest sends none by default).
+        .user_agent("XFChess-Backend/1.0 (+https://xfchess.com)")
         .build()
         .map_err(|e| format!("http client: {e}"))?;
 
@@ -215,7 +220,7 @@ pub struct ExchangeRatesResponse {
 /// GET /api/rates/all — cached SOL exchange rates for multiple currencies.
 async fn get_all_rates(
     State(app_state): State<crate::signing::AppState>,
-) -> Result<Json<ExchangeRatesResponse>, StatusCode> {
+) -> axum::response::Response {
     match app_state.rate_cache.get().await {
         Ok(rates) => {
             let mut sol_per_fiat = HashMap::new();
@@ -223,18 +228,28 @@ async fn get_all_rates(
                 sol_per_fiat.insert(currency.clone(), 1.0 / rate);
             }
 
-            Ok(Json(ExchangeRatesResponse {
+            Json(ExchangeRatesResponse {
                 rates,
                 sol_per_fiat,
                 fetched_at: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64,
-            }))
+            })
+            .into_response()
         }
         Err(e) => {
             error!("[RATES] Failed to fetch rates: {}", e);
-            Err(StatusCode::SERVICE_UNAVAILABLE)
+            // Surface the underlying fetch error in the body — callers (the
+            // game client, this admin panel) log the response body verbatim
+            // on a non-2xx status, so this is the only way to see *why* the
+            // upstream fetch failed without direct access to this process's
+            // own console.
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": e })),
+            )
+                .into_response()
         }
     }
 }

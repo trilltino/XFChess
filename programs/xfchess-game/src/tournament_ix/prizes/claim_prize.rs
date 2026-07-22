@@ -103,7 +103,7 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
                 &[&[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump]]];
             token::transfer(
                 CpiContext::new_with_signer(
-                    ctx.accounts.token_program.to_account_info(),
+                    Token::id(),
                     Transfer {
                         from: usdc_prize_escrow.to_account_info(),
                         to: claimant_usdc_ata.to_account_info(),

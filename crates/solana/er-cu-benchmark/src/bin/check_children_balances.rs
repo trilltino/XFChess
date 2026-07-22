@@ -1,5 +1,5 @@
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::signature::{Keypair, Signer};
 use std::fs;
 
@@ -16,7 +16,7 @@ fn main() {
         if bytes.len() != 64 {
             continue;
         }
-        let kp = Keypair::from_bytes(bytes).unwrap();
+        let kp = Keypair::try_from(bytes.as_slice()).unwrap();
         let bal = rpc.get_balance(&kp.pubkey()).unwrap_or(0);
         if bal > 0 {
             total += bal;

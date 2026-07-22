@@ -6,7 +6,7 @@
 use anyhow::Result;
 use solana_client::rpc_client::RpcClient;
 #[allow(deprecated)]
-use solana_sdk::system_program;
+use solana_system_interface::program as system_program;
 use solana_sdk::{
     instruction::Instruction,
     pubkey::Pubkey,

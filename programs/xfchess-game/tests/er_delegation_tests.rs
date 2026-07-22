@@ -120,6 +120,48 @@ async fn undelegate_rejects_not_delegated_game_before_cpi() {
     );
 }
 
+/// MagicBlock advisory (2026-07-22): `ephemeral_rollups_sdk::cpi::undelegate_account`
+/// (SDK <= 0.16.1) checked `buffer` was a signer owned by the delegation program,
+/// but never that it was *this account's own* buffer — any delegation-owned signer
+/// buffer was accepted, letting an attacker substitute a manufactured buffer from
+/// their own delegated account to overwrite someone else's restored account data.
+/// We replicate the fix (see `magicblock::delegation::undelegate_buffer_pda`) since
+/// bumping the SDK to 0.16.2 isn't possible yet (dependency ceiling — see
+/// docs/MAGICBLOCK_INTEGRATION.md). This asserts a non-canonical buffer is rejected
+/// before the CPI runs, no live ER or external program required.
+#[tokio::test]
+async fn process_undelegation_rejects_non_canonical_buffer() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+
+    let mut ctx = start(vec![game_account(
+        GAME_ID,
+        white,
+        black,
+        start_board(),
+        1,
+        0,
+        GameStatus::Active,
+    )])
+    .await;
+
+    let payer = ctx.payer.pubkey();
+    let spoofed_buffer = Pubkey::new_unique(); // not the canonical undelegate-buffer PDA
+    let ix = process_undelegation_ix(
+        GAME_ID,
+        payer,
+        spoofed_buffer,
+        vec![b"game".to_vec(), GAME_ID.to_le_bytes().to_vec()],
+    );
+
+    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(xfchess_game::errors::GameErrorCode::InvalidUndelegationBuffer)),
+        "a buffer that isn't this account's canonical undelegate-buffer PDA must be rejected"
+    );
+}
+
 #[tokio::test]
 async fn resign_mutates_only_game_even_when_delegated() {
     let white = Keypair::new();

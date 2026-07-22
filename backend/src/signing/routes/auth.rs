@@ -671,9 +671,9 @@ async fn init_profile_tx(
     use base64::Engine as _;
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
-        system_program,
         transaction::Transaction,
     };
+    use solana_system_interface::program as system_program;
 
     // Validate JWT → wallet pubkey
     let wallet = authed_wallet(&state, &headers).await?;
@@ -795,9 +795,9 @@ async fn init_profile_sponsored_tx(
         instruction::{AccountMeta, Instruction},
         message::Message,
         signature::Signer as _,
-        system_instruction, system_program,
         transaction::Transaction,
     };
+    use solana_system_interface::{instruction as system_instruction, program as system_program};
 
     let wallet = authed_wallet(&state, &headers).await?;
     let wallet_pk = Pubkey::from_str(&wallet).map_err(|_| {
@@ -953,7 +953,7 @@ async fn broadcast_tx(
     use base64::engine::general_purpose;
     use base64::Engine as _;
     use solana_client::rpc_config::RpcSendTransactionConfig;
-    use solana_sdk::commitment_config::CommitmentConfig;
+    use solana_commitment_config::CommitmentConfig;
     use solana_sdk::transaction::Transaction;
 
     let tx_bytes = general_purpose::STANDARD

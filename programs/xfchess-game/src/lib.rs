@@ -422,6 +422,14 @@ pub mod xfchess_game {
             &ctx.accounts.payer,
             &ctx.accounts.system_program,
         ];
+        // Reject a buffer that isn't this specific account's own canonical
+        // undelegate-buffer PDA — see magicblock::delegation::undelegate_buffer_pda
+        // for why this check can't be left to the SDK yet.
+        require_keys_eq!(
+            buffer.key(),
+            crate::magicblock::delegation::undelegate_buffer_pda(delegated_account.key),
+            crate::errors::GameErrorCode::InvalidUndelegationBuffer
+        );
         undelegate_account(
             delegated_account,
             &id(),
@@ -575,15 +583,15 @@ pub mod xfchess_game {
         crate::tournament_ix::prizes::claim_prize::handler(ctx, tournament_id)
     }
 
-    pub fn distribute_tournament_prizes<'a, 'b, 'c, 'info>(
-        ctx: Context<'a, 'b, 'c, 'info, DistributeTournamentPrizes<'info>>,
+    pub fn distribute_tournament_prizes<'info>(
+        ctx: Context<'info, DistributeTournamentPrizes<'info>>,
         tournament_id: u64,
     ) -> Result<()> {
         crate::tournament_ix::prizes::distribute::handler(ctx, tournament_id)
     }
 
-    pub fn cancel_tournament<'a, 'b, 'c, 'info>(
-        ctx: Context<'a, 'b, 'c, 'info, CancelTournament<'info>>,
+    pub fn cancel_tournament<'info>(
+        ctx: Context<'info, CancelTournament<'info>>,
         tournament_id: u64,
     ) -> Result<()> {
         crate::tournament_ix::lifecycle::cancel::handler(ctx, tournament_id)

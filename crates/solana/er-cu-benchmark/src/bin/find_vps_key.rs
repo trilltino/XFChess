@@ -28,7 +28,7 @@ fn main() {
         if bytes.len() != 64 {
             continue;
         }
-        let kp = match Keypair::from_bytes(&bytes) {
+        let kp = match Keypair::try_from(bytes.as_slice()) {
             Ok(k) => k,
             Err(_) => continue,
         };

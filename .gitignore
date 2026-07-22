@@ -80,6 +80,9 @@ tauri/target/
 *.sqlite
 *.sqlite3
 
+# Backend runtime data (e.g. subscriber emails) — never commit live user data
+backend/data/
+
 # Runtime / process state
 *.pid
 .backend.pid

@@ -1241,7 +1241,7 @@ pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
                 return (sk, arr);
             }
         }
-        let sk = SecretKey::generate(&mut rand::rng());
+        let sk = SecretKey::generate();
         let bytes = sk.to_bytes();
         let _ = std::fs::write(&key_file, bytes);
         return (sk, bytes);

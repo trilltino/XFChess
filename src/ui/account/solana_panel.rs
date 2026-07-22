@@ -139,9 +139,14 @@ pub fn render_solana_panel(
                 });
 
                 ui.add_space(5.0);
-                let backend_url = std::env::var("BACKEND_URL")
-                    .unwrap_or_else(|_| "http://178.104.55.19".to_string());
-                let profile_url = format!("{}/profile", backend_url);
+                // XFCHESS_WEB_URL points at the web frontend (React SPA), not
+                // BACKEND_URL (the JSON API server) — that mismatch used to send
+                // this button to the API's bare domain, which serves no /profile
+                // page. Same fix as the "Web ↗" button below and the working
+                // precedent in main_menu/new_menu.rs's "XFChess.com" link.
+                let web_url = std::env::var("XFCHESS_WEB_URL")
+                    .unwrap_or_else(|_| "https://xfchess.com".to_string());
+                let profile_url = format!("{}/profile", web_url);
                 if ui.button("Complete at xfchess.gg/profile ?").clicked() {
                     let _ = webbrowser::open(&profile_url);
                 }
@@ -226,9 +231,9 @@ pub fn render_solana_panel(
                 if ui.button("View Profile").clicked() {
                     *profile_view_open = true;
                 }
-                let backend_url = std::env::var("BACKEND_URL")
-                    .unwrap_or_else(|_| "http://178.104.55.19".to_string());
-                let profile_url = format!("{}/profile", backend_url);
+                let web_url = std::env::var("XFCHESS_WEB_URL")
+                    .unwrap_or_else(|_| "https://xfchess.com".to_string());
+                let profile_url = format!("{}/profile", web_url);
                 if ui.small_button("Web ↗").clicked() {
                     let _ = webbrowser::open(&profile_url);
                 }

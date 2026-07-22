@@ -15,7 +15,7 @@ pub async fn initiate_game_on_chain(
     wager_amount: u64,
 ) -> Result<u64, String> {
     use crate::solana::instructions::create_game_ix;
-    use rand::Rng;
+    use rand::RngExt;
 
     let mut rng = rand::rng();
     let game_id: u64 = rng.random();

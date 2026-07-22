@@ -4,7 +4,7 @@
 [![Discord](https://img.shields.io/badge/Discord-Join-purple.svg)](https://discord.gg/erZJCPCm)
 [![GitHub Stars](https://img.shields.io/github/stars/trilltino/XFChess?style=social)](https://github.com/trilltino/XFChess/stargazers)
 
-**[MagicBlock Integration](MAGICBLOCK.md)** · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Environment Guide](docs/ENVIRONMENTS.md) · [Runbooks](docs/runbooks/)
+**[Install](docs/INSTALL.md)** · **[MagicBlock Integration](MAGICBLOCK.md)** · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Environment Guide](docs/ENVIRONMENTS.md) · [Runbooks](docs/runbooks/)
 
 XFChess is a forever-free, open source 3D chess platform built with Rust, Bevy, Solana, MagicBlock, and Iroh/Braid networking. It supports local play, online multiplayer, tournaments, Solana-backed game state, wager escrow, session keys, spectators, and observability tooling.
 
@@ -14,6 +14,7 @@ XFChess is a forever-free, open source 3D chess platform built with Rust, Bevy, 
 
 ## Docs
 
+- [Install (Windows/macOS/Linux)](docs/INSTALL.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)

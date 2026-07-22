@@ -6,7 +6,7 @@
 
 use braid_core::Update;
 
-use iroh::{protocol::Router, Endpoint, EndpointAddr, EndpointId, SecretKey};
+use iroh::{endpoint::presets, protocol::Router, Endpoint, EndpointAddr, EndpointId, SecretKey};
 use iroh_gossip::api::GossipReceiver;
 use iroh_gossip::net::Gossip;
 use std::collections::HashMap;
@@ -124,7 +124,7 @@ impl BraidIrohNode {
     /// accepting incoming connections.
     pub async fn spawn(config: BraidIrohConfig) -> anyhow::Result<Self> {
         // 1. Build the iroh endpoint with discovery + Braid ALPN
-        let mut builder = Endpoint::builder().alpns(vec![
+        let mut builder = Endpoint::builder(presets::N0).alpns(vec![
             BRAID_H3_ALPN.to_vec(),
             iroh_gossip::net::GOSSIP_ALPN.to_vec(),
         ]);
@@ -140,8 +140,8 @@ impl BraidIrohNode {
                 builder = builder.address_lookup(map);
             }
             DiscoveryConfig::Real => {
-                // Default Iroh discovery is already enabled by default in Endpoint::builder()
-                // unless we override it. So we do nothing here.
+                // The N0 preset above already wires up DNS + Pkarr discovery,
+                // so there's nothing more to add here.
             }
         }
 

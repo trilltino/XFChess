@@ -12,14 +12,14 @@
 
 use anyhow::{bail, Context, Result};
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    system_instruction,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 
 use super::instructions::{
     advance_winner_ix, bracket_position, fund_sol_prize_ix, init_profile_ix, initialize_escrow_ix,
@@ -306,5 +306,5 @@ fn push_step(steps: &mut Vec<StepLog>, step: &str, sig: &str) {
 pub fn load_keypair(path: &str) -> Result<Keypair> {
     let data = std::fs::read(path).with_context(|| format!("reading keypair {path}"))?;
     let bytes: Vec<u8> = serde_json::from_slice(&data)?;
-    Keypair::from_bytes(&bytes).map_err(|e| anyhow::anyhow!("bad keypair {path}: {e}"))
+    Keypair::try_from(bytes.as_slice()).map_err(|e| anyhow::anyhow!("bad keypair {path}: {e}"))
 }

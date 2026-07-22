@@ -109,6 +109,9 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
   const [bulkRegistering, setBulkRegistering] = useState(false);
 
   const [escrowBalance, setEscrowBalance] = useState<{ balance_sol: number } | null>(null);
+  const [fundAmountSol, setFundAmountSol] = useState("");
+  const [fundingPrize, setFundingPrize] = useState(false);
+  const [fundPrizeMsg, setFundPrizeMsg] = useState<string | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [savedTemplates] = useState<Record<string, any>>(loadTemplates);
 
@@ -145,12 +148,12 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     if (isNaN(mins) || mins <= 0) return;
     setSettingDeadline(true);
     const deadlineAt = Math.floor(Date.now() / 1000) + mins * 60;
-    const r = await fetch(`${apiClient.getBaseUrl()}/admin/tournament/${tournamentId}/set-round-deadline`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${localStorage.getItem("admin_token") ?? ""}` },
-      body: JSON.stringify({ deadline_at: deadlineAt }),
-    });
-    if (r.ok) setRoundDeadlineAt(deadlineAt);
+    const r = await apiClient.setRoundDeadline(tournamentId, deadlineAt);
+    if (r.ok) {
+      setRoundDeadlineAt(deadlineAt);
+    } else {
+      setAdvanceMsg(`Error setting deadline: ${r.error?.message || r.error?.status}`);
+    }
     setSettingDeadline(false);
   };
 
@@ -171,7 +174,8 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     setStartingSwiss(true); setStartSwissMsg(null);
     const r = await apiClient.initializeSwiss(tournamentId);
     if (r.ok) {
-      setStartSwissMsg(`Round 1 started — ${r.data?.players ?? "?"} players, ${r.data?.rounds ?? "?"} rounds.`);
+      const chainNote = r.data?.on_chain_start_queued ? " On-chain start submitted (confirming in background)." : " WARNING: on-chain start could not be queued — check backend logs.";
+      setStartSwissMsg(`Round 1 started — ${r.data?.players ?? "?"} players, ${r.data?.rounds ?? "?"} rounds.${chainNote}`);
       await loadTournament(); await loadBracket();
     } else {
       setStartSwissMsg(`Error: ${r.error?.status === 409 ? "Not enough players." : r.error?.message || "Failed."}`);
@@ -241,6 +245,21 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     await loadTournament();
   };
 
+  const handleFundPrize = async () => {
+    const sol = parseFloat(fundAmountSol);
+    if (isNaN(sol) || sol <= 0) return;
+    setFundingPrize(true); setFundPrizeMsg(null);
+    const r = await apiClient.fundTournamentPrize(tournamentId, Math.round(sol * 1e9));
+    if (r.ok && r.data) {
+      setFundPrizeMsg(`Locked ${sol} SOL. Tx: ${r.data.signature}`);
+      setFundAmountSol("");
+      await loadTournament();
+    } else {
+      setFundPrizeMsg(`Error: ${r.error?.message || r.error?.status}`);
+    }
+    setFundingPrize(false);
+  };
+
   const copyBlinkUrl = async () => {
     const url = `https://dial.to/?action=solana-action:${apiClient.getBaseUrl().replace("http://", "https://")}/api/actions/tournament/${tournament?.tournament_id}`;
     await navigator.clipboard.writeText(url).catch(() => {});
@@ -278,6 +297,23 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
             <Row label="PLATFORM CUT" value={fmt(tournament.platform_fee_lamports || 0)} color="var(--text-dim)" />
             <Row label="PRIZE POOL" value={fmt(tournament.prize_pool || 0)} color="var(--accent)" />
             {escrowBalance != null && <Row label="ESCROW LIVE" value={`${escrowBalance.balance_sol.toFixed(4)} SOL`} color="#4ade80" />}
+            {tournament.status === "Registration" && tournament.players.length === 0 && !tournament.prize_pool && (
+              <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
+                <div style={{ fontSize: "10px", color: "#f87171", marginBottom: "8px", fontWeight: "800" }}>
+                  ⚠ PRIZE NOT FUNDED — registration will fail on-chain until locked
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input type="number" step="0.0001" min="0" value={fundAmountSol} onChange={e => setFundAmountSol(e.target.value)}
+                    placeholder="Guaranteed prize (SOL)…"
+                    style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "6px 10px", fontSize: "12px" }} />
+                  <button onClick={handleFundPrize} disabled={fundingPrize || !fundAmountSol}
+                    style={{ padding: "6px 14px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer", opacity: fundingPrize ? 0.6 : 1 }}>
+                    {fundingPrize ? "LOCKING…" : "FUND PRIZE"}
+                  </button>
+                </div>
+                {fundPrizeMsg && <div style={{ marginTop: "6px", fontSize: "11px", color: fundPrizeMsg.startsWith("Error") ? "#f87171" : "#4ade80", wordBreak: "break-all" }}>{fundPrizeMsg}</div>}
+              </div>
+            )}
             {tournament.prize_shares && (
               <div style={{ marginTop: "1rem" }}>
                 <div style={{ fontSize: "10px", color: "var(--text-dim)", marginBottom: "8px", fontWeight: "800" }}>DISTRIBUTION</div>
@@ -389,14 +425,11 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
                 const file = e.target.files?.[0]; if (!file) return;
                 const text = await file.text();
                 setBulkRegistering(true);
-                const r = await fetch(`${apiClient.getBaseUrl()}/admin/tournament/${tournamentId}/import-players-csv`, {
-                  method: "POST",
-                  headers: { "Content-Type": "text/plain", "Authorization": `Bearer ${localStorage.getItem("admin_token") ?? ""}` },
-                  body: text,
-                });
-                const json = r.ok ? await r.json() : null;
-                if (json?.results) {
-                  setBulkRegisterResults(json.results.map((row: any) => ({ wallet: row.player, ok: row.status === "added", msg: row.status === "added" ? "Added" : "Already registered" })));
+                const r = await apiClient.importPlayersCsv(tournamentId, text);
+                if (r.ok && r.data?.results) {
+                  setBulkRegisterResults(r.data.results.map((row) => ({ wallet: row.player, ok: row.status === "added", msg: row.status === "added" ? "Added" : "Already registered" })));
+                } else {
+                  setBulkRegisterResults([{ wallet: "", ok: false, msg: `Import failed: ${r.error?.message || r.error?.status}` }]);
                 }
                 setBulkRegistering(false);
                 await loadTournament();

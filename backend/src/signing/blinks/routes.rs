@@ -394,7 +394,7 @@ async fn confirm_registration(
     let rpc_url = state.config.solana_rpc_url.clone();
     let confirmed = tokio::task::spawn_blocking(move || {
         use crate::signing::solana::make_rpc;
-        use solana_sdk::commitment_config::CommitmentConfig;
+        use solana_commitment_config::CommitmentConfig;
         let rpc = make_rpc(&rpc_url);
         for _ in 0..30 {
             match rpc.get_signature_status_with_commitment(&sig, CommitmentConfig::confirmed()) {

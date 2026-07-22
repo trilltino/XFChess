@@ -1,8 +1,8 @@
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::signature::{Keypair, Signer};
-use solana_sdk::system_instruction;
 use solana_sdk::transaction::Transaction;
+use solana_system_interface::instruction as system_instruction;
 use std::fs;
 
 fn main() {
@@ -13,13 +13,13 @@ fn main() {
 
     let deployer_bytes: Vec<u8> =
         serde_json::from_str(&fs::read_to_string("keys/program-authority.json").unwrap()).unwrap();
-    let deployer = Keypair::from_bytes(&deployer_bytes).unwrap();
+    let deployer = Keypair::try_from(deployer_bytes.as_slice()).unwrap();
     println!("Deployer: {}", deployer.pubkey());
 
     // Reclaim from old master
     let old_master_bytes: Vec<u8> =
         serde_json::from_str(&fs::read_to_string("keys/er-cu-master.json").unwrap()).unwrap();
-    let old_master = Keypair::from_bytes(&old_master_bytes).unwrap();
+    let old_master = Keypair::try_from(old_master_bytes.as_slice()).unwrap();
     let old_master_bal = rpc.get_balance(&old_master.pubkey()).unwrap_or(0);
     println!("Old master balance: {}", old_master_bal);
     if old_master_bal > 1_000_000 {
@@ -46,7 +46,7 @@ fn main() {
     let children_arr: Vec<Vec<u8>> = serde_json::from_str(&children_data).unwrap();
     let children: Vec<Keypair> = children_arr
         .iter()
-        .filter_map(|b| Keypair::from_bytes(b).ok())
+        .filter_map(|b| Keypair::try_from(b.as_slice()).ok())
         .collect();
 
     let mut total_reclaimed = 0u64;

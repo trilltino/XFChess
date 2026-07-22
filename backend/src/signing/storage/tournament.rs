@@ -569,6 +569,18 @@ impl TournamentStore {
             .collect()
     }
 
+    /// Removes a tournament record from the store. Does not touch on-chain
+    /// state — callers must only allow this for tournaments that are
+    /// already Cancelled or Completed on-chain (nothing left to manage).
+    pub async fn delete(&self, id: u64) -> bool {
+        sqlx::query("DELETE FROM tournaments WHERE id = ?")
+            .bind(id as i64)
+            .execute(&self.pool)
+            .await
+            .map(|r| r.rows_affected() > 0)
+            .unwrap_or(false)
+    }
+
     /// Updates a tournament with a closure.
     pub async fn update<F: FnOnce(&mut TournamentRecord)>(&self, id: u64, f: F) -> bool {
         if let Some(mut record) = self.get(id).await {

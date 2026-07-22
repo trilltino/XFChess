@@ -219,7 +219,7 @@ impl MagicBlockResolver {
             solana_sdk::instruction::AccountMeta::new(ml_delegation_metadata, false),
             solana_sdk::instruction::AccountMeta::new_readonly(delegation_program_id, false),
             solana_sdk::instruction::AccountMeta::new_readonly(
-                solana_sdk::system_program::id(),
+                solana_system_interface::program::id(),
                 false,
             ),
         ];

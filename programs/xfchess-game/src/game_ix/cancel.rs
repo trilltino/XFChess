@@ -69,7 +69,7 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
         // Always refund white (creator always escrowed)
         anchor_lang::system_program::transfer(
             CpiContext::new_with_signer(
-                ctx.accounts.system_program.to_account_info(),
+                System::id(),
                 anchor_lang::system_program::Transfer {
                     from: ctx.accounts.escrow_pda.to_account_info(),
                     to: ctx.accounts.white_authority.to_account_info(),
@@ -87,7 +87,7 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
             );
             anchor_lang::system_program::transfer(
                 CpiContext::new_with_signer(
-                    ctx.accounts.system_program.to_account_info(),
+                    System::id(),
                     anchor_lang::system_program::Transfer {
                         from: ctx.accounts.escrow_pda.to_account_info(),
                         to: ctx.accounts.black_authority.to_account_info(),

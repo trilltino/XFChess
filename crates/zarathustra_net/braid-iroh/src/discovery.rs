@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use iroh::address_lookup::{
-    AddressLookup, EndpointData, EndpointInfo, Error, IntoAddressLookup, Item,
+    AddressLookup, AddressLookupBuilder, EndpointData, EndpointInfo, Error, Item,
 };
 use iroh::{Endpoint, EndpointAddr, EndpointId};
 use n0_future::boxed::BoxStream;
@@ -63,11 +63,11 @@ impl MockDiscoveryMap {
     }
 }
 
-impl IntoAddressLookup for MockDiscoveryMap {
+impl AddressLookupBuilder for MockDiscoveryMap {
     fn into_address_lookup(
         self,
         endpoint: &Endpoint,
-    ) -> Result<impl AddressLookup, iroh::address_lookup::IntoAddressLookupError> {
+    ) -> Result<impl AddressLookup, iroh::address_lookup::AddressLookupBuilderError> {
         Ok(MockDiscoveryInstance {
             id: endpoint.id(),
             map: self,

@@ -34,7 +34,7 @@ pub fn pot(wager: u64) -> Result<u64> {
 /// System Program, so a direct lamport decrement would fail the runtime's
 /// ownership check.
 pub fn pay_from_game_escrow<'info>(
-    system_program: &Program<'info, System>,
+    _system_program: &Program<'info, System>,
     escrow: &SystemAccount<'info>,
     to: &AccountInfo<'info>,
     lamports: u64,
@@ -48,7 +48,7 @@ pub fn pay_from_game_escrow<'info>(
     let signer: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[escrow_bump]]];
     system_program::transfer(
         CpiContext::new_with_signer(
-            system_program.to_account_info(),
+            System::id(),
             Transfer {
                 from: escrow.to_account_info(),
                 to: to.clone(),

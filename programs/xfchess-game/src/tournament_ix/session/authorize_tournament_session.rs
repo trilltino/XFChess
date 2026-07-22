@@ -54,7 +54,7 @@ pub fn handler_authorize_tournament_session(
     if args.deposit_lamports > 0 {
         anchor_lang::system_program::transfer(
             CpiContext::new(
-                ctx.accounts.system_program.to_account_info(),
+                System::id(),
                 anchor_lang::system_program::Transfer {
                     from: player.to_account_info(),
                     to: delegation.to_account_info(),

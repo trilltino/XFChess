@@ -21,7 +21,7 @@ pub struct SessionEntry {
 impl SessionEntry {
     /// Extracts the Keypair from stored bytes.
     pub fn keypair(&self) -> Keypair {
-        Keypair::from_bytes(&self.keypair_bytes)
+        Keypair::try_from(self.keypair_bytes.as_slice())
             .unwrap_or_else(|e| panic!("invalid keypair bytes: {}", e))
     }
 

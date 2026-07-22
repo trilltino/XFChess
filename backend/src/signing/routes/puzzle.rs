@@ -716,7 +716,7 @@ async fn pay_sol(state: &AppState, to: &str, lamports: u64) -> anyhow::Result<St
     let authority = state.vps_authority.clone();
     let rpc = state.solana_rpc.clone();
     let sig = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-        let ix = solana_sdk::system_instruction::transfer(&authority.pubkey(), &to_pk, lamports);
+        let ix = solana_system_interface::instruction::transfer(&authority.pubkey(), &to_pk, lamports);
         let bh = rpc.get_latest_blockhash()?;
         let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
             &[ix],

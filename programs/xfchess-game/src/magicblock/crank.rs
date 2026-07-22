@@ -29,9 +29,9 @@ pub fn build_time_check_schedule_instruction(
     };
 
     let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
-        task_id,
-        execution_interval_millis: check_interval_millis,
-        iterations,
+        task_id: task_id as i64,
+        execution_interval_millis: check_interval_millis as i64,
+        iterations: iterations as i64,
         instructions: vec![crank_ix],
     }))
     .map_err(|_| crate::crank_ix::schedule_time_check::ErrorCode::InvalidArgument)?;

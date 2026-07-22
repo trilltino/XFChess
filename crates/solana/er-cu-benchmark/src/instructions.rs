@@ -3,7 +3,7 @@
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 #[allow(deprecated)]
-use solana_sdk::system_program;
+use solana_system_interface::program as system_program;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,

@@ -62,7 +62,7 @@ pub fn handler(
     // deters a losing player from freezing the pot with a frivolous dispute.
     anchor_lang::system_program::transfer(
         CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
+            System::id(),
             anchor_lang::system_program::Transfer {
                 from: ctx.accounts.player.to_account_info(),
                 to: ctx.accounts.dispute_record.to_account_info(),

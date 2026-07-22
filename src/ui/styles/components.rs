@@ -43,7 +43,7 @@ impl Layout {
     /// this exact (non-resizable) width so the board column left between
     /// them is identical in size regardless of which side is measured —
     /// this is also what keeps the 2D and 3D board renders the same size.
-    pub const SIDE_PANEL_WIDTH: f32 = 280.0;
+    pub const SIDE_PANEL_WIDTH: f32 = 320.0;
 
     /// Add section spacing
     pub fn section_space(ui: &mut egui::Ui) {

@@ -11,7 +11,7 @@
 
 use solana_client::client_error::Result as ClientResult;
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

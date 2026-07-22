@@ -1,15 +1,23 @@
 import { useState, useEffect } from "react";
 import { apiClient, type TournamentSummary } from "../../services/api";
+import { lamportsToUsd } from "../../services/sol";
+import { useSolUsdRate } from "../../hooks/useSolUsdRate";
 
 interface TournamentListProps {
   onTournamentSelect: (tournamentId: number) => void;
 }
+
+const CANCELLABLE_STATUSES = ["registration", "scheduled", "active"];
+const DELETABLE_STATUSES = ["cancelled", "completed"];
 
 export default function TournamentList({ onTournamentSelect }: TournamentListProps) {
   const [tournaments, setTournaments] = useState<TournamentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const solUsdRate = useSolUsdRate();
 
   useEffect(() => {
     loadTournaments();
@@ -39,14 +47,52 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
   });
 
   const formatPrizePool = (lamports: number) => {
+    const usd = lamportsToUsd(lamports, solUsdRate);
+    if (usd != null) return "$" + usd.toFixed(2);
     const sol = lamports / 1_000_000_000;
     return sol.toFixed(4) + " SOL";
   };
 
   const formatEntryFee = (lamports: number) => {
     if (lamports === 0) return "FREE";
+    const usd = lamportsToUsd(lamports, solUsdRate);
+    if (usd != null) return "$" + usd.toFixed(2);
     const sol = lamports / 1_000_000_000;
     return sol.toFixed(4) + " SOL";
+  };
+
+  const handleCancel = async (e: React.MouseEvent, tournament: TournamentSummary) => {
+    e.stopPropagation();
+    const confirmed = window.confirm(
+      `Cancel "${tournament.name}" (#${tournament.tournament_id})?\n\n` +
+      `This submits an on-chain cancel_tournament transaction: entry fees are refunded to all ${tournament.registered} registered player(s) and the guaranteed prize pool is returned to the operator. This cannot be undone.`
+    );
+    if (!confirmed) return;
+    setCancellingId(tournament.tournament_id);
+    const r = await apiClient.cancelTournament(tournament.tournament_id);
+    setCancellingId(null);
+    if (r.ok) {
+      await loadTournaments();
+    } else {
+      alert(`Failed to cancel: ${r.error?.message || "Unknown error"}`);
+    }
+  };
+
+  // Local housekeeping only — removes a Cancelled/Completed tournament from
+  // this list. Does not touch on-chain state (nothing left to manage once a
+  // tournament is terminal); the backend rejects this for any other status.
+  const handleDelete = async (e: React.MouseEvent, tournament: TournamentSummary) => {
+    e.stopPropagation();
+    const confirmed = window.confirm(`Remove "${tournament.name}" (#${tournament.tournament_id}) from this list? This only clears it from the admin panel — it doesn't touch on-chain state.`);
+    if (!confirmed) return;
+    setDeletingId(tournament.tournament_id);
+    const r = await apiClient.deleteTournament(tournament.tournament_id);
+    setDeletingId(null);
+    if (r.ok) {
+      setTournaments(prev => prev.filter(t => t.tournament_id !== tournament.tournament_id));
+    } else {
+      alert(`Failed to remove: ${r.error?.message || "Unknown error"}`);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -202,17 +248,64 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
                 <div style={{ color: "var(--primary)", fontSize: "12px", fontWeight: "800", letterSpacing: "1px" }}>
                   ID #{tournament.tournament_id}
                 </div>
-                <div style={{ 
-                  color: getStatusColor(tournament.status),
-                  fontSize: "10px",
-                  fontWeight: "900",
-                  letterSpacing: "1px",
-                  padding: "4px 10px",
-                  borderRadius: "100px",
-                  background: "rgba(255,255,255,0.05)",
-                  border: `1px solid ${getStatusColor(tournament.status)}44`
-                }}>
-                  {tournament.status.toUpperCase()}
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  {CANCELLABLE_STATUSES.includes(tournament.status.toLowerCase()) && (
+                    <button
+                      onClick={(e) => handleCancel(e, tournament)}
+                      disabled={cancellingId === tournament.tournament_id}
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: "800",
+                        letterSpacing: "1px",
+                        padding: "4px 10px",
+                        borderRadius: "100px",
+                        background: "rgba(239,68,68,0.1)",
+                        color: "#f87171",
+                        border: "1px solid rgba(239,68,68,0.3)",
+                        cursor: cancellingId === tournament.tournament_id ? "default" : "pointer",
+                        opacity: cancellingId === tournament.tournament_id ? 0.5 : 1,
+                      }}
+                    >
+                      {cancellingId === tournament.tournament_id ? "CANCELLING…" : "CANCEL"}
+                    </button>
+                  )}
+                  <div style={{
+                    color: getStatusColor(tournament.status),
+                    fontSize: "10px",
+                    fontWeight: "900",
+                    letterSpacing: "1px",
+                    padding: "4px 10px",
+                    borderRadius: "100px",
+                    background: "rgba(255,255,255,0.05)",
+                    border: `1px solid ${getStatusColor(tournament.status)}44`
+                  }}>
+                    {tournament.status.toUpperCase()}
+                  </div>
+                  {DELETABLE_STATUSES.includes(tournament.status.toLowerCase()) && (
+                    <button
+                      onClick={(e) => handleDelete(e, tournament)}
+                      disabled={deletingId === tournament.tournament_id}
+                      title="Remove from this list (local only, doesn't touch on-chain state)"
+                      style={{
+                        width: "22px",
+                        height: "22px",
+                        borderRadius: "50%",
+                        background: "rgba(255,255,255,0.06)",
+                        color: "var(--text-dim)",
+                        border: "1px solid var(--border)",
+                        cursor: deletingId === tournament.tournament_id ? "default" : "pointer",
+                        opacity: deletingId === tournament.tournament_id ? 0.5 : 1,
+                        fontSize: "12px",
+                        lineHeight: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 0,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               </div>
 

@@ -15,9 +15,9 @@ iroh-h3 = { version = "0.1.0", path = "../iroh-h3" }
 bytes = "1.11.1"
 futures-lite = "2.6.1"
 h3 = "0.0.8"
-iroh = "0.96.1"
-tokio = { version = "1.50.0", features = ["rt"], default-features = false }
-axum = { version = "0.8.8", default-features = false }
+iroh.workspace = true
+tokio = { version = "1.53.1", features = ["rt"], default-features = false }
+axum = { version = "0.8.9", default-features = false }
 http = "1.4.0"
 tower-service = "0.3.3"
 http-body = "1.0.1"
