@@ -313,6 +313,9 @@ if (-not $SkipBuild) {
     Write-Host "`n=== Syncing source and building backend on server ===" -ForegroundColor Green
     # Clone into a clean dir: `git clone` fails if /opt/xfchess/src exists as a non-git
     # dir (older layouts put the game src there), so remove a non-git dir first.
+    # A prior run's final chown leaves this owned by xfchess; root running git here
+    # otherwise trips git's dubious-ownership guard (CVE-2022-24765 protection).
+    Run-Remote "git config --global --add safe.directory /opt/xfchess/src"
     Run-Remote "if [ ! -d /opt/xfchess/src/.git ]; then rm -rf /opt/xfchess/src && git clone $remoteUrl /opt/xfchess/src; fi"
     Run-Remote "cd /opt/xfchess/src && git fetch --all --tags --prune && git checkout $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src"
     # Build as the (nologin) xfchess user via -s /bin/bash, with cargo on PATH; this is a
