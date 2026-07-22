@@ -317,7 +317,10 @@ if (-not $SkipBuild) {
     # otherwise trips git's dubious-ownership guard (CVE-2022-24765 protection).
     Run-Remote "git config --global --add safe.directory /opt/xfchess/src"
     Run-Remote "if [ ! -d /opt/xfchess/src/.git ]; then rm -rf /opt/xfchess/src && git clone $remoteUrl /opt/xfchess/src; fi"
-    Run-Remote "cd /opt/xfchess/src && git fetch --all --tags --prune && git checkout $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src"
+    # -f: a prior server-side `cargo build` regenerates Cargo.lock in the worktree,
+    # which blocks a plain checkout ("local changes would be overwritten"). This
+    # checkout is disposable build state, not anyone's work — safe to force past.
+    Run-Remote "cd /opt/xfchess/src && git fetch --all --tags --prune && git checkout -f $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src"
     # Build as the (nologin) xfchess user via -s /bin/bash, with cargo on PATH; this is a
     # workspace, so build with -p backend from the repo root.
     $buildCmd = 'su -s /bin/bash xfchess -c ''export CARGO_HOME=/opt/xfchess/.cargo RUSTUP_HOME=/opt/xfchess/.rustup HOME=/opt/xfchess PATH=/opt/xfchess/.cargo/bin:$PATH && cd /opt/xfchess/src && cargo build --release -p backend --bin signing-server-http'''
