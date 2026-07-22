@@ -86,14 +86,21 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::item_space(ui);
 
-        // Wallet / balance header
+        // Wallet / balance header. USD is the primary display currency (see
+        // wager_rate.rs) — fall back to raw SOL only if the live rate hasn't
+        // been fetched yet, matching render_wallet_hud's top-right badge.
         let balance = lobby.cached_balance;
         let wallet_ready = lobby.cached_keypair_bytes.is_some();
         if wallet_ready {
-            ui.label(
-                egui::RichText::new(format!("Wallet balance: {:.4} SOL", balance))
-                    .color(egui::Color32::GOLD),
-            );
+            let usd = ctx
+                .sol_usd_wager_rate
+                .as_ref()
+                .and_then(|rate| rate.usd_for_sol(balance));
+            let balance_text = match usd {
+                Some(usd) => format!("Wallet balance: ${:.2}", usd),
+                None => format!("Wallet balance: {:.4} SOL", balance),
+            };
+            ui.label(egui::RichText::new(balance_text).color(egui::Color32::GOLD));
         } else {
             ui.colored_label(egui::Color32::YELLOW, "Wallet not connected");
             if ui.button("Connect Wallet").clicked() {

@@ -37,7 +37,14 @@ export default function Dashboard() {
   const [cpuUsage, setCpuUsage] = useState(0);
   const [ramUsage, setRamUsage] = useState(0);
   const [rates, setRates] = useState<Record<string, number>>({});
-  const [wallets, setWallets] = useState<{ feepayer: WalletData; vps_signer: WalletData; kyc_signer: WalletData; treasury: WalletData } | undefined>();
+  type WalletKey = "feepayer" | "vps_signer" | "kyc_signer" | "treasury";
+  const WALLET_LABELS: Record<WalletKey, string> = {
+    feepayer: "FEEPAYER",
+    vps_signer: "VPS AUTHORITY",
+    kyc_signer: "KYC AUTHORITY",
+    treasury: "TREASURY AUTHORITY",
+  };
+  const [wallets, setWallets] = useState<Record<WalletKey, WalletData> | undefined>();
   const [reports, setReports] = useState<Report[]>([]);
 
   const [logs, setLogs] = useState<string[]>([]);
@@ -451,8 +458,8 @@ export default function Dashboard() {
           <div style={{ padding: "1.5rem", backgroundColor: "rgba(255,255,255,0.02)", borderRadius: "24px", border: "1px solid var(--border)" }}>
             <h4 style={{ color: "rgba(255,255,255,0.2)", margin: "0 0 16px", fontSize: "11px", letterSpacing: "1px" }}>PLATFORM WALLETS</h4>
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "12px", color: "var(--text-dim)" }}>
-              {(["feepayer", "vps_signer", "kyc_signer"] as const).map(key => (
-                <WalletStatus key={key} label={key.replace("_", " ").toUpperCase()} data={(wallets as any)?.[key]} warn={key === "feepayer" && fpLow} usdRate={rates.usd ?? rates.USD} />
+              {(Object.keys(WALLET_LABELS) as WalletKey[]).map(key => (
+                <WalletStatus key={key} label={WALLET_LABELS[key]} data={wallets?.[key]} warn={key === "feepayer" && fpLow} usdRate={rates.usd ?? rates.USD} />
               ))}
             </div>
           </div>
