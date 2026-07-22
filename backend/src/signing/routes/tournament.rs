@@ -1183,14 +1183,16 @@ fn seed_players_by_elo(t: &mut TournamentRecord) {
 async fn build_cancel_transaction(
     Path(id): Path<u64>,
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     info!("[tournament] Cancelling tournament {}", id);
 
-    let tournament = state
-        .tournament_store
-        .get(id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let err_body = |status: StatusCode, message: String| {
+        (status, Json(serde_json::json!({ "ok": false, "message": message })))
+    };
+
+    let tournament = state.tournament_store.get(id).await.ok_or_else(|| {
+        err_body(StatusCode::NOT_FOUND, format!("Tournament {id} not found"))
+    })?;
 
     if tournament.status != TournamentStatus::Registration
         && tournament.status != TournamentStatus::Active
@@ -1199,7 +1201,13 @@ async fn build_cancel_transaction(
             "[tournament] Refusing to cancel tournament {} in status {:?}",
             id, tournament.status
         );
-        return Err(StatusCode::CONFLICT);
+        return Err(err_body(
+            StatusCode::CONFLICT,
+            format!(
+                "Tournament {id} is {:?} — only Registration or Active tournaments can be cancelled",
+                tournament.status
+            ),
+        ));
     }
 
     let players: Vec<Pubkey> = tournament
@@ -1212,11 +1220,18 @@ async fn build_cancel_transaction(
                 "[tournament] Malformed player pubkey in tournament {} store: {}",
                 id, e
             );
-            StatusCode::INTERNAL_SERVER_ERROR
+            err_body(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Malformed player pubkey in tournament {id} store: {e}"),
+            )
         })?;
 
-    let program_id = Pubkey::from_str(&state.config.program_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|e| {
+        err_body(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid configured program_id: {e}"),
+        )
+    })?;
     let authority = &*state.vps_authority;
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
 
@@ -1246,7 +1261,10 @@ async fn build_cancel_transaction(
         }
         Err(e) => {
             error!("[tournament] cancel_tournament tx failed for {}: {}", id, e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err(err_body(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("cancel_tournament transaction failed: {e}"),
+            ));
         }
     };
 
@@ -1403,12 +1421,14 @@ async fn sync_tournament_status(
 async fn delete_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let tournament = state
-        .tournament_store
-        .get(id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let err_body = |status: StatusCode, message: String| {
+        (status, Json(serde_json::json!({ "ok": false, "message": message })))
+    };
+
+    let tournament = state.tournament_store.get(id).await.ok_or_else(|| {
+        err_body(StatusCode::NOT_FOUND, format!("Tournament {id} not found"))
+    })?;
 
     if tournament.status != TournamentStatus::Cancelled
         && tournament.status != TournamentStatus::Completed
@@ -1417,7 +1437,13 @@ async fn delete_tournament(
             "[tournament] Refusing to delete {} — status {:?} is not terminal",
             id, tournament.status
         );
-        return Err(StatusCode::CONFLICT);
+        return Err(err_body(
+            StatusCode::CONFLICT,
+            format!(
+                "Tournament {id} is {:?} — only Cancelled or Completed tournaments can be removed. Cancel it first.",
+                tournament.status
+            ),
+        ));
     }
 
     state.tournament_store.delete(id).await;
