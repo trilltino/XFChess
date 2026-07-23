@@ -116,7 +116,8 @@ export const PRIVATE_PAGE_METADATA: Record<string, PageMetadata> = {
   createProfile: privatePage('/create-profile', 'Create Profile'),
   kyc: privatePage('/kyc', 'Identity Verification'),
   login: privatePage('/login', 'Sign In'),
-  authLogin: privatePage('/auth/login', 'Sign In'),
+  // /auth/login no longer has its own metadata entry — it's now a plain
+  // redirect to /login (see App.tsx), not a rendered page.
   lichessCallback: privatePage('/auth/lichess/callback', 'Lichess Link'),
 };
 

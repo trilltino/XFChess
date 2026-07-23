@@ -463,7 +463,13 @@ function AppContent() {
                         <Route path="/kyc" element={<KycPage />} />
                         <Route path="/news/release" element={<NewsRelease />} />
                         <Route path="/login" element={<SignIn defaultMode="login" />} />
-                        <Route path="/auth/login" element={<SignIn defaultMode="login" />} />
+                        {/* Historical duplicate of /login — no internal <Link> ever
+                            pointed at this path (checked before redirecting), so any
+                            hit here is a stale bookmark/external link. Redirect
+                            instead of rendering the same component twice under two
+                            URLs (was flagged as a duplicate-content risk even though
+                            both were noindexed — see docs/plans/web-solana-seo-sitemap-plan.md §7). */}
+                        <Route path="/auth/login" element={<Navigate to="/login" replace />} />
                         <Route path="/launch" element={<Launch />} />
                         <Route path="/tournaments" element={<Tournaments />} />
                         <Route path="/tournament/:id" element={<TournamentDetail />} />

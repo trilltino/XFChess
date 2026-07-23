@@ -123,6 +123,16 @@ test.describe('Private pages are noindex', () => {
   }
 });
 
+test.describe('Route duplication fix', () => {
+  test('/auth/login redirects to /login instead of rendering a duplicate page', async ({ page }) => {
+    await page.goto('/auth/login');
+    // A glob like '**/login' would also match '/auth/login' itself (it
+    // literally ends in "/login") — wait for the exact pathname instead.
+    await page.waitForFunction(() => window.location.pathname === '/login');
+    expect(new URL(page.url()).pathname).toBe('/login');
+  });
+});
+
 test.describe('Technical SEO', () => {
   test('robots.txt is reachable and references the sitemap', async ({ request }) => {
     const res = await request.get('/robots.txt');

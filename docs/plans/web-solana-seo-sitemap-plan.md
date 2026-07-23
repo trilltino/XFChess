@@ -199,7 +199,11 @@ Both were confirmed fixed by re-running the full 85-test suite (`npx playwright 
 
 **Also shipped, not separately called out above**: `web-solana/tests/e2e/seo.spec.ts` + `playwright.config.ts` (webServer runs the actual production build, not `vite dev`, so it's exercising the real prerendered files) — 85 assertions covering per-route title/description/canonical/robots/OG/JSON-LD, private-route noindex, robots.txt/sitemap.xml/og-image.png reachability, and a dedicated raw-HTTP (no browser JS) check against each prerendered route's actual static file.
 
-**Still open**: the five questions in §7 above (route consolidation, `/players` public-ness confirmation, AI-crawler allow confirmation, social links — resolved from the real Footer.tsx links, no longer open — and OG image sourcing — shipped using the real `xfchess-logo.png`/site color tokens, also resolved). GSC/Bing submission (§Phase 5) is still a manual operational step for whoever has console access.
+**Route consolidation — resolved 2026-07-23**: `/auth/login` now renders `<Navigate to="/login" replace />` instead of a second copy of `<SignIn>`. Nothing internal ever linked to `/auth/login` (checked before changing it), so this only affects stale bookmarks/external links, which now land on the canonical `/login` instead of a silently-duplicated page. The dead `authLogin` entry was removed from the metadata registry, and a Playwright test (`Route duplication fix`) asserts the redirect actually happens — written carelessly on the first pass (`waitForURL('**/login')` also matches `/auth/login`, which literally ends in `/login`), caught by the test itself failing with the *wrong* URL back, fixed to assert on `window.location.pathname` exactly.
+
+**`/profile` vs `/create-profile`**: not consolidated (different open question, already answered in §7 differently — both stay, distinguished by `useLocation()`-based metadata in `ProfileViewer.tsx`, not a redirect).
+
+**Still open**: GSC/Bing submission (§Phase 5) — this needs whoever holds the Google Search Console / Bing Webmaster Tools account credentials; it isn't something that can be scripted from the repo alone (see the conversation this plan came from for the concrete blocker).
 
 ## Sources
 
