@@ -1,6 +1,6 @@
 # backend-types
 
-Serde-only DTOs shared between the backend and the web frontend (`web-solana`) over
+Serde-only DTOs shared between the backend and the web frontend (`xfchessdotcom`) over
 JSON. The crate is deliberately free of Bevy and any game-client dependency so the
 web-facing API surface can evolve without dragging the game toolchain along.
 
@@ -15,4 +15,4 @@ web-facing API surface can evolve without dragging the game toolchain along.
 - **Serde only.** No Bevy, no Solana SDK, no async runtimes. If a type needs those,
   it belongs in [`shared`](../shared/) (client↔backend) or a more specific crate.
 - Field changes here are **API contract changes** for the web frontend — coordinate
-  with `web-solana`'s TypeScript expectations when renaming or removing fields.
+  with `xfchessdotcom`'s TypeScript expectations when renaming or removing fields.

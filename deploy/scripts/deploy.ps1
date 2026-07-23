@@ -118,11 +118,11 @@ Pop-Location
 # ── Step 1: Build frontend ────────────────────────────────────────────────────
 if (-not $SkipBuild) {
     Write-Host "`n=== Building frontend ===" -ForegroundColor Green
-    Push-Location "$ROOT\web-solana"
+    Push-Location "$ROOT\xfchessdotcom"
     # Write BOM-less UTF-8: PS5.1 Out-File -Encoding utf8 adds a BOM, which breaks
     # env parsing (this is the class of bug that took the backend .env down).
     $frontendEnv = "VITE_BACKEND_URL=https://${TlsDomain}`nSIGNING_SERVICE_URL=https://${TlsDomain}`n"
-    [System.IO.File]::WriteAllText("$ROOT\web-solana\.env.production", $frontendEnv, (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText("$ROOT\xfchessdotcom\.env.production", $frontendEnv, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "VITE_BACKEND_URL=https://${TlsDomain}" -ForegroundColor DarkGray
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
@@ -406,7 +406,7 @@ Run-Remote "systemctl restart xfchess-backend"
 
 # ── Step 7: Upload frontend ───────────────────────────────────────────────────
 Write-Host "`n=== Uploading frontend ===" -ForegroundColor Green
-Upload "$ROOT\web-solana\dist\*" "/opt/xfchess/web/"
+Upload "$ROOT\xfchessdotcom\dist\*" "/opt/xfchess/web/"
 # scp/sftp can create subdirectories (assets/, fonts/) as owner-only (700),
 # which silently blocks nginx (runs as www-data, not xfchess) from traversing
 # them — every asset request then 404s internally and falls back to

@@ -1,4 +1,4 @@
-# web-solana/src/pages
+# xfchessdotcom/src/pages
 
 One component per route, registered in [../App.tsx](../App.tsx).
 

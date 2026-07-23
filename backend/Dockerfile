@@ -17,7 +17,7 @@ COPY src ./src
 COPY backend ./backend
 COPY crates ./crates
 COPY programs ./programs
-COPY web-solana ./web-solana
+COPY xfchessdotcom ./xfchessdotcom
 COPY tauri ./tauri
 
 # Build the backend

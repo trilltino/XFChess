@@ -25,7 +25,7 @@ are already built**:
   is signed by a backend-held `link_authority` keypair — **already a
   backend-sponsored on-chain write**, the exact pattern needed for sponsored
   `init_profile` too.
-- `web-solana/src/components/LichessLinkCard.tsx` is a working React
+- `xfchessdotcom/src/components/LichessLinkCard.tsx` is a working React
   reference UI for the connect flow.
 - Migration `009_external_elo.sql` already created `external_elo_links` /
   `external_elo_sync_log` tables.
@@ -199,7 +199,7 @@ before wiring anything to it.
    or wherever the fetched profile currently gets mapped into UI-visible
    state (`handle_auth_task`/`sync_profile` response handling).
 
-## Phase 4 — Web frontend (`web-solana`)
+## Phase 4 — Web frontend (`xfchessdotcom`)
 
 1. **Guest bailout in `SignIn.tsx`** — add a "Continue as Guest" option to
    `IdentityStep` mirroring native's "No, I want to play local-online",
@@ -211,7 +211,7 @@ before wiring anything to it.
    already-approved decision in `docs/plans/identity-separation-plan.md`
    (KYC required for on-chain profile creation), block `createPlayerProfile`
    until `Kyc.tsx`'s submission is complete, using Phase 0's reconciled KYC
-   source via a new `getKycStatus`-style call in `web-solana/src/lib/api/kyc.ts`
+   source via a new `getKycStatus`-style call in `xfchessdotcom/src/lib/api/kyc.ts`
    (extends the existing `getUserStatus` pattern).
 4. Use the sponsored route from Phase 1 instead of player-funded
    `init_profile_tx` for first-time profile creation specifically.
@@ -234,4 +234,4 @@ before wiring anything to it.
   username, play a bot game and a Direct Connection game via pasted node ID,
   confirm zero backend calls (check server logs show nothing).
 - Manual, web client: same KYC-gate and Guest-bailout checks in
-  `web-solana`.
+  `xfchessdotcom`.

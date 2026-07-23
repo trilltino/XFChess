@@ -63,7 +63,7 @@ release/
 .anchor/
 
 # Vite cache
-web-solana/node_modules/.vite/
+xfchessdotcom/node_modules/.vite/
 
 # Tauri
 tauri/target/
@@ -105,15 +105,15 @@ tauri/gen/
 # Package lock files — kept for the npm projects CI actually builds
 # (npm ci requires a committed lockfile; there is no root npm project).
 **/package-lock.json
-!web-solana/package-lock.json
+!xfchessdotcom/package-lock.json
 !tauri/wallet-ui/package-lock.json
 !tauri/tournament-admin/package-lock.json
 
 # Generated JSON files — except the Anchor IDL, which the frontend imports
 # directly and which a fresh checkout has no way to regenerate without a full
 # Solana/Anchor toolchain (CI builds the web frontend without one).
-web-solana/src/lib/*.json
-!web-solana/src/lib/xfchess_game.json
+xfchessdotcom/src/lib/*.json
+!xfchessdotcom/src/lib/xfchess_game.json
 
 # WASM package
 xfchess-wasm/pkg/

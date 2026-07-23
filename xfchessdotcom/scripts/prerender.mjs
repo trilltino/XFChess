@@ -1,7 +1,7 @@
 // Build-time prerender for the public marketing routes (Phase 3 of
-// docs/plans/web-solana-seo-sitemap-plan.md).
+// docs/plans/xfchessdotcom-seo-sitemap-plan.md).
 //
-// Why this exists: web-solana is pure CSR (no SSR framework), served as flat
+// Why this exists: xfchessdotcom is pure CSR (no SSR framework), served as flat
 // static files by nginx. React 19's native <title>/<meta> hoisting (used by
 // SeoHead.tsx) only ever runs client-side here, so zero-JS bots (social
 // link-preview bots, most non-Google crawlers) never see it — only real

@@ -57,7 +57,7 @@ MagicBlock Ephemeral Rollups
 | `crates/shared/` | Shared protocol, pairing, backend types, anti-cheat |
 | `crates/solana/` | Solana helpers, on-chain chess logic, ER benchmarks |
 | `crates/zarathustra_net/` | Braid/Iroh networking crates |
-| `web-solana/` | React/Solana web frontend |
+| `xfchessdotcom/` | React/Solana web frontend |
 | `tauri/` | Desktop companion services and visualization tooling |
 | `docs/` | Architecture notes, ADRs, plans, runbooks |
 | `deploy/` | VPS, nginx, staging, backend, monitoring config |
@@ -90,7 +90,7 @@ scripts\build_program.bat
 ### Web Frontend
 
 ```bash
-cd web-solana
+cd xfchessdotcom
 npm ci
 npm run dev
 ```

@@ -13,7 +13,7 @@ if %ERRORLEVEL% neq 0 exit /b 1
 where cargo >nul 2>&1
 if %ERRORLEVEL% neq 0 exit /b 1
 
-pushd "%ROOT%\web-solana"
+pushd "%ROOT%\xfchessdotcom"
 set VITE_BACKEND_URL=%BACKEND_URL%
 call npm run build
 if %ERRORLEVEL% neq 0 exit /b 1

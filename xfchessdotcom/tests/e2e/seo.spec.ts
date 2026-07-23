@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 // js_handyman/handyman/tests/e2e/seo.spec.ts — same structure (per-route
 // title/meta/OG/JSON-LD checks, technical-SEO reachability, basic a11y),
 // adapted to XFChess's route list. See
-// docs/plans/web-solana-seo-sitemap-plan.md Phase 4.
+// docs/plans/xfchessdotcom-seo-sitemap-plan.md Phase 4.
 
 const PUBLIC_PAGES = [
   '/home', '/features', '/play', '/tournaments', '/computer',

@@ -1,4 +1,4 @@
-# web-solana/src/lib
+# xfchessdotcom/src/lib
 
 Client libraries: backend API access and Anchor program client.
 

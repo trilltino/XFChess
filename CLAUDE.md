@@ -11,7 +11,7 @@ XFChess is a 3D chess game built with Rust + Bevy and Solana blockchain integrat
 | Game client | `src/` | Bevy 0.19, ECS, Iroh P2P |
 | Backend API | `backend/` | Axum 0.8, SQLite/SQLx 0.9, Tokio |
 | Solana program | `programs/xfchess-game/` | Anchor 1.1, Ephemeral Rollups |
-| Web frontend | `web-solana/` | React 19, Vite, Chakra UI |
+| Web frontend | `xfchessdotcom/` | React 19, Vite, Chakra UI |
 | Desktop wrapper | `tauri/` | Tauri 2.1 |
 
 Shared library crates live in `crates/` — see [crates/CLAUDE.md](crates/CLAUDE.md).
@@ -77,7 +77,7 @@ cargo clippy
 ### Web frontend
 
 ```bash
-cd web-solana
+cd xfchessdotcom
 npm install
 npm run dev      # Dev server
 npm run build    # Production build (runs tsc then vite)

@@ -468,7 +468,7 @@ function AppContent() {
                             hit here is a stale bookmark/external link. Redirect
                             instead of rendering the same component twice under two
                             URLs (was flagged as a duplicate-content risk even though
-                            both were noindexed — see docs/plans/web-solana-seo-sitemap-plan.md §7). */}
+                            both were noindexed — see docs/plans/xfchessdotcom-seo-sitemap-plan.md §7). */}
                         <Route path="/auth/login" element={<Navigate to="/login" replace />} />
                         <Route path="/launch" element={<Launch />} />
                         <Route path="/tournaments" element={<Tournaments />} />

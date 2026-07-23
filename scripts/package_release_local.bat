@@ -40,7 +40,7 @@ if %ERRORLEVEL% neq 0 (
     >> "%ROOT%\backend\.env" echo IDENTITY_SALT=%IDENTITY_SALT%
 )
 
-pushd "%ROOT%\web-solana"
+pushd "%ROOT%\xfchessdotcom"
 set VITE_BACKEND_URL=%BACKEND_URL%
 call npm run build
 if %ERRORLEVEL% neq 0 exit /b 1

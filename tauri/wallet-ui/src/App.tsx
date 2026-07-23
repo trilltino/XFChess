@@ -120,7 +120,7 @@ interface AuthResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Design tokens � matches web-solana color scheme
+// Design tokens � matches xfchessdotcom color scheme
 // ---------------------------------------------------------------------------
 const PRIMARY    = "#ffffff";
 const PRIMARY_DIM    = "rgba(255,255,255,0.08)";
@@ -175,7 +175,7 @@ const page: CSSProperties = {
 };
 
 // ---------------------------------------------------------------------------
-// Navbar � matches web-solana pill style; links back to /
+// Navbar � matches xfchessdotcom pill style; links back to /
 // ---------------------------------------------------------------------------
 function SiteNav() {
   const HOME = window.location.origin + "/";
@@ -219,7 +219,7 @@ function SiteNav() {
 function GridBg() {
   return (
     <>
-      {/* Subtle white radial glow� matches web-solana bg */}
+      {/* Subtle white radial glow� matches xfchessdotcom bg */}
       <div style={{
         position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none",
         background: `radial-gradient(ellipse 80% 60% at 50% 0%, rgba(255,255,255,0.06) 0%, transparent 70%),

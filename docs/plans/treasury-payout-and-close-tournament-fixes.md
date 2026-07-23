@@ -430,7 +430,7 @@ All three code fixes (1, 2, 3) and any key rotation (4) ship in one program upgr
    ```
    Add the new test cases from Fixes 1 and 2 first.
 3. **Regenerate the IDL** and sync it to the clients (`crates/solana-chess-client`,
-   `web-solana`) — the new `withdraw_treasury` instruction and any changed account
+   `xfchessdotcom`) — the new `withdraw_treasury` instruction and any changed account
    structs must be reflected downstream.
 4. **Deploy to devnet** and smoke-test end to end:
    ```bash

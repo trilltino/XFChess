@@ -217,7 +217,7 @@ PROGRAM_ID=8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU
 
 ## Web Client
 
-The React frontend does not talk to base RPC or the ER directly — per `web-solana/CLAUDE.md`, all game transactions go through the backend API, which does the routing described above. There is no separate client-side delegation-aware routing layer to maintain in `web-solana/`.
+The React frontend does not talk to base RPC or the ER directly — per `xfchessdotcom/CLAUDE.md`, all game transactions go through the backend API, which does the routing described above. There is no separate client-side delegation-aware routing layer to maintain in `xfchessdotcom/`.
 
 ## Backend Settlement Worker
 

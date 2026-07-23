@@ -11,7 +11,7 @@ echo   - Backend (signing-server-http)
 echo   - Game (xfchess with Solana)
 echo   - Tauri host (xfchess-tauri)
 echo   - Wallet UI (tauri/wallet-ui)
-echo   - Web frontend (web-solana)
+echo   - Web frontend (xfchessdotcom)
 echo   - All Rust crates
 echo.
 echo ========================================
@@ -115,8 +115,8 @@ echo  Tauri host built successfully
 echo.
 
 :: Build Web frontend
-echo [6/7] Building Web Frontend (web-solana)...
-cd /d "%ROOT%\web-solana"
+echo [6/7] Building Web Frontend (xfchessdotcom)...
+cd /d "%ROOT%\xfchessdotcom"
 call npm install
 if errorlevel 1 (
     echo ERROR: Web frontend npm install failed
@@ -159,7 +159,7 @@ echo   Backend:        %ROOT%\target\release\signing-server-http.exe
 echo   Game:           %ROOT%\target\release\xfchess.exe
 echo   Tauri:          %ROOT%\target\release\xfchess-tauri.exe
 echo   Wallet UI:      %ROOT%\tauri\wallet-ui\dist\
-echo   Web Frontend:   %ROOT%\web-solana\dist\
+echo   Web Frontend:   %ROOT%\xfchessdotcom\dist\
 echo.
 echo Build started: %START_TIME%
 echo Build finished: %TIME%

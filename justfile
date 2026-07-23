@@ -127,9 +127,9 @@ build-admin-ui-force:
 
 # Install web frontend dependencies (only if node_modules is missing)
 build-web-ui:
-    @if (-not (Test-Path "web-solana/node_modules/.bin/vite")) { \
+    @if (-not (Test-Path "xfchessdotcom/node_modules/.bin/vite")) { \
         Write-Host "[BUILD] Installing Web Frontend dependencies..." -ForegroundColor Cyan; \
-        Set-Location web-solana; npm install; Set-Location .. \
+        Set-Location xfchessdotcom; npm install; Set-Location .. \
     } else { \
         Write-Host "[BUILD] Web Frontend node_modules exists, skipping" \
     }
@@ -140,7 +140,7 @@ build-wallet-ui-force:
 
 # Build web frontend (production)
 build-web:
-    Set-Location web-solana; npm install; if ($?) { npm run build }
+    Set-Location xfchessdotcom; npm install; if ($?) { npm run build }
 
 # ── Run individual services ───────────────────────────────────────────────────
 
@@ -170,7 +170,7 @@ profile: build-profile
 
 # Run web frontend dev server
 web:
-    Set-Location web-solana; npm run dev
+    Set-Location xfchessdotcom; npm run dev
 
 # Open the tournament admin desktop window (starts a backend if :8090 is down,
 # reuses a running Tauri shell, else launches one)
@@ -205,12 +205,12 @@ web-stack: kill build-backend build-web-ui
          Write-Host "[LAUNCH] Using Windows Terminal tabs" -ForegroundColor Green; \
          & $wt -w 0 nt --title "Backend" -d "$root/backend" powershell -NoProfile -NoExit -Command "& '$root/$bin/signing-server.exe'"; \
          Start-Sleep -Seconds 2; \
-         & $wt -w 0 nt --title "Web Frontend" -d "$root/web-solana" powershell -NoProfile -NoExit -Command "npm run dev" \
+         & $wt -w 0 nt --title "Web Frontend" -d "$root/xfchessdotcom" powershell -NoProfile -NoExit -Command "npm run dev" \
      } else { \
          Write-Host "[LAUNCH] Windows Terminal not found, using separate windows" -ForegroundColor Yellow; \
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/backend'; & '$root/$bin/signing-server.exe'" -WindowStyle Normal; \
          Start-Sleep -Seconds 2; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/web-solana'; npm run dev" -WindowStyle Normal \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/xfchessdotcom'; npm run dev" -WindowStyle Normal \
      }
     @Write-Host ""
     @Write-Host "Backend:      http://127.0.0.1:8090" -ForegroundColor White
@@ -266,7 +266,7 @@ dev: kill build build-wallet-ui build-admin-ui build-web-ui
          & $wt -w 0 nt --title "Tauri" -d "$root" powershell -NoProfile -NoExit -File "$root\tmp\dev-tauri.ps1"; \
          Start-Sleep -Seconds 1; \
          & $wt -w 0 nt --title "Game" -d "$root" powershell -NoProfile -NoExit -File "$root\tmp\dev-game.ps1"; \
-         & $wt -w 0 nt --title "Web Frontend" -d "$root/web-solana" powershell -NoProfile -NoExit -Command "npm run dev" \
+         & $wt -w 0 nt --title "Web Frontend" -d "$root/xfchessdotcom" powershell -NoProfile -NoExit -Command "npm run dev" \
      } else { \
          Write-Host "[LAUNCH] Windows Terminal not found, using separate windows" -ForegroundColor Yellow; \
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/backend'; & '$root/$bin/signing-server.exe'" -WindowStyle Normal; \
@@ -276,7 +276,7 @@ dev: kill build build-wallet-ui build-admin-ui build-web-ui
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev-tauri.ps1'" -WindowStyle Minimized; \
          Start-Sleep -Seconds 1; \
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev-game.ps1'" -WindowStyle Normal; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/web-solana'; npm run dev" -WindowStyle Normal \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/xfchessdotcom'; npm run dev" -WindowStyle Normal \
      }
     @Write-Host ""
     @Write-Host "Backend:          http://127.0.0.1:8090" -ForegroundColor White
@@ -297,7 +297,7 @@ dev2: kill build build-wallet-ui build-admin-ui build-web-ui
      Set-Content -Path "$root\tmp\dev2-wallet-p1.ps1" -Value "Set-Location '$root\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-tauri-p1.ps1"  -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-game-p1.ps1"   -Value "$env_common; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p1'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-web.ps1"        -Value "Set-Location '$root\web-solana'; npm run dev" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-web.ps1"        -Value "Set-Location '$root\xfchessdotcom'; npm run dev" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7464'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p2'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
@@ -434,7 +434,7 @@ logs:
 # Clean all build artifacts
 clean:
     cargo clean
-    @if (Test-Path "web-solana/dist") { Remove-Item -Recurse -Force web-solana/dist }
+    @if (Test-Path "xfchessdotcom/dist") { Remove-Item -Recurse -Force xfchessdotcom/dist }
     @if (Test-Path "viz/dist") { Remove-Item -Recurse -Force viz/dist }
     @if (Test-Path "tauri/wallet-ui/dist") { Remove-Item -Recurse -Force tauri/wallet-ui/dist }
     @if (Test-Path "tauri/tournament-admin/dist") { Remove-Item -Recurse -Force tauri/tournament-admin/dist }

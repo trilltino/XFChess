@@ -13,7 +13,7 @@ This checklist ensures that all components and configurations for the XFChess ba
   - [ ] Key files available at expected paths: `FEE_PAYER_KEYS`, `VPS_AUTHORITY_KEY`, `KYC_AUTHORITY_KEY`.
 
 - [ ] **Local Build Preparation**
-  - [ ] Frontend build completed (`npm run build` in `web-solana`).
+  - [ ] Frontend build completed (`npm run build` in `xfchessdotcom`).
   - [ ] Git repository up-to-date and no uncommitted changes unless intentional.
   - [ ] Commit to be deployed is verified and tagged if necessary.
 

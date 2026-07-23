@@ -1,4 +1,4 @@
-# web-solana/src
+# xfchessdotcom/src
 
 Source tree of the web frontend. App shell: [main.tsx](main.tsx) mounts
 [App.tsx](App.tsx), which wires the wallet-adapter context, Privy provider, Chakra

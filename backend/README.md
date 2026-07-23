@@ -7,7 +7,7 @@ P2P connections, and exposes Prometheus metrics. It never holds player private k
 ## Role in XFChess
 
 ```
-Bevy client / web-solana ──HTTP──> backend ──RPC──> Solana (mainnet + MagicBlock ER)
+Bevy client / xfchessdotcom ──HTTP──> backend ──RPC──> Solana (mainnet + MagicBlock ER)
                           ──WS───> auth / signaling
                           ──QUIC──> p2p_relay (braid-iroh) ──> opponent client
 ```

@@ -1,4 +1,4 @@
-# web-solana/ — web frontend
+# xfchessdotcom/ — web frontend
 
 React 19 + TypeScript + Vite web app: wallet-based sign-in, tournament registration
 and play, spectating, KYC, and Solana Blinks integration. Talks to the backend API

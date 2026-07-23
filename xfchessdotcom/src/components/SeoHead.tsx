@@ -5,7 +5,7 @@ import { canonicalUrl, ogImageUrl, SITE_NAME } from '../lib/seo/metadata';
  * Per-route <head> metadata. Uses React 19's native support for rendering
  * <title>/<meta>/<link> anywhere in the tree — React hoists them into
  * <head> itself, so no react-helmet-async (or any extra dependency) is
- * needed here. See docs/plans/web-solana-seo-sitemap-plan.md §4.2/§4.3.
+ * needed here. See docs/plans/xfchessdotcom-seo-sitemap-plan.md §4.2/§4.3.
  *
  * Important limitation this component does NOT solve on its own: this is
  * still a client-side render, so it only helps real browsers and Google's

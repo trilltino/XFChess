@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Flat urlset — correct at ~13 public routes (see docs/plans/web-solana-seo-sitemap-plan.md
+  Flat urlset — correct at ~13 public routes (see docs/plans/xfchessdotcom-seo-sitemap-plan.md
   §4.10: a sitemap index is unnecessary until the public page count is in the
   hundreds; lichess.org ships no sitemap at all, chess.com uses an index only
   because of per-user/per-game page volume XFChess doesn't have yet).

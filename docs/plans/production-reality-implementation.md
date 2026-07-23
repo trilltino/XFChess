@@ -51,7 +51,7 @@ Main risks before production:
 - Release flow deploys directly to the VPS and restarts services, but production
   gates, canaries, staged promotion, artifact provenance, and post-deploy smoke
   checks need to be formalized.
-- Web/desktop supply-chain and client-side security need gates. `web-solana`
+- Web/desktop supply-chain and client-side security need gates. `xfchessdotcom`
   depends on fast-moving wallet/Privy/Solana packages and current remediation
   docs flag frontend audit work.
 - Money, KYC, tournament, and escrow paths need explicit owner sign-off,
@@ -97,8 +97,8 @@ Acceptance gate:
 
 Primary files:
 
-- `web-solana/src/pages/Compliance.tsx`
-- `web-solana/src/pages/Legal.tsx`
+- `xfchessdotcom/src/pages/Compliance.tsx`
+- `xfchessdotcom/src/pages/Legal.tsx`
 - `XFChess_Jurisdictional_Deep_Dive.txt`
 - `legal/*`
 - `docs/IMPLEMENTATION_PLAN.md`
@@ -112,7 +112,7 @@ Tasks:
 - Finish the remediation in `deploy/docs/E2E_REMEDIATION.md` for production env
   files and secret rotation.
 - Ensure `.env`, `deploy/.env.production`, `deploy/backend/.env.production`, and
-  `web-solana/.env.production` are either untracked local templates or removed
+  `xfchessdotcom/.env.production` are either untracked local templates or removed
   from git history and rotated if previously committed.
 - Add runtime config validation on backend startup: required envs, key lengths,
   allowed origins, Solana RPC URLs, admin API key, relay secret, database paths,
@@ -274,7 +274,7 @@ Primary files:
 - `deploy/scripts/deploy.ps1`
 - `deploy/scripts/rollback.ps1`
 - `backend/Dockerfile`
-- `web-solana/package.json`
+- `xfchessdotcom/package.json`
 - `Cargo.lock`
 
 ## Phase 6 - Security, Abuse, And Compliance Hardening
@@ -313,7 +313,7 @@ Primary files:
 - `tauri/tauri.conf.json`
 - `tauri/capabilities/*`
 - `programs/xfchess-game/src/*`
-- `web-solana/src/lib/api/*`
+- `xfchessdotcom/src/lib/api/*`
 
 ## Phase 7 - Product Operations And Support
 
@@ -342,7 +342,7 @@ Primary files:
 - `tauri/tournament-admin/*`
 - `backend/src/signing/routes/admin.rs`
 - `backend/src/signing/routes/dispute.rs`
-- `web-solana/src/pages/Compliance.tsx`
+- `xfchessdotcom/src/pages/Compliance.tsx`
 
 ## Critical Path
 

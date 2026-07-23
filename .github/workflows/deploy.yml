@@ -21,13 +21,13 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: web-solana/package-lock.json
+          cache-dependency-path: xfchessdotcom/package-lock.json
 
       - name: Install dependencies
-        run: cd web-solana && npm ci
+        run: cd xfchessdotcom && npm ci
 
       - name: Build
-        run: cd web-solana && npm run build
+        run: cd xfchessdotcom && npm run build
         env:
           # Points to the same domain — nginx routes /api/* to the backend
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
@@ -38,7 +38,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: "web-solana/dist/*"
+          source: "xfchessdotcom/dist/*"
           target: "/opt/xfchess/web"
           strip_components: 2
 

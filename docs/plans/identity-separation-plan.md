@@ -97,7 +97,7 @@ Decisions made with the user so far:
   sponsor/relayer path exists in this instruction today.
 - Tournament `register` (`tournament_ix/registration/register.rs`): requires an
   *existing* `player_profile` PDA, player signs and pays the entry fee into
-  escrow. **Both native clients stub this out** — `web-solana/src/pages/TournamentDetail.tsx`
+  escrow. **Both native clients stub this out** — `xfchessdotcom/src/pages/TournamentDetail.tsx`
   `handleRegister` just logs, and `src/multiplayer/solana/tournament.rs::register_tournament`
   is a no-op returning `Ok(0)`. Only the Blinks-built flow
   (`backend/src/signing/blinks/core.rs::build_register_transaction`) is
@@ -194,11 +194,11 @@ gated behind completed KYC, globally, not just at wager time.
   but **no client currently calls it**), `/api/auth/link-wallet`,
   `/api/auth/register` + `/api/auth/login` (wallet signature), and
   `/api/auth/sync-profile`.
-- `web-solana/src/pages/SignIn.tsx` has the web equivalent: `IdentityStep`
+- `xfchessdotcom/src/pages/SignIn.tsx` has the web equivalent: `IdentityStep`
   (wallet vs email+password) → `CredentialsStep` → `ConnectWalletStep` →
   `ProfileStep` (on-chain profile creation form, currently collecting only
   country/tax_id/dob).
-- The full formal KYC form already exists at `web-solana/src/pages/Kyc.tsx`
+- The full formal KYC form already exists at `xfchessdotcom/src/pages/Kyc.tsx`
   (full name, DOB, residence, country-specific tax ID) — it's just not wired
   to gate profile creation today.
 - **The Lichess door does not exist yet anywhere** — new UI button + OAuth

@@ -16,7 +16,7 @@ sudo chmod 600 /opt/xfchess-staging/.env && sudo nano /opt/xfchess-staging/.env
 # 3. Build once, deploy the same artifact to staging
 cargo build -p backend --bin signing-server --release
 sudo cp target/release/signing-server /opt/xfchess-staging/signing-server-http
-# (build the web bundle and copy web-solana/dist → /opt/xfchess-staging/web)
+# (build the web bundle and copy xfchessdotcom/dist → /opt/xfchess-staging/web)
 
 # 4. systemd unit
 sudo cp deploy/staging/xfchess-staging.service /etc/systemd/system/

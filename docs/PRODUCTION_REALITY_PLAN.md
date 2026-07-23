@@ -20,7 +20,7 @@ to idiomatic, modular, documented work across every component. Grounded in the
 | Game client | `src/` | Bevy 0.18 ECS, Iroh P2P | Native desktop |
 | Backend API | `backend/` | Axum 0.8, SQLx/SQLite, Tokio | systemd on 1 Hetzner VPS |
 | Solana program | `programs/xfchess-game/` | Anchor 0.31, Ephemeral Rollups | Solana devnet |
-| Web frontend | `web-solana/` | React 19, Vite | static (nginx) |
+| Web frontend | `xfchessdotcom/` | React 19, Vite | static (nginx) |
 | Desktop wrapper | `tauri/` | Tauri 2.10 + Privy | Native; local bridge :7454 |
 | Tournament admin | `tauri/tournament-admin/` | React + Tauri shell | Native admin app |
 | Shared crates | `crates/` | engine, chess-logic, braid, swiss | in-process |

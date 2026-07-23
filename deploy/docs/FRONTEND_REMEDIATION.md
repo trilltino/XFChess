@@ -1,6 +1,6 @@
-# Frontend Remediation — End-to-End Plan (web-solana)
+# Frontend Remediation — End-to-End Plan (xfchessdotcom)
 
-Fixes from the frontend audit of `web-solana` (React 19 + Vite 8), plus two
+Fixes from the frontend audit of `xfchessdotcom` (React 19 + Vite 8), plus two
 deployment bugs found in [../../.github/workflows/deploy.yml](../../.github/workflows/deploy.yml).
 Companion to the VPS guide [E2E_REMEDIATION.md](E2E_REMEDIATION.md). Ordered by
 severity. Each item: **Problem → Fix → Verify**, tagged with who does it.
@@ -12,7 +12,7 @@ severity. Each item: **Problem → Fix → Verify**, tagged with who does it.
 - [ ] **F1**  🟠 Dependency vulnerabilities (4 critical / 14 high) `[you]`
 - [ ] **F2**  🟠 JWT in localStorage (XSS-exfiltratable) `[you]`
 - [ ] **F3**  🟡 API keys baked into public bundle (Helius etc.) `[you]`
-- [ ] **F4**  🟡 `web-solana/.env.production` tracked + stale (http/raw-IP) `[auto]`
+- [ ] **F4**  🟡 `xfchessdotcom/.env.production` tracked + stale (http/raw-IP) `[auto]`
 - [ ] **F5**  🟡 No Content-Security-Policy `[auto]` (report-only)
 - [ ] **F6**  🟡 Hardcoded WalletConnect projectId `[auto]`
 - [ ] **F7**  🔵 Dead MoonPay link (`pk_test_123`) `[auto]`
@@ -24,7 +24,7 @@ severity. Each item: **Problem → Fix → Verify**, tagged with who does it.
 
 ## FD1 🟠 CI uploads the frontend to a directory nginx doesn't serve
 
-**Problem:** [deploy.yml](../../.github/workflows/deploy.yml) uploads `web-solana/dist/*`
+**Problem:** [deploy.yml](../../.github/workflows/deploy.yml) uploads `xfchessdotcom/dist/*`
 to `/var/www/xfchess`, but nginx serves `root /opt/xfchess/web`
 ([../nginx/nginx.conf](../nginx/nginx.conf)) and `deploy.ps1` uploads to
 `/opt/xfchess/web`. So a push-to-main frontend deploy lands somewhere nginx never
@@ -51,7 +51,7 @@ shows a fresh mtime, and the live site reflects the change.
           node-version: '20'
 ```
 
-**Verify:** the `Build` step in Actions succeeds; `web-solana/dist` is produced.
+**Verify:** the `Build` step in Actions succeeds; `xfchessdotcom/dist` is produced.
 
 ---
 
@@ -62,7 +62,7 @@ WalletConnect / Reown / `viem` / `ws` / `engine.io-client` tree.
 
 **Fix `[you]`:**
 ```bash
-cd web-solana
+cd xfchessdotcom
 npm audit fix                 # safe, non-breaking first
 npm audit --omit=dev          # see what remains
 # For the rest, bump the direct culprits:
@@ -78,9 +78,9 @@ accepted residue with no browser-reachable impact).
 
 ## F2 🟠 Session JWT stored in localStorage
 
-**Problem:** the auth token lives in `localStorage` ([SignIn.tsx](../../web-solana/src/pages/SignIn.tsx),
-[ProfileViewer.tsx](../../web-solana/src/pages/ProfileViewer.tsx),
-[LoginModal.tsx](../../web-solana/src/components/LoginModal.tsx)). Any XSS or
+**Problem:** the auth token lives in `localStorage` ([SignIn.tsx](../../xfchessdotcom/src/pages/SignIn.tsx),
+[ProfileViewer.tsx](../../xfchessdotcom/src/pages/ProfileViewer.tsx),
+[LoginModal.tsx](../../xfchessdotcom/src/components/LoginModal.tsx)). Any XSS or
 hostile dependency can exfiltrate it → account takeover. It is not `httpOnly`.
 
 **Fix `[you]` (choose one):**
@@ -97,7 +97,7 @@ hostile dependency can exfiltrate it → account takeover. It is not `httpOnly`.
 ## F3 🟡 API keys shipped in the public JS bundle
 
 **Problem:** every `VITE_*` var is embedded in the built JS. `VITE_HELIUS_API_KEY`
-is put straight into a request URL ([useWalletUsdBalance.ts:46](../../web-solana/src/hooks/useWalletUsdBalance.ts#L46));
+is put straight into a request URL ([useWalletUsdBalance.ts:46](../../xfchessdotcom/src/hooks/useWalletUsdBalance.ts#L46));
 `VITE_MOONPAY_API_KEY` / `VITE_TRANSAK_API_KEY` / `VITE_BANXA_API_KEY` are also
 baked in. A paid Helius key can be scraped and its quota abused.
 
@@ -109,22 +109,22 @@ baked in. A paid Helius key can be scraped and its quota abused.
 - If you must keep a client Helius key, use a **domain-restricted** one.
 
 **Verify:** grep the built bundle — no secret key strings:
-`grep -rEi 'helius|api-key=' web-solana/dist/assets/*.js` returns nothing sensitive.
+`grep -rEi 'helius|api-key=' xfchessdotcom/dist/assets/*.js` returns nothing sensitive.
 
 ---
 
-## F4 🟡 `web-solana/.env.production` tracked and stale
+## F4 🟡 `xfchessdotcom/.env.production` tracked and stale
 
 **Problem:** committed as `VITE_BACKEND_URL=http://178.104.55.19` (plain HTTP, raw
 IP). CI/deploy.ps1 overwrite it at build, but a manual build ships mixed-content.
 
 **Fix `[auto]`:**
 ```bash
-git rm --cached web-solana/.env.production
+git rm --cached xfchessdotcom/.env.production
 # ensure .gitignore covers it (it does via **/.env.*)
 ```
 
-**Verify:** `git ls-files | grep -c web-solana/.env.production` → 0.
+**Verify:** `git ls-files | grep -c xfchessdotcom/.env.production` → 0.
 
 ---
 
@@ -147,7 +147,7 @@ review console CSP reports. Then swap `-Report-Only` → enforcing.
 
 ## F6 🟡 Hardcoded WalletConnect projectId
 
-**Problem:** [App.tsx:67](../../web-solana/src/App.tsx#L67) hardcodes a "placeholder"
+**Problem:** [App.tsx:67](../../xfchessdotcom/src/App.tsx#L67) hardcodes a "placeholder"
 projectId — can be rate-limited/revoked and break mobile wallet connect.
 
 **Fix `[auto]`:** read from env with the current value as fallback:
@@ -162,7 +162,7 @@ projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '66e133d368e7ec815db
 
 ## F7 🔵 Dead MoonPay link (`pk_test_123`)
 
-**Problem:** [SignIn.tsx:486](../../web-solana/src/pages/SignIn.tsx#L486) opens
+**Problem:** [SignIn.tsx:486](../../xfchessdotcom/src/pages/SignIn.tsx#L486) opens
 `buy.moonpay.com?apiKey=pk_test_123` — a fake key, so the button is broken.
 
 **Fix `[auto]`:** use the env key; if unset, route users to the in-app funding page
@@ -175,8 +175,8 @@ or the `/fund` page.
 
 ## F8 🔵 Mixed-content "Launch Game" fetch
 
-**Problem:** [Play.tsx:56](../../web-solana/src/pages/Play.tsx#L56) /
-[SignIn.tsx:47](../../web-solana/src/pages/SignIn.tsx#L47) `fetch('http://localhost:7454/...')`
+**Problem:** [Play.tsx:56](../../xfchessdotcom/src/pages/Play.tsx#L56) /
+[SignIn.tsx:47](../../xfchessdotcom/src/pages/SignIn.tsx#L47) `fetch('http://localhost:7454/...')`
 from an HTTPS page is blocked by browsers; only works with the desktop bridge.
 It's a timeout fallback so it fails quietly.
 
@@ -191,7 +191,7 @@ than doing nothing.
 ## F9 🔵 Committed stale prebuilt bundle
 
 **Problem:** root `index.html` + `assets/` (150 tracked files) is an old Vite build.
-Neither deploy path uses it (`deploy.ps1` uploads `web-solana/dist`; `deploy.yml`
+Neither deploy path uses it (`deploy.ps1` uploads `xfchessdotcom/dist`; `deploy.yml`
 rebuilds), so it only leaks stale baked-in values and bloats the repo.
 
 **Fix `[auto]`:**
@@ -208,8 +208,8 @@ disk locally.
 ## F10 🔵 Type safety + minor perf
 
 **Problem:** `any` used for profiles, RPC responses, wallet objects (e.g.
-[ProfileViewer.tsx](../../web-solana/src/pages/ProfileViewer.tsx),
-[useWalletUsdBalance.ts](../../web-solana/src/hooks/useWalletUsdBalance.ts)); Helius
+[ProfileViewer.tsx](../../xfchessdotcom/src/pages/ProfileViewer.tsx),
+[useWalletUsdBalance.ts](../../xfchessdotcom/src/hooks/useWalletUsdBalance.ts)); Helius
 token prices fetched sequentially (N+1).
 
 **Fix `[you]`:** introduce typed models for the Anchor profile + RPC shapes;
@@ -224,7 +224,7 @@ launch UX, F10 types) is left for a scoped follow-up.
 
 ## Final verification
 ```bash
-cd web-solana && npm run build          # succeeds
-git ls-files | grep -cE '^(index.html|assets/|web-solana/.env.production)'  # 0
+cd xfchessdotcom && npm run build          # succeeds
+git ls-files | grep -cE '^(index.html|assets/|xfchessdotcom/.env.production)'  # 0
 grep -c CONTENT-SECURITY-POLICY ../deploy/nginx/nginx.conf  # >=1 (case-insensitive)
 ```

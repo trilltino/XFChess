@@ -1,4 +1,4 @@
-# web-solana/src/components
+# xfchessdotcom/src/components
 
 Shared UI components used across [../pages/](../pages/README.md).
 
