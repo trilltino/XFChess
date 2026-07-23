@@ -61,7 +61,6 @@ members = [
     "crates/shared/*",
     "programs/*",
     "tauri",
-    "backend",
 ]
 exclude = [
     "references/ephemeral-rollups-sdk/rust",
@@ -87,7 +86,7 @@ opt-level = 3
 
 [profile.release]
 opt-level = 3
-# Thin LTO: nearly the runtime perf of fat LTO but 2-4x faster to build — a big
+# Thin LTO: nearly the runtime perf of fat LTO but 2-4x faster to build â€” a big
 # win for the on-VPS backend build and local release iteration.
 lto = "thin"
 codegen-units = 1
@@ -141,7 +140,6 @@ braid_chess = { path = "crates/zarathustra_net/braid_chess" }
 iroh-gossip = { path = "crates/zarathustra_net/iroh-gossip" }
 solana-chess-client = { path = "crates/solana/solana-chess-client" }
 nimzovich_engine = { path = "crates/engine/nimzovich_engine" }
-xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
 chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
 magic-resolver = { version = "0.2.0" }
 bevy = { version = "=0.19.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg"] }
@@ -191,12 +189,12 @@ bevy_fixed_node = []
 # XFChess runs multiple cameras, so this is gated until a release with the
 # multi-camera fix is pinned. See src/rendering/effects/sky.rs.
 sky = []
-# Accept unsigned (0x01) P2P gossip messages. DEV/TEST ONLY — the default
+# Accept unsigned (0x01) P2P gossip messages. DEV/TEST ONLY â€” the default
 # build rejects unsigned moves so a peer cannot skip authentication by
 # sending plaintext. See docs/plans/causal-authentication.md (Gap A3).
 allow-unsigned-p2p = []
 # TempleOS tribute board theme (orthographic camera, unlit board, Terry Davis
-# quote). DEV ONLY — compiled out of default builds; enables the main-menu entry.
+# quote). DEV ONLY â€” compiled out of default builds; enables the main-menu entry.
 templeos = []
 solana = [
     "anchor-lang",
