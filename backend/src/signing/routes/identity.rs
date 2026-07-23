@@ -193,7 +193,7 @@ async fn register_identity(
 
     // 5. Write-through to kyc_records (unified vault table) so user_status and
     //    can_wager checks see the record regardless of which path was used.
-    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
+    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone(), state.store.pool());
     if let Err(e) = vault
         .insert_kyc(crate::signing::storage::vault::KycInput {
             wallet_pubkey: &payload.pubkey,

@@ -82,7 +82,7 @@ pub async fn submit_kyc(
         }
     }
 
-    let vault = VaultStore::new((*state.vault_pool).clone());
+    let vault = VaultStore::new((*state.vault_pool).clone(), state.store.pool());
     vault
         .insert_kyc(KycInput {
             wallet_pubkey: &req.wallet_pubkey,
@@ -127,7 +127,7 @@ pub async fn user_status(
         warn!("[kyc] user_status called with empty pubkey");
     }
 
-    let vault = VaultStore::new((*state.vault_pool).clone());
+    let vault = VaultStore::new((*state.vault_pool).clone(), state.store.pool());
 
     // has_kyc: active record exists in kyc_records (written by both submit_kyc
     // and identity.rs write-through, so both paths are covered).

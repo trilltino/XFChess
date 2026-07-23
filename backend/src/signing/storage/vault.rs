@@ -70,11 +70,17 @@ fn blind_hash(input: &str) -> String {
 #[derive(Clone)]
 pub struct VaultStore {
     pool: SqlitePool,
+    /// Pool for the `cacf_compliance` table, which lives in the session/auth
+    /// database (migration 010 only ever runs against `session_pool`) — it
+    /// holds no PII, so it doesn't belong in the GDPR vault pool. Kept as a
+    /// separate field from `pool` rather than merging the two stores because
+    /// every other table on `VaultStore` genuinely is vault-only PII.
+    session_pool: SqlitePool,
 }
 
 impl VaultStore {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(pool: SqlitePool, session_pool: SqlitePool) -> Self {
+        Self { pool, session_pool }
     }
 
     /// Inserts a new KYC record. Upserts on wallet_pubkey conflict.
@@ -252,7 +258,7 @@ impl VaultStore {
         .bind(kyc_completed as i32)
         .bind(details_json)
         .bind(now)
-        .execute(&self.pool)
+        .execute(&self.session_pool)
         .await?;
         Ok(())
     }
@@ -264,7 +270,7 @@ impl VaultStore {
             sqlx::query_as("SELECT status FROM cacf_compliance WHERE wallet = ?1 AND country = ?2")
                 .bind(wallet)
                 .bind(country)
-                .fetch_optional(&self.pool)
+                .fetch_optional(&self.session_pool)
                 .await
                 .ok()
                 .flatten();

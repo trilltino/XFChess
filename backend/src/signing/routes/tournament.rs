@@ -965,7 +965,7 @@ async fn join_tournament(
     // unconditionally. Fixed to use the same VaultStore::has_kyc check that
     // /api/user/status already relies on.
     if tournament.kyc_required {
-        let vault = VaultStore::new((*state.vault_pool).clone());
+        let vault = VaultStore::new((*state.vault_pool).clone(), state.store.pool());
         let has_kyc = vault.has_kyc(player).await;
 
         if !has_kyc {

@@ -422,7 +422,7 @@ async fn me(
     let wallet_linked = !user.0.is_empty();
 
     // Compute can_wager: wallet linked + vault KYC record + CACF ok.
-    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
+    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone(), state.store.pool());
     let has_kyc = vault.has_kyc(&user.0).await;
     let kyc_country = vault.get_kyc(&user.0).await.map(|r| r.country);
     let cacf_ok = match &kyc_country {
@@ -812,7 +812,7 @@ async fn init_profile_sponsored_tx(
     // Uses the working KYC store (kyc_records, written by /api/kyc/submit) —
     // NOT vault_users, which historically was never populated. See
     // docs/plans/identity-implementation-plan.md.
-    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
+    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone(), state.store.pool());
     if !vault.has_kyc(&wallet).await {
         return Err((
             StatusCode::FORBIDDEN,
@@ -1106,7 +1106,7 @@ async fn delete_account(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 2. Erase KYC PII from vault and write audit trail
-    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone());
+    let vault = crate::signing::storage::vault::VaultStore::new((*state.vault_pool).clone(), state.store.pool());
     let _ = vault.erase_kyc(&req.wallet).await;
     let _ = vault
         .log_deletion_request(&req.wallet, None, req.reason.as_deref())
