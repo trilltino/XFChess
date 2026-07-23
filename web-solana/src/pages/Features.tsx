@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Cpu, Swords, Coins, Trophy, Puzzle, Clapperboard, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 type Feature = {
     icon: LucideIcon;
@@ -67,6 +69,7 @@ const features: Feature[] = [
 export function Features() {
     return (
         <main className="section" style={{ minHeight: '100vh', paddingTop: '140px' }}>
+            <SeoHead meta={PAGE_METADATA.features} />
             <div className="section-label">GAME</div>
             <h2 style={{ fontSize: '3rem' }}>Features<span className="accent">.</span></h2>
             <p style={{ maxWidth: '700px', fontSize: '1.2rem', marginBottom: '48px' }}>

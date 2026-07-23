@@ -4,6 +4,9 @@ import { useWallet } from '@solana/wallet-adapter-react';
 
 import { getSwissCurrentRound, getSwissPairings, getTournamentMatch } from '../lib/api';
 import type { TournamentMatchResponse } from '../lib/api';
+import { SeoHead } from '../components/SeoHead';
+import { TournamentEventSchema } from '../components/StructuredData';
+import { forTournament } from '../lib/seo/metadata';
 
 interface ScheduleStatus {
     phase: string;
@@ -158,6 +161,12 @@ export default function TournamentDetail() {
 
     return (
         <div style={{ maxWidth: 720, margin: '2rem auto', padding: '0 1rem', color: '#eee' }}>
+            {id && (
+                <>
+                    <SeoHead meta={forTournament(id)} />
+                    <TournamentEventSchema id={id} name={`Tournament #${id}`} />
+                </>
+            )}
             <h2>Tournament #{id}</h2>
 
             {tournamentInfo && (

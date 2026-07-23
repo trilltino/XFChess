@@ -1,6 +1,8 @@
 ﻿import { useState } from 'react';
 import { X } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 
 export function Tournaments() {
@@ -8,6 +10,7 @@ export function Tournaments() {
 
     return (
         <main className="section" style={{ minHeight: '100vh', paddingTop: '100px' }}>
+            <SeoHead meta={PAGE_METADATA.tournaments} />
             <div className="section-label">COMMUNITY</div>
             <h2 style={{ fontSize: '2.5rem', marginBottom: '8px' }}>Tournaments<span className="accent">.</span></h2>
 

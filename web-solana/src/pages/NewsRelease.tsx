@@ -1,9 +1,12 @@
 import { Calendar, User, Clock, Share2, ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 export default function NewsRelease() {
     return (
         <main className="section" style={{ minHeight: '100vh', paddingTop: '140px' }}>
+            <SeoHead meta={PAGE_METADATA.newsRelease} />
             <div style={{ maxWidth: '900px', margin: '0 auto' }}>
                 {/* Back navigation */}
                 <Link to="/blog" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: 'var(--text-dim)', marginBottom: '32px', fontSize: '0.9rem', fontWeight: 600 }}>

@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { LogIn, UserPlus } from 'lucide-react';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 const Launch = () => {
   return (
@@ -10,6 +12,7 @@ const Launch = () => {
       exit={{ opacity: 0 }}
       className="launch-wrap"
     >
+      <SeoHead meta={PAGE_METADATA.launch} />
       <div className="launch-card">
         <div className="launch-logo">XFChess</div>
         <h1 className="launch-title">Welcome</h1>

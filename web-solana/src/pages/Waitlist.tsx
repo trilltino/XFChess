@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { CheckCircle2, Loader2, Mail } from 'lucide-react';
 import { submitWaitlist } from '../lib/api';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
 
@@ -28,6 +30,7 @@ export function Waitlist() {
 
   return (
     <main className="section" style={{ minHeight: '100vh', paddingTop: '140px' }}>
+      <SeoHead meta={PAGE_METADATA.waitlist} />
       <div style={{ maxWidth: '520px', margin: '0 auto', padding: '0 20px' }}>
         <div className="section-label">EARLY ACCESS</div>
         <h2 style={{ fontSize: '2.5rem', marginBottom: '8px' }}>Join the Waitlist<span className="accent">.</span></h2>

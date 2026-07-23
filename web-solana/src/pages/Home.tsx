@@ -1,12 +1,17 @@
 ﻿import { Link } from 'react-router-dom';
 import highFidelityChess from '../assets/high-fidelity-chess.png';
 import xfchessLogo from '../assets/xfchess-logo.png';
+import { SeoHead } from '../components/SeoHead';
+import { VideoGameSchema } from '../components/StructuredData';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 
 export function Home() {
 
     return (
         <main className="home-root">
+            <SeoHead meta={PAGE_METADATA.home} />
+            <VideoGameSchema />
             {/* HERO: STRATEGY / ACTION CHESS */}
             <section className="fullscreen-section" style={{
                 paddingTop: '160px'

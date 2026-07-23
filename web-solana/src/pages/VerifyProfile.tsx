@@ -2,6 +2,8 @@
 import { useWallet } from '@solana/wallet-adapter-react';
 import { ShieldAlert, ShieldCheck, Loader2 } from 'lucide-react';
 import bs58 from 'bs58';
+import { SeoHead } from '../components/SeoHead';
+import { PRIVATE_PAGE_METADATA } from '../lib/seo/metadata';
 
 export function VerifyProfile() {
     const { publicKey, signMessage } = useWallet();
@@ -104,6 +106,7 @@ export function VerifyProfile() {
 
     return (
         <main className="section" style={{ minHeight: '100vh', paddingTop: '140px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <SeoHead meta={PRIVATE_PAGE_METADATA.verify} />
             <div className="section-label">CARF 2026 COMPLIANCE</div>
             <h2 style={{ fontSize: '2.5rem', textAlign: 'center' }}>Secure Identity Vault<span className="accent">.</span></h2>
             <p style={{ textAlign: 'center', color: 'var(--text-dim)', maxWidth: '600px', marginBottom: '40px' }}>

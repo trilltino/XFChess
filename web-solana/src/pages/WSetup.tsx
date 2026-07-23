@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SeoHead } from '../components/SeoHead';
+import { PRIVATE_PAGE_METADATA } from '../lib/seo/metadata';
 
 const WSetup = () => {
   return (
@@ -10,6 +12,7 @@ const WSetup = () => {
       exit={{ opacity: 0 }}
       className="content-wrap page-overlay"
     >
+      <SeoHead meta={PRIVATE_PAGE_METADATA.wSetup} />
       <section className="section">
         <Link to="/download" className="back-btn">
           <ArrowLeft size={18} /> Back

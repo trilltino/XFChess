@@ -2,6 +2,8 @@
 import { useState } from 'react';
 import { ArrowLeft, Shield, FileText, CheckCircle, AlertTriangle, ChevronDown, Gamepad2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 const CompliancePage = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -333,6 +335,7 @@ const CompliancePage = () => {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="content-wrap page-overlay">
+      <SeoHead meta={PAGE_METADATA.compliance} />
       <section className="section">
         <Link to="/" className="back-btn"><ArrowLeft size={18} /> Back</Link>
 

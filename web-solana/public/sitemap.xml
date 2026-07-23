@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Flat urlset — correct at ~13 public routes (see docs/plans/web-solana-seo-sitemap-plan.md
+  §4.10: a sitemap index is unnecessary until the public page count is in the
+  hundreds; lichess.org ships no sitemap at all, chess.com uses an index only
+  because of per-user/per-game page volume XFChess doesn't have yet).
+
+  lastmod values are the real last-commit date of each page's source file
+  (git log -1 --format=%ad --date=short -- <file>), not invented dates —
+  Google discounts sitemaps once it catches lastmod being dishonest.
+
+  Dynamic /tournament/:id pages are intentionally NOT enumerated here; they're
+  covered by the build-time prerendering step (Phase 3 of the plan above),
+  which fetches live tournament IDs at build time instead of hardcoding them
+  into a static file that would immediately go stale.
+
+  priority/changefreq are omitted: Google Search Central has confirmed both
+  are ignored for crawling/ranking decisions.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://xfchess.com/home</loc>
+    <lastmod>2026-07-02</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/features</loc>
+    <lastmod>2026-07-02</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/play</loc>
+    <lastmod>2026-07-22</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/tournaments</loc>
+    <lastmod>2026-07-02</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/computer</loc>
+    <lastmod>2026-04-23</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/players</loc>
+    <lastmod>2026-06-11</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/legal</loc>
+    <lastmod>2026-06-09</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/compliance</loc>
+    <lastmod>2026-06-09</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/anti-cheat</loc>
+    <lastmod>2026-04-23</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/news/release</loc>
+    <lastmod>2026-05-02</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/launch</loc>
+    <lastmod>2026-04-23</lastmod>
+  </url>
+  <url>
+    <loc>https://xfchess.com/waitlist</loc>
+    <lastmod>2026-07-02</lastmod>
+  </url>
+</urlset>

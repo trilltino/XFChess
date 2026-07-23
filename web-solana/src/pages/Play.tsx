@@ -2,6 +2,9 @@
 import { ArrowLeft, X, Rocket, Download, BookOpen } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
+import { SeoHead } from '../components/SeoHead';
+import { VideoGameSchema } from '../components/StructuredData';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 const GITHUB_REPO = 'trilltino/XFChess';
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
@@ -126,6 +129,8 @@ const PlayPage = () => {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="content-wrap page-overlay">
+      <SeoHead meta={PAGE_METADATA.play} />
+      <VideoGameSchema />
       <section className="section" style={{ position: 'relative' }}>
         <Link to="/" className="back-btn"><ArrowLeft size={18} /> Back</Link>
 

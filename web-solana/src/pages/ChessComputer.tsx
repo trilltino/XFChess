@@ -1,8 +1,11 @@
 import chessComputerIcon from '../assets/chess-computer-icon.webp';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 export function ChessComputer() {
     return (
         <main className="section" style={{ minHeight: '100vh', paddingTop: '100px' }}>
+            <SeoHead meta={PAGE_METADATA.computer} />
             <div className="section-label">GAME MODES</div>
             <h2 style={{ fontSize: '2.5rem', marginBottom: '8px' }}>Chess Computer<span className="accent">.</span></h2>
 

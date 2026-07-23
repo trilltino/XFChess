@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { completeLichessLink } from '../lib/api/lichess';
+import { SeoHead } from '../components/SeoHead';
+import { PRIVATE_PAGE_METADATA } from '../lib/seo/metadata';
 
 export function LichessCallback() {
   const [searchParams] = useSearchParams();
@@ -56,6 +58,7 @@ export function LichessCallback() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+      <SeoHead meta={PRIVATE_PAGE_METADATA.lichessCallback} />
       <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-8 max-w-md w-full text-center shadow-2xl">
         {status === 'loading' && (
           <>

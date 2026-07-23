@@ -8,6 +8,8 @@ import {
   fetchProfileByUsername,
 } from '../lib/anchor_client';
 import { LichessLinkCard } from '../components/LichessLinkCard';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 export function Players() {
   const { connection } = useConnection();
@@ -47,6 +49,7 @@ export function Players() {
 
   return (
     <main className="section" style={{ minHeight: '100vh', paddingTop: '140px' }}>
+      <SeoHead meta={PAGE_METADATA.players} />
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 20px' }}>
         <div className="section-label">Player Lookup</div>
         <h2 style={{ fontSize: '2.5rem', textAlign: 'center' }}>

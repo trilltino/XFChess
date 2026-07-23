@@ -1,10 +1,13 @@
 ﻿import { motion } from 'framer-motion';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SeoHead } from '../components/SeoHead';
+import { PAGE_METADATA } from '../lib/seo/metadata';
 
 const LegalPage = () => {
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="content-wrap page-overlay">
+      <SeoHead meta={PAGE_METADATA.legal} />
       <section className="section">
         <Link to="/" className="back-btn"><ArrowLeft size={18} /> Back</Link>
 

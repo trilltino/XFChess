@@ -1,7 +1,9 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { SeoHead } from '../components/SeoHead';
+import { PRIVATE_PAGE_METADATA } from '../lib/seo/metadata';
 import {
   Shield,
   Loader2,
@@ -273,6 +275,10 @@ function SignupForm({
 export function ProfileViewer() {
   const { connection } = useConnection();
   const wallet = useWallet();
+  const location = useLocation();
+  const seoMeta = location.pathname === '/create-profile'
+    ? PRIVATE_PAGE_METADATA.createProfile
+    : PRIVATE_PAGE_METADATA.profile;
 
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -464,6 +470,7 @@ export function ProfileViewer() {
 
   return (
     <main className="section" style={{ minHeight: '100vh', paddingTop: '140px' }}>
+      <SeoHead meta={seoMeta} />
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 20px' }}>
         {/* Disconnected: Guest / Create / Login */}
         {disconnected && (

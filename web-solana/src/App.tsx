@@ -29,6 +29,7 @@ import { ProfileViewer } from './pages/ProfileViewer';
 import { LichessCallback } from './pages/LichessCallback';
 import { Features } from './pages/Features';
 import { Waitlist } from './pages/Waitlist';
+import { OrganizationSchema } from './components/StructuredData';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { getUserStatus } from './lib/api';
 import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
@@ -245,6 +246,7 @@ function AppContent() {
 
     return (
         <div className="app-container">
+            <OrganizationSchema />
             <div className="onboarding-bg"></div>
             <nav className={`navbar ${isMenuOpen ? 'mobile-open' : ''} ${navVisible ? 'nav-visible' : 'nav-hidden'}`}>
                 <div className="nav-mobile-row">

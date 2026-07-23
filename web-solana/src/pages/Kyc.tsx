@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { submitKyc, type KycSubmission } from '../lib/api';
+import { SeoHead } from '../components/SeoHead';
+import { PRIVATE_PAGE_METADATA } from '../lib/seo/metadata';
 
 const COUNTRIES = [
   { code: 'GB', label: 'United Kingdom', taxLabel: 'National Insurance Number', pattern: /^[A-Za-z]{2}\d{6}[A-Za-z]$/, example: 'AB123456C' },
@@ -79,6 +81,7 @@ const KycPage = () => {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="content-wrap page-overlay">
+      <SeoHead meta={PRIVATE_PAGE_METADATA.kyc} />
       <section className="section">
         <Link to="/" className="back-btn"><ArrowLeft size={18} /> Back</Link>
 

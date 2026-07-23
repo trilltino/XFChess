@@ -7,6 +7,8 @@ import { Loader2, Shield, ShieldCheck, Trophy, Zap, ChevronRight, RefreshCw, Cpu
 import { getAnchorProgram, fetchPlayerProfile } from '../lib/anchor_client';
 import { getUserStatus, initProfileSponsoredTx, broadcastTx } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
+import { SeoHead } from '../components/SeoHead';
+import { PRIVATE_PAGE_METADATA } from '../lib/seo/metadata';
 
 // --- Live SOL price hook -----------------------------------------------------
 interface SolPrice { usd: number; gbp: number; updatedAt: Date | null; loading: boolean; error: boolean; }
@@ -1232,6 +1234,7 @@ export function SignIn(_: { defaultMode?: 'login' | 'register' } = {}) {
 
     return (
         <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingBottom: 40 }}>
+            <SeoHead meta={PRIVATE_PAGE_METADATA.login} />
             {step === 'identity' && (
                 <IdentityStep
                     onWallet={() => setStep('wallet_login')}
