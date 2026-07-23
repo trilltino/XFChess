@@ -20,21 +20,19 @@ const ASSET_PATTERNS: Record<'windows' | 'macos' | 'linux', RegExp> = {
 };
 
 const downloadPlatform = async (platform: 'windows' | 'macos' | 'linux') => {
-  // Open the tab synchronously on click so browsers don't treat the later
-  // async navigation as a popup and block it.
-  const tab = window.open('', '_blank');
+  // Redirect the current page straight to the asset. GitHub serves release
+  // assets with Content-Disposition: attachment, so this triggers a direct
+  // file download in place — no new tab, no intermediate page.
   try {
     const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
     if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
     const release = await res.json();
     const asset = (release.assets || []).find((a: { name: string }) => ASSET_PATTERNS[platform].test(a.name));
     if (!asset) throw new Error(`No ${platform} asset found on latest release`);
-    if (tab) tab.location.href = asset.browser_download_url;
-    else window.location.href = asset.browser_download_url;
+    window.location.href = asset.browser_download_url;
   } catch (err) {
     console.error('[XFChess Download] Falling back to releases page', err);
-    if (tab) tab.location.href = RELEASES_URL;
-    else window.open(RELEASES_URL, '_blank');
+    window.location.href = RELEASES_URL;
   }
 };
 
