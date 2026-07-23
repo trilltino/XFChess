@@ -359,6 +359,11 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 .default_width(250.0)
                 .show_separator_line(false)
                 .show(&ctx, |ui| {
+                    let sol_usd_rate = params
+                        .sol_usd_rate
+                        .as_ref()
+                        .and_then(|r| r.snapshot())
+                        .map(|s| s.usd_per_sol);
                     egui::ScrollArea::vertical()
                         .max_height(f32::INFINITY)
                         .show(ui, |ui| {
@@ -383,6 +388,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                                     &mut pv_open,
                                     gs,
                                     gs_pending,
+                                    sol_usd_rate,
                                 );
                                 if let Some(pv) = profile_view {
                                     pv.open = pv_open;
@@ -398,6 +404,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                                     &mut false,
                                     None,
                                     false,
+                                    sol_usd_rate,
                                 );
                             }
                         });

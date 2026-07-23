@@ -25,7 +25,7 @@ Keep dev/staging/prod **meaningfully similar**; track drift. Config differs only
 **Build once, promote the same binary** staging → prod. Do **not** rebuild between staging
 and prod — that reintroduces "works in staging" drift.
 
-Target model for `deploy/scripts/deploy.ps1` (WS-G follow-up):
+Target model for `ops/scripts/deploy.ps1` (WS-G follow-up):
 1. `deploy.ps1 -Environment staging` → build `signing-server` **once**, tag the artifact with
    the git SHA, deploy to staging, run smoke tests (`/health` shows the SHA, `/readyz` = 200).
 2. `deploy.ps1 -Environment prod -Artifact <sha>` → **push the identical artifact** (no
@@ -53,7 +53,7 @@ useradd -r xfchess-staging || true
 mkdir -p /opt/xfchess-staging/data
 # copy binary + web + nginx server block on a staging subdomain/port
 # .env with SIGNING_PORT=8091, SESSION_DB_URL=sqlite:///opt/xfchess-staging/data/sessions.db, APP_ENV=production
-cp deploy/backend/xfchess-backend.service /etc/systemd/system/xfchess-staging.service  # edit paths/port/user
+cp ops/backend/xfchess-backend.service /etc/systemd/system/xfchess-staging.service  # edit paths/port/user
 systemctl enable --now xfchess-staging
 ```
 Point `staging.<domain>` at it in nginx (separate `server` block). Backups (WS-B) can target

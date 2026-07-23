@@ -41,6 +41,7 @@ pub fn render_solana_panel(
     profile_view_open: &mut bool,
     global_session: Option<&GlobalSessionActive>,
     global_session_pending: bool,
+    sol_usd_rate: Option<f64>,
 ) {
     ui.vertical(|ui| {
         ui.heading(egui::RichText::new("SOLANA COMPETITIVE").color(UiColors::ACCENT_GOLD));
@@ -252,7 +253,12 @@ pub fn render_solana_panel(
                     sync.wager_amount
                 };
                 if lamports > 0 {
-                    ui.label(format!("Amount: {} SOL", lamports as f64 / 1_000_000_000.0));
+                    let sol = lamports as f64 / 1_000_000_000.0;
+                    let amount_text = match sol_usd_rate.map(|rate| sol * rate) {
+                        Some(usd) => format!("Amount: ${:.2}", usd),
+                        None => format!("Amount: {:.3} SOL", sol),
+                    };
+                    ui.label(amount_text);
                 } else {
                     ui.label("Amount: —");
                 }

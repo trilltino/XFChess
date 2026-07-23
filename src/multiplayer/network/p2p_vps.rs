@@ -4,8 +4,10 @@
 //! This provides reliable NAT traversal and eliminates manual Node ID sharing.
 //!
 //! Connection flow (HTTP relay only — no Iroh required):
-//!   Host: announces → waits → polls relay for JOIN_ACK → starts game
-//!   Joiner: sees listing → clicks join → sends JOIN_ACK → starts game immediately
+//!   Host: announces → waits → polls relay for JOIN_ACK → shows "opponent found"
+//!         with a Start Game button → host clicks it → sends GAME_START → starts game
+//!   Joiner: sees listing → clicks join → sends JOIN_ACK → waits for the host's
+//!           GAME_START signal → starts game
 
 use bevy::prelude::*;
 use std::collections::VecDeque;
@@ -62,6 +64,17 @@ pub struct P2PVpsState {
     /// Joiner who has sent JOIN_ACK but the game hasn't yet started.
     /// Used by the waiting screen to show who is about to join.
     pub pending_joiner: Option<PendingJoinerInfo>,
+
+    // ── Joiner-side game-start detection ─────────────────────────────────────
+    /// The game_id we've joined and are waiting on the host to start (set after
+    /// JOIN_ACK is sent, cleared once GAME_START arrives or we leave).
+    pub joining_game_id: Option<String>,
+    /// Host's node ID for the game we're joining.
+    pub joining_host_node_id: Option<String>,
+    /// Stake carried from `JoinResult` through to the GAME_START signal.
+    pub joining_stake_amount: f64,
+    /// Last time we polled the relay for the host's GAME_START message.
+    pub joiner_poll_last: Option<std::time::Instant>,
 }
 
 /// Build a `TimeControl` from base/increment seconds (0 base = unlimited).
@@ -94,6 +107,10 @@ impl Default for P2PVpsState {
             hosting_base_secs: 0,
             hosting_inc: 0,
             pending_joiner: None,
+            joining_game_id: None,
+            joining_host_node_id: None,
+            joining_stake_amount: 0.0,
+            joiner_poll_last: None,
         }
     }
 }
@@ -112,6 +129,10 @@ pub enum VpsResponse {
         joiner_node_id: String,
         joiner_display: String,
         joiner_elo: String,
+    },
+    /// Joiner received the host's GAME_START signal via backend relay
+    JoinerGameStart {
+        game_id: String,
     },
     Error(String),
 }
@@ -143,6 +164,7 @@ impl Plugin for P2PVpsPlugin {
             .add_systems(Update, sync_vps_relay_settings)
             .add_systems(Update, poll_vps_game_list)
             .add_systems(Update, poll_for_joiner_messages)
+            .add_systems(Update, poll_for_game_start_message)
             .add_systems(Update, handle_vps_responses)
             .add_systems(Update, send_vps_messages);
     }
@@ -247,6 +269,50 @@ fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
     });
 }
 
+/// Joiner polls backend relay every second looking for the host's GAME_START
+/// signal. The host no longer auto-starts the game once JOIN_ACK is received
+/// (see `poll_for_joiner_messages` / `JoinerDetected`) — it waits for the host
+/// to click "Start Game", which sends this signal.
+fn poll_for_game_start_message(
+    mut vps_state: ResMut<P2PVpsState>,
+    network_state: Res<OnlineNetworkState>,
+) {
+    let game_id = match vps_state.joining_game_id.clone() {
+        Some(id) => id,
+        None => return,
+    };
+    let node_id = match network_state.node_id.as_ref() {
+        Some(id) => bs58::encode(id.as_bytes()).into_string(),
+        None => return,
+    };
+
+    let should_poll = vps_state
+        .joiner_poll_last
+        .map(|t| t.elapsed().as_secs() >= 1)
+        .unwrap_or(true);
+
+    if !should_poll {
+        return;
+    }
+    vps_state.joiner_poll_last = Some(std::time::Instant::now());
+
+    let tx = vps_state.response_tx.clone();
+    std::thread::spawn(move || {
+        match vps_client::p2p_poll_messages(game_id.clone(), &node_id, 0) {
+            Ok((messages, _)) => {
+                for msg in &messages {
+                    if msg.strip_prefix("GAME_START:").is_some() {
+                        info!("[P2P VPS] GAME_START received for {}", game_id);
+                        let _ = tx.send(VpsResponse::JoinerGameStart { game_id });
+                        return;
+                    }
+                }
+            }
+            Err(e) => warn!("[P2P VPS] Joiner relay poll failed: {}", e),
+        }
+    });
+}
+
 /// Handle background VPS responses and update state
 #[allow(clippy::too_many_arguments)]
 fn handle_vps_responses(
@@ -254,9 +320,7 @@ fn handle_vps_responses(
     mut connect_events: MessageWriter<ConnectToPeerEvent>,
     mut core_mode: ResMut<crate::core::GameMode>,
     mut ai_config: ResMut<crate::game::ai::ChessAIResource>,
-    #[allow(unused_mut, unused_variables)] mut menu_state: ResMut<
-        NextState<crate::core::MenuState>,
-    >,
+    mut menu_state: ResMut<NextState<crate::core::MenuState>>,
     mut next_game_state: ResMut<NextState<GameState>>,
     mut game_started: MessageWriter<GameStartedEvent>,
     mut p2p_conn: ResMut<P2PConnectionState>,
@@ -334,18 +398,16 @@ fn handle_vps_responses(
                         &network_state,
                     );
 
-                    // Ask the host for the authoritative board state.
-                    // On a fresh game this is a no-op (host replies with starting FEN).
-                    // On reconnect this restores the current mid-game position.
-                    let gid = parse_game_id_u64(&game_id);
-                    if let Some(tx) = &network_state.message_sender {
-                        let _ = tx.send(
-                            crate::multiplayer::network::protocol::NetworkMessage::ResyncRequest {
-                                game_id: gid,
-                            },
-                        );
-                        info!("[P2P VPS] Sent ResyncRequest to host for game {gid}");
-                    }
+                    p2p_conn.is_host = false;
+                    p2p_conn.player_color = Some(crate::rendering::pieces::PieceColor::Black);
+
+                    // Remember what we joined so `poll_for_game_start_message` can watch
+                    // for the host's GAME_START signal — the game doesn't start until the
+                    // host clicks "Start Game" on their end.
+                    vps_state.joining_game_id = Some(game_id.clone());
+                    vps_state.joining_host_node_id = Some(host_id);
+                    vps_state.joining_stake_amount = stake_amount;
+                    vps_state.joiner_poll_last = None; // poll immediately
 
                     if stake_amount > 0.0 {
                         #[cfg(feature = "solana")]
@@ -358,18 +420,15 @@ fn handle_vps_responses(
                                 lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Join;
                             }
                         }
+                        #[cfg(not(feature = "solana"))]
+                        {
+                            menu_state.set(crate::core::MenuState::P2PWaiting);
+                        }
                     } else {
-                        // Start game immediately on joiner side (Black)
-                        ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
-                        *core_mode = crate::core::GameMode::OnlineMultiplayer;
-                        p2p_conn.is_host = false;
-                        p2p_conn.player_color = Some(crate::rendering::pieces::PieceColor::Black);
-                        p2p_conn.status = P2PConnectionStatus::InGame;
-
-                        let gid = parse_game_id_u64(&game_id);
-                        game_started.write(GameStartedEvent { game_id: gid });
-                        next_game_state.set(GameState::InGame);
-                        info!("[P2P VPS] Game started (joiner/Black) via HTTP relay");
+                        // Show the "waiting for host to start" screen instead of
+                        // entering the game immediately.
+                        menu_state.set(crate::core::MenuState::P2PWaiting);
+                        info!("[P2P VPS] Joined {} — waiting for host to start", game_id);
                     }
                 } else {
                     warn!("[P2P VPS] Join for game {} rejected by host", game_id);
@@ -401,10 +460,11 @@ fn handle_vps_responses(
                     elo_str: joiner_elo,
                 });
 
-                // Stop polling for joiners and clear stake so it isn't reused.
+                // Stop polling for further joiners (one opponent is enough). Keep
+                // `hosting_stake_amount` around — the waiting screen's "Start Game"
+                // button reads it when the host actually starts the match.
                 vps_state.hosting_game_id = None;
                 vps_state.hosting_node_id = None;
-                vps_state.hosting_stake_amount = 0.0;
 
                 // Start online game session with the correct stake amount.
                 crate::multiplayer::network::online_game_session::start_session(
@@ -424,42 +484,52 @@ fn handle_vps_responses(
                 p2p_conn.is_host = true;
                 p2p_conn.player_color = Some(crate::rendering::pieces::PieceColor::White);
 
-                if stake > 0.0 {
-                    // Wagered: route host through Solana contract creation before InGame.
-                    #[cfg(feature = "solana")]
-                    {
-                        info!("[P2P VPS] Wagered game — routing host to Solana Lobby to create on-chain game.");
-                        menu_state.set(crate::core::MenuState::SolanaLobby);
-                        if let Some(ref mut lobby) = solana_lobby {
-                            lobby.game_id_input = game_id.clone();
-                            lobby.wager_sol = stake as f32;
-                            lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
-                            lobby.allow_create = true;
-                        }
-                    }
-                    #[cfg(not(feature = "solana"))]
-                    {
-                        warn!("[P2P VPS] Wagered game requested but solana feature not enabled — starting as free game.");
-                        ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
-                        *core_mode = crate::core::GameMode::OnlineMultiplayer;
-                        p2p_conn.status = P2PConnectionStatus::InGame;
-                        let gid = parse_game_id_u64(&game_id);
-                        game_started.write(GameStartedEvent { game_id: gid });
-                        next_game_state.set(GameState::InGame);
-                    }
-                } else {
-                    // Free game — start immediately.
-                    ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
-                    *core_mode = crate::core::GameMode::OnlineMultiplayer;
-                    p2p_conn.status = P2PConnectionStatus::InGame;
-                    let gid = parse_game_id_u64(&game_id);
-                    game_started.write(GameStartedEvent { game_id: gid });
-                    next_game_state.set(GameState::InGame);
-                    // Leave the P2P waiting lobby so the "Waiting for opponent" overlay
-                    // dismisses the moment the joiner is detected.
-                    menu_state.set(crate::core::MenuState::Main);
-                    info!("[P2P VPS] Free game started (host/White) via HTTP relay");
+                // Stay on the waiting screen — it now shows "Opponent found!" with a
+                // Start Game button. The host explicitly starts the match from there
+                // (see the button handler in `render_p2p_waiting_screen`), which sends
+                // GAME_START and is what actually transitions both sides into InGame.
+            }
+
+            VpsResponse::JoinerGameStart { game_id } => {
+                // Ignore stale signals (e.g. after the joiner already left/cancelled).
+                if vps_state.joining_game_id.as_deref() != Some(game_id.as_str()) {
+                    continue;
                 }
+
+                let stake = vps_state.joining_stake_amount;
+                info!(
+                    "[P2P VPS] Host started game {} (stake={:.3}) — entering as joiner (Black)",
+                    game_id, stake
+                );
+
+                ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+                *core_mode = crate::core::GameMode::OnlineMultiplayer;
+                p2p_conn.status = P2PConnectionStatus::InGame;
+
+                let gid = parse_game_id_u64(&game_id);
+
+                // Ask the host for the authoritative board state.
+                // On a fresh game this is a no-op (host replies with starting FEN).
+                // On reconnect this restores the current mid-game position.
+                if let Some(tx) = &network_state.message_sender {
+                    let _ = tx.send(
+                        crate::multiplayer::network::protocol::NetworkMessage::ResyncRequest {
+                            game_id: gid,
+                        },
+                    );
+                    info!("[P2P VPS] Sent ResyncRequest to host for game {gid}");
+                }
+
+                game_started.write(GameStartedEvent { game_id: gid });
+                next_game_state.set(GameState::InGame);
+                // Fall back to Main (not the waiting screen) if InGame is exited later.
+                menu_state.set(crate::core::MenuState::Main);
+
+                vps_state.joining_game_id = None;
+                vps_state.joining_host_node_id = None;
+                vps_state.joining_stake_amount = 0.0;
+
+                info!("[P2P VPS] Game started (joiner/Black) via HTTP relay");
             }
 
             VpsResponse::Error(e) => {
@@ -495,7 +565,7 @@ fn send_vps_messages(
 }
 
 /// Parse the numeric suffix of a game_id string (e.g. "p2p_1947654842" → 1947654842).
-fn parse_game_id_u64(game_id: &str) -> u64 {
+pub(crate) fn parse_game_id_u64(game_id: &str) -> u64 {
     game_id
         .rsplit('_')
         .next()

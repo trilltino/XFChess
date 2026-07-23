@@ -26,7 +26,7 @@ take funds, forge results, impersonate a user, or take over the box?**
 |---|---|---|---|
 | Wager escrow | Forged game result to steal pot | Moves validated **on-chain** (`chess-logic-on-chain`); result derived from on-chain state; settlement reads the PDA | ✅ |
 | Wager escrow | Replay/duplicate settlement | `finalize_game` idempotent on-chain; settlement worker re-derives from chain | ✅ |
-| Session keys | Stolen session key signs moves for a game | Session key scoped per-game via `SessionDelegation` PDA; no funds authority; rotate via [SECRETS_ROTATION.md](../deploy/SECRETS_ROTATION.md) | ✅ |
+| Session keys | Stolen session key signs moves for a game | Session key scoped per-game via `SessionDelegation` PDA; no funds authority; rotate via [SECRETS_ROTATION.md](../ops/SECRETS_ROTATION.md) | ✅ |
 | Auth JWT | Token theft → impersonation | Server-side verify; short TTL; sig-replay window; revocation table (`017_jwt_revocations`) | ✅ (web JWT→httpOnly cookie still open, FRONTEND_REMEDIATION F2) |
 | **Desktop wallet JWT** | Any website reads it from local bridge :7454 | CORS locked to localhost/tauri origins (Tauri T1); **full fix (per-launch bearer token) pending** | 🟡 partial |
 | Authority keys (fee-payer/KYC/dispute) | Key leak → drain fees / forge KYC / resolve disputes | Keys only in untracked `.env` (chmod 600), hardened systemd, rotation runbook; **rotate the values leaked in git history before mainnet** | 🟡 rotate pending |
@@ -59,8 +59,8 @@ take funds, forge results, impersonate a user, or take over the box?**
 - **SSRF** — backend only calls known providers (RPC, Resend, CoinGecko/Frankfurter); no user-supplied fetch URLs.
 
 ## Top open items (tracked elsewhere)
-1. Rotate secrets leaked in git history before mainnet — [E2E_REMEDIATION.md R1](../deploy/docs/E2E_REMEDIATION.md).
+1. Rotate secrets leaked in git history before mainnet — [E2E_REMEDIATION.md R1](../ops/docs/E2E_REMEDIATION.md).
 2. Desktop bridge per-launch bearer token — [TAURI_REMEDIATION.md T1](../tauri/docs/TAURI_REMEDIATION.md).
-3. Web JWT → httpOnly cookie — [FRONTEND_REMEDIATION.md F2](../deploy/docs/FRONTEND_REMEDIATION.md).
+3. Web JWT → httpOnly cookie — [FRONTEND_REMEDIATION.md F2](../ops/docs/FRONTEND_REMEDIATION.md).
 4. At-rest DB encryption (SQLCipher) — P2.
 5. Admin-action audit log + break-glass — WS component, pending.

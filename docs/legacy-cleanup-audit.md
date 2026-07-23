@@ -126,7 +126,7 @@ Removal path:
 - Pick one canonical binary name.
 - Update scripts using the removed alias, notably `scripts/start-tournament-admin.bat` currently uses `signing-server-http`.
 
-Risk: medium because deploy/local scripts may depend on the alias.
+Risk: medium because ops/local scripts may depend on the alias.
 
 ## Do Not Simply Remove Yet
 

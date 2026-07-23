@@ -44,7 +44,7 @@ export default function Settings() {
         <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: 0, lineHeight: "1.6" }}>
           Authority-key rotation is a deliberate operational procedure, not a one-click action — the
           old "rotate" button only logged and told you to hand-edit <code style={{ color: "var(--primary)" }}>.env</code> anyway.
-          Follow <code style={{ color: "var(--primary)" }}>deploy/SECRETS_ROTATION.md</code>: generate the new keypair
+          Follow <code style={{ color: "var(--primary)" }}>ops/SECRETS_ROTATION.md</code>: generate the new keypair
           offline, update <code style={{ color: "var(--primary)" }}>VPS_AUTHORITY_KEY</code> in <code style={{ color: "var(--primary)" }}>/opt/xfchess/.env</code>,
           and restart <code style={{ color: "var(--primary)" }}>xfchess-backend</code>. Treasury/dispute authorities move to a Squads multisig in Phase 5.
         </p>

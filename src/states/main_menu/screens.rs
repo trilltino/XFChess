@@ -449,6 +449,10 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 }
 
 /// Render spectator popup to view all games.
+///
+/// `sol_usd_rate` is the current USD-per-SOL quote (see `wager_rate::SolUsdRate`),
+/// pre-resolved by the caller since this function isn't solana-feature-gated
+/// (spectating free games works without the feature) but the rate resource is.
 pub(super) fn render_spectator_popup(
     ctx: &egui::Context,
     competitive: &mut CompetitiveMenuState,
@@ -458,6 +462,7 @@ pub(super) fn render_spectator_popup(
             crate::multiplayer::spectator::SpectateViaLinkEvent,
         >,
     >,
+    sol_usd_rate: Option<f64>,
 ) {
     egui::Window::new("Spectator Mode")
         .collapsible(false)
@@ -485,7 +490,21 @@ pub(super) fn render_spectator_popup(
             ui.separator();
             ui.add_space(8.0);
 
-            if cached_games.is_empty() {
+            // Only games with both seats filled are actually being played —
+            // an Open lobby waiting for a second player has nothing to watch
+            // yet. `players_joined`/`capacity` are populated from
+            // `joiner_node_id.is_some()` independently of the relay's
+            // Open/Connecting/InProgress status label (see
+            // `backend/src/signing/p2p_relay/routes.rs::list_games`), so this
+            // stays correct for both the casual GAME_START flow and
+            // tournament matches, which never go through an explicit
+            // "accept" step.
+            let live_games: Vec<_> = cached_games
+                .iter()
+                .filter(|g| g.players_joined >= g.capacity)
+                .collect();
+
+            if live_games.is_empty() {
                 ui.label(
                     egui::RichText::new("No games available to spectate at the moment.")
                         .size(14.0)
@@ -499,7 +518,7 @@ pub(super) fn render_spectator_popup(
                 );
             } else {
                 egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                    for game in cached_games {
+                    for game in live_games {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
                                 ui.vertical(|ui| {
@@ -507,11 +526,19 @@ pub(super) fn render_spectator_popup(
                                     ui.label(egui::RichText::new(host).size(13.0).color(egui::Color32::WHITE).strong());
                                     let type_badge = match game.game_type.as_str() {
                                         "solana_wager" => " Wager",
-                                        "tournament" => " Tournament",
+                                        // Tournament matches announce themselves as
+                                        // "tournament_match" (see
+                                        // announce_or_join_tournament_relay in
+                                        // multiplayer/solana/tournament.rs) — "tournament"
+                                        // alone never actually gets sent by anything.
+                                        "tournament" | "tournament_match" => " Tournament",
                                         _ => " Free",
                                     };
                                     let stake_str = if game.stake_amount > 0.0 {
-                                        format!("{} — {:.3} SOL", type_badge, game.stake_amount)
+                                        match sol_usd_rate.map(|rate| game.stake_amount * rate) {
+                                            Some(usd) => format!("{} — ${:.2}", type_badge, usd),
+                                            None => format!("{} — {:.3} SOL", type_badge, game.stake_amount),
+                                        }
                                     } else {
                                         type_badge.to_string()
                                     };
@@ -1439,7 +1466,7 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
         );
         ui.add(
             egui::TextEdit::singleline(&mut ctx.competitive_menu.join_game_id)
-                .hint_text("p2p_xxxxxxxx")
+                .hint_text("Enter code")
                 .desired_width(160.0),
         );
         let can_join = !ctx.competitive_menu.join_game_id.trim().is_empty();
@@ -2708,6 +2735,16 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
 }
 
 pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
+    // This popup is shared by both sides of a P2P lobby: the host (waiting for
+    // someone to join) and a joiner (waiting for the host to start). `p2p_host`
+    // is only populated on the hosting side, so its absence means we got here
+    // by joining someone else's game.
+    let is_joiner = ctx.p2p_host.game_id.is_none();
+    if is_joiner {
+        render_p2p_joiner_waiting_screen(ui, ctx);
+        return;
+    }
+
     // Heartbeat: keep the lobby alive on the backend every 60 seconds. Direct
     // Connection hosts were never announced to the VPS lobby directory in
     // the first place, so there's nothing to keep alive there.
@@ -2778,32 +2815,11 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     .size(14.0)
                     .color(egui::Color32::WHITE),
             );
-            ui.add_space(8.0);
-
-            if let Some(game_id) = ctx.p2p_host.game_id.clone() {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!("Code: {}", game_id))
-                            .size(12.0)
-                            .color(egui::Color32::GRAY)
-                            .monospace(),
-                    );
-                    if ui
-                        .small_button("Copy")
-                        .on_hover_text("Copy game code to clipboard")
-                        .clicked()
-                    {
-                        ui.output_mut(|o| {
-                            o.commands
-                                .push(egui::OutputCommand::CopyText(game_id.clone()))
-                        });
-                    }
-                });
-            }
         }
         ui.add_space(30.0);
 
-        // Show joiner identity once detected, otherwise animated dots
+        // Show joiner identity once detected, along with the Start Game button
+        // that actually begins the match — joining no longer auto-starts it.
         let pending_joiner = ctx
             .p2p_vps_state
             .as_ref()
@@ -2829,12 +2845,25 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                         .color(egui::Color32::GOLD),
                 );
             }
-        } else {
-            ui.label(
-                egui::RichText::new("• • •")
-                    .size(32.0)
-                    .color(egui::Color32::GOLD),
-            );
+
+            ui.add_space(16.0);
+
+            if ui
+                .add_sized(
+                    [180.0, 40.0],
+                    egui::Button::new(
+                        egui::RichText::new("Start Game")
+                            .size(16.0)
+                            .color(egui::Color32::WHITE)
+                            .strong(),
+                    )
+                    .fill(egui::Color32::from_rgb(40, 140, 80))
+                    .corner_radius(6.0),
+                )
+                .clicked()
+            {
+                start_p2p_host_game(ctx);
+            }
         }
 
         ui.add_space(40.0);
@@ -2945,4 +2974,170 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
             ctx.menu_state.set(crate::core::MenuState::BraidLobby);
         }
     });
+}
+
+/// Waiting screen shown to the *joiner* after sending JOIN_ACK, while we wait
+/// for the host to click "Start Game". Joining a lobby no longer starts the
+/// match immediately — the host has to explicitly kick it off, which signals
+/// us over the VPS relay (see `poll_for_game_start_message` in `p2p_vps.rs`).
+fn render_p2p_joiner_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(40.0);
+        ui.heading(
+            egui::RichText::new("WAITING FOR HOST")
+                .size(24.0)
+                .color(egui::Color32::GOLD)
+                .strong(),
+        );
+        ui.add_space(20.0);
+        ui.label(
+            egui::RichText::new("You've joined the game.")
+                .size(14.0)
+                .color(egui::Color32::WHITE),
+        );
+        ui.label(
+            egui::RichText::new("Waiting for the host to start the match…")
+                .size(13.0)
+                .color(egui::Color32::GRAY),
+        );
+
+        ui.add_space(40.0);
+
+        if ui
+            .button(
+                egui::RichText::new("Leave")
+                    .size(16.0)
+                    .color(egui::Color32::from_rgb(255, 100, 100)),
+            )
+            .clicked()
+        {
+            let left_game_id = ctx
+                .p2p_vps_state
+                .as_mut()
+                .and_then(|vps| vps.joining_game_id.take());
+            if let Some(ref mut vps) = ctx.p2p_vps_state {
+                vps.joining_host_node_id = None;
+                vps.joining_stake_amount = 0.0;
+            }
+            if let Some(game_id) = left_game_id {
+                let node_id = ctx
+                    .network_state
+                    .as_ref()
+                    .and_then(|ns| {
+                        ns.node_id
+                            .map(|id| bs58::encode(id.as_bytes()).into_string())
+                    })
+                    .unwrap_or_default();
+                std::thread::spawn(move || {
+                    if let Err(e) =
+                        crate::multiplayer::vps_client::p2p_leave_game(game_id.clone(), &node_id)
+                    {
+                        warn!("[LOBBY] Leave failed: {}", e);
+                    } else {
+                        info!("[LOBBY] Left game {} before it started", game_id);
+                    }
+                });
+            }
+            if let Some(ref mut p2p_state) = ctx.p2p_state {
+                p2p_state.status = P2PConnectionStatus::Disconnected;
+            }
+            ctx.menu_state.set(crate::core::MenuState::BraidLobby);
+        }
+    });
+}
+
+/// Called when the host clicks "Start Game" on the waiting screen after an
+/// opponent has joined. Sends the GAME_START signal so the joiner enters the
+/// game too, then transitions the host in (or, for a wagered game, on to the
+/// Solana lobby to create the on-chain game first).
+fn start_p2p_host_game(ctx: &mut MainMenuUIContext) {
+    let Some(game_id) = ctx.p2p_host.game_id.clone() else {
+        return;
+    };
+    let stake = ctx
+        .p2p_vps_state
+        .as_ref()
+        .map(|vps| vps.hosting_stake_amount)
+        .unwrap_or(0.0);
+
+    let node_id = ctx
+        .network_state
+        .as_ref()
+        .and_then(|ns| {
+            ns.node_id
+                .map(|id| bs58::encode(id.as_bytes()).into_string())
+        })
+        .unwrap_or_default();
+    {
+        let gid = game_id.clone();
+        let nid = node_id.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = crate::multiplayer::vps_client::p2p_send_message(
+                gid.clone(),
+                &nid,
+                "GAME_START:1",
+            ) {
+                warn!("[LOBBY] GAME_START send failed: {}", e);
+            } else {
+                info!("[LOBBY] Sent GAME_START for {}", gid);
+            }
+            // Flips the relay's own listing status from Connecting to
+            // InProgress — nothing else in the client ever called this, so
+            // the game never left "Connecting" as far as GET /p2p/games was
+            // concerned. Best-effort: a failure here doesn't block the game,
+            // it just means the listing status stays stale (visibility is
+            // still correct via players_joined/capacity — see
+            // render_spectator_popup).
+            if let Err(e) = crate::multiplayer::vps_client::p2p_accept_join(gid.clone(), &nid) {
+                warn!("[LOBBY] p2p_accept_join failed for {}: {}", gid, e);
+            }
+        });
+    }
+
+    if stake > 0.0 {
+        #[cfg(feature = "solana")]
+        {
+            info!("[LOBBY] Wagered game — routing host to Solana Lobby to create on-chain game.");
+            ctx.menu_state.set(crate::core::MenuState::SolanaLobby);
+            if let Some(ref mut lobby) = ctx.solana_lobby {
+                lobby.game_id_input = game_id.clone();
+                lobby.wager_sol = stake as f32;
+                lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
+                lobby.allow_create = true;
+            }
+        }
+        #[cfg(not(feature = "solana"))]
+        {
+            warn!(
+                "[LOBBY] Wagered game requested but solana feature not enabled — starting as free game."
+            );
+            enter_p2p_host_game(ctx, &game_id);
+        }
+    } else {
+        enter_p2p_host_game(ctx, &game_id);
+    }
+
+    if let Some(ref mut vps) = ctx.p2p_vps_state {
+        vps.pending_joiner = None;
+        vps.hosting_stake_amount = 0.0;
+    }
+}
+
+/// Puts the host directly into the game (the free/non-wagered path).
+fn enter_p2p_host_game(ctx: &mut MainMenuUIContext, game_id: &str) {
+    ctx.ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+    *ctx.core_mode = crate::core::GameMode::OnlineMultiplayer;
+    if let Some(ref mut p2p) = ctx.p2p_state {
+        p2p.is_host = true;
+        p2p.player_color = Some(crate::rendering::pieces::PieceColor::White);
+        p2p.status = P2PConnectionStatus::InGame;
+    }
+    let gid = crate::multiplayer::network::p2p_vps::parse_game_id_u64(game_id);
+    ctx.game_started_events
+        .write(crate::game::events::GameStartedEvent { game_id: gid });
+    ctx.next_state.set(crate::core::GameState::InGame);
+    ctx.menu_state.set(crate::core::MenuState::Main);
+
+    ctx.p2p_host.game_id = None;
+    ctx.p2p_host.last_heartbeat = None;
 }

@@ -1,9 +1,14 @@
 use super::state::WagerState;
+use crate::multiplayer::solana::wager_rate::SolUsdRate;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 /// UI system that displays wager info in-game
-pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts) {
+pub fn wager_ui_system(
+    wager_state: Res<WagerState>,
+    sol_usd_rate: Res<SolUsdRate>,
+    mut contexts: EguiContexts,
+) {
     // Only show if wager info is loaded
     if !wager_state.is_loaded {
         return;
@@ -12,6 +17,18 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,
         Err(_) => return,
+    };
+
+    // Appends "(≈$X.XX)" next to a raw SOL amount when a live rate is
+    // available; empty otherwise so callers can no-op on `None` amounts
+    // (e.g. "Free Game") via `Option::map`. Deliberately doesn't touch
+    // `wager_display()`/`pot_display()` in state.rs — those have exact-string
+    // unit tests.
+    let usd_suffix = |sol: f64| -> String {
+        match sol_usd_rate.usd_for_sol(sol) {
+            Some(usd) => format!(" (≈${:.2})", usd),
+            None => String::new(),
+        }
     };
 
     // Create a top-right panel for wager info
@@ -31,8 +48,9 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                 // Wager amount
                 ui.horizontal(|ui| {
                     ui.label("Your Wager:");
+                    let suffix = wager_state.wager_amount.map(usd_suffix).unwrap_or_default();
                     ui.label(
-                        egui::RichText::new(wager_state.wager_display())
+                        egui::RichText::new(format!("{}{}", wager_state.wager_display(), suffix))
                             .color(egui::Color32::GOLD)
                             .strong(),
                     );
@@ -41,8 +59,9 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                 // Total pot
                 ui.horizontal(|ui| {
                     ui.label("Total Pot:");
+                    let suffix = wager_state.total_pot.map(usd_suffix).unwrap_or_default();
                     ui.label(
-                        egui::RichText::new(wager_state.pot_display())
+                        egui::RichText::new(format!("{}{}", wager_state.pot_display(), suffix))
                             .color(egui::Color32::GREEN)
                             .strong(),
                     );
@@ -60,7 +79,7 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                         ui.horizontal(|ui| {
                             ui.label("Country Fee:");
                             ui.label(
-                                egui::RichText::new(format!("{} SOL", country_fee))
+                                egui::RichText::new(format!("{} SOL{}", country_fee, usd_suffix(country_fee)))
                                     .color(egui::Color32::LIGHT_BLUE)
                                     .small(),
                             );
@@ -72,7 +91,7 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                         ui.horizontal(|ui| {
                             ui.label("ELO Fee:");
                             ui.label(
-                                egui::RichText::new(format!("{} SOL", elo_fee))
+                                egui::RichText::new(format!("{} SOL{}", elo_fee, usd_suffix(elo_fee)))
                                     .color(egui::Color32::LIGHT_BLUE)
                                     .small(),
                             );
@@ -88,7 +107,7 @@ pub fn wager_ui_system(wager_state: Res<WagerState>, mut contexts: EguiContexts)
                         ui.horizontal(|ui| {
                             ui.label("Total Fees:");
                             ui.label(
-                                egui::RichText::new(format!("{} SOL", total_fees))
+                                egui::RichText::new(format!("{} SOL{}", total_fees, usd_suffix(total_fees)))
                                     .color(egui::Color32::YELLOW)
                                     .strong()
                                     .small(),

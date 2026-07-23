@@ -17,11 +17,31 @@ use xfchess_game::state::PlayerProfile;
 pub fn check_profile_on_connect(
     mut solana_state: ResMut<SolanaIntegrationState>,
     tokio_runtime: Res<TokioRuntime>,
+    time: Res<Time>,
     mut last_wallet: Local<Option<String>>,
+    mut recheck_timer: Local<f32>,
 ) {
     let current_wallet = solana_state.wallet_pubkey.map(|pk| pk.to_string());
-    if current_wallet.is_none() || current_wallet == *last_wallet {
+    if current_wallet.is_none() {
         return;
+    }
+
+    if current_wallet == *last_wallet {
+        // Same wallet as last check. Normally nothing to do — but if the
+        // profile still isn't fully set up, re-poll periodically so
+        // completing on-chain setup in the Tauri wallet-ui popup (see
+        // ProfileStep's requireOnchain branch in tauri/wallet-ui/src/App.tsx)
+        // is picked up without requiring a wallet reconnect.
+        if solana_state.profile_status == ProfileStatus::HasProfileWithUsername {
+            return;
+        }
+        *recheck_timer += time.delta_secs();
+        if *recheck_timer < 15.0 {
+            return;
+        }
+        *recheck_timer = 0.0;
+    } else {
+        *recheck_timer = 0.0;
     }
 
     let Some(wallet_pubkey) = solana_state.wallet_pubkey else {

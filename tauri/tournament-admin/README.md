@@ -49,5 +49,5 @@ just build-admin-ui-force   # from the repo root
 - Every request goes through [src/services/api.ts](src/services/api.ts) so the admin
   key is attached in one place.
 - Deployment actions only surface instructions for
-  [deploy/scripts/deploy.ps1](../../deploy/scripts/deploy.ps1) — the app must not
+  [ops/scripts/deploy.ps1](../../ops/scripts/deploy.ps1) — the app must not
   execute deploys itself (T9 in [../docs/TAURI_REMEDIATION.md](../docs/TAURI_REMEDIATION.md)).

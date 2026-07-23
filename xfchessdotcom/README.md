@@ -49,4 +49,4 @@ const base =
   program instructions change.
 - Build transactions through Anchor's `Program` class — never raw transactions.
 - Every `VITE_*` variable is baked into the public bundle; secrets must stay
-  server-side (see F3 in [deploy/docs/FRONTEND_REMEDIATION.md](../deploy/docs/FRONTEND_REMEDIATION.md)).
+  server-side (see F3 in [ops/docs/FRONTEND_REMEDIATION.md](../ops/docs/FRONTEND_REMEDIATION.md)).

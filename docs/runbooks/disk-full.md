@@ -3,7 +3,7 @@
 **Symptom:** `disk_space` health check warns/critical; writes failing; SQLite errors;
 backup job failing.
 **Severity:** S2 → S1 (SQLite can't write = outage).
-**Dashboards:** `deploy/monitoring/rules/disk_alerts.yml`; `/health/detailed` disk check.
+**Dashboards:** `ops/monitoring/rules/disk_alerts.yml`; `/health/detailed` disk check.
 
 ## Diagnose
 1. `ssh $SERVER df -h` — which mount is full?

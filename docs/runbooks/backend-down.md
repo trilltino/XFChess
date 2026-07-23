@@ -14,7 +14,7 @@
 
 ## Mitigate
 1. Transient crash: `systemctl restart xfchess-backend` (Restart=on-failure already retries).
-2. Bad deploy: **roll back** — `deploy/scripts/rollback.ps1` (restores previous binary).
+2. Bad deploy: **roll back** — `ops/scripts/rollback.ps1` (restores previous binary).
 3. Bad config: fix `/opt/xfchess/.env`, `systemctl restart`.
 4. DB corruption: restore per [DR.md](../DR.md) (`restore-db.sh`), then start.
 

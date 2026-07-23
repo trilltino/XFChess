@@ -60,7 +60,7 @@ MagicBlock Ephemeral Rollups
 | `xfchessdotcom/` | React/Solana web frontend |
 | `tauri/` | Desktop companion services and visualization tooling |
 | `docs/` | Architecture notes, ADRs, plans, runbooks |
-| `deploy/` | VPS, nginx, staging, backend, monitoring config |
+| `ops/` | VPS, nginx, staging, backend, monitoring config |
 
 ## Quick Start
 
@@ -137,9 +137,9 @@ cargo test -p xfchess-game --test game_settlement_tests
 
 Deployment material lives in:
 
-- `deploy/README.md`
-- `deploy/backend/.env.example`
-- `deploy/staging/.env.staging.example`
+- `ops/README.md`
+- `ops/backend/.env.example`
+- `ops/staging/.env.staging.example`
 - `docs/ENVIRONMENTS.md`
 - `docs/runbooks/`
 

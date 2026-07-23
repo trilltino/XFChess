@@ -6,6 +6,15 @@ they don't have to be rediscovered.
 
 ## Cutting a release
 
+```powershell
+# Pushes the current branch + an auto-bumped (or explicit) version tag to both
+# origin and private in one step
+.\scripts\push_and_release.ps1
+.\scripts\push_and_release.ps1 -Version v0.5.0
+```
+
+Or manually, origin only:
+
 ```bash
 git tag v0.4.0
 git push origin v0.4.0

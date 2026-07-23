@@ -18,6 +18,8 @@ code (each directory's README); this tree holds the cross-cutting material.
 | [PUBLISHING.md](PUBLISHING.md) | Cutting a Win/Mac/Linux release; known CI/release landmines and how they were fixed |
 | [INSTALL.md](INSTALL.md) | End-user install steps per platform from GitHub Releases (SmartScreen/Gatekeeper bypass, Linux runtime deps) |
 | [PRODUCTION_REALITY_PLAN.md](PRODUCTION_REALITY_PLAN.md) | Production-hardening master plan |
+| [XFChess_Jurisdictional_Deep_Dive.txt](XFChess_Jurisdictional_Deep_Dive.txt) | Legal/jurisdictional research backing the compliance pages (has 3 known errors — cross-check before citing) |
+| [lichess-api-reference.json](lichess-api-reference.json) | Lichess API reference used for the external-ELO linking / OAuth integration |
 
-Deployment docs live in [deploy/](../deploy/README.md); the MagicBlock ER guide is
+Deployment docs live in [ops/](../ops/README.md); the MagicBlock ER guide is
 [MAGICBLOCK.md](../MAGICBLOCK.md) at the repo root.

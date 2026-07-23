@@ -14,6 +14,8 @@ use crate::multiplayer::solana::addon::{
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
 #[cfg(feature = "solana")]
+use crate::multiplayer::solana::wager_rate::SolUsdRate;
+#[cfg(feature = "solana")]
 use crate::ui::account::profile_view::ProfileViewState;
 use crate::ui::game::game_ui::InGameHudVisibility;
 use bevy::ecs::system::SystemParam;
@@ -49,6 +51,8 @@ pub struct GameUIParams<'w, 's> {
     pub rollup_manager: Option<ResMut<'w, EphemeralRollupManager>>,
     #[cfg(feature = "solana")]
     pub solana_integration: Option<Res<'w, SolanaIntegrationState>>,
+    #[cfg(feature = "solana")]
+    pub sol_usd_rate: Option<Res<'w, SolUsdRate>>,
     #[cfg(feature = "solana")]
     pub profile_view: Option<ResMut<'w, ProfileViewState>>,
     #[cfg(feature = "solana")]

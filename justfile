@@ -340,12 +340,12 @@ deploy-devnet:
 
 # Start local Prometheus + Grafana monitoring stack
 monitoring:
-    docker-compose -f deploy/monitoring/docker-compose.local.yml up -d
+    docker-compose -f ops/monitoring/docker-compose.local.yml up -d
     @Write-Host "Grafana: http://localhost:3000" -ForegroundColor Green
 
 # Stop monitoring stack
 monitoring-down:
-    docker-compose -f deploy/monitoring/docker-compose.local.yml down
+    docker-compose -f ops/monitoring/docker-compose.local.yml down
 
 # ── Lint & test ───────────────────────────────────────────────────────────────
 

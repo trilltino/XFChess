@@ -46,9 +46,9 @@ pub use identity::{
     RegisterReq, UserStatus,
 };
 pub use p2p::{
-    p2p_announce_game, p2p_announce_game_with_password, p2p_heartbeat, p2p_join_game,
-    p2p_join_game_with_password, p2p_leave_game, p2p_list_games, p2p_list_games_filtered,
-    p2p_poll_messages, p2p_send_message, P2PGameListing, P2PListFilter,
+    p2p_accept_join, p2p_announce_game, p2p_announce_game_with_password, p2p_heartbeat,
+    p2p_join_game, p2p_join_game_with_password, p2p_leave_game, p2p_list_games,
+    p2p_list_games_filtered, p2p_poll_messages, p2p_send_message, P2PGameListing, P2PListFilter,
 };
 #[cfg(feature = "solana")]
 pub use session::tee_authenticate;

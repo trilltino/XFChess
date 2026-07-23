@@ -61,6 +61,7 @@ members = [
     "crates/shared/*",
     "programs/*",
     "tauri",
+    "backend",
 ]
 exclude = [
     "references/ephemeral-rollups-sdk/rust",
@@ -140,6 +141,7 @@ braid_chess = { path = "crates/zarathustra_net/braid_chess" }
 iroh-gossip = { path = "crates/zarathustra_net/iroh-gossip" }
 solana-chess-client = { path = "crates/solana/solana-chess-client" }
 nimzovich_engine = { path = "crates/engine/nimzovich_engine" }
+xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
 chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
 magic-resolver = { version = "0.2.0" }
 bevy = { version = "=0.19.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg"] }

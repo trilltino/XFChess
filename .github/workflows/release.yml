@@ -15,7 +15,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # Production endpoints baked into the installers/launchers. nginx serves the
-  # frontend + API from the same domain (see deploy/nginx/nginx.conf) — there's
+  # frontend + API from the same domain (see ops/nginx/nginx.conf) — there's
   # no separate api.* subdomain.
   BACKEND_URL: https://xfchess.com
   SIGNING_URL: https://xfchess.com

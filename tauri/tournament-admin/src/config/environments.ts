@@ -64,7 +64,7 @@ export const ENVIRONMENTS: Record<EnvId, EnvConfig> = {
 
 // Interactive ops terminal (Hetzner SSH panel) connects as the restricted
 // `deploy` user — NOT root. deploy has NOPASSWD sudo for only
-// `systemctl restart/reload/status` (see deploy/scripts/deploy.ps1 Step 2a).
+// `systemctl restart/reload/status` (see ops/scripts/deploy.ps1 Step 2a).
 export const OPS_SSH = {
   user: "deploy",
   host: VPS_HOST,

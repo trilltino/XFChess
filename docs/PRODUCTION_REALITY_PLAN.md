@@ -2,8 +2,8 @@
 
 Deep evaluation of the production-engineering concepts against **this** codebase, mapped
 to idiomatic, modular, documented work across every component. Grounded in the
-[Production Reality Checklist](../deploy/docs/) (35 domains) and the audits already done:
-[VPS](../deploy/docs/E2E_REMEDIATION.md), [Frontend](../deploy/docs/FRONTEND_REMEDIATION.md),
+[Production Reality Checklist](../ops/docs/) (35 domains) and the audits already done:
+[VPS](../ops/docs/E2E_REMEDIATION.md), [Frontend](../ops/docs/FRONTEND_REMEDIATION.md),
 [Tauri](../tauri/docs/TAURI_REMEDIATION.md).
 
 > **Principle:** adopt what fits a solo-operated, latency-sensitive **P2P chess dapp on a
@@ -93,7 +93,7 @@ Each workstream lands as a **self-contained module + a doc**, so it's idiomatic 
 - **Timeouts on every external call** (RPC, email, RPC-to-ER); **circuit breaker** wrapper (`crates/` util or `backend/src/signing/solana/rpc.rs`).
 - Doc: `docs/RELIABILITY.md` (failure modes table, degraded modes, RPO/RTO).
 
-### WS-B · Data & Backups (`backend/src/db/`, new `deploy/backup/`)
+### WS-B · Data & Backups (`backend/src/db/`, new `ops/backup/`)
 - Document source-of-truth per entity (on-chain vs SQLite vs cache) and consistency model.
 - **Backup job**: nightly `VACUUM INTO` snapshot → **encrypt (age/gpg)** → push to **R2** (S3 API), retention + immutability (object-lock). **Test restore** and record the date in `docs/DR.md`.
 - Migrations: enforce **expand-contract**, add a `sqlx migrate` dry-run + rollback test in CI.
@@ -111,7 +111,7 @@ Each workstream lands as a **self-contained module + a doc**, so it's idiomatic 
 
 ### WS-E · Observability (`backend/src/telemetry/`, all services)
 - **Structured JSON logs** (`tracing-subscriber` json) with **correlation/request IDs** propagated client→backend→chain; **redact secrets** (deny-list layer).
-- Expand RED metrics (rate/errors/duration) per route + worker; alerts mapped to SLOs (`deploy/monitoring/rules/`), **every alert gets a runbook** in `docs/runbooks/`.
+- Expand RED metrics (rate/errors/duration) per route + worker; alerts mapped to SLOs (`ops/monitoring/rules/`), **every alert gets a runbook** in `docs/runbooks/`.
 - Add lightweight **distributed tracing** (OpenTelemetry OTLP → Grafana Tempo, optional) or at minimum correlation-ID logging end-to-end.
 - Error sink (self-hosted GlitchTip / Sentry) for grouped, actionable errors from game + web + backend.
 
@@ -121,12 +121,12 @@ Each workstream lands as a **self-contained module + a doc**, so it's idiomatic 
 - Threat model doc `docs/THREAT_MODEL.md` (attacker/abuse/fraud paths: move forgery, session-key abuse, wager settlement fraud, Sybil, bridge token theft).
 - OWASP Top-10 pass on backend + web; upload/PGN import validation.
 
-### WS-G · Delivery: Envs, CI/CD, Git (repo + `.github/`, `deploy/`)
+### WS-G · Delivery: Envs, CI/CD, Git (repo + `.github/`, `ops/`)
 - **Staging environment** (second VPS or namespaced systemd slice; devnet). Promote the **same artifact** staging→prod.
-- Branch protection: block direct push to `main`, require PR + review; **dedicated reviewers** for `migrations/`, `programs/`, `deploy/`. Signed hotfix + **cherry-pick/backport** process → `docs/GIT_WORKFLOW.md`.
+- Branch protection: block direct push to `main`, require PR + review; **dedicated reviewers** for `migrations/`, `programs/`, `ops/`. Signed hotfix + **cherry-pick/backport** process → `docs/GIT_WORKFLOW.md`.
 - CI/CD: build once → test+scan gates → deploy staging → smoke → deploy prod; **DORA metrics**; rollback one-command (exists) + tested; deployment traceable to commit (embed git SHA in `/health`).
 
-### WS-H · Availability & Ops (`docs/`, `deploy/`)
+### WS-H · Availability & Ops (`docs/`, `ops/`)
 - Define **SLIs/SLOs** per flow (auth, move record, settlement, tournament ops, web reads) with p50/p95/p99 + error budget → `docs/SLO.md`.
 - Health/readiness/liveness that mean something (DB reachable, RPC reachable, ER reachable); degraded-mode banners in client/web.
 - **Incident response**: severity levels, runbooks, blameless postmortem template → `docs/runbooks/`, `docs/INCIDENT_RESPONSE.md`.
@@ -189,7 +189,7 @@ Adopt: JWT→httpOnly cookie (or short-TTL + refresh), Helius key behind backend
 | 3 | Who is alerted? | Alertmanager configured; **owner/rotation undefined.** |
 | 4 | What do they do? | **Gap:** runbooks. |
 | 5 | How do we recover? | Restart via systemd; settlement worker self-heals. **Gap:** DR runbook. |
-| 6 | How do we roll back? | `deploy/scripts/rollback.ps1` exists; **time-to-rollback untracked.** |
+| 6 | How do we roll back? | `ops/scripts/rollback.ps1` exists; **time-to-rollback untracked.** |
 | 7 | Prevent data loss? | On-chain is durable; SQLite **has no offsite backup** → P0. |
 | 8 | Prevent unauthorized access? | JWT + session keys + CACF; **CORS/token gaps** being fixed. |
 | 9 | Protect secrets? | `.env` + rotation doc; **history leak** → rotate (P0). |
@@ -210,7 +210,7 @@ Adopt: JWT→httpOnly cookie (or short-TTL + refresh), Helius key behind backend
 
 | Phase | Status | Landed |
 |---|---|---|
-| **P0** | ✅ done | WS-B backups ([backup-db.sh](../deploy/backup/backup-db.sh), [DR.md](DR.md)); WS-D RPC resilience + Triton primary ([rpc.rs](../backend/src/signing/solana/rpc.rs)); WS-A validate+graceful shutdown; WS-H [SLO.md](SLO.md) + `/readyz` + git SHA + [runbooks/](runbooks/); WS-F nginx + CI scans; WS-G [GIT_WORKFLOW.md](GIT_WORKFLOW.md) + [ENVIRONMENTS.md](ENVIRONMENTS.md) |
+| **P0** | ✅ done | WS-B backups ([backup-db.sh](../ops/backup/backup-db.sh), [DR.md](DR.md)); WS-D RPC resilience + Triton primary ([rpc.rs](../backend/src/signing/solana/rpc.rs)); WS-A validate+graceful shutdown; WS-H [SLO.md](SLO.md) + `/readyz` + git SHA + [runbooks/](runbooks/); WS-F nginx + CI scans; WS-G [GIT_WORKFLOW.md](GIT_WORKFLOW.md) + [ENVIRONMENTS.md](ENVIRONMENTS.md) |
 | **P1** | ✅ done | WS-A durable [job queue](../backend/src/tasks/queue.rs) + DLQ (email); WS-C [CAPACITY.md](CAPACITY.md) (Helius key leak fixed, elo RPC timeout); WS-E JSON logs + `x-request-id`; WS-F [THREAT_MODEL.md](THREAT_MODEL.md) |
 | **P2** | 📐 designed | [SCALING.md](SCALING.md) — OTel, partition/archival, HA, at-rest, Litestream (each with a build trigger) |
 

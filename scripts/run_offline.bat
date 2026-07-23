@@ -113,7 +113,7 @@ if !errorlevel! neq 0 (
 
 :: --- Launch Services ---
 echo [LAUNCH] 1/5 Monitoring Stack...
-cd /d "%ROOT%\deploy\monitoring"
+cd /d "%ROOT%\ops\monitoring"
 docker-compose -f docker-compose.local.yml ps >nul 2>&1
 if !errorlevel! neq 0 (
     echo Starting local monitoring stack...

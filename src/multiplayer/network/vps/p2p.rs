@@ -364,6 +364,23 @@ pub fn p2p_heartbeat(game_id: String, host_node_id: &str) -> Result<(), String> 
     Ok(())
 }
 
+/// Host confirms the game has actually started (called once GAME_START is
+/// sent, see `start_p2p_host_game` in `states/main_menu/screens.rs`). Flips
+/// the relay's listing status from Connecting to InProgress so the game
+/// shows up correctly to anything reading the listing's status field.
+pub fn p2p_accept_join(game_id: String, host_node_id: &str) -> Result<(), String> {
+    let resp = client()?
+        .post(format!("{}/p2p/accept", vps_base()))
+        .json(&serde_json::json!({ "game_id": game_id, "host_node_id": host_node_id }))
+        .send()
+        .map_err(|e| format!("vps p2p_accept: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("vps p2p_accept: HTTP {}", resp.status()));
+    }
+    Ok(())
+}
+
 /// Leave or cancel a P2P game on the VPS relay.
 pub fn p2p_leave_game(game_id: String, node_id: &str) -> Result<(), String> {
     let resp = client()?

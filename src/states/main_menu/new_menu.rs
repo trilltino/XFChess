@@ -1447,6 +1447,7 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             if let Ok(mut d) = cx.wallet_bridge.data.lock() {
                 d.sol_balance = 0.0;
                 d.usd_balance = None;
+                d.balance_loaded = false;
             }
             *cx.player_identity = crate::states::main_menu::PlayerIdentity::default();
             *cx.auth_state = Default::default();
@@ -1879,6 +1880,7 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             if let Ok(mut d) = cx.wallet_bridge.data.lock() {
                 d.sol_balance = 0.0;
                 d.usd_balance = None;
+                d.balance_loaded = false;
             }
             *cx.player_identity = crate::states::main_menu::PlayerIdentity::default();
         }
@@ -1946,6 +1948,7 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             if let Ok(mut d) = cx.wallet_bridge.data.lock() {
                 d.sol_balance = 0.0;
                 d.usd_balance = None;
+                d.balance_loaded = false;
             }
         }
     } else {
@@ -2070,47 +2073,56 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         return;
     }
 
-    let (sol_usd_rate, sol_gbp_rate) = cx
+    let (sol_usd_rate, sol_gbp_rate, balance_loaded) = cx
         .wallet_bridge
         .data
         .lock()
-        .map(|d| (d.sol_usd_rate, d.sol_gbp_rate))
-        .unwrap_or((0.0, 0.0));
+        .map(|d| (d.sol_usd_rate, d.sol_gbp_rate, d.balance_loaded))
+        .unwrap_or((0.0, 0.0, true));
 
     // 0 = USD (default — the primary display currency throughout the app),
     // 1 = SOL, 2 = GBP — persisted in egui temp storage across frames.
     let currency_id = egui::Id::new("balance_currency");
     let currency_mode = ctx.data(|d| d.get_temp::<u8>(currency_id).unwrap_or(0));
 
-    let (balance_text, balance_color) = match currency_mode {
-        1 => (
-            format!("{:.3} SOL", sol_balance),
-            egui::Color32::from_rgb(20, 241, 149),
-        ),
-        2 => {
-            if sol_gbp_rate > 0.0 {
-                (
-                    format!("£{:.2}", sol_balance * sol_gbp_rate),
-                    egui::Color32::from_rgb(20, 241, 149),
-                )
-            } else {
-                (
-                    format!("{:.3} SOL", sol_balance),
-                    egui::Color32::from_rgb(20, 241, 149),
-                )
+    // Fetch is in flight (fresh connect / manual refresh) — show a loading
+    // state instead of a stale/default "$0.00" that reads as a real balance.
+    let (balance_text, balance_color) = if !balance_loaded {
+        (
+            "Updating…".to_string(),
+            egui::Color32::from_rgb(160, 170, 190),
+        )
+    } else {
+        match currency_mode {
+            1 => (
+                format!("{:.3} SOL", sol_balance),
+                egui::Color32::from_rgb(20, 241, 149),
+            ),
+            2 => {
+                if sol_gbp_rate > 0.0 {
+                    (
+                        format!("£{:.2}", sol_balance * sol_gbp_rate),
+                        egui::Color32::from_rgb(20, 241, 149),
+                    )
+                } else {
+                    (
+                        format!("{:.3} SOL", sol_balance),
+                        egui::Color32::from_rgb(20, 241, 149),
+                    )
+                }
             }
-        }
-        _ => {
-            if sol_usd_rate > 0.0 {
-                (
-                    format!("${:.2}", sol_balance * sol_usd_rate),
-                    egui::Color32::from_rgb(20, 241, 149),
-                )
-            } else {
-                (
-                    format!("{:.3} SOL", sol_balance),
-                    egui::Color32::from_rgb(20, 241, 149),
-                )
+            _ => {
+                if sol_usd_rate > 0.0 {
+                    (
+                        format!("${:.2}", sol_balance * sol_usd_rate),
+                        egui::Color32::from_rgb(20, 241, 149),
+                    )
+                } else {
+                    (
+                        format!("{:.3} SOL", sol_balance),
+                        egui::Color32::from_rgb(20, 241, 149),
+                    )
+                }
             }
         }
     };
@@ -2125,27 +2137,27 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                     1.0,
                     egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
                 ),
-                inner_margin: egui::Margin::symmetric(14, 10),
+                inner_margin: egui::Margin::symmetric(16, 12),
                 ..egui::Frame::NONE
             }
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(&display_name)
-                            .size(10.5)
+                            .size(15.5)
                             .color(egui::Color32::WHITE)
                             .strong(),
                     );
 
-                    ui.add_space(10.0);
+                    ui.add_space(12.0);
                     ui.separator();
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
 
                     // Clickable balance — cycles SOL → USD → GBP on each click.
                     let bal_resp = ui.add(
                         egui::Button::new(
                             egui::RichText::new(&balance_text)
-                                .size(10.1)
+                                .size(15.0)
                                 .color(balance_color)
                                 .strong(),
                         )

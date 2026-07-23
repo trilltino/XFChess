@@ -23,7 +23,7 @@ How we back up, what we can lose, and exactly how to restore. Owner: **@trilltin
 - **Offsite:** `rclone` to an S3-compatible bucket (**Cloudflare R2** recommended) or Hetzner
   Storage Box. Enable **object-lock / versioning** on the bucket for ransomware-immutable copies.
 - **Schedule:** `xfchess-backup.timer` daily 03:17 UTC (persistent catch-up + jitter).
-- **Retention:** 14 local days ([backup-db.sh](../deploy/backup/backup-db.sh)); offsite retention via bucket lifecycle.
+- **Retention:** 14 local days ([backup-db.sh](../ops/backup/backup-db.sh)); offsite retention via bucket lifecycle.
 
 ### RPO / RTO
 
@@ -50,7 +50,7 @@ rclone config    # name it e.g. "r2", type "s3", provider "Cloudflare"
 #   BACKUP_REMOTE=r2:xfchess-backups/db
 
 # 5. Install units:
-cp deploy/backup/xfchess-backup.{service,timer} /etc/systemd/system/
+cp ops/backup/xfchess-backup.{service,timer} /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now xfchess-backup.timer
 systemctl start xfchess-backup.service        # run one now
@@ -64,7 +64,7 @@ journalctl -u xfchess-backup.service -n 50    # verify
 export BACKUP_REMOTE=r2:xfchess-backups/db
 export BACKUP_AGE_IDENTITY=/path/to/xfchess-backup-age.txt
 sudo systemctl stop xfchess-backend
-deploy/backup/restore-db.sh vault            # latest vault.db (integrity-checked first)
+ops/backup/restore-db.sh vault            # latest vault.db (integrity-checked first)
 sudo systemctl start xfchess-backend
 ```
 `restore-db.sh` refuses to proceed if `PRAGMA integrity_check` isn't `ok`, and keeps a
@@ -75,7 +75,7 @@ sudo systemctl start xfchess-backend
 Quarterly, restore into a **scratch path** and boot the backend against it:
 ```bash
 BACKUP_REMOTE=... BACKUP_AGE_IDENTITY=... \
-  deploy/backup/restore-db.sh vault "" /tmp/restore-test/vault.db
+  ops/backup/restore-db.sh vault "" /tmp/restore-test/vault.db
 # point a throwaway backend at /tmp/restore-test and hit /health + a read endpoint
 ```
 
@@ -86,7 +86,7 @@ BACKUP_REMOTE=... BACKUP_AGE_IDENTITY=... \
 
 ## Regional / total-VPS loss
 
-1. Provision a new VPS, run `deploy/scripts/deploy.ps1` (rebuilds backend + nginx).
+1. Provision a new VPS, run `ops/scripts/deploy.ps1` (rebuilds backend + nginx).
 2. Restore `vault.db` (+ tournament state) via `restore-db.sh`.
 3. Re-point DNS / floating IP.
 4. Sessions are disposable — users re-login. On-chain data needs no restore.

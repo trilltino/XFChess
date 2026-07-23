@@ -453,6 +453,11 @@ pub struct WalletBridgeData {
     pub sol_usd_rate: f64,
     /// GBP per 1 SOL (0.0 if unknown).
     pub sol_gbp_rate: f64,
+    /// Whether a balance fetch has completed for the currently-connected
+    /// pubkey. False while the very first fetch is in flight (or after a
+    /// manual refresh) so the HUD can show a loading state instead of a
+    /// misleadingly-precise "$0.00" before any real data has come back.
+    pub balance_loaded: bool,
 }
 
 /// Subset of `/auth/me` relevant to the game client.
@@ -659,6 +664,11 @@ fn poll_wallet_bridge(
 
                 // Trigger balance fetch on new pubkey or when Refresh was clicked (balance_rx is None)
                 if is_new_pubkey || poller.balance_rx.is_none() {
+                    if is_new_pubkey {
+                        // Fresh connection — show a loading state rather than a
+                        // stale/default "$0.00" until this fetch actually lands.
+                        poller.data.lock().unwrap().balance_loaded = false;
+                    }
                     let (btx, brx) = crossbeam_channel::bounded(1);
                     poller.balance_rx = Some(brx);
                     let data_arc = poller.data.clone();
@@ -675,6 +685,7 @@ fn poll_wallet_bridge(
                             };
                             d.sol_usd_rate = usd_per_sol;
                             d.sol_gbp_rate = gbp_per_sol;
+                            d.balance_loaded = true;
                         })
                         .detach();
                 }
@@ -693,6 +704,7 @@ fn poll_wallet_bridge(
             } else {
                 None
             };
+            d.balance_loaded = true;
             d.sol_usd_rate = usd_per_sol;
             d.sol_gbp_rate = gbp_per_sol;
         }
@@ -918,9 +930,12 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
         .map(|lamports| lamports as f64 / 1_000_000_000.0)
         .unwrap_or(0.0);
 
-    if sol == 0.0 {
-        return (0.0, 0.0, 0.0);
-    }
+    // Rate fetch below is a global market quote, independent of this
+    // wallet's balance — it used to be skipped whenever `sol == 0.0` (either
+    // a genuinely empty wallet, or the balance RPC call above failing and
+    // defaulting to 0.0), which silently withheld the USD/GBP conversion and
+    // left the wallet HUD (render_wallet_hud) showing plain SOL text even
+    // though the rate itself was perfectly fetchable. Always attempt it.
 
     // Fetch both USD and GBP rates from the backend in one call. Must go
     // through vps_base() (not a hardcoded localhost URL) — release builds
@@ -1461,11 +1476,20 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
         } else {
             Vec::new()
         };
+        #[cfg(feature = "solana")]
+        let sol_usd_rate = ctx_menu
+            .sol_usd_wager_rate
+            .as_ref()
+            .and_then(|r| r.snapshot())
+            .map(|s| s.usd_per_sol);
+        #[cfg(not(feature = "solana"))]
+        let sol_usd_rate: Option<f64> = None;
         render_spectator_popup(
             ctx,
             &mut ctx_menu.competitive_menu,
             &cached_games,
             &mut ctx_menu.spectate_events,
+            sol_usd_rate,
         );
     }
 

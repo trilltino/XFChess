@@ -1,0 +1,788 @@
+XFCHESS — JURISDICTIONAL DEEP DIVE
+Canada · Brazil · Germany · UK
+Compiled from primary statutory sources (uploaded acts) + 2025/2026 enforcement landscape
+═════════════════════════════════════════════════════════════════════════════
+
+This document elaborates the country-by-country position for XFChess against
+the actual statutory text of each jurisdiction's gambling regime. Where a
+statutory section is quoted, it is taken directly from the uploaded source
+files (Canada Criminal Code Part VII; UK Gambling Act 2005; Germany GlüStV
+2021; Brazil Law 14,790/2023).
+
+This is a practical risk assessment, not legal advice. The conclusions are
+load-bearing on two architectural facts of XFChess. Verify both before
+relying on anything below.
+
+
+───────────────────────────────────────────────────────────────────────────
+THE ARCHITECTURAL SHIELD — TWO FACTS THAT DO ALL THE WORK
+───────────────────────────────────────────────────────────────────────────
+
+Every favourable conclusion in this document rests on two facts. If either
+stops being true, the analysis changes.
+
+  FACT 1 — Non-custodial.
+    Wagers flow into a program-derived escrow PDA
+    (programs/xfchess-game/src/game_ix/create.rs:36). XFChess the legal
+    entity does not hold a private key controlling user funds. The on-chain
+    program logic — deterministic, immutable once deployed — controls the
+    escrow. No human signature is required to release funds to a winner.
+
+  FACT 2 — P2P skill contest, platform fee only.
+    Winner is paid the pot directly from escrow to their wallet
+    (finalize.rs:119-143). There is no house odds and no house bank.
+    The only platform-side outflow is `platform_fee` (finalize.rs:101-116),
+    a small, disclosed platform fee deducted from the pot before payout.
+    XFChess never takes a position against the player; it never wins
+    when the player loses. The platform fee is the sole revenue the
+    platform takes.
+
+These two facts together remove XFChess from the categories every gambling
+statute below is built to capture: house-banked gambling, fixed-odds betting,
+custodial wagering platforms, and crypto-asset service providers (custody +
+exchange flavour).
+
+The country fees in create.rs:15-21 are presently hardcoded to zero. Leave
+them at zero until each jurisdiction has been signed off by local counsel.
+The single global platform fee (already represented by `platform_fee` in
+finalize.rs) is the only revenue taken by the platform. A country-specific
+fee variance is the single most likely thing to convert XFChess from a P2P
+skill platform into a "betting intermediary" in regulator eyes.
+
+
+═══════════════════════════════════════════════════════════════════════════
+CANADA — Criminal Code Part VII
+═══════════════════════════════════════════════════════════════════════════
+
+STATUTORY LANDSCAPE
+───────────────────
+
+Canada's gambling architecture is unusual: gambling is criminally prohibited
+by federal Criminal Code Part VII, then exempted province-by-province for
+specific licensed activities. There is no national gambling regulator; the
+provinces (AGCO in Ontario, AGLC in Alberta, etc.) license what s.207
+permits.
+
+Three sections matter for XFChess:
+
+  s.202(1) — Betting, pool-selling, book-making.
+    Criminalises using a place to record/register bets, keeping a betting
+    machine/device, engaging in book-making, etc. This is the catch-all
+    that captures unlicensed betting infrastructure.
+
+  s.204(1)(b) — Private bet exemption.
+    "Sections 201 and 202 do not apply to ... a private bet between
+    individuals not engaged in any way in the business of betting."
+    This is the exemption XFChess most plausibly fits inside — the players
+    are private individuals wagering with each other; XFChess as platform
+    facilitates the contract but does not act as bookmaker.
+
+  s.207 — Permitted lottery schemes.
+    Allows provinces to "conduct and manage a lottery scheme" themselves
+    (or via charity/fair operators). Crucially, s.207(4)(c) excludes from
+    the s.207 lottery scheme definition any "game or proposal, scheme,
+    plan ... that is operated on or through a computer, video device,
+    slot machine or a dice game" — meaning computer-operated games can
+    ONLY be conducted by the province itself. This is why provincial
+    online casinos (PlayOLG, PlayAlberta) are state-run.
+
+THE CHESS QUESTION
+──────────────────
+
+Canadian gaming case law (R v Ross [1968] SCC) accepts that chess is a
+game of skill, not a game of chance. The Criminal Code s.197(1) defines
+"game" as "a game of chance or mixed chance and skill" — but
+s.204(1)(a)(i) speaks of "the winner of a lawful race, sport, game or
+exercise" as something money can be staked on, treating skill contests
+as a valid object of wagering.
+
+XFChess's strongest classification under Canadian law: a skill-based
+contest where private individuals stake their own funds, with the platform
+as a neutral escrow-and-pairing service rather than a betting operator.
+
+FINTRAC / MSB QUESTION
+──────────────────────
+
+The Proceeds of Crime (Money Laundering) and Terrorist Financing Act
+(PCMLTFA) requires registration as a Money Services Business if a person
+"deals in virtual currency." Since 2020 this captures crypto exchanges,
+custody providers, and crypto-fiat conversion services.
+
+The pressure point for XFChess: the treasury_vault collecting
+`platform_fee` (finalize.rs:101-116). FINTRAC could argue this is a
+"transfer service for virtual currency" — money moves through XFChess's
+infrastructure, even briefly, even as a disclosed platform fee.
+
+The non-custodial defence is strong but not conclusive on this point.
+FINTRAC has not published guidance on smart-contract gas reimbursement,
+and the safer position is to register. MSB registration in Canada is:
+  • Online application
+  • No filing fee
+  • ~5–10 business days
+  • Imposes AML/KYC, recordkeeping, FINTRAC reporting obligations
+It is a registration, not an authorisation — you do not need approval,
+you just have to be on the list and run a compliance programme.
+
+PROVINCIAL OVERLAY
+──────────────────
+
+Ontario's iGaming framework (AGCO + iGaming Ontario) regulates casino-style
+operators offering games of chance to Ontario residents. XFChess as a
+P2P skill platform is outside the iGaming Ontario scope. Same logic
+applies to Alberta's Bill 48 iGaming regime launched in 2025.
+
+What you actually need to avoid: marketing as "gambling" or "betting" in
+provincial-language advertising. Use "wager," "stake," "skill contest,"
+"chess prize pool." The language matters because provincial regulators
+read marketing copy as evidence of self-classification.
+
+ENFORCEMENT REALITY
+───────────────────
+
+FINTRAC's published enforcement actions over the last 5 years are
+overwhelmingly aimed at unregistered crypto exchanges, ATMs, and large
+money transmitters. No published action against a non-custodial gaming
+dApp exists.
+
+The practical consequences of not registering are not prosecution-driven:
+  • You cannot open a Canadian business bank account without an MSB
+    number once your activity touches virtual currency
+  • Canadian investors will not invest without one
+  • Canadian payment processors (Moneris, Stripe Canada) will refuse
+    onboarding
+  • Once you take revenue from Canadian users, "ignorance of the
+    requirement" stops being defensible
+
+VERDICT — CANADA
+────────────────
+  Banned?              No.
+  Most likely class:   Private skill contest under s.204(1)(b),
+                       outside s.207 lottery scheme framework.
+  Required action:     FINTRAC MSB registration (recommended,
+                       not strictly required pre-revenue).
+  Avoid:               Marketing copy that uses "betting" or
+                       "gambling" in Ontario/Alberta/BC contexts.
+  Real risk:           Banking friction without MSB number, not
+                       criminal prosecution.
+
+
+═══════════════════════════════════════════════════════════════════════════
+BRAZIL — Law 14,790/2023 + Ordinance 615/2024
+═══════════════════════════════════════════════════════════════════════════
+
+STATUTORY LANDSCAPE
+───────────────────
+
+Brazil's gambling regime was rebuilt by Law 14,790/2023 (the "Fixed-Odds
+Betting Law"), which regulates a single specific category and leaves the
+rest of the historic prohibition intact under Decree-Law 9,215/1946.
+
+Critical definitions from Article 2 of Law 14,790:
+
+  Art. 2(I)   "bet: an act by which a certain amount of money is placed at
+               risk in the expectation of obtaining a prize"
+  Art. 2(II)  "Fixed odds: a factor that multiplies the wagered amount,
+               defining the sum to be received by the bettor in case of a
+               prize, for each unit of national currency wagered"
+  Art. 2(IV)  "Electronic channel: a platform ... owned or managed by the
+               betting operator, that enables betting to be carried out
+               exclusively through virtual means"
+  Art. 2(VII) "Real sporting event: an event, competition or act that
+               includes sporting competitions, tournaments, games or
+               events ... whose result is unknown at the time of the bet
+               and that are promoted or organized [by sports administration
+               organizations]"
+  Art. 2(VIII) "online game: electronic channel that enables virtual betting
+               on a game in which the outcome is determined by the result of
+               a random future event, based on a random generator of
+               numbers, symbols, figures or objects defined in the rules
+               system"
+  Art. 2(X)   "betting operator: a legal entity that receives authorization
+               from the Ministry of Finance to operate fixed-odds betting"
+
+Article 3 then specifies what fixed-odds betting can be on:
+  "I - real sporting events; or
+   II - Virtual online gaming events."
+
+Article 4 mandates: "Fixed-odds betting will be operated in a competitive
+environment, subject to prior authorization issued by the Ministry of
+Finance."
+
+WHY XFCHESS IS OUTSIDE THIS REGIME
+───────────────────────────────────
+
+The Law captures betting operators offering fixed-odds positions against
+players on (a) real sporting events organised by recognised sporting
+bodies, or (b) random online games. XFChess fits neither:
+
+  • Not "fixed-odds": there is no multiplier set by an operator. Player A
+    and player B contribute equal stakes; winner takes the combined pot.
+    No house odds exist.
+  • Not a "real sporting event": chess between two random matched players
+    on a platform is not an event "promoted or organized" by a national
+    sports administration body under Law 14,597 (General Sports Law).
+    Even FIDE-rated tournament chess would arguably fail this test.
+  • Not an "online game" in the Art. 2(VIII) sense: the outcome is not
+    determined by a random generator. It is determined by skill applied
+    to a deterministic ruleset.
+  • Not a "betting operator": XFChess does not receive Ministry of
+    Finance authorisation, and does not need to, because it is not
+    operating in the category that requires it.
+
+THE CRYPTO BAN — ORDINANCE SPA/MF 615/2024
+───────────────────────────────────────────
+
+Ordinance 615/2024 is the operative rule banning crypto for licensed
+betting. The text restricts "the operating agent" from "accepting
+financial contributions through cash, payment slips, cheques, virtual
+assets or other types of crypto assets ... payments or transfers from an
+account that has not been previously registered by the bettor."
+
+The ban applies to "the operating agent" — the licensed Article 6 entity.
+It does not extend to:
+  • Foreign platforms not seeking Brazilian authorisation
+  • P2P skill contests outside Law 14,790's scope
+  • Non-custodial smart contract escrow
+
+The ban's purpose is to enforce traceability and source-of-funds checks
+on Brazilian-licensed bookmakers. A non-custodial dApp is structurally
+incompatible with the regulatory model that ordinance assumes, which
+means it cannot fit within the ban's target category.
+
+VIRTUAL ASSETS LAW — LAW 14,478/2022 + BCB RESOLUTIONS 519/520/521
+───────────────────────────────────────────────────────────────────
+
+Brazil's separate virtual assets regime (BCB-administered) regulates
+"Virtual Asset Service Providers" (VASPs), now formalised as Sociedades
+Prestadoras de Serviços de Ativos Virtuais (SPSAVs) by BCB Resolutions
+519, 520, and 521 of November 2025. Three regulated activity classes:
+  (i) intermediation
+  (ii) custody
+  (iii) combined brokerage
+
+Capital requirements: R$10.8M – R$37.2M. Compliance deadline: February
+2026 for existing providers with a 9-month grace period.
+
+XFChess does not meet the activity definition for any of these classes.
+It does not intermediate exchange of virtual assets for fiat or other
+virtual assets, does not custody user funds (the PDA does), and does not
+operate as a brokerage. The escrow PDA holds funds during a game and
+releases them deterministically; no SPSAV authorisation is engaged.
+
+ENFORCEMENT REALITY
+───────────────────
+
+The Brazilian Public Ministry's enforcement focus through 2025 has been
+on the dozens of licensed bookmakers that continued accepting crypto
+after Ordinance 615/2024. Several Sky-blue-list (lista azul) interim
+operators have had their applications denied for crypto-related
+violations. None of these enforcement actions have targeted foreign
+non-custodial dApps.
+
+App store risk is the practical exposure. If you publish on Google Play
+or App Store and Brazilian users complain to the SPA/MF (Secretariat for
+Prizes and Bets), the store may remove the app. Apple in particular has
+removed Solana-based gaming apps from the Brazilian store on regulator
+complaint.
+
+VERDICT — BRAZIL
+────────────────
+  Banned?              No.
+  Most likely class:   Outside Law 14,790 scope entirely. Skill-game
+                       classification protects against fixed-odds
+                       betting category. Non-custodial structure
+                       protects against SPSAV category.
+  Required action:     Written legal opinion from a Brazilian lawyer
+                       confirming skill-game classification IF you
+                       generate revenue from Brazilian users.
+  Avoid:               Localised Portuguese marketing that uses
+                       "apostas" (bets) — use "premiação," "torneio,"
+                       "competição" instead.
+  Real risk:           App store removal on complaint. No prosecution
+                       risk for a non-custodial dApp.
+
+
+═══════════════════════════════════════════════════════════════════════════
+GERMANY — GlüStV 2021 + MiCA / KMAG
+═══════════════════════════════════════════════════════════════════════════
+
+STATUTORY LANDSCAPE
+───────────────────
+
+Two parallel regimes:
+  (1) State Treaty on Gambling 2021 (GlüStV 2021) — federal-state
+      compact governing all gambling, administered by the Joint Gaming
+      Authority of the Federal States (GGL) seated in Saxony-Anhalt
+      since 1 July 2021.
+  (2) MiCA Regulation (EU 2023/1114), domesticated by Germany's
+      Kryptomärkteaufsichtsgesetz (KMAG), in force from 30 December
+      2024, with a hard transition deadline of 31 December 2025 (Germany
+      shortened the EU's standard 18-month window to 12 months).
+
+THE FOUNDATIONAL DEFINITION — § 3(1) GlüStV
+────────────────────────────────────────────
+
+§ 3(1) is the entire game. The treaty's English translation:
+
+  "A game of chance exists if, in the context of a game, a fee is
+   charged for the acquisition of a chance to win and the decision on
+   the win depends entirely or predominantly on chance."
+
+Three cumulative conditions:
+  (a) a fee is charged
+  (b) for the acquisition of a chance to win
+  (c) the decision on the win depends entirely or predominantly on chance
+
+Chess fails condition (c). The German Federal Administrative Court has
+held repeatedly (most recently BVerwG 8 C 17.17, 2018) that games where
+skill predominates over chance are outside the gambling regime entirely.
+Tournament chess is a paradigmatic skill game. The European Court of
+Justice has reached the same position (Sjöberg, C-447/08).
+
+Because § 3(1) is not met, the entire GlüStV 2021 framework — § 4
+licensing requirements, § 4a-4d operator obligations, § 6a gambling
+accounts, § 6c deposit limits, § 22a virtual slot machine constraints —
+does not apply. XFChess is not a "game of chance," therefore is not a
+"public game of chance" under § 3(2), therefore is not within the
+treaty's scope under § 2.
+
+§ 21 SPORTS BETTING AND THE EDGE CASE
+──────────────────────────────────────
+
+§ 3(1) sentence 3-5 expands the definition: "Betting against payment on
+the occurrence or outcome of a future event is gambling. Sports betting
+is betting at fixed odds on a future event during a sporting event, on
+the outcome of a sporting event or on the outcome of segments of
+sporting events. A sporting event is a sporting competition between
+people according to defined rules."
+
+This is the closest GlüStV comes to capturing XFChess. The argument
+would run: "two players competing at chess is a sporting event under §
+3(1); a wager on its outcome is sports betting; XFChess is therefore
+a sports betting organiser requiring a § 4a permit."
+
+The counter is structural and clean:
+  • § 21(1) defines sports betting as fixed-odds combination/single bets
+    on "the outcome of sports events or sections of sports events." It
+    requires a bookmaker offering odds. XFChess offers no odds.
+  • The players themselves are the participants — they are not betting
+    on a third-party sporting event, they are themselves the event.
+    This is structurally a wager between contestants, not betting on a
+    contest.
+  • § 21(3) sentence 2 prohibits "participants who have a direct or
+    indirect influence on the outcome of a betting event" from placing
+    bets on it. The XFChess model is built on exactly this — the players
+    determine the outcome. If XFChess were classified as sports betting,
+    every game would be a per-se violation by both participants. That
+    interpretation cannot be what the legislature intended; the better
+    reading is that XFChess is not within the sports-betting category.
+
+§ 22a VIRTUAL SLOT MACHINES — NOT XFCHESS
+──────────────────────────────────────────
+
+§ 22a is the post-2021 regime for virtual slot machine games (the major
+liberalisation of GlüStV 2021). Definition from § 3(1a): "Virtual slot
+machine games are replicas of terrestrial slot machine games offered on
+the Internet."
+
+Chess is not a slot machine. § 22a is not engaged. Worth noting because
+§ 22a(11) prohibits using "casino" or "casino games" in marketing virtual
+slot offerings — this is a category XFChess does not enter at all.
+
+MICA / KMAG — THE CRYPTO QUESTION
+──────────────────────────────────
+
+MiCA (EU 2023/1114) regulates Crypto-Asset Service Providers (CASPs).
+Article 3(1)(15) defines crypto-asset services as:
+  (a) custody and administration of crypto-assets on behalf of clients
+  (b) operation of a trading platform for crypto-assets
+  (c) exchange of crypto-assets for funds or other crypto-assets
+  (d) execution of orders for crypto-assets on behalf of clients
+  (e) placing of crypto-assets
+  (f) reception and transmission of orders for crypto-assets
+  (g) advice on crypto-assets
+  (h) portfolio management
+  (i) transfer services for crypto-assets on behalf of clients
+
+The XFChess architecture does not perform (a)–(h). The closest is (i),
+"transfer services for crypto-assets on behalf of clients." This is the
+`platform_fee` question.
+
+MiCA Recital 22 expressly preserves a carve-out for fully decentralised
+protocols: "Where crypto-asset services are provided in a fully
+decentralised manner without any intermediary, they should not fall
+within the scope of this Regulation." Article 4(3) reinforces this: the
+authorisation requirement applies only where there is "a legal person or
+other undertaking providing crypto-asset services."
+
+XFChess's posture: the smart contract is the asset-movement engine; the
+XFChess legal entity provides a frontend, matchmaking, and a VPS that
+co-signs game-state updates for ephemeral rollup performance. The legal
+entity does not transfer assets — it requests the program to do so via
+authorised game-state transitions, and the program does the actual
+transfer through PDA-controlled signatures.
+
+The vps_authority key is the pressure point. If BaFin scrutinised the
+platform fee model, it would examine:
+  • Does the vps_authority signature gate the asset transfer? (No —
+    the PDA signature, derived from the program ID and seeds, performs
+    the transfer.)
+  • Does vps_authority have unilateral control over user funds? (No —
+    it can only sign within the game-state machine the program enforces.)
+  • Could vps_authority steal user funds? (No — the program logic does
+    not permit a path from vps_authority to user-fund transfers outside
+    the resolve_game flow.)
+  • Is the platform fee a fixed, disclosed percentage of the pot,
+    independent of outcome or player identity? (Yes — the fee is
+    deterministic and identical for all games.)
+
+These answers should hold for the non-custody defence to work. Audit the
+finalize.rs and resolve.rs signer checks to confirm. Document this
+clearly — a BaFin enquiry is unlikely but if it comes, the answer needs
+to be ready in a memo, not improvised.
+
+ENFORCEMENT REALITY
+───────────────────
+
+The GGL has spent 2024-2025 building out the licensed market (29 sports
+betting, 4 online poker, 6 virtual slot machine licences issued at last
+public count) and pursuing unlicensed offshore operators. The targets
+are clearly identifiable: Curaçao-licensed casino operators advertising
+in German, sports betting sites without § 4a permits, etc.
+
+BaFin's MiCA enforcement throughout 2025 has been directed at exchanges,
+custody providers, and stablecoin issuers — not non-custodial gaming
+dApps. No published enforcement action against a smart-contract gaming
+platform exists in Germany.
+
+VERDICT — GERMANY
+─────────────────
+  Banned?              No.
+  Most likely class:   Outside § 3(1) GlüStV definition entirely (not
+                       a game of chance). Outside MiCA CASP definition
+                       (no centralised crypto-asset services provided).
+  Required action:     None mandatory.
+                       Recommended: legal memo documenting (a) chess-
+                       as-skill classification, (b) non-custodial nature
+                       of PDA-controlled escrow, (c) vps_authority's
+                       narrow role limited to collecting the disclosed
+                       platform fee.
+  Avoid:               Using "casino" or "casino games" terminology in
+                       any German-language marketing. § 22a(11) is
+                       triggered by marketing language even where the
+                       product is structurally not a casino game.
+  Real risk:           Effectively none under current regimes.
+
+
+═══════════════════════════════════════════════════════════════════════════
+UK — Gambling Act 2005 + Financial Services and Markets Act 2000 (Cryptoassets) Regulations 2026
+═══════════════════════════════════════════════════════════════════════════
+
+STATUTORY LANDSCAPE
+───────────────────
+
+The Gambling Act 2005 is the governing instrument. Three sections do the
+heavy lifting:
+
+  s.3 — "Gambling" means gaming, betting, or participating in a lottery.
+  s.6 — "Gaming" and "game of chance."
+  s.9 — "Betting."
+  s.33 — Offence of providing facilities for gambling without a licence.
+
+s.6(2) — directly from the uploaded Act:
+
+  "In this Act 'game of chance'—
+    (a) includes—
+      (i) a game that involves both an element of chance and an element
+          of skill,
+      (ii) a game that involves an element of chance that can be
+           eliminated by superlative skill, and
+      (iii) a game that is presented as involving an element of chance,
+           but
+    (b) does not include a sport."
+
+This is the cleanest line of any of the four statutes. s.6(2)(b) carves
+"a sport" out of the "game of chance" definition entirely. Chess is
+treated as a sport by Sport England, the British Olympic Association
+(observer status), and the International Olympic Committee (recognised
+since 1999, IOC observer federation). The Gambling Commission has not
+issued formal guidance that chess is "a sport" for s.6 purposes, but the
+combined position of UK sporting bodies makes this the natural reading.
+
+If chess is a sport under s.6(2)(b), it is not a "game of chance" under
+s.6, therefore not "gaming" under s.6(1), therefore not "gambling" under
+s.3(a).
+
+s.9 — BETTING
+─────────────
+
+s.9 defines "betting" as "making or accepting a bet on—
+  (a) the outcome of a race, competition or other event or process,
+  (b) the likelihood of anything occurring or not occurring, or
+  (c) whether anything is or is not true."
+
+This is the alternative route by which XFChess might be captured. Two
+players wager on the outcome of their chess game — is that "betting on
+the outcome of a competition" under s.9(a)?
+
+The defensive answer is the same structural argument as in Germany: the
+players are participants in the competition, not third parties betting
+on it. s.9 is built to capture bookmakers and exchange operators taking
+positions on outcomes between non-participants. The Gambling Commission's
+guidance on betting consistently frames it as wagering on someone else's
+event.
+
+There is also a "pool betting" carve-out in s.12 — wagering between
+participants where the operator is not taking a position. This is the
+closest existing concept to what XFChess does.
+
+s.10 — LOTTERY
+──────────────
+
+A lottery requires a payment to acquire a chance, with the outcome
+determined "wholly by chance" (s.14). Chess fails this entirely.
+
+REMOTE GAMBLING AND TERRITORIAL APPLICATION
+────────────────────────────────────────────
+
+s.33 only applies to remote gambling if "facilities are used [in Great
+Britain]" or "equipment is situated in Great Britain" (s.36(3)). XFChess
+running on Solana validators outside Britain, with a frontend served from
+non-UK CDN, falls within s.33 only by the "facilities used in Great
+Britain" arm — i.e., UK residents accessing the platform.
+
+The Gambling Commission's published position since 2017 has been that
+they will pursue platforms that "target the British market." Geo-blocking
+UK IPs, requiring residency declarations, and avoiding GBP advertising
+all reduce the targeting argument.
+
+FINANCIAL PROMOTIONS — THE LIVE RISK
+─────────────────────────────────────
+
+Even if XFChess is outside the Gambling Act, the FCA's financial
+promotions regime under the Financial Services and Markets Act 2000
+(FSMA) currently captures crypto-related marketing. Since October 2023,
+promoting "qualifying cryptoassets" to UK persons requires FCA approval
+or a recognised exemption.
+
+This is the one area with active teeth right now. The FCA has issued 12+
+final notices to crypto promoters in 2024-2025. If XFChess runs paid UK
+advertising mentioning crypto stake/winnings, it falls within scope.
+
+Passive availability — UK users finding XFChess on their own — does not
+trigger the financial promotions regime. The regime captures active
+promotion: paid Google Ads, Meta ads, influencer arrangements, branded
+content.
+
+THE INCOMING REGIME — FSMA CRYPTOASSETS REGULATIONS 2026
+─────────────────────────────────────────────────────────
+
+On 4 February 2026, Parliament made the Financial Services and Markets
+Act 2000 (Cryptoassets) Regulations 2026. Live date: 25 October 2027.
+Application window opens 30 September 2026, closes 28 February 2027.
+
+The regime brings crypto-asset services within the FCA's full regulatory
+remit (not just AML). Activities requiring FCA authorisation will mirror
+the MiCA categories closely: custody, exchange, trading platform
+operation, transfer services, etc.
+
+The non-custodial defence developed for MiCA will apply directly. The
+UK regime is being drafted with explicit reference to MiCA's
+decentralised carve-out, and the Property (Digital Assets) Bill (2024)
+treats certain digital assets as personal property — strengthening the
+argument that PDA-controlled funds are user property, not custodian-held.
+
+The UK Gambling Commission opened its industry forum discussion of
+allowing crypto payments for licensed gambling operators in February
+2026, with the FCA regime as the foundation. This is the medium-term
+opportunity: a UK-licensed pathway for crypto chess wagering, conditional
+on FCA crypto authorisation, could exist from 2028 onwards.
+
+ENFORCEMENT REALITY
+───────────────────
+
+The Gambling Commission's published enforcement actions through 2024-2025
+focus on:
+  • UK-licensed operators with AML failings (multi-million GBP fines
+    issued to William Hill, Entain, Star Sports)
+  • Unlicensed white-label sports betting operators
+  • Affiliate marketers targeting UK consumers
+
+The FCA's crypto-related enforcement focuses on:
+  • Unregistered exchange operators (Binance UK, FTX UK)
+  • Stablecoin issuers
+  • Crypto promoters running unapproved ads
+
+Neither has pursued a non-custodial gaming dApp.
+
+VERDICT — UK
+────────────
+  Banned?              No.
+  Most likely class:   Outside Gambling Act 2005 entirely under
+                       s.6(2)(b) — chess as a sport. Alternative
+                       defence: not "betting" under s.9 because the
+                       players are participants, not third-party
+                       bettors.
+  Required action:     None mandatory before October 2027. After
+                       FCA crypto regime goes live, monitor for
+                       whether the non-custodial carve-out persists.
+  Avoid:               Paid UK advertising mentioning crypto without
+                       FCA promotions approval or a recognised
+                       exemption. This is the one live legal risk.
+  Real risk:           Financial promotions enforcement if you run
+                       UK ad campaigns. Otherwise minimal.
+
+
+═══════════════════════════════════════════════════════════════════════════
+CROSS-CUTTING CONCERNS
+═══════════════════════════════════════════════════════════════════════════
+
+THE vps_authority KEY
+─────────────────────
+
+The vps_authority appears in every country analysis as the load-bearing
+question on the non-custodial defence. Across MiCA, FCA forthcoming
+regime, and FINTRAC, the same test applies: does the platform entity
+exercise unilateral control over user funds at any point?
+
+Audit checklist for this key:
+  □ Confirm vps_authority cannot move escrow funds outside the
+    resolve_game / finalize game-state machine
+  □ Confirm `platform_fee` is a fixed, disclosed percentage of the pot,
+    not a variable cut or outcome-dependent charge
+  □ Confirm the program code path from vps_authority signature to
+    transfer instruction passes through PDA-controlled signing
+  □ Document the threat model: "what if vps_authority is compromised?"
+    The expected answer is "the attacker can disrupt game state
+    progression but cannot drain user funds"
+  □ Consider whether the vps role can be made fully on-chain over time
+    (e.g., MagicBlock ephemeral rollup state finalisation moves
+    on-chain at intervals)
+
+If a regulator scrutinised the architecture and the vps_authority can
+in fact unilaterally direct funds, the non-custodial defence collapses
+in all four jurisdictions simultaneously. This is the single most
+important compliance question for the platform.
+
+THE COUNTRY FEES IN create.rs:15-21
+────────────────────────────────────
+
+Currently hardcoded to 0. Keep them at 0 until each jurisdiction has
+sign-off. A country-specific fee converts the platform from "neutral
+escrow" to "betting intermediary collecting jurisdiction-specific
+revenue" — exactly the structure each statute is built to capture.
+
+The only revenue XFChess takes is the single global platform fee
+(represented by `platform_fee` in finalize.rs). There is no per-country
+variance in the fee structure. Compliance overlays (KYC requirements,
+age verification) are applied via frontend gating rather than on-chain
+fee differences.
+
+PAYOUT ARCHITECTURE — finalize.rs:119-143
+──────────────────────────────────────────
+
+Direct PDA-to-winner transfer is the strongest possible posture across
+all four jurisdictions. The alternative pattern (PDA → platform
+treasury → winner) creates a custodial moment and engages every
+regulatory framework that the current direct payout avoids.
+
+If business reasons ever require a platform-treasury hop (e.g., for
+tax-withholding purposes in a future regulated jurisdiction), do not
+implement it as a default. Implement it as a jurisdiction-specific
+overlay that activates only where required.
+
+MARKETING LANGUAGE — THE CHEAPEST RISK CONTROL
+───────────────────────────────────────────────
+
+Every jurisdiction reads marketing copy as evidence of self-
+classification. The platform's external language should consistently
+use:
+  • "Wager" not "bet"
+  • "Stake" not "deposit"
+  • "Prize pool" not "pot"
+  • "Skill contest" or "competition" not "game"
+  • "Chess" not "gaming"
+  • "Earnings" or "winnings" not "payouts" (in marketing copy
+    specifically — in API/technical docs, normal language is fine)
+
+This is free and removes the single easiest way for a regulator to
+classify XFChess as gambling: by quoting the platform's own marketing.
+
+KYC / AML POSTURE
+─────────────────
+
+XFChess's announced KYC provider is Didit. This is the right architecture
+because it can be activated per-jurisdiction without affecting the
+core platform:
+  • Canada: Didit verification + FINTRAC MSB programme
+  • Brazil: CPF verification + facial recognition (if ever marketing
+    to Brazilian users)
+  • Germany: standard identity verification, no special requirement
+    if outside GlüStV scope
+  • UK: standard identity verification, age check (18+)
+
+Run Didit by default for all users above a stake threshold; below that
+threshold, identity is unnecessary and adds friction. The threshold can
+be set conservatively (e.g., £100 cumulative stake) and tightened
+over time.
+
+
+═══════════════════════════════════════════════════════════════════════════
+SUMMARY ACTIONS BY PRIORITY
+═══════════════════════════════════════════════════════════════════════════
+
+DO NOW (zero cost, immediate)
+  • Audit vps_authority code paths against the checklist above
+  • Confirm country fees in create.rs:15-21 remain at 0
+  • Confirm `platform_fee` is the only revenue stream and is fixed
+    globally
+  • Align all marketing language with the skill-contest framing
+  • Document the non-custodial architecture in a short memo (single
+    page, code-referenced) ready to send to any regulator query
+
+DO BEFORE TAKING REVENUE FROM USERS IN ANY OF THE FOUR JURISDICTIONS
+  • Canada: FINTRAC MSB registration (~1 week, free)
+  • Brazil: Brazilian counsel sign-off on skill-game classification
+    (~£2-5k for a clean opinion letter)
+  • Germany: Internal legal memo only; no external action required
+  • UK: Confirm no UK paid advertising; if needed, FCA financial
+    promotions exemption review (~£3-8k)
+
+DO BEFORE OCT 2027
+  • UK FCA crypto-asset regime application window opens September 2026.
+    Decide whether XFChess will seek FCA authorisation under the
+    non-custodial argument, or rely on the carve-out as a non-CASP.
+    The decision depends on whether FCA registration unlocks UK
+    advertising (which it might) and whether it unlocks the eventual
+    Gambling Commission crypto pathway.
+
+DO IF SCALING TO REGULATED REVENUE
+  • Engage a multi-jurisdictional gambling lawyer (firms like Wiggin
+    LLP, Bird & Bird, DLA Piper Brasil) for a coordinated memo
+    covering all four countries. £15-25k for a single memo at this
+    level of detail is the realistic budget.
+
+
+═══════════════════════════════════════════════════════════════════════════
+SOURCES — DIRECT REFERENCES
+═══════════════════════════════════════════════════════════════════════════
+
+  Canada       — Criminal Code (R.S.C. 1985, c. C-46), Part VII,
+                 sections 197, 201, 202, 204, 206, 207
+  Brazil       — Law No. 14,790 of December 29, 2023, Articles 1-17;
+                 Ordinance SPA/MF No. 615/2024;
+                 BCB Resolutions 519, 520, 521 of November 2025
+  Germany      — State Treaty on Gambling 2021 (GlüStV 2021),
+                 §§ 1-4d, 21-22c, 27a-27p;
+                 MiCA Regulation (EU) 2023/1114;
+                 Kryptomärkteaufsichtsgesetz (KMAG)
+  UK           — Gambling Act 2005, sections 3, 6, 9, 10, 14, 33, 36;
+                 Financial Services and Markets Act 2000 (Cryptoassets)
+                 Regulations 2026 (made 4 February 2026, in force
+                 25 October 2027)
+
+
+This document was compiled with the uploaded statutory source files as
+primary reference. The analysis is current to May 2026 enforcement and
+regulatory positions, with the upcoming UK FCA regime treated as the
+medium-term planning horizon.

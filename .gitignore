@@ -35,6 +35,17 @@ Thumbs.db
 # Keys (sensitive)
 keys/
 
+# Backend-generated game archive (backend/src/tasks/archiver.rs writes
+# data/archive/games.xfg + wallets.idx at runtime, recreating the dir on
+# every backend start even before anything's archived)
+data/
+
+# Superseded by docs/XFChess_Jurisdictional_Deep_Dive.txt (2026-07-23) — these
+# research files have reappeared on disk unexplained more than once after
+# deletion; ignored so a stray local copy can't silently re-block a clean
+# working tree.
+/legal/
+
 # Large binaries
 stockfish.exe
 

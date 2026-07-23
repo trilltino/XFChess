@@ -106,7 +106,7 @@ async function resolveExistingUsername(
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-type Step = "consent" | "entry" | "auth" | "wallet" | "profile" | "splash";
+type Step = "consent" | "entry" | "auth" | "wallet" | "profile" | "splash" | "sign";
 
 interface ConsentRecord {
   version: number;
@@ -890,13 +890,25 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 3 — Choose a username handle (off-chain only).
-// On-chain Solana profile creation is deferred to first wager attempt.
+// Step 3 — Choose a username handle.
+//
+// Two invocations, distinguished by `requireOnchain`:
+//  - Normal first-login (requireOnchain=false): off-chain handle only.
+//    On-chain Solana profile creation stays deferred to first wager attempt.
+//  - Deep-linked via `open_profile_step()`/`?step=profile` (requireOnchain=
+//    true): the game client is blocking a wager on a missing on-chain
+//    PlayerProfile, so this must actually submit the on-chain `init_profile`
+//    transaction (via /api/auth/init-profile-tx + broadcast-tx), not just
+//    PATCH the off-chain username — otherwise this popup resurfaces on every
+//    future wager attempt, forever.
 // ---------------------------------------------------------------------------
 function ProfileStep({
   onComplete,
   onClose,
   defaultHandle = "",
+  pubkey,
+  walletProvider,
+  requireOnchain = false,
 }: {
   onComplete: (handle: string) => void;
   pubkey?: string | null;
@@ -904,16 +916,57 @@ function ProfileStep({
   walletProvider?: any;
   onClose?: () => void;
   defaultHandle?: string;
+  requireOnchain?: boolean;
 }) {
   const [handle, setHandle] = useState(defaultHandle || localStorage.getItem("xfchess_username") || "");
+  const [country, setCountry] = useState("");
+  const [dob, setDob] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const countryValid = /^[A-Za-z]{2}$/.test(country.trim());
+  const dobValid = !!dob;
+  const canSubmit = handle.length >= 3 && (!requireOnchain || (countryValid && dobValid));
+
   const submit = async () => {
-    if (!handle || handle.length < 3) return;
+    if (!canSubmit) return;
     setSaving(true);
     setError(null);
     try {
+      if (requireOnchain) {
+        const walletPubkey =
+          pubkey ?? localStorage.getItem("xfchess_wallet_pubkey") ?? localStorage.getItem("xfchess_wallet");
+        if (!walletPubkey) {
+          throw new Error("No wallet connected in this window — reopen from the game client and try again.");
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const provider: any = walletProvider ?? (window as any).phantom?.solana ?? (window as any).solflare;
+        if (!provider) {
+          throw new Error("No Phantom/Solflare extension detected in this window.");
+        }
+        if (!provider.publicKey) {
+          await provider.connect();
+        }
+
+        const dateOfBirth = Math.floor(new Date(`${dob}T00:00:00Z`).getTime() / 1000);
+        const built = await apiPost<{ tx_b64: string; profile_pda: string }>("/api/auth/init-profile-tx", {
+          username: handle,
+          country: country.trim().toUpperCase(),
+          date_of_birth: dateOfBirth,
+        });
+
+        const txBytes = Buffer.from(built.tx_b64, "base64");
+        const tx = web3.Transaction.from(txBytes);
+        let signed: web3.Transaction;
+        try {
+          signed = await provider.signTransaction(tx);
+        } catch {
+          throw new Error("Signature rejected — try again to finish on-chain setup.");
+        }
+        const signedB64 = Buffer.from(signed.serialize()).toString("base64");
+        await apiPost<{ signature: string }>("/api/auth/broadcast-tx", { tx_b64: signedB64 });
+      }
+
       const token = localStorage.getItem("xfchess_token");
       if (token) {
         const r = await fetch(`${API_BASE}/api/auth/username`, {
@@ -926,7 +979,7 @@ function ProfileStep({
       localStorage.setItem("xfchess_username", handle);
       onComplete(handle);
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || String(e));
     } finally {
       setSaving(false);
     }
@@ -940,21 +993,31 @@ function ProfileStep({
           Choose Your Handle
         </h2>
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
-          Pick a display name for the arena
+          {requireOnchain
+            ? "Confirm your details to create your on-chain profile"
+            : "Pick a display name for the arena"}
         </p>
       </div>
       {error && <ErrorMsg msg={error} />}
       <InputField label="Chess Handle" value={handle} onChange={setHandle} placeholder="e.g. DragonKnight99" />
+      {requireOnchain && (
+        <>
+          <InputField label="Country (2-letter code)" value={country} onChange={(v) => setCountry(v.toUpperCase())} placeholder="e.g. GB" />
+          <InputField label="Date of Birth" value={dob} onChange={setDob} type="date" />
+        </>
+      )}
       <p style={{ fontSize: 11, color: TEXT_MUTED, textAlign: "center" as const, marginBottom: 16 }}>
-        Your handle is saved to your account. On-chain Solana setup happens when you first wager.
+        {requireOnchain
+          ? "This submits a one-time on-chain transaction to create your Solana profile."
+          : "Your handle is saved to your account. On-chain Solana setup happens when you first wager."}
       </p>
       <PrimaryBtn
         onClick={submit}
         loading={saving}
-        disabled={!handle || handle.length < 3}
+        disabled={!canSubmit}
         style={{ marginTop: 4 }}
       >
-        Save &amp; Enter Arena
+        {requireOnchain ? "Create Profile & Continue" : "Save & Enter Arena"}
       </PrimaryBtn>
     </Card>
   );
@@ -965,16 +1028,39 @@ function ProfileStep({
 // Root orchestrator
 // ---------------------------------------------------------------------------
 function Onboarding() {
+  // A signing request (see tauri/src/main.rs's open_wallet_popup_for_signing)
+  // reopens this popup from scratch — a brand new page load with no React
+  // state carried over from whatever window handled the original login. If
+  // there's already a session on disk, `?step=sign` must skip straight past
+  // consent/entry/wallet/profile so the pending-transaction prompt (rendered
+  // unconditionally below via <TransactionSigner>) is what the user actually
+  // sees, instead of being asked to log in or pick a handle all over again.
+  const hasExistingSession = () =>
+    !!(localStorage.getItem("xfchess_wallet_pubkey") || localStorage.getItem("xfchess_wallet"));
+
   const [step, setStep] = useState<Step>(() => {
     const params = new URLSearchParams(window.location.search);
     const s = params.get("step");
     if (s === "connect_wallet") return "wallet";
     if (s === "profile") return "profile";
+    if (s === "sign") return hasExistingSession() ? "sign" : "consent";
     return "consent";
   });
-  const [username, setUsername] = useState("Player");
+  // Only the `?step=profile` deep link (opened by open_profile_step() when
+  // the game client is blocking a wager on a missing on-chain profile) needs
+  // to actually submit the on-chain init_profile tx here — the normal
+  // first-login path reaches "profile" via handleAuth/handleWalletContinue
+  // with no such param, and stays off-chain-only by design.
+  const [requireOnchain] = useState<boolean>(
+    () => new URLSearchParams(window.location.search).get("step") === "profile",
+  );
+  const [username, setUsername] = useState<string>(
+    () => localStorage.getItem("xfchess_username") || "Player",
+  );
   const [ready, setReady] = useState(false);
-  const [pubkey, setPubkey] = useState<string | null>(null);
+  const [pubkey, setPubkey] = useState<string | null>(
+    () => localStorage.getItem("xfchess_wallet_pubkey") || localStorage.getItem("xfchess_wallet"),
+  );
   const [path, setPath] = useState<"wallet" | "email" | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [walletProvider, setWalletProvider] = useState<any>(null);
@@ -991,7 +1077,10 @@ function Onboarding() {
       try {
         const record = await apiGet<ConsentRecord | null>("/api/consent");
         if (record && record.version >= CONSENT_VERSION) {
-          setStep("entry");
+          // Only advance the default "consent" step — a "sign"/"profile"/"wallet"
+          // deep link already resolved to the right step above and must not be
+          // clobbered once this async check lands.
+          setStep(cur => (cur === "consent" ? "entry" : cur));
         }
       } catch { /* ignore */ }
 
@@ -1144,12 +1233,28 @@ function Onboarding() {
           walletProvider={walletProvider}
           onClose={closePopup}
           defaultHandle={username !== "Player" ? username : undefined}
+          requireOnchain={requireOnchain}
         />
       )}
 
       {/* Game is already running — auto-close shortly after showing the
           welcome message; "View Profile Hub" also closes immediately. */}
       {step === "splash"  && <SplashStep username={username} onComplete={closePopup} />}
+
+      {/* Reopened purely to approve a pending transaction (see hasExistingSession
+          above) — no login walkthrough, just wait for <TransactionSigner> below
+          to pick up the pending tx from /pending and show the sign prompt. */}
+      {step === "sign" && (
+        <Card showClose={true} onClose={closePopup}>
+          <div style={{ textAlign: "center" as const }}>
+            <LogoMark size={40} />
+            <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 16 }}>
+              Welcome back, <span style={{ color: TEXT, fontWeight: 600 }}>{username}</span>.
+              Approve the pending transaction below to continue.
+            </p>
+          </div>
+        </Card>
+      )}
 
       {pubkey && <TransactionSigner pubkey={pubkey} />}
     </div>

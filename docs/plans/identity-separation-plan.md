@@ -309,7 +309,7 @@ changes required.
 - Rename `host_treasury_pubkey` → something unambiguous (e.g.
   `tournament_fee_recipient` or `entry_fee_vault_pubkey`) to stop it reading as
   the same thing as `treasury_authority_key` (the withdraw-authority signer).
-  Update `backend/.env.example`, `deploy/backend/.env.example`, and all call
+  Update `backend/.env.example`, `ops/backend/.env.example`, and all call
   sites in `backend/src/signing/blinks/`.
 - Leave `/admin/wallet-balances` and `/admin/treasury/refund` as-is (already
   correctly gated behind `require_api_key`) — just confirm no player-facing

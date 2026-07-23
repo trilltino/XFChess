@@ -641,10 +641,29 @@ async fn http_server(
 /// Open the wallet UI in the user's real Chrome browser so Phantom/Solflare
 /// extensions are available. WebView2 inside Tauri cannot load extensions.
 fn open_wallet_popup(_app: &tauri::AppHandle) {
+  open_wallet_popup_with_step(None);
+}
+
+/// Open the wallet UI to approve a pending transaction. Passing `?step=sign`
+/// tells wallet-ui (see hasExistingSession in App.tsx) to skip straight past
+/// the login/profile walkthrough when a session is already on disk — a plain
+/// `open_wallet_popup()` reopens the base URL, which always restarts at
+/// consent/entry, so a signing request that arrives after the user already
+/// logged in used to show a fresh "log in again" screen instead of the sign
+/// prompt, and the pending tx would silently time out 60s later.
+fn open_wallet_popup_for_signing(_app: &tauri::AppHandle) {
+  open_wallet_popup_with_step(Some("sign"));
+}
+
+fn open_wallet_popup_with_step(step: Option<&str>) {
   let wallet_url =
     std::env::var("XFCHESS_WALLET_URL").unwrap_or_else(|_| "http://localhost:5174".to_string());
-  tracing::info!("[WalletPopup] opening in system browser: {wallet_url}");
-  open_in_browser(&wallet_url);
+  let url = match step {
+    Some(s) => format!("{wallet_url}?step={s}"),
+    None => wallet_url,
+  };
+  tracing::info!("[WalletPopup] opening in system browser: {url}");
+  open_in_browser(&url);
 }
 
 /// Open a URL in Chrome app-mode (compact popup, no address bar).
@@ -1081,7 +1100,7 @@ fn main() {
                   // Ensure the popup is open/focused so the user can approve.
                   // Dedup-guarded on the Rust side (see process_is_alive in
                   // open_in_browser), so this is a no-op if one is already up.
-                  open_wallet_popup(&app2);
+                  open_wallet_popup_for_signing(&app2);
 
                   let outcome = tokio::time::timeout(
                     std::time::Duration::from_secs(SIGN_TIMEOUT_SECS),

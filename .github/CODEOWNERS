@@ -4,6 +4,6 @@
 
 /backend/migrations/        @trilltino
 /programs/                  @trilltino
-/deploy/                    @trilltino
+/ops/                    @trilltino
 /backend/src/signing/       @trilltino
 /.github/                   @trilltino

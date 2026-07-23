@@ -157,10 +157,10 @@ export default function Dashboard() {
   }, []);
 
   // In-app deployment is not implemented (T9, tauri/docs/TAURI_REMEDIATION.md).
-  // Deploys run from a terminal via deploy\scripts\deploy.ps1.
+  // Deploys run from a terminal via ops\scripts\deploy.ps1.
   const runDeployment = async () => {
     addLog("NOT IMPLEMENTED: deploys run from a terminal, not this panel.");
-    addLog("Run: powershell -File deploy\\scripts\\deploy.ps1 -Server 178.104.55.19 [-Domain your.domain]");
+    addLog("Run: powershell -File ops\\scripts\\deploy.ps1 -Server 178.104.55.19 [-Domain your.domain]");
   };
 
   const handleIpBan = async () => {

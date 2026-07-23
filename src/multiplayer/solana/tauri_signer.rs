@@ -157,15 +157,39 @@ pub fn sign_message_via_tauri(message: &str) -> Result<Vec<u8>, String> {
     send_to_tauri_blocking(message.as_bytes())
 }
 
+/// Real transactions are a few KB; this mirrors the Tauri side's own
+/// `MAX_TX_LEN` sanity check so a bogus/huge length read off a port that
+/// isn't actually our bridge can't trigger a giant allocation.
+const MAX_RESP_LEN: u32 = 64 * 1024;
+
 /// Send raw transaction bytes to the Tauri signing server and block until the
 /// signed bytes are returned or an error occurs.
+///
+/// `tcp_port_range()` spans 10 ports so multiple local dev instances can each
+/// claim their own slot — but a `connect()` succeeding doesn't prove the peer
+/// is actually our bridge (a stale/orphaned instance, or any other unrelated
+/// service, could be squatting on an earlier port). So a connection that
+/// fails immediately (EOF / bad length) is treated as "not our bridge" and
+/// scanning continues to the next port. A real timeout, by contrast, means
+/// we did reach a live bridge that's genuinely waiting on the user — that's
+/// surfaced as-is rather than retried, so we don't fire a second signing
+/// popup on top of one still pending.
 fn send_to_tauri_blocking(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;
 
+    fn is_timeout(e: &std::io::Error) -> bool {
+        matches!(
+            e.kind(),
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+        )
+    }
+
     let write_timeout = Duration::from_secs(5);
     let read_timeout = Duration::from_secs(SIGN_TIMEOUT_SECS);
+
+    let mut last_err: Option<String> = None;
 
     for port in tcp_port_range() {
         let mut stream = match TcpStream::connect(format!("127.0.0.1:{}", port)) {
@@ -178,31 +202,46 @@ fn send_to_tauri_blocking(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
         let len = tx_bytes.len() as u32;
         if stream.write_all(&len.to_le_bytes()).is_err() || stream.write_all(tx_bytes).is_err() {
+            last_err = Some(format!("write to port {port} failed"));
             continue;
         }
 
         let mut len_buf = [0u8; 4];
-        if stream.read_exact(&mut len_buf).is_err() {
-            return Err("Signing server closed connection before responding".to_string());
+        if let Err(e) = stream.read_exact(&mut len_buf) {
+            if is_timeout(&e) {
+                return Err(format!("Signing server closed connection before responding: {e}"));
+            }
+            last_err = Some(format!("port {port} closed before sending a length prefix"));
+            continue;
         }
         let resp_len = u32::from_le_bytes(len_buf);
         if resp_len == 0xFFFF_FFFF {
             return Err("Signing server rejected the transaction (user cancelled?)".to_string());
         }
+        if resp_len > MAX_RESP_LEN {
+            last_err = Some(format!("port {port} sent implausible response length {resp_len}"));
+            continue;
+        }
 
         let mut buf = vec![0u8; resp_len as usize];
-        return stream
-            .read_exact(&mut buf)
-            .map(|_| buf)
-            .map_err(|e| format!("read_signed_bytes: {}", e));
+        match stream.read_exact(&mut buf) {
+            Ok(_) => return Ok(buf),
+            Err(e) if is_timeout(&e) => return Err(format!("read_signed_bytes: {}", e)),
+            Err(e) => {
+                last_err = Some(format!("read_signed_bytes (port {port}): {}", e));
+                continue;
+            }
+        }
     }
 
     let range = tcp_port_range();
-    Err(format!(
-        "Could not connect to Tauri signing server on ports {}-{}",
-        range.start(),
-        range.end()
-    ))
+    Err(last_err.unwrap_or_else(|| {
+        format!(
+            "Could not connect to Tauri signing server on ports {}-{}",
+            range.start(),
+            range.end()
+        )
+    }))
 }
 
 /// Deserialise the wire-format signed bytes into a `VersionedTransaction` and

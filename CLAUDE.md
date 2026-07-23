@@ -110,7 +110,7 @@ scripts\build.bat
 scripts\run_offline.bat
 
 # Production deploy to Hetzner VPS (build + nginx + systemd + TLS)
-deploy\scripts\deploy.ps1
+ops\scripts\deploy.ps1
 
 # Docker monitoring stack
 docker-compose up -d
@@ -197,4 +197,4 @@ See [crates/CLAUDE.md](crates/CLAUDE.md) for per-crate details. Key ones:
 - Grafana: `http://localhost:3000` (when running `docker-compose up -d`)
 - Transaction debug: `GET /api/debug/transaction/:signature`
 
-Monitoring stack config lives in [deploy/monitoring/](deploy/monitoring/).
+Monitoring stack config lives in [ops/monitoring/](ops/monitoring/).

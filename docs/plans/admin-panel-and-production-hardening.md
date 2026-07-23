@@ -3,7 +3,7 @@
 **Date:** 2026-07-15
 **Status:** IN PROGRESS — Phases 0, 1, 2, 4 implemented & verified; 3, 5, 6 outstanding
 **Scope:** Tournament admin panel (Tauri GUI + CLIs), deploy scripts, admin route security, audit trail, treasury key custody
-**Related docs:** [treasury-payout-and-close-tournament-fixes.md](treasury-payout-and-close-tournament-fixes.md), [production-reality-implementation.md](production-reality-implementation.md), [../../deploy/SECRETS_ROTATION.md](../../deploy/SECRETS_ROTATION.md)
+**Related docs:** [treasury-payout-and-close-tournament-fixes.md](treasury-payout-and-close-tournament-fixes.md), [production-reality-implementation.md](production-reality-implementation.md), [../../ops/SECRETS_ROTATION.md](../../ops/SECRETS_ROTATION.md)
 
 ---
 
@@ -42,7 +42,7 @@ Rationale: the deploy SSH key infrastructure (`~/.ssh/id_xfchess`, `deploy` user
 
 | # | Finding | Evidence |
 |---|---------|----------|
-| 1 | `/admin/*` not proxied in prod; falls through to SPA | `deploy/nginx/nginx.conf:55-57` (`try_files … /index.html`); no `location /admin/` anywhere in the file |
+| 1 | `/admin/*` not proxied in prod; falls through to SPA | `ops/nginx/nginx.conf:55-57` (`try_files … /index.html`); no `location /admin/` anywhere in the file |
 | 2 | Live ngrok URL as default admin endpoint | `backend/src/bin/vps_admin.rs:22` (`VPS_DEFAULT_URL = "https://unrejuvenated-….ngrok-free.app"`), used on any `SIGNING_SERVICE_URL` error at `:24-35` |
 | 3 | `ADMIN_TOKEN` compared with `!=` (timing side channel) | `backend/src/signing/routes/dispute.rs:141-145` |
 | 4 | `ADMIN_API_KEY` gate is constant-time (good), but defaults to `"dev"` in debug builds | `backend/src/infrastructure/auth_middleware.rs:26-63` |
@@ -52,19 +52,19 @@ Rationale: the deploy SSH key infrastructure (`~/.ssh/id_xfchess`, `deploy` user
 | 8 | GUI SSH terminal connects as **root** | `tauri/tournament-admin/src/components/HetznerSsh.tsx:17,23,42` |
 | 9 | Stub admin handlers that return fake data or do nothing | `admin.rs:213-237` (anti_cheat_reports), `:480` (force_resign), `:574` (treasury_refund), `:651-708` (tasks_status / tls_expiry / logs_stream), `:710-726` (rotate_authority) |
 | 10 | Treasury / dispute / VPS authorities: single plaintext keys in `/opt/xfchess/.env` | `backend/src/signing/config.rs:97-106`, `dispute.rs:148-152`; custody hardening in treasury-fixes doc §Fix 4 (decision: single dedicated wallets, no multisig) |
-| 11 | `package_backend_hetzner.bat` broken: copies from pre-reorg paths that no longer exist; plain-HTTP `.env.production` fallback | `scripts/package_backend_hetzner.bat:32,48-53` (`deploy\xfchess-backend.service`, `deploy\nginx.conf`, `deploy\deploy.ps1` — all moved to `deploy/backend/`, `deploy/nginx/`, `deploy/scripts/`) |
-| 12 | `deploy.bat` is a stale batch duplicate of `deploy.ps1` (which was recently fixed; the .bat was not) | `deploy/scripts/deploy.bat` vs `deploy/scripts/deploy.ps1` |
+| 11 | `package_backend_hetzner.bat` broken: copies from pre-reorg paths that no longer exist; plain-HTTP `.env.production` fallback | `scripts/package_backend_hetzner.bat:32,48-53` (`ops\xfchess-backend.service`, `ops\nginx.conf`, `ops\deploy.ps1` — all moved to `ops/backend/`, `ops/nginx/`, `ops/scripts/`) |
+| 12 | `deploy.bat` is a stale batch duplicate of `deploy.ps1` (which was recently fixed; the .bat was not) | `ops/scripts/deploy.bat` vs `ops/scripts/deploy.ps1` |
 | 13 | Dead doc references: `scripts/deploy-coturn.sh` and `deploy-to-hetzner.sh` don't exist | `backend/.env.example:62-64` |
 | 14 | Two parallel login implementations in the GUI (TokenAuth verifies via `/admin/players`, useAuth via audit-log) | `TokenAuth.tsx:32`, `hooks/useAuth.tsx:40` |
 
-Things verified as **fine** (no action): `deploy/scripts/deploy.ps1` is current (BOM-safe env, JSON health check, clean-clone build, builds real binary `signing-server-http` per `backend/Cargo.toml:22-24`); backend binds `0.0.0.0:8090` behind UFW; `require_api_key` uses constant-time compare; systemd + nginx + certbot flow works.
+Things verified as **fine** (no action): `ops/scripts/deploy.ps1` is current (BOM-safe env, JSON health check, clean-clone build, builds real binary `signing-server-http` per `backend/Cargo.toml:22-24`); backend binds `0.0.0.0:8090` behind UFW; `require_api_key` uses constant-time compare; systemd + nginx + certbot flow works.
 
 ---
 
 ## Phase 0 — Stop the bleeding (small, independent diffs; ship same day)
 
 ### 0.1 nginx: explicitly kill `/admin/*` on the public path
-`deploy/nginx/nginx.conf` — add **above** `location /`:
+`ops/nginx/nginx.conf` — add **above** `location /`:
 
 ```nginx
 # Admin API is NEVER served publicly. Operators connect via SSH tunnel
@@ -74,7 +74,7 @@ location /admin/ {
 }
 ```
 
-Mirror in `deploy/staging/nginx-staging.conf`. This converts today's accidental protection (SPA fallback) into an explicit, documented contract.
+Mirror in `ops/staging/nginx-staging.conf`. This converts today's accidental protection (SPA fallback) into an explicit, documented contract.
 
 ### 0.2 `vps_admin.rs`: remove the ngrok fallback
 Delete `VPS_DEFAULT_URL` (line 22). `vps_base()` must **panic with a clear message** if `SIGNING_SERVICE_URL` is unset — in all build profiles. An admin/treasury tool must fail loudly, never silently reroute over a third-party tunnel. Also delete the `ngrok-skip-browser-warning` header from both `vps_admin.rs:45-48` and `tournament_admin.rs:49-52` once no ngrok path remains.
@@ -88,8 +88,8 @@ Replace `req.admin_token != expected` (`dispute.rs:142`) with the same `constant
 `tauri/tournament-admin/src/services/api.ts:258` builds `…/admin/archive/download/${type}?api_key=${token}`. Change the download flow to `fetch` with the `X-API-Key` header and save via blob URL. If the backend's archive route reads the query param, add header support there and delete query-param support.
 
 ### 0.5 Fix or retire the two broken/stale scripts
-- `scripts/package_backend_hetzner.bat`: **retire it** — replace body with an echo pointing at `deploy\scripts\deploy.ps1` (it duplicates a now-canonical flow, and all its copy paths are dead). Alternative (not recommended): fix all five paths + change fallback to `https://`.
-- `deploy/scripts/deploy.bat`: same — reduce to a thin wrapper that calls `powershell -File deploy.ps1 %*`, or delete and update `deploy/README.md`. Two divergent implementations of "deploy" is how the recently-fixed ps1 bugs come back.
+- `scripts/package_backend_hetzner.bat`: **retire it** — replace body with an echo pointing at `ops\scripts\deploy.ps1` (it duplicates a now-canonical flow, and all its copy paths are dead). Alternative (not recommended): fix all five paths + change fallback to `https://`.
+- `ops/scripts/deploy.bat`: same — reduce to a thin wrapper that calls `powershell -File deploy.ps1 %*`, or delete and update `ops/README.md`. Two divergent implementations of "deploy" is how the recently-fixed ps1 bugs come back.
 - `backend/.env.example:62-64`: delete references to nonexistent `deploy-coturn.sh` / `deploy-to-hetzner.sh`; state coturn's actual install story or mark TODO.
 
 **Verify Phase 0:** `curl -k https://<server>/admin/players` → connection closed (no 200, no HTML). `SIGNING_SERVICE_URL= cargo run --bin vps_admin` → immediate panic. `cargo test -p backend`. Grep repo for `ngrok` → only historical docs remain.
@@ -153,7 +153,7 @@ Picking PRODUCTION checks the tunnel with a `GET /health`; if down, print the ex
 
 ### 1.6 Server side: dedicated tunnel user (added to `deploy.ps1`)
 
-New Step 2g in `deploy/scripts/deploy.ps1`:
+New Step 2g in `ops/scripts/deploy.ps1`:
 
 ```bash
 id tunnel 2>/dev/null || adduser tunnel --disabled-password --shell /usr/sbin/nologin --gecos ''
@@ -186,19 +186,19 @@ Result: the tunnel identity can do exactly one thing — forward to the backend 
 
 | Script | Verdict | Action |
 |--------|---------|--------|
-| `deploy/scripts/deploy.ps1` | **Current** (recently fixed) | Extend: Step 2g tunnel user (§1.6); add `/admin/` 444 check to Step 10 verify; add `ALLOWED_ORIGINS` reminder incl. panel origins |
-| `deploy/scripts/deploy.bat` | Stale duplicate | **DELETED 2026-07-15** |
-| `deploy/scripts/rollback.ps1` | Assumed OK | Smoke-read: confirm binary name `signing-server-http` + `.prev` path match deploy.ps1:267 |
-| `deploy/scripts/copy-key.bat` | Superseded by deploy.ps1 SSH bootstrap | **DELETED 2026-07-15** |
+| `ops/scripts/deploy.ps1` | **Current** (recently fixed) | Extend: Step 2g tunnel user (§1.6); add `/admin/` 444 check to Step 10 verify; add `ALLOWED_ORIGINS` reminder incl. panel origins |
+| `ops/scripts/deploy.bat` | Stale duplicate | **DELETED 2026-07-15** |
+| `ops/scripts/rollback.ps1` | Assumed OK | Smoke-read: confirm binary name `signing-server-http` + `.prev` path match deploy.ps1:267 |
+| `ops/scripts/copy-key.bat` | Superseded by deploy.ps1 SSH bootstrap | **DELETED 2026-07-15** |
 | `scripts/package_backend_hetzner.bat` | **Broken** (dead paths) | **DELETED 2026-07-15**; CLAUDE.md now points at deploy.ps1 |
 | `scripts/run_offline2.bat` | Unreferenced, superseded by run_offline.bat | **DELETED 2026-07-15** |
 | `scripts/build.bat`, `run_offline.bat`, `start-tournament-admin.bat` | Local-dev, OK | Keep; update start-tournament-admin.bat only if panel startup flow changes |
-| `deploy/frontend/deploy-frontend.ps1` | Broken (`$ROOT` path bug, plain-HTTP, BOM) | **DELETED 2026-07-15**; add a `-FrontendOnly` flag to deploy.ps1 if a fast path is wanted |
-| `tauri/tournament-admin/deploy/` (21 tracked files) | Stale pre-fix snapshot of `deploy/`; only ref is the panel's broken sidecar deploy button (`DeploymentManager.tsx:17`) | Pending owner approval to delete (outside 2026-07-15 cleanup scope); fix or remove the deploy button with it |
-| `deploy/staging/nginx-staging.conf` | Missing admin block | Add `/admin/` 444 (§0.1) |
+| `ops/frontend/deploy-frontend.ps1` | Broken (`$ROOT` path bug, plain-HTTP, BOM) | **DELETED 2026-07-15**; add a `-FrontendOnly` flag to deploy.ps1 if a fast path is wanted |
+| `tauri/tournament-admin/ops/` (21 tracked files) | Stale pre-fix snapshot of `ops/`; only ref is the panel's broken sidecar deploy button (`DeploymentManager.tsx:17`) | Pending owner approval to delete (outside 2026-07-15 cleanup scope); fix or remove the deploy button with it |
+| `ops/staging/nginx-staging.conf` | Missing admin block | Add `/admin/` 444 (§0.1) |
 | `backend/.env.example` | Stale refs | Fix (§0.5); document `ADMIN_TOKEN` scope (§0.3) |
 
-Deliverable: every row moved to "verified current" or deleted, in one commit series, so `deploy/` has exactly one canonical path per task.
+Deliverable: every row moved to "verified current" or deleted, in one commit series, so `ops/` has exactly one canonical path per task.
 
 ---
 
@@ -223,7 +223,7 @@ Rule: **an admin button that lies is worse than no button.** For each stub in `a
 |---------|----------|-------|
 | `force_resign` (:480) | **Implement** | Build + submit real resign/timeout tx via the same path as settlement worker; needed mid-incident |
 | `treasury_refund` (:574) | **Implement, double-gated** | Needs `withdraw_treasury_ix` builder + `TREASURY_AUTHORITY_KEY` (single wallet, Phase 5) + `ADMIN_TOKEN` second factor (§0.3 scope). Currently honest 501. |
-| `rotate_authority` (:710-726) | **Delete endpoint** | True rotation is a deploy/SECRETS_ROTATION.md procedure; an endpoint that "just logs" is a footgun. Panel links to the runbook instead |
+| `rotate_authority` (:710-726) | **Delete endpoint** | True rotation is a ops/SECRETS_ROTATION.md procedure; an endpoint that "just logs" is a footgun. Panel links to the runbook instead |
 | `anti_cheat_reports` (:213-237) | **Wire to real data or return 501** | Fake data in a compliance surface is a liability |
 | `tasks_status`, `tls_expiry`, `logs_stream` (:651-708) | **Implement cheaply** | tasks: expose real worker tick metadata; TLS: read cert expiry via openssl on the box or from `/metrics`; logs: tail journald via existing SSH pattern in panel, delete backend stub |
 

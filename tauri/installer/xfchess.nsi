@@ -25,7 +25,7 @@
 
 ; Production backend endpoints baked into the launcher. Override at build time:
 ;   makensis /DBACKEND_URL=https://xfchess.com /DSIGNING_URL=https://xfchess.com xfchess.nsi
-; nginx serves the frontend + API from the same domain (see deploy/nginx/nginx.conf) —
+; nginx serves the frontend + API from the same domain (see ops/nginx/nginx.conf) —
 ; there's no separate api.* subdomain.
 !ifndef BACKEND_URL
   !define BACKEND_URL "https://xfchess.com"

@@ -12,7 +12,7 @@ input/keys/testing.
 - [ ] **T6** 🟡 CSP `'unsafe-inline'` + `withGlobalTauri` `[you]`
 - [ ] **T7** 🔵 `.unwrap()` panics in IPC commands `[auto]`
 - [ ] **T8** 🔵 Dead weak `hash_password` `[auto]`
-- [x] **T9** 🔵 Fragile `deploy.bat` sidecar — resolved 2026-07-15: the sidecar call was removed; Dashboard now instructs running `deploy/scripts/deploy.ps1` from a terminal
+- [x] **T9** 🔵 Fragile `deploy.bat` sidecar — resolved 2026-07-15: the sidecar call was removed; Dashboard now instructs running `ops/scripts/deploy.ps1` from a terminal
 
 ---
 
@@ -118,7 +118,7 @@ frontend-triggerable panics.
 **Fix `[auto]`:** remove it (and its tests) so it can't be adopted later.
 
 ## T9 🔵 Fragile deploy sidecar `[you]`
-`Command.sidecar("../deploy/scripts/deploy.bat")` ([Dashboard.tsx](../tournament-admin/src/components/Dashboard.tsx#L137))
+`Command.sidecar("../ops/scripts/deploy.bat")` ([Dashboard.tsx](../tournament-admin/src/components/Dashboard.tsx#L137))
 won't resolve in a bundle and ships a one-click prod-deploy. Register it properly via
 `externalBin` or remove it from the shipped admin app.
 

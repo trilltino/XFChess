@@ -34,7 +34,7 @@ Create `.github/CODEOWNERS` so sensitive areas require review:
 ```
 /backend/migrations/        @trilltino
 /programs/                  @trilltino
-/deploy/                    @trilltino
+/ops/                    @trilltino
 /backend/src/signing/       @trilltino
 ```
 
@@ -58,9 +58,9 @@ For an urgent production fix:
 - The backend bakes the git SHA at build time (`build.rs` → `GIT_SHA`) and serves it at
   `GET /health` (`git_sha`). After a deploy, `curl https://$SERVER/health` must show the
   SHA you shipped — that's how a production bug is traced to its commit.
-- `deploy/scripts/deploy.ps1` **aborts on a dirty tree** (WS-G) so prod always maps to a
+- `ops/scripts/deploy.ps1` **aborts on a dirty tree** (WS-G) so prod always maps to a
   committed, pushed SHA.
 
 ## Rollback
-- `deploy/scripts/rollback.ps1` restores the previous binary. Know your **time-to-rollback**
+- `ops/scripts/rollback.ps1` restores the previous binary. Know your **time-to-rollback**
   (measure it once) and record it. See [runbooks/backend-down.md](runbooks/backend-down.md).

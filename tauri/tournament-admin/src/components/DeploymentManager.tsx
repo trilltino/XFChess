@@ -9,10 +9,10 @@ export default function DeploymentManager() {
   };
 
   // In-app deployment is not implemented. Deploys run from a terminal via
-  // deploy\scripts\deploy.ps1 (see docs/plans/admin-panel-and-production-hardening.md).
+  // ops\scripts\deploy.ps1 (see docs/plans/admin-panel-and-production-hardening.md).
   const runDeployment = () => {
     addLog("NOT IMPLEMENTED: deploys run from a terminal, not this panel.");
-    addLog("Run: powershell -File deploy\\scripts\\deploy.ps1 -Server 178.104.55.19 [-Domain your.domain]");
+    addLog("Run: powershell -File ops\\scripts\\deploy.ps1 -Server 178.104.55.19 [-Domain your.domain]");
   };
 
   return (

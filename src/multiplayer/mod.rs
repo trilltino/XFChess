@@ -89,6 +89,11 @@ impl Plugin for MultiplayerPlugin {
             solana::integration::SolanaIntegrationPlugin,
             solana::lobby::SolanaLobbyPlugin,
             solana::wager_rate::SolUsdRatePlugin,
+            // Backs ctx.tournament_client (ui/system_params/main_menu.rs) — the
+            // resource every tournament register/join/expand click handler in
+            // screens.rs is gated on. Without this, that Option resolves to
+            // None at runtime and those buttons silently no-op.
+            solana::tournament::TournamentClientPlugin,
         ));
 
         // 3. Register core orchestration systems
