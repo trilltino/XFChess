@@ -887,7 +887,13 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
 /// Fetches the wallet SOL balance and live exchange rates.
 /// Returns (sol_balance, usd_per_sol, gbp_per_sol) — all 0.0 on error.
 fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
-    let rpc_url = "https://beta.helius-rpc.com/?api-key=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5";
+    // No embedded API key — shipped client binaries must not carry one.
+    // Falls back to the free public mainnet RPC when HELIUS_API_KEY isn't set.
+    let rpc_url = match std::env::var("HELIUS_API_KEY") {
+        Ok(key) if !key.is_empty() => format!("https://beta.helius-rpc.com/?api-key={key}"),
+        _ => "https://api.mainnet-beta.solana.com".to_string(),
+    };
+    let rpc_url = rpc_url.as_str();
 
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(8))

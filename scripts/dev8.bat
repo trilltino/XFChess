@@ -16,15 +16,20 @@ set "DATA_ROOT=%ROOT%\dev8_data"
 :: --- Shared environment (mirrors run_offline.bat) ---
 set BACKEND_URL=http://127.0.0.1:8090
 set SIGNING_SERVICE_URL=http://127.0.0.1:8090
-set XFCHESS_RPC_URL=https://beta.helius-rpc.com/?api-key=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5
-set SOLANA_RPC_URL=https://beta.helius-rpc.com/?api-key=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5
-set HELIUS_API_KEY=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5
+:: No hardcoded API keys — falls back to the free public devnet RPC (same
+:: fallback as the justfile). Export HELIUS_API_KEY/XFCHESS_RPC_URL yourself
+:: first if you need Helius throughput locally.
+if not defined XFCHESS_RPC_URL set XFCHESS_RPC_URL=https://api.devnet.solana.com
+if not defined SOLANA_RPC_URL set SOLANA_RPC_URL=https://api.devnet.solana.com
+if not defined HELIUS_API_KEY set HELIUS_API_KEY=
 set MAGIC_BLOCK_RPC_URL=https://devnet.magicblock.app
 set ER_RPC_URL=https://devnet.magicblock.app
 set PROGRAM_ID=8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU
-set JWT_SECRET=137a895ebd9506dad79ba1f6c7d1119ad1446f7214710d93a0743f72deb5b5f3
-set IDENTITY_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-set IDENTITY_SALT=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+:: Non-production dummy values (same convention as the justfile) — never
+:: real secrets. Export these yourself first if you need real auth locally.
+if not defined JWT_SECRET set JWT_SECRET=0000000000000000000000000000000000000000000000000000000000000000
+if not defined IDENTITY_ENCRYPTION_KEY set IDENTITY_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+if not defined IDENTITY_SALT set IDENTITY_SALT=1111111111111111111111111111111111111111111111111111111111111111
 
 :: --- Check backend is reachable ---
 curl -s --max-time 2 http://127.0.0.1:8090/health >nul 2>&1

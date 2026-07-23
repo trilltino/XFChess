@@ -24,14 +24,12 @@ const BRLA_MINT: &str = "BRLbKUMNMHhpSA6pppwJT6MLBpVtCVhpPAMHu9KMLVH"; // BRLA D
 // ── Helius RPC helpers ──────────────────────────────────────────────────────
 
 fn helius_rpc_url() -> String {
-    let key = std::env::var("HELIUS_API_KEY")
-        .unwrap_or_else(|_| "5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5".to_string());
+    let key = std::env::var("HELIUS_API_KEY").unwrap_or_default();
     format!("https://mainnet.helius-rpc.com/?api-key={key}")
 }
 
 fn helius_beta_url() -> String {
-    let key = std::env::var("HELIUS_API_KEY")
-        .unwrap_or_else(|_| "5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5".to_string());
+    let key = std::env::var("HELIUS_API_KEY").unwrap_or_default();
     format!("https://beta.helius-rpc.com/?api-key={key}")
 }
 

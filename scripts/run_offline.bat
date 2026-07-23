@@ -37,14 +37,19 @@ set XFCHESS_FAST_LOCAL_BUILD=1
 set BACKEND_URL=http://127.0.0.1:8090
 set SIGNING_SERVICE_URL=http://127.0.0.1:8090
 
-:: Secrets
-set JWT_SECRET=137a895ebd9506dad79ba1f6c7d1119ad1446f7214710d93a0743f72deb5b5f3
-set IDENTITY_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-set IDENTITY_SALT=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+:: Secrets — non-production dummy values (same convention as the justfile),
+:: never real secrets. Export these yourself first if you need real auth
+:: locally.
+if not defined JWT_SECRET set JWT_SECRET=0000000000000000000000000000000000000000000000000000000000000000
+if not defined IDENTITY_ENCRYPTION_KEY set IDENTITY_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+if not defined IDENTITY_SALT set IDENTITY_SALT=1111111111111111111111111111111111111111111111111111111111111111
 
 :: Solana / Authority Keys (UPDATED to new Program ID)
-set SOLANA_RPC_URL=https://beta.helius-rpc.com/?api-key=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5
-set HELIUS_API_KEY=5bb5fed2-8d33-458b-b7d2-3d18fdbb3da5
+:: No hardcoded API key — falls back to the free public devnet RPC (same
+:: fallback as the justfile). Export HELIUS_API_KEY/SOLANA_RPC_URL yourself
+:: first if you need Helius throughput locally.
+if not defined SOLANA_RPC_URL set SOLANA_RPC_URL=https://api.devnet.solana.com
+if not defined HELIUS_API_KEY set HELIUS_API_KEY=
 set MAGIC_BLOCK_RPC_URL=https://devnet.magicblock.app
 set ER_RPC_URL=https://devnet.magicblock.app
 set PROGRAM_ID=8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU
@@ -143,9 +148,9 @@ echo [LAUNCH] 5/5 Web Frontend...
 :: Tournament admin is desktop-only: the Tauri host serves the built dist in its
 :: own window (tray icon -> Tournament Admin).
 if "!LAUNCH_CMD!"=="start" (
-    start "XFChess Web" /D "%ROOT%\web-solana" cmd /k "npm run dev"
+    start "XFChess Web" /D "%ROOT%\xfchessdotcom" cmd /k "npm run dev"
 ) else (
-    wt -w 0 nt --title "XFChess Web" -d "%ROOT%\web-solana" cmd /k "npm run dev"
+    wt -w 0 nt --title "XFChess Web" -d "%ROOT%\xfchessdotcom" cmd /k "npm run dev"
 )
 
 echo.
