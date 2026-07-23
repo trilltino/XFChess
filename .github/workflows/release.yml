@@ -21,7 +21,9 @@ env:
   SIGNING_URL: https://xfchess.com
   # Actual production backend today (xfchess.com has no DNS yet). Update this
   # to https://xfchess.com/health once DNS + nginx are live, and drop this env.
-  BACKEND_HEALTH_URL: http://178.104.55.19/health
+  # nginx redirects plain HTTP to HTTPS with a self-signed cert (no DNS yet,
+  # so no real cert either) — hence https:// + -k below.
+  BACKEND_HEALTH_URL: https://178.104.55.19/health
 
 jobs:
   # ─────────────────────── Verify backend is up ───────────────────────
@@ -31,7 +33,7 @@ jobs:
       - name: Check production backend health
         run: |
           for i in 1 2 3 4 5; do
-            code=$(curl -sS -m 10 -o /tmp/health.json -w '%{http_code}' "$BACKEND_HEALTH_URL" || echo 000)
+            code=$(curl -skS -m 10 -o /tmp/health.json -w '%{http_code}' "$BACKEND_HEALTH_URL" || echo 000)
             if [ "$code" = "200" ]; then
               echo "Backend healthy: $(cat /tmp/health.json)"
               exit 0
