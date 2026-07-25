@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { ConnectionProvider, WalletProvider, useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
@@ -28,23 +28,12 @@ import TournamentPlay from './pages/TournamentPlay';
 import { ProfileViewer } from './pages/ProfileViewer';
 import { LichessCallback } from './pages/LichessCallback';
 import { Features } from './pages/Features';
-import { Waitlist } from './pages/Waitlist';
 import { OrganizationSchema } from './components/StructuredData';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
-import { getUserStatus } from './lib/api';
 import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
-import { Menu, X, ChevronDown, Sun, Moon } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { Footer } from './components/Footer';
 import { WalletSelectionModal } from './components/WalletSelectionModal';
-import { LoginModal } from './components/LoginModal';
-
-const dropdownVariants = {
-    hidden: { opacity: 0, y: -10 },
-    visible: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -10 }
-};
-
-
 
 // Default styles that can be overridden by your app
 import '@solana/wallet-adapter-react-ui/styles.css';
@@ -124,41 +113,14 @@ function AppContent() {
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
     const [username, setUsername] = useState<string | null>(null);
-    const [hasKyc, setHasKyc] = useState<boolean | null>(null);
-    const [hasAccount, setHasAccount] = useState<boolean | null>(null);
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [_userEmail, setUserEmail] = useState<string | null>(null);
-    const [isLegalOpen, setIsLegalOpen] = useState(false);
-    const [isCommunityOpen, setIsCommunityOpen] = useState(false);
-    const [isGameTypesOpen, setIsGameTypesOpen] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
-    const [isDark, setIsDark] = useState(() => localStorage.getItem('xfchess_theme') !== 'light');
     const lastScrollY = useRef(0);
-    const closeDropdowns = () => { setIsLegalOpen(false); setIsCommunityOpen(false); setIsGameTypesOpen(false); };
 
     const { totalUsdValue, loading: balanceLoading } = useWalletUsdBalance(
         connected ? connection : null,
         publicKey
     );
-
-    // Check authentication status on mount
-    useEffect(() => {
-        const token = localStorage.getItem('xfchess_token');
-        const email = localStorage.getItem('xfchess_email');
-        const storedUsername = localStorage.getItem('xfchess_username');
-        if (token && email) {
-            setIsLoggedIn(true);
-            setUserEmail(email);
-            if (storedUsername) setUsername(storedUsername);
-        }
-    }, []);
-
-    useEffect(() => {
-        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-        localStorage.setItem('xfchess_theme', isDark ? 'dark' : 'light');
-    }, [isDark]);
 
     // Scroll detection for navbar fade
     useEffect(() => {
@@ -211,39 +173,6 @@ function AppContent() {
         return () => { isMounted = false; };
     }, [connected, publicKey, connection]);
 
-    // Nav-level KYC nudge — independent of the on-chain profile fetch above
-    // since KYC lives in the backend vault, not the on-chain PlayerProfile.
-    useEffect(() => {
-        let isMounted = true;
-        const refetch = () => {
-            if (!connected || !publicKey) {
-                setHasKyc(null);
-                setHasAccount(null);
-                return;
-            }
-            getUserStatus(publicKey.toBase58())
-                .then((status) => {
-                    if (!isMounted) return;
-                    setHasKyc(status.has_kyc);
-                    setHasAccount(status.has_profile);
-                })
-                .catch(() => {
-                    if (!isMounted) return;
-                    setHasKyc(null);
-                    setHasAccount(null);
-                });
-        };
-        refetch();
-        // ProfileViewer fires this right after a successful KYC submission so
-        // the pill clears without waiting for a reconnect/reload.
-        window.addEventListener('xfchess:kyc-updated', refetch);
-        return () => {
-            isMounted = false;
-            window.removeEventListener('xfchess:kyc-updated', refetch);
-        };
-    }, [connected, publicKey]);
-
-
     return (
         <div className="app-container">
             <OrganizationSchema />
@@ -261,96 +190,12 @@ function AppContent() {
                 </div>
                 
                 <div className={`nav-links ${isMenuOpen ? 'active' : ''}`}>
-                    <Link to="/home" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Home</Link>
-                    <Link to="/play" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
-                    <Link to="/waitlist" className="nav-link" onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>Waitlist</Link>
-                    <div className="nav-legal-dropdown">
-                        <button className="nav-link dropdown-toggle" onClick={() => { setIsGameTypesOpen(v => !v); setIsCommunityOpen(false); setIsLegalOpen(false); }}>
-                            Game <ChevronDown size={14} className={`dropdown-icon ${isGameTypesOpen ? 'open' : ''}`} />
-                        </button>
-                        <AnimatePresence>
-                            {isGameTypesOpen && (
-                                <motion.div 
-                                    className="nav-legal-dropdown-menu"
-                                    variants={dropdownVariants}
-                                    initial="hidden"
-                                    animate="visible"
-                                    exit="exit"
-                                    transition={{ duration: 0.2 }}
-                                >
-                                    <Link to="/features" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Features</Link>
-                                    <Link to="/tournaments" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Tournament</Link>
-                                    <Link to="/computer" className="nav-legal-dropdown-item" onClick={() => { setIsGameTypesOpen(false); setIsMenuOpen(false); }}>Chess Computer</Link>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
-                    <div className="nav-legal-dropdown">
-                        <button className="nav-link dropdown-toggle" onClick={() => { setIsCommunityOpen(v => !v); setIsLegalOpen(false); setIsGameTypesOpen(false); }}>
-                            Community <ChevronDown size={14} className={`dropdown-icon ${isCommunityOpen ? 'open' : ''}`} />
-                        </button>
-                        <AnimatePresence>
-                            {isCommunityOpen && (
-                                <motion.div 
-                                    className="nav-legal-dropdown-menu"
-                                    variants={dropdownVariants}
-                                    initial="hidden"
-                                    animate="visible"
-                                    exit="exit"
-                                    transition={{ duration: 0.2 }}
-                                >
-                                    <Link to="/players" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Players</Link>
-                                    <a href="https://t.me/+IBdo42qMPqM4Y2Vk" target="_blank" rel="noopener noreferrer" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Telegram</a>
-                                    <Link to="/community/uk" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>UK</Link>
-                                    <Link to="/community/brazil" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Brazil</Link>
-                                    <Link to="/community/germany" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Germany</Link>
-                                    <Link to="/community/canada" className="nav-legal-dropdown-item" onClick={() => { setIsCommunityOpen(false); setIsMenuOpen(false); }}>Canada</Link>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
-                    <div className="nav-legal-dropdown">
-                        <button className="nav-link dropdown-toggle" onClick={() => { setIsLegalOpen(v => !v); setIsCommunityOpen(false); setIsGameTypesOpen(false); }}>
-                            Legal <ChevronDown size={14} className={`dropdown-icon ${isLegalOpen ? 'open' : ''}`} />
-                        </button>
-                        <AnimatePresence>
-                            {isLegalOpen && (
-                                <motion.div
-                                    className="nav-legal-dropdown-menu"
-                                    variants={dropdownVariants}
-                                    initial="hidden"
-                                    animate="visible"
-                                    exit="exit"
-                                    transition={{ duration: 0.2 }}
-                                >
-                                    <Link to="/legal" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>Legal & Compliance</Link>
-                                    <Link to="/anti-cheat" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>Anti-Cheat</Link>
-                                    <Link to="/kyc" className="nav-legal-dropdown-item" onClick={() => { setIsLegalOpen(false); setIsMenuOpen(false); }}>KYC</Link>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
-                    {isLoggedIn ? (
-                        <button onClick={() => {
-                            localStorage.removeItem('xfchess_token');
-                            localStorage.removeItem('xfchess_email');
-                            localStorage.removeItem('xfchess_username');
-                            setIsLoggedIn(false);
-                            setUserEmail(null);
-                            setUsername(null);
-                            setIsMenuOpen(false);
-                        }} className="nav-link" style={{ fontSize: '12px', fontWeight: '600', letterSpacing: '0.04em' }}>
-                            Logout
-                        </button>
-                    ) : (
-                        <button onClick={() => { setIsLoginModalOpen(true); setIsMenuOpen(false); }} className="nav-link" style={{ fontSize: '12px', fontWeight: '600', letterSpacing: '0.04em' }}>
-                            Login
-                        </button>
-                    )}
+                    <Link to="/home" className="nav-link" onClick={() => setIsMenuOpen(false)}>Home</Link>
+                    <Link to="/play" className="nav-link" onClick={() => setIsMenuOpen(false)} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
                     {connected && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             {username ? (
-                                <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}>
+                                <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => setIsMenuOpen(false)}>
                                     {username}
                                 </Link>
                             ) : (
@@ -367,63 +212,28 @@ function AppContent() {
                                         borderRadius: '6px',
                                         letterSpacing: '0.02em',
                                     }}
-                                    onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}
+                                    onClick={() => setIsMenuOpen(false)}
                                 >
                                     Create Profile
-                                </Link>
-                            )}
-                            {hasAccount === true && hasKyc === false && (
-                                <Link
-                                    to="/profile"
-                                    className="nav-link"
-                                    title="Wagered play requires KYC verification"
-                                    style={{
-                                        color: '#1a1a1a',
-                                        fontWeight: 700,
-                                        fontSize: '12px',
-                                        background: '#ffb020',
-                                        padding: '5px 12px',
-                                        borderRadius: '6px',
-                                        letterSpacing: '0.02em',
-                                    }}
-                                    onClick={() => { setIsMenuOpen(false); closeDropdowns(); }}
-                                >
-                                    Complete KYC
                                 </Link>
                             )}
                             <span style={{ color: 'var(--text-dim)', fontSize: '12px', fontWeight: 600 }}>
                                 {balanceLoading ? '...' : totalUsdValue !== null ? `$${totalUsdValue.toFixed(2)}` : ''}
                             </span>
-                            {publicKey && (
-                                <button
-                                    onClick={async () => {
-                                        // autoConnect silently reconnects to whichever wallet/account
-                                        // was last used — this is the only way to confirm which one
-                                        // is actually active and pick a different one if it's wrong.
-                                        await disconnect();
-                                        setIsModalOpen(true);
-                                        setIsMenuOpen(false);
-                                    }}
-                                    title="Connected wallet — click to switch"
-                                    className="nav-link"
-                                    style={{
-                                        fontSize: '11px',
-                                        fontFamily: 'monospace',
-                                        color: 'var(--text-dim)',
-                                        background: 'transparent',
-                                        border: '1px solid rgba(255,255,255,0.15)',
-                                        borderRadius: '6px',
-                                        padding: '3px 8px',
-                                        cursor: 'pointer',
-                                    }}
-                                >
-                                    {publicKey.toBase58().slice(0, 4)}…{publicKey.toBase58().slice(-4)}
-                                </button>
-                            )}
                         </div>
                     )}
 
-                    <div className="nav-wallet-wrap">
+                    <div className="nav-wallet-wrap" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span
+                            title={connected ? 'Wallet connected' : 'Wallet not connected'}
+                            style={{
+                                width: '10px',
+                                height: '10px',
+                                borderRadius: '50%',
+                                background: connected ? '#27c93f' : '#ff5f56',
+                                flexShrink: 0,
+                            }}
+                        />
                         {connected ? (
                             <button onClick={() => { disconnect(); setIsMenuOpen(false); }} title="Disconnect wallet" aria-label="Disconnect wallet" className="btn-secondary disconnect-btn" style={{ height: '44px', width: '44px', padding: '0', borderRadius: '4px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <X size={24} />
@@ -434,14 +244,6 @@ function AppContent() {
                             </button>
                         )}
                     </div>
-
-                    <button
-                        className="theme-toggle"
-                        onClick={() => setIsDark(d => !d)}
-                        title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-                    >
-                        {isDark ? <Sun size={14} /> : <Moon size={14} />}
-                    </button>
                 </div>
             </nav>
 
@@ -478,7 +280,6 @@ function AppContent() {
                         <Route path="/spectate/:game_id" element={<Spectate />} />
                         <Route path="/computer" element={<ChessComputer />} />
                         <Route path="/features" element={<Features />} />
-                        <Route path="/waitlist" element={<Waitlist />} />
                     </Routes>
                 </AnimatePresence>
             </div>
@@ -486,13 +287,8 @@ function AppContent() {
             <Footer />
 
             {isModalOpen && <WalletSelectionModal onClose={() => setIsModalOpen(false)} />}
-            {isLoginModalOpen && <LoginModal onClose={() => setIsLoginModalOpen(false)} onLoginSuccess={(email: string, username: string) => {
-                setIsLoggedIn(true);
-                setUserEmail(email);
-                setUsername(username);
-            }} />}
         </div>
     );
 }
 
-// WalletSelectionModal and LoginModal now live in `./components/`.
+// WalletSelectionModal lives in `./components/`.

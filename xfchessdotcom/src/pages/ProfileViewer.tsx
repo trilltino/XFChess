@@ -21,7 +21,6 @@ import {
 } from '../lib/anchor_client';
 import bs58 from 'bs58';
 import { submitSignup, getUserStatus, registerWithWallet, checkUsernameAvailable, addEmail, syncProfile, type UserStatus } from '../lib/api';
-import { KycModal } from '../components/KycModal';
 import { MatchHistory } from '../components/MatchHistory';
 import { LichessLinkCard } from '../components/LichessLinkCard';
 
@@ -265,9 +264,6 @@ function SignupForm({
         {creationLoading ? <Loader2 className="spinner" /> : 'Create Account'}
       </button>
 
-      <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textAlign: 'center', margin: '8px 0 0' }}>
-        Complete KYC verification after account creation to unlock wagered play.
-      </p>
     </form>
   );
 }
@@ -296,7 +292,6 @@ export function ProfileViewer() {
 
   // Verification state
   const [status, setStatus] = useState<UserStatus | null>(null);
-  const [kycOpen, setKycOpen] = useState(false);
 
   // Add-email state
   const [emailAddOpen, setEmailAddOpen] = useState(false);
@@ -555,21 +550,6 @@ export function ProfileViewer() {
               }
             />
             <ChecklistRow
-              label="KYC verified"
-              ok={status?.has_kyc ?? false}
-              action={
-                !status?.has_kyc ? (
-                  <button
-                    type="button"
-                    className="btn-small"
-                    onClick={() => setKycOpen(true)}
-                  >
-                    Complete KYC
-                  </button>
-                ) : undefined
-              }
-            />
-            <ChecklistRow
               label="Eligible for wagered play"
               ok={status?.can_wager ?? false}
             />
@@ -709,21 +689,6 @@ export function ProfileViewer() {
         )}
 
       </div>
-
-      {kycOpen && wallet.publicKey && (
-        <KycModal
-          walletPubkey={wallet.publicKey.toBase58()}
-          onClose={() => setKycOpen(false)}
-          onSuccess={() => {
-            setKycOpen(false);
-            refreshStatus();
-            // Nudges the nav bar's "Complete KYC" pill (App.tsx) to refetch —
-            // it has its own independent status fetch tied to wallet connect,
-            // not to this page's local `status` state.
-            window.dispatchEvent(new Event('xfchess:kyc-updated'));
-          }}
-        />
-      )}
     </main>
   );
 }

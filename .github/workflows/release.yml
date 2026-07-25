@@ -79,6 +79,14 @@ jobs:
           cargo build --release --bin xfchess --features solana
           cargo build --release -p xfchess-tauri
 
+      - name: Download Stockfish (best-effort — AI features degrade gracefully without it)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.zip" -OutFile sf.zip
+          Expand-Archive -Path sf.zip -DestinationPath sf_extracted
+          Copy-Item -Force "sf_extracted\stockfish\stockfish-windows-x86-64-modern.exe" stockfish.exe
+
       - name: Stage payload
         shell: pwsh
         run: |
@@ -296,6 +304,14 @@ jobs:
         run: |
           cargo build --release --bin xfchess --features solana
           cargo build --release -p xfchess-tauri
+
+      - name: Download Stockfish (best-effort — AI features degrade gracefully without it)
+        continue-on-error: true
+        run: |
+          curl -sSL -m 60 -o /tmp/sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-macos-x86-64-modern.tar
+          tar -xf /tmp/sf.tar -C /tmp stockfish/stockfish-macos-x86-64-modern
+          cp /tmp/stockfish/stockfish-macos-x86-64-modern "$GITHUB_WORKSPACE/stockfish"
+          chmod +x "$GITHUB_WORKSPACE/stockfish"
 
       - name: Package, sign, notarize, DMG
         env:

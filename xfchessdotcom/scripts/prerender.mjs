@@ -42,7 +42,6 @@ const ROUTES = [
   { path: '/anti-cheat', file: 'src/pages/AntiCheat.tsx', name: 'default' },
   { path: '/news/release', file: 'src/pages/NewsRelease.tsx', name: 'default' },
   { path: '/launch', file: 'src/pages/Launch.tsx', name: 'default' },
-  { path: '/waitlist', file: 'src/pages/Waitlist.tsx', name: 'Waitlist' },
 ];
 
 // React 19 hoists <title>/<meta>/<link> to the front of the rendered string

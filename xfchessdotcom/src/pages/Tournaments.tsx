@@ -1,59 +1,13 @@
-﻿import { useState } from 'react';
-import { X } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { SeoHead } from '../components/SeoHead';
+﻿import { SeoHead } from '../components/SeoHead';
 import { PAGE_METADATA } from '../lib/seo/metadata';
 
 
 export function Tournaments() {
-    const [showNotice, setShowNotice] = useState(true);
-
     return (
         <main className="section" style={{ minHeight: '100vh', paddingTop: '100px' }}>
             <SeoHead meta={PAGE_METADATA.tournaments} />
             <div className="section-label">COMMUNITY</div>
             <h2 style={{ fontSize: '2.5rem', marginBottom: '8px' }}>Tournaments<span className="accent">.</span></h2>
-
-            {/* Floating Wagering Notice Tooltip */}
-            {showNotice && (
-                <div style={{
-                    position: 'fixed',
-                    right: '20px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    width: '280px',
-                    padding: '20px',
-                    background: 'rgba(0, 0, 0, 0.95)',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    borderRadius: '12px',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-                    backdropFilter: 'blur(16px)',
-                    zIndex: 1000
-                }}>
-                    <button
-                        onClick={() => setShowNotice(false)}
-                        style={{
-                            position: 'absolute',
-                            top: '8px',
-                            right: '8px',
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--text-dim)',
-                            cursor: 'pointer',
-                            padding: '4px'
-                        }}
-                    >
-                        <X size={16} />
-                    </button>
-                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-dim)', lineHeight: 1.6, marginBottom: '12px' }}>
-                        <strong style={{ color: 'var(--primary)' }}>Wagering Requirements:</strong> Cash Tournaments require a Solana wallet and KYC verification.
-                    </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <Link to="/kyc" style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>Complete KYC</Link>
-                        <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>Create wallet on Solflare</a>
-                    </div>
-                </div>
-            )}
 
             {/* Content Section */}
             <div style={{ maxWidth: '1000px', margin: '0 auto', marginTop: '40px' }}>

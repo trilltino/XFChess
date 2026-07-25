@@ -27,24 +27,9 @@ export interface AuthResponse {
   wallet: string;
 }
 
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  token: string;
-  username: string;
-}
-
 /** Record a signup; the confirmation email is queued for durable delivery. */
 export function submitSignup(body: SignupRequest): Promise<{ ok: boolean; queued: boolean }> {
   return request('/api/signup', { method: 'POST', body: JSON.stringify(body) });
-}
-
-/** Join the waitlist; the acknowledgement email is queued for durable delivery. */
-export function submitWaitlist(email: string, referral?: string): Promise<{ ok: boolean; queued: boolean }> {
-  return request('/api/waitlist', { method: 'POST', body: JSON.stringify({ email, referral }) });
 }
 
 /** Create an account proving wallet ownership with a signed message. */
@@ -55,11 +40,6 @@ export function registerWithWallet(body: RegisterRequest): Promise<AuthResponse>
 /** Check whether a username is already taken. */
 export function checkUsernameAvailable(username: string): Promise<{ taken: boolean }> {
   return request(`/api/auth/check-username/${encodeURIComponent(username)}`, { method: 'GET' });
-}
-
-/** Log in an email/password account. */
-export function loginWithEmail(body: LoginRequest): Promise<LoginResponse> {
-  return request('/api/auth/login', { method: 'POST', body: JSON.stringify(body) });
 }
 
 /** Sync the on-chain PlayerProfile status back into the backend DB. */

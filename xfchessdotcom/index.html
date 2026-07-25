@@ -2,10 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Versioned query string: browsers cache favicons unusually
+         aggressively (often surviving normal hard-refreshes), so a stale
+         icon from before this file's current content can otherwise persist
+         indefinitely. Bump the version whenever the favicon changes. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=2" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <!-- Deliberately just a bare title here, nothing else. Per-route
@@ -20,7 +24,7 @@
          a zero-JS bot sees just this title until SeoHead runs — a real,
          documented limit (plan §5), not a bug to paper over with a
          default that would only break the routes that DO run JS. -->
-    <title>XFChess — Competitive Chess Server</title>
+    <title>XFChess | Competitive Chess Server</title>
   </head>
   <body>
     <div id="root"></div>

@@ -110,10 +110,12 @@ pub struct RollupNetworkBridgePlugin;
 
 impl Plugin for RollupNetworkBridgePlugin {
     fn build(&self, app: &mut App) {
+        use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
+
         app.insert_resource(RollupNetworkBridge::new());
 
         let mut resolver = MagicBlockResolver::default();
-        resolver.set_solana_rpc(Arc::new(RpcClient::new("https://api.devnet.solana.com")));
+        resolver.set_solana_rpc(Arc::new(RpcClient::new(DEVNET_RPC_URL.to_string())));
         app.insert_resource(resolver);
 
         app.init_resource::<RecentTransactions>();
@@ -738,7 +740,7 @@ async fn spawn_delegation_task(
         game_id
     );
 
-    match tauri_signer::sign_and_send_via_tauri(DEVNET_RPC_URL, wallet_pubkey, &[ix], &[]) {
+    match tauri_signer::sign_and_send_via_tauri(&DEVNET_RPC_URL, wallet_pubkey, &[ix], &[]) {
         Ok(sig) => {
             info!(
                 "[DELEGATION-TASK] SUCCESS for game {} sig: {}",

@@ -248,7 +248,7 @@ pub fn handle_profile_submission(
 
             info!("[PROFILE] Sending on-chain transaction...");
             match tauri_signer::sign_and_send_via_tauri(
-                "https://api.devnet.solana.com",
+                &crate::multiplayer::solana::integration::state::DEVNET_RPC_URL,
                 wallet_pubkey,
                 &[ix],
                 &[],
@@ -289,7 +289,13 @@ pub fn handle_profile_submission(
                 username: username.clone(),
             };
 
-            if let Err(e) = vps_client::register_wallet(&reg_req) {
+            // vps_client:: calls are blocking (reqwest::blocking) — must go through
+            // spawn_blocking when called from inside this tokio-runtime-driven task,
+            // otherwise dropping the client's internal nested runtime panics.
+            let reg_result = tokio::task::spawn_blocking(move || vps_client::register_wallet(&reg_req))
+                .await
+                .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {e}")));
+            if let Err(e) = reg_result {
                 warn!("[PROFILE] Backend registration skipped/failed: {}", e);
             }
 
@@ -316,7 +322,10 @@ pub fn handle_profile_submission(
                     timestamp,
                 };
 
-                if let Err(e) = vps_client::link_wallet(&link_req) {
+                let link_result = tokio::task::spawn_blocking(move || vps_client::link_wallet(&link_req))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {e}")));
+                if let Err(e) = link_result {
                     error!("[PROFILE] Wallet linking failed: {}", e);
                 } else {
                     info!("[PROFILE] Wallet successfully linked to email account.");
@@ -347,7 +356,11 @@ pub fn handle_profile_submission(
                 consent_retention_years: 5,
             };
 
-            if let Err(e) = vps_client::register_identity(&kyc_payload) {
+            let kyc_result =
+                tokio::task::spawn_blocking(move || vps_client::register_identity(&kyc_payload))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {e}")));
+            if let Err(e) = kyc_result {
                 warn!("[PROFILE] KYC submission skipped/failed: {}", e);
             }
 

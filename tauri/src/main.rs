@@ -80,10 +80,17 @@ fn http_port() -> u16 {
 }
 
 /// Get the backend API base URL.
+///
+/// Defaults to the production Hetzner backend — same resolution order and
+/// same default as the game client's `vps_base()` (`src/multiplayer/network/vps/client.rs`).
+/// These two MUST stay in sync: if this ever defaults somewhere the game client
+/// doesn't (e.g. a local dev server), every `/api/auth/*` call proxied through
+/// this bridge silently 502s while the game client's own VPS calls succeed —
+/// a confusing split-brain failure that looks like a server outage but isn't.
 fn get_backend_url() -> String {
   std::env::var("SIGNING_SERVICE_URL")
     .or_else(|_| std::env::var("BACKEND_URL"))
-    .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string())
+    .unwrap_or_else(|_| "https://xfchess.com".to_string())
 }
 
 /// Per-instance cache directory, scoped by the wallet bridge port so that
@@ -245,17 +252,31 @@ async fn http_server(
     "The backend returned an unexpected response. Please try again in a moment.".to_string()
   }
 
+  // Reads a backend response body exactly once and forwards it faithfully:
+  // JSON stays JSON, anything else (plain-text bodies from the backend's
+  // common `(StatusCode, String)` handler-error pattern, HTML error pages,
+  // etc.) is forwarded as plain text with the backend's real status code —
+  // instead of collapsing every non-JSON body into a generic "unexpected
+  // response" message that hides the actual reason (e.g. "Username already
+  // taken", "Username must be 3-20 characters").
+  async fn forward_backend_response(resp: reqwest::Response) -> axum::response::Response {
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    match resp.bytes().await {
+      Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(v) => (status, Json(v)).into_response(),
+        Err(_) => (status, String::from_utf8_lossy(&bytes).into_owned()).into_response(),
+      },
+      Err(e) => {
+        tracing::warn!("[HTTP] failed to read backend response body: {e}");
+        (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response()
+      }
+    }
+  }
+
   async fn proxy_post(url: &str, body: serde_json::Value) -> axum::response::Response {
     let client = reqwest::Client::new();
     match client.post(url).json(&body).send().await {
-      Ok(resp) => {
-        let status =
-          StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-        match resp.json::<serde_json::Value>().await {
-          Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (status, backend_bad_response_msg(e)).into_response(),
-        }
-      }
+      Ok(resp) => forward_backend_response(resp).await,
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
@@ -273,14 +294,7 @@ async fn http_server(
       }
     }
     match req.send().await {
-      Ok(resp) => {
-        let status =
-          StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-        match resp.json::<serde_json::Value>().await {
-          Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response(),
-        }
-      }
+      Ok(resp) => forward_backend_response(resp).await,
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
@@ -365,14 +379,7 @@ async fn http_server(
       }
     }
     match req.send().await {
-      Ok(resp) => {
-        let status =
-          StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-        match resp.json::<serde_json::Value>().await {
-          Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response(),
-        }
-      }
+      Ok(resp) => forward_backend_response(resp).await,
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
@@ -389,14 +396,7 @@ async fn http_server(
       }
     }
     match req.send().await {
-      Ok(resp) => {
-        let status =
-          StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-        match resp.json::<serde_json::Value>().await {
-          Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response(),
-        }
-      }
+      Ok(resp) => forward_backend_response(resp).await,
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
@@ -467,14 +467,7 @@ async fn http_server(
   ) -> impl IntoResponse {
     let url = format!("{}/api/auth/check-wallet/{pubkey}", get_backend_url());
     match reqwest::get(&url).await {
-      Ok(resp) => {
-        let status =
-          StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-        match resp.json::<serde_json::Value>().await {
-          Ok(v) => (status, Json(v)).into_response(),
-          Err(e) => (StatusCode::BAD_GATEWAY, backend_bad_response_msg(e)).into_response(),
-        }
-      }
+      Ok(resp) => forward_backend_response(resp).await,
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
@@ -768,11 +761,17 @@ fn open_in_browser(url: &str) {
 /// Phantom/Solflare extensions it talks to via `window.phantom`/`window.solflare`;
 /// a fresh profile would have neither installed.
 ///
-/// Instead: find the actual top-level window by title (the page is always
-/// titled "XFChess" — see `tauri/wallet-ui/index.html`) whose owning process
-/// is chrome.exe/msedge.exe (never the main game, which is a native window
+/// Instead: find the actual top-level window by title (the page is titled
+/// `XFChess #<port>` — see `tauri/wallet-ui/src/App.tsx`, which stamps its
+/// own bridge port onto `document.title` at load) whose owning process is
+/// chrome.exe/msedge.exe (never the main game, which is a native window
 /// under `xfchess.exe`, so this can't ever match the wrong "XFChess"-titled
 /// window), and post it a real `WM_CLOSE`.
+///
+/// The port suffix matters: with a bare "XFChess" title, two local
+/// instances (e.g. `just dev2`'s P1 on port 7454 and P2 on port 7464) are
+/// indistinguishable to `EnumWindows`, which searches the whole desktop —
+/// either player's popup closing would `WM_CLOSE` *both* players' popups.
 #[cfg(windows)]
 fn kill_wallet_popup() {
   use ::windows::core::BOOL;
@@ -785,14 +784,18 @@ fn kill_wallet_popup() {
     EnumWindows, GetWindowTextW, GetWindowThreadProcessId, PostMessageW, WM_CLOSE,
   };
 
-  extern "system" fn enum_proc(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+  let expected_title = format!("XFChess #{}", http_port());
+
+  extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     unsafe {
+      let expected_title = &*(lparam.0 as *const String);
+
       let mut title_buf = [0u16; 256];
       let len = GetWindowTextW(hwnd, &mut title_buf);
       if len <= 0 {
         return BOOL(1); // keep enumerating
       }
-      if String::from_utf16_lossy(&title_buf[..len as usize]) != "XFChess" {
+      if String::from_utf16_lossy(&title_buf[..len as usize]) != *expected_title {
         return BOOL(1);
       }
 
@@ -826,7 +829,10 @@ fn kill_wallet_popup() {
   }
 
   unsafe {
-    let _ = EnumWindows(Some(enum_proc), LPARAM(0));
+    let _ = EnumWindows(
+      Some(enum_proc),
+      LPARAM(&expected_title as *const String as isize),
+    );
   }
 }
 
@@ -1135,8 +1141,12 @@ fn main() {
       }
 
       // ── Background Notification Poller ──────────────────────────────────────
-      let backend_url =
-        std::env::var("VITE_BACKEND_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
+      // Same prod-by-default rule as get_backend_url() above — must not
+      // default anywhere the game client and wallet-bridge proxy don't.
+      let backend_url = std::env::var("VITE_BACKEND_URL")
+        .or_else(|_| std::env::var("SIGNING_SERVICE_URL"))
+        .or_else(|_| std::env::var("BACKEND_URL"))
+        .unwrap_or_else(|_| "https://xfchess.com".to_string());
       services::notification_poller::start_poller(
         app.handle().clone(),
         backend_url,

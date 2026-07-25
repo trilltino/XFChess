@@ -25,7 +25,7 @@ const WSetup = () => {
 
         <p>
           To play XFChess for money (PvP wagering and Cash Tournaments), you need a Solana
-          wallet and a completed KYC verification.
+          wallet.
         </p>
 
         <h3 style={{ marginTop: '32px' }}>Step 1 — Install Solflare</h3>
@@ -89,16 +89,7 @@ const WSetup = () => {
           </a>
         </div>
 
-        <h3 style={{ marginTop: '32px' }}>Step 3 — Complete KYC</h3>
-        <p>
-          Verify your identity via our <Link to="/kyc" style={{ color: 'var(--primary)' }}>KYC page</Link> to
-          unlock wagering and tournament entry.
-        </p>
-        <p style={{ fontSize: '0.9rem', color: 'var(--text-dim)', marginTop: '8px' }}>
-          Note: KYC verification requires an email address and a connected Solana wallet.
-        </p>
-
-        <h3 style={{ marginTop: '32px' }}>Step 4 — Connect to XFChess</h3>
+        <h3 style={{ marginTop: '32px' }}>Step 3 — Connect to XFChess</h3>
         <p>
           Launch the game, open the wallet connection dialog, and select Solflare. You are ready
           to play for money.

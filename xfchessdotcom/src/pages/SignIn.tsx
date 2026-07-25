@@ -5,7 +5,7 @@ import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletReadyState } from '@solana/wallet-adapter-base';
 import { Loader2, Shield, ShieldCheck, Trophy, Zap, ChevronRight, RefreshCw, Cpu, X, UserCircle2 } from 'lucide-react';
 import { getAnchorProgram, fetchPlayerProfile } from '../lib/anchor_client';
-import { getUserStatus, initProfileSponsoredTx, broadcastTx } from '../lib/api';
+import { initProfileSponsoredTx, broadcastTx } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
 import { SeoHead } from '../components/SeoHead';
 import { PRIVATE_PAGE_METADATA } from '../lib/seo/metadata';
@@ -706,20 +706,16 @@ function ProfileStep() {
     const [loading, setLoading] = useState(true);
     const [createHandle, setCreateHandle] = useState('');
     const [country, setCountry] = useState('GB');
-    const [taxId, setTaxId] = useState('');
     const [dob, setDob] = useState(''); // YYYY-MM-DD
     const [creating, setCreating] = useState(false);
     const [err, setErr] = useState<string | null>(null);
-    const [hasKyc, setHasKyc] = useState<boolean | null>(null); // null = still checking
 
     const countries = [
-        { code: 'GB', label: 'United Kingdom', taxLabel: 'NI Number' },
-        { code: 'BR', label: 'Brazil', taxLabel: 'CPF' },
-        { code: 'CA', label: 'Canada', taxLabel: 'SIN' },
-        { code: 'DE', label: 'Germany', taxLabel: 'Tax ID' },
+        { code: 'GB', label: 'United Kingdom' },
+        { code: 'BR', label: 'Brazil' },
+        { code: 'CA', label: 'Canada' },
+        { code: 'DE', label: 'Germany' },
     ];
-
-    const currentCountry = countries.find(c => c.code === country);
 
     // AI Setup state
     const [showAiSetup, setShowAiSetup] = useState(false);
@@ -745,16 +741,6 @@ function ProfileStep() {
             loadProfile();
         }
     }, [wallet.connected, wallet.publicKey]);
-
-    // On-chain profile creation is gated behind KYC (see
-    // docs/plans/identity-implementation-plan.md) — check once we have a
-    // wallet to check against.
-    useEffect(() => {
-        if (!wallet.publicKey) return;
-        getUserStatus(wallet.publicKey.toBase58())
-            .then(status => setHasKyc(status.has_kyc))
-            .catch(() => setHasKyc(false));
-    }, [wallet.publicKey]);
 
     const loadProfile = async () => {
         if (!wallet.publicKey) return;
@@ -792,10 +778,6 @@ function ProfileStep() {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!wallet.publicKey || !createHandle) return;
-        if (!hasKyc) {
-            setErr('KYC verification is required before creating an on-chain profile.');
-            return;
-        }
         setCreating(true);
         setErr(null);
         try {
@@ -1096,24 +1078,7 @@ function ProfileStep() {
                 </>
             )}
 
-            {!loading && !profile && hasKyc === false && (
-                <div style={{
-                    padding: '24px', background: 'rgba(255,255,255,0.02)',
-                    borderRadius: 12, border: '1px dashed rgba(255,255,255,0.1)',
-                    marginBottom: 20, textAlign: 'center',
-                }}>
-                    <Shield size={36} style={{ color: '#ffffff', opacity: 0.5, marginBottom: 12 }} />
-                    <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 800 }}>KYC Required</h3>
-                    <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '0 0 16px' }}>
-                        Creating a Solana account requires identity verification, same as wagered play.
-                    </p>
-                    <a href="/kyc" className="btn btn-secondary" style={{ display: 'inline-block', padding: '10px 20px', fontSize: 13 }}>
-                        Complete KYC
-                    </a>
-                </div>
-            )}
-
-            {!loading && !profile && hasKyc !== false && (
+            {!loading && !profile && (
                 <>
                     <div style={{
                         padding: '24px', background: 'rgba(255,255,255,0.02)',
@@ -1161,18 +1126,6 @@ function ProfileStep() {
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                 <label style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                                    {currentCountry?.taxLabel ?? 'Tax ID'}
-                                </label>
-                                <input
-                                    style={{ ...input, padding: '10px 12px' }}
-                                    value={taxId}
-                                    onChange={e => setTaxId(e.target.value)}
-                                    placeholder="Required"
-                                    required
-                                />
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                <label style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                                     Date of Birth
                                 </label>
                                 <input
@@ -1185,7 +1138,7 @@ function ProfileStep() {
                                 />
                             </div>
                         </div>
-                        <button type="submit" style={{ ...primaryBtn, opacity: creating || !createHandle || !taxId || !dob ? 0.6 : 1, marginTop: 8 }} disabled={creating || !createHandle || !taxId || !dob}>
+                        <button type="submit" style={{ ...primaryBtn, opacity: creating || !createHandle || !dob ? 0.6 : 1, marginTop: 8 }} disabled={creating || !createHandle || !dob}>
                             {creating ? <Loader2 size={16} className="spinner" /> : <Zap size={16} />}
                             Initialize Profile
                         </button>

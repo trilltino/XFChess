@@ -1,10 +1,11 @@
-﻿import { Link } from 'react-router-dom';
 import highFidelityChess from '../assets/high-fidelity-chess.png';
-import xfchessLogo from '../assets/xfchess-logo.png';
+import wageredPvpSpectator from '../assets/wagered-pvp-spectator.png';
+import tournamentsBoard from '../assets/tournaments-board.png';
+import boardSilhouette from '../assets/board-silhouette.png';
+import xfchessTitleLogo from '../assets/xfchess-title-logo.png';
 import { SeoHead } from '../components/SeoHead';
 import { VideoGameSchema } from '../components/StructuredData';
 import { PAGE_METADATA } from '../lib/seo/metadata';
-
 
 export function Home() {
 
@@ -12,96 +13,60 @@ export function Home() {
         <main className="home-root">
             <SeoHead meta={PAGE_METADATA.home} />
             <VideoGameSchema />
-            {/* HERO: STRATEGY / ACTION CHESS */}
-            <section className="fullscreen-section" style={{
-                paddingTop: '160px'
-            }}>
-                <div className="section-overlay"></div>
-                <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
-                    <div style={{ flex: '1' }}>
-                        <h1 className="feature-title">Competitive Chess Server</h1>
 
-                        <p className="feature-desc">
-                            Challenge players worldwide, compete in tournaments, and play chess anywhere, anytime.
-                            Experience wagered chess, computer opponents, and tournament game modes.
-                            Earn money through your chess hustle. Challenge players around the world at any time and compete for cash prizes either through direct games or our Grand Tournaments.
-                        </p>
-                    </div>
-                    <div style={{ flex: '0 0 320px' }}>
-                        <h2 className="feature-title" style={{ marginBottom: '24px' }}>News</h2>
-                        <div style={{ 
-                            background: 'var(--surface)', 
-                            borderRadius: '12px', 
-                            overflow: 'hidden', 
-                            border: '1px solid var(--border)'
-                        }}>
-                            <div style={{ height: '160px', background: 'linear-gradient(135deg, #1a3d2e 0%, #0f2a1f 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <img src={xfchessLogo} alt="XFChess Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            </div>
-                            <div style={{ padding: '20px' }}>
-                                <h3 style={{ fontSize: '1.1rem', marginBottom: '8px', color: 'var(--text)' }}>XFChess released</h3>
-                                <Link to="/news/release" style={{ color: 'var(--primary)', fontSize: '0.9rem', fontWeight: 600 }}>read more</Link>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            {/* HERO */}
+            <section className="home-hero">
+                <div className="home-hero-glow" />
+                <img src={boardSilhouette} alt="" aria-hidden="true" className="home-hero-board-silhouette" />
+                <h1 className="home-hero-title">
+                    <img src={xfchessTitleLogo} alt="XFChess — Competitive Chess Server" className="home-hero-title-img" />
+                </h1>
             </section>
 
-            {/* SECTION: SANDBOX WAR TABLE */}
+            {/* 01 — WAGERED PVP */}
             <section className="fullscreen-section">
-                <div className="section-overlay" style={{ background: 'linear-gradient(to left, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.20))' }}></div>
-                <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
-                    <div style={{ flex: '1', textAlign: 'right' }}>
-                        <h2 className="feature-title">3D and 2D GUI</h2>
-
-                        <p className="feature-desc">
-                            Every move can be rendered in 2D or 3D with instant switch. Custom board sets allow every game to tell a story. Master the squares with whichever way you prefer. A Light or Heavy in-game GUI to tell spectators and players all about a game's history or to cut the noise and focus on the tension of the game.
-                        </p>
-                    </div>
-                </div>
-            </section>
-
-            {/* SECTION: HIGH FIDELITY */}
-            <section className="fullscreen-section">
-                <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
-                        <h2 className="feature-title">Free Decentralised Chess Server</h2>
-
+                        <h2 className="feature-title">Winner Takes All</h2>
                         <p className="feature-desc">
-                            XFChess is a free, open-source decentralized game server. By using Solana coupled with P2P networking protocols, we create a chess server that is owned by your machine. XFChess will always be free to access and open source. The goal is to spread the powerful game of chess to every individual and allow them, no matter their background, to learn and then hustle with their skill.
+                            Stake SOL and face off head-to-head. Funds lock in on-chain escrow the moment
+                            both players accept, and settle instantly when the king falls.
                         </p>
                     </div>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>
-                        <img src={highFidelityChess} alt="High-fidelity chess gameplay" style={{ display: 'block', maxWidth: '300px', width: '100%', height: 'auto', aspectRatio: '16/10', objectFit: 'cover', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }} />
+                        <img src={wageredPvpSpectator} alt="Live wagered chess match" className="home-feature-image" />
                     </div>
                 </div>
             </section>
 
-            {/* SECTION: ECONOMY */}
+            {/* 02 — HIGH FIDELITY */}
             <section className="fullscreen-section">
-                <div className="section-overlay"></div>
-                <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
-                    <div style={{ flex: '1', textAlign: 'right' }}>
-                        <h2 className="feature-title">Own your Hustle</h2>
-
+                <div className="section-content" style={{ display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: '60px' }}>
+                    <div style={{ flex: '1' }}>
+                        <h2 className="feature-title">A Real 3D Board</h2>
                         <p className="feature-desc">
-                            Challenge opponents with clear stakes. Winner takes all in these PvP encounters. Put your money where your mind is - Wager on your chess skills in secure, transparent matches. Financial transactions settle in real-time to your wallet allowing you to access your gains. Weekly Tournaments attract larger prize pools.
+                            Rendered in Bevy with full 3D pieces and board. The same engine that powers
+                            the desktop client drives every match, move by move.
                         </p>
                     </div>
+                    <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-start' }}>
+                        <img src={highFidelityChess} alt="High-fidelity 3D chess board" className="home-feature-image" />
+                    </div>
                 </div>
             </section>
 
-            {/* SECTION: LEARN THE GAME */}
+            {/* 03 — TOURNAMENTS */}
             <section className="fullscreen-section">
-                <div className="section-overlay"></div>
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
-                        <h2 className="feature-title">Learn the Game</h2>
-
+                        <h2 className="feature-title">Compete for Pools</h2>
                         <p className="feature-desc">
-                            Learn from the historic game modes represented in a 2D or 3D interface, understand the people who changed the game for centuries, common pitfalls and how to teach chess to your peers.
+                            Join structured brackets and Swiss events with guaranteed prize pools held in
+                            escrow. Climb the ladder and earn your reputation.
                         </p>
+                    </div>
+                    <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>
+                        <img src={tournamentsBoard} alt="Tournament chess board" className="home-feature-image" />
                     </div>
                 </div>
             </section>
@@ -109,4 +74,3 @@ export function Home() {
         </main>
     );
 }
-

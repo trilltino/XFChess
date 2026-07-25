@@ -18,6 +18,32 @@ html {
     scroll-behavior: smooth;
 }
 
+/* The browser's default scrollbar is a stark light-gray bar against this
+   site's pure-black background — reads as an unwanted border/seam down the
+   right edge. Thin it out and tint it to match the theme. */
+html {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
 :root {
     --primary: #ffffff;
     --primary-hover: #cccccc;
@@ -31,21 +57,6 @@ html {
     --card-bg: #111111;
     font-family: 'Cinzel', serif;
 }
-
-[data-theme="light"] {
-    --primary: #0d0d0d;
-    --primary-hover: #333333;
-    --accent: #0d0d0d;
-    --bg: #f5f5f5;
-    --surface: #ebebeb;
-    --text: #0d0d0d;
-    --text-dim: #666666;
-    --glass: rgba(0, 0, 0, 0.03);
-    --border: rgba(0, 0, 0, 0.10);
-    --card-bg: #e2e2e2;
-}
-
-
 
 * {
     margin: 0;
@@ -111,104 +122,7 @@ body {
     justify-content: space-between;
     gap: 20px;
     z-index: 100;
-    background: rgba(0, 0, 0, 0.80);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 100px;
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    box-shadow: 
-        0 10px 40px rgba(0, 0, 0, 0.6),
-        0 0 50px rgba(255, 255, 255, 0.06);
     transition: all 0.3s ease;
-}
-
-[data-theme="light"] .navbar {
-    background: rgba(245, 245, 245, 0.88);
-    border-color: rgba(0, 0, 0, 0.08);
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.10), 0 0 50px rgba(0, 0, 0, 0.04);
-}
-
-[data-theme="light"] .connected-subnav {
-    background: rgba(235, 235, 235, 0.88);
-    border-color: rgba(0, 0, 0, 0.08);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme="light"] .section-overlay {
-    background: linear-gradient(to right, rgba(245, 245, 245, 0.55) 0%, rgba(245, 245, 245, 0.10) 50%, rgba(245, 245, 245, 0.55) 100%) !important;
-}
-
-[data-theme="light"] .subnav-link:hover {
-    background: rgba(0, 0, 0, 0.06);
-    border-color: rgba(0, 0, 0, 0.10);
-}
-
-[data-theme="light"] .subnav-link.active {
-    border-color: rgba(0, 0, 0, 0.14);
-    background: rgba(0, 0, 0, 0.04);
-}
-
-[data-theme="light"] .nav-legal-dropdown-item:hover {
-    background: rgba(0, 0, 0, 0.06);
-}
-
-[data-theme="light"] .nav-legal-dropdown-item:active {
-    background: rgba(0, 0, 0, 0.10);
-}
-
-[data-theme="light"] .nav-logo {
-    color: #000;
-    border-color: rgba(0, 0, 0, 0.08);
-    background: rgba(0, 0, 0, 0.04);
-}
-
-[data-theme="light"] .nav-logo:hover {
-    background: rgba(0, 0, 0, 0.08);
-    border-color: rgba(0, 0, 0, 0.14);
-}
-
-[data-theme="light"] h1,
-[data-theme="light"] h2,
-[data-theme="light"] h3,
-[data-theme="light"] h4,
-[data-theme="light"] h5,
-[data-theme="light"] h6,
-[data-theme="light"] p,
-[data-theme="light"] span,
-[data-theme="light"] a,
-[data-theme="light"] li,
-[data-theme="light"] td,
-[data-theme="light"] th,
-[data-theme="light"] dt,
-[data-theme="light"] dd,
-[data-theme="light"] label,
-[data-theme="light"] caption,
-[data-theme="light"] button,
-[data-theme="light"] input,
-[data-theme="light"] select,
-[data-theme="light"] textarea {
-    color: var(--text) !important;
-}
-
-.theme-toggle {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 1px solid var(--border);
-    background: var(--glass);
-    color: var(--text-dim);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
-    flex-shrink: 0;
-    padding: 0;
-}
-
-.theme-toggle:hover {
-    color: var(--text);
-    background: rgba(128, 128, 128, 0.14);
 }
 
 /* Navbar fade animation on scroll */
@@ -279,16 +193,11 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 14px;
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.05);
-    transition: all 0.2s ease;
+    transition: color 0.2s ease;
 }
 
 .nav-logo:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.8);
 }
 
 .nav-logo .xf {
@@ -322,6 +231,13 @@ body {
 }
 
 .navbar.mobile-open {
+    background: rgba(0, 0, 0, 0.80);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow:
+        0 10px 40px rgba(0, 0, 0, 0.6),
+        0 0 50px rgba(255, 255, 255, 0.06);
     border-radius: 20px;
     height: auto;
     flex-direction: column;
@@ -331,6 +247,15 @@ body {
     gap: 20px;
     width: 92%;
     max-width: 520px;
+    /* The collapsed navbar is intentionally background-less, but the expanded
+       mobile menu is an overlay panel covering page content underneath it —
+       without its own backdrop the links are unreadable against whatever's
+       behind them (hero art, images, etc). */
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
 }
 
 .nav-mobile-row {
@@ -362,82 +287,12 @@ body {
 }
 
 /* NAVBAR DROPDOWN */
-.nav-legal-dropdown {
-    position: relative;
-    display: inline-block;
-}
-
-.dropdown-toggle {
-    color: var(--text-dim);
-    text-decoration: none;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    transition: color 0.2s ease;
-    white-space: nowrap;
-    padding: 6px 12px;
-    border-radius: 20px;
-    border: 1px solid transparent;
-    background: transparent;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.dropdown-toggle:hover {
-    color: var(--text);
-    background: transparent;
-    border-color: transparent;
-}
-
 .dropdown-icon {
     transition: transform 0.2s ease;
 }
 
 .dropdown-icon.open {
     transform: rotate(180deg);
-}
-
-.nav-legal-dropdown-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    z-index: 1000;
-    overflow: hidden;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-    min-width: 200px;
-    margin-top: 8px;
-}
-
-.nav-legal-dropdown-item {
-    display: block;
-    padding: 12px 20px;
-    color: var(--text);
-    text-decoration: none;
-    font-size: 0.9rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
-    border-bottom: 1px solid var(--border);
-}
-
-.nav-legal-dropdown-item:last-child {
-    border-bottom: none;
-}
-
-.nav-legal-dropdown-item:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--primary);
-    padding-left: 24px;
-}
-
-.nav-legal-dropdown-item:active {
-    background: rgba(255, 255, 255, 0.15);
 }
 
 /* NAVBAR DEMO DROPDOWN */
@@ -792,6 +647,92 @@ body {
     justify-content: flex-end;
 }
 
+/* HOME: HERO GLOW + STATS BAR */
+.home-hero {
+    position: relative;
+    text-align: center;
+    padding: 190px 24px 80px;
+    overflow: hidden;
+}
+
+.home-hero-glow {
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1100px;
+    max-width: 160vw;
+    height: 450px;
+    background: radial-gradient(ellipse at center, rgba(210, 215, 225, 0.30) 0%, rgba(180, 185, 200, 0.10) 40%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.home-hero-board-silhouette {
+    position: absolute;
+    top: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 620px;
+    max-width: 80vw;
+    height: auto;
+    opacity: 0.4;
+    filter: grayscale(1) contrast(1.1) brightness(0.9);
+    mix-blend-mode: screen;
+    pointer-events: none;
+    z-index: 0;
+    -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 95%);
+    mask-image: linear-gradient(to bottom, black 50%, transparent 95%);
+}
+
+.home-hero > *:not(.home-hero-glow):not(.home-hero-board-silhouette) {
+    position: relative;
+    z-index: 1;
+}
+
+.home-hero-title {
+    margin-bottom: 24px;
+}
+
+.home-hero-title-img {
+    display: block;
+    width: min(720px, 85%);
+    height: auto;
+    margin: 0 auto;
+}
+
+.home-hero-sub {
+    max-width: 620px;
+    margin: 0 auto 40px;
+    font-size: 1.15rem;
+    line-height: 1.6;
+    color: var(--text-dim);
+}
+
+.home-feature-eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--primary);
+    margin-bottom: 16px;
+}
+
+.home-feature-image {
+    display: block;
+    width: 100%;
+    max-width: 480px;
+    height: auto;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 768px) {
+    .home-hero {
+        padding: 110px 20px 60px;
+    }
+}
+
 /* MEDIA QUERIES */
 
 @media (max-width: 1024px) {
@@ -814,8 +755,7 @@ body {
         align-items: flex-start;
     }
 
-    .nav-links.active .nav-link,
-    .nav-links.active .dropdown-toggle {
+    .nav-links.active .nav-link {
         width: 100%;
         text-align: left;
         justify-content: space-between;
@@ -934,7 +874,7 @@ body {
         padding: 4px 10px;
     }
 
-    .nav-link, .dropdown-toggle {
+    .nav-link {
         font-size: 11px;
         padding: 10px 12px;
         white-space: normal;
@@ -992,20 +932,6 @@ body {
     .nav-wallet-wrap button {
         width: 100%;
         min-width: auto;
-    }
-
-    /* Fix dropdown menus on mobile */
-    .nav-legal-dropdown-menu {
-        position: static !important;
-        width: 100% !important;
-        min-width: auto !important;
-        margin-top: 4px;
-        margin-left: 0;
-        left: 0;
-    }
-
-    .nav-legal-dropdown-item {
-        padding: 12px 16px;
     }
 
     /* Ensure all images are responsive */
@@ -1981,10 +1907,6 @@ body {
 
     .nav-links {
         gap: 16px;
-    }
-
-    .nav-link {
-        display: none;
     }
 
     .section h2 {

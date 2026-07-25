@@ -7,6 +7,16 @@ import bs58 from "bs58";
 const BRIDGE_PORT = import.meta.env.VITE_BRIDGE_PORT ?? "7454";
 const API_BASE = `http://localhost:${BRIDGE_PORT}`;
 
+// Every instance's popup window is otherwise titled the same static
+// "XFChess" (see index.html) — indistinguishable to Windows' EnumWindows.
+// tauri/src/main.rs's kill_wallet_popup() closes a popup by finding a
+// chrome.exe/msedge.exe top-level window with this exact title; without a
+// per-port suffix, running two local instances (e.g. `just dev2`) means
+// either instance closing its own popup closes *both* players' popups,
+// since the match is desktop-wide by title text alone, not scoped to which
+// Tauri sidecar spawned it. main.rs must match this exact format.
+document.title = `XFChess #${BRIDGE_PORT}`;
+
 async function apiGet<T = unknown>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`);
   if (!resp.ok) throw new Error(`GET ${path} failed: ${resp.status}`);
@@ -25,6 +35,23 @@ async function closePopup() {
   } catch {
     window.close();
   }
+}
+
+// Which wallet extension the user actually authenticated with, persisted at
+// connect time (see WalletStep.handleConnect). Signing must always go back
+// through this SAME extension — if both Phantom and Solflare are installed,
+// blindly preferring one (Phantom used to always win) silently signs with
+// the wrong wallet: the popup shows a real "Confirm Transaction" dialog with
+// a valid-looking fee, but for an account the player never funded, which
+// surfaces as a confusing "not enough SOL" even though their actual wallet
+// has plenty.
+function getConnectedProvider(): any {
+  const kind = localStorage.getItem("xfchess_wallet_provider");
+  if (kind === "solflare") return (window as any).solflare;
+  if (kind === "phantom") return (window as any).phantom?.solana;
+  // Unknown (e.g. state from before this was tracked) — fall back to the old
+  // best-effort behavior rather than refusing to sign at all.
+  return (window as any).phantom?.solana ?? (window as any).solflare;
 }
 
 async function apiPost<T = unknown>(path: string, body?: unknown): Promise<T> {
@@ -635,6 +662,7 @@ function WalletStep({
 
       if (!pubkey) throw new Error("No public key returned from wallet");
       localStorage.setItem("xfchess_wallet", pubkey);
+      localStorage.setItem("xfchess_wallet_provider", walletName);
       const _walletUsername = localStorage.getItem("xfchess_username") ?? "";
 
       // Check registration status first — avoids redundant signing requests.
@@ -872,7 +900,7 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
           setSigning(true);
           setError(null);
           try {
-            const provider = (window as any).phantom?.solana || (window as any).solflare;
+            const provider = getConnectedProvider();
             if (!provider) throw new Error("No Phantom/Solflare extension detected");
             const txBytes = Buffer.from(pendingTx, "base64");
             const tx = deserializeTx(txBytes);
@@ -940,7 +968,7 @@ function ProfileStep({
           throw new Error("No wallet connected in this window — reopen from the game client and try again.");
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const provider: any = walletProvider ?? (window as any).phantom?.solana ?? (window as any).solflare;
+        const provider: any = walletProvider ?? getConnectedProvider();
         if (!provider) {
           throw new Error("No Phantom/Solflare extension detected in this window.");
         }
@@ -1151,8 +1179,14 @@ function Onboarding() {
       if (needsProfile) {
         // No real username yet — make sure nothing (this session's state,
         // or a stale value from a previous wallet's session) pre-fills the
-        // handle field with something that looks chosen but isn't.
+        // handle field with something that looks chosen but isn't. Clearing
+        // localStorage alone isn't enough: `username` state was already read
+        // from it at mount time, and ProfileStep's defaultHandle prop is
+        // derived from that stale in-memory value, not from localStorage
+        // again — so it must be reset here too, or the old value leaks
+        // straight through into the "Choose Your Handle" field.
         localStorage.removeItem("xfchess_username");
+        setUsername("Player");
         setStep("profile");
       } else {
         setStep("splash");

@@ -70,7 +70,7 @@ copy /Y "%ROOT%\target\%TARGET_SUBDIR%\signing-server-http.exe" "%STAGE%\signing
 if exist "%ROOT%\stockfish.exe" copy /Y "%ROOT%\stockfish.exe" "%STAGE%\stockfish.exe" >nul
 if not exist "%STAGE%\stockfish.exe" (
     echo Stockfish not found - downloading from official repository...
-    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.exe' -OutFile '%STAGE%\stockfish.exe'"
+    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.zip' -OutFile '%TEMP%\sf.zip'; Expand-Archive -Path '%TEMP%\sf.zip' -DestinationPath '%TEMP%\sf_extracted' -Force; Copy-Item -Force '%TEMP%\sf_extracted\stockfish\stockfish-windows-x86-64-modern.exe' '%STAGE%\stockfish.exe'"
     if %ERRORLEVEL% neq 0 (
         echo Failed to download Stockfish. AI features will not work.
     )

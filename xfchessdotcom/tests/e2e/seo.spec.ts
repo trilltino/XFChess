@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
 const PUBLIC_PAGES = [
   '/home', '/features', '/play', '/tournaments', '/computer',
   '/players', '/legal', '/compliance', '/anti-cheat', '/news/release',
-  '/launch', '/waitlist',
+  '/launch',
 ];
 
 // Prerendered at build time by scripts/prerender.mjs (Phase 3) — these are
@@ -17,7 +17,7 @@ const PUBLIC_PAGES = [
 // tags, since that's what zero-JS bots and social link-preview bots see.
 const PRERENDERED_PAGES = [
   '/home', '/features', '/play', '/tournaments', '/computer',
-  '/legal', '/compliance', '/anti-cheat', '/news/release', '/launch', '/waitlist',
+  '/legal', '/compliance', '/anti-cheat', '/news/release', '/launch',
 ];
 
 const PRIVATE_PAGES = ['/kyc', '/profile', '/create-profile', '/verify', '/login', '/w_setup'];
@@ -176,7 +176,7 @@ test.describe('Build-time prerendered HTML (Phase 3) — raw response, no JS', (
       const res = await request.get(`${path}/`);
       expect(res.status()).toBe(200);
       const body = await res.text();
-      expect(body).toMatch(/<title>.*\| XFChess<\/title>/);
+      expect(body).toMatch(/<title>XFChess \| .*<\/title>/);
       expect(body).not.toContain('<div id="root"></div>'); // real content baked in, not an empty shell
     });
   }

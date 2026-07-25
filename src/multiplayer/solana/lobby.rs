@@ -90,6 +90,10 @@ pub struct SolanaLobbyState {
     pub allow_create: bool,
     /// SOL amount chosen by creator (default 0.05).
     pub wager_sol: f32,
+    /// Raw text typed into the custom wager amount field (USD when a live
+    /// rate is available, otherwise SOL). Kept separate from `wager_sol` so
+    /// in-progress typing (e.g. "1.") isn't clobbered by reformatting.
+    pub wager_amount_input: String,
     /// Match type: 0=Free Casual, 1=Free Rated (ELO), 2=Wagered.
     pub match_type: u8,
     /// Raw game-id text typed by the joiner.
@@ -152,6 +156,7 @@ impl Default for SolanaLobbyState {
             mode: LobbyMode::default(),
             allow_create: true,
             wager_sol: 0.05,
+            wager_amount_input: String::new(),
             match_type: 0,
             game_id_input: String::new(),
             status: LobbyStatus::default(),

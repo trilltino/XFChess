@@ -114,4 +114,5 @@ pub struct MainMenuUIContext<'w, 's> {
     pub exit_confirm: ResMut<'w, MenuExitConfirm>,
     pub focus_mode: ResMut<'w, MenuFocusMode>,
     pub spectate_events: Option<MessageWriter<'w, SpectateViaLinkEvent>>,
+    pub tokio_runtime: Res<'w, crate::multiplayer::TokioRuntime>,
 }

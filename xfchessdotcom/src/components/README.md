@@ -4,9 +4,7 @@ Shared UI components used across [../pages/](../pages/README.md).
 
 | Component | Purpose |
 |-----------|---------|
-| [LoginModal.tsx](LoginModal.tsx) | Wallet/email sign-in modal (backend JWT flow) |
 | [WalletSelectionModal.tsx](WalletSelectionModal.tsx) | Wallet-adapter picker |
-| [KycModal.tsx](KycModal.tsx) | KYC prompt for wager-gated actions |
 | [MatchHistory.tsx](MatchHistory.tsx) | Player match list from the archive API |
 | [LichessLinkCard.tsx](LichessLinkCard.tsx) | Linked external-rating card |
 | [Footer.tsx](Footer.tsx) | Site footer |

@@ -25,11 +25,11 @@ export interface PageMetadata {
 }
 
 function page(path: string, title: string, description: string, ogImage?: string): PageMetadata {
-  return { path, title: `${title} | ${SITE_NAME}`, description, ogImage, noindex: false };
+  return { path, title: `${SITE_NAME} | ${title}`, description, ogImage, noindex: false };
 }
 
 function privatePage(path: string, title: string): PageMetadata {
-  return { path, title: `${title} | ${SITE_NAME}`, description: '', noindex: true };
+  return { path, title: `${SITE_NAME} | ${title}`, description: '', noindex: true };
 }
 
 /** Static registry for the ~13 public marketing/content routes. */
@@ -88,11 +88,6 @@ export const PAGE_METADATA: Record<string, PageMetadata> = {
     '/launch',
     'Launch',
     'XFChess is live — join the competitive chess platform built on Solana.',
-  ),
-  waitlist: page(
-    '/waitlist',
-    'Join the Waitlist',
-    'Sign up for early access to new XFChess features and tournaments.',
   ),
 };
 

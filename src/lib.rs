@@ -260,7 +260,7 @@ pub fn build_app(game_config: GameConfig) -> App {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "XFChess".to_string(),
+                    title: core::WindowConfig::default().title,
                     fit_canvas_to_parent: true,
                     prevent_default_event_handling: false,
                     ..default()

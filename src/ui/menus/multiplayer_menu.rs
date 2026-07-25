@@ -231,7 +231,7 @@ pub fn multiplayer_menu_system(
                                                                     if let Ok(data) = r.json::<serde_json::Value>() {
                                                                         if let Some(tx_b64) = data["transaction"].as_str() {
                                                                             // 2. Sign and Send via Tauri bridge
-                                                                            let sign_res = crate::multiplayer::solana::tauri_signer::sign_and_send_b64_via_tauri(crate::multiplayer::solana::integration::state::DEVNET_RPC_URL, tx_b64);
+                                                                            let sign_res = crate::multiplayer::solana::tauri_signer::sign_and_send_b64_via_tauri(&crate::multiplayer::solana::integration::state::DEVNET_RPC_URL, tx_b64);
 
                                                                             if sign_res.is_ok() {
                                                                                 // 3. Confirm with backend

@@ -7,8 +7,17 @@ use crate::solana::instructions::{
     SESSION_DELEGATION_SEED, WAGER_ESCROW_SEED,
 };
 
-/// Devnet RPC endpoint
-pub const DEVNET_RPC_URL: &str = "https://api.devnet.solana.com";
+/// Devnet RPC endpoint. Overridable via `SOLANA_RPC_URL` (same var name and
+/// resolution as the backend's `SigningConfig` and `vps_base()`) so a local
+/// dev build can point at a dedicated provider (e.g. Triton) instead of the
+/// public endpoint, which rate-limits heavily and is the main source of
+/// slow-feeling blockhash fetches / tx submission / account polling from the
+/// client. Never hardcode a real provider URL/token here — this constant
+/// ships in every distributed client binary, so a literal secret would leak
+/// to every player. Falls back to the public endpoint when unset.
+pub static DEVNET_RPC_URL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".to_string())
+});
 /// MagicBlock EU Devnet endpoint
 pub const MAGICBLOCK_EU_DEVNET: &str = "https://devnet-eu.magicblock.app";
 

@@ -11,7 +11,7 @@ One component per route, registered in [../App.tsx](../App.tsx).
 | [Tournaments.tsx](Tournaments.tsx), [TournamentDetail.tsx](TournamentDetail.tsx), [TournamentPlay.tsx](TournamentPlay.tsx), [TournamentStandings.tsx](TournamentStandings.tsx) | Tournament browse → register (on-chain) → play → standings |
 | [Spectate.tsx](Spectate.tsx), [Players.tsx](Players.tsx), [ProfileViewer.tsx](ProfileViewer.tsx) | Watch live games (delayed feed), browse players |
 | [Kyc.tsx](Kyc.tsx), [Compliance.tsx](Compliance.tsx), [Legal.tsx](Legal.tsx) | Regulatory |
-| [ChessComputer.tsx](ChessComputer.tsx), [AntiCheat.tsx](AntiCheat.tsx), [Features.tsx](Features.tsx), [Home.tsx](Home.tsx), [NewsRelease.tsx](NewsRelease.tsx), [Waitlist.tsx](Waitlist.tsx) | Marketing/info pages |
+| [ChessComputer.tsx](ChessComputer.tsx), [AntiCheat.tsx](AntiCheat.tsx), [Features.tsx](Features.tsx), [Home.tsx](Home.tsx), [NewsRelease.tsx](NewsRelease.tsx) | Marketing/info pages |
 | [LichessCallback.tsx](LichessCallback.tsx) | OAuth return leg for linked Lichess ratings |
 
 ## Conventions

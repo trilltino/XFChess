@@ -121,7 +121,19 @@ impl Default for LobbyChatSession {
 }
 
 impl LobbyChatSession {
-    pub fn activate(&mut self, game_id: String, base_url: String, display: String) {
+    /// `rt` must be the shared [`crate::multiplayer::TokioRuntime`] handle — the
+    /// subscriber below drives an async `reqwest` client internally, which needs
+    /// a live Tokio reactor. Bevy's own task pools (`IoTaskPool` et al.) don't
+    /// provide one and will panic with "there is no reactor running" the moment
+    /// the HTTP client tries to time out or retry (see src/multiplayer/README.md
+    /// "Gotchas" — all async network work must go through the shared runtime).
+    pub fn activate(
+        &mut self,
+        game_id: String,
+        base_url: String,
+        display: String,
+        rt: &tokio::runtime::Handle,
+    ) {
         if self.active && self.game_id == game_id {
             return;
         }
@@ -138,8 +150,7 @@ impl LobbyChatSession {
 
         // Spawn a Braid-HTTP chat subscriber in background
         let sender = tx_in;
-        bevy::tasks::IoTaskPool::get()
-            .spawn(async move {
+        rt.spawn(async move {
                 let sub = match braid_chess::ChessSubscriber::new(&base_url, &game_id) {
                     Ok(s) => s,
                     Err(e) => {
@@ -167,8 +178,7 @@ impl LobbyChatSession {
                         }
                     }
                 }
-            })
-            .detach();
+            });
     }
 
     pub fn deactivate(&mut self) {

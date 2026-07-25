@@ -278,8 +278,12 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                         .cached_display_name
                         .clone()
                         .unwrap_or_else(|| "Anonymous".to_string());
-                    ctx.lobby_chat
-                        .activate(game_id_str.clone(), backend_url, display);
+                    ctx.lobby_chat.activate(
+                        game_id_str.clone(),
+                        backend_url,
+                        display,
+                        &ctx.tokio_runtime.0.handle().clone(),
+                    );
                 }
                 ui.add_space(6.0);
                 ui.collapsing(
@@ -691,11 +695,6 @@ fn render_create_tab(
         };
         ui.horizontal(|ui| {
             ui.colored_label(chip_color, &chip_text);
-            if matches!(lobby.session_expires_at, None | Some(_) if lobby.session_expires_at.map_or(true, |e| e <= now + 86400)) {
-                if ui.small_button("Authorize").on_hover_text("Re-authorize session key for this wallet").clicked() {
-                    info!("[LOBBY] User triggered session key re-authorization");
-                }
-            }
         });
         Layout::small_space(ui);
     }
@@ -705,33 +704,77 @@ fn render_create_tab(
         lobby.wager_sol = 0.0;
     }
 
-    // SOL (`lobby.wager_sol`) stays the on-chain source of truth — only the
-    // control the player drags is USD-denominated, converted live via
-    // usd_per_sol. Falls back to a SOL slider when no rate has loaded yet
-    // (startup, or the backend rate fetch is down) so hosting a game is
-    // never blocked on a third-party price feed.
+    // SOL (`lobby.wager_sol`) stays the on-chain source of truth. The player
+    // either picks one of the preset USD wagers or types a custom amount —
+    // converted live via usd_per_sol. Falls back to a plain SOL entry field
+    // when no rate has loaded yet (startup, or the backend rate fetch is
+    // down) so hosting a game is never blocked on a third-party price feed.
     let live_rate = usd_per_sol.filter(|r| *r > 0.0);
+    const PRESET_WAGERS_USD: [f32; 3] = [2.0, 5.0, 10.0];
 
     if wallet_connected {
         if let Some(rate) = live_rate {
             ui.label(egui::RichText::new("Wager amount (USD)").size(14.0));
             let max_wager_usd = (max_wager as f64 * rate) as f32;
-            let mut wager_usd = (lobby.wager_sol as f64 * rate) as f32;
-            ui.add(
-                egui::Slider::new(&mut wager_usd, 0.0..=max_wager_usd.max(0.01))
-                    .step_by(0.01)
-                    .fixed_decimals(2)
-                    .prefix("$"),
-            );
-            lobby.wager_sol = (wager_usd as f64 / rate).clamp(0.0, max_wager as f64) as f32;
+            let wager_usd = (lobby.wager_sol as f64 * rate) as f32;
+
+            let input_id = egui::Id::new("wager_custom_amount_usd");
+            let editing = ui.memory(|m| m.has_focus(input_id));
+            if !editing {
+                // Not being typed into right now, so it's safe to resync the
+                // display from the canonical wager_sol (preset clicks, or
+                // wager_sol changed elsewhere, e.g. the browse/join flow).
+                lobby.wager_amount_input = format!("{:.2}", wager_usd);
+            }
+
+            ui.horizontal(|ui| {
+                for preset in PRESET_WAGERS_USD {
+                    let affordable = preset <= max_wager_usd + 0.005;
+                    let selected = affordable && (wager_usd - preset).abs() < 0.005;
+                    let response = ui.add_enabled_ui(affordable, |ui| {
+                        crate::ui::styles::StyledButton::chip(
+                            ui,
+                            &format!("${:.0}", preset),
+                            selected,
+                            egui::Vec2::new(48.0, 28.0),
+                        )
+                    });
+                    if response.inner.clicked() {
+                        lobby.wager_sol = (preset as f64 / rate) as f32;
+                        lobby.wager_amount_input = format!("{:.2}", preset);
+                    }
+                }
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new("Custom $").size(13.0));
+                let edit_response = ui.add(
+                    egui::TextEdit::singleline(&mut lobby.wager_amount_input)
+                        .id(input_id)
+                        .desired_width(60.0),
+                );
+                if edit_response.changed() {
+                    if let Ok(value) = lobby.wager_amount_input.trim().parse::<f32>() {
+                        let clamped = value.max(0.0).min(max_wager_usd);
+                        lobby.wager_sol = (clamped as f64 / rate) as f32;
+                    }
+                }
+            });
         } else {
             ui.label(egui::RichText::new("Wager amount (SOL)").size(14.0));
-            ui.add(
-                egui::Slider::new(&mut lobby.wager_sol, 0.0..=max_wager.max(0.001))
-                    .step_by(0.001)
-                    .fixed_decimals(3),
+            let input_id = egui::Id::new("wager_custom_amount_sol");
+            let editing = ui.memory(|m| m.has_focus(input_id));
+            if !editing {
+                lobby.wager_amount_input = format!("{:.3}", lobby.wager_sol);
+            }
+            let edit_response = ui.add(
+                egui::TextEdit::singleline(&mut lobby.wager_amount_input)
+                    .id(input_id)
+                    .desired_width(80.0),
             );
-            lobby.wager_sol = lobby.wager_sol.clamp(0.0, max_wager);
+            if edit_response.changed() {
+                if let Ok(value) = lobby.wager_amount_input.trim().parse::<f32>() {
+                    lobby.wager_sol = value.max(0.0).min(max_wager);
+                }
+            }
             ui.label(
                 egui::RichText::new("(USD rate loading — showing SOL for now)")
                     .size(10.0)
@@ -740,13 +783,20 @@ fn render_create_tab(
             );
         }
     } else {
-        // Greyed-out disabled slider at 0
+        // Greyed-out disabled presets while no wallet is connected.
         ui.label(egui::RichText::new("Wager amount (USD)").size(14.0));
-        let mut zero: f32 = 0.0;
-        ui.add_enabled(
-            false,
-            egui::Slider::new(&mut zero, 0.0..=1.0).fixed_decimals(2),
-        );
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(false, |ui| {
+                for preset in PRESET_WAGERS_USD {
+                    crate::ui::styles::StyledButton::chip(
+                        ui,
+                        &format!("${:.0}", preset),
+                        false,
+                        egui::Vec2::new(48.0, 28.0),
+                    );
+                }
+            });
+        });
         ui.label(
             egui::RichText::new("(Connect wallet to add a wager)")
                 .size(11.0)

@@ -354,7 +354,7 @@ pub fn monitor_network_handshakes(
                 )
                 .map_err(|e| format!("build join_game_ix: {}", e))?;
 
-                sign_and_send_via_tauri(DEVNET_RPC_URL, wallet_pubkey, &[ix], &[])
+                sign_and_send_via_tauri(&DEVNET_RPC_URL, wallet_pubkey, &[ix], &[])
                     .map(|_sig| game_id_owned)
                     .map_err(|e| format!("join_game sign: {}", e))
             });
@@ -618,9 +618,19 @@ pub fn sync_player_profiles(
             if let Some(pk) = solana_state.wallet_pubkey {
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 let pk_str = pk.to_string();
+                // fetch_player_profile is a blocking reqwest call — it must run via
+                // spawn_blocking, not directly inside this async task. reqwest::blocking
+                // builds (and later drops) its own nested Tokio runtime internally, which
+                // panics ("cannot drop a runtime in a context where blocking is not
+                // allowed") when called from a task already driven by this outer runtime.
                 tokio_runtime.0.spawn(async move {
-                    let _ = tx
-                        .send(crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok());
+                    let result =
+                        tokio::task::spawn_blocking(move || {
+                            crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok()
+                        })
+                        .await
+                        .unwrap_or(None);
+                    let _ = tx.send(result);
                 });
                 *own_rx = Some(rx);
             }
@@ -630,8 +640,13 @@ pub fn sync_player_profiles(
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 let pk_str = pk.to_string();
                 tokio_runtime.0.spawn(async move {
-                    let _ = tx
-                        .send(crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok());
+                    let result =
+                        tokio::task::spawn_blocking(move || {
+                            crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok()
+                        })
+                        .await
+                        .unwrap_or(None);
+                    let _ = tx.send(result);
                 });
                 *opp_rx = Some(rx);
             }
