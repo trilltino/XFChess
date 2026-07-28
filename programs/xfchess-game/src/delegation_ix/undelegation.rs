@@ -2,6 +2,8 @@
 
 use anchor_lang::prelude::*;
 
+/// Accounts the ER infrastructure passes when restoring a `Game` PDA to the
+/// base layer after undelegation. Not called directly by clients.
 #[derive(Accounts)]
 pub struct InitializeAfterUndelegation<'info> {
     /// CHECK: delegated account being restored

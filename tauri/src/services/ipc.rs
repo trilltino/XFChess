@@ -1,8 +1,14 @@
+//! All `#[tauri::command]` handlers: window management, notifications,
+//! clipboard, and URL opening. `WindowCommands`/`IpcCommands` below are the
+//! real, live command enums (distinct from the unused, similarly-named types
+//! in `types::ipc` — see that module's docs).
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_notification::NotificationExt;
 
+/// Unused — never constructed anywhere.
 pub struct IpcServer;
 
 impl IpcServer {
@@ -87,6 +93,33 @@ pub fn maximize_tournament_admin(app: AppHandle) {
   if let Some(window) = app.get_webview_window("tournament-admin") {
     window.maximize().ok();
   }
+}
+
+/// Flip maximized/restored state — used by the custom (decorations-off) title
+/// bar's maximize button and its double-click-to-maximize handler, since a
+/// borderless window has no OS-drawn button that already knows how to do this.
+#[tauri::command]
+pub fn toggle_maximize_tournament_admin(app: AppHandle) {
+  if let Some(window) = app.get_webview_window("tournament-admin") {
+    match window.is_maximized() {
+      Ok(true) => {
+        window.unmaximize().ok();
+      }
+      _ => {
+        window.maximize().ok();
+      }
+    }
+  }
+}
+
+/// Lets the custom title bar draw the right maximize-vs-restore icon on
+/// mount, without needing a `core:window:*` ACL grant for the JS window API.
+#[tauri::command]
+pub fn is_tournament_admin_maximized(app: AppHandle) -> bool {
+  app
+    .get_webview_window("tournament-admin")
+    .and_then(|w| w.is_maximized().ok())
+    .unwrap_or(false)
 }
 
 #[tauri::command]

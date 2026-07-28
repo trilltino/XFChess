@@ -19,7 +19,8 @@ per account type; ADR-0004 covers tournament shard invariants
 | [username_record.rs](username_record.rs) | `UsernameRecord` | Username → wallet mapping |
 | [friendship.rs](friendship.rs) | `Friendship` | On-chain friends graph |
 | [dispute.rs](dispute.rs) | `DisputeRecord` | Governance dispute state |
-| [platform_fee_vault.rs](platform_fee_vault.rs) / [treasury_vault.rs](treasury_vault.rs) | `PlatformFeeVault`, `TreasuryVault` | Fee and treasury lamport vaults |
+| [platform_fee_vault.rs](platform_fee_vault.rs) | `PlatformFeeVault` | Fee lamport vault |
+| [treasury_vault.rs](treasury_vault.rs) | `TreasuryVault` | **Unused.** The real treasury is a single, untyped `SystemAccount` PDA at `seeds = [TREASURY_VAULT_SEED]` (see `account_ix/treasury.rs`) — this per-country typed struct is never constructed anywhere in the program |
 
 ## Example
 

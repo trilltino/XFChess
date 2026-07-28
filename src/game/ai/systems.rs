@@ -13,11 +13,31 @@ use std::env;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-/// Resource holding the async AI computation task
+/// Resource holding the async AI computation task and its reveal timing.
+///
+/// `spawned_at` + `min_reveal_delay` enforce a minimum, slightly randomized
+/// pause between the AI's turn starting and its move being applied to the
+/// board — see [`crate::game::ai::resource::AIDifficulty::thinking_delay_range_ms`].
+/// Without this, low-difficulty searches (which finish in well under 100ms)
+/// make the AI's move snap onto the board instantly, which reads as
+/// robotic/broken UX rather than an opponent "thinking".
 #[derive(Resource)]
-pub struct PendingAIMove(pub Task<Result<AIMove, String>>);
+pub struct PendingAIMove {
+    pub task: Task<Result<AIMove, String>>,
+    spawned_at: Instant,
+    min_reveal_delay: Duration,
+}
+
+/// A resolved AI move still waiting out `min_reveal_delay` before it's
+/// applied to the board. Populated once the search task in [`PendingAIMove`]
+/// completes faster than the minimum reveal delay.
+#[derive(Resource)]
+pub struct AIMovePendingReveal {
+    result: Result<AIMove, String>,
+    ready_at: Instant,
+}
 
 /// Persistent, pre-warmed nimzovich engine game.
 ///
@@ -204,6 +224,7 @@ pub struct AiSpawnParams<'w, 's> {
     pub game_phase: Res<'w, CurrentGamePhase>,
     pub pieces_query: Query<'w, 's, (Entity, &'static Piece, &'static HasMoved)>,
     pub pending_task: Option<Res<'w, PendingAIMove>>,
+    pub pending_reveal: Option<Res<'w, AIMovePendingReveal>>,
     pub engine: ResMut<'w, ChessEngine>,
     pub pending_turn_advance: Option<Res<'w, crate::game::resources::PendingTurnAdvance>>,
     pub players: Res<'w, crate::game::resources::player::Players>,
@@ -250,6 +271,7 @@ fn compute_think_params(
 #[derive(SystemParam)]
 pub struct AiPollParams<'w, 's> {
     pub task_resource: Option<ResMut<'w, PendingAIMove>>,
+    pub pending_reveal: Option<Res<'w, AIMovePendingReveal>>,
     pub pieces_queries: ParamSet<
         'w,
         's,
@@ -268,11 +290,9 @@ pub struct AiPollParams<'w, 's> {
 }
 
 fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
-    #[cfg(not(target_arch = "wasm32"))]
-    let _start_time = std::time::Instant::now();
-
     if should_skip_ai_spawn(
         &params.pending_task,
+        &params.pending_reveal,
         &params.pending_turn_advance,
         &params.game_phase,
         &params.current_turn,
@@ -287,6 +307,10 @@ fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
     let depth = params.ai_config.difficulty.stockfish_depth();
     let movetime_ms = params.ai_config.difficulty.stockfish_movetime_ms();
     let ai_color = params.ai_config.mode.ai_color();
+
+    let spawned_at = Instant::now();
+    let (min_delay_ms, max_delay_ms) = params.ai_config.difficulty.thinking_delay_range_ms();
+    let min_reveal_delay = Duration::from_millis(rand::random_range(min_delay_ms..=max_delay_ms));
 
     match params.ai_config.engine {
         crate::game::ai::resource::AIEngine::Stockfish => {
@@ -312,7 +336,11 @@ fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
             };
 
             let task = spawn_stockfish_task_persistent(fen, depth, movetime, sf_arc);
-            commands.insert_resource(PendingAIMove(task));
+            commands.insert_resource(PendingAIMove {
+                task,
+                spawned_at,
+                min_reveal_delay,
+            });
         }
         crate::game::ai::resource::AIEngine::XFChessEngine => {
             let base_think = params.ai_config.difficulty.seconds_per_move();
@@ -332,7 +360,11 @@ fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
             let preloaded = pool_arc.as_ref().and_then(|arc| arc.lock().ok()?.take());
             let task =
                 spawn_xf_engine_task(fen, think_time, max_depth, ai_color, preloaded, pool_arc);
-            commands.insert_resource(PendingAIMove(task));
+            commands.insert_resource(PendingAIMove {
+                task,
+                spawned_at,
+                min_reveal_delay,
+            });
         }
     }
 }
@@ -538,6 +570,7 @@ fn spawn_stockfish_task_persistent(
 /// Helper to check conditions for spawning AI task
 fn should_skip_ai_spawn(
     pending_task: &Option<Res<PendingAIMove>>,
+    pending_reveal: &Option<Res<AIMovePendingReveal>>,
     pending_turn_advance: &Option<Res<crate::game::resources::PendingTurnAdvance>>,
     game_phase: &CurrentGamePhase,
     current_turn: &CurrentTurn,
@@ -546,6 +579,11 @@ fn should_skip_ai_spawn(
 ) -> bool {
     if pending_task.is_some() {
         trace!("[AI] Skipping spawn: pending task already exists");
+        return true;
+    }
+
+    if pending_reveal.is_some() {
+        trace!("[AI] Skipping spawn: move resolved, waiting on reveal delay");
         return true;
     }
 
@@ -597,46 +635,74 @@ fn should_skip_ai_spawn(
     false
 }
 
-/// System that polls the AI task and executes the move when ready
+/// System that polls the AI task and executes the move once it's both
+/// resolved and past its minimum "thinking" reveal delay (see
+/// [`PendingAIMove`] / [`AIMovePendingReveal`]).
 #[allow(clippy::too_many_arguments)]
 fn poll_ai_task_system(mut commands: Commands, mut params: AiPollParams) {
-    let Some(mut task_resource) = params.task_resource else {
+    // A move already finished computing and is waiting out its reveal delay.
+    if let Some(pending_reveal) = params.pending_reveal.as_ref() {
+        if Instant::now() < pending_reveal.ready_at {
+            return;
+        }
+        let result = pending_reveal.result.clone();
+        commands.remove_resource::<AIMovePendingReveal>();
+        apply_ai_result(result, &mut commands, &mut params);
+        return;
+    }
+
+    let Some(task_resource) = params.task_resource.as_mut() else {
         return;
     };
 
+    // Poll the in-flight search task.
+    let Some(result) = futures_lite::future::block_on(futures_lite::future::poll_once(
+        &mut task_resource.task,
+    )) else {
+        return;
+    };
+
+    let ready_at = task_resource.spawned_at + task_resource.min_reveal_delay;
+    commands.remove_resource::<PendingAIMove>();
+
+    if Instant::now() >= ready_at {
+        apply_ai_result(result, &mut commands, &mut params);
+    } else {
+        commands.insert_resource(AIMovePendingReveal { result, ready_at });
+    }
+}
+
+/// Turns a resolved AI search result into board state: updates statistics
+/// and, if the search succeeded, executes the move via [`execute_move`].
+fn apply_ai_result(
+    result: Result<AIMove, String>,
+    commands: &mut Commands,
+    params: &mut AiPollParams,
+) {
     let mut move_found = None;
     let mut move_from_direct_stockfish = false;
 
-    // Poll the local AI task
-    if move_found.is_none() {
-        if let Some(result) =
-            futures_lite::future::block_on(futures_lite::future::poll_once(&mut task_resource.0))
-        {
-            commands.remove_resource::<PendingAIMove>();
+    match result {
+        Ok(ai_move) => {
+            info!(
+                "[AI] Direct Stockfish task completed with move: {}",
+                ai_move.uci
+            );
+            let uci_move = format!(
+                "{}{}",
+                ChessEngine::coords_to_uci(ai_move.from.0, ai_move.from.1),
+                ChessEngine::coords_to_uci(ai_move.to.0, ai_move.to.1)
+            );
+            move_found = Some(uci_move);
+            move_from_direct_stockfish = true;
 
-            match result {
-                Ok(ai_move) => {
-                    info!(
-                        "[AI] Direct Stockfish task completed with move: {}",
-                        ai_move.uci
-                    );
-                    let uci_move = format!(
-                        "{}{}",
-                        ChessEngine::coords_to_uci(ai_move.from.0, ai_move.from.1),
-                        ChessEngine::coords_to_uci(ai_move.to.0, ai_move.to.1)
-                    );
-                    move_found = Some(uci_move);
-                    move_from_direct_stockfish = true;
-
-                    // Update AI statistics
-                    params.ai_stats.last_score = ai_move.score as i64;
-                    params.ai_stats.last_depth = ai_move.depth as i64;
-                    params.ai_stats.thinking_time = ai_move.thinking_time;
-                }
-                Err(e) => {
-                    error!("[AI] Stockfish task failed: {}", e);
-                }
-            }
+            // Update AI statistics
+            params.ai_stats.last_score = ai_move.score as i64;
+            params.ai_stats.last_depth = ai_move.depth as i64;
+            params.ai_stats.thinking_time = ai_move.thinking_time;
+        }
+        Err(e) => {
+            error!("[AI] Stockfish task failed: {}", e);
         }
     }
 
@@ -708,7 +774,7 @@ fn poll_ai_task_system(mut commands: Commands, mut params: AiPollParams) {
 
                 execute_move(
                     &ctx,
-                    &mut commands,
+                    commands,
                     &mut params.pending_turn,
                     &mut params.move_history,
                     &mut params.captured_pieces,

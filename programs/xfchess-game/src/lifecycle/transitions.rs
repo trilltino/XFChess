@@ -5,6 +5,10 @@ use crate::errors::GameErrorCode;
 use crate::state::{Game, GameStatus};
 use anchor_lang::prelude::*;
 
+/// Transitions a `WaitingForOpponent` game to `Active` with `joiner` as
+/// black. Used by `game_ix::join`. Note: `game_ix::global_join` performs the
+/// same transition inline rather than calling this helper — keep the two in
+/// sync if this logic changes.
 pub fn join_waiting_game(
     game: &mut Game,
     joiner: Pubkey,
@@ -29,6 +33,9 @@ pub fn join_waiting_game(
     Ok(())
 }
 
+/// Marks an active, not-yet-delegated game as delegated to the Ephemeral
+/// Rollup and records the delegation fee advance. The single writer of
+/// `is_delegated = true` — call this instead of setting the field directly.
 pub fn mark_delegated(game: &mut Game) -> Result<()> {
     require!(
         game.status == GameStatus::Active,
@@ -43,6 +50,9 @@ pub fn mark_delegated(game: &mut Game) -> Result<()> {
     Ok(())
 }
 
+/// Marks a delegated game as undelegated back to the base layer. The single
+/// writer of `is_delegated = false` — call this instead of setting the field
+/// directly.
 pub fn mark_undelegated(game: &mut Game) -> Result<()> {
     require!(game.is_delegated, GameErrorCode::GameNotDelegated);
     game.is_delegated = false;

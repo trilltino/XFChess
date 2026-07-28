@@ -1,3 +1,6 @@
+//! Standings computation: score, Buchholz, and Sonneborn-Berger tiebreaks, and
+//! the ranking they produce for a Swiss tournament.
+
 use crate::{MatchResult, Pairing, StandingsEntry, SwissPlayer, SwissRound};
 
 /// Calculate tournament standings

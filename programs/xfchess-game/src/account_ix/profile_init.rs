@@ -5,6 +5,12 @@ use crate::state::PlayerProfile;
 use anchor_lang::prelude::*;
 use anchor_lang::{AccountDeserialize, Discriminator};
 
+/// Deserializes an existing `PlayerProfile` from raw account data, or builds
+/// a fresh default one if the discriminator doesn't match (uninitialized
+/// account). Either way, preserves all gameplay/verification/external-link
+/// fields already present — only `authority`, `created_at`, and a zero
+/// `elo_rating` seed are touched here. See ADR 0005 (profile init is not
+/// profile reset).
 pub fn load_or_new_profile(data: &[u8], player: Pubkey, now: i64) -> Result<PlayerProfile> {
     let mut profile = if data.len() >= 8 && &data[..8] == PlayerProfile::DISCRIMINATOR {
         let mut reader = data;
@@ -31,6 +37,8 @@ pub fn load_or_new_profile(data: &[u8], player: Pubkey, now: i64) -> Result<Play
     Ok(profile)
 }
 
+/// Overwrites only the identity fields (username, country, date of birth) on
+/// a profile, deliberately kept separate from gameplay-stat mutation.
 pub fn update_identity_fields(
     profile: &mut PlayerProfile,
     username: String,

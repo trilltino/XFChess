@@ -286,6 +286,10 @@ pub enum GameErrorCode {
     // ── MagicBlock ER undelegation ────────────────────────────────────────────
     #[msg("Buffer account is not the canonical undelegate-buffer for this account.")]
     InvalidUndelegationBuffer, // buffer isn't this delegated account's own buffer PDA
+
+    // ── ER-unavailability forced recovery ─────────────────────────────────────
+    #[msg("Game is not in the post-force-undelegate wiped state.")]
+    GameNotStuckDelegation, // recover_stuck_delegation called on a game that wasn't actually force-recovered
 }
 
 // Alias so the rest of the codebase can use either name.

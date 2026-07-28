@@ -10,6 +10,7 @@
 //! Braid/P2P relay layer.
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -115,7 +116,10 @@ impl Plugin for RollupNetworkBridgePlugin {
         app.insert_resource(RollupNetworkBridge::new());
 
         let mut resolver = MagicBlockResolver::default();
-        resolver.set_solana_rpc(Arc::new(RpcClient::new(DEVNET_RPC_URL.to_string())));
+        resolver.set_solana_rpc(Arc::new(RpcClient::new_with_commitment(
+            DEVNET_RPC_URL.to_string(),
+            CommitmentConfig::confirmed(),
+        )));
         app.insert_resource(resolver);
 
         app.init_resource::<RecentTransactions>();
@@ -670,13 +674,34 @@ fn handle_game_start_delegation(
             }
         };
 
+        // Sign with the session key that *this specific game* actually used
+        // (`rollup_manager.used_global_session`, set once at create/join
+        // time) — NOT the wallet's live `global_session_active` flag, which
+        // can flip independently of which flow created this game and would
+        // pick the wrong key (`FeePayerMismatch` on-chain). When it used the
+        // global session, that key co-signs both slots the delegation
+        // instruction needs, no wallet popup at all. Otherwise the VPS
+        // delegates on our behalf (it holds the per-game session key) —
+        // still no wallet popup, just a different signer.
+        let global_session_keypair_bytes = solana_state
+            .as_ref()
+            .filter(|_| rollup_manager.used_global_session)
+            .and_then(|s| s.global_session_keypair.as_ref())
+            .map(|kp| kp.to_bytes().to_vec());
+        let _ = wallet_pubkey; // only used above to gate readiness
+
         let (tx, rx) = oneshot::channel();
         bridge.delegation_rx = Some(rx);
 
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
-                let result =
-                    spawn_delegation_task(game_pda, game_id, wallet_pubkey, rpc_client).await;
+                let result = spawn_delegation_task(
+                    game_pda,
+                    game_id,
+                    rpc_client,
+                    global_session_keypair_bytes,
+                )
+                .await;
                 let _ = tx.send(result);
             })
             .detach();
@@ -709,16 +734,17 @@ fn handle_game_start_delegation(
 
 /// Async delegation task that runs on IoTaskPool (off main thread).
 ///
-/// Builds the delegation instruction and signs via Tauri (wallet popup).
-/// The delegation ix marks wallet_pubkey as is_signer:true, so only the wallet can sign.
+/// When `global_session_keypair_bytes` is `Some`, signs and submits directly
+/// with that session key — zero wallet popup. Otherwise asks the VPS to
+/// delegate on our behalf, since it holds the per-game session key that
+/// `game.fee_payer` requires — no wallet popup either way.
 async fn spawn_delegation_task(
     game_pda: Pubkey,
     game_id: u64,
-    wallet_pubkey: Pubkey,
     rpc_client: Arc<RpcClient>,
+    global_session_keypair_bytes: Option<Vec<u8>>,
 ) -> Result<Pubkey, String> {
-    use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
-    use crate::multiplayer::solana::tauri_signer;
+    use solana_sdk::signer::Signer;
 
     info!(
         "[DELEGATION-TASK] Starting delegation for game {} (PDA: {})",
@@ -729,21 +755,50 @@ async fn spawn_delegation_task(
     resolver.set_solana_rpc(rpc_client.clone());
     resolver.set_game_id(game_id);
 
-    let ix = resolver
-        .create_delegation_instruction(game_pda, wallet_pubkey)
-        .map_err(|e| format!("build delegation ix: {}", e))?;
+    if let Some(kp_bytes) = global_session_keypair_bytes {
+        // `game.fee_payer` is the global session key for games created via
+        // `global_create_game`/`global_join_game` — it can satisfy both the
+        // `payer` (bookkeeping rent) and `fee_payer` (authority check) slots
+        // itself, entirely locally, no Tauri round-trip.
+        let session_kp = solana_sdk::signature::Keypair::try_from(kp_bytes.as_slice())
+            .map_err(|e| format!("session keypair: {e}"))?;
+        let ix = resolver
+            .create_delegation_instruction(game_pda, session_kp.pubkey(), session_kp.pubkey())
+            .map_err(|e| format!("build delegation ix: {}", e))?;
+        let blockhash = rpc_client
+            .get_latest_blockhash()
+            .map_err(|e| format!("get_latest_blockhash: {e}"))?;
+        let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&session_kp.pubkey()),
+            &[&session_kp],
+            blockhash,
+        );
+        return match rpc_client.send_and_confirm_transaction(&tx) {
+            Ok(sig) => {
+                info!(
+                    "[DELEGATION-TASK] SUCCESS for game {} sig: {} (session-signed, no wallet popup)",
+                    game_id, sig
+                );
+                Ok(game_pda)
+            }
+            Err(e) => {
+                error!("[DELEGATION-TASK] FAILED for game {}: {}", game_id, e);
+                Err(e.to_string())
+            }
+        };
+    }
 
-    // The delegation instruction marks wallet_pubkey as is_signer:true, so the
-    // wallet must sign — not the VPS session key. Route through Tauri (Phantom popup).
-    info!(
-        "[DELEGATION-TASK] Sending delegation TX via Tauri wallet for game {}",
-        game_id
-    );
-
-    match tauri_signer::sign_and_send_via_tauri(&DEVNET_RPC_URL, wallet_pubkey, &[ix], &[]) {
+    // Fallback: per-game session flow. `fee_payer` must equal `game.fee_payer`
+    // (the per-game session key the *backend* holds, not the client) — so
+    // the client can't sign that slot itself. Ask the VPS to delegate on our
+    // behalf instead (it already holds that key), same trust model as the
+    // existing `vps_undelegate_game`/`vps_finalize_game` calls — no wallet
+    // popup here either.
+    match crate::multiplayer::vps_client::vps_delegate_game(game_id) {
         Ok(sig) => {
             info!(
-                "[DELEGATION-TASK] SUCCESS for game {} sig: {}",
+                "[DELEGATION-TASK] SUCCESS for game {} sig: {} (VPS-signed, no wallet popup)",
                 game_id, sig
             );
             Ok(game_pda)
@@ -797,6 +852,7 @@ fn retry_pending_delegation(
     mut bridge: ResMut<RollupNetworkBridge>,
     magicblock_resolver: Res<MagicBlockResolver>,
     solana_state: Option<Res<SolanaIntegrationState>>,
+    rollup_manager: Res<EphemeralRollupManager>,
     magicblock_events: MessageWriter<MagicBlockEvent>,
 ) {
     if bridge.delegation_rx.is_some() {
@@ -829,12 +885,27 @@ fn retry_pending_delegation(
     bridge.pending_delegation_pda = None;
     bridge.pending_game_id = None;
 
+    // Same per-game gating as `handle_game_start_delegation` — see its
+    // comment for why this can't be the live `global_session_active` flag.
+    let global_session_keypair_bytes = solana_state
+        .as_ref()
+        .filter(|_| rollup_manager.used_global_session)
+        .and_then(|s| s.global_session_keypair.as_ref())
+        .map(|kp| kp.to_bytes().to_vec());
+    let _ = wallet_pubkey; // only used above to gate readiness
+
     let (tx, rx) = oneshot::channel();
     bridge.delegation_rx = Some(rx);
 
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            let result = spawn_delegation_task(game_pda, game_id, wallet_pubkey, rpc_client).await;
+            let result = spawn_delegation_task(
+                game_pda,
+                game_id,
+                rpc_client,
+                global_session_keypair_bytes,
+            )
+            .await;
             let _ = tx.send(result);
         })
         .detach();
@@ -1001,6 +1072,7 @@ fn spawn_finalization_task(
             use crate::multiplayer::vps_client;
             use crate::solana::instructions::PROGRAM_ID as SOLANA_PROGRAM_ID;
             use solana_client::rpc_client::RpcClient;
+            use solana_commitment_config::CommitmentConfig;
 
             // Brief pause before undelegation so the final move batch lands first.
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -1017,7 +1089,8 @@ fn spawn_finalization_task(
             let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
             let game_pda =
                 Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &program_id).0;
-            let rpc = RpcClient::new(DEVNET_RPC_URL.to_string());
+            let rpc =
+                RpcClient::new_with_commitment(DEVNET_RPC_URL.to_string(), CommitmentConfig::confirmed());
             let deadline = std::time::Instant::now()
                 + std::time::Duration::from_secs(MAX_UNDELEGATE_WAIT_SECS);
             loop {

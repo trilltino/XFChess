@@ -1,6 +1,11 @@
+//! Unused command DTOs (`#![allow(dead_code)]` below is deliberate) — the
+//! bridge's real, live IPC command set is `services::ipc::{WindowCommands,
+//! IpcCommands}`, not the similarly-named types here.
+
 #![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 
+/// Unused. See module docs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IpcCommand {
   Window(WindowCommand),

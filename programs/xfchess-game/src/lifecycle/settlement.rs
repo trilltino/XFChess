@@ -9,6 +9,11 @@ use crate::lifecycle::guards;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// The canonical settlement path for a `Finished`, undelegated game (ADR-0003):
+/// pays the wager pot out of escrow in order (tx-fee reimbursement, platform
+/// fee, country fee, per-player ELO-linking fee, then the result payout to
+/// winner or split on draw), moves the game to `Settled`, and updates both
+/// players' profile stats via `update_profiles`.
 pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     let (result, wager_amount, game_white, wager_token, match_type, country_fee, fees_advanced) = {
         let game = &mut ctx.accounts.game;
@@ -108,14 +113,26 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
                 escrow::pay_from_game_escrow(sp, escrow, dest, remaining, game_id, bump)?;
             }
             GameResult::Draw => {
-                let each = remaining / 2;
-                escrow::require_rent_exempt_after(ctx.accounts.white_authority.as_ref(), each)?;
-                escrow::require_rent_exempt_after(ctx.accounts.black_authority.as_ref(), each)?;
+                // `remaining / 2` alone drops the odd lamport when `remaining`
+                // is odd — that lamport then sits in escrow_pda below its
+                // rent-exempt minimum, which the runtime unconditionally
+                // rejects (`InsufficientFundsForRent`), hard-blocking
+                // finalize forever. split_draw_remaining always accounts for
+                // every lamport.
+                let (white_share, black_share) = split_draw_remaining(remaining);
+                escrow::require_rent_exempt_after(
+                    ctx.accounts.white_authority.as_ref(),
+                    white_share,
+                )?;
+                escrow::require_rent_exempt_after(
+                    ctx.accounts.black_authority.as_ref(),
+                    black_share,
+                )?;
                 escrow::pay_from_game_escrow(
                     sp,
                     escrow,
                     ctx.accounts.white_authority.as_ref(),
-                    each,
+                    white_share,
                     game_id,
                     bump,
                 )?;
@@ -123,7 +140,7 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
                     sp,
                     escrow,
                     ctx.accounts.black_authority.as_ref(),
-                    each,
+                    black_share,
                     game_id,
                     bump,
                 )?;
@@ -277,4 +294,43 @@ fn update_profiles(
     }
 
     Ok(())
+}
+
+/// Splits a draw's remaining escrow pot between both players without
+/// dropping a lamport: `remaining / 2` alone loses the odd lamport when
+/// `remaining` is odd, leaving it stranded in escrow below the rent-exempt
+/// minimum — which the runtime unconditionally rejects, blocking
+/// `finalize_game` forever for that game.
+fn split_draw_remaining(remaining: u64) -> (u64, u64) {
+    let white_share = remaining / 2;
+    let black_share = remaining - white_share;
+    (white_share, black_share)
+}
+
+#[cfg(test)]
+mod split_draw_remaining_tests {
+    use super::split_draw_remaining;
+
+    #[test]
+    fn even_splits_equally() {
+        assert_eq!(split_draw_remaining(2_000_000), (1_000_000, 1_000_000));
+    }
+
+    #[test]
+    fn odd_accounts_for_every_lamport() {
+        let (white, black) = split_draw_remaining(1_999_999);
+        assert_eq!(white + black, 1_999_999);
+        assert_eq!(white, 999_999);
+        assert_eq!(black, 1_000_000);
+    }
+
+    #[test]
+    fn zero_splits_to_zero() {
+        assert_eq!(split_draw_remaining(0), (0, 0));
+    }
+
+    #[test]
+    fn one_lamport_goes_to_black_not_lost() {
+        assert_eq!(split_draw_remaining(1), (0, 1));
+    }
 }

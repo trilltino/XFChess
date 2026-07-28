@@ -1,6 +1,12 @@
+//! Unused config DTOs (`#![allow(dead_code)]` below is deliberate) — the
+//! bridge's real configuration is read directly from env vars in `main.rs`
+//! and `services::config`, not through `AppConfig`/`WindowConfig`/
+//! `SecurityConfig` here.
+
 #![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 
+/// Unused. See module docs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
   pub backend_url: String,

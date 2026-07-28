@@ -1,3 +1,8 @@
+//! `no_std` re-export layer over `nimzovich_engine`'s on-chain subset, compiled
+//! into the Solana program (behind its `move-validation` feature) to validate
+//! move legality on-chain within compute limits. See the crate README for the
+//! full surface and the `no_std` constraint.
+
 #![no_std]
 
 extern crate alloc;

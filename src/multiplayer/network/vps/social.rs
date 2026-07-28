@@ -12,8 +12,11 @@ fn urlenc(s: &str) -> String {
         .collect()
 }
 
-// ── Types mirroring the backend ──────────────────────────────────────────────
+// ── Types mirroring the backend's SQLite/node-ID-anchored social graph
+// (backend/src/signing/social/friends.rs, presence.rs) — not the on-chain
+// wallet-based Friendship PDA. ─────────────────────────────────────────────
 
+/// Mirrors the backend's `FriendRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FriendRequest {
     pub id: String,
@@ -27,6 +30,7 @@ pub struct FriendRequest {
     pub created_at: String,
 }
 
+/// Mirrors the backend's `Contact`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Contact {
     pub id: String,
@@ -40,6 +44,7 @@ pub struct Contact {
     pub created_at: String,
 }
 
+/// Mirrors the backend's `Presence`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Presence {
     pub node_id: String,
@@ -50,6 +55,7 @@ pub struct Presence {
     pub updated_at: String,
 }
 
+/// A pending lobby invite from another player, as returned by `poll_social`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LobbyInvite {
     pub game_id: String,
@@ -58,6 +64,8 @@ pub struct LobbyInvite {
     pub received_at: String,
 }
 
+/// Response from `poll_social`: new invites since `next_index`, plus the
+/// cursor to pass on the next poll.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SocialPollResponse {
     pub invites: Vec<LobbyInvite>,
@@ -66,6 +74,7 @@ pub struct SocialPollResponse {
 
 // ── API calls ────────────────────────────────────────────────────────────────
 
+/// `POST /friends/requests`.
 pub fn send_friend_request(
     from_node_id: &str,
     from_pubkey: Option<&str>,
@@ -94,6 +103,7 @@ pub fn send_friend_request(
         .map_err(|e| format!("parse: {e}"))
 }
 
+/// `GET /friends/requests`.
 pub fn get_pending_requests(
     node_id: &str,
     pubkey: Option<&str>,
@@ -110,6 +120,7 @@ pub fn get_pending_requests(
         .map_err(|e| format!("parse: {e}"))
 }
 
+/// `PUT /friends/requests/{request_id}` — accept or reject.
 pub fn respond_friend_request(
     request_id: &str,
     accept: bool,
@@ -130,6 +141,7 @@ pub fn respond_friend_request(
     Ok(())
 }
 
+/// `GET /friends`.
 pub fn get_contacts(node_id: &str, pubkey: Option<&str>) -> Result<Vec<Contact>, String> {
     let mut qs = format!("?node_id={}", urlenc(node_id));
     if let Some(pk) = pubkey {
@@ -143,6 +155,7 @@ pub fn get_contacts(node_id: &str, pubkey: Option<&str>) -> Result<Vec<Contact>,
         .map_err(|e| format!("parse: {e}"))
 }
 
+/// `DELETE /friends/{contact_node_id}`.
 pub fn remove_contact(owner_node_id: &str, contact_node_id: &str) -> Result<(), String> {
     let resp = client()?
         .delete(format!(
@@ -159,6 +172,7 @@ pub fn remove_contact(owner_node_id: &str, contact_node_id: &str) -> Result<(), 
     Ok(())
 }
 
+/// `PUT /presence` — reports this node's current status.
 pub fn update_presence(p: &Presence) -> Result<(), String> {
     let resp = client()?
         .put(format!("{}/presence", vps_base()))
@@ -184,6 +198,7 @@ pub fn get_online() -> Result<Vec<Presence>, String> {
         .map_err(|e| format!("parse: {e}"))
 }
 
+/// `POST /friends/invite`.
 pub fn push_lobby_invite(
     game_id: &str,
     from_node_id: &str,
@@ -207,6 +222,7 @@ pub fn push_lobby_invite(
     Ok(())
 }
 
+/// `GET /social/poll` — new lobby invites since `since_index`.
 pub fn poll_social(node_id: &str, since_index: usize) -> Result<SocialPollResponse, String> {
     let resp = client()?
         .get(format!(

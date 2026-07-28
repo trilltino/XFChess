@@ -397,3 +397,26 @@ pub fn p2p_leave_game(game_id: String, node_id: &str) -> Result<(), String> {
 
     Ok(())
 }
+
+/// Same as [`p2p_leave_game`] but with a short (2s) timeout instead of the
+/// shared client's 120s default. Used from the app-exit cleanup hook, where
+/// we're trying to notify the relay before the process actually terminates —
+/// a slow/unreachable backend must not hang shutdown for two minutes.
+pub fn p2p_leave_game_fast(game_id: String, node_id: &str) -> Result<(), String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| format!("vps p2p_leave (fast) client build: {e}"))?;
+
+    let resp = client
+        .post(format!("{}/p2p/leave", vps_base()))
+        .json(&P2PLeaveReq { game_id, node_id })
+        .send()
+        .map_err(|e| format!("vps p2p_leave (fast): {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("vps p2p_leave (fast): HTTP {}", resp.status()));
+    }
+
+    Ok(())
+}

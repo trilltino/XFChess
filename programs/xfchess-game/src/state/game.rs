@@ -97,6 +97,9 @@ pub enum MatchType {
 }
 
 impl Game {
+    /// Derives the finer-grained `GamePhase` from `(status, is_delegated)`.
+    /// Fails on combinations that shouldn't be reachable (e.g. delegated
+    /// while `WaitingForOpponent`) — used by `lifecycle::guards::require_phase`.
     pub fn phase(&self) -> Result<GamePhase> {
         match (self.status, self.is_delegated) {
             (GameStatus::WaitingForOpponent, false) => Ok(GamePhase::WaitingBase),
@@ -115,6 +118,26 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pins the byte offset of `wager_amount` within the Borsh-serialized
+    /// account (excluding the 8-byte Anchor discriminator, which callers must
+    /// add themselves). `src/multiplayer/solana/lobby.rs` on the client hand-
+    /// parses this offset instead of depending on this crate — if this test
+    /// ever fails, that client-side offset needs to move too.
+    #[test]
+    fn wager_amount_offset_is_212() {
+        let mut g = game(GameStatus::WaitingForOpponent, false);
+        g.wager_amount = 0;
+        let bytes = borsh::to_vec(&g).unwrap();
+        g.wager_amount = 0x1122334455667788;
+        let bytes2 = borsh::to_vec(&g).unwrap();
+        let diff_pos = bytes
+            .iter()
+            .zip(bytes2.iter())
+            .position(|(a, b)| a != b)
+            .unwrap();
+        assert_eq!(diff_pos, 212);
+    }
 
     fn game(status: GameStatus, is_delegated: bool) -> Game {
         Game {

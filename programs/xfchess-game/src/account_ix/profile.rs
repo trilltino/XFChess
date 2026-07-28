@@ -9,6 +9,12 @@ use anchor_lang::solana_program::system_instruction;
 
 use anchor_lang::Discriminator;
 
+/// Creates a player's profile PDA on first use, or re-initializes an existing
+/// one (legacy accounts get reallocated to the current `PlayerProfile` size).
+/// Also enforces username uniqueness via `UsernameRecord` and the 18+ age
+/// gate. `player_profile` is untyped `AccountInfo` rather than a typed
+/// `Account` because the handler must support both the create and
+/// re-initialize paths under one instruction.
 #[derive(Accounts)]
 #[instruction(username: String, country: String, date_of_birth: i64)]
 pub struct InitProfile<'info> {
@@ -34,6 +40,10 @@ pub struct InitProfile<'info> {
 /// Seconds in 18 years (18 * 365.25 days).
 const EIGHTEEN_YEARS_SECS: i64 = 567_648_000;
 
+/// Creates or re-initializes the caller's profile PDA, validates the
+/// username and 18+ age gate, and claims/verifies the `UsernameRecord` for
+/// the chosen username. See the `InitProfile` accounts struct for why the
+/// profile account is handled manually instead of via Anchor's `init`.
 pub fn handler(
     ctx: Context<InitProfile>,
     username: String,
@@ -147,6 +157,8 @@ pub fn handler(
     Ok(())
 }
 
+/// Marks a player's profile as KYC-verified. Restricted to the configured
+/// `kyc_authority` (the VPS master key), not the player themselves.
 #[derive(Accounts)]
 pub struct VerifyProfile<'info> {
     #[account(
@@ -162,6 +174,7 @@ pub struct VerifyProfile<'info> {
     pub player: AccountInfo<'info>,
 }
 
+/// Sets `is_verified = true` on the target player's profile.
 pub fn verify_handler(ctx: Context<VerifyProfile>) -> Result<()> {
     let profile = &mut ctx.accounts.player_profile;
     profile.is_verified = true;

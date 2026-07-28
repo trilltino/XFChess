@@ -3,6 +3,9 @@
 
 use anchor_lang::prelude::*;
 
+/// One bracket slot in a single-elimination tournament (seed:
+/// `[tournament_id, match_index]` via `tournament_ix`). `player_black` is
+/// `None` until the previous round's winner advances into this slot.
 #[account]
 #[derive(InitSpace)]
 pub struct TournamentMatch {
@@ -11,11 +14,15 @@ pub struct TournamentMatch {
     pub match_index: u16,
     /// Round number (0 = first round, 1 = second round, etc.).
     pub round: u8,
+    /// White player; `None` until seeded or advanced into this slot.
     pub player_white: Option<Pubkey>,
+    /// Black player; `None` until seeded or advanced into this slot.
     pub player_black: Option<Pubkey>,
+    /// Set once the match completes.
     pub winner: Option<Pubkey>,
     /// On-chain Game PDA for this match (set when the match is started).
     pub game_pda: Option<Pubkey>,
+    /// The `Game` account's `game_id`, mirroring `game_pda`.
     pub game_id: Option<u64>,
     pub status: MatchStatus,
     /// Index of the next match the winner advances to (None for final).
@@ -27,6 +34,7 @@ pub struct TournamentMatch {
     pub bump: u8,
 }
 
+/// Lifecycle of one bracket match.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum MatchStatus {
     Pending,   // Players assigned, game not yet started

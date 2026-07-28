@@ -6,6 +6,8 @@ use anchor_lang::prelude::*;
 
 // ─── Fee Vault Instructions ───────────────────────────────────────────────────
 
+/// Creates the single, program-wide `PlatformFeeVault` PDA that accumulates
+/// platform fees collected from wagered games.
 #[derive(Accounts)]
 pub struct InitializeFeeVault<'info> {
     #[account(mut)]
@@ -21,6 +23,8 @@ pub struct InitializeFeeVault<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Sets `host_wallet` as the fee vault's payout destination and applies the
+/// default auto-claim threshold/interval.
 pub fn handler_initialize_fee_vault(
     ctx: Context<InitializeFeeVault>,
     host_wallet: Pubkey,
@@ -36,6 +40,9 @@ pub fn handler_initialize_fee_vault(
     Ok(())
 }
 
+/// Deposits a platform fee into the vault. Restricted to the VPS backend
+/// authority — this is called by the backend when settling a wagered game,
+/// not directly by players.
 #[derive(Accounts)]
 pub struct CollectFee<'info> {
     /// VPS backend authority — the only signer allowed to deposit into the fee vault.
@@ -50,6 +57,8 @@ pub struct CollectFee<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Transfers `amount` from the VPS authority into the fee vault and adds it
+/// to `total_accumulated`.
 pub fn handler_collect_fee(ctx: Context<CollectFee>, amount: u64) -> Result<()> {
     // Transfer fee from payer to vault PDA
     anchor_lang::system_program::transfer(
@@ -71,6 +80,9 @@ pub fn handler_collect_fee(ctx: Context<CollectFee>, amount: u64) -> Result<()> 
     Ok(())
 }
 
+/// Sweeps accumulated fees to `host_wallet`. Permissionless — any signer may
+/// trigger a claim, but funds only ever move to the vault's configured host
+/// wallet, and only once `should_claim` (threshold/interval) is satisfied.
 #[derive(Accounts)]
 pub struct ClaimFees<'info> {
     /// Anyone can trigger claim — permissionless
@@ -88,6 +100,9 @@ pub struct ClaimFees<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Pays out the vault's full accumulated balance to `host_wallet` and resets
+/// `total_accumulated` to 0. Moves lamports directly (not via a system-program
+/// CPI) since the vault is program-owned. Returns the amount claimed.
 pub fn handler_claim_fees(ctx: Context<ClaimFees>) -> Result<u64> {
     let now = Clock::get()?.unix_timestamp;
 
@@ -130,6 +145,9 @@ pub fn handler_claim_fees(ctx: Context<ClaimFees>) -> Result<u64> {
 
 // ─── Player Session Instructions ──────────────────────────────────────────────
 
+/// Creates a `PlayerSession` PDA: a time-bounded (24h default) session key
+/// that can sign game transactions without a wallet popup. Distinct from the
+/// longer-lived, multi-game session delegation in `global_session_ix.rs`.
 #[derive(Accounts)]
 #[instruction(session_key: Pubkey)]
 pub struct CreateSession<'info> {
@@ -146,6 +164,8 @@ pub struct CreateSession<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Initializes the session with the given (or default) duration, spending
+/// limit, and max-wager cap, and grants create/join/claim permissions.
 pub fn handler_create_session(
     ctx: Context<CreateSession>,
     session_key: Pubkey,
@@ -170,6 +190,7 @@ pub fn handler_create_session(
     Ok(())
 }
 
+/// Closes a `PlayerSession` PDA and refunds its rent to the player.
 #[derive(Accounts)]
 pub struct RevokeSession<'info> {
     #[account(mut)]
@@ -184,11 +205,15 @@ pub struct RevokeSession<'info> {
     pub session: Account<'info, PlayerSession>,
 }
 
+/// Marks the session inactive; the account then closes per the `close = player`
+/// constraint on `RevokeSession`, returning rent to the player.
 pub fn handler_revoke_session(ctx: Context<RevokeSession>) -> Result<()> {
     ctx.accounts.session.is_active = false;
     Ok(())
 }
 
+/// Updates a player's lifetime win/loss/draw/wager stats after a game.
+/// Restricted to the VPS backend authority.
 #[derive(Accounts)]
 pub struct UpdateElo<'info> {
     /// VPS backend authority — only this key may update ELO standings.
@@ -198,6 +223,10 @@ pub struct UpdateElo<'info> {
     pub profile: Account<'info, crate::state::PlayerProfile>,
 }
 
+/// Updates lifetime stats (wins/losses/draws/streaks/games_played) and, for
+/// ranked games, wager totals. Does not touch `elo_rating` itself — that field
+/// is updated exclusively by `finalize_game` (K=32). `_opponent_rating` and
+/// `_opponent_rd` are unused here and kept only for ABI compatibility.
 pub fn handler_update_elo(
     ctx: Context<UpdateElo>,
     _opponent_rating: u32,

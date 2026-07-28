@@ -4,6 +4,8 @@ use crate::errors::XfchessGameError;
 use crate::state::{Game, SessionDelegation};
 use anchor_lang::prelude::*;
 
+/// Creates a per-game `SessionDelegation` for the calling player (must be
+/// white or black), valid for 2 hours with a max batch length of 10 moves.
 pub fn handler_authorize_session_key(
     ctx: Context<AuthorizeSessionCtx>,
     game_id: u64,
@@ -31,6 +33,8 @@ pub fn handler_authorize_session_key(
     Ok(())
 }
 
+/// Disables the caller's session delegation immediately (`enabled = false`,
+/// `expires_at = now`).
 pub fn handler_revoke_session_key(ctx: Context<RevokeSessionCtx>, _game_id: u64) -> Result<()> {
     let session_delegation = &mut ctx.accounts.session_delegation;
     let player = &ctx.accounts.player;
@@ -48,6 +52,9 @@ pub fn handler_revoke_session_key(ctx: Context<RevokeSessionCtx>, _game_id: u64)
     Ok(())
 }
 
+/// Accounts for creating a per-game session-key delegation. Distinct from
+/// both `account_ix::CreateSession` (a standalone, time-bounded key not tied
+/// to one game) and `global_session_ix` (multi-game delegation).
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct AuthorizeSessionCtx<'info> {
@@ -73,6 +80,8 @@ pub struct AuthorizeSessionCtx<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Accounts for revoking a per-game session-key delegation. Only the
+/// delegation's own `player` may revoke it.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct RevokeSessionCtx<'info> {

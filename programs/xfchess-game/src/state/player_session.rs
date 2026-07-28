@@ -20,10 +20,12 @@ pub struct PlayerSession {
     pub total_spent: u64,
     /// Max lamports per individual game wager.
     pub max_wager: u64,
+    /// Permission flags, independently revocable without disabling the whole session.
     pub can_create_games: bool,
     pub can_join_games: bool,
     pub can_claim_prizes: bool,
     pub games_played: u32,
+    /// Set false by `account_ix::handler_revoke_session`; the account then closes.
     pub is_active: bool,
     pub bump: u8,
 }
@@ -34,10 +36,13 @@ impl PlayerSession {
     pub const DEFAULT_SPENDING_LIMIT: u64 = 500_000_000; // 0.5 SOL
     pub const MAX_WAGER_DEFAULT: u64 = 10_000_000_000; // 10 SOL
 
+    /// True if the session is active and not yet expired.
     pub fn is_valid(&self, now: i64) -> bool {
         self.is_active && now < self.expires_at
     }
 
+    /// True if `amount` is within the per-wager cap and won't push
+    /// cumulative spending over the session's total limit.
     pub fn has_budget(&self, amount: u64) -> bool {
         amount <= self.max_wager
             && self

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import TokenAuth from "./components/TokenAuth";
 import Layout from "./components/common/Layout";
+import TitleBar from "./components/common/TitleBar";
 import TournamentList from "./components/tournaments/TournamentList";
 import CreateTournament from "./components/tournaments/CreateTournament";
 import TournamentDetail from "./components/tournaments/TournamentDetail";
@@ -25,21 +26,27 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div style={{
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        minHeight: "100vh",
-        backgroundColor: "#1a1a1a",
-        color: "#999",
-      }}>
-        Loading...
-      </div>
+      <AppShell>
+        <div style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100%",
+          backgroundColor: "var(--bg)",
+          color: "var(--text-dim)",
+        }}>
+          Loading...
+        </div>
+      </AppShell>
     );
   }
 
   if (!authState.authenticated) {
-    return <TokenAuth />;
+    return (
+      <AppShell>
+        <TokenAuth />
+      </AppShell>
+    );
   }
 
   const handleTournamentSelect = (tournamentId: number) => {
@@ -106,9 +113,20 @@ function AppContent() {
   };
 
   return (
-    <Layout currentPage={currentPage} onPageChange={(p) => setCurrentPage(p)}>
-      {renderPage()}
-    </Layout>
+    <AppShell>
+      <Layout currentPage={currentPage} onPageChange={(p) => setCurrentPage(p)}>
+        {renderPage()}
+      </Layout>
+    </AppShell>
+  );
+}
+
+function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <TitleBar />
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>{children}</div>
+    </div>
   );
 }
 

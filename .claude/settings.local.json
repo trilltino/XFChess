@@ -13,7 +13,9 @@
       "WebSearch",
       "Bash(cargo tree *)",
       "Bash(xargs wc -l)",
-      "Bash(npm outdated *)"
+      "Bash(npm outdated *)",
+      "Bash(tasklist //FI \"IMAGENAME eq xfchess.exe\")",
+      "Bash(cargo clippy *)"
     ]
   }
 }

@@ -126,7 +126,7 @@ function SignupForm({
         .then(({ taken }) => {
           setUsernameError(taken ? 'Username already taken' : null);
         })
-        .catch(() => { /* network error � don't block UX */ })
+        .catch(() => { /* network error — don't block UX */ })
         .finally(() => setCheckingUsername(false));
     }, 500);
     return () => clearTimeout(timer);
@@ -173,7 +173,7 @@ function SignupForm({
         {!usernameError && newUsername && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.8rem', color: '#ffffff', justifyContent: 'center' }}>
             {checkingUsername
-              ? <><Loader2 size={14} className="spinner" /> Checking availability�</>
+              ? <><Loader2 size={14} className="spinner" /> Checking availability…</>
               : <><CheckCircle2 size={14} /> Username available</>
             }
           </div>
@@ -403,20 +403,20 @@ export function ProfileViewer() {
           username: newUsername,
           email: email || null,
         });
-        // Fresh registration � store token and username
+        // Fresh registration — store token and username
         token = auth.token;
         localStorage.setItem('xfchess_token', auth.token);
         localStorage.setItem('xfchess_username', auth.username);
         localStorage.setItem('xfchess_wallet', wallet.publicKey.toBase58());
       } catch (regErr: any) {
-        // 409 = wallet already registered � existing token is still valid
+        // 409 = wallet already registered — existing token is still valid
         if (!regErr.message?.includes('409') && !regErr.message?.includes('already')) {
           console.warn('Backend registration call failed:', regErr);
         }
       }
 
-      // 4. Sync on-chain username ? SQLite (canonical source of truth).
-      // Runs for both new and existing wallets � idempotent.
+      // 4. Sync on-chain username -> SQLite (canonical source of truth).
+      // Runs for both new and existing wallets — idempotent.
       if (token) {
         try {
           const { username: synced } = await syncProfile(token);
@@ -538,7 +538,7 @@ export function ProfileViewer() {
                         onKeyDown={e => { if (e.key === 'Enter') handleAddEmail(); }}
                       />
                       <button className="btn-small" onClick={handleAddEmail} disabled={emailAddLoading}>
-                        {emailAddLoading ? '�' : 'Save'}
+                        {emailAddLoading ? '…' : 'Save'}
                       </button>
                       <button className="btn-small" style={{ background: 'transparent', opacity: 0.6 }} onClick={() => { setEmailAddOpen(false); setEmailAddError(null); }}></button>
                       {emailAddError && <span style={{ color: '#ff4444', fontSize: 11 }}>{emailAddError}</span>}

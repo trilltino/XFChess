@@ -11,15 +11,29 @@ fn main() {
 
     // Check wallet mode (Tauri vs standalone)
     let wallet_mode = std::env::var("XFCHESS_WALLET_MODE").unwrap_or_default() == "tauri";
-    if !wallet_mode {
-        println!(
-            " XFChess running in standalone mode — backend: {}",
-            xfchess::multiplayer::network::vps::vps_base()
-        );
-        println!("   (override with SIGNING_SERVICE_URL or BACKEND_URL env vars)");
-    } else {
+    if wallet_mode {
         println!(" XFChess running in Tauri mode — using system-provided signing server.");
+    } else {
+        println!(" XFChess running in standalone mode.");
     }
+    // Always print resolved config, regardless of wallet mode — two instances
+    // silently pointed at different backends (a leftover BACKEND_URL/
+    // SIGNING_SERVICE_URL from an earlier dev session in the same terminal)
+    // used to be undetectable short of curling /health from both. This is
+    // the fastest way to rule that class of bug in or out.
+    #[cfg(feature = "solana")]
+    println!(
+        " [CONFIG] backend={} devnet_rpc={} program_id={}",
+        xfchess::multiplayer::network::vps::vps_base(),
+        *xfchess::multiplayer::solana::integration::state::DEVNET_RPC_URL,
+        xfchess::solana::instructions::PROGRAM_ID,
+    );
+    #[cfg(not(feature = "solana"))]
+    println!(
+        " [CONFIG] backend={}",
+        xfchess::multiplayer::network::vps::vps_base()
+    );
+    println!("   (override backend with SIGNING_SERVICE_URL or BACKEND_URL env vars)");
 
     // Parse Game configuration from CLI + environment variables
     let mut game_config = GameConfig::parse();

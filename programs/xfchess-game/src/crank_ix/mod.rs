@@ -5,8 +5,10 @@
 //! - Time control enforcement (auto-flag timeout)
 //! - Game inactivity cleanup
 
+pub mod cancel_time_check;
 pub mod crank_time_check;
 pub mod schedule_time_check;
 
+pub use cancel_time_check::*;
 pub use crank_time_check::*;
 pub use schedule_time_check::*;

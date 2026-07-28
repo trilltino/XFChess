@@ -1,3 +1,7 @@
+//! Color-preference rules for Swiss pairing: tracks each player's white/black
+//! balance and enforces the FIDE 3-in-a-row and balance constraints when
+//! assigning colors for a pairing.
+
 use crate::{Color, SwissPlayer};
 
 /// Calculate color balance for a player

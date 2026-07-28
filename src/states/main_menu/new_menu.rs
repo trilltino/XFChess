@@ -70,7 +70,6 @@ pub enum NewMenuPanel {
     PlayOnline,
     Puzzles,
     Tournaments,
-    SolanaMultiplayer,
     SolanaConnect,
     DirectConnection,
     HowToPlay,
@@ -85,7 +84,6 @@ impl NewMenuPanel {
             Self::PlayOnline => 1,
             Self::Puzzles => 2,
             Self::Tournaments => 3,
-            Self::SolanaMultiplayer => 4,
             Self::SolanaConnect => 5,
             Self::DirectConnection => 6,
             Self::HowToPlay => 7,
@@ -457,14 +455,14 @@ pub fn menu_escape_system(
 /// Render the bottom-left button list.
 /// Modals (AI setup, controls popup) are rendered by the caller in `main_menu.rs`.
 pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
-    // Corner logos whenever a wallet is connected (any panel)
-    if cx.player_identity.username.is_some() || *cx.new_menu_panel == NewMenuPanel::SolanaConnect {
-        render_corner_logos(ctx, cx);
+    // MagicBlock + Solana partner badges while the multiplayer connect panel is open
+    if *cx.new_menu_panel == NewMenuPanel::SolanaConnect {
+        render_partner_logos(ctx, cx);
     }
 
     render_title_logo(ctx, cx);
     render_hint_bar(ctx);
-    render_board_caption(ctx);
+    render_board_caption(ctx, cx);
 
     // ── Per-panel fade-in ────────────────────────────────────────────────────
     // Detect panel changes via egui temp storage; when the panel changes,
@@ -519,7 +517,12 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                             .clicked()
                         {
                             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
-                            std::process::exit(0);
+                            // Writing AppExit (rather than std::process::exit) lets
+                            // Bevy run its normal shutdown pass first, giving
+                            // cleanup_p2p_lobby_on_exit a chance to tell the relay
+                            // we're leaving any hosted/joined lobby before the
+                            // process actually terminates.
+                            cx.app_exit.write(AppExit::Success);
                         }
                         ui.add_space(12.0);
                         if ui
@@ -562,7 +565,6 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                 NewMenuPanel::HowToPlay => render_how_to_play_panel(ui, cx),
                 NewMenuPanel::Settings => render_settings_panel(ui, cx),
                 NewMenuPanel::Profile => render_profile_panel(ui, cx),
-                NewMenuPanel::SolanaMultiplayer => {}
             }
 
             ui.set_opacity(1.0);
@@ -639,19 +641,47 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         });
 }
 
-/// Caption under the ambient board naming the game it replays
-/// (Sämisch vs. Nimzowitsch, Copenhagen 1923 — the Immortal Zugzwang Game).
+/// Renders one `‹`/`›` nav glyph, returning its click response. Mirrors
+/// `render_title_logo`'s interact/cursor pattern above.
+fn caption_nav_arrow(ui: &mut egui::Ui, glyph: &str) -> egui::Response {
+    let resp = ui.add(
+        egui::Label::new(
+            egui::RichText::new(glyph)
+                .size(15.0)
+                .color(egui::Color32::from_rgba_unmultiplied(216, 202, 168, 140)),
+        )
+        .sense(egui::Sense::click()),
+    );
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
+}
+
+/// Caption under the ambient board naming the game it currently replays, with
+/// `‹`/`›` arrows that step the carousel forward/backward through
+/// `famous_games::FAMOUS_GAMES` (reusing the board's own end-of-game
+/// crossfade — see `board_animation::request_game_nav`).
 /// The board is horizontally centred on screen, so bottom-center sits under it.
-pub(super) fn render_board_caption(ctx: &egui::Context) {
+pub(super) fn render_board_caption(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
+    let caption = super::famous_games::FAMOUS_GAMES[cx.board_animator.game_index].caption;
     egui::Area::new("board_caption".into())
         .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0))
         .show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new("Sämisch vs. Nimzowitsch, Copenhagen 1923")
-                    .size(13.0)
-                    .italics()
-                    .color(egui::Color32::from_rgba_unmultiplied(216, 202, 168, 185)),
-            );
+            ui.horizontal(|ui| {
+                if caption_nav_arrow(ui, "‹").clicked() {
+                    super::board_animation::request_game_nav(&mut cx.board_animator, -1);
+                }
+                ui.label(
+                    egui::RichText::new(caption)
+                        .size(13.0)
+                        .italics()
+                        .color(egui::Color32::from_rgba_unmultiplied(216, 202, 168, 185)),
+                );
+                if caption_nav_arrow(ui, "›").clicked() {
+                    super::board_animation::request_game_nav(&mut cx.board_animator, 1);
+                }
+            });
         });
 }
 
@@ -699,35 +729,47 @@ fn render_hint_bar(ctx: &egui::Context) {
         });
 }
 
-/// Small logos pinned above the hint bar — shown whenever a wallet is connected.
-fn render_corner_logos(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
-    super::ensure_solana_logos(ctx, &mut cx.solana_logos);
+/// MagicBlock + Solana partner badges, stacked bottom-left directly above the
+/// now-playing music widget — shown while the multiplayer wallet-connect
+/// panel is open. Fixed size (no hover animation); a short tooltip explains
+/// each badge on hover.
+fn render_partner_logos(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
+    super::ensure_partner_logos(ctx, &mut cx.partner_logos);
 
-    egui::Area::new("corner_logos".into())
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -52.0))
+    egui::Area::new("partner_logos".into())
+        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(18.0, -58.0))
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if let Some(ref tex) = cx.solana_logos.texture1 {
-                    let [w, h] = tex.size();
-                    let dh = 32.0_f32;
-                    let dw = (w as f32 / h as f32) * dh;
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                        tex.id(),
-                        [dw, dh],
-                    )));
-                    ui.add_space(8.0);
+            ui.vertical(|ui| {
+                if let Some(ref tex) = cx.partner_logos.magicblock {
+                    partner_logo_widget(
+                        ui,
+                        tex,
+                        22.0,
+                        "MagicBlock — Ephemeral Rollups powering XFChess's sub-second on-chain moves.",
+                    );
+                    ui.add_space(6.0);
                 }
-                if let Some(ref tex) = cx.solana_logos.texture2 {
-                    let [w, h] = tex.size();
-                    let dh = 32.0_f32;
-                    let dw = (w as f32 / h as f32) * dh;
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                        tex.id(),
-                        [dw, dh],
-                    )));
+                if let Some(ref tex) = cx.partner_logos.solana {
+                    partner_logo_widget(
+                        ui,
+                        tex,
+                        28.0,
+                        "Solana — the blockchain settling XFChess wagers, ratings, and tournaments.",
+                    );
                 }
             });
         });
+}
+
+/// Renders one partner badge at a fixed display height with a short tooltip on hover.
+fn partner_logo_widget(ui: &mut egui::Ui, tex: &egui::TextureHandle, display_h: f32, tooltip: &str) {
+    let [w, h] = tex.size();
+    let dw = (w as f32 / h as f32) * display_h;
+    let resp = ui.add(
+        egui::Image::new(egui::load::SizedTexture::new(tex.id(), [dw, display_h]))
+            .sense(egui::Sense::hover()),
+    );
+    resp.on_hover_text(tooltip);
 }
 
 /// Alpha announcement card shown on the startup (main) menu. Starts docked to
@@ -844,12 +886,11 @@ fn render_welcome_panel(
                     ui.add_space(2.0);
                     // ── Image slot ───────────────────────────────────────────────
                     // Drop announcement screenshots here once their egui textures are
-                    // available (load them into a State resource like `SolanaLogoState`,
-                    // then render with:
+                    // available (load them into a dedicated `Resource`, then render with:
                     //   let [w, h] = tex.size();
                     //   ui.add(egui::Image::new(egui::load::SizedTexture::new(
                     //       tex.id(), [width, width * h as f32 / w as f32])));
-                    // See `render_corner_logos` for the existing texture pattern.
+                    // See `ensure_partner_logos`/`partner_logo_widget` for the pattern.
 
                     ui.add_space(6.0);
                     ui.label(
@@ -1449,10 +1490,22 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                 d.usd_balance = None;
                 d.balance_loaded = false;
             }
+            #[cfg(feature = "solana")]
+            if let Some(wallet) = cx.wallet.as_mut() {
+                wallet.pubkey = None;
+                wallet.keypair = None;
+                wallet.ranked_active = false;
+                wallet.tournament_match_id = None;
+            }
+            #[cfg(feature = "solana")]
+            if let Some(sync) = cx.solana_sync.as_mut() {
+                sync.game_id = None;
+                sync.moves_submitted = 0;
+                sync.wager_amount = 0;
+            }
             *cx.player_identity = crate::states::main_menu::PlayerIdentity::default();
-            *cx.auth_state = Default::default();
             *cx.new_menu_panel = NewMenuPanel::Main;
-            cx.next_state.set(GameState::Auth);
+            // Just disconnect the wallet — stay on the main menu, no login screen.
         }
     }
 }
@@ -1597,6 +1650,10 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                     // create-game form, not a stale WaitingForOpponent/Success
                     // left over from an earlier create attempt this session.
                     lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
+                    // Always start the wager at $0 — don't carry over whatever
+                    // amount was left typed in from a previous visit.
+                    lobby.wager_sol = 0.0;
+                    lobby.wager_amount_input.clear();
                 }
                 // Always open the lobby screen. If the on-chain profile isn't
                 // ready yet, the profile check (profile_check.rs) opens the
@@ -1991,58 +2048,6 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
 }
 
-/// Full-screen Solana splash: pure black background, two logos bottom-right.
-pub fn render_solana_splash(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
-    // Ensure textures are loaded
-    super::ensure_solana_logos(ctx, &mut cx.solana_logos);
-
-    // Black full-screen background
-    egui::CentralPanel::default()
-        .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
-        .show(ctx, |ui| {
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Back")
-                            .size(13.0)
-                            .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
-                    )
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE),
-                )
-                .clicked()
-            {
-                *cx.new_menu_panel = NewMenuPanel::Main;
-            }
-        });
-
-    // Logos anchored to bottom-right via a floating Area
-    egui::Area::new("solana_logos_area".into())
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-24.0, -24.0))
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if let Some(ref tex) = cx.solana_logos.texture1 {
-                    let [w, h] = tex.size();
-                    let dh = 72.0_f32;
-                    let dw = (w as f32 / h as f32) * dh;
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                        tex.id(),
-                        [dw, dh],
-                    )));
-                    ui.add_space(16.0);
-                }
-                if let Some(ref tex) = cx.solana_logos.texture2 {
-                    let [w, h] = tex.size();
-                    let dh = 72.0_f32;
-                    let dw = (w as f32 / h as f32) * dh;
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                        tex.id(),
-                        [dw, dh],
-                    )));
-                }
-            });
-        });
-}
 
 /// Render username + wallet balance in the top-right corner of the main menu.
 /// Clicking the balance section cycles through SOL → USD → GBP.

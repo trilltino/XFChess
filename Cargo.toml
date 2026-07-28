@@ -86,7 +86,7 @@ opt-level = 3
 
 [profile.release]
 opt-level = 3
-# Thin LTO: nearly the runtime perf of fat LTO but 2-4x faster to build — a big
+# Thin LTO: nearly the runtime perf of fat LTO but 2-4x faster to build â€” a big
 # win for the on-VPS backend build and local release iteration.
 lto = "thin"
 codegen-units = 1
@@ -129,7 +129,7 @@ iroh-base = "=1.0.3"
 bevy_egui = "=0.40.1"
 
 webbrowser = "=1.1.0"
-ephemeral-rollups-sdk = { version = "=0.16.2", features = ["anchor"] }
+ephemeral-rollups-sdk = { version = "=0.16.2", features = ["anchor", "instruction"] }
 axum = "=0.8.9"
 tower-http = "=0.7.0"
 xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
@@ -189,12 +189,12 @@ bevy_fixed_node = []
 # XFChess runs multiple cameras, so this is gated until a release with the
 # multi-camera fix is pinned. See src/rendering/effects/sky.rs.
 sky = []
-# Accept unsigned (0x01) P2P gossip messages. DEV/TEST ONLY — the default
+# Accept unsigned (0x01) P2P gossip messages. DEV/TEST ONLY â€” the default
 # build rejects unsigned moves so a peer cannot skip authentication by
 # sending plaintext. See docs/plans/causal-authentication.md (Gap A3).
 allow-unsigned-p2p = []
 # TempleOS tribute board theme (orthographic camera, unlit board, Terry Davis
-# quote). DEV ONLY — compiled out of default builds; enables the main-menu entry.
+# quote). DEV ONLY â€” compiled out of default builds; enables the main-menu entry.
 templeos = []
 solana = [
     "anchor-lang",

@@ -18,6 +18,11 @@ struct RecordMoveReq<'a> {
 }
 
 #[derive(Serialize)]
+struct DelegateGameReq {
+    game_id: u64,
+}
+
+#[derive(Serialize)]
 struct UndelegateGameReq {
     game_id: u64,
 }
@@ -128,6 +133,29 @@ pub fn record_move(
     let resp = response
         .json::<SigResp>()
         .map_err(|e| format!("vps record_move parse: {e}"))?;
+    Ok(resp.sig)
+}
+
+/// Ask the VPS to delegate a game to the Ephemeral Rollup on the caller's
+/// behalf — it already holds the per-game session key set as `game.fee_payer`
+/// during create/join, so this needs no wallet signature at all. For games
+/// created via the newer global-session flow, the client signs delegation
+/// itself locally instead (see `rollup::bridge::spawn_delegation_task`) —
+/// this path is for the original per-game session flow only.
+pub fn vps_delegate_game(game_id: u64) -> Result<String, String> {
+    let response = client()?
+        .post(format!("{}/game/delegate", vps_base()))
+        .json(&DelegateGameReq { game_id })
+        .send()
+        .map_err(|e| format!("vps delegate_game: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("vps delegate_game: HTTP {status} — {body}"));
+    }
+    let resp = response
+        .json::<SigResp>()
+        .map_err(|e| format!("vps delegate_game parse: {e}"))?;
     Ok(resp.sig)
 }
 

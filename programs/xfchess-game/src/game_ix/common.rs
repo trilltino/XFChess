@@ -5,6 +5,8 @@ use crate::errors::GameErrorCode;
 use crate::state::{Game, GameResult, GameStatus, GameType, MatchType};
 use anchor_lang::prelude::*;
 
+/// Fields needed to initialize a new `Game` account, shared by the plain and
+/// session-signed create paths.
 pub struct InitGameArgs {
     pub game_id: u64,
     pub white: Pubkey,
@@ -17,6 +19,10 @@ pub struct InitGameArgs {
     pub tournament_id: Option<u64>,
 }
 
+/// The single shared initializer for a new `Game` account: sets identity,
+/// starting board state, clocks, and bookkeeping fields to their creation-time
+/// values. Called by every create path (`game_ix::create`, `global_create`,
+/// and `tournament_ix::session::session_create_game`).
 pub fn init_game_fields(game: &mut Game, args: InitGameArgs, now: i64, bump: u8) -> Result<()> {
     game.game_id = args.game_id;
     game.white = args.white;
@@ -58,6 +64,7 @@ pub fn init_game_fields(game: &mut Game, args: InitGameArgs, now: i64, bump: u8)
     Ok(())
 }
 
+/// Fails unless `player` is white or black in `game`.
 pub fn require_player(game: &Game, player: Pubkey) -> Result<()> {
     require!(
         player == game.white || player == game.black,
@@ -66,6 +73,7 @@ pub fn require_player(game: &Game, player: Pubkey) -> Result<()> {
     Ok(())
 }
 
+/// Returns the other player's pubkey. Fails if `player` isn't in `game`.
 pub fn opponent_of(game: &Game, player: Pubkey) -> Result<Pubkey> {
     require_player(game, player)?;
     if player == game.white {

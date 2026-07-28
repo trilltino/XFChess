@@ -9,7 +9,6 @@ pub mod spectator_mode;
 pub mod styles;
 pub mod system_params;
 
-pub use account::auth;
 #[cfg(feature = "solana")]
 pub use account::profile_creation;
 #[cfg(feature = "solana")]
@@ -25,7 +24,6 @@ pub use menus::popup;
 pub use menus::stats;
 // pub use menus::inspector;
 
-use auth::AuthUiPlugin;
 use bevy::prelude::*;
 use spectator_mode::SpectatorModePlugin;
 
@@ -33,7 +31,6 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(AuthUiPlugin);
         app.add_plugins(compliance_modal::CompliancePlugin);
         app.add_plugins(popup::PopupPlugin);
         app.add_plugins(stats::StatsPlugin);

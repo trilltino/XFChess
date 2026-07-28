@@ -19,8 +19,100 @@ pub const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 /// Base-layer devnet RPC endpoint.
 pub const BASE_RPC_URL: &str = "https://api.devnet.solana.com";
 
-/// MagicBlock ephemeral rollup devnet endpoint.
-pub const ER_RPC_URL: &str = "https://devnet-eu.magicblock.app";
+/// MagicBlock ephemeral rollup devnet endpoint — the router, not a raw
+/// regional validator URL. A direct regional endpoint (e.g. `devnet-eu.
+/// magicblock.app`) isn't guaranteed to be the specific ER instance a given
+/// account was actually delegated to, which surfaces as "Transaction loads a
+/// writable account that cannot be written" the moment you try to write to
+/// it. The production backend never talks to a regional endpoint directly —
+/// see `backend/src/signing/config.rs`'s `magic_router_rpc_url` (env
+/// `MAGIC_ROUTER_RPC_URL`, this same default), used for every ER RPC call
+/// (`backend/src/signing/routes/main.rs`, `tasks/settlement_worker.rs`).
+pub const ER_RPC_URL: &str = "https://devnet-router.magicblock.app";
+
+/// Fetch a blockhash valid for a transaction touching `accounts`, routed
+/// correctly by the Magic Router.
+///
+/// Plain `getLatestBlockhash` against a router endpoint (as opposed to a
+/// single validator) doesn't work for ER-delegated accounts: the router picks
+/// which shard actually executes a transaction based on the *accounts it
+/// touches*, but a blockhash fetched with no account context can come back
+/// from an arbitrary/default shard — one that never advances the blockhash
+/// the real target shard will check against, so the send later fails with
+/// "Blockhash not found" on every retry, not just a transient one. The router
+/// exposes a dedicated method for this exact problem:
+/// <https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/getBlockhashForAccounts>
+pub fn get_blockhash_for_accounts(
+    rpc: &RpcClient,
+    accounts: &[Pubkey],
+) -> solana_client::client_error::Result<solana_sdk::hash::Hash> {
+    use solana_client::rpc_request::RpcRequest;
+
+    #[derive(serde::Deserialize)]
+    struct BlockhashForAccountsResponse {
+        blockhash: String,
+    }
+
+    let addrs: Vec<String> = accounts.iter().map(|p| p.to_string()).collect();
+    let params = serde_json::json!([addrs]);
+    let resp: BlockhashForAccountsResponse = rpc.send(
+        RpcRequest::Custom {
+            method: "getBlockhashForAccounts",
+        },
+        params,
+    )?;
+    Ok(resp
+        .blockhash
+        .parse()
+        .expect("router returned an invalid blockhash string"))
+}
+
+/// Sends `tx` and polls for confirmation with a short, tight interval instead
+/// of relying on `RpcClient::send_and_confirm_transaction`.
+///
+/// Measured empirically: that SDK method clustered every move's round-trip at
+/// ~800ms regardless of how fast the ER itself processed it. Traced to
+/// `solana-rpc-client` 3.1.12's nonblocking `send_and_confirm_transaction`,
+/// which does `sleep(Duration::from_millis(500))` between each
+/// `get_signature_status` poll — so unless the transaction happens to already
+/// be confirmed on the very first check (it almost never is), you eat a full
+/// extra 500ms tick no matter how fast confirmation actually landed. Polling
+/// every 20ms instead removes that artificial floor; the remaining latency is
+/// real network/ER time, not client-side waiting.
+pub fn fast_send_and_confirm(
+    rpc: &RpcClient,
+    tx: &solana_sdk::transaction::Transaction,
+) -> solana_client::client_error::Result<solana_sdk::signature::Signature> {
+    use solana_client::rpc_request::RpcError;
+
+    let signature = rpc.send_transaction(tx)?;
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(30);
+    let poll_interval = std::time::Duration::from_millis(20);
+
+    loop {
+        let statuses = rpc.get_signature_statuses(&[signature])?;
+        if let Some(Some(status)) = statuses.value.first() {
+            if let Some(err) = &status.err {
+                return Err(RpcError::ForUser(format!(
+                    "transaction {signature} failed: {err}"
+                ))
+                .into());
+            }
+            if status.satisfies_commitment(CommitmentConfig::confirmed()) {
+                return Ok(signature);
+            }
+        }
+        if start.elapsed() > timeout {
+            return Err(RpcError::ForUser(format!(
+                "timed out waiting for {signature} to confirm after {:?}",
+                start.elapsed()
+            ))
+            .into());
+        }
+        std::thread::sleep(poll_interval);
+    }
+}
 
 /// Default compute-unit limit per transaction.
 pub const DEFAULT_CU_LIMIT: u32 = 1_400_000;

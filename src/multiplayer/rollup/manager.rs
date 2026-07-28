@@ -42,6 +42,15 @@ pub struct EphemeralRollupManager {
     pub game_id: u64,
     pub session_keys: Option<(Pubkey, Pubkey)>, // (white_session_key, black_session_key)
     pub is_creator: bool,
+    /// Whether this game was created via `global_create_game`/`global_join_game`
+    /// (as opposed to the original per-game `create_game`/`join_game` +
+    /// `authorize_session_key` flow). Set once at create/join time — must NOT
+    /// be re-derived from the wallet's *current* `global_session_active` flag,
+    /// since that can change (e.g. authorization completing later) independently
+    /// of which flow this specific game actually used. Delegation signing
+    /// depends on getting this right: `game.fee_payer` is a different key
+    /// depending on which flow created the game.
+    pub used_global_session: bool,
 }
 
 impl Default for EphemeralRollupManager {
@@ -66,6 +75,7 @@ impl EphemeralRollupManager {
             game_id,
             session_keys: None,
             is_creator,
+            used_global_session: false,
         }
     }
 

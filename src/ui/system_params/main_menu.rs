@@ -22,7 +22,6 @@ use crate::multiplayer::spectator::SpectateViaLinkEvent;
 use crate::multiplayer::{BraidSubscriptionConfig, NetworkConfig, OnlineNetworkState};
 use crate::states::main_menu::new_menu::{MenuExitConfirm, MenuFocusMode};
 use crate::states::main_menu::{CompetitiveMenuState, PlayerColorChoice};
-use crate::ui::account::auth::AuthState;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
@@ -95,7 +94,6 @@ pub struct MainMenuUIContext<'w, 's> {
         Option<ResMut<'w, crate::multiplayer::solana::tournament::TournamentClientState>>,
     pub tournament_lobby: ResMut<'w, crate::states::tournament_menu::TournamentLobbyState>,
     pub compliance: ResMut<'w, crate::ui::compliance_modal::ComplianceState>,
-    pub auth_state: ResMut<'w, AuthState>,
     pub player_identity: ResMut<'w, crate::states::main_menu::PlayerIdentity>,
     pub brand_logo: ResMut<'w, crate::states::main_menu::BrandLogoState>,
     pub news_banner: ResMut<'w, crate::states::main_menu::NewsBannerState>,
@@ -108,11 +106,16 @@ pub struct MainMenuUIContext<'w, 's> {
     pub active_time_control:
         ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
     pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
-    pub solana_logos: ResMut<'w, crate::states::main_menu::SolanaLogoState>,
+    pub partner_logos: ResMut<'w, crate::states::main_menu::PartnerLogoState>,
     pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,
     pub menu_sounds: Option<Res<'w, MenuSounds>>,
     pub exit_confirm: ResMut<'w, MenuExitConfirm>,
     pub focus_mode: ResMut<'w, MenuFocusMode>,
+    pub board_animator: ResMut<'w, crate::states::main_menu::BoardAnimator>,
     pub spectate_events: Option<MessageWriter<'w, SpectateViaLinkEvent>>,
     pub tokio_runtime: Res<'w, crate::multiplayer::TokioRuntime>,
+    /// Used by the exit-confirmation dialog to request a graceful shutdown
+    /// instead of `std::process::exit`, so cleanup systems (e.g. notifying
+    /// the P2P relay we're leaving a hosted lobby) get a chance to run first.
+    pub app_exit: MessageWriter<'w, AppExit>,
 }

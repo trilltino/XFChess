@@ -59,7 +59,11 @@ fn init_profile_ix(player: &Pubkey, username: &str) -> Instruction {
         date_of_birth: 631_152_000, // 1990-01-01
     }
     .data();
-    Instruction { program_id: xfchess_game::ID, accounts, data }
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data,
+    }
 }
 
 /// This mirrors `build_register_player_ix` in
@@ -67,7 +71,12 @@ fn init_profile_ix(player: &Pubkey, username: &str) -> Instruction {
 /// via Anchor's own generated `to_account_metas` — an independent,
 /// authoritative check that the client's manually-assembled account list
 /// (order + is_writable/is_signer flags) is actually correct.
-fn register_player_ix(tournament_id: u64, player: &Pubkey, host_treasury: &Pubkey, elo: u32) -> Instruction {
+fn register_player_ix(
+    tournament_id: u64,
+    player: &Pubkey,
+    host_treasury: &Pubkey,
+    elo: u32,
+) -> Instruction {
     let program_id = xfchess_game::ID;
     let accounts = xfchess_game::__client_accounts_register_player::RegisterPlayer {
         tournament: tournament_pda(tournament_id),
@@ -83,7 +92,11 @@ fn register_player_ix(tournament_id: u64, player: &Pubkey, host_treasury: &Pubke
     }
     .to_account_metas(None);
     let data = xfchess_game::instruction::RegisterPlayer { tournament_id, elo }.data();
-    Instruction { program_id, accounts, data }
+    Instruction {
+        program_id,
+        accounts,
+        data,
+    }
 }
 
 #[tokio::test]
@@ -99,7 +112,8 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() {
     .expect("keys/vps_authority.json must exist (devnet throwaway key, see project memory)");
 
     // Fund the authority (it pays for every account it creates below).
-    let fund = system_instruction::transfer(&ctx.payer.pubkey(), &authority.pubkey(), 10_000_000_000);
+    let fund =
+        system_instruction::transfer(&ctx.payer.pubkey(), &authority.pubkey(), 10_000_000_000);
     let mut tx = Transaction::new_with_payer(&[fund], Some(&ctx.payer.pubkey()));
     tx.sign(&[&ctx.payer], ctx.last_blockhash);
     ctx.banks_client.process_transaction(tx).await.unwrap();
@@ -109,21 +123,22 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() {
     const PRIZE: u64 = 50_000_000; // 0.05 SOL guaranteed prize
 
     // 1. initialize_tournament (max_players=2 -> single shard tier)
-    let init_accounts = xfchess_game::__client_accounts_initialize_tournament::InitializeTournament {
-        tournament: tournament_pda(tournament_id),
-        usdc_prize_escrow_authority: Pubkey::find_program_address(
-            &[b"t_usdc_prize", &tournament_id.to_le_bytes()],
-            &xfchess_game::ID,
-        )
-        .0,
-        usdc_prize_escrow: None,
-        usdc_mint: None,
-        authority: authority.pubkey(),
-        token_program: anchor_spl::token::ID,
-        associated_token_program: anchor_spl::associated_token::ID,
-        system_program: solana_system_interface::program::ID,
-    }
-    .to_account_metas(None);
+    let init_accounts =
+        xfchess_game::__client_accounts_initialize_tournament::InitializeTournament {
+            tournament: tournament_pda(tournament_id),
+            usdc_prize_escrow_authority: Pubkey::find_program_address(
+                &[b"t_usdc_prize", &tournament_id.to_le_bytes()],
+                &xfchess_game::ID,
+            )
+            .0,
+            usdc_prize_escrow: None,
+            usdc_mint: None,
+            authority: authority.pubkey(),
+            token_program: anchor_spl::token::ID,
+            associated_token_program: anchor_spl::associated_token::ID,
+            system_program: solana_system_interface::program::ID,
+        }
+        .to_account_metas(None);
     let init_data = xfchess_game::instruction::InitializeTournament {
         tournament_id,
         name: "E2E Register Test".to_string(),
@@ -142,7 +157,11 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() {
         increment_seconds: 0,
     }
     .data();
-    let init_ix = Instruction { program_id: xfchess_game::ID, accounts: init_accounts, data: init_data };
+    let init_ix = Instruction {
+        program_id: xfchess_game::ID,
+        accounts: init_accounts,
+        data: init_data,
+    };
 
     // 2. initialize_tournament_escrow
     let escrow_accounts =
@@ -153,21 +172,32 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() {
             system_program: solana_system_interface::program::ID,
         }
         .to_account_metas(None);
-    let escrow_data = xfchess_game::instruction::InitializeTournamentEscrow { tournament_id }.data();
-    let escrow_ix = Instruction { program_id: xfchess_game::ID, accounts: escrow_accounts, data: escrow_data };
+    let escrow_data =
+        xfchess_game::instruction::InitializeTournamentEscrow { tournament_id }.data();
+    let escrow_ix = Instruction {
+        program_id: xfchess_game::ID,
+        accounts: escrow_accounts,
+        data: escrow_data,
+    };
 
     // 3. initialize_shards_small
-    let shards_accounts = xfchess_game::__client_accounts_initialize_shards_small::InitializeShardsSmall {
-        tournament: tournament_pda(tournament_id),
-        tournament_players_shard_0: shard_pda(tournament_id, 0),
-        authority: authority.pubkey(),
-        system_program: solana_system_interface::program::ID,
-    }
-    .to_account_metas(None);
+    let shards_accounts =
+        xfchess_game::__client_accounts_initialize_shards_small::InitializeShardsSmall {
+            tournament: tournament_pda(tournament_id),
+            tournament_players_shard_0: shard_pda(tournament_id, 0),
+            authority: authority.pubkey(),
+            system_program: solana_system_interface::program::ID,
+        }
+        .to_account_metas(None);
     let shards_data = xfchess_game::instruction::InitializeShardsSmall { tournament_id }.data();
-    let shards_ix = Instruction { program_id: xfchess_game::ID, accounts: shards_accounts, data: shards_data };
+    let shards_ix = Instruction {
+        program_id: xfchess_game::ID,
+        accounts: shards_accounts,
+        data: shards_data,
+    };
 
-    let mut tx = Transaction::new_with_payer(&[init_ix, escrow_ix, shards_ix], Some(&authority.pubkey()));
+    let mut tx =
+        Transaction::new_with_payer(&[init_ix, escrow_ix, shards_ix], Some(&authority.pubkey()));
     tx.sign(&[&authority], ctx.last_blockhash);
     ctx.banks_client
         .process_transaction(tx)
@@ -182,21 +212,38 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() {
         system_program: solana_system_interface::program::ID,
     }
     .to_account_metas(None);
-    let fund_prize_data =
-        xfchess_game::instruction::FundSolPrize { tournament_id, amount: PRIZE }.data();
-    let fund_prize_ix =
-        Instruction { program_id: xfchess_game::ID, accounts: fund_prize_accounts, data: fund_prize_data };
+    let fund_prize_data = xfchess_game::instruction::FundSolPrize {
+        tournament_id,
+        amount: PRIZE,
+    }
+    .data();
+    let fund_prize_ix = Instruction {
+        program_id: xfchess_game::ID,
+        accounts: fund_prize_accounts,
+        data: fund_prize_data,
+    };
     let mut tx = Transaction::new_with_payer(&[fund_prize_ix], Some(&authority.pubkey()));
     tx.sign(&[&authority], ctx.last_blockhash);
-    ctx.banks_client.process_transaction(tx).await.expect("fund_sol_prize should succeed");
+    ctx.banks_client
+        .process_transaction(tx)
+        .await
+        .expect("fund_sol_prize should succeed");
 
-    let escrow_before = ctx.banks_client.get_balance(escrow_pda(tournament_id)).await.unwrap();
-    assert!(escrow_before >= PRIZE, "escrow should hold the guaranteed prize before registration");
+    let escrow_before = ctx
+        .banks_client
+        .get_balance(escrow_pda(tournament_id))
+        .await
+        .unwrap();
+    assert!(
+        escrow_before >= PRIZE,
+        "escrow should hold the guaranteed prize before registration"
+    );
 
     // 5. Set up a real player: fund wallet + init_profile (real instruction,
     // same as the sponsored-profile test).
     let player = Keypair::new();
-    let fund_player = system_instruction::transfer(&ctx.payer.pubkey(), &player.pubkey(), 5_000_000_000);
+    let fund_player =
+        system_instruction::transfer(&ctx.payer.pubkey(), &player.pubkey(), 5_000_000_000);
     let mut tx = Transaction::new_with_payer(&[fund_player], Some(&ctx.payer.pubkey()));
     tx.sign(&[&ctx.payer], ctx.last_blockhash);
     ctx.banks_client.process_transaction(tx).await.unwrap();
@@ -204,12 +251,16 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() {
     let init_profile = init_profile_ix(&player.pubkey(), "e2eregistrant");
     let mut tx = Transaction::new_with_payer(&[init_profile], Some(&player.pubkey()));
     tx.sign(&[&player], ctx.last_blockhash);
-    ctx.banks_client.process_transaction(tx).await.expect("init_profile should succeed");
+    ctx.banks_client
+        .process_transaction(tx)
+        .await
+        .expect("init_profile should succeed");
 
     // 6. THE thing this test exists to prove: register_player, built exactly
     // the way the fixed game client builds it.
     let player_balance_before = ctx.banks_client.get_balance(player.pubkey()).await.unwrap();
-    let register_ix = register_player_ix(tournament_id, &player.pubkey(), &authority.pubkey(), 1200);
+    let register_ix =
+        register_player_ix(tournament_id, &player.pubkey(), &authority.pubkey(), 1200);
     let mut tx = Transaction::new_with_payer(&[register_ix], Some(&player.pubkey()));
     tx.sign(&[&player], ctx.last_blockhash);
     ctx.banks_client
@@ -227,7 +278,11 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() {
     );
 
     // Entry fee really landed in escrow (on top of the guaranteed prize already there).
-    let escrow_after = ctx.banks_client.get_balance(escrow_pda(tournament_id)).await.unwrap();
+    let escrow_after = ctx
+        .banks_client
+        .get_balance(escrow_pda(tournament_id))
+        .await
+        .unwrap();
     assert_eq!(
         escrow_after,
         escrow_before + ENTRY_FEE,
@@ -235,13 +290,23 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() {
     );
 
     // Player really appears in the on-chain shard (not just an off-chain roster).
-    let shard_acc = ctx.banks_client.get_account(shard_pda(tournament_id, 0)).await.unwrap().unwrap();
+    let shard_acc = ctx
+        .banks_client
+        .get_account(shard_pda(tournament_id, 0))
+        .await
+        .unwrap()
+        .unwrap();
     let shard = TournamentPlayersShard::try_deserialize(&mut &shard_acc.data[..]).unwrap();
     assert_eq!(shard.players, vec![player.pubkey()]);
     assert_eq!(shard.player_elos, vec![1200]);
 
     // Tournament's registered-player counter really incremented on-chain.
-    let t_acc = ctx.banks_client.get_account(tournament_pda(tournament_id)).await.unwrap().unwrap();
+    let t_acc = ctx
+        .banks_client
+        .get_account(tournament_pda(tournament_id))
+        .await
+        .unwrap()
+        .unwrap();
     let t = Tournament::try_deserialize(&mut &t_acc.data[..]).unwrap();
     assert_eq!(t.num_registered_players, 1);
 }

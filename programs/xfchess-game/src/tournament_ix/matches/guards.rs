@@ -4,6 +4,8 @@ use crate::errors::GameErrorCode;
 use crate::state::{Game, GameResult, TournamentMatch};
 use anchor_lang::prelude::*;
 
+/// Fails unless `winner`/`loser` are exactly the match's two stored
+/// participants (in either order) and aren't the same player.
 pub fn require_match_participants(
     tournament_match: &TournamentMatch,
     winner: Pubkey,
@@ -23,6 +25,10 @@ pub fn require_match_participants(
     Ok(())
 }
 
+/// Fails unless `game` is the tournament match's recorded game (when set),
+/// `winner` is one of the game's two players, and the game's own result
+/// agrees with `winner` — cross-checks the on-chain `Game` outcome before
+/// recording a tournament match result from it.
 pub fn require_game_matches_tournament_match(
     game: &Game,
     tournament_match: &TournamentMatch,

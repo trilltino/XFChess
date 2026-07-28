@@ -37,8 +37,8 @@ pub use client::{
 };
 pub use game::{
     fetch_move_log, get_active_game_for_wallet, get_broadcast_delay, get_game_moves_for_spectator,
-    record_move, report_blur, vps_fetch_move_nonce, vps_finalize_game, vps_submit_dispute,
-    vps_submit_free_rated_result, vps_undelegate_game,
+    record_move, report_blur, vps_delegate_game, vps_fetch_move_nonce, vps_finalize_game,
+    vps_submit_dispute, vps_submit_free_rated_result, vps_undelegate_game,
 };
 pub use identity::{
     fetch_player_profile, get_user_status, get_user_status_async, link_wallet, register_identity,
@@ -47,14 +47,15 @@ pub use identity::{
 };
 pub use p2p::{
     p2p_accept_join, p2p_announce_game, p2p_announce_game_with_password, p2p_heartbeat,
-    p2p_join_game, p2p_join_game_with_password, p2p_leave_game, p2p_list_games,
-    p2p_list_games_filtered, p2p_poll_messages, p2p_send_message, P2PGameListing, P2PListFilter,
+    p2p_join_game, p2p_join_game_with_password, p2p_leave_game, p2p_leave_game_fast,
+    p2p_list_games, p2p_list_games_filtered, p2p_poll_messages, p2p_send_message, P2PGameListing,
+    P2PListFilter,
 };
 #[cfg(feature = "solana")]
 pub use session::tee_authenticate;
 pub use session::{
-    activate_session, create_session, session_status, sign_and_submit, verify_global_session,
-    SessionStatus,
+    activate_session, create_session, session_status, sign_and_submit, track_global_session_game,
+    verify_global_session, SessionStatus,
 };
 pub use social::{
     fetch_region, get_contacts, get_online, get_pending_requests, poll_social, push_lobby_invite,

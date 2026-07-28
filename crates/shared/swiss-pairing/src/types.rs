@@ -110,7 +110,9 @@ impl SwissPlayer {
 /// Chess colors
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Color {
+    /// White pieces.
     White,
+    /// Black pieces.
     Black,
 }
 
@@ -127,10 +129,13 @@ impl Color {
 /// Float status for pairing across scoregroups
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FloatStatus {
+    /// Paired within the player's own scoregroup; no float.
     #[default]
     None,
-    Up,   // Floated up from lower scoregroup
-    Down, // Floated down from higher scoregroup
+    /// Floated up from a lower scoregroup.
+    Up,
+    /// Floated down from a higher scoregroup.
+    Down,
 }
 
 /// A pairing between two players
@@ -164,9 +169,13 @@ pub struct SwissRound {
 /// Match result
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MatchResult {
+    /// White won on the board.
     WhiteWin,
+    /// Black won on the board.
     BlackWin,
+    /// Game was drawn.
     Draw,
+    /// Player received a bye (no opponent this round); scores as a win.
     Bye,
     /// Black player no-showed; white wins by forfeit
     ForfeitWhiteWin,
@@ -193,6 +202,7 @@ impl MatchResult {
         }
     }
 
+    /// True for the two forfeit variants; false for a played result or a bye.
     pub fn is_forfeit(&self) -> bool {
         matches!(
             self,
@@ -204,25 +214,38 @@ impl MatchResult {
 /// Tournament format
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TournamentFormat {
+    /// Single-elimination bracket.
     SingleElimination,
-    Swiss { rounds: u8 },
+    /// Swiss system over a fixed number of rounds.
+    Swiss {
+        /// Total rounds in the tournament.
+        rounds: u8,
+    },
 }
 
 /// A scoregroup - players with identical scores
 #[derive(Debug, Clone)]
 pub struct Scoregroup {
+    /// The score shared by every player in this group.
     pub score: f64,
+    /// Players at this score, in rank order.
     pub players: Vec<SwissPlayer>,
 }
 
 /// Standings entry for tournament results
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StandingsEntry {
+    /// Same ID space as `SwissPlayer::id`.
     pub player_id: String,
+    /// Total tournament score (wins = 1.0, draws = 0.5).
     pub score: f64,
+    /// Buchholz tiebreak: sum of opponents' scores.
     pub buchholz: f64,
+    /// Sonneborn-Berger tiebreak: sum of defeated opponents' scores plus half of drawn opponents' scores.
     pub sonneborn: f64,
+    /// Player rating, carried through for the display and the rating tiebreak.
     pub rating: u32,
+    /// 1-indexed final placement after tiebreaks are applied.
     pub rank: u16,
 }
 
@@ -238,11 +261,14 @@ pub struct PairingConfig {
 /// A manually forced pairing
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ManualPairing {
+    /// Player assigned white.
     pub white: String,
+    /// Player assigned black.
     pub black: String,
 }
 
 impl PairingConfig {
+    /// True if `a` and `b` appear together in `forbidden`, in either order.
     pub fn is_forbidden(&self, a: &str, b: &str) -> bool {
         self.forbidden.iter().any(|(x, y)| {
             (x.as_str() == a && y.as_str() == b) || (x.as_str() == b && y.as_str() == a)

@@ -147,7 +147,7 @@ const pageStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "center",
   alignItems: "center",
-  minHeight: "100vh",
+  height: "100%",
   backgroundColor: "var(--bg)",
   fontFamily: "'Outfit', sans-serif",
   position: "relative",

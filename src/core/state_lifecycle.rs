@@ -155,7 +155,7 @@ impl Default for StateAuditTimer {
 /// Warns when domain entities leak across the state boundary they're scoped to —
 /// the exact signature of the bugs the state-separation plan targets:
 ///   * game `Piece` entities present while NOT in gameplay (they're
-///     `DespawnOnExit(InGame)`, so they must be gone in MainMenu/Auth), and
+///     `DespawnOnExit(InGame)`, so they must be gone in MainMenu), and
 ///   * menu `MenuBg` entities present while NOT on the main menu.
 ///
 /// A hit means cleanup didn't run for that transition. Throttled to one warn per
@@ -172,8 +172,8 @@ pub fn audit_cross_state_leaks(
     let menu_count = menu_bg.iter().count();
 
     // Pieces are valid during gameplay (InGame/Paused/GameOver); a leak is a
-    // Piece surviving into MainMenu/Auth. MenuBg is valid only on MainMenu.
-    let pieces_leaked = piece_count > 0 && matches!(s, GameState::MainMenu | GameState::Auth);
+    // Piece surviving into MainMenu. MenuBg is valid only on MainMenu.
+    let pieces_leaked = piece_count > 0 && matches!(s, GameState::MainMenu);
     let menu_leaked = menu_count > 0 && !matches!(s, GameState::MainMenu);
 
     if pieces_leaked || menu_leaked {

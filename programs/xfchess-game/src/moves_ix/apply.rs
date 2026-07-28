@@ -10,6 +10,12 @@ use chess_logic_on_chain::nimzovich_engine::{
     parse_uci, validate_and_apply, CompactBoard, MoveOutcome,
 };
 
+/// Applies one move to `game`'s state: enforces turn order and the
+/// nonce/parent-nonce causal chain, validates the move and derives the
+/// resulting board (behind the `move-validation` feature), detects terminal
+/// results (checkmate/stalemate/insufficient material/50-move rule), and
+/// advances move count, turn, and activity timestamps. Pure state mutation —
+/// no account I/O; `moves_ix::record::handler` is the Anchor adapter around it.
 pub fn apply_recorded_move(
     game: &mut Game,
     moving_player: Pubkey,

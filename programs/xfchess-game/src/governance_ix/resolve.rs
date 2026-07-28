@@ -12,6 +12,7 @@ use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// Accounts for the platform dispute authority ruling on a pending dispute.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct ResolveDispute<'info> {
@@ -37,6 +38,8 @@ pub struct ResolveDispute<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Applies the authority's ruling (see module docs for the full payout
+/// breakdown) and settles both the pot and the challenger's bond.
 pub fn handler(
     ctx: Context<ResolveDispute>,
     game_id: u64,

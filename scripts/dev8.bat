@@ -16,11 +16,17 @@ set "DATA_ROOT=%ROOT%\dev8_data"
 :: --- Shared environment (mirrors run_offline.bat) ---
 set BACKEND_URL=http://127.0.0.1:8090
 set SIGNING_SERVICE_URL=http://127.0.0.1:8090
-:: No hardcoded API keys — falls back to the free public devnet RPC (same
-:: fallback as the justfile). Export HELIUS_API_KEY/XFCHESS_RPC_URL yourself
-:: first if you need Helius throughput locally.
-if not defined XFCHESS_RPC_URL set XFCHESS_RPC_URL=https://api.devnet.solana.com
+:: Pick up the dedicated RPC provider (e.g. Triton) from backend\.env so
+:: client instances don't fall back to the heavily rate-limited public devnet
+:: endpoint for their pre-popup blockhash fetch (that rate-limiting is the
+:: main cause of slow/stuck wallet signing popups). Falls back to the free
+:: public devnet RPC if backend\.env has no override or doesn't exist. Export
+:: SOLANA_RPC_URL/XFCHESS_RPC_URL yourself first to take precedence over both.
+if not defined SOLANA_RPC_URL (
+    for /f "tokens=1,* delims==" %%a in ('findstr /b "SOLANA_RPC_URL=" "%ROOT%\backend\.env" 2^>nul') do set "SOLANA_RPC_URL=%%b"
+)
 if not defined SOLANA_RPC_URL set SOLANA_RPC_URL=https://api.devnet.solana.com
+if not defined XFCHESS_RPC_URL set XFCHESS_RPC_URL=%SOLANA_RPC_URL%
 if not defined HELIUS_API_KEY set HELIUS_API_KEY=
 set MAGIC_BLOCK_RPC_URL=https://devnet.magicblock.app
 set ER_RPC_URL=https://devnet.magicblock.app

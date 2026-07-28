@@ -178,6 +178,30 @@ jobs:
         run: cargo audit
         continue-on-error: true
 
+  # Tauri desktop sub-apps (tournament-admin, wallet-ui, viz): each is a
+  # separate npm project with no build/e2e gate in CI at all today. Runs each
+  # one's Vitest unit suite — logic/hooks only (config, sol conversions,
+  # wallet-provider selection, topology graph building), not a full Tauri
+  # shell smoke test (would need the native binary + WebDriver stack).
+  tauri-apps-test:
+    name: Tauri Apps (unit tests)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [tournament-admin, wallet-ui, viz]
+    defaults:
+      run:
+        working-directory: tauri/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install deps
+        run: npm ci
+      - name: Test
+        run: npm run test
+
   # Web frontend: build gate + dependency audit (npm). Build is a hard gate; audit
   # is informative until triaged.
   web-ci:
@@ -198,6 +222,10 @@ jobs:
         continue-on-error: true
       - name: Build
         run: npm run build
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: E2E tests (builds + serves dist/ itself)
+        run: npm run test:e2e
       - name: npm audit (high+)
         run: npm audit --audit-level=high
         continue-on-error: true

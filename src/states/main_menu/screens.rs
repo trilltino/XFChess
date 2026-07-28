@@ -223,6 +223,29 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             }
 
             LobbyStatus::WaitingForOpponent { game_id } => {
+                // Heartbeat: keep the post-create P2P-relay announce (the
+                // thing that makes this game show up in Browse Games) alive
+                // every 25s — well under the backend's 90s stale-lobby TTL.
+                // Without this the listing silently expires while the host
+                // is still very much waiting, with no on-screen indication.
+                let should_heartbeat = lobby
+                    .last_lobby_heartbeat
+                    .map(|t| t.elapsed().as_secs() >= 25)
+                    .unwrap_or(false); // announce just happened, first heartbeat at 25s
+                if should_heartbeat {
+                    if let Some(node_id) = lobby.cached_node_id.clone() {
+                        lobby.last_lobby_heartbeat = Some(std::time::Instant::now());
+                        std::thread::spawn(move || {
+                            if let Err(e) = crate::multiplayer::vps_client::p2p_heartbeat(
+                                game_id.to_string(),
+                                &node_id,
+                            ) {
+                                warn!("[SOLANA_LOBBY] Heartbeat failed for game {}: {}", game_id, e);
+                            }
+                        });
+                    }
+                }
+
                 ui.spinner();
                 ui.label(
                     egui::RichText::new("Waiting for opponent to join...")
@@ -245,6 +268,14 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                             });
                         }
                     });
+                }
+
+                if let Some(ref warning) = lobby.announce_warning {
+                    ui.label(
+                        egui::RichText::new(format!("⚠ {}", warning))
+                            .color(egui::Color32::from_rgb(230, 180, 60))
+                            .size(11.0),
+                    );
                 }
 
                 // Pot preview
@@ -672,32 +703,13 @@ fn render_create_tab(
         0.0
     };
 
-    // Session key status chip
-    if wallet_connected {
-        let now = chrono::Utc::now().timestamp();
-        let (chip_text, chip_color) = match lobby.session_expires_at {
-            Some(exp) if exp > now + 86400 => (
-                format!("Session: Authorized ({}h left)", (exp - now) / 3600),
-                egui::Color32::from_rgb(34, 197, 94),
-            ),
-            Some(exp) if exp > now => {
-                let hours = (exp - now) / 3600;
-                (
-                    format!("Session: Expiring soon (~{}h)", hours),
-                    egui::Color32::from_rgb(251, 191, 36),
-                )
-            }
-            Some(_) => (
-                "Session: Expired".to_string(),
-                egui::Color32::from_rgb(239, 68, 68),
-            ),
-            None => ("Session: Not authorized".to_string(), egui::Color32::GRAY),
-        };
-        ui.horizontal(|ui| {
-            ui.colored_label(chip_color, &chip_text);
-        });
-        Layout::small_space(ui);
-    }
+    ui.label(
+        egui::RichText::new("XFChess | Competitive Chess Server")
+            .color(egui::Color32::LIGHT_GRAY)
+            .size(12.0)
+            .italics(),
+    );
+    Layout::small_space(ui);
 
     // If wallet is not connected force wager to 0 (free game only).
     if !wallet_connected {
@@ -805,31 +817,6 @@ fn render_create_tab(
         );
     }
 
-    let sol_str = format!(" (≈{:.4} SOL)", lobby.wager_sol);
-    let label_text = if lobby.wager_sol == 0.0 && lobby.match_type == 1 {
-        "Free Rated game — ELO tracked, no SOL at stake".to_string()
-    } else if lobby.wager_sol == 0.0 {
-        "Free casual game — no SOL at stake".to_string()
-    } else if let Some(rate) = live_rate {
-        format!(
-            "Escrow: ${:.2}{}  |  Pot: ${:.2}",
-            lobby.wager_sol as f64 * rate,
-            sol_str,
-            lobby.wager_sol as f64 * 2.0 * rate,
-        )
-    } else {
-        format!(
-            "Escrow: {:.4} SOL  |  Pot: {:.4} SOL",
-            lobby.wager_sol,
-            lobby.wager_sol * 2.0
-        )
-    };
-    ui.label(
-        egui::RichText::new(label_text)
-            .color(egui::Color32::LIGHT_GRAY)
-            .size(12.0),
-    );
-
     Layout::small_space(ui);
 
     // Time control selector
@@ -934,6 +921,7 @@ fn render_create_tab(
             }
         } else if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
             let (tx, rx) = tokio::sync::oneshot::channel();
+            lobby.last_attempt_used_global_session = lobby.cached_global_session_keypair_bytes.is_some();
             spawn_create_game(
                 lobby.cached_rpc_url.clone(),
                 wallet_pubkey,
@@ -941,10 +929,12 @@ fn render_create_tab(
                 lobby.match_type,
                 lobby.time_control_base,
                 lobby.time_control_inc,
+                lobby.cached_global_session_keypair_bytes.clone(),
                 tx,
             );
             lobby.tx_rx = Some(rx);
             lobby.status = LobbyStatus::Pending;
+            lobby.announce_warning = None;
             info!(
                 "[SOLANA_LOBBY] Creating game ({} SOL wager)",
                 lobby.wager_sol
@@ -974,10 +964,17 @@ fn render_join_tab(
 
     let game_id_valid = lobby.game_id_input.trim().parse::<u64>().is_ok();
     let looking_up = matches!(lobby.status, LobbyStatus::Pending);
-    let already_fetched = matches!(lobby.status, LobbyStatus::Fetched { .. });
+    let is_idle = matches!(lobby.status, LobbyStatus::Idle);
 
-    // Auto-lookup if pre-filled but not yet looked up
-    if game_id_valid && !looking_up && !already_fetched && !lobby.game_id_input.is_empty() {
+    // Auto-lookup if pre-filled but not yet looked up. Gated on Idle rather
+    // than "not Pending/Fetched" — otherwise this refires on every frame
+    // once a join transaction resolves (Success or Error is neither Pending
+    // nor Fetched), re-triggering a lookup that clobbers that status back to
+    // Pending and then Error (the game is now Active, no longer joinable).
+    // That loop is what makes "Confirm Join" look permanently stuck: the
+    // real join transaction lands once, but its Success status never
+    // survives the next frame's auto-lookup to be shown to the user.
+    if game_id_valid && is_idle && !lobby.game_id_input.is_empty() {
         if let Ok(game_id) = lobby.game_id_input.trim().parse::<u64>() {
             let (tx, rx) = tokio::sync::oneshot::channel();
             spawn_lookup_game(lobby.cached_rpc_url.clone(), game_id, tx);
@@ -1046,10 +1043,31 @@ fn render_join_tab(
                         game_id.to_string(),
                         node_id,
                     ) {
-                        Ok(Some(host_id)) => info!(
-                            "[SOLANA_LOBBY] Relay join accepted for game {} (host {})",
-                            game_id, host_id
-                        ),
+                        Ok(Some(host_id)) => {
+                            info!(
+                                "[SOLANA_LOBBY] Relay join accepted for game {} (host {})",
+                                game_id, host_id
+                            );
+                            // Tell the host who joined — this is what lets the
+                            // host's `poll_for_joiner_messages` (see
+                            // network::p2p_vps) discover our node id and wire up
+                            // the actual move transport (Iroh gossip / relay
+                            // fallback). Without it the on-chain join can land
+                            // while the two clients stay completely unconnected.
+                            let display = lobby
+                                .cached_display_name
+                                .clone()
+                                .unwrap_or_else(|| "Anonymous".to_string());
+                            let elo = lobby.cached_elo;
+                            let ack = format!("JOIN_ACK:{}|{}|{}", node_id, display, elo);
+                            if let Err(e) = crate::multiplayer::vps_client::p2p_send_message(
+                                game_id.to_string(),
+                                node_id,
+                                &ack,
+                            ) {
+                                warn!("[SOLANA_LOBBY] JOIN_ACK send failed for {}: {}", game_id, e);
+                            }
+                        }
                         Ok(None) => warn!(
                             "[SOLANA_LOBBY] Relay join accepted without host node for game {}",
                             game_id
@@ -1058,7 +1076,14 @@ fn render_join_tab(
                     }
                 }
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                spawn_join_game(lobby.cached_rpc_url.clone(), wallet_pubkey, game_id, tx);
+                lobby.last_attempt_used_global_session = lobby.cached_global_session_keypair_bytes.is_some();
+                spawn_join_game(
+                    lobby.cached_rpc_url.clone(),
+                    wallet_pubkey,
+                    game_id,
+                    lobby.cached_global_session_keypair_bytes.clone(),
+                    tx,
+                );
                 // Copy fetched wager into create flow so poll_lobby_tasks can persist it
                 lobby.wager_sol = wager_sol as f32;
                 lobby.tx_rx = Some(rx);
@@ -1183,15 +1208,36 @@ fn render_solana_browse_tab(
                             ).fill(if can_join { egui::Color32::from_rgb(140, 80, 0) } else { egui::Color32::from_rgb(60, 60, 60) }).corner_radius(4.0).min_size(egui::vec2(60.0, 28.0))).clicked() {
                                 if let Some(pk) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
                                     if let Ok(game_id) = game.game_id.rsplit('_').next().and_then(|s| s.parse::<u64>().ok()).ok_or("") {
-                                        if let Some(node_id) = &lobby.cached_node_id {
-                                            match crate::multiplayer::vps_client::p2p_join_game(game.game_id.clone(), node_id) {
-                                                Ok(Some(host_id)) => info!("[SOLANA_BROWSE] Relay join accepted for game {} (host {})", game.game_id, host_id),
+                                        if let Some(node_id) = lobby.cached_node_id.clone() {
+                                            match crate::multiplayer::vps_client::p2p_join_game(game.game_id.clone(), &node_id) {
+                                                Ok(Some(host_id)) => {
+                                                    info!("[SOLANA_BROWSE] Relay join accepted for game {} (host {})", game.game_id, host_id);
+                                                    // See render_join_tab's Confirm Join handler for why
+                                                    // this JOIN_ACK is required for the game to connect.
+                                                    let display = lobby
+                                                        .cached_display_name
+                                                        .clone()
+                                                        .unwrap_or_else(|| "Anonymous".to_string());
+                                                    let elo = lobby.cached_elo;
+                                                    let ack = format!("JOIN_ACK:{}|{}|{}", node_id, display, elo);
+                                                    if let Err(e) = crate::multiplayer::vps_client::p2p_send_message(game.game_id.clone(), &node_id, &ack) {
+                                                        warn!("[SOLANA_BROWSE] JOIN_ACK send failed for {}: {}", game.game_id, e);
+                                                    }
+                                                }
                                                 Ok(None) => warn!("[SOLANA_BROWSE] Relay join accepted without host node for game {}", game.game_id),
                                                 Err(e) => warn!("[SOLANA_BROWSE] Relay join failed for {}: {}", game.game_id, e),
                                             }
                                         }
                                         let (tx, rx) = tokio::sync::oneshot::channel();
-                                        spawn_join_game(lobby.cached_rpc_url.clone(), pk, game_id, tx);
+                                        lobby.last_attempt_used_global_session =
+                                            lobby.cached_global_session_keypair_bytes.is_some();
+                                        spawn_join_game(
+                                            lobby.cached_rpc_url.clone(),
+                                            pk,
+                                            game_id,
+                                            lobby.cached_global_session_keypair_bytes.clone(),
+                                            tx,
+                                        );
                                         lobby.wager_sol = game.stake_amount as f32;
                                         lobby.tx_rx = Some(rx);
                                         lobby.status = LobbyStatus::Pending;
@@ -1371,7 +1417,6 @@ fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubk
 pub(super) fn render_lobby_selection_popup(
     mut contexts: bevy_egui::EguiContexts,
     mut menu_state: ResMut<NextState<crate::core::MenuState>>,
-    _auth_state: ResMut<crate::ui::account::auth::AuthState>,
     #[cfg(feature = "solana")] solana_state: Option<
         Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
     >,
@@ -1983,15 +2028,19 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                 .map(|tc| tc.available_tournaments.clone())
                 .unwrap_or_else(Vec::new);
 
-            // Filter list by selected status
+            // Filter list by selected status, and drop anything the player dismissed.
             let filter_key = ctx.tournament_client.as_ref()
                 .and_then(|tc| tc.status_filter.clone());
+            let dismissed_ids = ctx.tournament_client.as_ref()
+                .map(|tc| tc.dismissed_ids.clone())
+                .unwrap_or_default();
             let visible_tournaments: Vec<_> = tournaments.iter()
                 .filter(|t| {
-                    match &filter_key {
-                        None => true,
-                        Some(k) => t.status.to_lowercase().contains(k.as_str()),
-                    }
+                    !dismissed_ids.contains(&t.tournament_id)
+                        && match &filter_key {
+                            None => true,
+                            Some(k) => t.status.to_lowercase().contains(k.as_str()),
+                        }
                 })
                 .collect();
 
@@ -2037,10 +2086,12 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                     // Header row: name + format badge
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new(&t.name).size(14.0).color(egui::Color32::WHITE).strong());
-                                        let (badge_text, badge_color) = if t.is_tournament {
-                                            ("Swiss", egui::Color32::from_rgb(255, 200, 50))
-                                        } else {
+                                        let (badge_text, badge_color) = if !t.is_tournament {
                                             ("Game", egui::Color32::from_rgb(100, 200, 180))
+                                        } else if t.format.eq_ignore_ascii_case("single_elimination") {
+                                            ("Elimination", egui::Color32::from_rgb(220, 130, 60))
+                                        } else {
+                                            ("Swiss", egui::Color32::from_rgb(255, 200, 50))
                                         };
                                         ui.add_space(4.0);
                                         ui.add(egui::Button::new(
@@ -2079,21 +2130,22 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                         }
                                     });
                                     // Registered count
-                                    let lock_icon = if t.is_private { "  " } else { "" };
-                                    ui.label(egui::RichText::new(
-                                        format!("{}{}  registered", lock_icon, t.registered)
-                                    ).size(10.0).color(egui::Color32::from_gray(160)));
+                                    let registered_text = if t.is_private {
+                                        format!("Private · {}  registered", t.registered)
+                                    } else {
+                                        format!("{}  registered", t.registered)
+                                    };
+                                    ui.label(egui::RichText::new(registered_text).size(10.0).color(egui::Color32::from_gray(160)));
                                 });
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     let can_join = wallet_pubkey.is_some();
                                     let join_btn = ui.add_enabled(can_join && !is_password_prompt, egui::Button::new(
                                         egui::RichText::new("Join").size(12.0).color(egui::Color32::WHITE).strong()
                                     ).fill(if can_join { egui::Color32::from_rgb(50, 140, 50) } else { egui::Color32::from_rgb(60, 60, 60) }).corner_radius(4.0).min_size(egui::vec2(60.0, 28.0)));
-                                    if t.is_private {
-                                        ui.label(egui::RichText::new("").size(14.0).color(egui::Color32::WHITE));
-                                    }
-                                    // Expand/collapse toggle
-                                    let expand_icon = if is_expanded { "▲" } else { "▼" };
+                                    // Expand/collapse toggle. Plain ASCII on purpose — the custom
+                                    // Cinzel/OpenSans font stack doesn't cover the Geometric Shapes
+                                    // block, so "▲"/"▼" rendered as a hollow tofu box here.
+                                    let expand_icon = if is_expanded { "^" } else { "v" };
                                     if ui.add(
                                         egui::Button::new(egui::RichText::new(expand_icon).size(11.0).color(egui::Color32::from_gray(180)))
                                             .fill(egui::Color32::TRANSPARENT)
@@ -2106,6 +2158,21 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                                 tc.expanded_tournament_id = None;
                                             } else {
                                                 tc.expanded_tournament_id = Some(tid);
+                                            }
+                                        }
+                                    }
+                                    // Cancelled tournaments can't be joined or scheduled — let the
+                                    // player clear them out of the browser instead of them piling up.
+                                    if t.status.to_lowercase().contains("cancelled") {
+                                        ui.add_space(4.0);
+                                        if ui.add(
+                                            egui::Button::new(egui::RichText::new("Remove").size(10.5).color(egui::Color32::from_gray(180)))
+                                                .fill(egui::Color32::TRANSPARENT)
+                                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(70)))
+                                                .min_size(egui::vec2(0.0, 26.0)),
+                                        ).on_hover_text("Remove this cancelled tournament from the list").clicked() {
+                                            if let Some(ref mut tc) = ctx.tournament_client {
+                                                tc.dismissed_ids.insert(t.tournament_id);
                                             }
                                         }
                                     }
@@ -2169,12 +2236,19 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                         };
                                         ui.label(egui::RichText::new(pool_str).size(11.0).color(egui::Color32::GOLD));
                                     }
-                                    let kind = if t.is_tournament { "Swiss/SE Tournament" } else if t.entry_fee_lamports > 0 { "Wagered 1v1" } else { "Casual 1v1" };
+                                    let kind = if !t.is_tournament {
+                                        if t.entry_fee_lamports > 0 { "Wagered 1v1" } else { "Casual 1v1" }
+                                    } else if t.format.eq_ignore_ascii_case("single_elimination") {
+                                        "Single Elimination Tournament"
+                                    } else {
+                                        "Swiss Tournament"
+                                    };
                                     ui.label(egui::RichText::new(format!("Format: {}", kind)).size(11.0).color(egui::Color32::from_gray(190)));
                                     let status_icon = match t.status.to_lowercase().as_str() {
                                         s if s.contains("registration") => "  Open for registration",
                                         s if s.contains("active") => "  In progress",
                                         s if s.contains("completed") => "  Finished",
+                                        s if s.contains("cancelled") => "  Cancelled",
                                         _ => "  Unknown status",
                                     };
                                     ui.label(egui::RichText::new(status_icon).size(11.0).color(egui::Color32::from_rgb(100, 200, 255)));
@@ -2183,12 +2257,16 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                     }
                                 });
 
-                                // ELO requirement display
-                                if t.min_elo > 0 || t.max_elo > 0 {
+                                // ELO requirement display. `max_elo` is u32::MAX when the
+                                // tournament has no upper cap (backend sentinel for "unset") —
+                                // treat that (and 0) as "no cap" rather than printing the raw
+                                // sentinel value.
+                                let has_max_elo = t.max_elo > 0 && t.max_elo != u32::MAX;
+                                if t.min_elo > 0 || has_max_elo {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 6.0;
                                         ui.label(egui::RichText::new("ELO:").size(11.0).color(egui::Color32::from_gray(140)));
-                                        if t.min_elo > 0 && t.max_elo > 0 {
+                                        if t.min_elo > 0 && has_max_elo {
                                             ui.label(egui::RichText::new(format!("{} – {}", t.min_elo, t.max_elo)).size(11.0).color(egui::Color32::from_rgb(200, 180, 100)));
                                         } else if t.min_elo > 0 {
                                             ui.label(egui::RichText::new(format!("{}+", t.min_elo)).size(11.0).color(egui::Color32::from_rgb(200, 180, 100)));
@@ -2795,15 +2873,19 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
         return;
     }
 
-    // Heartbeat: keep the lobby alive on the backend every 60 seconds. Direct
-    // Connection hosts were never announced to the VPS lobby directory in
-    // the first place, so there's nothing to keep alive there.
+    // Heartbeat: keep the lobby alive on the backend every 25 seconds — well
+    // under the backend's 90s stale-lobby TTL (`LOBBY_TTL_SECS`) so a couple
+    // of missed beats don't get a live host evicted, but tight enough that a
+    // host who actually vanished (crash, force-quit) stops looking joinable
+    // within roughly a TTL window. Direct Connection hosts were never
+    // announced to the VPS lobby directory in the first place, so there's
+    // nothing to keep alive there.
     let should_heartbeat = !ctx.p2p_host.direct_mode
         && ctx
             .p2p_host
             .last_heartbeat
-            .map(|t| t.elapsed().as_secs() >= 60)
-            .unwrap_or(false); // announce just happened, first heartbeat at 60s
+            .map(|t| t.elapsed().as_secs() >= 25)
+            .unwrap_or(false); // announce just happened, first heartbeat at 25s
     if should_heartbeat {
         if let Some(game_id) = ctx.p2p_host.game_id.clone() {
             let node_id = ctx
@@ -3051,6 +3133,28 @@ fn render_p2p_joiner_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIConte
                 .color(egui::Color32::GRAY),
         );
 
+        // If this drags on, say so — otherwise a dropped GAME_START relay
+        // message (host sent it, backend never got it / joiner never polled
+        // it) looks identical to the host simply not having clicked Start yet.
+        let waited_secs = ctx
+            .p2p_vps_state
+            .as_ref()
+            .and_then(|vps| vps.joining_since)
+            .map(|since| since.elapsed().as_secs())
+            .unwrap_or(0);
+        if waited_secs >= 20 {
+            ui.add_space(12.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "Still waiting after {}s — if the host already clicked Start Game, \
+                     the signal may not have reached you. Try leaving and rejoining.",
+                    waited_secs
+                ))
+                .size(12.0)
+                .color(egui::Color32::from_rgb(230, 160, 60)),
+            );
+        }
+
         ui.add_space(40.0);
 
         if ui
@@ -3068,6 +3172,7 @@ fn render_p2p_joiner_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIConte
             if let Some(ref mut vps) = ctx.p2p_vps_state {
                 vps.joining_host_node_id = None;
                 vps.joining_stake_amount = 0.0;
+                vps.joining_since = None;
             }
             if let Some(game_id) = left_game_id {
                 let node_id = ctx
@@ -3122,14 +3227,39 @@ fn start_p2p_host_game(ctx: &mut MainMenuUIContext) {
         let gid = game_id.clone();
         let nid = node_id.clone();
         std::thread::spawn(move || {
-            if let Err(e) = crate::multiplayer::vps_client::p2p_send_message(
-                gid.clone(),
-                &nid,
-                "GAME_START:1",
-            ) {
-                warn!("[LOBBY] GAME_START send failed: {}", e);
-            } else {
-                info!("[LOBBY] Sent GAME_START for {}", gid);
+            // The host transitions into the game locally right after this thread
+            // is spawned (see below) — it doesn't wait on this send. So a single
+            // dropped/timed-out HTTP call here would silently strand the joiner
+            // on "Waiting for host" forever, with nothing else ever re-sending
+            // GAME_START. Retry a handful of times before giving up.
+            let mut delivered = false;
+            for attempt in 1..=5u32 {
+                match crate::multiplayer::vps_client::p2p_send_message(
+                    gid.clone(),
+                    &nid,
+                    "GAME_START:1",
+                ) {
+                    Ok(()) => {
+                        info!("[LOBBY] Sent GAME_START for {} (attempt {})", gid, attempt);
+                        delivered = true;
+                        break;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "[LOBBY] GAME_START send failed (attempt {}/5) for {}: {}",
+                            attempt, gid, e
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(
+                            500 * attempt as u64,
+                        ));
+                    }
+                }
+            }
+            if !delivered {
+                error!(
+                    "[LOBBY] GAME_START never delivered for {} after 5 attempts — joiner is likely stuck on the waiting screen",
+                    gid
+                );
             }
             // Flips the relay's own listing status from Connecting to
             // InProgress — nothing else in the client ever called this, so

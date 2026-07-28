@@ -1,8 +1,8 @@
-﻿import { useState, useEffect, type CSSProperties } from "react";
+﻿import { useState, useEffect, useRef, type CSSProperties } from "react";
 import bs58 from "bs58";
 
 // ---------------------------------------------------------------------------
-// REST API bridge � works in Chrome AND Tauri webview
+// REST API bridge — works in Chrome AND Tauri webview
 // ---------------------------------------------------------------------------
 const BRIDGE_PORT = import.meta.env.VITE_BRIDGE_PORT ?? "7454";
 const API_BASE = `http://localhost:${BRIDGE_PORT}`;
@@ -45,7 +45,7 @@ async function closePopup() {
 // a valid-looking fee, but for an account the player never funded, which
 // surfaces as a confusing "not enough SOL" even though their actual wallet
 // has plenty.
-function getConnectedProvider(): any {
+export function getConnectedProvider(): any {
   const kind = localStorage.getItem("xfchess_wallet_provider");
   if (kind === "solflare") return (window as any).solflare;
   if (kind === "phantom") return (window as any).phantom?.solana;
@@ -116,7 +116,7 @@ async function fetchMe(token: string): Promise<{ username: string }> {
  * field, so it must be excluded here or every fresh wallet would look like
  * it already has a name.
  */
-async function resolveExistingUsername(
+export async function resolveExistingUsername(
   token: string,
   pubkey: string,
   onChain: ProfileStatus,
@@ -133,7 +133,7 @@ async function resolveExistingUsername(
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-type Step = "consent" | "entry" | "auth" | "wallet" | "profile" | "splash" | "sign";
+type Step = "consent" | "wallet" | "profile" | "splash" | "sign";
 
 interface ConsentRecord {
   version: number;
@@ -147,7 +147,7 @@ interface AuthResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Design tokens � matches xfchessdotcom color scheme
+// Design tokens — matches xfchessdotcom color scheme
 // ---------------------------------------------------------------------------
 const PRIMARY    = "#ffffff";
 const PRIMARY_DIM    = "rgba(255,255,255,0.08)";
@@ -202,7 +202,7 @@ const page: CSSProperties = {
 };
 
 // ---------------------------------------------------------------------------
-// Navbar � matches xfchessdotcom pill style; links back to /
+// Navbar — matches xfchessdotcom pill style; links back to /
 // ---------------------------------------------------------------------------
 function SiteNav() {
   const HOME = window.location.origin + "/";
@@ -246,7 +246,7 @@ function SiteNav() {
 function GridBg() {
   return (
     <>
-      {/* Subtle white radial glow� matches xfchessdotcom bg */}
+      {/* Subtle white radial glow — matches xfchessdotcom bg */}
       <div style={{
         position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none",
         background: `radial-gradient(ellipse 80% 60% at 50% 0%, rgba(255,255,255,0.06) 0%, transparent 70%),
@@ -364,11 +364,11 @@ function ErrorMsg({ msg }: { msg: string }) {
 }
 
 function StepDots({ step }: { step: Step }) {
-  const steps: Step[] = ["consent", "entry", "auth", "wallet", "profile", "splash"];
+  const steps: Step[] = ["consent", "wallet", "profile", "splash"];
   const idx = steps.indexOf(step);
   return (
     <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 28 }}>
-      {steps.slice(0, 5).map((_, i) => (
+      {steps.map((_, i) => (
         <div key={i} style={{
           width: i === idx ? 20 : 6, height: 6, borderRadius: 3,
           background: i <= idx ? RED : "rgba(255,255,255,0.12)", transition: "all 0.3s",
@@ -379,67 +379,7 @@ function StepDots({ step }: { step: Step }) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 0.5 � Entry Path Selection
-// ---------------------------------------------------------------------------
-function EntryStep({
-  onChoice,
-  onClose
-}: {
-  onChoice: (choice: "wallet" | "email") => void;
-  onClose?: () => void;
-}) {
-  return (
-    <Card showClose={true} onClose={onClose}>
-      <StepDots step="entry" />
-      <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
-        <LogoMark size={44} />
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <button
-          style={pathBtn}
-          onClick={() => onChoice("wallet")}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
-        >
-          <div style={{ ...iconCircle, background: "rgba(255,255,255,0.06)" }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: 15 }}>Login with Wallet</div>
-            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Phantom / Solflare — for existing users</div>
-          </div>
-        </button>
-
-        <button
-          style={pathBtn}
-          onClick={() => onChoice("email")}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = PRIMARY; (e.currentTarget as HTMLButtonElement).style.background = PRIMARY_DIM; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = BORDER; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.03)"; }}
-        >
-          <div style={{ ...iconCircle, background: "rgba(255,255,255,0.06)" }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: 15 }}>Email + Password</div>
-            <div style={{ fontSize: 12, color: TEXT_MUTED }}>Classic account — bring your own wallet</div>
-          </div>
-        </button>
-
-      </div>
-    </Card>
-  );
-}
-
-const pathBtn: CSSProperties = {
-  width: "100%", padding: "16px 20px", borderRadius: 16, border: `1px solid ${BORDER}`,
-  background: "rgba(255,255,255,0.03)", color: TEXT, textAlign: "left" as const,
-  display: "flex", alignItems: "center", gap: 16, cursor: "pointer", transition: "all 0.2s",
-};
-
-const iconCircle: CSSProperties = {
-  width: 44, height: 44, borderRadius: "50%", display: "flex", alignItems: "center",
-  justifyContent: "center", fontSize: 20,
-};
-
-// ---------------------------------------------------------------------------
-// Step 0 � Legal / GDPR Consent
+// Step 0 — Legal / GDPR Consent
 // ---------------------------------------------------------------------------
 function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: () => void }) {
   const [checkedTos, setTos] = useState(false);
@@ -472,7 +412,6 @@ function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: ()
         <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}> Privacy &amp; GDPR Notice</p>
         <p style={{ marginBottom: 8 }}>We collect and store the following data securely:</p>
         <ul style={{ paddingLeft: 18, marginBottom: 12 }}>
-          <li>Account credentials (email + bcrypt-hashed password � plaintext never stored)</li>
           <li>Solana wallet public key (public by nature on-chain)</li>
           <li>Game history &amp; move records (used for anti-cheat and tournament verification)</li>
           <li>Session tokens (short-lived JWTs, stored only in memory)</li>
@@ -526,101 +465,15 @@ function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: ()
 }
 
 // ---------------------------------------------------------------------------
-// Step 1 � Login / Register
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Step 1 � Login / Register (Email Path)
-// ---------------------------------------------------------------------------
-function AuthStep({ onAuth, onBack, onClose }: { onAuth: (token: string, username: string) => void; onBack: () => void; onClose?: () => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const submit = async () => {
-    setError(null);
-    if (!email || !password) { setError("Email and password are required"); return; }
-    setLoading(true);
-    try {
-      let res: AuthResponse;
-      if (mode === "login") {
-        res = await apiPost<AuthResponse>("/api/auth/login-email", { email, password });
-      } else {
-        // Registration now uses a default username (email prefix)
-        // Sol Name is finalized in the profile step later
-        res = await apiPost<AuthResponse>("/api/auth/register-email", { 
-          email, password, username: email.split('@')[0] 
-        });
-      }
-      onAuth(res.token, res.username);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg.includes("404") || msg.includes("Invalid") ? "Invalid email or password" : msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleKey = (e: React.KeyboardEvent) => { if (e.key === "Enter") submit(); };
-
-  return (
-    <Card showClose={true} onClose={onClose}>
-      <StepDots step="auth" />
-      <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Cinzel', serif", color: TEXT }}>
-          {mode === "login" ? "Account Login" : "Email Registration"}
-        </h2>
-        <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
-          {mode === "login"
-            ? "Sign in to your XFChess account"
-            : "Quick account setup � no handle needed yet"}
-        </p>
-      </div>
-
-      {error && <ErrorMsg msg={error} />}
-
-      <div onKeyDown={handleKey}>
-        <InputField label="Email Address" value={email} onChange={setEmail} type="email" placeholder="you@example.com" />
-        <InputField label="Password" value={password} onChange={setPassword} type="password" placeholder="Enter password" />
-      </div>
-
-      <div style={{ marginTop: 20, marginBottom: 20 }}>
-        <PrimaryBtn onClick={submit} loading={loading}>
-          {mode === "login" ? "Sign In" : "Register Account"}
-        </PrimaryBtn>
-      </div>
-
-      <div style={{ textAlign: "center" as const, display: "flex", flexDirection: "column", gap: 12 }}>
-        <button onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(null); }}
-          style={{ background: "none", border: "none", color: TEXT_DIM, fontSize: 13 }}>
-          {mode === "login"
-            ? <>No account? <span style={{ color: RED, fontWeight: 600 }}>Register</span></>
-            : <>Already have one? <span style={{ color: RED, fontWeight: 600 }}>Sign in</span></>}
-        </button>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: TEXT_MUTED, fontSize: 12, textDecoration: "underline" }}>
-          Go back to paths
-        </button>
-      </div>
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step 2 � Wallet Connection (direct, no adapter library)
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Step 2 � Wallet Connection (Tauri Embedded)
+// Step 1 — Wallet Connection (Tauri Embedded)
 // ---------------------------------------------------------------------------
 import * as web3 from "@solana/web3.js";
 
 function WalletStep({
-  mode, onContinue, onAuth, onBack, onClose
+  onContinue, onAuth, onClose
 }: {
-  mode: "login" | "link";
   onContinue: (pubkey: string, provider: any) => void;
-  onAuth: (token: string, user: string, pubkey?: string) => void;
-  onBack: () => void;
+  onAuth: (token: string, user: string, pubkey: string) => void;
   onClose?: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -646,7 +499,16 @@ function WalletStep({
       if (!provider) {
         throw new Error(`${WALLET_META[walletName].label} extension not detected.`);
       }
-      const resp = await provider.connect();
+      // Try a silent reconnect first — if this origin was already approved
+      // in a prior session, this resolves with no popup at all. Only shows
+      // a real approval prompt on the very first-ever connection (or after
+      // the user has revoked access), instead of on every app launch.
+      let resp: any;
+      try {
+        resp = await provider.connect({ onlyIfTrusted: true });
+      } catch {
+        resp = await provider.connect();
+      }
       // Phantom: publicKey is on the response object
       // Solflare: publicKey is on the provider after connect, not on resp
       pubkey = resp?.publicKey?.toBase58?.()
@@ -713,10 +575,10 @@ function WalletStep({
       <StepDots step="wallet" />
       <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
         <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Cinzel', serif", color: TEXT }}>
-          {mode === "login" ? "Wallet Sign-In" : "Link Your Wallet"}
+          Wallet Sign-In
         </h2>
         <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 4 }}>
-          {mode === "login" ? "Verify ownership to access your account" : "Connect to enable on-chain gameplay"}
+          Verify ownership to access your account
         </p>
       </div>
 
@@ -760,9 +622,6 @@ function WalletStep({
         })}
       </div>
 
-      <button onClick={onBack} style={{ width: "100%", marginTop: 20, background: "none", border: "none", color: TEXT_MUTED, fontSize: 12, textDecoration: "underline" }}>
-        ‹ Back
-      </button>
     </Card>
   );
 }
@@ -814,6 +673,10 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   const [pendingTx, setPendingTx] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Tracks which pending tx we've already auto-attempted, so the polling
+  // effect doesn't re-fire signTransaction() every second while the user is
+  // busy approving (or rejecting) it inside Phantom's own popup.
+  const autoAttempted = useRef<string | null>(null);
 
   const resolveAndHide = async (signedB64: string) => {
     await fetch(`${API_BASE}/resolved`, {
@@ -860,6 +723,46 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
     }
   };
 
+  // Signs via the connected browser-extension wallet (Phantom/Solflare) —
+  // this itself triggers the extension's own native popup. Called
+  // automatically the moment a pending tx shows up (see the poll loop
+  // below) so the user lands straight on Phantom's popup instead of having
+  // to click "Sign with Extension" on this page first. The button stays as
+  // a manual retry for when no provider was connected yet, or the user
+  // dismissed/rejected the extension popup and wants to try again.
+  const signWithExtension = async (txB64: string) => {
+    setSigning(true);
+    setError(null);
+    try {
+      const provider = getConnectedProvider();
+      if (!provider) throw new Error("No Phantom/Solflare extension detected");
+      // `getConnectedProvider()` only checks a persisted preference plus
+      // whether the extension object exists on `window` — it says nothing
+      // about whether *this* page/window actually has a live session with
+      // it. Popups are real OS-level browser windows (see closePopup's
+      // comment above), so a freshly (re)opened one hasn't run `.connect()`
+      // in its own JS context yet even though the extension remembers this
+      // origin as trusted — calling `signTransaction` straight away then
+      // fails with "Not connected". Silently reconnect first, same as
+      // `handleConnect` and `ProfileStep` already do.
+      if (!provider.publicKey) {
+        try {
+          await provider.connect({ onlyIfTrusted: true });
+        } catch {
+          await provider.connect();
+        }
+      }
+      const txBytes = Buffer.from(txB64, "base64");
+      const tx = deserializeTx(txBytes);
+      const signed = await provider.signTransaction(tx);
+      await resolveAndHide(Buffer.from(signed.serialize()).toString("base64"));
+    } catch (e: any) {
+      setError(e.message || String(e));
+    } finally {
+      setSigning(false);
+    }
+  };
+
   useEffect(() => {
     const poll = async () => {
       try {
@@ -868,7 +771,12 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         if (data.tx && data.tx !== pendingTx) {
           setPendingTx(data.tx);
           const secret = sessionStorage.getItem("xfchess_session_key");
-          if (secret) { handleAutoSign(data.tx, secret); }
+          if (secret) {
+            handleAutoSign(data.tx, secret);
+          } else if (getConnectedProvider() && autoAttempted.current !== data.tx) {
+            autoAttempted.current = data.tx;
+            signWithExtension(data.tx);
+          }
         } else if (!data.tx) {
           setPendingTx(null);
         }
@@ -896,22 +804,7 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
       </p>
       {error && <ErrorMsg msg={error} />}
       {!signing && !sessionStorage.getItem("xfchess_session_key") && (
-        <PrimaryBtn onClick={async () => {
-          setSigning(true);
-          setError(null);
-          try {
-            const provider = getConnectedProvider();
-            if (!provider) throw new Error("No Phantom/Solflare extension detected");
-            const txBytes = Buffer.from(pendingTx, "base64");
-            const tx = deserializeTx(txBytes);
-            const signed = await provider.signTransaction(tx);
-            await resolveAndHide(Buffer.from(signed.serialize()).toString("base64"));
-          } catch (e: any) {
-            setError(e.message || String(e));
-          } finally {
-            setSigning(false);
-          }
-        }}>Sign with Extension</PrimaryBtn>
+        <PrimaryBtn onClick={() => signWithExtension(pendingTx)}>Sign with Extension</PrimaryBtn>
       )}
     </div>
   );
@@ -973,7 +866,11 @@ function ProfileStep({
           throw new Error("No Phantom/Solflare extension detected in this window.");
         }
         if (!provider.publicKey) {
-          await provider.connect();
+          try {
+            await provider.connect({ onlyIfTrusted: true });
+          } catch {
+            await provider.connect();
+          }
         }
 
         const dateOfBirth = Math.floor(new Date(`${dob}T00:00:00Z`).getTime() / 1000);
@@ -1089,7 +986,6 @@ function Onboarding() {
   const [pubkey, setPubkey] = useState<string | null>(
     () => localStorage.getItem("xfchess_wallet_pubkey") || localStorage.getItem("xfchess_wallet"),
   );
-  const [path, setPath] = useState<"wallet" | "email" | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [walletProvider, setWalletProvider] = useState<any>(null);
 
@@ -1108,7 +1004,7 @@ function Onboarding() {
           // Only advance the default "consent" step — a "sign"/"profile"/"wallet"
           // deep link already resolved to the right step above and must not be
           // clobbered once this async check lands.
-          setStep(cur => (cur === "consent" ? "entry" : cur));
+          setStep(cur => (cur === "consent" ? "wallet" : cur));
         }
       } catch { /* ignore */ }
 
@@ -1130,76 +1026,110 @@ function Onboarding() {
     return () => clearInterval(interval);
   }, [step]);
 
+  // The `?step=profile` deep link (see requireOnchain above) jumps straight to
+  // ProfileStep without ever going through handleAuth, so `username` here is
+  // whatever was last cached in this browser's localStorage — potentially
+  // from a completely different wallet that was logged into on this machine
+  // at some earlier point (localStorage for this popup is intentionally the
+  // user's real, persistent Chrome profile, not an isolated one — see
+  // tauri/src/main.rs's kill_wallet_popup comment). Re-resolve against the
+  // backend for the wallet that's ACTUALLY active right now before letting
+  // ProfileStep prefill the handle field with it, so a stale name from a
+  // prior wallet never gets submitted into a new on-chain profile. Gated on
+  // `handleResolved` (not just re-running on every render) because
+  // ProfileStep seeds its own input state from `defaultHandle` exactly once,
+  // at mount — updating `username` after it has already mounted wouldn't
+  // reach the visible field, so ProfileStep must not mount until this
+  // resolves (see the `handleResolved` check around its render below).
+  const [handleResolved, setHandleResolved] = useState(!requireOnchain);
+  useEffect(() => {
+    if (step !== "profile" || !requireOnchain || handleResolved) return;
+    const token = localStorage.getItem("xfchess_token");
+    const activePubkey = pubkey ?? localStorage.getItem("xfchess_wallet_pubkey") ?? localStorage.getItem("xfchess_wallet");
+    if (!token || !activePubkey) { setHandleResolved(true); return; }
+    (async () => {
+      try {
+        const status = await fetchProfileStatus(token);
+        const existing = await resolveExistingUsername(token, activePubkey, status);
+        if (existing) {
+          setUsername(existing);
+          localStorage.setItem("xfchess_username", existing);
+        } else {
+          localStorage.removeItem("xfchess_username");
+          setUsername("Player");
+        }
+      } catch { /* backend unreachable — fall back to whatever was cached */ }
+      finally { setHandleResolved(true); }
+    })();
+  }, [step, requireOnchain, handleResolved, pubkey]);
+
   const handleConsent = async () => {
     try { await apiPost("/api/consent", { version: CONSENT_VERSION }); } catch { /* non-critical */ }
-    setStep("entry");
+    setStep("wallet");
   };
 
-  const onChoice = (choice: "wallet" | "email") => {
-    setPath(choice);
-    if (choice === "wallet") {
-      setStep("wallet");
-    } else {
-      setStep("auth");
-    }
-  };
-
-  const handleAuth = async (token: string, user: string, nextPubkey?: string) => {
+  const handleAuth = async (token: string, user: string, nextPubkey: string) => {
     localStorage.setItem("xfchess_token", token);
-    if (nextPubkey) {
-      localStorage.setItem("xfchess_wallet_pubkey", nextPubkey);
-      setPubkey(nextPubkey);
-    }
+    localStorage.setItem("xfchess_wallet_pubkey", nextPubkey);
+    setPubkey(nextPubkey);
     // Push JWT to bridge so the game client can pick it up via GET /token
     apiPost("/token", { token }).catch(() => {});
 
-    if (path === "wallet" && nextPubkey) {
-      // `user` here may just be the throwaway pubkey-slice placeholder
-      // WalletStep sends as a required-but-unchosen value on first
-      // registration (see handleConnect's register call) — never treat it
-      // as a real display name directly. resolveExistingUsername checks
-      // both the on-chain PlayerProfile (sync-profile) and the off-chain
-      // account username (auth/me, set by a prior ProfileStep completion
-      // that hasn't been followed by a wager yet), excluding that same
-      // placeholder — so a returning player with a chosen handle but no
-      // on-chain profile isn't asked to pick a new one.
-      let resolvedUser = user;
-      let needsProfile = true;
-      try {
-        const status = await fetchProfileStatus(token);
-        const existing = await resolveExistingUsername(token, nextPubkey, status);
-        if (existing) {
-          resolvedUser = existing;
-          localStorage.setItem("xfchess_username", resolvedUser);
-          setUsername(resolvedUser);
-          needsProfile = false;
-        }
-      } catch { /* on-chain lookup failed — fall through to profile step */ }
-
-      if (needsProfile) {
-        // No real username yet — make sure nothing (this session's state,
-        // or a stale value from a previous wallet's session) pre-fills the
-        // handle field with something that looks chosen but isn't. Clearing
-        // localStorage alone isn't enough: `username` state was already read
-        // from it at mount time, and ProfileStep's defaultHandle prop is
-        // derived from that stale in-memory value, not from localStorage
-        // again — so it must be reset here too, or the old value leaks
-        // straight through into the "Choose Your Handle" field.
-        localStorage.removeItem("xfchess_username");
-        setUsername("Player");
-        setStep("profile");
-      } else {
-        setStep("splash");
-        handleGameLaunch(nextPubkey, resolvedUser);
-      }
+    // `user` here may just be the throwaway pubkey-slice placeholder
+    // WalletStep sends as a required-but-unchosen value on first
+    // registration (see handleConnect's register call) — never treat it
+    // as a real display name directly. But for a returning player, `user`
+    // is exactly what /api/auth/login already read out of the same DB row
+    // sync-profile/auth-me would re-derive — trust it immediately rather
+    // than re-verifying over the network first. A transient hiccup in the
+    // on-chain RPC read (fetchProfileStatus) or the off-chain lookup
+    // (fetchMe) must never override a value we already know is good, or a
+    // returning player gets re-asked to pick a handle every time devnet RPC
+    // has a bad moment. Only the registration placeholder itself falls
+    // through to the slower on-chain/off-chain resolution below.
+    const registrationPlaceholder = nextPubkey.slice(0, 8);
+    if (user && user !== registrationPlaceholder) {
+      localStorage.setItem("xfchess_username", user);
+      setUsername(user);
+      setStep("splash");
+      handleGameLaunch(nextPubkey, user);
       return;
     }
-    // Email path: `user` is a real chosen value from registration/login,
-    // not a placeholder — safe to persist directly.
-    localStorage.setItem("xfchess_username", user);
-    setUsername(user);
-    // After email auth, we MUST connect a wallet to link them
-    setStep("wallet");
+
+    // resolveExistingUsername checks both the on-chain PlayerProfile
+    // (sync-profile) and the off-chain account username (auth/me, set by a
+    // prior ProfileStep completion that hasn't been followed by a wager
+    // yet), excluding that same placeholder — so a returning player with a
+    // chosen handle but no on-chain profile isn't asked to pick a new one.
+    let resolvedUser = user;
+    let needsProfile = true;
+    try {
+      const status = await fetchProfileStatus(token);
+      const existing = await resolveExistingUsername(token, nextPubkey, status);
+      if (existing) {
+        resolvedUser = existing;
+        localStorage.setItem("xfchess_username", resolvedUser);
+        setUsername(resolvedUser);
+        needsProfile = false;
+      }
+    } catch { /* on-chain lookup failed — fall through to profile step */ }
+
+    if (needsProfile) {
+      // No real username yet — make sure nothing (this session's state,
+      // or a stale value from a previous wallet's session) pre-fills the
+      // handle field with something that looks chosen but isn't. Clearing
+      // localStorage alone isn't enough: `username` state was already read
+      // from it at mount time, and ProfileStep's defaultHandle prop is
+      // derived from that stale in-memory value, not from localStorage
+      // again — so it must be reset here too, or the old value leaks
+      // straight through into the "Choose Your Handle" field.
+      localStorage.removeItem("xfchess_username");
+      setUsername("Player");
+      setStep("profile");
+    } else {
+      setStep("splash");
+      handleGameLaunch(nextPubkey, resolvedUser);
+    }
   };
 
   const handleWalletContinue = (pk: string, provider: any) => {
@@ -1244,23 +1174,21 @@ function Onboarding() {
       <GridBg />
       <SiteNav />
       {step === "consent" && <ConsentStep onAccept={handleConsent} onClose={closePopup} />}
-      {step === "entry"   && <EntryStep onChoice={onChoice} onClose={closePopup} />}
-
-      {step === "auth"    && <AuthStep
-        onAuth={handleAuth}
-        onBack={() => setStep("entry")}
-        onClose={closePopup}
-      />}
 
       {step === "wallet"  && <WalletStep
-        mode={path === "wallet" ? "login" : "link"}
         onContinue={handleWalletContinue}
         onAuth={handleAuth}
-        onBack={() => setStep("entry")}
         onClose={closePopup}
       />}
 
-      {step === "profile" && (
+      {step === "profile" && !handleResolved && (
+        <Card showClose={true} onClose={closePopup}>
+          <div style={{ textAlign: "center" as const, padding: "20px 0" }}>
+            <div style={{ width: 24, height: 24, margin: "0 auto", border: `2px solid ${RED_BORDER}`, borderTop: `2px solid ${RED}`, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          </div>
+        </Card>
+      )}
+      {step === "profile" && handleResolved && (
         <ProfileStep
           onComplete={handleProfileComplete}
           pubkey={pubkey}
@@ -1296,7 +1224,7 @@ function Onboarding() {
 }
 
 // ---------------------------------------------------------------------------
-// App root (no wallet adapter library � direct connections only)
+// App root (no wallet adapter library — direct connections only)
 // ---------------------------------------------------------------------------
 export default function App() {
   return (

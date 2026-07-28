@@ -1,10 +1,11 @@
-// Ephemeral MVP Plugin for MagicBlock ER
-//! MVP Plugin for MagicBlock integration
-//!
-//! Simple plugin to manage MagicBlock state and basic delegation lifecycle.
+//! An early, minimal MagicBlock state tracker. Confirmed unused — neither
+//! `EphemeralMvpState` nor `EphemeralMvpPlugin` is referenced anywhere else
+//! in the codebase; the real ER delegation lifecycle lives in
+//! `rollup::magicblock` and `rollup::manager` instead.
+
 use bevy::prelude::*;
 
-/// Ephemeral MVP state
+/// Unused. See module docs.
 #[derive(Resource, Default)]
 pub struct EphemeralMvpState {
     pub is_initialized: bool,
@@ -17,6 +18,7 @@ impl EphemeralMvpState {
     }
 }
 
+/// Unused. See module docs.
 pub struct EphemeralMvpPlugin;
 
 impl Plugin for EphemeralMvpPlugin {

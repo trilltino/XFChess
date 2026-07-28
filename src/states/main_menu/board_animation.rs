@@ -118,7 +118,7 @@ pub enum ResetPhase {
     FadeIn(f32),
 }
 
-/// Drives the Immortal Zugzwang Game animation on the menu background board.
+/// Drives the famous-games carousel animation on the menu background board.
 /// The move sequence itself is applied by the cinematic system.
 #[derive(Resource)]
 pub struct BoardAnimator {
@@ -132,6 +132,11 @@ pub struct BoardAnimator {
     pub board: [[Option<Entity>; 8]; 8],
     /// False until `spawn_menu_bg_pieces` populates `board`.
     pub active: bool,
+    /// Index into `famous_games::FAMOUS_GAMES` of the game currently replaying.
+    pub game_index: usize,
+    /// Set by [`request_game_nav`] to force the next transition toward a
+    /// specific game instead of the natural "next in the list".
+    pub game_index_override: Option<usize>,
 }
 
 impl Default for BoardAnimator {
@@ -142,29 +147,41 @@ impl Default for BoardAnimator {
             reset: ResetPhase::Idle,
             board: [[None; 8]; 8],
             active: false,
+            game_index: 0,
+            game_index_override: None,
         }
     }
 }
 
-// Sämisch vs Nimzowitsch, Copenhagen 1923 — the Immortal Zugzwang Game.
-pub(super) const ZUGZWANG_PGN: &str = "
-1. d4 Nf6 2. c4 e6 3. Nf3 b6 4. g3 Bb7 5. Bg2 Be7
-6. Nc3 O-O 7. O-O d5 8. Ne5 c6
-9. cxd5 cxd5 10. Bf4 a6
-11. Rc1 b5 12. Qb3 Nc6
-13. Nxc6 Bxc6 14. h3 Qd7 15. Kh2 Nh5
-16. Bd2 f5 17. Qd1 b4 18. Nb1 Bb5 19. Rg1 Bd6 20. e4 fxe4
-21. Qxh5 Rxf2 22. Qg5 Raf8 23. Kh1 R8f5 24. Qe3 Bd3 25. Rce1 h6
-0-1
-";
+/// Jumps the ambient board to the next/previous game in `FAMOUS_GAMES`
+/// (`delta` = ±1), reusing the existing Hang→FadeOut→FadeIn crossfade.
+///
+/// Only takes effect while the board is showing a stable position (mid-replay
+/// or paused on the final one). A click landing mid-crossfade (~3s window) is
+/// ignored outright rather than silently deferred — deferring it would only
+/// apply the jump after the *next* full game finishes (tens of seconds later),
+/// which would read as a bug, not a feature.
+pub(super) fn request_game_nav(anim: &mut BoardAnimator, delta: i32) {
+    if !matches!(anim.reset, ResetPhase::Idle | ResetPhase::Hang(_)) {
+        return;
+    }
+    let len = super::famous_games::FAMOUS_GAMES.len() as i32;
+    let wrapped = (anim.game_index as i32 + delta).rem_euclid(len) as usize;
+    anim.game_index_override = Some(wrapped);
+    // Next tick's `Hang(t)` branch computes `t - dt <= 0.0` and falls straight
+    // into the existing fade-out/snap-home/fade-in sequence, unmodified.
+    anim.reset = ResetPhase::Hang(0.0);
+}
 
 // ── Ambient board auto-play (post-Enter) ──────────────────────────────────────
 //
-// Replays ZUGZWANG_PGN on the full-size `MenuBg` board once the player presses
-// Enter. Captured pieces are *hidden* (not despawned) so the whole game can loop
-// without re-spawning: after the final move the board hangs on the position,
-// then every piece fades out, is moved back to its `MenuBgPieceHome` while
-// invisible, and fades back in for the next loop.
+// Replays the current game (`famous_games::FAMOUS_GAMES[game_index]`) on the
+// full-size `MenuBg` board once the player presses Enter. Captured pieces are
+// *hidden* (not despawned) so the whole game can loop without re-spawning:
+// after the final move the board hangs on the position, then every piece
+// fades out, is moved back to its `MenuBgPieceHome` while invisible, and fades
+// back in — either for a loop of the same game or, here, for the next game in
+// the carousel.
 
 /// World position of a square on the `MenuBg` board (x = 7 − file, z = rank).
 /// Matches `spawn_menu_bg_pieces` and the cinematic's `square_to_world`.
@@ -187,16 +204,26 @@ struct AmbientStep {
     castle_rook: Option<(u8, u8)>,
 }
 
-static AMBIENT_PLAN: OnceLock<Vec<AmbientStep>> = OnceLock::new();
+static ALL_PLANS: OnceLock<Vec<Vec<AmbientStep>>> = OnceLock::new();
 
-/// Parse ZUGZWANG_PGN once into a flat list of resolved plies, computed lazily.
-fn ambient_plan() -> &'static [AmbientStep] {
-    AMBIENT_PLAN.get_or_init(zugzwang_steps).as_slice()
+/// Parses every `FAMOUS_GAMES` PGN once into flat lists of resolved plies,
+/// computed lazily on first use and cached for the process lifetime (all 6
+/// games together are a few KB — negligible next to this game's textures and
+/// audio, so there's no benefit to recomputing per game-transition instead).
+fn all_plans() -> &'static [Vec<AmbientStep>] {
+    ALL_PLANS
+        .get_or_init(|| {
+            super::famous_games::FAMOUS_GAMES
+                .iter()
+                .map(|g| compute_plan(g.pgn))
+                .collect()
+        })
+        .as_slice()
 }
 
-fn zugzwang_steps() -> Vec<AmbientStep> {
+fn compute_plan(pgn: &str) -> Vec<AmbientStep> {
     use nimzovich_engine::{do_move, new_game_no_tt, parse_pgn, san_to_move};
-    let Ok(parsed) = parse_pgn(ZUGZWANG_PGN) else {
+    let Ok(parsed) = parse_pgn(pgn) else {
         return Vec::new();
     };
     // No search ever runs on this Game (just replaying a fixed decorative
@@ -242,8 +269,9 @@ fn zugzwang_steps() -> Vec<AmbientStep> {
     steps
 }
 
-/// Drives the Immortal-Zugzwang replay on the ambient `MenuBg` board. Self-arms
-/// via `anim.active`, set once `spawn_menu_bg_pieces` populates the board map.
+/// Drives the famous-games carousel replay on the ambient `MenuBg` board.
+/// Self-arms via `anim.active`, set once `spawn_menu_bg_pieces` populates the
+/// board map.
 pub fn animate_ambient_board(
     time: Res<Time>,
     mut commands: Commands,
@@ -260,7 +288,7 @@ pub fn animate_ambient_board(
     if !anim.active {
         return;
     }
-    let plan = ambient_plan();
+    let plan = &all_plans()[anim.game_index];
     if plan.is_empty() {
         return;
     }
@@ -307,7 +335,14 @@ pub fn animate_ambient_board(
                 anim.reset = ResetPhase::FadeOut(t);
             } else {
                 // Everything is invisible now — snap pieces home at alpha 0 and
-                // fade the starting position back in.
+                // fade the starting position back in. Resolve which game plays
+                // next: a manual nav request wins, otherwise advance to the
+                // next game in the list (wrapping around).
+                let next = anim
+                    .game_index_override
+                    .take()
+                    .unwrap_or((anim.game_index + 1) % super::famous_games::FAMOUS_GAMES.len());
+                anim.game_index = next;
                 anim.board = [[None; 8]; 8];
                 for (e, home, mut tr, mut v, mat) in reset_q.iter_mut() {
                     commands
@@ -355,6 +390,27 @@ pub fn animate_ambient_board(
     let step = plan[anim.ply_index];
     apply_ambient_step(&mut commands, &mut anim, step);
     anim.ply_index += 1;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_famous_games_parse_completely() {
+        for g in super::super::famous_games::FAMOUS_GAMES {
+            let parsed = nimzovich_engine::parse_pgn(g.pgn).expect("pgn should parse");
+            let plan = compute_plan(g.pgn);
+            assert_eq!(
+                plan.len(),
+                parsed.moves.len(),
+                "{:?}: only resolved {}/{} plies",
+                g.caption,
+                plan.len(),
+                parsed.moves.len()
+            );
+        }
+    }
 }
 
 /// Applies one ply to `anim.board`: hides captures and inserts slide tweens.

@@ -132,7 +132,7 @@ Moves are validated on-chain via `chess-logic-on-chain` (no_std). The Solana pro
 
 Bevy ECS app. Key modules:
 
-- `core/` — app lifecycle, crash reporting, `GameState` enum (`Auth/MainMenu → InGame → Paused/GameOver`)
+- `core/` — app lifecycle, crash reporting, `GameState` enum (`MainMenu → InGame → Paused/GameOver`)
 - `game/` — board state, FEN management, move validation, check/checkmate detection
 - `engine/` — delegates to `nimzovich_engine` crate for AI moves
 - `multiplayer/` — WebSocket auth + Iroh P2P relay
@@ -195,6 +195,6 @@ See [crates/CLAUDE.md](crates/CLAUDE.md) for per-crate details. Key ones:
 - Prometheus metrics: `GET /metrics`
 - Health check: `GET /health`
 - Grafana: `http://localhost:3000` (when running `docker-compose up -d`)
-- Transaction debug: `GET /api/debug/transaction/:signature`
+- Transaction debug: `GET /api/debug/tx/{signature}` — currently a stub, always reports success regardless of the actual transaction
 
 Monitoring stack config lives in [ops/monitoring/](ops/monitoring/).

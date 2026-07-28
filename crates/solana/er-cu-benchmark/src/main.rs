@@ -6,7 +6,7 @@ use er_cu_benchmark::{
     cost_reporter::{export_json, generate_cost_report, print_cost_report},
     cu_logger::CuLogger,
     er_client,
-    game_flows::{run_1v1_game_flow, run_swiss_tournament_flow},
+    game_flows::{run_1v1_game_flow, run_global_session_1v1_game_flow, run_swiss_tournament_flow},
     keygen::{
         fund_children, generate_child_keypairs, load_or_generate_master_keypair, reclaim_surplus,
     },
@@ -46,7 +46,14 @@ struct Cli {
 
 #[derive(ValueEnum, Clone, Debug)]
 enum TestMode {
+    // clap's default kebab-case rename would be "one-v-one", which doesn't
+    // match `default_value = "1v1"` below or the `--mode 1v1` usage printed
+    // by `--init` — pinning the value string here so the documented default
+    // actually parses instead of erroring on every invocation that omits
+    // `--mode`.
+    #[value(name = "1v1")]
     OneVOne,
+    GlobalSession,
     Swiss,
     All,
 }
@@ -101,6 +108,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.mode {
         TestMode::OneVOne => run_1v1_test(&master, program_id, cli).await?,
+        TestMode::GlobalSession => run_global_session_test(&master, program_id, cli).await?,
         TestMode::Swiss => {
             if cli.all {
                 run_all_swiss_sizes(&master, program_id, cli).await?;
@@ -173,6 +181,63 @@ async fn run_1v1_test(
     }
 
     println!("\n   1v1 test complete. Total CU: {}", total_cu);
+    Ok(())
+}
+
+async fn run_global_session_test(
+    master: &solana_sdk::signature::Keypair,
+    program_id: Pubkey,
+    cli: Cli,
+) -> anyhow::Result<()> {
+    println!("\n══════════════════════════════════════════════════════════");
+    println!("  GLOBAL-SESSION 1V1 GAME TEST");
+    println!("══════════════════════════════════════════════════════════");
+
+    let base_rpc = base_client();
+    let er_rpc = er_client();
+    let children = generate_child_keypairs(2);
+    let white = &children[0];
+    let black = &children[1];
+
+    if !cli.skip_funding {
+        println!("\n   Funding player wallets...");
+        fund_children(&base_rpc, master, &children).await?;
+    }
+
+    println!("\n   Generating 100-move checkmate sequence...");
+    let _moves = generate_100_move_sequence();
+
+    let mut logger = CuLogger::new();
+    let total_cu = run_global_session_1v1_game_flow(
+        &base_rpc,
+        &er_rpc,
+        program_id,
+        master,
+        white,
+        black,
+        &mut logger,
+    )
+    .await?;
+
+    logger.print_summary();
+    let report = generate_cost_report(&logger, "global_session_1v1_game");
+    print_cost_report(&report);
+
+    if let Some(path) = &cli.export {
+        let json = export_json(&report);
+        std::fs::write(format!("{}_global_session.json", path), json)?;
+        println!("   Exported to {}_global_session.json", path);
+    }
+
+    if !cli.skip_reclaim {
+        println!("\n   Reclaiming surplus...");
+        reclaim_surplus(&base_rpc, master, &children).await?;
+    }
+
+    println!(
+        "\n   Global-session 1v1 test complete. Total CU: {}",
+        total_cu
+    );
     Ok(())
 }
 

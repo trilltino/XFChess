@@ -1,6 +1,11 @@
+//! Unused error scaffold — confirmed no caller anywhere in the codebase.
+//! Near-duplicate of `solana::errors::XfChessError` (same variants, also
+//! unused). See that module's docs for where real errors actually surface.
+
 use solana_program::program_error::ProgramError;
 use thiserror::Error;
 
+/// Unused. See module docs.
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XfChessError {
     #[error("Game is already full")]

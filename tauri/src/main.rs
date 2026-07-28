@@ -943,7 +943,8 @@ fn open_tournament_admin(app: &tauri::AppHandle) {
         .inner_size(1200.0, 800.0)
         .min_inner_size(800.0, 600.0)
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
+        .shadow(true)
         .center()
         .build()
       {
@@ -1165,6 +1166,8 @@ fn main() {
       services::ipc::set_tournament_admin_position,
       services::ipc::minimize_tournament_admin,
       services::ipc::maximize_tournament_admin,
+      services::ipc::toggle_maximize_tournament_admin,
+      services::ipc::is_tournament_admin_maximized,
       services::ipc::close_tournament_admin,
       services::ipc::show_notification,
       services::ipc::open_url,

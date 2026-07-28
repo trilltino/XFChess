@@ -9,6 +9,7 @@ use bevy::ecs::message::MessageReader;
 use bevy::prelude::{debug, error, info, warn, Commands, Local, Res, ResMut, Time};
 use directories::ProjectDirs;
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
@@ -16,7 +17,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Solana RPC configuration with relayer fee payer
+/// Solana RPC configuration with relayer fee payer. Only ever constructed by
+/// `setup_solana_system` below, which is itself never registered as a system
+/// — this resource is never actually inserted into the app. Distinct from
+/// (and unrelated to) the differently-unused `solana::rpc::SolanaRpc`.
 #[derive(Clone, Debug, bevy::prelude::Resource)]
 pub struct SolanaRpc {
     pub rpc_url: String,
@@ -51,7 +55,10 @@ pub fn initialize_solana_integration(
                         let pubkey = keypair.pubkey();
                         info!("[WALLET] Hot wallet initialized. Pubkey: {}", pubkey);
                         solana_state.wallet_pubkey = Some(pubkey);
-                        solana_state.rpc_client = Some(RpcClient::new(DEVNET_RPC_URL.to_string()));
+                        solana_state.rpc_client = Some(RpcClient::new_with_commitment(
+                            DEVNET_RPC_URL.to_string(),
+                            CommitmentConfig::confirmed(),
+                        ));
                         if let Some(ref mut w) = solana_wallet {
                             w.pubkey = Some(pubkey);
                             w.keypair = Some(Arc::new(keypair));
@@ -63,10 +70,30 @@ pub fn initialize_solana_integration(
                         Ok(pubkey) => {
                             info!("[WALLET] Phantom wallet connected. Pubkey: {}", pubkey);
                             solana_state.wallet_pubkey = Some(pubkey);
-                            solana_state.rpc_client =
-                                Some(RpcClient::new(DEVNET_RPC_URL.to_string()));
+                            solana_state.rpc_client = Some(RpcClient::new_with_commitment(
+                                DEVNET_RPC_URL.to_string(),
+                                CommitmentConfig::confirmed(),
+                            ));
                             if let Some(ref mut w) = solana_wallet {
                                 w.pubkey = Some(pubkey);
+                            }
+
+                            // Pick up an already-authorized global session from
+                            // a previous run, if one's saved on disk — lets
+                            // `authorize_global_session_if_needed` skip
+                            // straight to "active" instead of re-prompting.
+                            solana_state.try_load_global_session(&pubkey);
+                            // Re-register with the backend on every connect
+                            // (fire-and-forget, off this thread) — its
+                            // registry is in-memory only and forgets
+                            // everything on restart, so this is what
+                            // recovers finalize/undelegate/settlement for
+                            // this wallet without needing a fresh popup.
+                            if let Some(ref kp) = solana_state.global_session_keypair {
+                                let kp_bytes = kp.to_bytes();
+                                std::thread::spawn(move || {
+                                    register_global_session_with_backend(pubkey, kp_bytes);
+                                });
                             }
 
                             // Try to load existing session key
@@ -107,7 +134,10 @@ pub fn initialize_solana_integration(
                                     info!("[SESSION] Created new session key: {}", session_pubkey);
 
                                     // Authorize session key on-chain (async)
-                                    let _rpc_client = RpcClient::new(DEVNET_RPC_URL.to_string());
+                                    let _rpc_client = RpcClient::new_with_commitment(
+                                        DEVNET_RPC_URL.to_string(),
+                                        CommitmentConfig::confirmed(),
+                                    );
                                     let _session_pubkey_clone = session_pubkey;
                                     let _pubkey_clone = pubkey;
                                     tokio_runtime.0.spawn(async move {
@@ -189,30 +219,58 @@ pub fn query_wallet_pubkey_from_tauri() -> Option<String> {
     None
 }
 
+/// Refreshes the wallet's SOL balance on a timer. The actual RPC call runs on
+/// tokio's blocking-thread pool via `spawn_blocking` — `get_balance` is a
+/// synchronous network call, and running it straight in a Bevy system (as
+/// this used to) blocks that frame's update for the full round-trip, which
+/// reads to the player as the whole game hitching every time the balance
+/// polls.
 pub fn update_wallet_balance(
     mut solana_state: ResMut<SolanaIntegrationState>,
     mut timer: ResMut<BalanceRefreshTimer>,
     time: Res<Time>,
+    tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
+    mut rx: Local<Option<crossbeam_channel::Receiver<Result<u64, String>>>>,
 ) {
+    if let Some(ref receiver) = *rx {
+        match receiver.try_recv() {
+            Ok(Ok(lamports)) => {
+                let sol = lamports as f64 / 1_000_000_000.0;
+                solana_state.balance = sol;
+                if let Some(rate) = solana_state.sol_usd_rate {
+                    solana_state.cached_usd_balance = Some(sol * rate);
+                }
+                *rx = None;
+            }
+            Ok(Err(e)) => {
+                warn!("[SOLANA] Balance fetch failed: {}", e);
+                *rx = None;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => {
+                *rx = None;
+            }
+        }
+        return;
+    }
+
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
-    let (Some(ref pubkey), Some(ref rpc_client)) = (
-        solana_state.wallet_pubkey.as_ref(),
-        solana_state.rpc_client.as_ref(),
+    let (Some(pubkey), Some(rpc_url)) = (
+        solana_state.wallet_pubkey,
+        solana_state.rpc_client.as_ref().map(|c| c.url()),
     ) else {
         return;
     };
-    match rpc_client.get_balance(*pubkey) {
-        Ok(lamports) => {
-            let sol = lamports as f64 / 1_000_000_000.0;
-            solana_state.balance = sol;
-            if let Some(rate) = solana_state.sol_usd_rate {
-                solana_state.cached_usd_balance = Some(sol * rate);
-            }
-        }
-        Err(e) => warn!("[SOLANA] Balance fetch failed: {}", e),
-    }
+
+    let (tx, receiver) = crossbeam_channel::bounded(1);
+    *rx = Some(receiver);
+    tokio_runtime.0.spawn_blocking(move || {
+        let rpc =
+            RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+        let _ = tx.send(rpc.get_balance(&pubkey).map_err(|e| e.to_string()));
+    });
 }
 
 /// Background-fetch SOL/USD rate from CoinGecko and cache it in [`SolanaIntegrationState`].
@@ -688,6 +746,9 @@ pub fn sync_player_profiles(
     }
 }
 
+/// Not registered as a system anywhere — `SolanaIntegrationPlugin::build`
+/// does not call this, so `SolanaRpc` is never actually inserted as a
+/// resource in the running app.
 pub fn setup_solana_system(mut commands: Commands) {
     // Placeholder for fetching relayer_pubkey from backend or environment
     let relayer_pubkey = "PlaceholderRelayerPubkey";
@@ -697,11 +758,13 @@ pub fn setup_solana_system(mut commands: Commands) {
     });
 }
 
+/// Not registered as a system anywhere; body is an unimplemented placeholder.
 pub fn handle_game_transactions(_game_state: ResMut<GameState>, _solana_rpc: Res<SolanaRpc>) {
     // Use solana_rpc.fee_payer for transactions
     // Placeholder for transaction logic
 }
 
+/// Not registered as a system anywhere; body is an unimplemented placeholder.
 pub fn handle_tournament_transactions(
     _tournament_state: ResMut<TournamentClientState>,
     _solana_rpc: Res<SolanaRpc>,
@@ -827,6 +890,173 @@ pub fn poll_global_session_result(
         Err(crossbeam_channel::TryRecvError::Empty) => {}
         Err(_) => {
             commands.remove_resource::<GlobalSessionCheckPending>();
+        }
+    }
+}
+
+/// Once a wallet is connected and has an on-chain profile, automatically
+/// authorize a global session — one Phantom popup, ever — if none is active
+/// yet. After this succeeds, `lobby.rs`'s create/join (and, once wired,
+/// delegation) can sign locally with the persisted session keypair instead
+/// of round-tripping through the Tauri wallet bridge every game.
+///
+/// Mirrors `profile_check.rs`'s background-task + backoff-timer shape: a
+/// `Local` receiver drains a background thread's result, and a cooldown
+/// timer stops a failed attempt from retrying every frame.
+pub fn authorize_global_session_if_needed(
+    mut solana_state: ResMut<SolanaIntegrationState>,
+    time: Res<Time>,
+    mut rx: Local<Option<crossbeam_channel::Receiver<Result<Keypair, String>>>>,
+    mut retry_timer: Local<f32>,
+    mut attempted_for: Local<Option<Pubkey>>,
+) {
+    let Some(wallet_pubkey) = solana_state.wallet_pubkey else {
+        return;
+    };
+
+    if let Some(ref receiver) = *rx {
+        match receiver.try_recv() {
+            Ok(Ok(kp)) => {
+                info!("[GLOBAL_SESSION] Authorized — session {}", kp.pubkey());
+                solana_state.global_session_keypair = Some(kp);
+                solana_state.global_session_active = true;
+                *rx = None;
+            }
+            Ok(Err(e)) => {
+                warn!("[GLOBAL_SESSION] Authorization failed: {e}");
+                *rx = None;
+                *retry_timer = 30.0; // back off before trying again
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => {
+                *rx = None;
+                *retry_timer = 30.0;
+            }
+        }
+        return;
+    }
+
+    if solana_state.global_session_active {
+        return;
+    }
+    // Don't compete with the (separate, existing) profile-creation gate —
+    // wait until that's fully done first.
+    if solana_state.profile_status != super::state::ProfileStatus::HasProfileWithUsername {
+        return;
+    }
+    // One attempt per connected wallet per app run, then a cooldown on failure.
+    if *attempted_for == Some(wallet_pubkey) {
+        *retry_timer -= time.delta_secs();
+        if *retry_timer > 0.0 {
+            return;
+        }
+    }
+    *attempted_for = Some(wallet_pubkey);
+
+    let program_id: Pubkey = crate::solana::instructions::PROGRAM_ID
+        .parse()
+        .unwrap_or_default();
+    let rpc_url = DEVNET_RPC_URL.to_string();
+    let (tx, receiver) = crossbeam_channel::bounded(1);
+    *rx = Some(receiver);
+    std::thread::spawn(move || {
+        let _ = tx.send(establish_global_session(wallet_pubkey, program_id, &rpc_url));
+    });
+}
+
+/// One-time (per wallet) setup: generate a session keypair locally, build the
+/// `authorize_global_session` instruction, sign + submit it via the existing
+/// Tauri wallet bridge (the one popup this ever costs), then persist the
+/// keypair encrypted to disk so `try_load_global_session` finds it on every
+/// future launch.
+fn establish_global_session(
+    wallet_pubkey: Pubkey,
+    program_id: Pubkey,
+    rpc_url: &str,
+) -> Result<Keypair, String> {
+    use crate::multiplayer::solana::global_session_manager::{
+        build_authorize_global_session_ix, find_global_session_pda, AuthorizeGlobalSessionArgs,
+        GlobalSessionKeyManager,
+    };
+    use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
+
+    let mgr = GlobalSessionKeyManager::new(&wallet_pubkey);
+    let session_pubkey = mgr.pubkey();
+    let (session_pda, _bump) = find_global_session_pda(&program_id, &wallet_pubkey);
+
+    // 0.1 SOL — matches the (currently unused) backend `/global-session/prepare`
+    // default; no spending_limit/max_wager cap beyond the deposit itself.
+    const DEPOSIT_LAMPORTS: u64 = 100_000_000;
+    let authorize_ix = build_authorize_global_session_ix(
+        &program_id,
+        &wallet_pubkey,
+        &session_pda,
+        AuthorizeGlobalSessionArgs {
+            session_key: session_pubkey,
+            duration_secs: None,
+            spending_limit: None,
+            max_wager: None,
+            games: None,
+            deposit_lamports: DEPOSIT_LAMPORTS,
+        },
+    );
+
+    // The session keypair is freshly generated client-side and holds zero
+    // SOL — with no backend involved to fund it (unlike the per-game flow's
+    // `activate_session`, which funds its session key from the fee-payer
+    // pool), it can't even pay its own transaction fee. Bundle a direct
+    // transfer into this same, already-necessary signature: 0.01 SOL covers
+    // ~2000 future tx fees, same margin `activate_session` uses.
+    const SESSION_KEY_FUND_LAMPORTS: u64 = 10_000_000;
+    let fund_ix = solana_system_interface::instruction::transfer(
+        &wallet_pubkey,
+        &session_pubkey,
+        SESSION_KEY_FUND_LAMPORTS,
+    );
+
+    sign_and_send_via_tauri(rpc_url, wallet_pubkey, &[authorize_ix, fund_ix], &[])
+        .map_err(|e| format!("authorize_global_session: {e}"))?;
+
+    register_global_session_with_backend(wallet_pubkey, mgr.signer().to_bytes());
+
+    mgr.save(&wallet_pubkey, 30)
+        .map_err(|e| format!("save session key: {e}"))?;
+
+    Keypair::try_from(mgr.signer().to_bytes().as_slice())
+        .map_err(|e| format!("keypair conversion: {e}"))
+}
+
+/// Best-effort: hand the backend a copy of an already-authorized global
+/// session key, so it can act on this wallet's behalf for
+/// finalize/undelegate/settlement (Track 1 of
+/// docs/plans/global-session-flow-fix-plan.md) — create/join/delegate don't
+/// need this, the client signs those itself. Idempotent (the backend just
+/// re-verifies against on-chain state and overwrites its in-memory entry),
+/// so it's safe to call on every wallet connect, not just the first-ever
+/// authorization — that repetition matters because the backend's registry
+/// is in-memory only and forgets everything on restart.
+fn register_global_session_with_backend(wallet_pubkey: Pubkey, keypair_bytes: [u8; 64]) {
+    let secret_b58 = bs58::encode(keypair_bytes).into_string();
+    let url = format!(
+        "{}/api/global-session/register",
+        crate::multiplayer::network::vps::vps_base()
+    );
+    let body = serde_json::json!({
+        "wallet_pubkey": wallet_pubkey.to_string(),
+        "session_secret_key_b58": secret_b58,
+    });
+    match reqwest::blocking::Client::new().post(&url).json(&body).send() {
+        Ok(resp) if resp.status().is_success() => {
+            info!("[GLOBAL_SESSION] Registered session key with backend");
+        }
+        Ok(resp) => {
+            warn!(
+                "[GLOBAL_SESSION] Backend registration returned {} — finalize/undelegate/settlement won't work for this wallet until it's retried",
+                resp.status()
+            );
+        }
+        Err(e) => {
+            warn!("[GLOBAL_SESSION] Backend registration failed: {e}");
         }
     }
 }

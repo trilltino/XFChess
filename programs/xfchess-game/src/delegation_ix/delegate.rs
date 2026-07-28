@@ -89,6 +89,7 @@ mod inner {
         Ok(())
     }
 
+    /// Accounts for delegating a `Game` PDA to the Ephemeral Rollup.
     #[derive(Accounts)]
     #[instruction(_game_id: u64)]
     pub struct DelegateGameCtx<'info> {
@@ -129,6 +130,7 @@ mod inner {
         pub fee_payer: Signer<'info>,
     }
 
+    /// Accounts for committing ER state back to the base layer and undelegating.
     #[derive(Accounts)]
     #[instruction(_game_id: u64)]
     pub struct UndelegateGameCtx<'info> {

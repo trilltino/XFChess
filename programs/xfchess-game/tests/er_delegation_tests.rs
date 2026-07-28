@@ -157,7 +157,9 @@ async fn process_undelegation_rejects_non_canonical_buffer() {
     let err = send(&mut ctx, ix, &[]).await.unwrap_err();
     assert_eq!(
         custom_code(&err),
-        Some(ec(xfchess_game::errors::GameErrorCode::InvalidUndelegationBuffer)),
+        Some(ec(
+            xfchess_game::errors::GameErrorCode::InvalidUndelegationBuffer
+        )),
         "a buffer that isn't this account's canonical undelegate-buffer PDA must be rejected"
     );
 }

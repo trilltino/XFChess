@@ -1,6 +1,6 @@
 # Program fix plan: treasury payout, close_tournament drain, authority hygiene
 
-Status: **implemented in-tree (2026-07-02)** — compiles, all tests pass. Not yet deployed; still requires a program upgrade + redeploy to take effect on devnet/mainnet.
+Status: **implemented in-tree (2026-07-02), live on devnet since the 2026-07-16 program upgrade.** Not yet deployed to mainnet. IDL/client builder regeneration and treasury-authority multisig are still open.
 Scope: `programs/xfchess-game/`. Program ID `8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU` (localnet + devnet).
 Author: audit follow-up (2026-07-02).
 

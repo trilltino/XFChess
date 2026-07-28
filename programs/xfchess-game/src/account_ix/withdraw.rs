@@ -6,6 +6,9 @@ use crate::state::*;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
+/// Lets the game creator reclaim their wager from a game that never found an
+/// opponent within the 24h expiration window. `vault_nft_ata`/`player_nft_ata`/
+/// `token_program` are only required when the wager was an SPL token, not SOL.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct WithdrawExpiredWager<'info> {
@@ -24,6 +27,9 @@ pub struct WithdrawExpiredWager<'info> {
     pub token_program: Option<Program<'info, Token>>,
 }
 
+/// Verifies the game is still `WaitingForOpponent`, the caller is its creator,
+/// and 24h have passed since creation, then refunds the wager (SOL or SPL
+/// token) from escrow back to the creator and marks the game `Expired`.
 pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();

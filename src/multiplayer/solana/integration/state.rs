@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 use crate::solana::instructions::{
@@ -9,14 +10,21 @@ use crate::solana::instructions::{
 
 /// Devnet RPC endpoint. Overridable via `SOLANA_RPC_URL` (same var name and
 /// resolution as the backend's `SigningConfig` and `vps_base()`) so a local
-/// dev build can point at a dedicated provider (e.g. Triton) instead of the
-/// public endpoint, which rate-limits heavily and is the main source of
-/// slow-feeling blockhash fetches / tx submission / account polling from the
-/// client. Never hardcode a real provider URL/token here — this constant
-/// ships in every distributed client binary, so a literal secret would leak
-/// to every player. Falls back to the public endpoint when unset.
+/// dev build can point directly at a dedicated provider (e.g. Triton).
+///
+/// Distributed builds never carry a real provider URL/token here — this
+/// constant ships in every player's binary, so a literal secret would leak to
+/// all of them. Instead the default resolves to the backend's `/api/rpc`
+/// proxy (`routes::rpc_proxy`), which forwards allow-listed JSON-RPC calls to
+/// the real (paid, non-rate-limited) endpoint server-side, where the token
+/// stays — same base host as every other VPS call, see `vps_base()`.
 pub static DEVNET_RPC_URL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".to_string())
+    std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| {
+        format!(
+            "{}/api/rpc",
+            crate::multiplayer::network::vps::vps_base()
+        )
+    })
 });
 /// MagicBlock EU Devnet endpoint
 pub const MAGICBLOCK_EU_DEVNET: &str = "https://devnet-eu.magicblock.app";
@@ -170,9 +178,11 @@ impl SolanaIntegrationState {
         }
     }
 
-    /// Create a new RPC client
+    /// Create a new RPC client at `confirmed` commitment — the client default
+    /// (`finalized`) waits for ~32 confirmations (~13-20s) where ~1-2 (~1-2s)
+    /// is already safe for interactive use.
     pub fn create_rpc_client(rpc_url: &str) -> RpcClient {
-        RpcClient::new(rpc_url.to_string())
+        RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed())
     }
 }
 

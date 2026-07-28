@@ -6,6 +6,9 @@ use crate::game_ix::common::{init_game_fields, InitGameArgs};
 use crate::state::{Game, MatchType};
 use anchor_lang::prelude::*;
 
+/// Creates a new `Game` PDA and its wager escrow. `fee_payer` is the VPS
+/// relayer wallet that covers account rent, separate from `player` (white),
+/// so game creation can be sponsored without the player holding SOL.
 #[derive(Accounts)]
 #[instruction(game_id: u64, wager_amount: u64, match_type: MatchType, platform_fee: u64, base_time_seconds: u64, increment_seconds: u16)]
 pub struct CreateGame<'info> {
@@ -28,6 +31,9 @@ pub struct CreateGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Validates the wager amount against the min/max bounds, initializes the
+/// game via `common::init_game_fields`, and (for a non-zero wager) transfers
+/// the creator's stake into the escrow PDA.
 pub fn handler(
     ctx: Context<CreateGame>,
     game_id: u64,

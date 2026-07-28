@@ -1775,6 +1775,7 @@ dependencies = [
  "chrono",
  "csv",
  "dotenv",
+ "ephemeral-rollups-sdk 0.16.2",
  "futures",
  "hex",
  "iroh-gossip",

@@ -1,6 +1,13 @@
+//! Unused error scaffold — confirmed no caller anywhere in the codebase.
+//! Near-duplicate of `solana::core::errors::XfChessError` (same variants,
+//! also unused). Real on-chain error codes are `GameErrorCode` in
+//! `programs/xfchess-game/src/errors.rs`; the client surfaces RPC/program
+//! errors as plain `String`s (see `solana-chess-client`), not this type.
+
 use solana_program::program_error::ProgramError;
 use thiserror::Error;
 
+/// Unused. See module docs.
 #[derive(Error, Debug)]
 pub enum XfChessError {
     #[error("Game is already full")]

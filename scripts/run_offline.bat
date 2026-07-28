@@ -45,9 +45,15 @@ if not defined IDENTITY_ENCRYPTION_KEY set IDENTITY_ENCRYPTION_KEY=0000000000000
 if not defined IDENTITY_SALT set IDENTITY_SALT=1111111111111111111111111111111111111111111111111111111111111111
 
 :: Solana / Authority Keys (UPDATED to new Program ID)
-:: No hardcoded API key — falls back to the free public devnet RPC (same
-:: fallback as the justfile). Export HELIUS_API_KEY/SOLANA_RPC_URL yourself
-:: first if you need Helius throughput locally.
+:: Pick up the dedicated RPC provider (e.g. Triton) from backend\.env so the
+:: game client doesn't fall back to the heavily rate-limited public devnet
+:: endpoint for its pre-popup blockhash fetch (that rate-limiting is the main
+:: cause of slow/stuck wallet signing popups). Falls back to the free public
+:: devnet RPC if backend\.env has no override or doesn't exist. Export
+:: SOLANA_RPC_URL yourself first to take precedence over both.
+if not defined SOLANA_RPC_URL (
+    for /f "tokens=1,* delims==" %%a in ('findstr /b "SOLANA_RPC_URL=" "%ROOT%\backend\.env" 2^>nul') do set "SOLANA_RPC_URL=%%b"
+)
 if not defined SOLANA_RPC_URL set SOLANA_RPC_URL=https://api.devnet.solana.com
 if not defined HELIUS_API_KEY set HELIUS_API_KEY=
 set MAGIC_BLOCK_RPC_URL=https://devnet.magicblock.app

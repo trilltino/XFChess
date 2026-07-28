@@ -5,6 +5,7 @@
 
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 
 use crate::multiplayer::solana::integration::state::{
     ProfileStatus, SolanaIntegrationState, DEVNET_RPC_URL,
@@ -65,7 +66,7 @@ pub fn check_profile_on_connect(
     let profile_pda = solana_state.get_profile_pda(&wallet_pubkey);
 
     let handle = tokio_runtime.0.spawn(async move {
-        let rpc = RpcClient::new(rpc_url);
+        let rpc = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
         match rpc.get_account(&profile_pda) {
             Ok(account) => {
                 let mut data: &[u8] = &account.data;

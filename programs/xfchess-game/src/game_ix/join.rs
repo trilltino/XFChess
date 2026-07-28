@@ -5,6 +5,9 @@ use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// Accounts for a second player joining an open PvP game. `white_profile` is
+/// read (not just referenced) to support cross-border platform-fee
+/// calculation between the two players' jurisdictions.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct JoinGame<'info> {
@@ -25,6 +28,9 @@ pub struct JoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Joins an open PvP game as black: transitions the game via
+/// `join_waiting_game` and, for a SOL wager, transfers the joiner's stake
+/// into escrow (SPL-token wagers are funded through a separate path).
 pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();

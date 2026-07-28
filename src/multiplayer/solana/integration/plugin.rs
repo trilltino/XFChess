@@ -36,6 +36,7 @@ impl Plugin for SolanaIntegrationPlugin {
             verify_global_session_on_menu_enter,
         );
         app.add_systems(Update, poll_global_session_result);
+        app.add_systems(Update, authorize_global_session_if_needed);
         app.add_systems(Update, check_profile_on_connect);
         app.add_systems(Update, handle_profile_check_tasks);
         app.add_systems(Update, fetch_user_status_async);

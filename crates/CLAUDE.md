@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `nimzovich-uci` | UCI protocol adapter binary for the engine | Match testing via `cutechess-cli`, not linked into the app |
 | `chess-logic-on-chain` | **must stay `no_std`** | Solana program (`move-validation` feature) |
 | `xfchess-anticheat` | Engine-move-correlation anti-cheat | Backend |
-| `backend-types` | Serde-only, no Bevy | Backend, web frontend (via JSON) |
+| `backend-types` | Serde-only, no Bevy | Game client only (deserializes the backend's tournament-list JSON) — the backend does not depend on this crate; it hand-maintains a matching struct instead |
 | `solana-chess-client` | Anchor + Solana SDK | Game client (`--features solana`) |
 | `er-cu-benchmark` | Compute-unit/RPC load-test binaries against MagicBlock ER | Standalone benchmarking tool, not linked into the app |
 | `braid-core` | Thin HTTP-209 Braid facade over `braid-http` | All braid-* crates |
@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `braid-iroh` | Iroh QUIC transport for Braid | Game client, backend |
 | `braid_chess` | Typed chess messages + resources + publish/subscribe (was `braid_uri`) | Game client, backend |
 | `iroh-gossip` | Gossip broadcast over Iroh | Backend relay |
-| `iroh-h3`, `iroh-h3-axum`, `iroh-h3-client` | HTTP/3 layer over Iroh | Backend |
+| `iroh-h3`, `iroh-h3-axum`, `iroh-h3-client` | HTTP/3 layer over Iroh | Not currently used by anything — each crate's own README says so explicitly and recommends considering removal |
 | `xfchess-braid-server` | Axum integration for HTTP-209 subscribe | Backend |
 | `swiss-pairing` | FIDE Dutch Swiss algorithm | Backend (`network` feature adds Axum routes) |
 

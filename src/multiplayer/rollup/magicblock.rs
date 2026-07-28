@@ -142,21 +142,34 @@ impl MagicBlockResolver {
     /// Creates a `delegate_game` Anchor instruction matching the on-chain
     /// `DelegateGameCtx` account layout.
     ///   0.  game                  (mut) — game PDA
-    ///   1.  move_log              (mut) — move_log PDA
-    ///   2.  payer          (mut, sign)  — pays for delegation
-    ///   3.  owner_program               — xfchess-game program itself
-    ///   4.  buffer                (mut) — game delegation buffer PDA
-    ///   5.  delegation_record     (mut) — game delegation record PDA
-    ///   6.  delegation_metadata   (mut) — game delegation metadata PDA
-    ///   7.  ml_buffer             (mut) — move_log delegation buffer PDA
-    ///   8.  ml_delegation_record  (mut) — move_log delegation record PDA
-    ///   9.  ml_delegation_metadata(mut) — move_log delegation metadata PDA
-    ///  10.  delegation_program          — MagicBlock delegation program
-    ///  11.  system_program
+    ///   1.  payer          (mut, sign)  — pays for delegation bookkeeping
+    ///   2.  owner_program               — xfchess-game program itself
+    ///   3.  buffer                (mut) — game delegation buffer PDA
+    ///   4.  delegation_record     (mut) — game delegation record PDA
+    ///   5.  delegation_metadata   (mut) — game delegation metadata PDA
+    ///   6.  delegation_program          — MagicBlock delegation program
+    ///   7.  system_program
+    ///   8.  fee_payer       (mut, sign) — must equal `game.fee_payer`
+    /// `payer` funds the MagicBlock delegation bookkeeping accounts (buffer,
+    /// delegation_record, delegation_metadata) — it does not have to be the
+    /// wallet, just some funded signer; `fee_payer` must equal `game.fee_payer`
+    /// on-chain (checked by `handler_delegate_game`) — pass the session key
+    /// there to co-sign without a second real "authority" check.
+    ///
+    /// Account order below matches `DelegateGameCtx`
+    /// (`programs/xfchess-game/src/delegation_ix/delegate.rs`) exactly — Anchor
+    /// resolves `Accounts` fields positionally, so previously this built a
+    /// 12-account list (interleaving a `move_log` delegation that has no
+    /// field in `DelegateGameCtx` at all) which put a non-signer PDA where
+    /// `payer: Signer` was expected — every delegation submitted through it
+    /// would have failed on-chain with `AccountNotSigner`, regardless of who
+    /// signed. If move_log ever needs delegating too, that has to be a
+    /// second, separate instruction — not folded into this account list.
     pub fn create_delegation_instruction(
         &self,
         game_pda: Pubkey,
         payer: Pubkey,
+        fee_payer: Pubkey,
     ) -> Result<Instruction, MagicBlockError> {
         let delegation_program_id: Pubkey = DELEGATION_PROGRAM_ID
             .parse()
@@ -164,14 +177,6 @@ impl MagicBlockResolver {
 
         let game_id = self.delegated_game_id.unwrap_or(0);
 
-        // Derive move_log PDA
-        let move_log_pda = Pubkey::find_program_address(
-            &[b"move_log", &game_id.to_le_bytes()],
-            &self.config.program_id,
-        )
-        .0;
-
-        // --- Game PDA delegation accounts ---
         let buffer_pda = {
             let pda = delegate_buffer_pda_from_delegated_account_and_owner_program(
                 &game_pda.to_bytes().into(),
@@ -188,40 +193,19 @@ impl MagicBlockResolver {
             Pubkey::new_from_array(pda.to_bytes())
         };
 
-        // --- MoveLog PDA delegation accounts ---
-        let ml_buffer_pda = {
-            let pda = delegate_buffer_pda_from_delegated_account_and_owner_program(
-                &move_log_pda.to_bytes().into(),
-                &self.config.program_id.to_bytes().into(),
-            );
-            Pubkey::new_from_array(pda.to_bytes())
-        };
-        let ml_delegation_record = {
-            let pda = delegation_record_pda_from_delegated_account(&move_log_pda.to_bytes().into());
-            Pubkey::new_from_array(pda.to_bytes())
-        };
-        let ml_delegation_metadata = {
-            let pda =
-                delegation_metadata_pda_from_delegated_account(&move_log_pda.to_bytes().into());
-            Pubkey::new_from_array(pda.to_bytes())
-        };
-
         let accounts = vec![
             solana_sdk::instruction::AccountMeta::new(game_pda, false),
-            solana_sdk::instruction::AccountMeta::new(move_log_pda, false),
             solana_sdk::instruction::AccountMeta::new(payer, true),
             solana_sdk::instruction::AccountMeta::new_readonly(self.config.program_id, false),
             solana_sdk::instruction::AccountMeta::new(buffer_pda, false),
             solana_sdk::instruction::AccountMeta::new(delegation_record, false),
             solana_sdk::instruction::AccountMeta::new(delegation_metadata, false),
-            solana_sdk::instruction::AccountMeta::new(ml_buffer_pda, false),
-            solana_sdk::instruction::AccountMeta::new(ml_delegation_record, false),
-            solana_sdk::instruction::AccountMeta::new(ml_delegation_metadata, false),
             solana_sdk::instruction::AccountMeta::new_readonly(delegation_program_id, false),
             solana_sdk::instruction::AccountMeta::new_readonly(
                 solana_system_interface::program::id(),
                 false,
             ),
+            solana_sdk::instruction::AccountMeta::new(fee_payer, true),
         ];
 
         let valid_until: i64 = 600;

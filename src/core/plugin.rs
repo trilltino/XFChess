@@ -144,9 +144,6 @@ impl Plugin for CorePlugin {
             OnExit(GameState::GameOver),
             (log_state_exit, audit_despawn_markers, cleanup_game_over),
         );
-
-        // Check for FORCE_AUTH override on startup
-        app.add_systems(Startup, check_force_auth);
     }
 
     fn finish(&self, _app: &mut App) {
@@ -264,17 +261,6 @@ fn update_panic_state_tracker(
             if let Some(menu_state_res) = menu_state {
                 state_info.menu_state = Some(*menu_state_res.get());
             }
-        }
-    }
-}
-
-/// System to check for FORCE_AUTH environment variable and transition to Auth state
-fn check_force_auth(mut next_state: ResMut<NextState<GameState>>, state: Res<State<GameState>>) {
-    // Only check if we are in MainMenu (default state)
-    if *state.get() == GameState::MainMenu {
-        if std::env::var("FORCE_AUTH").is_ok() {
-            info!("[CORE] FORCE_AUTH detected, transitioning to Auth state");
-            next_state.set(GameState::Auth);
         }
     }
 }

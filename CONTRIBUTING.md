@@ -112,6 +112,13 @@ When you're ready, make an issue ticket and link relevant, constructive comments
 - Keep functions focused and small
 - Write descriptive variable and function names
 
+### Documentation Standards
+- Write docs in finality tone: state what the code does and how it's used, present tense. Do not narrate history ("this replaced X", "added because of Y") or changelog-style rationale — that belongs in commit messages, not in docs or doc comments.
+- Every module (`//!` in Rust, a top-of-file comment in TS/TSX) documents its purpose, its role in the data flow, and any invariants it depends on.
+- Every public item (`///` in Rust, TSDoc in TS/TSX — `fn`, `struct`, `enum`, `trait`, exported component, exported hook) gets a doc comment describing what it does and when to call it. Don't restate the signature.
+- READMEs follow the existing per-directory convention (`Role in XFChess` / `Files` / `Submodules` / `Invariants` headings, depending on what fits the module) — match the style already used by sibling READMEs rather than inventing a new format.
+- Once a crate's public API is fully documented, add `#![warn(missing_docs)]` to its crate root so CI catches undocumented items added later.
+
 ### Testing
 - Write unit tests for new functionality
 - Write integration tests for complex features

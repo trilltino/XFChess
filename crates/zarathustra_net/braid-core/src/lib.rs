@@ -1,10 +1,11 @@
 //! braid-core: the thin Braid-HTTP protocol surface used by XFChess.
 //!
 //! Re-exports the protocol types and client from `braid-http` plus the local
-//! error type. The historical filesystem-sync (`fs`), blob storage (`blob`),
-//! server (`server`) and vendored CRDT (`vendor`/diamond-types, conflict
-//! `merge`) modules were removed — XFChess only consumes the `Update`/`Version`
-//! types and the Braid client path.
+//! error type, behind one stable import path so the rest of `zarathustra_net`
+//! depends on this crate rather than `braid-http` directly. XFChess is
+//! server-authoritative (append-log for moves, JSON Patch for tournament
+//! documents), so this crate carries only protocol vocabulary and the client
+//! path — no filesystem sync, blob store, or CRDT merge. See the crate README.
 
 pub mod core;
 

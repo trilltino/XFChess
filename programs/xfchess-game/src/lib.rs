@@ -30,19 +30,20 @@ pub use account_ix::{
 };
 #[cfg(feature = "cranks")]
 pub use crank_ix::{
-    crank_time_check, crank_time_check::CrankTimeCheckData, schedule_time_check_crank,
-    CrankTimeCheck, ScheduleTimeCheck, ScheduleTimeCheckArgs,
+    cancel_time_check_crank, crank_time_check, crank_time_check::CrankTimeCheckData,
+    schedule_time_check_crank, CancelTimeCheck, CancelTimeCheckArgs, CrankTimeCheck,
+    ScheduleTimeCheck, ScheduleTimeCheckArgs,
 };
 pub use delegation_ix::{
-    AuthorizeSessionCtx, DelegateGameCtx, InitializeAfterUndelegation, RevokeSessionCtx,
-    UndelegateGameCtx,
+    AuthorizeSessionCtx, DelegateGameCtx, ForceUndelegateAfterTimeoutCtx,
+    InitializeAfterUndelegation, RequestForceUndelegateCtx, RevokeSessionCtx, UndelegateGameCtx,
 };
 pub use game_ix::{
     CancelGame, ClaimTimeout, CreateGame, EndGame, GlobalCreateGame, GlobalJoinGame, JoinGame,
     ResignGame,
 };
-pub use governance_ix::{ClaimStaleDispute, DisputeGame, ResolveDispute};
-pub use moves_ix::RecordMove;
+pub use governance_ix::{ClaimStaleDispute, DisputeGame, RecoverStuckDelegation, ResolveDispute};
+pub use moves_ix::{GlobalRecordMove, RecordMove};
 pub use tournament_ix::{
     AdvanceRound, AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
     CancelTournament, ClaimTournamentPrize, CloseTournament, DistributeTournamentPrizes,
@@ -98,6 +99,12 @@ pub mod __client_accounts_revoke_session_ctx {
 pub mod __client_accounts_initialize_after_undelegation {
     pub use crate::delegation_ix::undelegation::__client_accounts_initialize_after_undelegation::*;
 }
+pub mod __client_accounts_request_force_undelegate_ctx {
+    pub use crate::delegation_ix::force_recovery::__client_accounts_request_force_undelegate_ctx::*;
+}
+pub mod __client_accounts_force_undelegate_after_timeout_ctx {
+    pub use crate::delegation_ix::force_recovery::__client_accounts_force_undelegate_after_timeout_ctx::*;
+}
 pub mod __client_accounts_cancel_game {
     pub use crate::game_ix::cancel::__client_accounts_cancel_game::*;
 }
@@ -124,6 +131,9 @@ pub mod __client_accounts_resolve_dispute {
 }
 pub mod __client_accounts_record_move {
     pub use crate::moves_ix::record::__client_accounts_record_move::*;
+}
+pub mod __client_accounts_global_record_move {
+    pub use crate::moves_ix::global_record::__client_accounts_global_record_move::*;
 }
 pub mod __client_accounts_initialize_tournament {
     pub use crate::tournament_ix::lifecycle::initialize::__client_accounts_initialize_tournament::*;
@@ -223,8 +233,15 @@ pub mod __client_accounts_schedule_time_check {
 pub mod __client_accounts_crank_time_check {
     pub use crate::crank_ix::crank_time_check::__client_accounts_crank_time_check::*;
 }
+#[cfg(feature = "cranks")]
+pub mod __client_accounts_cancel_time_check {
+    pub use crate::crank_ix::cancel_time_check::__client_accounts_cancel_time_check::*;
+}
 pub mod __client_accounts_claim_stale_dispute {
     pub use crate::governance_ix::claim_stale_dispute::__client_accounts_claim_stale_dispute::*;
+}
+pub mod __client_accounts_recover_stuck_delegation {
+    pub use crate::governance_ix::recover_stuck_delegation::__client_accounts_recover_stuck_delegation::*;
 }
 pub mod __client_accounts_authorize_global_session_ctx {
     pub use crate::account_ix::global_session_ix::__client_accounts_authorize_global_session_ctx::*;
@@ -346,6 +363,31 @@ pub mod xfchess_game {
         )
     }
 
+    /// Same as `record_move`, but for games created via
+    /// `global_create_game`/`global_join_game` — checks the mover's
+    /// `GlobalSessionDelegation` instead of a per-game `SessionDelegation`
+    /// (which those games never get, that's what makes create/join
+    /// popup-free for them).
+    pub fn global_record_move(
+        ctx: Context<GlobalRecordMove>,
+        game_id: u64,
+        move_uci: [u8; 5],
+        next_board: [u8; 68],
+        nonce: u64,
+        signature: Option<Vec<u8>>,
+        parent_nonce: Option<u64>,
+    ) -> Result<()> {
+        crate::moves_ix::global_record::handler(
+            ctx,
+            game_id,
+            move_uci,
+            next_board,
+            nonce,
+            signature,
+            parent_nonce,
+        )
+    }
+
     pub fn finalize_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
         crate::game_ix::finalize::handler(ctx, game_id)
     }
@@ -388,6 +430,16 @@ pub mod xfchess_game {
         crate::governance_ix::claim_stale_dispute::handler(ctx, game_id)
     }
 
+    /// Releases wager escrow from a `Game` PDA left wiped by
+    /// `force_undelegate_after_timeout` — see
+    /// `governance_ix::recover_stuck_delegation` for the full rationale.
+    pub fn recover_stuck_delegation(
+        ctx: Context<RecoverStuckDelegation>,
+        game_id: u64,
+    ) -> Result<()> {
+        crate::governance_ix::recover_stuck_delegation::handler(ctx, game_id)
+    }
+
     pub fn authorize_session_key(
         ctx: Context<AuthorizeSessionCtx>,
         game_id: u64,
@@ -410,6 +462,28 @@ pub mod xfchess_game {
 
     pub fn undelegate_game(ctx: Context<UndelegateGameCtx>, game_id: u64) -> Result<()> {
         crate::delegation_ix::delegate::handler_undelegate_game(ctx, game_id)
+    }
+
+    /// Starts the non-admin, owner-program-authorized forced-undelegation
+    /// countdown for a `Game` PDA whose ER validator has gone unreachable.
+    /// See `delegation_ix::force_recovery` and MAGICBLOCK.md's
+    /// "Failure Mode: ER Unavailability" section.
+    pub fn request_force_undelegate(
+        ctx: Context<RequestForceUndelegateCtx>,
+        game_id: u64,
+    ) -> Result<()> {
+        crate::delegation_ix::force_recovery::handler_request_force_undelegate(ctx, game_id)
+    }
+
+    /// Completes a forced undelegation once the `request_force_undelegate`
+    /// timeout has elapsed — hands the `Game` PDA back wiped to zero bytes
+    /// (data-loss by design; see the handler's doc comment). Follow up with
+    /// `recover_stuck_delegation` to release the escrow.
+    pub fn force_undelegate_after_timeout(
+        ctx: Context<ForceUndelegateAfterTimeoutCtx>,
+        game_id: u64,
+    ) -> Result<()> {
+        crate::delegation_ix::force_recovery::handler_force_undelegate_after_timeout(ctx, game_id)
     }
 
     pub fn process_undelegation(
@@ -842,5 +916,14 @@ pub mod xfchess_game {
     #[cfg(feature = "cranks")]
     pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData) -> Result<()> {
         crate::crank_ix::crank_time_check::crank_time_check(ctx, _data)
+    }
+
+    /// Cancel a previously scheduled time check crank
+    #[cfg(feature = "cranks")]
+    pub fn cancel_time_check(
+        ctx: Context<CancelTimeCheck>,
+        args: CancelTimeCheckArgs,
+    ) -> Result<()> {
+        crate::crank_ix::cancel_time_check_crank(ctx, args)
     }
 }

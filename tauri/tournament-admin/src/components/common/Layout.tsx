@@ -34,7 +34,7 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
   return (
     <div style={{
       display: "flex",
-      minHeight: "100vh",
+      height: "100%",
       width: "100%",
       backgroundColor: "var(--bg)",
       fontFamily: "'Outfit', sans-serif",
@@ -54,7 +54,7 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
         zIndex: 10,
         margin: "1rem",
         borderRadius: "24px",
-        height: "calc(100vh - 2rem)",
+        height: "calc(100% - 2rem)",
       }}>
         <div style={{
           padding: "1rem",
@@ -158,42 +158,40 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
         </div>
         {/* Header */}
         <header style={{
-          backgroundColor: "#2d2d2d",
-          borderBottom: "1px solid #404040",
-          padding: "0.75rem 1.5rem",
+          backgroundColor: "var(--surface)",
+          backdropFilter: "blur(20px)",
+          borderBottom: "1px solid var(--border)",
+          padding: "0.85rem 1.5rem",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
         }}>
           <div>
             <h1 style={{
-              color: "#ffffff",
+              color: "var(--text)",
               margin: 0,
-              fontSize: "24px",
-            }}>
-              XFChess Tournament Admin
-            </h1>
-            <p style={{
-              color: "#999",
-              margin: "0.25rem 0 0 0",
-              fontSize: "14px",
+              fontSize: "22px",
+              fontWeight: 700,
+              letterSpacing: "-0.02em",
             }}>
               {menuItems.find(item => item.id === currentPage)?.label || "Dashboard"}
-            </p>
+            </h1>
           </div>
 
           <div style={{
             display: "flex",
             alignItems: "center",
-            gap: "1rem",
+            gap: "0.75rem",
           }}>
             <div style={{
               display: "flex",
               alignItems: "center",
               gap: "0.5rem",
               padding: "0.5rem 1rem",
-              backgroundColor: "#404040",
-              borderRadius: "4px",
+              backgroundColor: "var(--glass)",
+              border: "1px solid var(--border)",
+              borderRadius: "100px",
+              backdropFilter: "blur(8px)",
             }}>
               <div style={{
                 width: "8px",
@@ -205,45 +203,34 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
               }} />
               <span style={{
                 fontSize: "12px",
-                color: "#999",
+                color: "var(--text-dim)",
               }}>
                 {isProd ? `Tunnel ${tunnelState}` : "Local"}
               </span>
             </div>
 
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-            }}>
-              <span style={{
-                fontSize: "14px",
-                color: "#999",
-              }}>
-                Admin
-              </span>
-              <button
-                onClick={logout}
-                style={{
-                  backgroundColor: "#ef4444",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "0.5rem 1rem",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                  transition: "background-color 0.2s ease",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = "#dc2626";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "#ef4444";
-                }}
-              >
-                Logout
-              </button>
-            </div>
+            <button
+              onClick={logout}
+              style={{
+                backgroundColor: "rgba(239, 68, 68, 0.12)",
+                color: "#ef4444",
+                border: "1px solid rgba(239, 68, 68, 0.3)",
+                borderRadius: "100px",
+                padding: "0.5rem 1.1rem",
+                fontSize: "13px",
+                fontWeight: 600,
+                backdropFilter: "none",
+                transition: "background-color 0.2s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(239, 68, 68, 0.22)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(239, 68, 68, 0.12)";
+              }}
+            >
+              Logout
+            </button>
           </div>
         </header>
 

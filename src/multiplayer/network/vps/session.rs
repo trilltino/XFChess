@@ -186,7 +186,7 @@ pub fn tee_authenticate(game_id: u64, wallet_pubkey: &str) -> Result<String, Str
 pub fn verify_global_session(wallet_pubkey: &str) -> Result<Option<String>, String> {
     let resp = client()?
         .get(format!(
-            "{}/global-session/{}/verify",
+            "{}/api/global-session/{}/verify",
             vps_base(),
             wallet_pubkey
         ))
@@ -211,4 +211,35 @@ pub fn verify_global_session(wallet_pubkey: &str) -> Result<Option<String>, Stri
     } else {
         Ok(None)
     }
+}
+
+#[derive(Serialize)]
+struct TrackGameReq<'a> {
+    game_id: u64,
+    wallet_pubkey: &'a str,
+}
+
+/// Tell the backend a game was just created/joined via the global-session
+/// flow, so `settlement_worker` can discover and auto-settle it — see
+/// `routes::global_session::track_game`'s doc comment for why this exists.
+/// Best-effort: `finalize_game`/`undelegate_game` don't depend on this call
+/// having succeeded (they resolve a signer from on-chain state directly), so
+/// a failure here only means this specific game misses out on *automatic*
+/// settlement, not that it becomes unsettleable.
+pub fn track_global_session_game(game_id: u64, wallet_pubkey: &str) -> Result<(), String> {
+    let resp = client()?
+        .post(format!("{}/api/global-session/track-game", vps_base()))
+        .json(&TrackGameReq {
+            game_id,
+            wallet_pubkey,
+        })
+        .send()
+        .map_err(|e| format!("track_global_session_game: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "track_global_session_game: HTTP {}",
+            resp.status()
+        ));
+    }
+    Ok(())
 }

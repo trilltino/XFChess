@@ -8,6 +8,9 @@ use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// Writes a verified Lichess rating attestation onto a player's profile.
+/// Only the configured `link_authority` (VPS backend signer) may call this —
+/// players cannot self-report ratings.
 #[derive(Accounts)]
 #[instruction(
     username: String,
@@ -34,6 +37,9 @@ pub struct LinkExternalElo<'info> {
     pub link_authority: AccountInfo<'info>,
 }
 
+/// Records the Lichess username and blitz/rapid/bullet ratings (converted to
+/// centiscale) on the caller's profile. On the first link only, also seeds
+/// `elo_rating` from the external rating (rapid, unless blitz is 500+ higher).
 pub fn handler(
     ctx: Context<LinkExternalElo>,
     username: String,

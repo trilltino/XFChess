@@ -4,6 +4,7 @@ use crate::constants::*;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// Accounts for a player conceding their own game.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct ResignGame<'info> {
@@ -13,6 +14,7 @@ pub struct ResignGame<'info> {
     pub player: Signer<'info>,
 }
 
+/// Ends the game in a loss for the resigning player via `finish_by_resign`.
 pub fn handler(ctx: Context<ResignGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();

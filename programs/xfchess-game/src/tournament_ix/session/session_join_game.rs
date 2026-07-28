@@ -4,6 +4,7 @@
 //! drawing funds from the delegation PDA vault for cross-border fees and wagers.
 
 use crate::account_ix::session_guards;
+use crate::common::escrow::debit_program_pda;
 use crate::constants::*;
 use crate::errors::*;
 use crate::state::*;
@@ -134,28 +135,16 @@ pub fn handler(ctx: Context<SessionJoinGame>, _tournament_id: u64, _game_id: u64
     game.updated_at = Clock::get()?.unix_timestamp;
     game.country_fee = final_fee;
 
-    // Transfer wager from delegation PDA vault to escrow
-    if game.wager_amount > 0 && game.wager_token.is_none() {
-        let tid_bytes = delegation.tournament_id.to_le_bytes();
-        let player_bytes = delegation.player.to_bytes();
-        let bump = [delegation.bump];
-        let delegation_seeds: [&[u8]; 4] = [
-            TournamentSessionDelegation::SEED,
-            tid_bytes.as_ref(),
-            player_bytes.as_ref(),
-            bump.as_ref(),
-        ];
-        let signer_seeds: &[&[&[u8]]] = &[&delegation_seeds];
-
-        anchor_lang::system_program::transfer(
-            CpiContext::new_with_signer(
-                System::id(),
-                anchor_lang::system_program::Transfer {
-                    from: delegation.to_account_info(),
-                    to: ctx.accounts.escrow_pda.to_account_info(),
-                },
-                signer_seeds,
-            ),
+    // Transfer wager from delegation PDA vault to escrow. `delegation` is a
+    // program-owned PDA carrying real account data, so the System Program
+    // refuses to act as `from` for it in any CPI ("Transfer: `from` must not
+    // carry data") regardless of signing — `debit_program_pda` moves the
+    // lamports directly instead. See `game_ix::global_create` for the fuller
+    // writeup (this is the tournament join-side half of the same bug).
+    if game.wager_token.is_none() {
+        debit_program_pda(
+            &delegation.to_account_info(),
+            &ctx.accounts.escrow_pda.to_account_info(),
             game.wager_amount,
         )?;
     }

@@ -34,6 +34,8 @@ use std::sync::Arc;
 
 #[path = "main_menu/board_animation.rs"]
 mod board_animation;
+#[path = "main_menu/famous_games.rs"]
+mod famous_games;
 #[path = "main_menu/modals.rs"]
 mod modals;
 #[path = "main_menu/music.rs"]
@@ -43,12 +45,13 @@ pub mod new_menu;
 #[path = "main_menu/screens.rs"]
 mod screens;
 
+pub use board_animation::BoardAnimator;
 use modals::{render_ai_setup_modal, render_controls_popup, render_pgn_input_modal};
 pub use new_menu::NewMenuPanel;
 use new_menu::{
     menu_escape_system, orbit_camera_system, purge_stale_lights, render_new_style_panel,
-    render_solana_splash, render_wallet_hud, setup_menu_fog, spawn_menu_bg_board,
-    spawn_menu_bg_lights, spawn_menu_bg_pieces,
+    render_wallet_hud, setup_menu_fog, spawn_menu_bg_board, spawn_menu_bg_lights,
+    spawn_menu_bg_pieces,
 };
 use screens::*;
 
@@ -115,7 +118,7 @@ impl Plugin for MainMenuPlugin {
             )
             .add_systems(OnEnter(GameState::MainMenu), music::start_menu_music)
             .init_resource::<BrandLogoState>()
-            .init_resource::<SolanaLogoState>()
+            .init_resource::<PartnerLogoState>()
             .init_resource::<PlayerColorChoice>()
             .init_resource::<NewsBannerState>()
             .init_resource::<PlayerIdentity>()
@@ -156,11 +159,23 @@ impl Plugin for MainMenuPlugin {
                     try_setup_fonts,
                     // Slide tween for the ambient board pieces.
                     board_animation::animate_menu_pieces,
-                    // Slow opacity fade for captured ambient pieces.
-                    board_animation::animate_menu_piece_fades,
-                    // Ambient Immortal-Zugzwang replay on the full-size MenuBg board.
-                    // Self-arms once `spawn_menu_bg_pieces` populates the animator.
-                    board_animation::animate_ambient_board,
+                    // Slow opacity fade for captured/reset ambient pieces, then
+                    // the carousel's reset-phase state machine. Order matters:
+                    // a piece's own fade must finish (component removed,
+                    // Visibility set) before the phase logic decides whether to
+                    // overwrite it with a fresh fade for the next game — run
+                    // unordered, both systems can race on the same entity in
+                    // the same frame (their timers expire together, since both
+                    // use the same crossfade duration) and the fresh fade gets
+                    // silently dropped.
+                    (
+                        board_animation::animate_menu_piece_fades,
+                        // Ambient famous-games carousel replay on the full-size
+                        // MenuBg board. Self-arms once `spawn_menu_bg_pieces`
+                        // populates the animator.
+                        board_animation::animate_ambient_board,
+                    )
+                        .chain(),
                     menu_escape_system,
                     // Menu playlist: fades between tracks, advances on end / skip.
                     music::drive_menu_music,
@@ -895,18 +910,20 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
     })
 }
 
-/// Fetch SOL balance via Helius RPC getBalance, then convert to USD via
-/// Fetches the wallet SOL balance and live exchange rates.
+/// Fetches the wallet's real (mainnet) SOL balance and live exchange rates.
 /// Returns (sol_balance, usd_per_sol, gbp_per_sol) — all 0.0 on error.
+///
+/// The balance read goes through the backend's `/api/rpc/mainnet` proxy
+/// rather than hitting a public mainnet RPC directly from the client — the
+/// free public endpoint (the old fallback here) is heavily rate-limited and
+/// was the dominant cause of the wallet HUD taking up to a minute to show a
+/// balance. The backend forwards to `SOLANA_MAINNET_RPC_URL` if configured,
+/// same public endpoint otherwise (see `routes::rpc_proxy`).
+///
+/// The balance and rates fetches are independent (a wallet's SOL balance
+/// doesn't depend on the SOL/USD quote or vice versa), so they run on
+/// separate threads concurrently instead of one blocking call after another.
 fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
-    // No embedded API key — shipped client binaries must not carry one.
-    // Falls back to the free public mainnet RPC when HELIUS_API_KEY isn't set.
-    let rpc_url = match std::env::var("HELIUS_API_KEY") {
-        Ok(key) if !key.is_empty() => format!("https://beta.helius-rpc.com/?api-key={key}"),
-        _ => "https://api.mainnet-beta.solana.com".to_string(),
-    };
-    let rpc_url = rpc_url.as_str();
-
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
@@ -915,32 +932,34 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
         Err(_) => return (0.0, 0.0, 0.0),
     };
 
-    let body = serde_json::json!({
-        "jsonrpc": "2.0", "id": 1,
-        "method": "getBalance",
-        "params": [pubkey, { "commitment": "confirmed" }]
+    let balance_url = format!(
+        "{}/api/rpc/mainnet",
+        crate::multiplayer::network::vps::vps_base()
+    );
+    let pubkey = pubkey.to_string();
+    let balance_client = client.clone();
+    let balance_handle = std::thread::spawn(move || {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "getBalance",
+            "params": [pubkey, { "commitment": "confirmed" }]
+        });
+        balance_client
+            .post(&balance_url)
+            .json(&body)
+            .send()
+            .ok()
+            .and_then(|r| r.json::<serde_json::Value>().ok())
+            .and_then(|j| j["result"]["value"].as_u64())
+            .map(|lamports| lamports as f64 / 1_000_000_000.0)
+            .unwrap_or(0.0)
     });
-    let sol = client
-        .post(rpc_url)
-        .json(&body)
-        .send()
-        .ok()
-        .and_then(|r| r.json::<serde_json::Value>().ok())
-        .and_then(|j| j["result"]["value"].as_u64())
-        .map(|lamports| lamports as f64 / 1_000_000_000.0)
-        .unwrap_or(0.0);
 
-    // Rate fetch below is a global market quote, independent of this
-    // wallet's balance — it used to be skipped whenever `sol == 0.0` (either
-    // a genuinely empty wallet, or the balance RPC call above failing and
-    // defaulting to 0.0), which silently withheld the USD/GBP conversion and
-    // left the wallet HUD (render_wallet_hud) showing plain SOL text even
-    // though the rate itself was perfectly fetchable. Always attempt it.
-
-    // Fetch both USD and GBP rates from the backend in one call. Must go
-    // through vps_base() (not a hardcoded localhost URL) — release builds
-    // run against the production backend, and a literal 127.0.0.1 here
-    // always fails for real players, silently losing the USD conversion.
+    // Fetch both USD and GBP rates from the backend in one call, concurrently
+    // with the balance fetch above. Must go through vps_base() (not a
+    // hardcoded localhost URL) — release builds run against the production
+    // backend, and a literal 127.0.0.1 here always fails for real players,
+    // silently losing the USD conversion.
     let rates_url = format!(
         "{}/api/rates/all",
         crate::multiplayer::network::vps::vps_base()
@@ -973,6 +992,8 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
                 0.0
             }
         });
+
+    let sol = balance_handle.join().unwrap_or(0.0);
 
     (sol, usd_per_sol, gbp_per_sol)
 }
@@ -1063,52 +1084,62 @@ pub struct NewsBannerState {
     pub loaded: bool,
 }
 
-/// Cached Solana splash textures (Screenshot logo + Solana coin logo).
+/// Cached partner-badge textures (MagicBlock + Solana), shown while connecting
+/// a wallet for multiplayer.
 #[derive(Resource, Default)]
-pub struct SolanaLogoState {
-    pub texture1: Option<egui::TextureHandle>,
-    pub texture2: Option<egui::TextureHandle>,
-    pub loaded: bool,
+pub struct PartnerLogoState {
+    pub magicblock: Option<egui::TextureHandle>,
+    pub solana: Option<egui::TextureHandle>,
+    loaded: bool,
 }
 
-const SOLANA_LOGO1_PATH: &str =
-    r"C:\Users\isich\Pictures\Camera Roll\Screenshots\Screenshot 2026-05-20 211643.png";
-const SOLANA_LOGO2_PATH: &str = r"C:\Users\isich\Downloads\solanaLogo.png";
+const MAGICBLOCK_LOGO_PATH: &str = "assets/branding/magicblock-logo-white.png";
+const SOLANA_PARTNER_LOGO_PATH: &str = "assets/branding/solana-logo.png";
 
-pub(super) fn ensure_solana_logos(ctx: &egui::Context, logos: &mut SolanaLogoState) {
+/// Resolves an asset-relative path against a few candidate roots (mirrors the
+/// brand-logo/font loaders): CWD, "./CWD", and next to the executable for
+/// packaged builds.
+fn resolve_asset_path(rel: &str) -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<std::path::PathBuf> = vec![rel.into(), format!("./{}", rel).into()];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(rel));
+        }
+    }
+    candidates.into_iter().find(|p| p.exists())
+}
+
+pub(super) fn ensure_partner_logos(ctx: &egui::Context, logos: &mut PartnerLogoState) {
     if logos.loaded {
         return;
     }
     logos.loaded = true;
 
+    // egui's wgpu backend caps texture sides at 2048; the MagicBlock wordmark
+    // ships at 3401px wide, so it must be downscaled before `load_texture` or
+    // egui panics (see logs/crash_1785002521.log).
     const MAX_SIDE: u32 = 2048;
 
-    let load = |path: &str| -> Option<egui::ColorImage> {
-        let bytes = std::fs::read(path).ok()?;
-        let img = image::load_from_memory(&bytes).ok()?;
-        // Scale down if either dimension exceeds egui's texture limit
-        let img = if img.width() > MAX_SIDE || img.height() > MAX_SIDE {
-            let scale = (MAX_SIDE as f32 / img.width().max(img.height()) as f32).min(1.0);
-            let nw = ((img.width() as f32 * scale) as u32).max(1);
-            let nh = ((img.height() as f32 * scale) as u32).max(1);
-            img.resize(nw, nh, image::imageops::FilterType::Lanczos3)
+    let load = |rel: &str, name: &str| -> Option<egui::TextureHandle> {
+        let path = resolve_asset_path(rel)?;
+        let bytes = std::fs::read(&path).ok()?;
+        let decoded = image::load_from_memory(&bytes).ok()?;
+        let decoded = if decoded.width() > MAX_SIDE || decoded.height() > MAX_SIDE {
+            let scale = (MAX_SIDE as f32 / decoded.width().max(decoded.height()) as f32).min(1.0);
+            let w = ((decoded.width() as f32 * scale) as u32).max(1);
+            let h = ((decoded.height() as f32 * scale) as u32).max(1);
+            decoded.resize(w, h, image::imageops::FilterType::Lanczos3)
         } else {
-            img
+            decoded
         };
-        let rgba = img.to_rgba8();
+        let rgba = decoded.to_rgba8();
         let size = [rgba.width() as usize, rgba.height() as usize];
-        Some(egui::ColorImage::from_rgba_unmultiplied(
-            size,
-            rgba.as_raw(),
-        ))
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+        Some(ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR))
     };
 
-    if let Some(ci) = load(SOLANA_LOGO1_PATH) {
-        logos.texture1 = Some(ctx.load_texture("solana_logo1", ci, egui::TextureOptions::LINEAR));
-    }
-    if let Some(ci) = load(SOLANA_LOGO2_PATH) {
-        logos.texture2 = Some(ctx.load_texture("solana_logo2", ci, egui::TextureOptions::LINEAR));
-    }
+    logos.magicblock = load(MAGICBLOCK_LOGO_PATH, "magicblock_logo");
+    logos.solana = load(SOLANA_PARTNER_LOGO_PATH, "solana_partner_logo");
 }
 
 /// Cached brand logo texture loaded from the local screenshot file.
@@ -1438,8 +1469,8 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
 }
 
 /// Render the main menu: loading screen while assets load, the "Learn" focus
-/// mode (board caption only), the Solana splash panel, or the 3D-board menu
-/// — the only menu layout that exists.
+/// mode (board caption only), or the 3D-board menu — the only menu layout
+/// that exists.
 fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     if !ctx_menu.loading_progress.complete {
         render_loading_screen_website(ctx, ctx_menu);
@@ -1447,15 +1478,11 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     }
 
     if ctx_menu.focus_mode.active {
-        new_menu::render_board_caption(ctx);
+        new_menu::render_board_caption(ctx, ctx_menu);
         return;
     }
 
-    if *ctx_menu.new_menu_panel == NewMenuPanel::SolanaMultiplayer {
-        render_solana_splash(ctx, ctx_menu);
-    } else {
-        render_new_style_panel(ctx, ctx_menu);
-    }
+    render_new_style_panel(ctx, ctx_menu);
 
     render_wallet_hud(ctx, ctx_menu);
 

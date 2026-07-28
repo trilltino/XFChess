@@ -5,6 +5,8 @@ use crate::lifecycle::clock;
 use crate::state::{Game, GameResult, GameStatus};
 use anchor_lang::prelude::*;
 
+/// Ends an active game as a loss for `resigner`. Sets the result and status
+/// only — does not touch `is_delegated` or move any funds (see settlement.rs).
 pub fn finish_by_resign(game: &mut Game, resigner: Pubkey, now: i64) -> Result<()> {
     require!(
         game.status == GameStatus::Active,
@@ -27,6 +29,9 @@ pub fn finish_by_resign(game: &mut Game, resigner: Pubkey, now: i64) -> Result<(
     Ok(())
 }
 
+/// Ends an active game as a loss for whoever's clock ran out, for the
+/// permissionless `ClaimTimeout` instruction. Fails if the inactivity window
+/// hasn't actually elapsed yet.
 pub fn finish_by_timeout(game: &mut Game, now: i64) -> Result<()> {
     require!(
         game.status == GameStatus::Active,
@@ -52,6 +57,10 @@ pub fn finish_by_timeout(game: &mut Game, now: i64) -> Result<()> {
     Ok(())
 }
 
+/// The idempotent, crank-friendly variant of timeout resolution: returns
+/// `Ok(false)` (rather than erroring) if the game isn't active or the clock
+/// hasn't expired, so callers like `crank_ix::crank_time_check` can invoke it
+/// unconditionally on every tick. Returns `Ok(true)` if it resolved the game.
 pub fn finish_by_timeout_if_expired(game: &mut Game, now: i64) -> Result<bool> {
     if game.status != GameStatus::Active || game.base_time_seconds == 0 {
         return Ok(false);

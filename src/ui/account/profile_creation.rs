@@ -157,7 +157,6 @@ pub fn handle_profile_submission(
     tokio: Res<TokioRuntime>,
     mut menu_state: ResMut<NextState<MenuState>>,
     mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
-    auth_state: Res<crate::ui::account::auth::AuthState>,
     mut solana_state: ResMut<
         crate::multiplayer::solana::integration::state::SolanaIntegrationState,
     >,
@@ -185,10 +184,6 @@ pub fn handle_profile_submission(
         let _email = event.email.clone();
         let dob = event.dob.clone();
         let address = event.address.clone();
-
-        // Credentials for linking
-        let auth_email = auth_state.email.clone();
-        let auth_password = auth_state.password.clone();
 
         let wallet_pubkey = match wallet.pubkey {
             Some(pk) => pk,
@@ -297,39 +292,6 @@ pub fn handle_profile_submission(
                 .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {e}")));
             if let Err(e) = reg_result {
                 warn!("[PROFILE] Backend registration skipped/failed: {}", e);
-            }
-
-            // 2.5 Link wallet if account was created via email
-            if !auth_email.is_empty() {
-                info!(
-                    "[PROFILE] Linking wallet to email account {}...",
-                    auth_email
-                );
-                let link_msg = format!("xfchess:link:{}", timestamp);
-                let link_sig = match tauri_signer::sign_message_via_tauri(&link_msg) {
-                    Ok(sig) => sig,
-                    Err(e) => {
-                        error!("[PROFILE] Link sign failed: {}", e);
-                        return;
-                    }
-                };
-
-                let link_req = vps_client::LinkWalletReq {
-                    email: auth_email,
-                    password: auth_password,
-                    wallet: wallet_pubkey.to_string(),
-                    signature: bs58::encode(&link_sig).into_string(),
-                    timestamp,
-                };
-
-                let link_result = tokio::task::spawn_blocking(move || vps_client::link_wallet(&link_req))
-                    .await
-                    .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {e}")));
-                if let Err(e) = link_result {
-                    error!("[PROFILE] Wallet linking failed: {}", e);
-                } else {
-                    info!("[PROFILE] Wallet successfully linked to email account.");
-                }
             }
 
             // 3. Submit KYC to backend

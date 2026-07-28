@@ -6,6 +6,9 @@ use crate::moves_ix::apply;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// Accounts for recording a move via a per-game session key. `player` is the
+/// session signer, not the wallet — the actual moving wallet is
+/// `session_delegation.player`.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct RecordMove<'info> {
@@ -27,6 +30,9 @@ pub struct RecordMove<'info> {
     pub session_delegation: Account<'info, SessionDelegation>,
 }
 
+/// Checks session expiry, delegates the actual move application to
+/// `apply::apply_recorded_move`, and emits a `MoveEvent` for zero-rent
+/// ledger-based move history.
 pub fn handler(
     ctx: Context<RecordMove>,
     _game_id: u64,

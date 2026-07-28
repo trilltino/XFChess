@@ -92,6 +92,22 @@ path = "tests/tournament_round_advancement_tests.rs"
 name = "instruction_layout_tests"
 path = "tests/instruction_layout_tests.rs"
 
+[[test]]
+name = "cancel_time_check_tests"
+path = "tests/cancel_time_check_tests.rs"
+
+# Forced-recovery path for a Game PDA stuck on an unreachable ER validator
+# (delegation_ix::force_recovery / governance_ix::recover_stuck_delegation).
+[[test]]
+name = "er_recovery_tests"
+path = "tests/er_recovery_tests.rs"
+
+# Session-signed create-game path where a PDA (not a wallet) fronts rent +
+# wager — regression coverage for the "signer privilege escalated" CPI bug.
+[[test]]
+name = "global_create_game_tests"
+path = "tests/global_create_game_tests.rs"
+
 [dev-dependencies]
 tokio = { workspace = true }
 solana-program-test = { workspace = true }

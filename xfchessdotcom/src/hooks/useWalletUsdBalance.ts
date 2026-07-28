@@ -54,6 +54,11 @@ async function fetchHeliusPrice(mint: string): Promise<number | null> {
   }
 }
 
+/**
+ * Fetches SOL + SPL token balances for a wallet and prices them in USD via
+ * the Helius price API (skipped, `usdPrice: null`, when `VITE_HELIUS_API_KEY`
+ * is unset).
+ */
 export async function getWalletUsdBalance(
   connection: Connection,
   publicKey: PublicKey
@@ -108,6 +113,11 @@ export async function getWalletUsdBalance(
   };
 }
 
+/**
+ * Live wallet USD balance, auto-refreshing every 15s while `connection` and
+ * `publicKey` are set. Returns zeroed/`null` state (not loading) when either
+ * is absent.
+ */
 export function useWalletUsdBalance(
   connection: Connection | null,
   publicKey: PublicKey | null

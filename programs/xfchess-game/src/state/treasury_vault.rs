@@ -1,10 +1,15 @@
-//! Regional treasury vault for collecting country-specific fees.
+//! Typed regional-treasury account definition. Not currently used — see the
+//! doc comment on `TreasuryVault` below.
 
 use anchor_lang::prelude::*;
 
-/// Regional treasury vault account for collecting country-specific fees.
-/// One PDA per country code.
-/// Seeds: [TREASURY_VAULT_SEED, country_code.as_bytes()]
+/// A per-country treasury account shape (never instantiated). Every actual
+/// treasury reference in the program (`account_ix::treasury`,
+/// `governance_ix::resolve`, `governance_ix::claim_stale_dispute`,
+/// `lifecycle::settlement`) uses a single global, untyped `SystemAccount` at
+/// `seeds = [TREASURY_VAULT_SEED]` — no country code, and not this struct.
+/// Confirmed via search: nothing in the program constructs or deserializes
+/// a `TreasuryVault`.
 #[account]
 #[derive(InitSpace)]
 pub struct TreasuryVault {

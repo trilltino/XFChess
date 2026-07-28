@@ -78,7 +78,7 @@ pub fn ec(e: xfchess_game::errors::GameErrorCode) -> u32 {
 /// (`None`) to 33 (`Winner(Pubkey)`) when a game finishes, so an exact-size
 /// account would fail to re-serialize (AccountDidNotSerialize) on checkmate —
 /// exactly as a too-small real account would.
-fn program_account<T: AccountSerialize>(value: &T, space: usize) -> Account {
+pub fn program_account<T: AccountSerialize>(value: &T, space: usize) -> Account {
     let mut data = Vec::with_capacity(space);
     value.try_serialize(&mut data).unwrap();
     if data.len() < space {
@@ -289,6 +289,31 @@ pub fn resign_ix(game_id: u64, player: Pubkey) -> Instruction {
     }
     .to_account_metas(None);
     let data = xfchess_game::instruction::Resign { game_id }.data();
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data,
+    }
+}
+
+/// `cancel_time_check` instruction with a caller-chosen `magic_program` (for
+/// constraint negative-testing, mirroring `undelegate_ix`).
+pub fn cancel_time_check_ix(
+    game_id: u64,
+    payer: Pubkey,
+    task_id: u64,
+    magic_program: Pubkey,
+) -> Instruction {
+    let accounts = xfchess_game::__client_accounts_cancel_time_check::CancelTimeCheck {
+        payer,
+        game: game_pda(game_id).0,
+        magic_program,
+    }
+    .to_account_metas(None);
+    let data = xfchess_game::instruction::CancelTimeCheck {
+        args: xfchess_game::CancelTimeCheckArgs { task_id },
+    }
+    .data();
     Instruction {
         program_id: xfchess_game::ID,
         accounts,

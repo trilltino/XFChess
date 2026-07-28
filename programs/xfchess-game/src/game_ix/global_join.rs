@@ -4,11 +4,14 @@
 //! [`GlobalSessionDelegation`] vault — no wallet popup for the joiner.
 
 use crate::account_ix::session_guards;
+use crate::common::escrow::debit_program_pda;
 use crate::constants::{GAME_SEED, JOIN_GAME_COST, PROFILE_SEED, WAGER_ESCROW_SEED};
 use crate::errors::GameErrorCode;
 use crate::state::{Game, GameStatus, GameType, GlobalSessionDelegation, PlayerProfile};
 use anchor_lang::prelude::*;
 
+/// Accounts for session-signed joining. `white_profile` is read for
+/// cross-border fee context, same as the plain `JoinGame` path.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct GlobalJoinGame<'info> {
@@ -47,6 +50,9 @@ pub struct GlobalJoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Validates the session and game state, draws the wager from the session
+/// delegation vault into escrow (SOL wagers only), decrements
+/// `games_remaining`, and activates the game with the player as black.
 pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let session = &ctx.accounts.session_delegation;
@@ -77,27 +83,18 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
         GameErrorCode::GlobalSessionSpendingLimitExceeded
     );
 
-    // Transfer wager from delegation vault to escrow
+    // Transfer wager from delegation vault to escrow. `session_delegation` is
+    // a program-owned PDA carrying real account data, so the System Program
+    // refuses to act as `from` for it in any CPI ("Transfer: `from` must not
+    // carry data") no matter how it's signed — `debit_program_pda` moves the
+    // lamports directly instead, which is what a program is allowed to do
+    // with an account it owns. See `game_ix::global_create` for the fuller
+    // writeup (this is the join-side half of the same bug).
     let wager = game.wager_amount;
-    if wager > 0 && game.wager_token.is_none() {
-        let player_bytes = session.player.to_bytes();
-        let bump = [session.bump];
-        let delegation_seeds: [&[u8]; 3] = [
-            GlobalSessionDelegation::SEED,
-            player_bytes.as_ref(),
-            bump.as_ref(),
-        ];
-        let signer_seeds: &[&[&[u8]]] = &[&delegation_seeds];
-
-        anchor_lang::system_program::transfer(
-            CpiContext::new_with_signer(
-                System::id(),
-                anchor_lang::system_program::Transfer {
-                    from: ctx.accounts.session_delegation.to_account_info(),
-                    to: ctx.accounts.escrow_pda.to_account_info(),
-                },
-                signer_seeds,
-            ),
+    if game.wager_token.is_none() {
+        debit_program_pda(
+            &ctx.accounts.session_delegation.to_account_info(),
+            &ctx.accounts.escrow_pda.to_account_info(),
             wager,
         )?;
     }

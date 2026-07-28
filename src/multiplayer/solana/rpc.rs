@@ -1,3 +1,9 @@
+//! Not part of the build — `multiplayer::solana::mod` does not declare
+//! `pub mod rpc;`, so this file is unreachable from any `mod` statement and
+//! is not compiled. A separate, differently-shaped `SolanaRpc` struct is
+//! defined and actually used in `integration::systems` (itself only
+//! constructed by dead code — see that module's docs).
+
 use bevy::prelude::*;
 use solana_sdk::pubkey::Pubkey;
 

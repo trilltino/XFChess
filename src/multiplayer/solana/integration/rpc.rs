@@ -1,3 +1,10 @@
+//! Direct hot-wallet game creation/join, signing on-chain transactions
+//! locally with a `Keypair`. Confirmed unused — no caller anywhere in the
+//! codebase. The live architecture instead has the backend build unsigned
+//! transactions that the VPS session key or the player's wallet co-signs
+//! (see root `CLAUDE.md`'s data-flow diagram); this file predates or bypasses
+//! that path.
+
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{

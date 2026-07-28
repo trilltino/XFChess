@@ -5,6 +5,7 @@ use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// Accounts for opening a dispute on an active or inactive game.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct DisputeGame<'info> {
@@ -28,6 +29,8 @@ pub struct DisputeGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Opens a `DisputeRecord` (status `Pending`, `DISPUTE_TTL_SECS` to live),
+/// moves the game to `Disputed`, and posts the challenger's dispute bond.
 pub fn handler(
     ctx: Context<DisputeGame>,
     _game_id: u64,

@@ -2,10 +2,14 @@
 
 use anchor_lang::prelude::*;
 
+/// One dispute per game (seed: `[b"dispute", game_id]`), opened by
+/// `governance_ix::dispute` and closed out by either `resolve` (authority
+/// ruling) or `claim_stale_dispute` (TTL auto-resolution).
 #[account]
 #[derive(InitSpace)]
 pub struct DisputeRecord {
     pub game_id: u64,
+    /// The player who opened the dispute.
     pub challenger: Pubkey,
     #[max_len(200)]
     pub reason: String,
@@ -24,9 +28,13 @@ pub struct DisputeRecord {
     pub bump: u8,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+/// Dispute lifecycle state.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum DisputeStatus {
+    /// Open, awaiting either an authority ruling or TTL expiry.
     Pending,
+    /// Ruled on by the platform dispute authority (`governance_ix::resolve`).
     Resolved,
+    /// Auto-resolved after `DISPUTE_TTL_SECS` with no ruling (`claim_stale_dispute`).
     Dismissed,
 }

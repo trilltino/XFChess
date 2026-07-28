@@ -279,6 +279,30 @@ impl AIDifficulty {
         self.stockfish_movetime_ms().unwrap_or(0) as f32 / 1000.0
     }
 
+    /// Minimum/maximum artificial "thinking" delay (milliseconds) enforced
+    /// between the AI's turn starting and its move landing on the board.
+    ///
+    /// This is a floor, not an addition on top of search time: at low
+    /// difficulties the search itself finishes in well under 100ms (Level1
+    /// is a 1-ply search), which made the move snap onto the board
+    /// instantly and read as robotic. At higher difficulties real search
+    /// time (see [`Self::stockfish_movetime_ms`]) already exceeds this
+    /// floor, so it adds little or nothing there. The random range (rather
+    /// than a fixed pause) avoids every move taking a suspiciously
+    /// identical amount of time.
+    pub fn thinking_delay_range_ms(self) -> (u64, u64) {
+        match self {
+            Self::Level1 => (450, 900),
+            Self::Level2 => (400, 800),
+            Self::Level3 => (350, 700),
+            Self::Level4 => (300, 600),
+            Self::Level5 => (250, 500),
+            Self::Level6 => (200, 400),
+            Self::Level7 => (150, 300),
+            Self::Level8 => (100, 200),
+        }
+    }
+
     /// Approximate ELO rating for this difficulty, for display next to the
     /// "Computer" name in the in-game HUD (see [`Self::description`] for the
     /// combined name+ELO string used elsewhere).

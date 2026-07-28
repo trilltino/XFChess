@@ -17,6 +17,9 @@ const VALID_PLAYER_COUNTS: [u16; 8] = [2, 4, 8, 16, 32, 64, 128, 256];
 // try_accounts. Skipping args from the middle (e.g. omitting `name` and
 // `entry_fee`) shifts every later field and fails with
 // InstructionDidNotDeserialize (102) before the handler runs.
+/// Accounts for bootstrapping a new tournament. `usdc_prize_escrow`/`usdc_mint`
+/// are only populated for USDC-prize tournaments; SOL-prize tournaments leave
+/// them `None`. Restricted to the VPS authority.
 #[derive(Accounts)]
 #[instruction(
     tournament_id: u64,
@@ -59,6 +62,10 @@ pub struct InitializeTournament<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Validates tournament parameters (player count is a supported power of 2,
+/// ELO range, prize shares sum to ≤10000 bps) and populates every `Tournament`
+/// field for the `Registration` phase. Does not create player shards — call
+/// the matching `initialize_shards*` instruction afterward.
 pub fn handler(
     ctx: Context<InitializeTournament>,
     tournament_id: u64,

@@ -6,12 +6,8 @@ use bevy::prelude::*;
 /// Primary game state controlling major application modes.
 #[derive(Clone, Copy, Resource, PartialEq, Eq, Hash, Debug, Default, States, Reflect)]
 pub enum GameState {
-    /// Authentication state (Login/Register)
-    #[cfg_attr(target_arch = "wasm32", default)]
-    Auth,
-
     /// Main menu state (starting state)
-    #[cfg_attr(not(target_arch = "wasm32"), default)]
+    #[default]
     MainMenu,
 
     /// Active gameplay state
@@ -213,7 +209,6 @@ fn is_valid_state_transition(from: GameState, to: GameState) -> bool {
         // MainMenu can transition to InGame
         (GameState::MainMenu, GameState::InGame) => true,
         (GameState::MainMenu, GameState::MultiplayerMenu) => true,
-        (GameState::MainMenu, GameState::Auth) => true, // Allowed for FORCE_AUTH override
         (GameState::MultiplayerMenu, GameState::MainMenu) => true,
         (GameState::MultiplayerMenu, GameState::InGame) => true, // Start game from lobby
 
@@ -276,14 +271,7 @@ mod tests {
     #[test]
     fn test_game_state_default() {
         let state = GameState::default();
-        #[cfg(target_arch = "wasm32")]
-        assert_eq!(state, GameState::Auth, "Game should start at Auth on Web");
-        #[cfg(not(target_arch = "wasm32"))]
-        assert_eq!(
-            state,
-            GameState::MainMenu,
-            "Game should start at MainMenu on Native"
-        );
+        assert_eq!(state, GameState::MainMenu, "Game should start at MainMenu");
     }
 
     #[test]

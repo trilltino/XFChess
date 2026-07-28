@@ -1,16 +1,14 @@
-//! # Salewski Chess Engine - Modularized Architecture
-//!
-//! ## Overview
-//!
-//! This is a complete **minimax-based chess AI** with alpha-beta pruning, transposition tables, and iterative
-//! deepening search. Originally implemented as a 2,715-line monolithic file, it has been refactored into a clean
-//! modular architecture for maintainability, testability, and integration with XFChess.
-
+//! A minimax chess AI with alpha-beta pruning, transposition tables, and
+//! iterative deepening search. One crate serves two builds: the full `std`
+//! search engine used by the game client and backend, and a `no_std`
+//! move-generation-only subset (`on_chain*` modules) that gets compiled into
+//! the Solana program via `chess-logic-on-chain`. See the crate README for
+//! the module map and the `std`/`no_std` feature boundary.
 //!
 //! ## Architecture Philosophy
 //!
-//! The engine follows **classic computer chess design principles** from the 1980s-90s, optimized for modern
-//! 64-bit processors:
+//! The engine follows classic computer chess design principles from the
+//! 1980s-90s, optimized for modern 64-bit processors:
 //!
 //! 1. **Precalculated Move Tables** - All possible moves from each square computed once at startup
 //! 2. **Bitboard Representation** - Compact 64-bit integers for fast set operations
@@ -24,24 +22,6 @@
 //! - **Nodes per second**: ~500K-1M on modern CPUs
 //! - **Memory usage**: 80MB transposition table + 2MB move tables
 //! - **Strength**: Estimated 1800-2000 ELO (club player level)
-//!
-//! ## Module Organization
-//!
-//! ### Core Data (No dependencies)
-//! - **[`bitset`](bitset/index.html)** - 64-bit bitboard for fast square operations
-//! - **[`constants`](constants/index.html)** - Piece values (centipawns), movement vectors, search tuning
-//! - **[`types`](types/index.html)** - Game state, Move struct, transposition table entries
-//!
-//! ### Game Logic (Depends on core)
-//! - **`board`** (TODO) - Square queries, hash computation, board utilities
-//! - **`move_gen`** (TODO) - Legal move generation for all piece types
-//! - **`evaluation`** (TODO) - Position scoring (material + positional factors)
-//! - **`hash`** (TODO) - Zobrist hashing, transposition table lookup/storage
-//!
-//! ### AI Engine (Depends on all above)
-//! - **`search`** - Minimax with alpha-beta pruning, iterative deepening
-//! - **`api`** - Public functions: `new_game()`, `reply()`, `do_move()`
-//! - **`error`** - Error types for engine operations
 //!
 //! ## Algorithm Overview: Alpha-Beta Pruning
 //!
@@ -74,140 +54,13 @@
 //! - **Negamax**: https://www.chessprogramming.org/Negamax
 //! - **Transposition Tables**: https://www.chessprogramming.org/Transposition_Table
 //!
-//! ## XFChess Integration Strategy
+//! ## XFChess Integration
 //!
-//! ### Phase 1: Add AI Opponent (No visual changes)
-//!
-//! ```rust,ignore
-//! // In src/game/ai/mod.rs (new module)
-//! use chess_engine::{new_game, reply, do_move, Game, Move, STATE_CHECKMATE};
-//! use bevy::prelude::*;
-//! use bevy::tasks::{AsyncComputeTaskPool, Task};
-//! use std::sync::{Arc, Mutex};
-//!
-//! #[derive(Resource)]
-//! pub struct ChessEngine {
-//!     game: Arc<Mutex<Game>>,
-//! }
-//!
-//! #[derive(Resource)]
-//! pub struct PendingAIMove(Task<Move>);
-//!
-//! impl Default for ChessEngine {
-//!     fn default() -> Self {
-//!         ChessEngine {
-//!             game: Arc::new(Mutex::new(new_game())),
-//!         }
-//!     }
-//! }
-//!
-//! // System: Spawn AI task when it's black's turn
-//! fn spawn_ai_computation(
-//!     mut commands: Commands,
-//!     engine: Res<ChessEngine>,
-//!     turn: Res<CurrentTurn>,
-//!     task: Option<Res<PendingAIMove>>,
-//! ) {
-//!     if task.is_some() {
-//!         return; // Already computing
-//!     }
-//!
-//!     if turn.color == PieceColor::Black {
-//!         let game_clone = engine.game.clone();
-//!         let task = AsyncComputeTaskPool::get().spawn(async move {
-//!             let mut game = game_clone.lock().unwrap();
-//!             game.secs_per_move = 1.5; // AI think time
-//!             reply(&mut game) // Compute best move
-//!         });
-//!         commands.insert_resource(PendingAIMove(task));
-//!     }
-//! }
-//!
-//! // System: Poll task and apply AI move when ready
-//! fn apply_ai_move(
-//!     mut commands: Commands,
-//!     mut task: ResMut<PendingAIMove>,
-//!     mut engine: ResMut<ChessEngine>,
-//!     pieces: Query<(Entity, &Piece)>,
-//!     mut turn: ResMut<CurrentTurn>,
-//! ) {
-//!     if let Some(ai_move) = future::block_on(future::poll_once(&mut task.0)) {
-//!         // AI move completed!
-//!         commands.remove_resource::<PendingAIMove>();
-//!
-//!         if ai_move.state == STATE_CHECKMATE {
-//!             info!("AI declares checkmate!");
-//!             return;
-//!         }
-//!
-//!         // Convert engine square indices to (x, y) coordinates
-//!         let src_x = (ai_move.src % 8) as u8;
-//!         let src_y = (ai_move.src / 8) as u8;
-//!         let dst_x = (ai_move.dst % 8) as u8;
-//!         let dst_y = (ai_move.dst / 8) as u8;
-//!
-//!         // Find the piece at source square and move it
-//!         for (entity, piece) in pieces.iter() {
-//!             if piece.x == src_x && piece.y == src_y {
-//!                 // Use existing move_piece system or manually update
-//!                 // ... (integrate with your movement.rs logic)
-//!             }
-//!         }
-//!
-//!         // Apply move to engine's internal board
-//!         let mut game = engine.game.lock().unwrap();
-//!         do_move(&mut game, ai_move.src as i8, ai_move.dst as i8, false);
-//!
-//!         // Switch turn
-//!         turn.color = PieceColor::White;
-//!     }
-//! }
-//! ```
-//!
-//! ### Phase 2: Board Synchronization
-//!
-//! Keep ECS as source of truth, sync to engine before AI computation:
-//!
-//! ```rust,ignore
-//! fn sync_ecs_to_engine(
-//!     pieces: Query<&Piece>,
-//!     mut engine: ResMut<ChessEngine>,
-//! ) {
-//!     let mut game = engine.game.lock().unwrap();
-//!     game.board = [0; 64];
-//!
-//!     for piece in pieces.iter() {
-//!         let square = (piece.y * 8 + piece.x) as usize;
-//!         let piece_id = match piece.piece_type {
-//!             PieceType::Pawn => 1,
-//!             PieceType::Knight => 2,
-//!             PieceType::Bishop => 3,
-//!             PieceType::Rook => 4,
-//!             PieceType::Queen => 5,
-//!             PieceType::King => 6,
-//!         };
-//!         game.board[square] = if piece.color == PieceColor::White {
-//!             piece_id
-//!         } else {
-//!             -piece_id
-//!         };
-//!     }
-//! }
-//! ```
-//!
-//! ### Phase 3: UI Enhancements
-//!
-//! - Show AI "thinking" indicator
-//! - Display evaluation score (`ai_move.score` in centipawns)
-//! - Show "Checkmate in N" when `ai_move.checkmate_in` is set
-//! - Add difficulty selector (adjust `game.secs_per_move`)
-//!
-//! ## Historical Note
-//!
-//! This engine's architecture follows the **Salewski Chess** design from Dr. Stefan Salewski (2015-2025),
-//! which itself draws from GNU Chess (1980s) and classic alpha-beta implementations. The use of precalculated
-//! move tables and compact board representation reflects the memory-constrained era of early computer chess,
-//! yet remains competitive on modern hardware due to excellent cache locality.
+//! The game client drives this engine from `src/game/ai/` (`ChessAIResource` in
+//! `src/game/ai/resource.rs`, systems in `src/game/ai/systems.rs`): it holds the
+//! engine's `Game` state, spawns AI move computation as a Bevy async task keyed
+//! off the current turn, and applies the resulting `Move` back onto the ECS
+//! board once the task completes.
 //!
 //! ## Further Reading
 //!

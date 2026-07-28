@@ -30,6 +30,11 @@ pub struct TournamentSummary {
     pub max_elo: u32,
     #[serde(default)]
     pub round_deadline_at: Option<i64>,
+    /// "swiss" or "single_elimination" (see backend `TournamentFormat`).
+    /// Defaults to empty (treated as Swiss) so an older backend that hasn't
+    /// deployed this field yet doesn't break the whole tournament list.
+    #[serde(default)]
+    pub format: String,
 }
 
 /// One on-chain game created by the backend tournament orchestrator — a bracket

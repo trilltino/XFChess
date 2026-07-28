@@ -71,6 +71,7 @@ pub fn init_profile_ix(
 // ---------------------------------------------------------------------------
 // create_game
 // ---------------------------------------------------------------------------
+#[allow(clippy::too_many_arguments)]
 pub fn create_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -78,7 +79,7 @@ pub fn create_game_ix(
     game_id: u64,
     wager_amount: u64,
     match_type: u8,
-    country: &str,
+    platform_fee: u64,
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> Result<Instruction> {
@@ -87,12 +88,17 @@ pub fn create_game_ix(
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
+    // create_game(game_id, wager_amount, match_type, platform_fee,
+    // base_time_seconds, increment_seconds) — see programs/xfchess-game/src/
+    // game_ix/create.rs. This used to take a `country: String` before the
+    // program moved to a universal live-rate `platform_fee`; the old encoding
+    // here silently produced a malformed instruction (4 zero bytes standing
+    // in for half of platform_fee's 8) that would fail to deserialize on-chain.
     let mut data = anchor_discriminator("create_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&wager_amount.to_le_bytes());
     data.push(match_type);
-    data.extend_from_slice(&(country.len() as u32).to_le_bytes());
-    data.extend_from_slice(country.as_bytes());
+    data.extend_from_slice(&platform_fee.to_le_bytes());
     data.extend_from_slice(&base_time_seconds.to_le_bytes());
     data.extend_from_slice(&increment_seconds.to_le_bytes());
 
@@ -230,7 +236,10 @@ pub fn finalize_game_ix(
             AccountMeta::new(black_pubkey, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(treasury_vault, false),
-            AccountMeta::new(fee_payer, true),
+            // fee_payer is a plain SystemAccount on-chain (game_ix/finalize.rs:39-40),
+            // not a Signer — marking it `true` here worked only because the
+            // current call site happens to pass the tx's own fee payer.
+            AccountMeta::new(fee_payer, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -245,7 +254,6 @@ pub fn authorize_session_key_ix(
     player: Pubkey,
     game_id: u64,
     session_pubkey: Pubkey,
-    duration_seconds: i64,
 ) -> Result<Instruction> {
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
@@ -259,10 +267,14 @@ pub fn authorize_session_key_ix(
     )
     .0;
 
+    // authorize_session_key(game_id, session_pubkey) — see lib.rs:443-447.
+    // A trailing `duration_seconds` used to be encoded here too; Anchor's
+    // deserializer silently ignores extra trailing bytes so it never caused
+    // a failure, but the value had no effect — session lifetime is fixed at
+    // 2 hours in delegation_ix/session.rs:28.
     let mut data = anchor_discriminator("authorize_session_key").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(session_pubkey.as_ref());
-    data.extend_from_slice(&duration_seconds.to_le_bytes());
 
     Ok(Instruction {
         program_id,
@@ -407,27 +419,6 @@ pub fn crank_time_check_ix(
             AccountMeta::new(game_pda, false),
             AccountMeta::new_readonly(white, false),
             AccountMeta::new_readonly(black, false),
-        ],
-        data,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// commit_move_batch (ER)
-// ---------------------------------------------------------------------------
-pub fn commit_move_batch_ix(
-    program_id: Pubkey,
-    game_pda: Pubkey,
-    fee_payer: Pubkey,
-) -> Result<Instruction> {
-    let data = anchor_discriminator("commit_move_batch").to_vec();
-
-    Ok(Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(game_pda, false),
-            AccountMeta::new(fee_payer, true),
-            AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
     })
@@ -580,7 +571,9 @@ pub fn initialize_tournament_shards_ix(
     Ok(Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(tournament_pda, false),
+            // `tournament` is read-only here (initialize_shards.rs:133-139) — the
+            // shards are what get initialized, not the tournament record itself.
+            AccountMeta::new_readonly(tournament_pda, false),
             AccountMeta::new(tournament_players_shard_0, false),
             AccountMeta::new(tournament_players_shard_1, false),
             AccountMeta::new(tournament_players_shard_2, false),
@@ -632,7 +625,7 @@ pub fn initialize_tournament_escrow_ix(
 pub fn register_player_ix(
     program_id: Pubkey,
     player: Pubkey,
-    treasury_vault: Pubkey,
+    host_treasury: Pubkey,
     tournament_id: u64,
     elo: u32,
 ) -> Result<Instruction> {
@@ -684,13 +677,18 @@ pub fn register_player_ix(
     .0;
     let player_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
-    // Program constraint requires treasury_vault == platform_treasury_vault
-    let platform_treasury_vault = treasury_vault;
 
     let mut data = anchor_discriminator("register_player").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend_from_slice(&elo.to_le_bytes());
 
+    // RegisterPlayer is 10 accounts, in this exact order — see
+    // programs/xfchess-game/src/tournament_ix/registration/register.rs:19-79.
+    // `host_treasury` is a plain `UncheckedAccount` (constrained ==
+    // tournament.host_treasury), not a signer — there used to be a second
+    // `platform_treasury_vault` account here too, which doesn't exist on the
+    // real struct and pushed every following account (just `system_program`)
+    // one slot out of alignment.
     Ok(Instruction {
         program_id,
         accounts: vec![
@@ -702,8 +700,7 @@ pub fn register_player_ix(
             AccountMeta::new(tournament_players_shard_1, false),
             AccountMeta::new(tournament_players_shard_2, false),
             AccountMeta::new(tournament_players_shard_3, false),
-            AccountMeta::new(treasury_vault, true),
-            AccountMeta::new_readonly(platform_treasury_vault, false),
+            AccountMeta::new(host_treasury, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -716,6 +713,7 @@ pub fn register_player_ix(
 pub fn start_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
+    host_treasury: Pubkey,
     tournament_id: u64,
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
@@ -759,10 +757,19 @@ pub fn start_tournament_ix(
         &program_id,
     )
     .0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
 
     let mut data = anchor_discriminator("start_tournament").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
 
+    // StartTournament sweeps entry fees from escrow_pda to host_treasury —
+    // both were missing here, which bound `authority`'s signature to
+    // escrow_pda's slot and dropped host_treasury/authority/system_program
+    // each one slot early. See tournament_ix/lifecycle/start.rs:12-66.
     Ok(Instruction {
         program_id,
         accounts: vec![
@@ -771,6 +778,8 @@ pub fn start_tournament_ix(
             AccountMeta::new(tournament_players_shard_1, false),
             AccountMeta::new(tournament_players_shard_2, false),
             AccountMeta::new(tournament_players_shard_3, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(host_treasury, false),
             AccountMeta::new(authority, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
@@ -785,26 +794,41 @@ pub fn record_match_result_ix(
     program_id: Pubkey,
     authority: Pubkey,
     tournament_id: u64,
-    match_index: u8,
+    match_index: u16,
     winner: Pubkey,
-    game_pda: Pubkey,
+    loser: Pubkey,
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
         &program_id,
     )
     .0;
+    let tournament_match_pda = Pubkey::find_program_address(
+        &[
+            TOURNAMENT_MATCH_SEED,
+            &tournament_id.to_le_bytes(),
+            &match_index.to_le_bytes(),
+        ],
+        &program_id,
+    )
+    .0;
 
+    // record_match_result(tournament_id, match_index: u16, winner, loser) —
+    // see tournament_ix/matches/record_result.rs:11,32-37. `match_index` was
+    // encoded as a single byte (u8) here, shifting `winner`/`loser` one byte
+    // short; `tournament_match` (the account the result is actually written
+    // to) was missing entirely; and the 4th arg is `loser`, not a game PDA.
     let mut data = anchor_discriminator("record_match_result").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
-    data.push(match_index);
+    data.extend_from_slice(&match_index.to_le_bytes());
     data.extend_from_slice(winner.as_ref());
-    data.extend_from_slice(game_pda.as_ref());
+    data.extend_from_slice(loser.as_ref());
 
     Ok(Instruction {
         program_id,
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(tournament_match_pda, false),
             AccountMeta::new(authority, true),
         ],
         data,
@@ -890,11 +914,13 @@ pub fn authorize_tournament_session_ix(
     Ok(Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(tournament_players_shard_0, false),
-            AccountMeta::new(tournament_players_shard_1, false),
-            AccountMeta::new(tournament_players_shard_2, false),
-            AccountMeta::new(tournament_players_shard_3, false),
+            // tournament + all 4 shards are read-only on-chain
+            // (authorize_tournament_session.rs:146-175) — only session_delegation is written.
+            AccountMeta::new_readonly(tournament_pda, false),
+            AccountMeta::new_readonly(tournament_players_shard_0, false),
+            AccountMeta::new_readonly(tournament_players_shard_1, false),
+            AccountMeta::new_readonly(tournament_players_shard_2, false),
+            AccountMeta::new_readonly(tournament_players_shard_3, false),
             AccountMeta::new(session_delegation_pda, false),
             AccountMeta::new(player, true),
             AccountMeta::new_readonly(system_program::id(), false),
@@ -906,6 +932,7 @@ pub fn authorize_tournament_session_ix(
 // ---------------------------------------------------------------------------
 // session_create_game
 // ---------------------------------------------------------------------------
+#[allow(clippy::too_many_arguments)]
 pub fn session_create_game_ix(
     program_id: Pubkey,
     tournament_id: u64,
@@ -913,6 +940,7 @@ pub fn session_create_game_ix(
     white_session: Pubkey,
     white_player: Pubkey,
     wager: u64,
+    platform_fee: u64,
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
@@ -969,14 +997,19 @@ pub fn session_create_game_ix(
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
+    // session_create_game(tournament_id, game_id, wager_amount, match_type,
+    // platform_fee, base_time_seconds, increment_seconds) — see
+    // programs/xfchess-game/src/tournament_ix/session/session_create_game.rs.
+    // This used to take a `country: String`; the old encoding here (4 zero
+    // bytes standing in for half of platform_fee's 8) would fail to
+    // deserialize on-chain today.
     let mut data = anchor_discriminator("session_create_game").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&wager.to_le_bytes());
     // MatchType::Free = 0
     data.push(0);
-    // Country string (empty for benchmark)
-    data.extend_from_slice(&(0u32).to_le_bytes());
+    data.extend_from_slice(&platform_fee.to_le_bytes());
     data.extend_from_slice(&600u64.to_le_bytes()); // base_time_seconds
     data.extend_from_slice(&0u16.to_le_bytes()); // increment_seconds
 
@@ -1076,11 +1109,12 @@ pub fn session_join_game_ix(
     Ok(Instruction {
         program_id,
         accounts: vec![
-            AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(tournament_players_shard_0, false),
-            AccountMeta::new(tournament_players_shard_1, false),
-            AccountMeta::new(tournament_players_shard_2, false),
-            AccountMeta::new(tournament_players_shard_3, false),
+            // tournament + all 4 shards are read-only on-chain (session_join_game.rs:16-45).
+            AccountMeta::new_readonly(tournament_pda, false),
+            AccountMeta::new_readonly(tournament_players_shard_0, false),
+            AccountMeta::new_readonly(tournament_players_shard_1, false),
+            AccountMeta::new_readonly(tournament_players_shard_2, false),
+            AccountMeta::new_readonly(tournament_players_shard_3, false),
             AccountMeta::new(session_delegation_pda, false),
             AccountMeta::new_readonly(session_key, true),
             AccountMeta::new_readonly(player, false),
@@ -1171,43 +1205,18 @@ pub fn record_swiss_result_ix(
 }
 
 // ---------------------------------------------------------------------------
-// claim_prize (1v1 wager payout)
-// ---------------------------------------------------------------------------
-pub fn claim_prize_ix(
-    program_id: Pubkey,
-    game_id: u64,
-    winner: Pubkey,
-    fee_payer: Pubkey,
-) -> Result<Instruction> {
-    let game_pda =
-        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
-    let escrow_pda =
-        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
-
-    let data = anchor_discriminator("claim_prize").to_vec();
-
-    Ok(Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(game_pda, false),
-            AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(winner, true),
-            AccountMeta::new(fee_payer, false),
-            AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// close_tournament (distributes prizes, marks Closed)
-// prize_recipients are passed as remaining_accounts in prize-place order
+// close_tournament — sweeps residual escrow to the treasury and marks the
+// tournament Closed. Only callable once every funded prize place has already
+// been claimed via `distribute_tournament_prizes`/`claim_tournament_prize`
+// (tournament_ix/lifecycle/close_tournament.rs:33-70); this instruction never
+// pays anyone directly and doesn't read `remaining_accounts` at all — a
+// `prize_recipients` param used to be appended here as extra account metas,
+// which the program simply ignored.
 // ---------------------------------------------------------------------------
 pub fn close_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
     tournament_id: u64,
-    prize_recipients: &[Pubkey],
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
@@ -1224,20 +1233,15 @@ pub fn close_tournament_ix(
     let mut data = anchor_discriminator("close_tournament").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
 
-    let mut accounts = vec![
-        AccountMeta::new(tournament_pda, false),
-        AccountMeta::new(prize_escrow_pda, false),
-        AccountMeta::new(treasury_vault, false),
-        AccountMeta::new_readonly(system_program::id(), false),
-        AccountMeta::new(authority, true),
-    ];
-    for recipient in prize_recipients {
-        accounts.push(AccountMeta::new(*recipient, false));
-    }
-
     Ok(Instruction {
         program_id,
-        accounts,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(prize_escrow_pda, false),
+            AccountMeta::new(treasury_vault, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new(authority, true),
+        ],
         data,
     })
 }
@@ -1245,29 +1249,171 @@ pub fn close_tournament_ix(
 // ---------------------------------------------------------------------------
 // resign
 // ---------------------------------------------------------------------------
-pub fn resign_game_ix(
+pub fn resign_game_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Result<Instruction> {
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+
+    let mut data = anchor_discriminator("resign").to_vec();
+    data.extend_from_slice(&game_id.to_le_bytes());
+
+    // ResignGame is exactly `game` (mut) + `player` (read-only Signer) — see
+    // programs/xfchess-game/src/game_ix/resign.rs. The previous 6-account
+    // version (escrow_pda, white, black, system_program that don't belong
+    // here) bound `player`'s signature to slot 2 (escrow_pda) instead of
+    // itself, failing on-chain with `AccountNotSigner`.
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new_readonly(player, true),
+        ],
+        data,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// authorize_global_session / global_create_game / global_join_game
+//
+// The persistent, non-tournament session flow: one `authorize_global_session`
+// covers up to 200 games, with `global_create_game`/`global_join_game` paying
+// rent + wager out of the `GlobalSessionDelegation` PDA vault instead of the
+// player's wallet. Current on-chain layout (see programs/xfchess-game/src/
+// account_ix/global_session_ix.rs and game_ix/global_create.rs,
+// global_join.rs) — `platform_fee: u64`, not the older `country: String` seen
+// in `create_game_ix`/`session_create_game_ix` above.
+// ---------------------------------------------------------------------------
+
+fn global_session_pda(program_id: &Pubkey, player: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"global_session", player.as_ref()], program_id).0
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn authorize_global_session_ix(
     program_id: Pubkey,
-    game_id: u64,
     player: Pubkey,
-    white_pubkey: Pubkey,
-    black_pubkey: Pubkey,
+    session_key: Pubkey,
+    duration_secs: Option<i64>,
+    spending_limit: Option<u64>,
+    max_wager: Option<u64>,
+    games: Option<u16>,
+    deposit_lamports: u64,
 ) -> Result<Instruction> {
+    let session_pda = global_session_pda(&program_id, &player);
+
+    let mut data = anchor_discriminator("authorize_global_session").to_vec();
+    // AuthorizeGlobalSessionArgs (Borsh)
+    data.extend_from_slice(session_key.as_ref());
+    match duration_secs {
+        Some(v) => {
+            data.push(1);
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        None => data.push(0),
+    }
+    match spending_limit {
+        Some(v) => {
+            data.push(1);
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        None => data.push(0),
+    }
+    match max_wager {
+        Some(v) => {
+            data.push(1);
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        None => data.push(0),
+    }
+    match games {
+        Some(v) => {
+            data.push(1);
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        None => data.push(0),
+    }
+    data.extend_from_slice(&deposit_lamports.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(session_pda, false),
+            AccountMeta::new(player, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn global_create_game_ix(
+    program_id: Pubkey,
+    session_signer: Pubkey,
+    player: Pubkey,
+    game_id: u64,
+    wager_amount: u64,
+    match_type: u8,
+    platform_fee: u64,
+    base_time_seconds: u64,
+    increment_seconds: u16,
+) -> Result<Instruction> {
+    let session_pda = global_session_pda(&program_id, &player);
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
-    let mut data = anchor_discriminator("resign").to_vec();
+    let mut data = anchor_discriminator("global_create_game").to_vec();
+    data.extend_from_slice(&game_id.to_le_bytes());
+    data.extend_from_slice(&wager_amount.to_le_bytes());
+    data.push(match_type);
+    data.extend_from_slice(&platform_fee.to_le_bytes());
+    data.extend_from_slice(&base_time_seconds.to_le_bytes());
+    data.extend_from_slice(&increment_seconds.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(session_pda, false),
+            AccountMeta::new_readonly(session_signer, true),
+            AccountMeta::new_readonly(player, false),
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+pub fn global_join_game_ix(
+    program_id: Pubkey,
+    session_signer: Pubkey,
+    player: Pubkey,
+    white_player: Pubkey,
+    game_id: u64,
+) -> Result<Instruction> {
+    let session_pda = global_session_pda(&program_id, &player);
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let player_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
+    let white_profile_pda =
+        Pubkey::find_program_address(&[PROFILE_SEED, white_player.as_ref()], &program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
+
+    let mut data = anchor_discriminator("global_join_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
 
     Ok(Instruction {
         program_id,
         accounts: vec![
+            AccountMeta::new(session_pda, false),
+            AccountMeta::new_readonly(session_signer, true),
+            AccountMeta::new_readonly(player, false),
             AccountMeta::new(game_pda, false),
+            AccountMeta::new_readonly(player_profile_pda, false),
+            AccountMeta::new_readonly(white_profile_pda, false),
             AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(player, true),
-            AccountMeta::new(white_pubkey, false),
-            AccountMeta::new(black_pubkey, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,

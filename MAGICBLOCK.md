@@ -6,22 +6,23 @@ XFChess uses MagicBlock Ephemeral Rollups for the latency-sensitive move path. T
 
 | Component | Version |
 | --- | --- |
-| Anchor | `0.31.1` |
-| Solana | `2.2.1` |
-| `ephemeral-rollups-sdk` | `0.13.0` |
-| `magicblock-magic-program-api` | `0.3.1` |
+| Anchor | `1.1.2` |
+| Solana | `3.0.0` |
+| `ephemeral-rollups-sdk` | `0.16.2` |
+| `magicblock-magic-program-api` | `0.13.11` |
 
-The stack is pinned in `programs/xfchess-game/Cargo.toml`:
+The stack is pinned as workspace dependencies in the root `Cargo.toml`, and consumed by `programs/xfchess-game/Cargo.toml` via `{ workspace = true }`:
 
 ```toml
-anchor-lang = { version = "=0.31.1", features = ["init-if-needed"] }
-anchor-spl = "=0.31.1"
-solana-program = "=2.2.1"
-ephemeral-rollups-sdk = { version = "0.13.0", features = ["anchor"] }
-magicblock-magic-program-api = { version = "=0.3.1", default-features = false, optional = true }
-```
+# root Cargo.toml [workspace.dependencies]
+anchor-lang = { version = "=1.1.2", features = ["init-if-needed"] }
+anchor-spl = "=1.1.2"
+solana-program = "=3.0.0"
+ephemeral-rollups-sdk = { version = "=0.16.2", features = ["anchor"] }
 
-Do not treat `ephemeral-rollups-sdk` `0.15.x` as a drop-in upgrade. That line belongs with an Anchor 1.0 / Solana 3.x migration.
+# programs/xfchess-game/Cargo.toml
+magicblock-magic-program-api = { version = "=0.13.11", default-features = false, optional = true }
+```
 
 ## Lifecycle
 
@@ -201,7 +202,7 @@ Delegated accounts need different transaction routing than normal base-layer acc
 The actual call sites:
 
 - `backend/src/signing/routes/main.rs` (`/vps/record_move`, `/vps/undelegate`) and `backend/src/tasks/settlement_worker.rs` (auto-undelegate) build their RPC client from `state.config.magic_router_rpc_url` — these are the only instructions that ever touch a delegated `Game` PDA.
-- Everything else (`create_game`, `join_game`, `finalize_game`, tournament/treasury instructions) uses `state.config.solana_rpc_url` (base layer) directly, and the program rejects those instructions on a still-delegated game (see `programs/xfchess-game/src/magicblock/routing.rs`'s `GAME_WRITES_ONLY_ROUTING_INVARIANT`) — so there is no mixed delegated/non-delegated write to route.
+- Everything else (`create_game`, `join_game`, `finalize_game`, tournament/treasury instructions) uses `state.config.solana_rpc_url` (base layer) directly. These instructions all declare `game: Account<'info, Game>`, so Anchor's built-in owner check rejects them outright on a still-delegated game (its owner is the delegation program, not `crate::ID`) — there is no separate runtime guard for this, just Anchor's normal account validation. `programs/xfchess-game/src/magicblock/routing.rs`'s `GAME_WRITES_ONLY_ROUTING_INVARIANT` is a documentation-only constant (its own doc comment says so) marking this boundary in code, not an enforcement mechanism itself.
 
 Useful environment variables:
 
@@ -233,17 +234,57 @@ Settlement flow:
 
 Never patch a payout with a one-off lamport transfer in an instruction handler. All settlement goes through the canonical settlement path.
 
+## Time-Check Crank (Ticking)
+
+Chess-clock timeouts are enforced entirely on the ER via MagicBlock's scheduled-task
+("crank") mechanism — no off-chain poller needed, matching the whitepaper's gasless
+ticking model. See `programs/xfchess-game/src/crank_ix/README.md` for the on-chain
+side (`schedule_time_check_crank`, `crank_time_check`, `cancel_time_check_crank`).
+
+Backend wiring:
+
+- `delegate_game` (`backend/src/signing/routes/main.rs`) submits
+  `schedule_time_check` to the ER right after delegation confirms on base layer —
+  30s interval, unlimited iterations until cancelled.
+- `undelegate_game` and the settlement worker's auto-undelegate path
+  (`backend/src/tasks/settlement_worker.rs`) both submit `cancel_time_check` as a
+  best-effort follow-up after undelegating, so a finished game doesn't leave a
+  dangling scheduled task on the ER.
+- Both scheduling and cancellation are best-effort: a failure is logged and counted
+  (`xfchess_time_check_scheduled_total` / `_schedule_failed_total` /
+  `_cancelled_total` / `_cancel_failed_total` on `/metrics`) but never blocks the
+  delegate/undelegate call it's attached to — those are the parts that matter for
+  gameplay and fund settlement to continue.
+
+Before this was wired up, `crank_time_check` had working forfeit logic but nothing
+ever called it, and separately nothing called the permissionless `claim_timeout`
+instruction either — a stalled clock just left the game `Active` indefinitely. This
+does **not** touch the ER-unavailability gap below: it makes timeouts self-enforcing
+while the ER is healthy, it doesn't provide a way to recover a game if the ER isn't.
+
 ## Failure Mode: ER Unavailability (Persistency)
 
-XFChess aims for no single point of failure (see the persistency roadmap plan), and the ER dependency is the one gap that can't be closed from this repo alone.
+XFChess aims for no single point of failure (see the persistency roadmap plan). The ER dependency was the one gap that couldn't be closed from this repo alone — as of this writing it's been closed with a self-serve, non-admin recovery path (below), though it's only ever been exercised in program-test, not against a real dead validator.
 
-Normal undelegation (`delegation_ix/delegate.rs`'s `handler_undelegate_game`) CPIs `commit_and_undelegate_accounts`, which only *schedules* work for the ER validator to execute — the transaction itself must still reach the ER. If the ER validator is unreachable, this path (and `claim_timeout`, and the crank-based idle checks, which also execute against the delegation-program-owned PDA via the ER) is equally unreachable. `ephemeral-rollups-sdk` 0.13.0 does expose a base-layer forced-undelegate builder (`dlp_api::instruction_builder::undelegate_confined_account`), but it's gated by a MagicBlock delegation-program **admin** key that XFChess does not hold — there is currently no self-serve way for XFChess to force a stuck delegated `Game` PDA back to base layer.
+Normal undelegation (`delegation_ix/delegate.rs`'s `handler_undelegate_game`) CPIs `commit_and_undelegate_accounts`, which only *schedules* work for the ER validator to execute — the transaction itself must still reach the ER. If the ER validator is unreachable, this path (and `claim_timeout`, and the crank-based idle checks, which also execute against the delegation-program-owned PDA via the ER) is equally unreachable. The pinned `ephemeral-rollups-sdk` 0.16.2 re-exports (behind its `instruction` Cargo feature, now enabled) `dlp_api::instruction_builder::undelegate_confined_account`, a base-layer forced-undelegate gated by a MagicBlock delegation-program **admin** key that XFChess does not hold — not usable by us.
 
-Mitigations actually available to us:
+### The self-serve escape hatch
+
+The same feature-gated module exposes a second, non-admin path, implemented in `delegation_ix/force_recovery.rs` and `governance_ix/recover_stuck_delegation.rs`:
+
+1. **`request_force_undelegate`** (owner-program-authorized, no validator signature needed, callable any time) CPIs `request_undelegation`. Starts a `DEFAULT_UNDELEGATION_REQUEST_TIMEOUT_SLOTS` (9000 slots, ~60min) countdown on the delegation program.
+2. **`force_undelegate_after_timeout`** (owner-program-authorized, no validator signature needed, callable once that window elapses) CPIs `undelegate_with_rollback_after_timeout`. **Data-loss warning, confirmed by reading the delegation program's actual processor source (`magicblock-labs/delegation-program`), not just its doc comment:** this does not apply the validator's pending commit, and does **not** preserve the account's own prior data either — it resizes the `Game` PDA to zero bytes and hands ownership back empty. It is a wipe, not a rollback to a good snapshot.
+3. Because the `Game` PDA comes back with no discriminator, the normal `finalize_game` path can never run against it — there's no on-chain record left of who was playing or how much was staked. **`recover_stuck_delegation`** is the dedicated instruction for this dead end: it trusts the `dispute_authority` key (the same one that already single-handedly resolves disputes) to attest `white`/`black` from off-chain records (this game's own immutable `create_game`/`join_game` transaction history), verifies `game` is actually in the wiped state (owned by the program, zero data — so it can't be misused against a live game), and splits whatever is actually sitting in the escrow 50/50, mirroring `claim_stale_dispute`'s "no fault ruled" refund. It never touches ELO or profiles.
+
+The wager escrow and treasury vault are separate PDAs from `Game` and are never delegated, so their lamports are untouched throughout all of this — what's actually at risk and recovered here is the *ability to release* those funds, not the funds' custody.
+
+Backend wiring (`backend/src/tasks/settlement_worker.rs`): once a delegation is flagged stale (see the gauge below), the worker fires `request_force_undelegate` once (idempotent — safe to retry), then checks each tick whether the on-chain request has expired and, if so, submits `force_undelegate_after_timeout` automatically. Both try every fee-payer-pool key in turn, since the worker doesn't track which pool entry funded a given game's original `delegate_game` call — a wrong key just fails the CPI's `delegation_metadata.rent_payer` check harmlessly. `recover_stuck_delegation` is **not** auto-triggered: it needs a human (or an authorized off-chain process) to attest `white`/`black`, so it's a deliberate, dispute-authority-signed action rather than something a background loop should do unattended.
+
+Mitigations actually available to us today:
 
 - **Shrink the exposure window.** The settlement worker commits+undelegates as soon as a game concludes (see above), so the time any given `Game` PDA sits delegated with funds at risk is normally minutes, not hours.
-- **Monitor for it.** `xfchess_settlement_stale_delegated_gauge` (Prometheus, `/metrics`) counts currently-delegated games with no on-chain activity for more than 20 minutes (`STALE_DELEGATION_SECS` in `backend/src/tasks/settlement_worker.rs`) — a proxy for "the ER may not be committing/undelegating as expected." This turns a silent stuck-delegation incident into something on-call can see and act on (page, investigate, contact MagicBlock) — it does not and cannot auto-recover the game.
-- **Track upstream.** Worth periodically checking whether MagicBlock exposes a self-serve or timeout-based forced-undelegate to dApp authorities in a future SDK version — that's the only real fix, and it's outside this repo's control.
+- **Monitor for it.** `xfchess_settlement_stale_delegated_gauge` (Prometheus, `/metrics`) counts currently-delegated games with no on-chain activity for more than 20 minutes (`STALE_DELEGATION_SECS` in `backend/src/tasks/settlement_worker.rs`) — a proxy for "the ER may not be committing/undelegating as expected." It's also the trigger point for the self-serve recovery path above.
+- **Recover it.** Once the ~60min window from `request_force_undelegate` elapses, the settlement worker completes the recovery on its own; releasing the escrow still needs a manual, dispute-authority-signed `recover_stuck_delegation` call.
 
 ## Live Devnet Validation
 

@@ -1,7 +1,13 @@
+//! Unused auth-state scaffold (`#![allow(dead_code)]` below is deliberate).
+//! `AuthState` is registered via `app.manage(auth_state)` in `main.rs`, but no
+//! `#[tauri::command]` handler in `services::ipc` ever reads or writes it —
+//! the bridge's real wallet/JWT state is `WalletPubkey`/`WalletJwt` in `main.rs`.
+
 #![allow(dead_code)]
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Registered as managed Tauri state but never consumed by any command. See module docs.
 #[derive(Debug, Clone)]
 pub struct AuthState {
   pub token: Option<String>,

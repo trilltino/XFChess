@@ -75,6 +75,11 @@ pub struct P2PVpsState {
     pub joining_stake_amount: f64,
     /// Last time we polled the relay for the host's GAME_START message.
     pub joiner_poll_last: Option<std::time::Instant>,
+    /// When we started waiting on this host — lets the waiting screen show a
+    /// "taking longer than usual" hint instead of hanging silently forever if
+    /// the host's GAME_START never arrives (e.g. their send failed after all
+    /// retries, or their client crashed after clicking Start Game).
+    pub joining_since: Option<std::time::Instant>,
 }
 
 /// Build a `TimeControl` from base/increment seconds (0 base = unlimited).
@@ -111,6 +116,7 @@ impl Default for P2PVpsState {
             joining_host_node_id: None,
             joining_stake_amount: 0.0,
             joiner_poll_last: None,
+            joining_since: None,
         }
     }
 }
@@ -166,7 +172,57 @@ impl Plugin for P2PVpsPlugin {
             .add_systems(Update, poll_for_joiner_messages)
             .add_systems(Update, poll_for_game_start_message)
             .add_systems(Update, handle_vps_responses)
-            .add_systems(Update, send_vps_messages);
+            .add_systems(Update, send_vps_messages)
+            // `.after(bevy::window::ExitSystems)` matters: that's the set
+            // `bevy_window` uses for the system that actually writes
+            // `AppExit` once all windows are closed. Ordering after it
+            // guarantees we observe that event in the same `Last` pass
+            // instead of missing it because there's no next frame to catch
+            // up on.
+            .add_systems(Last, cleanup_p2p_lobby_on_exit.after(bevy::window::ExitSystems));
+    }
+}
+
+/// Best-effort notification to the backend relay that we're leaving, fired
+/// when the app is shutting down (window closed, or the in-menu Exit
+/// confirmation — see `AppExit` usage in `states/main_menu/new_menu.rs`).
+///
+/// Without this, a hosted-but-abandoned lobby only disappears once the
+/// backend's stale-lobby sweep evicts it (`LOBBY_TTL_SECS` in
+/// `backend/src/signing/p2p_relay/types.rs`), which meant a player closing
+/// the app mid-lobby left a "ghost" entry in other players' Join Lobby list
+/// that looked live (fresh TTL) but had no one actually behind it. Uses
+/// [`vps_client::p2p_leave_game_fast`] (a short 2s timeout) so an unreachable
+/// backend can't hang app shutdown.
+fn cleanup_p2p_lobby_on_exit(
+    mut exit_events: MessageReader<AppExit>,
+    vps_state: Res<P2PVpsState>,
+    network_state: Option<Res<OnlineNetworkState>>,
+) {
+    if exit_events.read().next().is_none() {
+        return;
+    }
+
+    let node_id = network_state
+        .as_ref()
+        .and_then(|ns| {
+            ns.node_id
+                .map(|id| bs58::encode(id.as_bytes()).into_string())
+        })
+        .unwrap_or_default();
+    if node_id.is_empty() {
+        return;
+    }
+
+    if let Some(game_id) = vps_state.hosting_game_id.clone() {
+        if let Err(e) = vps_client::p2p_leave_game_fast(game_id.clone(), &node_id) {
+            warn!("[LOBBY] Exit cleanup: leave (hosting {}) failed: {}", game_id, e);
+        }
+    }
+    if let Some(game_id) = vps_state.joining_game_id.clone() {
+        if let Err(e) = vps_client::p2p_leave_game_fast(game_id.clone(), &node_id) {
+            warn!("[LOBBY] Exit cleanup: leave (joining {}) failed: {}", game_id, e);
+        }
     }
 }
 
@@ -408,6 +464,7 @@ fn handle_vps_responses(
                     vps_state.joining_host_node_id = Some(host_id);
                     vps_state.joining_stake_amount = stake_amount;
                     vps_state.joiner_poll_last = None; // poll immediately
+                    vps_state.joining_since = Some(std::time::Instant::now());
 
                     if stake_amount > 0.0 {
                         #[cfg(feature = "solana")]
@@ -528,6 +585,7 @@ fn handle_vps_responses(
                 vps_state.joining_game_id = None;
                 vps_state.joining_host_node_id = None;
                 vps_state.joining_stake_amount = 0.0;
+                vps_state.joining_since = None;
 
                 info!("[P2P VPS] Game started (joiner/Black) via HTTP relay");
             }

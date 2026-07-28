@@ -275,7 +275,7 @@ pub fn build_app(game_config: GameConfig) -> App {
             })
             .set(LogPlugin {
                 filter: if cfg!(debug_assertions) {
-                    "info,wgpu_core=warn,wgpu_hal=warn,xfchess=info,bevy_gltf=error,bevy_image=error".to_string()
+                    "info,wgpu_core=warn,wgpu_hal=warn,xfchess=info,bevy_gltf=error,bevy_image=error,iroh=warn,iroh_relay=warn,iroh_gossip=warn,netwatch=warn,portmapper=warn".to_string()
                 } else {
                     "error".to_string()
                 },
@@ -316,10 +316,13 @@ pub fn build_app(game_config: GameConfig) -> App {
 /// binary via `include_bytes!`, so it works regardless of working directory or
 /// how the game is packaged. Runs once at startup against the primary window.
 fn set_window_icon(
-    windows: NonSend<bevy::winit::WinitWindows>,
+    windows: Option<NonSend<bevy::winit::WinitWindows>>,
     primary: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
     const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+    let Some(windows) = windows else {
+        return;
+    };
     let Ok(entity) = primary.single() else {
         return;
     };

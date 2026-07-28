@@ -11,6 +11,7 @@ use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// Accounts for permissionlessly auto-resolving a dispute past its TTL.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct ClaimStaleDispute<'info> {
@@ -32,6 +33,8 @@ pub struct ClaimStaleDispute<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Verifies the dispute is `Pending` and past its TTL, then splits the pot
+/// 50/50, refunds the challenger's bond, and settles the game as a draw.
 pub fn handler(ctx: Context<ClaimStaleDispute>, game_id: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     require!(

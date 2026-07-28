@@ -12,6 +12,7 @@
 
 use bevy::prelude::info;
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
     instruction::Instruction,
     message::{v0, VersionedMessage},
@@ -78,7 +79,7 @@ pub fn sign_via_tauri_only(
     instructions: &[Instruction],
     local_signers: &[&Keypair],
 ) -> Result<Vec<u8>, String> {
-    let rpc = RpcClient::new(rpc_url.to_string());
+    let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
     let blockhash = rpc
         .get_latest_blockhash()
         .map_err(|e| format!("get_latest_blockhash: {}", e))?;
@@ -111,7 +112,7 @@ pub fn sign_and_send_via_tauri(
     instructions: &[Instruction],
     local_signers: &[&Keypair],
 ) -> Result<Signature, String> {
-    let rpc = RpcClient::new(rpc_url.to_string());
+    let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
 
     let blockhash = rpc
         .get_latest_blockhash()
@@ -250,7 +251,10 @@ fn submit_signed_to_rpc(rpc_url: &str, signed_bytes: &[u8]) -> Result<Signature,
     let signed_tx: VersionedTransaction =
         bincode::deserialize(signed_bytes).map_err(|e| format!("deserialize_signed_tx: {}", e))?;
 
-    let rpc = RpcClient::new(rpc_url.to_string());
+    // `confirmed` (not the client default `finalized`) — waiting for finalization
+    // here means ~32 confirmations (~13-20s) instead of ~1-2 (~1-2s) for a status
+    // that's already safe to act on interactively.
+    let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
 
     rpc.send_and_confirm_transaction(&signed_tx)
         .map_err(|e| format!("send_and_confirm: {}", e))

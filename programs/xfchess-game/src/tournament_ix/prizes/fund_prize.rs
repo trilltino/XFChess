@@ -82,13 +82,7 @@ pub fn handler(ctx: Context<FundUsdcPrize>, tournament_id: u64, amount: u64) -> 
         authority: ctx.accounts.operator.to_account_info(),
     };
 
-    token::transfer(
-        CpiContext::new(
-            Token::id(),
-            transfer_instruction,
-        ),
-        amount,
-    )?;
+    token::transfer(CpiContext::new(Token::id(), transfer_instruction), amount)?;
 
     // Update tournament state
     tournament.usdc_prize_pool = amount;

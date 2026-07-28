@@ -84,11 +84,84 @@ Removal:
 
 Risk: medium only if someone uses these exact local helpers. Product/runtime risk is low.
 
+### 4. Orphaned `game_ix` instruction files (not part of the build)
+
+Files:
+
+- `programs/xfchess-game/src/game_ix/record.rs`
+- `programs/xfchess-game/src/game_ix/record_move.rs`
+
+Evidence:
+
+- `programs/xfchess-game/src/game_ix/mod.rs` does not declare `pub mod record;` or
+  `pub mod record_move;` — Rust does not compile a file unless it is reachable from a
+  `mod` declaration, so these two are not part of the program build at all.
+- The real move-recording path is `programs/xfchess-game/src/moves_ix/record.rs`
+  (wired up in `lib.rs` as the `record_move` instruction via `moves_ix::RecordMove`).
+- `game_ix/record.rs`'s `record_result` handler body ends with the comment
+  `// Additional logic for recording game result here` — it reads as an abandoned
+  draft, not a stale-but-complete instruction.
+
+Removal:
+
+- Delete both files; no `mod`/`use` changes needed elsewhere since nothing references them.
+
+Risk: none — they are not compiled today, so deleting them cannot change program behavior.
+
+### 5. Unused `TreasuryVault` account type
+
+Files:
+
+- `programs/xfchess-game/src/state/treasury_vault.rs`
+
+Evidence:
+
+- Declares a per-country typed treasury account (`seeds = [TREASURY_VAULT_SEED, country]`)
+  but a repo-wide search finds no instruction that constructs, initializes, or
+  deserializes a `TreasuryVault`.
+- Every real treasury reference (`account_ix/treasury.rs`'s `WithdrawTreasury`,
+  `governance_ix::resolve`, `governance_ix::claim_stale_dispute`,
+  `lifecycle::settlement`) uses a single global, untyped `SystemAccount` at
+  `seeds = [TREASURY_VAULT_SEED]` — no country component at all.
+
+Removal:
+
+- Delete `state/treasury_vault.rs`, remove `pub mod treasury_vault;` and
+  `pub use treasury_vault::*;` from `state/mod.rs`.
+
+Risk: none — no deployed account has ever had this shape, so there is no on-chain data
+this type needs to stay compatible with (unlike removing fields from a struct that
+*is* live, e.g. `PlayerProfile`).
+
+### 6. Orphaned `src/multiplayer/solana/rpc.rs`
+
+Files:
+
+- `src/multiplayer/solana/rpc.rs`
+
+Evidence:
+
+- `src/multiplayer/solana/mod.rs` does not declare `pub mod rpc;` — not
+  reachable from any `mod` statement, not compiled at all (same class as item 4).
+- A differently-scoped `SolanaRpc` struct with the same field names is defined
+  separately in `integration/systems.rs`, which is the one actually referenced
+  (by code that is itself dead — see the doc-audit findings in
+  `docs/AUDIT_TRACKING.md` Phase 8 for the fuller picture, including
+  `integration/rpc.rs` and `integration/systems.rs`'s `setup_solana_system`
+  cluster, which compile but are never called/registered).
+
+Removal:
+
+- Delete `src/multiplayer/solana/rpc.rs`; no `mod`/`use` changes needed
+  elsewhere since nothing references it.
+
+Risk: none — not compiled today, so deleting it cannot change program behavior.
+
 ## Conditional Remove Candidates
 
 These may be removable after confirming current UX/ops choices.
 
-### 4. Old `GameState::MultiplayerMenu` UI path
+### 7. Old `GameState::MultiplayerMenu` UI path
 
 Files:
 
@@ -110,7 +183,7 @@ Removal path:
 
 Risk: medium; it is UI-visible if an old route still reaches it.
 
-### 5. Duplicate backend binary alias
+### 8. Duplicate backend binary alias
 
 Manifest:
 
@@ -178,6 +251,9 @@ Recommendation:
 1. Remove `src/solana/multiplayer`.
 2. Remove `src/multiplayer/network/braid.rs` and the unused resource injection.
 3. Remove or quarantine `on_chain_benchmark` and `tournament_data_gen`.
-4. Decide whether `GameState::MultiplayerMenu` is still reachable; remove if not.
-5. Collapse backend `signing-server`/`signing-server-http` to one canonical bin after updating scripts.
+4. Delete the orphaned `game_ix/record.rs` and `game_ix/record_move.rs` — zero risk, they are not compiled.
+5. Delete the unused `state::TreasuryVault` type — zero risk, never instantiated on-chain.
+6. Delete the orphaned `src/multiplayer/solana/rpc.rs` — zero risk, not compiled.
+7. Decide whether `GameState::MultiplayerMenu` is still reachable; remove if not.
+8. Collapse backend `signing-server`/`signing-server-http` to one canonical bin after updating scripts.
 

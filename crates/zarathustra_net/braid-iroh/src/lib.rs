@@ -1,3 +1,9 @@
+//! Braid-HTTP over Iroh: runs the Braid synchronization protocol over a
+//! peer-to-peer QUIC transport (Iroh) instead of plain HTTP, for XFChess's
+//! P2P play and gossip-based matchmaking. An alternative transport for the
+//! same Braid resources, not a different protocol — the Solana/Ephemeral
+//! Rollup move path does not use this layer. See the crate README.
+
 pub mod discovery;
 pub mod node;
 #[cfg(feature = "proxy")]
@@ -16,8 +22,11 @@ use std::sync::Arc;
 
 /// Core application state that can be shared across consumers
 pub struct BraidIrohState {
+    /// The Iroh endpoint speaking the Braid protocol; subscribe to topics via `peer.subscribe(...)`.
     pub peer: Arc<BraidIrohNode>,
+    /// This node's Iroh node id, stringified.
     pub node_id: String,
+    /// The human-readable name passed to `spawn_node` (e.g. `"alice"`).
     pub node_name: String,
 }
 

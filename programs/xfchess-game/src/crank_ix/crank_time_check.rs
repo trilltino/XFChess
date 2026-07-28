@@ -3,9 +3,14 @@
 use crate::state::Game;
 use anchor_lang::prelude::*;
 
+/// No arguments needed — the game account already carries its own clock state.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct CrankTimeCheckData {}
 
+/// The scheduled callback the Ephemeral Rollup invokes each
+/// `check_interval_millis`. Idempotent: only mutates the game if a clock has
+/// actually expired (via `finish_by_timeout_if_expired`), so repeated firings
+/// after a game already ended are no-ops.
 pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let now = Clock::get()?.unix_timestamp;
@@ -13,6 +18,7 @@ pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData)
     Ok(())
 }
 
+/// Accounts for the ER-invoked time-check crank callback.
 #[derive(Accounts)]
 pub struct CrankTimeCheck<'info> {
     #[account(

@@ -4,11 +4,15 @@
 //! drawing funds from the delegation PDA vault for rent and wagers.
 
 use crate::account_ix::session_guards;
+use crate::common::escrow::debit_program_pda;
 use crate::constants::*;
 use crate::errors::*;
 use crate::game_ix::common::{init_game_fields, InitGameArgs};
 use crate::state::*;
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program::invoke_signed;
+use anchor_lang::solana_program::system_instruction;
+use anchor_lang::Discriminator;
 
 #[derive(Accounts)]
 #[instruction(
@@ -80,14 +84,11 @@ pub struct SessionCreateGame<'info> {
     /// CHECK: Verified against tournament player list and delegation PDA.
     pub player: UncheckedAccount<'info>,
 
-    #[account(
-        init,
-        payer = session_delegation,
-        space = 8 + Game::INIT_SPACE,
-        seeds = [GAME_SEED, &game_id.to_le_bytes()],
-        bump
-    )]
-    pub game: Box<Account<'info, Game>>,
+    /// CHECK: Created manually in the handler — see the identical comment in
+    /// `game_ix::global_create::GlobalCreateGame::game` for why `init, payer
+    /// = session_delegation` cannot work when the payer is a PDA.
+    #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
+    pub game: UncheckedAccount<'info>,
 
     /// CHECK: PDA for escrowing SOL wager.
     #[account(
@@ -147,11 +148,99 @@ pub fn handler(
         GameErrorCode::InvalidTournamentStatus
     );
 
+    let now = Clock::get()?.unix_timestamp;
+
+    // Create the `game` PDA funded by the tournament session delegation
+    // vault via `debit_program_pda`, not a system-program CPI — see the
+    // comment on `game_ix::global_create::handler` for why: the System
+    // Program's transfer path (which `create_account` also uses internally)
+    // unconditionally rejects a `from` account that carries data, and
+    // `session_delegation` does. `Allocate` + `Assign` handle space/ownership
+    // separately since neither touches a `from` account.
+    //
+    // Order matters: `Allocate`+`Assign` must run *before* the debit —
+    // crediting `game` first (while still owned by the System Program) then
+    // passing it into `invoke_signed` trips the runtime's "sum of account
+    // balances before and after instruction do not match" check. See
+    // `game_ix::global_create`'s test for the empirical confirmation.
+    let space = 8 + Game::INIT_SPACE;
+    let lamports = Rent::get()?.minimum_balance(space);
+    let game_id_bytes = game_id.to_le_bytes();
+    let game_bump = [ctx.bumps.game];
+    let game_seeds: [&[u8]; 3] = [GAME_SEED, game_id_bytes.as_ref(), game_bump.as_ref()];
+
+    invoke_signed(
+        &system_instruction::allocate(&ctx.accounts.game.key(), space as u64),
+        &[
+            ctx.accounts.game.to_account_info(),
+            ctx.accounts.system_program.to_account_info(),
+        ],
+        &[&game_seeds],
+    )?;
+    invoke_signed(
+        &system_instruction::assign(&ctx.accounts.game.key(), ctx.program_id),
+        &[
+            ctx.accounts.game.to_account_info(),
+            ctx.accounts.system_program.to_account_info(),
+        ],
+        &[&game_seeds],
+    )?;
+    debit_program_pda(
+        &ctx.accounts.session_delegation.to_account_info(),
+        &ctx.accounts.game.to_account_info(),
+        lamports,
+    )?;
+
+    // Transfer wager from session vault to escrow — same rule.
+    if wager_amount > 0 {
+        require!(
+            session_guards::checked_session_total(session.total_spent, wager_amount)?
+                <= session.spending_limit,
+            GameErrorCode::InsufficientFunds
+        );
+    }
+    debit_program_pda(
+        &ctx.accounts.session_delegation.to_account_info(),
+        &ctx.accounts.escrow_pda.to_account_info(),
+        wager_amount,
+    )?;
+
+    // Update session spent amount
+    let session_account = &mut ctx.accounts.session_delegation;
+    session_account.total_spent =
+        session_guards::checked_session_total(session_account.total_spent, wager_amount)?;
+
     // Initialize game (full init, matching create/global_create — otherwise the
     // board, turn, and timestamps would be left zeroed and the game unplayable).
-    let now = Clock::get()?.unix_timestamp;
+    let mut game = Game {
+        game_id: 0,
+        white: Pubkey::default(),
+        black: Pubkey::default(),
+        status: GameStatus::Pending,
+        last_move_timestamp: 0,
+        fees_advanced: 0,
+        fee_payer: Pubkey::default(),
+        result: GameResult::None,
+        board_state: [0; 68],
+        move_count: 0,
+        halfmove_clock: 0,
+        turn: 0,
+        created_at: 0,
+        updated_at: 0,
+        wager_amount: 0,
+        wager_token: None,
+        game_type: GameType::PvP,
+        match_type: MatchType::Free,
+        country_fee: 0,
+        base_time_seconds: 0,
+        increment_seconds: 0,
+        bump: 0,
+        is_delegated: false,
+        tournament_id: None,
+        nonce: 0,
+    };
     init_game_fields(
-        &mut ctx.accounts.game,
+        &mut game,
         InitGameArgs {
             game_id,
             white: ctx.accounts.player.key(),
@@ -167,41 +256,10 @@ pub fn handler(
         ctx.bumps.game,
     )?;
 
-    // Transfer wager from session vault to escrow
-    if wager_amount > 0 {
-        require!(
-            session_guards::checked_session_total(session.total_spent, wager_amount)?
-                <= session.spending_limit,
-            GameErrorCode::InsufficientFunds
-        );
-        let tid_bytes = session.tournament_id.to_le_bytes();
-        let player_bytes = session.player.to_bytes();
-        let bump = [session.bump];
-        let delegation_seeds: [&[u8]; 4] = [
-            TournamentSessionDelegation::SEED,
-            tid_bytes.as_ref(),
-            player_bytes.as_ref(),
-            bump.as_ref(),
-        ];
-        let signer_seeds: &[&[&[u8]]] = &[&delegation_seeds];
-
-        anchor_lang::system_program::transfer(
-            CpiContext::new_with_signer(
-                System::id(),
-                anchor_lang::system_program::Transfer {
-                    from: session.to_account_info(),
-                    to: ctx.accounts.escrow_pda.to_account_info(),
-                },
-                signer_seeds,
-            ),
-            wager_amount,
-        )?;
-    }
-
-    // Update session spent amount
-    let session_account = &mut ctx.accounts.session_delegation;
-    session_account.total_spent =
-        session_guards::checked_session_total(session_account.total_spent, wager_amount)?;
+    let mut data = ctx.accounts.game.try_borrow_mut_data()?;
+    data[..8].copy_from_slice(&Game::DISCRIMINATOR);
+    let mut writer = &mut data[8..];
+    game.serialize(&mut writer)?;
 
     Ok(())
 }

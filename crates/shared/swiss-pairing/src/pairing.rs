@@ -1,3 +1,8 @@
+//! Round pairing: the FIDE Dutch system implementation. Groups players into
+//! scoregroups, pairs top half against bottom half within each group, floats
+//! unpaired players to adjacent scoregroups, then assigns colors and board
+//! numbers to the resulting pairings.
+
 use crate::{
     Color, Pairing, PairingConfig, PairingError, PairingResult, Scoregroup, SwissPlayer, SwissRound,
 };

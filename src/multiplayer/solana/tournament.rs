@@ -120,6 +120,12 @@ pub struct TournamentClientState {
     pub chat_input: String,
     /// Send closure for outbound chat (sends to VPS ws endpoint).
     pub chat_tx: Option<crossbeam_channel::Sender<(String, String)>>,
+
+    /// Tournament IDs the player dismissed from the browser (e.g. a cancelled
+    /// tournament they no longer want cluttering the list). Client-side only —
+    /// `available_tournaments` is fully replaced on every poll, so this can't
+    /// live on the summary itself; re-appears if the backend ever reuses the ID.
+    pub dismissed_ids: std::collections::HashSet<u64>,
 }
 
 impl Default for TournamentClientState {
@@ -157,6 +163,7 @@ impl Default for TournamentClientState {
             chat_rx: None,
             chat_input: String::new(),
             chat_tx: None,
+            dismissed_ids: std::collections::HashSet::new(),
         }
     }
 }
