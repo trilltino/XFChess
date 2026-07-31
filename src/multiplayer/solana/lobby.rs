@@ -73,6 +73,16 @@ pub enum LobbyStatus {
     OpponentJoined {
         game_id: u64,
     },
+    /// We (the joiner) have confirmed our on-chain `join_game` — now waiting
+    /// for the host to click "Host Game", which relays a GAME_START signal
+    /// over the P2P relay (see `spawn_poll_game_start`).
+    WaitingForHostStart {
+        game_id: u64,
+    },
+    /// The host's GAME_START signal arrived — safe to actually enter the match.
+    EnterGame {
+        game_id: u64,
+    },
     Error(String),
 }
 
@@ -107,6 +117,9 @@ pub struct SolanaLobbyState {
     pub lookup_rx: Option<oneshot::Receiver<Result<(u64, u64), String>>>,
     /// Channel receiving notification that opponent joined on-chain.
     pub opponent_poll_rx: Option<oneshot::Receiver<Result<(), String>>>,
+    /// Channel receiving notification that the host marked the game
+    /// in-progress on the relay (see `spawn_poll_game_start`).
+    pub game_start_poll_rx: Option<oneshot::Receiver<Result<(), String>>>,
     // Cached from SolanaIntegrationState each frame.
     pub cached_balance: f64,
     pub cached_keypair_bytes: Option<Vec<u8>>,
@@ -142,8 +155,6 @@ pub struct SolanaLobbyState {
     pub time_control_inc: u32,
     /// ELO matching preference.
     pub elo_pref: EloMatchPref,
-    /// Session key expires_at Unix timestamp (from on-disk session; populated by sync_from_solana_state).
-    pub session_expires_at: Option<i64>,
     /// Receiver for the on-chain active-game check (rejoin flow).
     pub rejoin_rx: Option<oneshot::Receiver<Option<u64>>>,
     /// Game ID found during rejoin check (displayed until dismissed).
@@ -194,6 +205,7 @@ impl Default for SolanaLobbyState {
             tx_rx: None,
             lookup_rx: None,
             opponent_poll_rx: None,
+            game_start_poll_rx: None,
             cached_balance: 0.0,
             cached_keypair_bytes: None,
             cached_rpc_url: DEVNET_RPC_URL.to_string(),
@@ -207,7 +219,6 @@ impl Default for SolanaLobbyState {
             time_control_base: 300,
             time_control_inc: 0,
             elo_pref: EloMatchPref::default(),
-            session_expires_at: None,
             rejoin_rx: None,
             rejoin_game_id: None,
             browse_games: Vec::new(),
@@ -307,6 +318,18 @@ pub fn spawn_lookup_game(
         .detach();
 }
 
+/// Spawn a background task that polls the P2P relay every 2 s for this
+/// game's durable status to flip to `InProgress` (set by the host's "Host
+/// Game" button via `p2p_accept_join`). Times out after 10 minutes.
+pub fn spawn_poll_game_start(game_id: u64, tx: oneshot::Sender<Result<(), String>>) {
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            let result = async_poll_game_start(game_id).await;
+            let _ = tx.send(result);
+        })
+        .detach();
+}
+
 /// Spawn a background task that polls the on-chain game account every 3 s until
 /// the `black` pubkey is set (opponent joined), then resolves the oneshot.
 /// Times out after 5 minutes.
@@ -400,6 +423,43 @@ async fn async_poll_opponent_joined(
         }
 
         // Use blocking sleep inside IoTaskPool (it runs on a thread pool, not async executor)
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// Polls the P2P relay's game listing every 2 s for up to 10 min until this
+/// game's entry reports `status == "InProgress"`. Deliberately checks the
+/// relay's durable per-game status (flipped once, server-side, by
+/// `p2p_accept_join`) rather than a one-shot message: a message log can
+/// accumulate a stale `GAME_START` from an earlier test/attempt against the
+/// same `game_id` (nothing expires individual messages — see
+/// `backend/src/signing/p2p_relay/state.rs`), which would make a *new* join
+/// falsely believe the host had already started. A status flip has no such
+/// history to misread.
+async fn async_poll_game_start(game_id: u64) -> Result<(), String> {
+    use std::time::{Duration, Instant};
+    const POLL_INTERVAL: Duration = Duration::from_secs(2);
+    const TIMEOUT: Duration = Duration::from_secs(600);
+
+    let target = game_id.to_string();
+    let start = Instant::now();
+    loop {
+        if start.elapsed() > TIMEOUT {
+            return Err("Timed out waiting for the host to start (10 min)".to_string());
+        }
+
+        match crate::multiplayer::vps_client::p2p_list_games() {
+            Ok(games) => {
+                if games
+                    .iter()
+                    .any(|g| g.game_id == target && g.status == "InProgress")
+                {
+                    return Ok(());
+                }
+            }
+            Err(e) => warn!("[LOBBY] poll for host start failed: {}", e),
+        }
+
         std::thread::sleep(POLL_INTERVAL);
     }
 }
@@ -547,10 +607,17 @@ async fn async_create_game_via_global_session(
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
-    // The per-game flow gets this from the VPS (live SOL/GBP rate) as part of
-    // /session/create; this path has no VPS round-trip for the transaction
-    // itself, so platform fee collection isn't wired up here yet — 0 for now.
-    let platform_fee_lamports = 0u64;
+    // Mirrors the on-chain settlement gate (`match_type != MatchType::Free`,
+    // see `lifecycle/settlement.rs`) — a Free match never gets charged the
+    // platform fee at settlement regardless of what's passed here, so don't
+    // bother fetching it (or failing game creation over a rate-fetch hiccup)
+    // for a match type that will just discard it anyway.
+    let platform_fee_lamports = if match_type != 0 {
+        crate::multiplayer::vps_client::fetch_platform_fee_lamports()
+            .map_err(|e| format!("fetch platform fee: {e}"))?
+    } else {
+        0
+    };
 
     let ix = build_global_create_game_ix(
         &program_id,
@@ -963,6 +1030,30 @@ fn poll_lobby_tasks(
         }
     }
 
+    // Poll for the host's GAME_START signal (joiner side) — see
+    // `WaitingForHostStart` in `screens.rs`'s auto-transition.
+    if let Some(ref mut rx) = lobby.game_start_poll_rx {
+        match rx.try_recv() {
+            Ok(Ok(())) => {
+                let game_id = match lobby.status {
+                    LobbyStatus::WaitingForHostStart { game_id } => game_id,
+                    _ => 0,
+                };
+                lobby.status = LobbyStatus::EnterGame { game_id };
+                lobby.game_start_poll_rx = None;
+            }
+            Ok(Err(e)) => {
+                lobby.status = LobbyStatus::Error(e);
+                lobby.game_start_poll_rx = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(_) => {
+                lobby.status = LobbyStatus::Error("Game-start poll task dropped".to_string());
+                lobby.game_start_poll_rx = None;
+            }
+        }
+    }
+
     // Poll lookup receiver.
     if let Some(ref mut rx) = lobby.lookup_rx {
         match rx.try_recv() {
@@ -1014,14 +1105,6 @@ fn sync_from_solana_state(
     if lobby.cached_keypair_bytes.is_none() {
         if let Some(ref pubkey) = solana.wallet_pubkey {
             lobby.cached_keypair_bytes = Some(pubkey.to_bytes().to_vec());
-
-            // Read session key expiry once per wallet connection.
-            if lobby.session_expires_at.is_none() {
-                lobby.session_expires_at =
-                    crate::multiplayer::solana::session_key_manager::SessionKeyManager::expires_at(
-                        pubkey,
-                    );
-            }
 
             // Kick off a one-time on-chain active-game check for the rejoin flow.
             if lobby.rejoin_rx.is_none() && lobby.rejoin_game_id.is_none() {

@@ -39,6 +39,34 @@ pub fn load_or_generate_master_keypair() -> anyhow::Result<Keypair> {
     Ok(keypair)
 }
 
+/// Path to the tournament-authority keypair. `initialize_tournament`,
+/// `initialize_tournament_shards`, and `initialize_tournament_escrow` all
+/// hard-require their `authority` signer to equal the program's baked-in
+/// `constants::vps_authority::ID` (`programs/xfchess-game/src/constants.rs`)
+/// — unlike the 1v1 game flows, tournament creation can't use an arbitrary
+/// funded wallet.
+const TOURNAMENT_AUTHORITY_KEYPAIR_PATH: &str = "keys/vps_authority.json";
+
+/// Load the tournament-authority keypair from disk. Deliberately has no
+/// "generate a new one" fallback (unlike `load_or_generate_master_keypair`):
+/// a freshly generated keypair would never match the on-chain
+/// `vps_authority::ID` constant, so a missing file has to be a hard error,
+/// not a silently-wrong one.
+pub fn load_tournament_authority_keypair() -> anyhow::Result<Keypair> {
+    let path = Path::new(TOURNAMENT_AUTHORITY_KEYPAIR_PATH);
+    let data = fs::read_to_string(path).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to read tournament authority keypair at {}: {e} — this must be the \
+             program's vps_authority::ID keypair, not an arbitrary funded wallet",
+            path.display()
+        )
+    })?;
+    let bytes: Vec<u8> = serde_json::from_str(&data)?;
+    let keypair = Keypair::try_from(bytes.as_slice())?;
+    println!("   Loaded tournament authority keypair: {}", keypair.pubkey());
+    Ok(keypair)
+}
+
 /// Generate N child keypairs for test participants.
 /// Loads from disk if previously saved, otherwise generates fresh and persists.
 pub fn generate_child_keypairs(count: usize) -> Vec<Keypair> {

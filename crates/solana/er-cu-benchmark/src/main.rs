@@ -6,9 +6,13 @@ use er_cu_benchmark::{
     cost_reporter::{export_json, generate_cost_report, print_cost_report},
     cu_logger::CuLogger,
     er_client,
-    game_flows::{run_1v1_game_flow, run_global_session_1v1_game_flow, run_swiss_tournament_flow},
+    game_flows::{
+        run_1v1_game_flow, run_global_session_1v1_game_flow, run_single_elimination_tournament_flow,
+        run_swiss_tournament_flow,
+    },
     keygen::{
-        fund_children, generate_child_keypairs, load_or_generate_master_keypair, reclaim_surplus,
+        fund_children, generate_child_keypairs, load_or_generate_master_keypair,
+        load_tournament_authority_keypair, reclaim_surplus,
     },
     moves::generate_100_move_sequence,
     PROGRAM_ID,
@@ -55,6 +59,7 @@ enum TestMode {
     OneVOne,
     GlobalSession,
     Swiss,
+    SingleElim,
     All,
 }
 
@@ -116,12 +121,21 @@ async fn main() -> anyhow::Result<()> {
                 run_swiss_test(&master, program_id, cli.size, cli).await?;
             }
         }
+        TestMode::SingleElim => {
+            if cli.all {
+                run_all_single_elim_sizes(&master, program_id, cli).await?;
+            } else {
+                run_single_elim_test(&master, program_id, cli.size, cli).await?;
+            }
+        }
         TestMode::All => {
             run_1v1_test(&master, program_id, cli.clone()).await?;
             if cli.all {
-                run_all_swiss_sizes(&master, program_id, cli).await?;
+                run_all_swiss_sizes(&master, program_id, cli.clone()).await?;
+                run_all_single_elim_sizes(&master, program_id, cli).await?;
             } else {
-                run_swiss_test(&master, program_id, cli.size, cli).await?;
+                run_swiss_test(&master, program_id, cli.size, cli.clone()).await?;
+                run_single_elim_test(&master, program_id, cli.size, cli).await?;
             }
         }
     }
@@ -268,12 +282,31 @@ async fn run_swiss_test(
         fund_children(&base_rpc, master, &children).await?;
     }
 
+    // Tournament creation (initialize_tournament/_shards/_escrow) requires the
+    // signer to be the program's hardcoded vps_authority::ID — a plain funded
+    // wallet like `master` gets UnauthorizedAccess. See
+    // load_tournament_authority_keypair's doc comment.
+    let authority = load_tournament_authority_keypair()?;
+    let authority_balance = base_rpc.get_balance(&authority.pubkey())?;
+    println!(
+        "   Tournament authority balance: {:.4} SOL",
+        authority_balance as f64 / 1_000_000_000.0
+    );
+    if authority_balance < 200_000_000 {
+        return Err(anyhow::anyhow!(
+            "Tournament authority ({}) balance too low ({:.4} SOL) — fund it with devnet SOL \
+             (it pays tournament rent + prize funding, not `master`)",
+            authority.pubkey(),
+            authority_balance as f64 / 1_000_000_000.0
+        ));
+    }
+
     let mut logger = CuLogger::new();
     let total_cu = run_swiss_tournament_flow(
         &base_rpc,
         &er_rpc,
         program_id,
-        master,
+        &authority,
         &children,
         size,
         &mut logger,
@@ -299,6 +332,112 @@ async fn run_swiss_test(
         "\n   Swiss {}-player test complete. Total CU: {}",
         size, total_cu
     );
+    Ok(())
+}
+
+async fn run_single_elim_test(
+    master: &solana_sdk::signature::Keypair,
+    program_id: Pubkey,
+    size: u16,
+    cli: Cli,
+) -> anyhow::Result<()> {
+    println!("\n══════════════════════════════════════════════════════════");
+    println!("  SINGLE-ELIMINATION TOURNAMENT TEST ({} players)", size);
+    println!("══════════════════════════════════════════════════════════");
+
+    let base_rpc = base_client();
+    // Kept small relative to Swiss's [8..256]: each match costs 2-3
+    // sequential transactions (record_match_result + advance_winner), and
+    // unlike Swiss's player-signed rounds there's no parallelism to exploit,
+    // so a 256-player bracket (255 matches) would take far longer than the
+    // 1-minute-ish turnaround this benchmark aims for per run.
+    let valid_sizes = [2u16, 4, 8, 16];
+    if !valid_sizes.contains(&size) {
+        return Err(anyhow::anyhow!(
+            "Invalid size: {}. Must be one of: {:?}",
+            size,
+            valid_sizes
+        ));
+    }
+
+    let children = generate_child_keypairs(size as usize);
+    if !cli.skip_funding {
+        println!("\n   Funding {} player wallets...", size);
+        fund_children(&base_rpc, master, &children).await?;
+    }
+
+    // See the identical comment in run_swiss_test: tournament creation
+    // requires the program's hardcoded vps_authority::ID as signer.
+    let authority = load_tournament_authority_keypair()?;
+    let authority_balance = base_rpc.get_balance(&authority.pubkey())?;
+    println!(
+        "   Tournament authority balance: {:.4} SOL",
+        authority_balance as f64 / 1_000_000_000.0
+    );
+    if authority_balance < 200_000_000 {
+        return Err(anyhow::anyhow!(
+            "Tournament authority ({}) balance too low ({:.4} SOL) — fund it with devnet SOL \
+             (it pays tournament rent + prize funding, not `master`)",
+            authority.pubkey(),
+            authority_balance as f64 / 1_000_000_000.0
+        ));
+    }
+
+    let mut logger = CuLogger::new();
+    let total_cu = run_single_elimination_tournament_flow(
+        &base_rpc,
+        program_id,
+        &authority,
+        &children,
+        size,
+        &mut logger,
+    )
+    .await?;
+
+    logger.print_summary();
+    let report = generate_cost_report(&logger, &format!("single_elim_{}_players", size));
+    print_cost_report(&report);
+
+    if let Some(path) = &cli.export {
+        let json = export_json(&report);
+        std::fs::write(format!("{}_single_elim_{}.json", path, size), json)?;
+        println!("   Exported to {}_single_elim_{}.json", path, size);
+    }
+
+    if !cli.skip_reclaim {
+        println!("\n   Reclaiming surplus from {} players...", size);
+        reclaim_surplus(&base_rpc, master, &children).await?;
+    }
+
+    println!(
+        "\n   Single-elimination {}-player test complete. Total CU: {}",
+        size, total_cu
+    );
+    Ok(())
+}
+
+async fn run_all_single_elim_sizes(
+    master: &solana_sdk::signature::Keypair,
+    program_id: Pubkey,
+    cli: Cli,
+) -> anyhow::Result<()> {
+    let sizes = [2u16, 4, 8, 16];
+    println!("\n══════════════════════════════════════════════════════════");
+    println!("  RUNNING ALL SINGLE-ELIMINATION TOURNAMENT SIZES");
+    println!("══════════════════════════════════════════════════════════");
+
+    for size in sizes {
+        match run_single_elim_test(master, program_id, size, cli.clone()).await {
+            Ok(_) => println!("      Size {} complete\n", size),
+            Err(e) => {
+                eprintln!("      Size {} failed: {}", size, e);
+                println!("      Continuing...\n");
+            }
+        }
+        sleep(Duration::from_secs(2)).await;
+    }
+
+    println!("\n   All single-elimination tournament sizes tested!");
     Ok(())
 }
 

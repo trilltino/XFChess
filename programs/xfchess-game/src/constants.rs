@@ -83,8 +83,8 @@ pub mod link_authority {
 }
 
 /// The VPS/backend operational authority — the only signer allowed to call
-/// privileged instructions such as `update_elo`, `collect_fee`, and
-/// tournament creation. Deliberately a dedicated key, separate from the
+/// privileged instructions such as `update_elo` and tournament creation.
+/// Deliberately a dedicated key, separate from the
 /// program's upgrade authority, so a compromised backend can't touch the
 /// deployed program itself.
 /// Matches keys/vps_authority.json (HZTwvN9AUK1n9jmQydrh5vkpdCBZm13W7qD9jtPZJSQc).

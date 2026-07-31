@@ -108,6 +108,19 @@ path = "tests/er_recovery_tests.rs"
 name = "global_create_game_tests"
 path = "tests/global_create_game_tests.rs"
 
+# complete_swiss_tournament: final standings sort + Completed transition once
+# all rounds are advanced — closes the gap flagged in advance_round.rs.
+[[test]]
+name = "tournament_swiss_completion_tests"
+path = "tests/tournament_swiss_completion_tests.rs"
+
+# Regression coverage for the platform-fee-lamports=0 bug found while
+# auditing the signing/popup architecture — guards `finalize_game` actually
+# pays a nonzero `country_fee` to `treasury_vault` at settlement.
+[[test]]
+name = "global_session_settlement_tests"
+path = "tests/global_session_settlement_tests.rs"
+
 [dev-dependencies]
 tokio = { workspace = true }
 solana-program-test = { workspace = true }

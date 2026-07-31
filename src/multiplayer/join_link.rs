@@ -55,6 +55,7 @@ fn handle_join_via_link(
         );
         connect_events.write(crate::multiplayer::network::p2p::ConnectToPeerEvent {
             peer_node_id: event.host_node_id.clone(),
+            is_host: false,
         });
     }
 }

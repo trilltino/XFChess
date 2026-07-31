@@ -86,7 +86,7 @@ pub struct MainMenuUIContext<'w, 's> {
     #[cfg(feature = "solana")]
     pub solana_lobby: Option<ResMut<'w, SolanaLobbyState>>,
     #[cfg(feature = "solana")]
-    pub solana_state: Option<Res<'w, SolanaIntegrationState>>,
+    pub solana_state: Option<ResMut<'w, SolanaIntegrationState>>,
     #[cfg(feature = "solana")]
     pub sol_usd_wager_rate: Option<Res<'w, SolUsdRate>>,
     #[cfg(feature = "solana")]
@@ -106,7 +106,6 @@ pub struct MainMenuUIContext<'w, 's> {
     pub active_time_control:
         ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
     pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
-    pub partner_logos: ResMut<'w, crate::states::main_menu::PartnerLogoState>,
     pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,
     pub menu_sounds: Option<Res<'w, MenuSounds>>,
     pub exit_confirm: ResMut<'w, MenuExitConfirm>,

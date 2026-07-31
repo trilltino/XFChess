@@ -1,11 +1,11 @@
 /**
  * Wallet picker modal shown from the top-nav "Connect Wallet" button.
  *
- * Lists all wallet adapters registered with `@solana/wallet-adapter-react`,
- * surfaces a short tagline per wallet, and — when running inside the Tauri
- * desktop shell — disables extension-only wallets (Phantom / Solflare) and
- * promotes WalletConnect as the recommended option since only mobile/QR
- * flows work there.
+ * Lists wallet adapters registered with `@solana/wallet-adapter-react`
+ * (plus any Wallet Standard wallet a browser extension self-registers,
+ * hence the explicit name filter below) and surfaces a short tagline per
+ * wallet. Inside the Tauri desktop shell, extension-only wallets
+ * (Phantom / Solflare) are disabled since there's no extension host there.
  */
 
 import { useWallet } from '@solana/wallet-adapter-react';
@@ -13,6 +13,11 @@ import { useWallet } from '@solana/wallet-adapter-react';
 const isTauri =
   typeof window !== 'undefined' &&
   (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== undefined;
+
+// Not explicitly registered as adapters — some wallet extensions
+// self-register via the Wallet Standard protocol. Filtered out here rather
+// than left to appear unannounced.
+const HIDDEN_WALLETS = new Set(['Jupiter', 'WalletConnect']);
 
 export function WalletSelectionModal({ onClose }: { onClose: () => void }) {
   const { wallets, select } = useWallet();
@@ -24,20 +29,10 @@ export function WalletSelectionModal({ onClose }: { onClose: () => void }) {
     Solflare: isTauri
       ? 'Requires Chrome Extension (Browser only).'
       : 'A powerful, feature-rich wallet with advanced security.',
-    WalletConnect: isTauri
-      ? 'Recommended for Desktop App (Connect via Mobile).'
-      : 'Connect to your mobile wallet via a secure bridge.',
     'Mobile Wallet Adapter': 'Native mobile connection for Android and iOS devices.',
   };
 
-  // Sort wallets to prioritize WalletConnect in Tauri
-  const sortedWallets = [...wallets].sort((a, b) => {
-    if (isTauri) {
-      if (a.adapter.name === 'WalletConnect') return -1;
-      if (b.adapter.name === 'WalletConnect') return 1;
-    }
-    return 0;
-  });
+  const visibleWallets = wallets.filter((w) => !HIDDEN_WALLETS.has(w.adapter.name));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -67,17 +62,14 @@ export function WalletSelectionModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <div className="wallet-list">
-          {sortedWallets.map((wallet) => {
+          {visibleWallets.map((wallet) => {
             const isDisabled =
               isTauri && (wallet.adapter.name === 'Phantom' || wallet.adapter.name === 'Solflare');
-            const isRecommended = isTauri && wallet.adapter.name === 'WalletConnect';
 
             return (
               <div
                 key={wallet.adapter.name}
-                className={`wallet-item ${isDisabled ? 'disabled' : ''} ${
-                  isRecommended ? 'recommended' : ''
-                }`}
+                className={`wallet-item ${isDisabled ? 'disabled' : ''}`}
                 onClick={() => {
                   if (isDisabled) return;
                   select(wallet.adapter.name);
@@ -86,7 +78,7 @@ export function WalletSelectionModal({ onClose }: { onClose: () => void }) {
                 style={{
                   opacity: isDisabled ? 0.5 : 1,
                   cursor: isDisabled ? 'not-allowed' : 'pointer',
-                  border: isRecommended ? '1px solid var(--primary)' : '1px solid var(--border)',
+                  border: '1px solid var(--border)',
                 }}
               >
                 <div className="wallet-icon-wrap">
@@ -100,13 +92,6 @@ export function WalletSelectionModal({ onClose }: { onClose: () => void }) {
                 <div className="wallet-info">
                   <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {wallet.adapter.name}
-                    {isRecommended && (
-                      <span
-                        style={{ fontSize: '0.6rem', color: 'var(--primary)', fontWeight: 800 }}
-                      >
-                        RECOMMENDED
-                      </span>
-                    )}
                   </h4>
                   <p>
                     {descriptions[wallet.adapter.name] ||

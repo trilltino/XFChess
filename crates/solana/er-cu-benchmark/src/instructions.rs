@@ -29,6 +29,42 @@ fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
     disc
 }
 
+/// Number of `TournamentPlayersShard` PDAs that actually exist for a
+/// tournament size — must mirror `initialize_shards.rs`'s three tiers
+/// (`initialize_shards_small`/`_medium`/`initialize_tournament_shards`).
+/// Ported from `src/solana/program_interface/instructions.rs::required_shards`
+/// (this crate can't depend on the game client).
+pub fn required_shards(max_players: u16) -> u8 {
+    match max_players {
+        0..=64 => 1,
+        65..=128 => 2,
+        _ => 4,
+    }
+}
+
+/// AccountMeta for a `TournamentPlayersShard` slot: the real PDA when the
+/// shard actually exists for this tournament size, otherwise the program ID
+/// — Anchor's convention for a client-supplied `None` in an
+/// `Option<Account<'info, T>>` slot (passing the *real but uninitialized* PDA
+/// there instead fails with `AccountNotInitialized`/constraint errors, since
+/// Anchor tries to deserialize it as `Some`).
+fn shard_meta(program_id: &Pubkey, tournament_id: u64, idx: u8, max_players: u16) -> AccountMeta {
+    if idx < required_shards(max_players) {
+        let pda = Pubkey::find_program_address(
+            &[
+                TOURNAMENT_PLAYERS_SEED,
+                &[idx],
+                &tournament_id.to_le_bytes(),
+            ],
+            program_id,
+        )
+        .0;
+        AccountMeta::new(pda, false)
+    } else {
+        AccountMeta::new_readonly(*program_id, false)
+    }
+}
+
 fn borsh_string(s: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(4 + s.len());
     buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
@@ -427,12 +463,16 @@ pub fn crank_time_check_ix(
 // ---------------------------------------------------------------------------
 // initialize_tournament
 // ---------------------------------------------------------------------------
-/// TournamentType enum discriminant for Swiss variant.
+/// TournamentType enum discriminants (state/tournament.rs's
+/// `TournamentType::Swiss { rounds: u8 }` / `TournamentType::SingleElimination`).
 const TOURNAMENT_TYPE_SWISS: u8 = 0;
+const TOURNAMENT_TYPE_SINGLE_ELIMINATION: u8 = 1;
 
 /// Wrapped SOL mint — used as a placeholder "USDC" mint for benchmarks.
 const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 
+/// `Some(rounds)` builds a Swiss tournament; `None` builds single-elimination
+/// (which has no `rounds` field — the bracket size determines round count).
 pub fn initialize_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -440,7 +480,7 @@ pub fn initialize_tournament_ix(
     name: &str,
     entry_fee: u64,
     max_players: u16,
-    rounds: u8,
+    rounds: Option<u8>,
     elo_min: u32,
     elo_max: u32,
     min_players: u16,
@@ -481,9 +521,17 @@ pub fn initialize_tournament_ix(
     data.extend(borsh_string(name));
     data.extend_from_slice(&entry_fee.to_le_bytes());
     data.extend_from_slice(&max_players.to_le_bytes());
-    // TournamentType::Swiss { rounds }
-    data.push(TOURNAMENT_TYPE_SWISS);
-    data.push(rounds);
+    match rounds {
+        Some(rounds) => {
+            // TournamentType::Swiss { rounds }
+            data.push(TOURNAMENT_TYPE_SWISS);
+            data.push(rounds);
+        }
+        None => {
+            // TournamentType::SingleElimination (no fields)
+            data.push(TOURNAMENT_TYPE_SINGLE_ELIMINATION);
+        }
+    }
     data.extend_from_slice(&elo_min.to_le_bytes());
     data.extend_from_slice(&elo_max.to_le_bytes());
     data.extend_from_slice(&min_players.to_le_bytes());
@@ -516,9 +564,28 @@ pub fn initialize_tournament_ix(
 }
 
 // ---------------------------------------------------------------------------
-// initialize_tournament_shards
+// initialize_shards_small / _medium / initialize_tournament_shards (large)
+//
+// The on-chain program has three separate shard-init instructions tiered by
+// `max_players` (initialize_shards.rs's doc comment: ≤64 -> 1 shard, ≤128 ->
+// 2 shards, 256 -> 4 shards) — each is its own instruction with its own
+// Accounts struct and its own `max_players` range constraint (mapped to
+// `GameErrorCode::InvalidGameStatus`), not one instruction that always
+// creates 4. Calling the large-tier instruction (the only one that used to be
+// wired up here) for anything smaller than 256 players fails that
+// `tournament.max_players == 256` constraint every time.
 // ---------------------------------------------------------------------------
-pub fn initialize_tournament_shards_ix(
+
+fn shard_pda(program_id: &Pubkey, tournament_id: u64, idx: u8) -> Pubkey {
+    Pubkey::find_program_address(
+        &[TOURNAMENT_PLAYERS_SEED, &[idx], &tournament_id.to_le_bytes()],
+        program_id,
+    )
+    .0
+}
+
+/// Small tier: ≤64 players, 1 shard.
+pub fn initialize_shards_small_ix(
     program_id: Pubkey,
     authority: Pubkey,
     tournament_id: u64,
@@ -528,39 +595,58 @@ pub fn initialize_tournament_shards_ix(
         &program_id,
     )
     .0;
-    let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[0u8],
-            &tournament_id.to_le_bytes(),
+
+    let mut data = anchor_discriminator("initialize_shards_small").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new_readonly(tournament_pda, false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 0), false),
+            AccountMeta::new(authority, true),
+            AccountMeta::new_readonly(system_program::id(), false),
         ],
+        data,
+    })
+}
+
+/// Medium tier: 65-128 players, 2 shards.
+pub fn initialize_shards_medium_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
         &program_id,
     )
     .0;
-    let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[1u8],
-            &tournament_id.to_le_bytes(),
+
+    let mut data = anchor_discriminator("initialize_shards_medium").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new_readonly(tournament_pda, false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 0), false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 1), false),
+            AccountMeta::new(authority, true),
+            AccountMeta::new_readonly(system_program::id(), false),
         ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[2u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[3u8],
-            &tournament_id.to_le_bytes(),
-        ],
+        data,
+    })
+}
+
+/// Large tier: exactly 256 players, 4 shards.
+pub fn initialize_tournament_shards_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
         &program_id,
     )
     .0;
@@ -574,15 +660,31 @@ pub fn initialize_tournament_shards_ix(
             // `tournament` is read-only here (initialize_shards.rs:133-139) — the
             // shards are what get initialized, not the tournament record itself.
             AccountMeta::new_readonly(tournament_pda, false),
-            AccountMeta::new(tournament_players_shard_0, false),
-            AccountMeta::new(tournament_players_shard_1, false),
-            AccountMeta::new(tournament_players_shard_2, false),
-            AccountMeta::new(tournament_players_shard_3, false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 0), false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 1), false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 2), false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 3), false),
             AccountMeta::new(authority, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
     })
+}
+
+/// Picks the right shard-init instruction for `max_players` — small (≤64),
+/// medium (65-128), or large (exactly 256). Callers no longer need to know
+/// about the tiering themselves.
+pub fn initialize_shards_for_size_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+) -> Result<Instruction> {
+    match required_shards(max_players) {
+        1 => initialize_shards_small_ix(program_id, authority, tournament_id),
+        2 => initialize_shards_medium_ix(program_id, authority, tournament_id),
+        _ => initialize_tournament_shards_ix(program_id, authority, tournament_id),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -622,51 +724,21 @@ pub fn initialize_tournament_escrow_ix(
 // ---------------------------------------------------------------------------
 // register_player
 // ---------------------------------------------------------------------------
+/// `max_players` determines which shards actually exist (see
+/// `required_shards`) — shards beyond that are passed as the program-ID
+/// `None` sentinel via `shard_meta`, matching `RegisterPlayer`'s
+/// `Option<Box<Account<...>>>` fields for shards 1-3
+/// (tournament_ix/registration/register.rs:50-70).
 pub fn register_player_ix(
     program_id: Pubkey,
     player: Pubkey,
     host_treasury: Pubkey,
     tournament_id: u64,
+    max_players: u16,
     elo: u32,
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[0u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[1u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[2u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[3u8],
-            &tournament_id.to_le_bytes(),
-        ],
         &program_id,
     )
     .0;
@@ -696,10 +768,10 @@ pub fn register_player_ix(
             AccountMeta::new_readonly(player_profile_pda, false),
             AccountMeta::new(player, true),
             AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(tournament_players_shard_0, false),
-            AccountMeta::new(tournament_players_shard_1, false),
-            AccountMeta::new(tournament_players_shard_2, false),
-            AccountMeta::new(tournament_players_shard_3, false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 0), false),
+            shard_meta(&program_id, tournament_id, 1, max_players),
+            shard_meta(&program_id, tournament_id, 2, max_players),
+            shard_meta(&program_id, tournament_id, 3, max_players),
             AccountMeta::new(host_treasury, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
@@ -710,50 +782,20 @@ pub fn register_player_ix(
 // ---------------------------------------------------------------------------
 // start_tournament
 // ---------------------------------------------------------------------------
+/// `max_players` determines which shards actually exist (see
+/// `required_shards`) — shards beyond that are passed as the program-ID
+/// `None` sentinel via `shard_meta`, matching `StartTournament`'s
+/// `Option<Account<...>>` fields for shards 1-3
+/// (tournament_ix/lifecycle/start.rs:27-48).
 pub fn start_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
     host_treasury: Pubkey,
     tournament_id: u64,
+    max_players: u16,
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[0u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[1u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[2u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[3u8],
-            &tournament_id.to_le_bytes(),
-        ],
         &program_id,
     )
     .0;
@@ -774,10 +816,10 @@ pub fn start_tournament_ix(
         program_id,
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(tournament_players_shard_0, false),
-            AccountMeta::new(tournament_players_shard_1, false),
-            AccountMeta::new(tournament_players_shard_2, false),
-            AccountMeta::new(tournament_players_shard_3, false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 0), false),
+            shard_meta(&program_id, tournament_id, 1, max_players),
+            shard_meta(&program_id, tournament_id, 2, max_players),
+            shard_meta(&program_id, tournament_id, 3, max_players),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(host_treasury, false),
             AccountMeta::new(authority, true),
@@ -838,9 +880,16 @@ pub fn record_match_result_ix(
 // ---------------------------------------------------------------------------
 // authorize_tournament_session
 // ---------------------------------------------------------------------------
+/// `max_players` determines which shards actually exist (see
+/// `required_shards`) — shards beyond that are passed as the program-ID
+/// `None` sentinel via `shard_meta`, matching
+/// `AuthorizeTournamentSessionCtx`'s `Option<Account<...>>` fields for
+/// shards 1-3.
+#[allow(clippy::too_many_arguments)]
 pub fn authorize_tournament_session_ix(
     program_id: Pubkey,
     tournament_id: u64,
+    max_players: u16,
     player: Pubkey,
     session_key: Pubkey,
     spending_limit: u64,
@@ -850,42 +899,6 @@ pub fn authorize_tournament_session_ix(
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[0u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[1u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[2u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[3u8],
-            &tournament_id.to_le_bytes(),
-        ],
         &program_id,
     )
     .0;
@@ -915,12 +928,12 @@ pub fn authorize_tournament_session_ix(
         program_id,
         accounts: vec![
             // tournament + all 4 shards are read-only on-chain
-            // (authorize_tournament_session.rs:146-175) — only session_delegation is written.
+            // (authorize_tournament_session.rs) — only session_delegation is written.
             AccountMeta::new_readonly(tournament_pda, false),
-            AccountMeta::new_readonly(tournament_players_shard_0, false),
-            AccountMeta::new_readonly(tournament_players_shard_1, false),
-            AccountMeta::new_readonly(tournament_players_shard_2, false),
-            AccountMeta::new_readonly(tournament_players_shard_3, false),
+            AccountMeta::new_readonly(shard_pda(&program_id, tournament_id, 0), false),
+            shard_meta(&program_id, tournament_id, 1, max_players),
+            shard_meta(&program_id, tournament_id, 2, max_players),
+            shard_meta(&program_id, tournament_id, 3, max_players),
             AccountMeta::new(session_delegation_pda, false),
             AccountMeta::new(player, true),
             AccountMeta::new_readonly(system_program::id(), false),
@@ -936,6 +949,7 @@ pub fn authorize_tournament_session_ix(
 pub fn session_create_game_ix(
     program_id: Pubkey,
     tournament_id: u64,
+    max_players: u16,
     game_id: u64,
     white_session: Pubkey,
     white_player: Pubkey,
@@ -944,42 +958,6 @@ pub fn session_create_game_ix(
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[0u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[1u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[2u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[3u8],
-            &tournament_id.to_le_bytes(),
-        ],
         &program_id,
     )
     .0;
@@ -1010,17 +988,17 @@ pub fn session_create_game_ix(
     // MatchType::Free = 0
     data.push(0);
     data.extend_from_slice(&platform_fee.to_le_bytes());
-    data.extend_from_slice(&600u64.to_le_bytes()); // base_time_seconds
+    data.extend_from_slice(&60u64.to_le_bytes()); // base_time_seconds — 1 min, synthetic instant-move benchmark
     data.extend_from_slice(&0u16.to_le_bytes()); // increment_seconds
 
     Ok(Instruction {
         program_id,
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(tournament_players_shard_0, false),
-            AccountMeta::new(tournament_players_shard_1, false),
-            AccountMeta::new(tournament_players_shard_2, false),
-            AccountMeta::new(tournament_players_shard_3, false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 0), false),
+            shard_meta(&program_id, tournament_id, 1, max_players),
+            shard_meta(&program_id, tournament_id, 2, max_players),
+            shard_meta(&program_id, tournament_id, 3, max_players),
             AccountMeta::new(session_delegation_pda, false),
             AccountMeta::new_readonly(white_session, true),
             AccountMeta::new_readonly(white_player, false),
@@ -1035,9 +1013,12 @@ pub fn session_create_game_ix(
 // ---------------------------------------------------------------------------
 // session_join_game
 // ---------------------------------------------------------------------------
+/// `max_players` determines which shards actually exist — see
+/// `session_create_game_ix`'s identical note.
 pub fn session_join_game_ix(
     program_id: Pubkey,
     tournament_id: u64,
+    max_players: u16,
     game_id: u64,
     session_key: Pubkey,
     player: Pubkey,
@@ -1045,42 +1026,6 @@ pub fn session_join_game_ix(
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[0u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[1u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[2u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[3u8],
-            &tournament_id.to_le_bytes(),
-        ],
         &program_id,
     )
     .0;
@@ -1109,12 +1054,12 @@ pub fn session_join_game_ix(
     Ok(Instruction {
         program_id,
         accounts: vec![
-            // tournament + all 4 shards are read-only on-chain (session_join_game.rs:16-45).
+            // tournament + all 4 shards are read-only on-chain (session_join_game.rs).
             AccountMeta::new_readonly(tournament_pda, false),
-            AccountMeta::new_readonly(tournament_players_shard_0, false),
-            AccountMeta::new_readonly(tournament_players_shard_1, false),
-            AccountMeta::new_readonly(tournament_players_shard_2, false),
-            AccountMeta::new_readonly(tournament_players_shard_3, false),
+            AccountMeta::new_readonly(shard_pda(&program_id, tournament_id, 0), false),
+            shard_meta(&program_id, tournament_id, 1, max_players),
+            shard_meta(&program_id, tournament_id, 2, max_players),
+            shard_meta(&program_id, tournament_id, 3, max_players),
             AccountMeta::new(session_delegation_pda, false),
             AccountMeta::new_readonly(session_key, true),
             AccountMeta::new_readonly(player, false),
@@ -1131,9 +1076,14 @@ pub fn session_join_game_ix(
 // ---------------------------------------------------------------------------
 // record_swiss_result
 // ---------------------------------------------------------------------------
+/// `max_players` determines which shards actually exist (see
+/// `required_shards`) — shards beyond that are passed as the program-ID
+/// `None` sentinel via `shard_meta`, matching `RecordSwissResult`'s
+/// `Option<Account<'info, TournamentPlayersShard>>` fields for shards 1-3.
 pub fn record_swiss_result_ix(
     program_id: Pubkey,
     tournament_id: u64,
+    max_players: u16,
     round: u8,
     board: u16,
     result_variant: u8, // 0 = Win, 1 = Loss, 2 = Draw (SwissMatchResult)
@@ -1142,42 +1092,6 @@ pub fn record_swiss_result_ix(
 ) -> Result<Instruction> {
     let tournament_pda = Pubkey::find_program_address(
         &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_0 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[0u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_1 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[1u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_2 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[2u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-    let tournament_players_shard_3 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[3u8],
-            &tournament_id.to_le_bytes(),
-        ],
         &program_id,
     )
     .0;
@@ -1192,10 +1106,10 @@ pub fn record_swiss_result_ix(
         program_id,
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(tournament_players_shard_0, false),
-            AccountMeta::new(tournament_players_shard_1, false),
-            AccountMeta::new(tournament_players_shard_2, false),
-            AccountMeta::new(tournament_players_shard_3, false),
+            AccountMeta::new(shard_pda(&program_id, tournament_id, 0), false),
+            shard_meta(&program_id, tournament_id, 1, max_players),
+            shard_meta(&program_id, tournament_id, 2, max_players),
+            shard_meta(&program_id, tournament_id, 3, max_players),
             AccountMeta::new(player, true),
             AccountMeta::new_readonly(opponent, false),
             AccountMeta::new_readonly(system_program::id(), false),
@@ -1244,6 +1158,285 @@ pub fn close_tournament_ix(
         ],
         data,
     })
+}
+
+// ---------------------------------------------------------------------------
+// fund_sol_prize — locks a guaranteed SOL prize pool in escrow. Must be sent
+// before the first player registers (tournament_ix/prizes/fund_sol_prize.rs:
+// rejects once tournament.num_registered_players > 0 or prize_pool != 0).
+// ---------------------------------------------------------------------------
+pub fn fund_sol_prize_ix(
+    program_id: Pubkey,
+    operator: Pubkey,
+    tournament_id: u64,
+    amount_lamports: u64,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("fund_sol_prize").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&amount_lamports.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(operator, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// advance_round — permissionless Swiss round-advancement crank
+// (tournament_ix/matches/advance_round.rs). Requires every board in the
+// current round to have already reported via record_swiss_result.
+// ---------------------------------------------------------------------------
+pub fn advance_round_ix(program_id: Pubkey, cranker: Pubkey, tournament_id: u64) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("advance_round").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new_readonly(cranker, true),
+        ],
+        data,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// complete_swiss_tournament — permissionless crank that sorts final Swiss
+// standings and marks the tournament Completed once `advance_round` has
+// pushed `current_round` to `total_rounds`
+// (tournament_ix/matches/complete_swiss.rs). `max_players` determines which
+// shards actually exist (see `required_shards`); shards beyond that are
+// passed as the program-ID `None` sentinel via `shard_meta`, matching
+// `CompleteSwissTournament`'s `Option<Account<...>>` fields for shards 1-3.
+// ---------------------------------------------------------------------------
+pub fn complete_swiss_tournament_ix(
+    program_id: Pubkey,
+    cranker: Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("complete_swiss_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new_readonly(shard_pda(&program_id, tournament_id, 0), false),
+            shard_meta(&program_id, tournament_id, 1, max_players),
+            shard_meta(&program_id, tournament_id, 2, max_players),
+            shard_meta(&program_id, tournament_id, 3, max_players),
+            AccountMeta::new_readonly(cranker, true),
+        ],
+        data,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// distribute_tournament_prizes — permissionless crank that pushes each
+// recorded place's SOL share directly to their wallet
+// (tournament_ix/prizes/distribute.rs). `winners` are passed as writable
+// remaining accounts in any order; places whose wallet is absent are skipped.
+// ---------------------------------------------------------------------------
+pub fn distribute_tournament_prizes_ix(
+    program_id: Pubkey,
+    cranker: Pubkey,
+    tournament_id: u64,
+    winners: &[Pubkey],
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("distribute_tournament_prizes").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+
+    let mut accounts = vec![
+        AccountMeta::new(tournament_pda, false),
+        AccountMeta::new(escrow_pda, false),
+        AccountMeta::new_readonly(cranker, true),
+    ];
+    accounts.extend(winners.iter().map(|w| AccountMeta::new(*w, false)));
+
+    Ok(Instruction {
+        program_id,
+        accounts,
+        data,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// initialize_match — creates one single-elimination bracket slot
+// (tournament_ix/matches/initialize_match.rs). Authority-only (the backend,
+// or here, the benchmark's own admin/master keypair).
+// ---------------------------------------------------------------------------
+#[allow(clippy::too_many_arguments)]
+pub fn initialize_match_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+    match_index: u16,
+    round: u8,
+    player_white: Option<Pubkey>,
+    player_black: Option<Pubkey>,
+    next_match_for_winner: Option<u16>,
+    next_match_slot: u8,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let match_pda = Pubkey::find_program_address(
+        &[
+            TOURNAMENT_MATCH_SEED,
+            &tournament_id.to_le_bytes(),
+            &match_index.to_le_bytes(),
+        ],
+        &program_id,
+    )
+    .0;
+
+    let mut data = anchor_discriminator("initialize_match").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&match_index.to_le_bytes());
+    data.push(round);
+    for player in [player_white, player_black] {
+        match player {
+            Some(pk) => {
+                data.push(1);
+                data.extend_from_slice(pk.as_ref());
+            }
+            None => data.push(0),
+        }
+    }
+    match next_match_for_winner {
+        Some(n) => {
+            data.push(1);
+            data.extend_from_slice(&n.to_le_bytes());
+        }
+        None => data.push(0),
+    }
+    data.push(next_match_slot);
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(match_pda, false),
+            AccountMeta::new(authority, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// advance_winner — copies a completed match's winner into their slot in the
+// next round's match (tournament_ix/matches/record_result.rs's
+// `handler_advance_winner`).
+// ---------------------------------------------------------------------------
+pub fn advance_winner_ix(
+    program_id: Pubkey,
+    authority: Pubkey,
+    tournament_id: u64,
+    source_match_index: u16,
+    target_match_index: u16,
+) -> Result<Instruction> {
+    let tournament_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
+        &program_id,
+    )
+    .0;
+    let match_pda = |idx: u16| {
+        Pubkey::find_program_address(
+            &[
+                TOURNAMENT_MATCH_SEED,
+                &tournament_id.to_le_bytes(),
+                &idx.to_le_bytes(),
+            ],
+            &program_id,
+        )
+        .0
+    };
+
+    let mut data = anchor_discriminator("advance_winner").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&source_match_index.to_le_bytes());
+    data.extend_from_slice(&target_match_index.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new_readonly(match_pda(source_match_index), false),
+            AccountMeta::new(match_pda(target_match_index), false),
+            AccountMeta::new(authority, true),
+        ],
+        data,
+    })
+}
+
+/// Computes a match's (round, next_match_for_winner, next_match_slot) in the
+/// linear single-elimination bracket layout used on-chain: round-1 matches
+/// occupy indices `0..max_players/2`, each later round follows, and the final
+/// is always the last index. Ported from
+/// `src/solana/program_interface/instructions.rs` (used by the game client's
+/// own tournament e2e driver) since this benchmark crate has no dependency on
+/// the game client.
+pub fn bracket_position(max_players: u16, match_index: u16) -> (u8, Option<u16>, u8) {
+    let total_matches = max_players.saturating_sub(1);
+    let mut round_start = 0u16;
+    let mut round_size = max_players / 2;
+    let mut round = 0u8;
+    while round_size > 1 && match_index >= round_start + round_size {
+        round_start += round_size;
+        round_size /= 2;
+        round += 1;
+    }
+    let pos_in_round = match_index - round_start;
+    let next = if match_index + 1 >= total_matches {
+        None // the final
+    } else {
+        Some(round_start + round_size + pos_in_round / 2)
+    };
+    (round, next, (pos_in_round % 2) as u8)
 }
 
 // ---------------------------------------------------------------------------

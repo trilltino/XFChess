@@ -290,6 +290,10 @@ pub enum GameErrorCode {
     // ── ER-unavailability forced recovery ─────────────────────────────────────
     #[msg("Game is not in the post-force-undelegate wiped state.")]
     GameNotStuckDelegation, // recover_stuck_delegation called on a game that wasn't actually force-recovered
+
+    // ── Swiss tournament completion ────────────────────────────────────────────
+    #[msg("complete_swiss_tournament called before every round has been played and advanced.")]
+    SwissTournamentNotFinished, // current_round < total_rounds
 }
 
 // Alias so the rest of the codebase can use either name.

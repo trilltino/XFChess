@@ -42,7 +42,12 @@ pub fn initialize_braid_network(
     network_state.bootstrap_sender = Some(bootstrap_tx);
     network_state.subscription_sender = Some(sub_tx);
 
-    let session_signing_key = network_state.session_signing_key;
+    // Cloned `Arc`, not a snapshot — this task reads the *shared* cell fresh
+    // on every send (see `OnlineNetworkState::session_signing_key_shared`'s
+    // doc comment), since a plain copy taken here would forever be `None`:
+    // this function runs at app boot, long before any wallet connects and a
+    // real signing key exists.
+    let session_signing_key_shared = network_state.session_signing_key_shared.clone();
     let event_tx_clone = event_tx.clone();
 
     tokio_runtime.0.spawn(async move {
@@ -56,11 +61,26 @@ pub fn initialize_braid_network(
             .map(|d| d.join("xfchess").join("braid"))
             .or_else(|| Some(std::path::PathBuf::from("braid-data")));
 
+        // Namespaced by XFCHESS_WALLET_PORT (same instance-scoping signal used
+        // for the hot wallet path, session-key storage, and wallet bridge
+        // elsewhere) so two same-machine instances (`just dev2`'s P1/P2, base
+        // port 7454 vs 7464) don't both bind 127.0.0.1:8181 — the second one
+        // always failed with "Only one usage of each socket address ...
+        // (os error 10048)" and silently never got a spectator TCP bridge.
+        let wallet_port: u16 = std::env::var("XFCHESS_WALLET_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(7454);
+        let proxy_port = 8181u16.wrapping_add(wallet_port.wrapping_sub(7454));
+        let listen_addr = format!("127.0.0.1:{proxy_port}")
+            .parse()
+            .expect("valid socket addr");
+
         let config = BraidIrohConfig {
             secret_key: Some(secret_key),
             discovery: DiscoveryConfig::Real,
             proxy_config: Some(braid_iroh::ProxyConfig {
-                listen_addr: "127.0.0.1:8181".parse().expect("static addr"),
+                listen_addr,
                 default_peer: derived_node_id,
             }),
             data_dir: braid_data_dir,
@@ -114,6 +134,20 @@ pub fn initialize_braid_network(
                     | NetworkMessage::GameStart { .. } => GAME_TOPIC.to_string(),
                     _ => format!("{}/{}", GAME_TOPIC, msg.game_id()),
                 };
+                // Captured before `msg` is potentially consumed below — kept
+                // deliberately cheap (variant name + game_id only) so this
+                // log line is safe to leave on permanently, unlike dumping
+                // full message contents.
+                let msg_kind = msg.kind_str();
+                let msg_game_id = msg.game_id();
+
+                // Read fresh every send — see `session_signing_key_shared`'s
+                // doc comment for why a one-time snapshot doesn't work here.
+                let session_signing_key = session_signing_key_shared
+                    .read()
+                    .map(|guard| *guard)
+                    .unwrap_or(None);
+                let signed = session_signing_key.is_some();
 
                 // Serialize with a 1-byte version prefix:
                 // 0x02 = bincode-encoded SignedNetworkMessage (secure path)
@@ -148,13 +182,26 @@ pub fn initialize_braid_network(
                 let version = Version::new(uuid::Uuid::new_v4().to_string());
                 let update = Update::snapshot(version, payload_bytes);
                 if let Err(e) = node_send.put(&topic, update).await {
-                    error!("Failed to broadcast message to {}: {}", topic, e);
+                    error!(
+                        "[NET] Broadcast FAILED: {} for game {} via gossip ({}): {}",
+                        msg_kind,
+                        msg_game_id,
+                        if signed { "signed" } else { "UNSIGNED" },
+                        e
+                    );
                     event_tx_error
                         .send(NetworkEvent::PeerDisconnected(format!(
                             "Broadcast error: {}",
                             e
                         )))
                         .ok();
+                } else {
+                    info!(
+                        "[NET] Sent {} for game {} via gossip ({})",
+                        msg_kind,
+                        msg_game_id,
+                        if signed { "signed" } else { "UNSIGNED — will be dropped by any peer without allow-unsigned-p2p" }
+                    );
                 }
             }
         });
@@ -258,6 +305,11 @@ async fn process_gossip_stream(
                                 bincode::deserialize::<SignedNetworkMessage>(&body[1..])
                             {
                                 if signed.verify() {
+                                    info!(
+                                        "[NET] Received {} for game {} via gossip (signed, verified)",
+                                        signed.msg.kind_str(),
+                                        signed.msg.game_id()
+                                    );
                                     event_tx
                                         .send(NetworkEvent::MessageReceived(bind_identity(signed)))
                                         .ok();
@@ -285,6 +337,11 @@ async fn process_gossip_stream(
                                 serde_json::from_slice::<SignedNetworkMessage>(&body)
                             {
                                 if signed.verify() {
+                                    info!(
+                                        "[NET] Received {} for game {} via gossip (JSON, signed, verified)",
+                                        signed.msg.kind_str(),
+                                        signed.msg.game_id()
+                                    );
                                     event_tx
                                         .send(NetworkEvent::MessageReceived(bind_identity(signed)))
                                         .ok();
@@ -311,6 +368,11 @@ async fn process_gossip_stream(
                                 // for local dev/testing only.
                                 #[cfg(feature = "allow-unsigned-p2p")]
                                 {
+                                    warn!(
+                                        "[NET] Received {} for game {} via gossip (UNSIGNED, accepted only because allow-unsigned-p2p is enabled)",
+                                        net_msg.kind_str(),
+                                        net_msg.game_id()
+                                    );
                                     event_tx.send(NetworkEvent::MessageReceived(net_msg)).ok();
                                 }
                                 #[cfg(not(feature = "allow-unsigned-p2p"))]
@@ -323,7 +385,11 @@ async fn process_gossip_stream(
                                                 .to_string(),
                                         })
                                         .ok();
-                                    warn!("[NET] Dropped unsigned message for game {}", game_id);
+                                    warn!(
+                                        "[NET] Dropped UNSIGNED {} for game {} — sender has no session_signing_key yet (see sync_session_key_to_network)",
+                                        net_msg.kind_str(),
+                                        game_id
+                                    );
                                 }
                             }
                         }
@@ -422,19 +488,36 @@ pub fn handle_network_events(
                 // A2: build the per-game roster of allowed signer keys from
                 // SessionInfo (broadcast only after the VPS confirms a session is
                 // active). Capped at two — the two participants.
+                //
+                // Must use `signing_pubkey`, NOT `session_pubkey` — the roster is
+                // checked against `agent_id`, which `bind_identity` sets from the
+                // verified signer of this message's own P2P envelope (i.e. the
+                // sender's `session_signing_key`, an ephemeral per-connection
+                // gossip key). `session_pubkey` is a completely different key
+                // (the VPS/backend on-chain session-delegation key). Populating
+                // the roster from it meant no real move's signer could ever
+                // match, so every move was rejected as "non-participant" as soon
+                // as the roster had any entry at all.
                 if let NetworkMessage::SessionInfo {
                     game_id: sg,
-                    session_pubkey,
+                    signing_pubkey,
                     ..
                 } = msg
                 {
                     #[cfg(feature = "solana")]
-                    let key = session_pubkey.to_bytes().to_vec();
+                    let key = signing_pubkey.to_bytes().to_vec();
                     #[cfg(not(feature = "solana"))]
-                    let key = session_pubkey.0.to_vec();
+                    let key = signing_pubkey.0.to_vec();
                     let entry = causal.roster.entry(*sg).or_default();
                     if !entry.contains(&key) && entry.len() < 2 {
+                        let key_prefix = key[..4.min(key.len())].to_vec();
                         entry.push(key);
+                        info!(
+                            "[NET] Roster for game {} now has {} entry(ies) — added signer {:?}",
+                            sg,
+                            entry.len(),
+                            key_prefix
+                        );
                     }
                 }
 
@@ -459,9 +542,14 @@ pub fn handle_network_events(
                         if let Some(allowed) = causal.roster.get(&game_id) {
                             if !allowed.is_empty() && !allowed.contains(agent_id) {
                                 warn!(
-                                    "[NET] Move from non-participant signer for game {} (agent {:?})",
+                                    "[NET] REJECTED move for game {} — signer {:?} not in roster ({} entries: {:?})",
                                     game_id,
-                                    &agent_id[..4.min(agent_id.len())]
+                                    &agent_id[..4.min(agent_id.len())],
+                                    allowed.len(),
+                                    allowed
+                                        .iter()
+                                        .map(|k| k[..4.min(k.len())].to_vec())
+                                        .collect::<Vec<_>>()
                                 );
                                 network_events.write(NetworkEvent::InvalidMoveRejected {
                                     game_id,
@@ -469,6 +557,12 @@ pub fn handle_network_events(
                                 });
                                 continue;
                             }
+                            info!(
+                                "[NET] Roster check passed for game {} — signer {:?} matched ({} entries on roster)",
+                                game_id,
+                                &agent_id[..4.min(agent_id.len())],
+                                allowed.len()
+                            );
                         }
 
                         let agent_key = (game_id, agent_id.clone());
@@ -697,7 +791,7 @@ pub fn feed_remote_moves_to_rollup(
 pub fn handle_session_info_from_network(
     mut network_events: MessageReader<NetworkEvent>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
-    mut session_key_manager: ResMut<crate::multiplayer::rollup::session_keys::SessionKeyManager>,
+    mut session_key_manager: ResMut<crate::multiplayer::rollup::session_keys::HandshakeOrderingKeyManager>,
     mut solana_state: Option<
         ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
     >,
@@ -1020,13 +1114,15 @@ pub fn handle_game_control_messages(
     }
 }
 
-/// Forward local draw offers, draw responses, rematch messages, and flag timeouts to the network.
+/// Forward local draw offers, draw responses, rematch messages, flag
+/// timeouts, and resignations to the network.
 pub fn send_local_draw_events(
     mut local_draw_offers: MessageReader<crate::game::events::DrawOfferEvent>,
     mut local_draw_responses: MessageReader<crate::game::events::DrawResponseEvent>,
     mut local_rematch_offers: MessageReader<crate::game::events::RematchOfferEvent>,
     mut local_rematch_responses: MessageReader<crate::game::events::RematchResponseEvent>,
     mut local_flag_timeouts: MessageReader<crate::game::events::FlagTimeoutEvent>,
+    mut local_resigns: MessageReader<crate::game::events::ResignEvent>,
     network_state: Res<OnlineNetworkState>,
     session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
 ) {
@@ -1085,6 +1181,23 @@ pub fn send_local_draw_events(
         let _ = tx.send(NetworkMessage::FlagTimeout {
             game_id,
             flagged_player: ev.flagged_player.clone(),
+        });
+    }
+    // The in-game "Resign" button (game_ui.rs) only ever wrote the local
+    // ResignEvent that updates this client's own GameOverState — nothing
+    // forwarded it to the opponent, so resigning ended the game on one
+    // screen while the other side's clock and board just kept running.
+    // `confirm_exit_game` (input.rs) already sent NetworkMessage::Resign
+    // for the "exit mid-game" path; this closes the same gap for the actual
+    // Resign button.
+    for ev in local_resigns.read() {
+        if ev.remote {
+            continue;
+        }
+        let _ = tx.send(NetworkMessage::Resign {
+            game_id,
+            winner: ev.winner.clone(),
+            nonce: 0, // resign doesn't need strict nonce ordering — same as input.rs's exit-resign path
         });
     }
 }
@@ -1214,6 +1327,36 @@ pub fn handle_pong(
             heartbeat.since_last_pong = 0.0;
         }
     }
+}
+
+/// Clear per-match networking state when leaving `InGame`, so the *next*
+/// match doesn't inherit it. Before this, three resources persisted across
+/// games in the same process:
+///
+/// - `P2PConnectionState.status` stayed `Connected`/`InGame` from the last
+///   match, so `handle_connect_to_peer`'s dedup guard silently dropped the
+///   new match's `ConnectToPeerEvent` ("Ignoring duplicate connect request —
+///   already InGame"), leaving direct Iroh P2P never established.
+/// - `RelayBridge.poll_index` kept counting up across games, so polling the
+///   new (empty) relay mailbox with a stale high `since` index meant nothing
+///   ever came back — pongs and moves were silently swallowed.
+/// - `HeartbeatState` (`timed_out` latch / stale `since_last_pong`) carried
+///   over, so a match that inherits both broken transports above has no
+///   working path to a Pong and hits the 15s abandonment timeout almost
+///   immediately.
+///
+/// Together these made every match after the first in a session (e.g. a
+/// wagered game played after a casual one) silently lose connectivity and
+/// get declared "opponent disconnected" within seconds of starting.
+pub fn reset_multiplayer_session_state(
+    mut p2p_conn: ResMut<crate::multiplayer::network::p2p::P2PConnectionState>,
+    mut heartbeat: ResMut<HeartbeatState>,
+    mut relay_bridge: ResMut<crate::multiplayer::network::relay_bridge::RelayBridge>,
+) {
+    *p2p_conn = crate::multiplayer::network::p2p::P2PConnectionState::default();
+    *heartbeat = HeartbeatState::default();
+    relay_bridge.reset();
+    info!("[NET] Reset P2P connection, heartbeat, and relay-bridge state on match exit");
 }
 
 pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {

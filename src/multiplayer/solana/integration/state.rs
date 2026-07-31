@@ -41,6 +41,19 @@ pub struct SolanaIntegrationState {
     pub global_session_keypair: Option<Keypair>,
     /// Whether the global session is active and loaded.
     pub global_session_active: bool,
+    /// True while `authorize_global_session_if_needed` has a background
+    /// authorization attempt in flight. Lets the lobby UI show a "setting up
+    /// one-time signing..." indicator (and hold off on Create/Join) instead
+    /// of silently racing into the per-game wallet-popup fallback path just
+    /// because the one-time setup hasn't resolved yet this frame.
+    pub global_session_setup_in_progress: bool,
+    /// Set once `authorize_global_session_if_needed` permanently gives up on
+    /// this wallet for the run (see `MAX_ATTEMPTS`). `Some(reason)` means
+    /// every game this session will use per-game wallet signing instead of
+    /// the zero-popup path — the lobby UI surfaces this explicitly instead of
+    /// letting the fallback (and its bundled platform-fee popup) show up
+    /// unexplained.
+    pub global_session_unavailable_reason: Option<String>,
     /// Direct RPC client for Solana
     pub rpc_client: Option<RpcClient>,
     /// Current balance of the wallet (SOL)
@@ -102,6 +115,8 @@ impl Default for SolanaIntegrationState {
             session_keypair: None,
             global_session_keypair: None,
             global_session_active: false,
+            global_session_setup_in_progress: false,
+            global_session_unavailable_reason: None,
             rpc_client: None,
             balance: 0.0,
             cached_usd_balance: None,

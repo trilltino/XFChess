@@ -10,8 +10,135 @@ use solana_system_interface::instruction as system_instruction;
 
 use crate::{
     apply_compute_budget, cu_logger::CuLogger, fetch_profile_elo, instructions as ix,
-    moves::generate_100_move_sequence, unique_id, with_retry,
+    moves::generate_100_move_sequence, unique_id, with_retry, LAMPORTS_PER_SOL,
+    TOURNAMENT_STATUS_COMPLETED,
 };
+
+/// Guaranteed SOL prize pool funded before a Swiss or single-elimination
+/// benchmark tournament opens registration — small enough to run repeatedly
+/// against a devnet wallet, large enough that payout deltas are unambiguous.
+const TOURNAMENT_PRIZE_LAMPORTS: u64 = 3_000_000;
+
+/// Snapshot both players' base-layer SOL balances, print the before/after
+/// delta once called again post-finalize, and fail loudly if the escrow
+/// didn't actually pay the winner more than the loser — i.e. verify the
+/// smart contract paid the winning pair, not just that `finalize_game`'s
+/// transaction landed. The scripted move sequence
+/// ([`generate_100_move_sequence`]) always ends in a Fool's Mate delivered
+/// by black, so black is the deterministic winner here.
+async fn verify_winner_payout(
+    base_rpc: &RpcClient,
+    white: &Pubkey,
+    black: &Pubkey,
+    white_before: u64,
+    black_before: u64,
+) -> anyhow::Result<()> {
+    let white_after = with_retry(|| base_rpc.get_balance(white)).await?;
+    let black_after = with_retry(|| base_rpc.get_balance(black)).await?;
+    let white_delta = white_after as i64 - white_before as i64;
+    let black_delta = black_after as i64 - black_before as i64;
+
+    println!("   Escrow payout (winner = Black, delivered Fool's Mate):");
+    println!(
+        "     White: {:.6} -> {:.6} SOL ({:+.6})",
+        white_before as f64 / LAMPORTS_PER_SOL as f64,
+        white_after as f64 / LAMPORTS_PER_SOL as f64,
+        white_delta as f64 / LAMPORTS_PER_SOL as f64,
+    );
+    println!(
+        "     Black: {:.6} -> {:.6} SOL ({:+.6})",
+        black_before as f64 / LAMPORTS_PER_SOL as f64,
+        black_after as f64 / LAMPORTS_PER_SOL as f64,
+        black_delta as f64 / LAMPORTS_PER_SOL as f64,
+    );
+
+    if black_delta <= 0 || black_delta <= white_delta {
+        anyhow::bail!(
+            "payout verification failed: winner (black) balance delta {black_delta} \
+             lamports was not greater than loser (white) delta {white_delta} lamports \
+             — smart contract did not pay the winning pair"
+        );
+    }
+
+    println!(
+        "   Payout verified: winner (black) received {:.6} SOL more than white from escrow.",
+        (black_delta - white_delta) as f64 / LAMPORTS_PER_SOL as f64
+    );
+    Ok(())
+}
+
+/// Snapshot each placed player's SOL balance, crank
+/// `distribute_tournament_prizes`, snapshot again, and verify every place
+/// received *exactly* `TOURNAMENT_PRIZE_LAMPORTS * share_bps / 10_000` —
+/// matching `ledger::prize_amount`'s own math — proving the smart contract
+/// paid the winning players, not just that the crank transaction landed.
+///
+/// `places` is `[1st, 2nd, 3rd]` (as returned by `fetch_tournament_places`);
+/// `prize_shares_bps` are the corresponding basis-point shares. Places that
+/// are `None` (e.g. a 2-player tournament has no 3rd place) are skipped.
+async fn verify_tournament_payout(
+    base_rpc: &RpcClient,
+    program_id: Pubkey,
+    cranker: &Keypair,
+    tournament_id: u64,
+    places: &[Option<Pubkey>],
+    prize_shares_bps: &[u16],
+) -> anyhow::Result<()> {
+    let placed: Vec<(Pubkey, u16)> = places
+        .iter()
+        .zip(prize_shares_bps.iter())
+        .filter_map(|(p, &bps)| p.map(|pk| (pk, bps)))
+        .collect();
+    anyhow::ensure!(!placed.is_empty(), "no placed players to verify payout for");
+
+    let mut balances_before = Vec::with_capacity(placed.len());
+    for (pk, _) in &placed {
+        balances_before.push(with_retry(|| base_rpc.get_balance(pk)).await?);
+    }
+
+    let winners: Vec<Pubkey> = placed.iter().map(|(pk, _)| *pk).collect();
+    let mut dist_ixs = vec![ix::distribute_tournament_prizes_ix(
+        program_id,
+        cranker.pubkey(),
+        tournament_id,
+        &winners,
+    )?];
+    apply_compute_budget(&mut dist_ixs, 200_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &dist_ixs,
+        Some(&cranker.pubkey()),
+        &[cranker],
+        blockhash,
+    );
+    with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+
+    println!("   Tournament payout ({} funded place(s)):", placed.len());
+    for (i, (pk, bps)) in placed.iter().enumerate() {
+        let place_no = i + 1;
+        let expected =
+            (TOURNAMENT_PRIZE_LAMPORTS as u128 * *bps as u128 / 10_000) as u64;
+        let after = with_retry(|| base_rpc.get_balance(pk)).await?;
+        let delta = after as i64 - balances_before[i] as i64;
+        println!(
+            "     Place {place_no}: {pk} — {:.6} SOL (expected {:.6})",
+            delta as f64 / LAMPORTS_PER_SOL as f64,
+            expected as f64 / LAMPORTS_PER_SOL as f64,
+        );
+        if delta != expected as i64 {
+            anyhow::bail!(
+                "payout verification failed: place {place_no} ({pk}) balance delta {delta} \
+                 lamports != expected {expected} lamports — smart contract did not pay this \
+                 place correctly"
+            );
+        }
+    }
+    println!(
+        "   Payout verified: all {} funded place(s) received their exact prize share.",
+        placed.len()
+    );
+    Ok(())
+}
 
 /// Run a full 1v1 game flow on ER with CU logging.
 pub async fn run_1v1_game_flow(
@@ -565,11 +692,15 @@ pub async fn run_1v1_game_flow(
     // Step 11: Finalize game
     println!("   Step 11: Finalizing game...");
 
-    // Capture pre-finalize ELOs
+    // Capture pre-finalize ELOs and balances — the balances let us verify
+    // afterward that the escrow actually paid the winner (see
+    // verify_winner_payout), not just that finalize_game's tx confirmed.
     let white_elo_before =
         fetch_profile_elo(base_rpc, program_id, white.pubkey()).unwrap_or(1200.0);
     let black_elo_before =
         fetch_profile_elo(base_rpc, program_id, black.pubkey()).unwrap_or(1200.0);
+    let white_balance_before = with_retry(|| base_rpc.get_balance(&white.pubkey())).await?;
+    let black_balance_before = with_retry(|| base_rpc.get_balance(&black.pubkey())).await?;
 
     // fee_payer must be `game.fee_payer` exactly (game_ix/finalize.rs:39
     // constrains `fee_payer.key() == game.fee_payer`) — Step 2 created this
@@ -621,6 +752,15 @@ pub async fn run_1v1_game_flow(
         black_elo_after / 100.0,
         (black_elo_after - black_elo_before) / 100.0
     );
+
+    verify_winner_payout(
+        base_rpc,
+        &white.pubkey(),
+        &black.pubkey(),
+        white_balance_before,
+        black_balance_before,
+    )
+    .await?;
 
     println!("   1v1 game flow complete!");
     Ok(logger.total_cu())
@@ -1042,6 +1182,8 @@ pub async fn run_global_session_1v1_game_flow(
         fetch_profile_elo(base_rpc, program_id, white.pubkey()).unwrap_or(1200.0);
     let black_elo_before =
         fetch_profile_elo(base_rpc, program_id, black.pubkey()).unwrap_or(1200.0);
+    let white_balance_before = with_retry(|| base_rpc.get_balance(&white.pubkey())).await?;
+    let black_balance_before = with_retry(|| base_rpc.get_balance(&black.pubkey())).await?;
 
     // fee_payer must be `game.fee_payer` exactly (game_ix/finalize.rs:39).
     // This game was created via global_create_game_ix(session_white.pubkey(),
@@ -1092,6 +1234,15 @@ pub async fn run_global_session_1v1_game_flow(
         (black_elo_after - black_elo_before) / 100.0
     );
 
+    verify_winner_payout(
+        base_rpc,
+        &white.pubkey(),
+        &black.pubkey(),
+        white_balance_before,
+        black_balance_before,
+    )
+    .await?;
+
     println!("   Global-session 1v1 game flow complete!");
     Ok(logger.total_cu())
 }
@@ -1122,7 +1273,7 @@ pub async fn run_swiss_tournament_flow(
         &format!("ER_Benchmark_{}", tournament_id),
         1_000_000,
         size,
-        rounds,
+        Some(rounds),
         0,                                          // elo_min
         3_000,                                      // elo_max
         2,                                          // min_players
@@ -1130,7 +1281,7 @@ pub async fn run_swiss_tournament_flow(
         0,                                          // platform_fee
         false,                                      // winner_takes_all
         master.pubkey(),                            // host_treasury
-        600,
+        60, // 1 min base clock — synthetic instant-move benchmark, no real clock needed
         0,
     )?];
     apply_compute_budget(&mut init_ixs, 400_000, 10_000, 262_144);
@@ -1149,10 +1300,11 @@ pub async fn run_swiss_tournament_flow(
 
     // Step 1b: Initialize tournament player shards (separate tx to avoid BPF stack overflow)
     println!("   Step 1b: Initializing tournament player shards...");
-    let mut shard_ixs = vec![ix::initialize_tournament_shards_ix(
+    let mut shard_ixs = vec![ix::initialize_shards_for_size_ix(
         program_id,
         master.pubkey(),
         tournament_id,
+        size,
     )?];
     apply_compute_budget(&mut shard_ixs, 200_000, 10_000, 262_144);
     let blockhash = base_rpc.get_latest_blockhash()?;
@@ -1197,6 +1349,32 @@ pub async fn run_swiss_tournament_flow(
         Some(sig.to_string()),
     );
 
+    // Step 1d: Fund a guaranteed SOL prize pool — must land before the first
+    // registration (fund_sol_prize.rs rejects once prize_pool != 0 or
+    // num_registered_players > 0). Without this the tournament has nothing to
+    // pay out and distribute_tournament_prizes/close_tournament both become
+    // no-ops that never actually exercise the payout path.
+    println!("   Step 1d: Funding guaranteed SOL prize pool...");
+    let mut fund_ixs = vec![ix::fund_sol_prize_ix(
+        program_id,
+        master.pubkey(),
+        tournament_id,
+        TOURNAMENT_PRIZE_LAMPORTS,
+    )?];
+    apply_compute_budget(&mut fund_ixs, 150_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx =
+        Transaction::new_signed_with_payer(&fund_ixs, Some(&master.pubkey()), &[master], blockhash);
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_setup",
+        "fund_sol_prize",
+        90_000,
+        150_000,
+        true,
+        Some(sig.to_string()),
+    );
+
     // Step 2: Initialize player profiles (required before registration)
     println!("   Step 2: Initializing player profiles...");
     for (i, player) in players.iter().enumerate() {
@@ -1236,14 +1414,20 @@ pub async fn run_swiss_tournament_flow(
             player.pubkey(),
             master.pubkey(),
             tournament_id,
+            size,
             elo,
         )?];
         apply_compute_budget(&mut reg_ixs, 200_000, 10_000, 262_144);
         let blockhash = base_rpc.get_latest_blockhash()?;
+        // register_player_ix's host_treasury account isn't a signer
+        // (register.rs constrains it == tournament.host_treasury, doesn't
+        // require its signature) — including `master` as an extra signer
+        // here panics with KeypairPubkeyMismatch since its pubkey doesn't
+        // appear in the instruction's signer set at all. Only `player` signs.
         let tx = Transaction::new_signed_with_payer(
             &reg_ixs,
             Some(&player.pubkey()),
-            &[player, master],
+            &[player],
             blockhash,
         );
         let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
@@ -1273,12 +1457,20 @@ pub async fn run_swiss_tournament_flow(
         let session = Keypair::new();
         let session_pubkey = session.pubkey();
         sessions.push(session);
-        // deposit_lamports = 3_000_000 (~3M) covers session account rent on-chain.
-        // The remaining budget (10M total - ~2.3M profile - ~3M session - fees) is enough headroom.
-        let deposit_lamports = 3_000_000u64;
+        // Each round this player is "white" draws a fresh Game account's
+        // rent-exemption (~0.003 SOL) + the 1_000_000-lamport wager from this
+        // same vault (session_create_game_ix's `wager` param) — and the vault
+        // persists across every round of the tournament, not just one game.
+        // 3_000_000 was only ever enough for a single round; with `rounds`
+        // rounds in a Swiss tournament (up to 4+ here) it ran out and
+        // session_create_game failed with InsufficientFunds. 30_000_000
+        // (0.03 SOL) comfortably covers the worst case (white every round)
+        // while staying well inside CHILD_FUNDING_AMOUNT (0.05 SOL/child).
+        let deposit_lamports = 30_000_000u64;
         let mut auth_ixs = vec![ix::authorize_tournament_session_ix(
             program_id,
             tournament_id,
+            size,
             player.pubkey(),
             session_pubkey,
             10_000_000_000,
@@ -1327,6 +1519,7 @@ pub async fn run_swiss_tournament_flow(
         master.pubkey(),
         master.pubkey(),
         tournament_id,
+        size,
     )?];
     apply_compute_budget(&mut start_ixs, 200_000, 10_000, 262_144);
     let blockhash = base_rpc.get_latest_blockhash()?;
@@ -1367,6 +1560,7 @@ pub async fn run_swiss_tournament_flow(
             let mut create_ixs = vec![ix::session_create_game_ix(
                 program_id,
                 tournament_id,
+                size,
                 game_id,
                 white_session.pubkey(),
                 white_player.pubkey(),
@@ -1395,6 +1589,7 @@ pub async fn run_swiss_tournament_flow(
             let mut join_ixs = vec![ix::session_join_game_ix(
                 program_id,
                 tournament_id,
+                size,
                 game_id,
                 black_session.pubkey(),
                 black_player.pubkey(),
@@ -1422,6 +1617,7 @@ pub async fn run_swiss_tournament_flow(
             let mut result_ixs = vec![ix::record_swiss_result_ix(
                 program_id,
                 tournament_id,
+                size,
                 round as u8,
                 match_idx as u16,
                 0, // SwissMatchResult::Win
@@ -1446,12 +1642,85 @@ pub async fn run_swiss_tournament_flow(
                 Some(sig.to_string()),
             );
         }
+
+        // Every board for this round is in — crank the round forward. The
+        // final call here (round == rounds - 1) pushes current_round to
+        // total_rounds, which is what makes complete_swiss_tournament below
+        // eligible to run (see complete_swiss.rs's precondition).
+        let mut advance_ixs = vec![ix::advance_round_ix(program_id, master.pubkey(), tournament_id)?];
+        apply_compute_budget(&mut advance_ixs, 150_000, 10_000, 262_144);
+        let blockhash = base_rpc.get_latest_blockhash()?;
+        let tx = Transaction::new_signed_with_payer(
+            &advance_ixs,
+            Some(&master.pubkey()),
+            &[master],
+            blockhash,
+        );
+        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        logger.log(
+            "tournament_game",
+            "advance_round",
+            70_000,
+            150_000,
+            true,
+            Some(sig.to_string()),
+        );
     }
 
-    // Step 6: Close tournament — sweeps residual escrow to treasury (this
-    // benchmark never funds a guaranteed prize pool via fund_sol_prize, so
-    // there are no funded places `close_tournament`'s pre-check could object to).
-    println!("   Step 6: Closing tournament...");
+    // Step 6: Finalize Swiss standings — sorts score/Buchholz/Sonneborn and
+    // marks the tournament Completed. Without this, distribute/close below
+    // would both fail: both are gated on TournamentStatus::Completed, and
+    // nothing else ever sets it for a Swiss tournament (see complete_swiss.rs).
+    println!("   Step 6: Completing Swiss tournament (finalizing standings)...");
+    let mut complete_ixs = vec![ix::complete_swiss_tournament_ix(
+        program_id,
+        master.pubkey(),
+        tournament_id,
+        size,
+    )?];
+    apply_compute_budget(&mut complete_ixs, 150_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &complete_ixs,
+        Some(&master.pubkey()),
+        &[master],
+        blockhash,
+    );
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_payout",
+        "complete_swiss_tournament",
+        100_000,
+        150_000,
+        true,
+        Some(sig.to_string()),
+    );
+
+    // Step 7: Distribute prizes to the top 3 places and verify the escrow
+    // actually paid them — the whole point of funding a real prize pool in
+    // Step 1d instead of leaving it at zero.
+    println!("   Step 7: Distributing and verifying tournament prizes...");
+    let (status, places) =
+        crate::fetch_tournament_places(base_rpc, program_id, tournament_id)?;
+    anyhow::ensure!(
+        status == TOURNAMENT_STATUS_COMPLETED,
+        "expected tournament status Completed ({TOURNAMENT_STATUS_COMPLETED}) after \
+         complete_swiss_tournament, got {status}"
+    );
+    verify_tournament_payout(
+        base_rpc,
+        program_id,
+        master,
+        tournament_id,
+        &places,
+        &[5000, 3000, 2000],
+    )
+    .await?;
+
+    // Step 8: Close tournament — now that every funded place has been paid,
+    // sweep the remainder (bps rounding + unallocated shares + rent) to the
+    // platform treasury.
+    println!("   Step 8: Closing tournament...");
     let mut close_ixs = vec![ix::close_tournament_ix(program_id, master.pubkey(), tournament_id)?];
     apply_compute_budget(&mut close_ixs, 300_000, 10_000, 262_144);
     let blockhash = base_rpc.get_latest_blockhash()?;
@@ -1461,34 +1730,444 @@ pub async fn run_swiss_tournament_flow(
         &[master],
         blockhash,
     );
-    match with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await {
-        Ok(sig) => {
+    // Every funded place was just paid in Step 7, so — unlike the old version
+    // of this flow, where an unfunded tournament made this fail every single
+    // run — a failure here now indicates a real bug (see
+    // close_tournament.rs's `PrizesOutstanding` guard), so it's propagated
+    // instead of swallowed as an expected warning.
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_payout",
+        "close_tournament",
+        200_000,
+        300_000,
+        true,
+        Some(sig.to_string()),
+    );
+    println!("   Tournament closed: {}", sig);
+
+    println!("   Swiss tournament flow complete!");
+    Ok(logger.total_cu())
+}
+
+/// Run a full single-elimination tournament flow on-chain: initialize with a
+/// real guaranteed SOL prize pool, register `size` players (seeded by ELO,
+/// highest first), build and play the bracket, then verify the escrow
+/// actually pays every placed player once the final match auto-completes the
+/// tournament.
+///
+/// Unlike Swiss, single-elimination needs no `advance_round`/
+/// `complete_swiss_tournament` cranks: `record_result::handler` already sets
+/// `winner`/`status = Completed` inline the moment the final match's result
+/// lands (record_result.rs:70-76). Bracket results are recorded by the
+/// tournament authority (`master`) rather than the players — no session keys
+/// or ER involved — mirroring `program_interface::tournament_e2e::
+/// run_tournament`'s approach ("higher seed wins"), which this benchmark
+/// crate can't depend on directly (it has no dependency on the game client).
+pub async fn run_single_elimination_tournament_flow(
+    base_rpc: &RpcClient,
+    program_id: Pubkey,
+    master: &Keypair,
+    players: &[Keypair],
+    size: u16,
+    logger: &mut CuLogger,
+) -> anyhow::Result<u64> {
+    anyhow::ensure!(
+        size.is_power_of_two() && (2..=64).contains(&size),
+        "size must be a power of 2 between 2 and 64, got {size}"
+    );
+    anyhow::ensure!(
+        players.len() == size as usize,
+        "expected exactly {size} players, got {}",
+        players.len()
+    );
+
+    let tournament_id = unique_id();
+    println!(
+        "\n   Setting up single-elimination tournament #{} ({} players)",
+        tournament_id, size
+    );
+    // Mirrors state::get_default_prize_shares's low-size branches (this
+    // benchmark crate doesn't depend on the on-chain program's Rust types).
+    let prize_shares: [u16; 10] = if size <= 2 {
+        [7000, 3000, 0, 0, 0, 0, 0, 0, 0, 0]
+    } else {
+        [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]
+    };
+
+    // Step 1: Initialize tournament (rounds = None -> TournamentType::SingleElimination).
+    println!("   Step 1: Initializing tournament...");
+    let mut init_ixs = vec![ix::initialize_tournament_ix(
+        program_id,
+        master.pubkey(),
+        tournament_id,
+        &format!("ER_Benchmark_SE_{}", tournament_id),
+        1_000_000,
+        size,
+        None,
+        0,     // elo_min
+        3_000, // elo_max
+        2,     // min_players
+        prize_shares,
+        0,                // platform_fee
+        false,            // winner_takes_all
+        master.pubkey(),  // host_treasury
+        60, // 1 min base clock — synthetic instant-result benchmark, no real clock needed
+        0,
+    )?];
+    apply_compute_budget(&mut init_ixs, 400_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx =
+        Transaction::new_signed_with_payer(&init_ixs, Some(&master.pubkey()), &[master], blockhash);
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_setup",
+        "initialize_tournament",
+        250_000,
+        400_000,
+        true,
+        Some(sig.to_string()),
+    );
+
+    // Step 1b: Player shards — same PDA layout single-elimination shares with
+    // Swiss (registration writes into these regardless of tournament type).
+    println!("   Step 1b: Initializing tournament player shards...");
+    let mut shard_ixs = vec![ix::initialize_shards_for_size_ix(
+        program_id,
+        master.pubkey(),
+        tournament_id,
+        size,
+    )?];
+    apply_compute_budget(&mut shard_ixs, 200_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &shard_ixs,
+        Some(&master.pubkey()),
+        &[master],
+        blockhash,
+    );
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_setup",
+        "initialize_tournament_shards",
+        150_000,
+        200_000,
+        true,
+        Some(sig.to_string()),
+    );
+
+    // Step 1c: Escrow (required before registration and before fund_sol_prize).
+    println!("   Step 1c: Initializing tournament escrow...");
+    let mut escrow_ixs = vec![ix::initialize_tournament_escrow_ix(
+        program_id,
+        master.pubkey(),
+        tournament_id,
+    )?];
+    apply_compute_budget(&mut escrow_ixs, 150_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &escrow_ixs,
+        Some(&master.pubkey()),
+        &[master],
+        blockhash,
+    );
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_setup",
+        "initialize_tournament_escrow",
+        80_000,
+        150_000,
+        true,
+        Some(sig.to_string()),
+    );
+
+    // Step 1d: Fund the guaranteed SOL prize pool before anyone registers.
+    println!("   Step 1d: Funding guaranteed SOL prize pool...");
+    let mut fund_ixs = vec![ix::fund_sol_prize_ix(
+        program_id,
+        master.pubkey(),
+        tournament_id,
+        TOURNAMENT_PRIZE_LAMPORTS,
+    )?];
+    apply_compute_budget(&mut fund_ixs, 150_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx =
+        Transaction::new_signed_with_payer(&fund_ixs, Some(&master.pubkey()), &[master], blockhash);
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_setup",
+        "fund_sol_prize",
+        90_000,
+        150_000,
+        true,
+        Some(sig.to_string()),
+    );
+
+    // Step 2: Profiles + registration, highest ELO first so seed[0] (and the
+    // `seeded` vec order below) is the top seed.
+    println!(
+        "   Step 2: Initializing profiles and registering {} players...",
+        size
+    );
+    for (i, player) in players.iter().enumerate() {
+        let username = format!("se{}{}", i, tournament_id % 1_000_000);
+        let profile_ix = ix::init_profile_ix(
+            program_id,
+            player.pubkey(),
+            username,
+            "GB".to_string(),
+            631_152_000, // 1990-01-01T00:00:00Z — on-chain age check requires date_of_birth > 0
+        )?;
+        let mut ixs = vec![profile_ix];
+        apply_compute_budget(&mut ixs, 200_000, 10_000, 262_144);
+        let blockhash = base_rpc.get_latest_blockhash()?;
+        let tx =
+            Transaction::new_signed_with_payer(&ixs, Some(&player.pubkey()), &[player], blockhash);
+        with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+
+        let elo = 2_800u32.saturating_sub(50 * i as u32);
+        let mut reg_ixs = vec![ix::register_player_ix(
+            program_id,
+            player.pubkey(),
+            master.pubkey(),
+            tournament_id,
+            size,
+            elo,
+        )?];
+        apply_compute_budget(&mut reg_ixs, 200_000, 10_000, 262_144);
+        let blockhash = base_rpc.get_latest_blockhash()?;
+        // register_player_ix's host_treasury account isn't a signer
+        // (register.rs constrains it == tournament.host_treasury, doesn't
+        // require its signature) — including `master` as an extra signer
+        // here panics with KeypairPubkeyMismatch since its pubkey doesn't
+        // appear in the instruction's signer set at all. Only `player` signs.
+        let tx = Transaction::new_signed_with_payer(
+            &reg_ixs,
+            Some(&player.pubkey()),
+            &[player],
+            blockhash,
+        );
+        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        logger.log(
+            "tournament_setup",
+            "register_player",
+            120_000,
+            200_000,
+            true,
+            Some(sig.to_string()),
+        );
+    }
+
+    // Step 3: Start — locks registration, seeds by ELO.
+    println!("   Step 3: Starting tournament...");
+    let mut start_ixs = vec![ix::start_tournament_ix(
+        program_id,
+        master.pubkey(),
+        master.pubkey(),
+        tournament_id,
+        size,
+    )?];
+    apply_compute_budget(&mut start_ixs, 200_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &start_ixs,
+        Some(&master.pubkey()),
+        &[master],
+        blockhash,
+    );
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_setup",
+        "start_tournament",
+        120_000,
+        200_000,
+        true,
+        Some(sig.to_string()),
+    );
+
+    // Step 4: Initialize every bracket slot. Seeding is ELO-descending = our
+    // player order; round-1 match i pairs seed i vs seed size-1-i (same
+    // layout `bracket_position`/on-chain `final_match_index` assume).
+    println!("   Step 4: Initializing bracket matches...");
+    let total_matches = size - 1;
+    let seeded: Vec<Pubkey> = players.iter().map(|p| p.pubkey()).collect();
+    let round1 = (size / 2) as usize;
+    for i in 0..total_matches {
+        let (round, next, slot) = ix::bracket_position(size, i);
+        let (white, black) = if (i as usize) < round1 {
+            (
+                Some(seeded[i as usize]),
+                Some(seeded[size as usize - 1 - i as usize]),
+            )
+        } else {
+            (None, None) // filled by advance_winner as earlier rounds resolve
+        };
+        let mut match_ixs = vec![ix::initialize_match_ix(
+            program_id,
+            master.pubkey(),
+            tournament_id,
+            i,
+            round,
+            white,
+            black,
+            next,
+            slot,
+        )?];
+        apply_compute_budget(&mut match_ixs, 200_000, 10_000, 262_144);
+        let blockhash = base_rpc.get_latest_blockhash()?;
+        let tx = Transaction::new_signed_with_payer(
+            &match_ixs,
+            Some(&master.pubkey()),
+            &[master],
+            blockhash,
+        );
+        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        logger.log(
+            "tournament_bracket",
+            "initialize_match",
+            100_000,
+            200_000,
+            true,
+            Some(sig.to_string()),
+        );
+    }
+
+    // Step 5: Play the bracket — higher seed (earlier in `seeded`) always
+    // wins, mirroring tournament_e2e.rs's convention. The final match's
+    // result auto-completes the tournament on-chain (record_result.rs:70-76)
+    // — no separate "complete" instruction needed, unlike Swiss.
+    println!("   Step 5: Playing the bracket...");
+    let mut slots: Vec<(Option<Pubkey>, Option<Pubkey>)> = (0..total_matches)
+        .map(|i| {
+            if (i as usize) < round1 {
+                (
+                    Some(seeded[i as usize]),
+                    Some(seeded[size as usize - 1 - i as usize]),
+                )
+            } else {
+                (None, None)
+            }
+        })
+        .collect();
+
+    for i in 0..total_matches {
+        let (Some(white), Some(black)) = slots[i as usize] else {
+            anyhow::bail!("match {i} has an unfilled slot — bracket advancement failed");
+        };
+        let (winner, loser) = if seeded.iter().position(|p| *p == white)
+            < seeded.iter().position(|p| *p == black)
+        {
+            (white, black)
+        } else {
+            (black, white)
+        };
+
+        let mut result_ixs = vec![ix::record_match_result_ix(
+            program_id,
+            master.pubkey(),
+            tournament_id,
+            i,
+            winner,
+            loser,
+        )?];
+        apply_compute_budget(&mut result_ixs, 150_000, 10_000, 262_144);
+        let blockhash = base_rpc.get_latest_blockhash()?;
+        let tx = Transaction::new_signed_with_payer(
+            &result_ixs,
+            Some(&master.pubkey()),
+            &[master],
+            blockhash,
+        );
+        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        logger.log(
+            "tournament_bracket",
+            "record_match_result",
+            90_000,
+            150_000,
+            true,
+            Some(sig.to_string()),
+        );
+
+        let (_, next, slot) = ix::bracket_position(size, i);
+        if let Some(next_idx) = next {
+            let mut adv_ixs = vec![ix::advance_winner_ix(
+                program_id,
+                master.pubkey(),
+                tournament_id,
+                i,
+                next_idx,
+            )?];
+            apply_compute_budget(&mut adv_ixs, 150_000, 10_000, 262_144);
+            let blockhash = base_rpc.get_latest_blockhash()?;
+            let tx = Transaction::new_signed_with_payer(
+                &adv_ixs,
+                Some(&master.pubkey()),
+                &[master],
+                blockhash,
+            );
+            let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
             logger.log(
-                "tournament_payout",
-                "close_tournament",
-                200_000,
-                300_000,
+                "tournament_bracket",
+                "advance_winner",
+                80_000,
+                150_000,
                 true,
                 Some(sig.to_string()),
             );
-            println!("   Tournament closed: {}", sig);
-        }
-        Err(e) => {
-            println!(
-                "   [Warning] Step 6 (Close Tournament) failed: {:?}. Continuing...",
-                e
-            );
-            logger.log(
-                "tournament_payout",
-                "close_tournament",
-                0,
-                300_000,
-                false,
-                None,
-            );
+
+            if slot == 0 {
+                slots[next_idx as usize].0 = Some(winner);
+            } else {
+                slots[next_idx as usize].1 = Some(winner);
+            }
+        } else {
+            println!("     Champion: {}", winner);
         }
     }
 
-    println!("   Swiss tournament flow complete!");
+    // Step 6: Verify the final match actually auto-completed the tournament,
+    // then distribute and verify payout to every placed player.
+    println!("   Step 6: Verifying tournament completion and distributing prizes...");
+    let (status, places) = crate::fetch_tournament_places(base_rpc, program_id, tournament_id)?;
+    anyhow::ensure!(
+        status == TOURNAMENT_STATUS_COMPLETED,
+        "expected tournament status Completed ({TOURNAMENT_STATUS_COMPLETED}) after the final \
+         match resolved, got {status}"
+    );
+    verify_tournament_payout(
+        base_rpc,
+        program_id,
+        master,
+        tournament_id,
+        &places,
+        &prize_shares[..3],
+    )
+    .await?;
+
+    // Step 7: Close tournament — every funded place was just paid, so a
+    // failure here indicates a real bug (see close_tournament.rs's
+    // `PrizesOutstanding` guard), not an expected condition.
+    println!("   Step 7: Closing tournament...");
+    let mut close_ixs = vec![ix::close_tournament_ix(program_id, master.pubkey(), tournament_id)?];
+    apply_compute_budget(&mut close_ixs, 300_000, 10_000, 262_144);
+    let blockhash = base_rpc.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &close_ixs,
+        Some(&master.pubkey()),
+        &[master],
+        blockhash,
+    );
+    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    logger.log(
+        "tournament_payout",
+        "close_tournament",
+        200_000,
+        300_000,
+        true,
+        Some(sig.to_string()),
+    );
+    println!("   Tournament closed: {}", sig);
+
+    println!("   Single-elimination tournament flow complete!");
     Ok(logger.total_cu())
 }

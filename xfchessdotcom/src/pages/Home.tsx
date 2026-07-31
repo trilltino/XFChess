@@ -27,10 +27,10 @@ export function Home() {
             <section className="fullscreen-section">
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
-                        <h2 className="feature-title">Winner Takes All</h2>
+                        <h2 className="feature-title">Stake Your Rating</h2>
                         <p className="feature-desc">
-                            Stake SOL and face off head-to-head. Funds lock in on-chain escrow the moment
-                            both players accept, and settle instantly when the king falls.
+                            Play anyone, anytime. Enter tournaments, queue casual games, or risk your
+                            rating in competitive PvP matches.
                         </p>
                     </div>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>
@@ -43,10 +43,10 @@ export function Home() {
             <section className="fullscreen-section">
                 <div className="section-content" style={{ display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
-                        <h2 className="feature-title">A Real 3D Board</h2>
+                        <h2 className="feature-title">2D or 3D</h2>
                         <p className="feature-desc">
-                            Rendered in Bevy with full 3D pieces and board. The same engine that powers
-                            the desktop client drives every match, move by move.
+                            Switch between a classic 2D board and a full 3D experience without leaving
+                            the game.
                         </p>
                     </div>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-start' }}>
@@ -59,10 +59,10 @@ export function Home() {
             <section className="fullscreen-section">
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
-                        <h2 className="feature-title">Compete for Pools</h2>
+                        <h2 className="feature-title">Open Source</h2>
                         <p className="feature-desc">
-                            Join structured brackets and Swiss events with guaranteed prize pools held in
-                            escrow. Climb the ladder and earn your reputation.
+                            The entire stack is AGPL-3.0. Client, backend, and smart contracts. Nothing
+                            hidden. Everything is verifiable.
                         </p>
                     </div>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>

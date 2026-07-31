@@ -38,10 +38,23 @@ pub enum P2PConnectionStatus {
     Error(String), // Connection error
 }
 
-/// Event to initiate a connection to a peer
+/// Event to initiate a connection to a peer.
+///
+/// `is_host` must reflect the caller's actual role in the legacy
+/// GameInvite/InviteResponse handshake this drives — `handle_connect_to_peer`
+/// used to hardcode `is_host = false` regardless of the caller, which broke
+/// silently the moment a second caller (`p2p_vps.rs`'s "opportunistic direct
+/// P2P upgrade" for an already-VPS-matched game) started firing this event
+/// from *both* sides of a match. With both sides forced to `is_host = false`,
+/// neither auto-accepted the other's `GameInvite` nor sent back
+/// `InviteResponse`, so both always hit the 12s `Connecting` timeout — every
+/// single time, regardless of actual network conditions. The VPS relay
+/// fallback masked this completely (games still play fine over relay), so it
+/// went unnoticed as "P2P just doesn't connect" rather than a caller-role bug.
 #[derive(Message)]
 pub struct ConnectToPeerEvent {
     pub peer_node_id: String,
+    pub is_host: bool,
 }
 
 /// Event to start hosting a game
@@ -206,10 +219,14 @@ fn handle_connect_to_peer(
         connection_state.local_node_id = network_state.node_id.clone();
         connection_state.peer_node_id = Some(event.peer_node_id.clone());
         connection_state.game_id = Some(game_id);
-        connection_state.is_host = false;
+        connection_state.is_host = event.is_host;
         connection_state.status = P2PConnectionStatus::Connecting;
         connection_state.connecting_since = Some(std::time::Instant::now());
-        connection_state.player_color = Some(PieceColor::Black);
+        connection_state.player_color = Some(if event.is_host {
+            PieceColor::White
+        } else {
+            PieceColor::Black
+        });
 
         // Decode peer ID from bs58
         let peer_endpoint_id = match bs58::decode(&event.peer_node_id).into_vec() {

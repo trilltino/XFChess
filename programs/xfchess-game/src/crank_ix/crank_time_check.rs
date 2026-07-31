@@ -14,7 +14,17 @@ pub struct CrankTimeCheckData {}
 pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let now = Clock::get()?.unix_timestamp;
-    crate::lifecycle::terminal::finish_by_timeout_if_expired(game, now)?;
+    let game_id = game.game_id;
+    // This is the only instruction in the delegate/undelegate/crank family
+    // that's invoked autonomously by MagicBlock's scheduler rather than by
+    // the backend (which already logs every other step it calls around).
+    // Without this, there's no way to tell from `solana logs`/Solscan
+    // whether a given interval fired, or what it decided.
+    msg!("crank_time_check: game {} at {}", game_id, now);
+    let timed_out = crate::lifecycle::terminal::finish_by_timeout_if_expired(game, now)?;
+    if timed_out {
+        msg!("crank_time_check: game {} flagged as timed out", game_id);
+    }
     Ok(())
 }
 
@@ -28,9 +38,13 @@ pub struct CrankTimeCheck<'info> {
     )]
     pub game: Account<'info, Game>,
 
-    /// CHECK: White player reference for scheduled-task account metas.
+    /// CHECK: White player reference for scheduled-task account metas — not
+    /// read by this instruction's body, but constrained to `game.white`
+    /// anyway; see the same constraint in `schedule_time_check::ScheduleTimeCheck`.
+    #[account(constraint = white.key() == game.white @ crate::errors::GameErrorCode::InvalidPlayerAccount)]
     pub white: AccountInfo<'info>,
 
-    /// CHECK: Black player reference for scheduled-task account metas.
+    /// CHECK: Black player reference for scheduled-task account metas — see `white` above.
+    #[account(constraint = black.key() == game.black @ crate::errors::GameErrorCode::InvalidPlayerAccount)]
     pub black: AccountInfo<'info>,
 }

@@ -1,26 +1,12 @@
 //! Session lifecycle endpoints on the VPS.
 //!
 //! Covers session keypair creation, activation (submitting the wallet-signed
-//! setup tx), signing arbitrary tx bytes with the session key, session
-//! status lookup, and TEE authentication for privacy-enhanced matches.
+//! setup tx), signing arbitrary tx bytes with the session key, and session
+//! status lookup.
 
 use serde::{Deserialize, Serialize};
 
 use super::client::{client, vps_base};
-
-// TEE (trusted-execution) authentication is only wired up under the `solana` feature.
-#[cfg(feature = "solana")]
-const TEE_AUTH_MESSAGE: &str = "Authenticate with MagicBlock TEE";
-#[cfg(feature = "solana")]
-const TEE_DEVNET_ADDR: &str = "FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA";
-
-#[cfg(feature = "solana")]
-#[derive(Serialize)]
-struct TeeAuthReq<'a> {
-    game_id: u64,
-    wallet_pubkey: &'a str,
-    signature_b64: &'a str,
-}
 
 #[derive(Serialize)]
 struct CreateSessionReq<'a> {
@@ -73,6 +59,26 @@ pub fn create_session(game_id: u64, wallet_pubkey: &str) -> Result<(String, u64)
         .json::<CreateSessionResp>()
         .map_err(|e| format!("vps create_session parse: {e}"))?;
     Ok((resp.session_pubkey, resp.platform_fee_lamports))
+}
+
+#[derive(Deserialize)]
+struct PlatformFeeResp {
+    platform_fee_lamports: u64,
+}
+
+/// Fetch the flat per-game platform fee in lamports (live SOL/GBP rate).
+/// Used by the global-session create-game path, which — unlike
+/// `create_session` above — has no per-game backend session round-trip to
+/// piggyback the fee on. Same backend-computed figure either way
+/// (`rates::PLATFORM_FEE_GBP`), so the two paths can never silently diverge.
+pub fn fetch_platform_fee_lamports() -> Result<u64, String> {
+    let resp = client()?
+        .get(format!("{}/api/rates/platform-fee", vps_base()))
+        .send()
+        .map_err(|e| format!("vps platform_fee: {e}"))?
+        .json::<PlatformFeeResp>()
+        .map_err(|e| format!("vps platform_fee parse: {e}"))?;
+    Ok(resp.platform_fee_lamports)
 }
 
 /// Submit the wallet-signed setup TX (create_game / join_game + authorize_session_key).
@@ -136,47 +142,6 @@ pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {
     }
     resp.json::<SessionStatus>()
         .map_err(|e| format!("vps session_status parse: {e}"))
-}
-
-/// Ask the user to sign the TEE auth message and forward it to the VPS to enable privacy.
-#[cfg(feature = "solana")]
-pub fn tee_authenticate(game_id: u64, wallet_pubkey: &str) -> Result<String, String> {
-    use crate::multiplayer::solana::tauri_signer;
-    use base64::Engine;
-    use bevy::prelude::info;
-
-    info!("[TEE-AUTH] Triggering TEE handshake for game {}", game_id);
-
-    let sig_bytes = tauri_signer::sign_message_via_tauri(TEE_AUTH_MESSAGE)
-        .map_err(|e| format!("TEE sign_message: {e}"))?;
-
-    let sig_b64 = base64::engine::general_purpose::STANDARD.encode(&sig_bytes);
-
-    let response = client()?
-        .post(format!("{}/session/tee_auth", vps_base()))
-        .json(&TeeAuthReq {
-            game_id,
-            wallet_pubkey,
-            signature_b64: &sig_b64,
-        })
-        .send()
-        .map_err(|e| format!("vps tee_auth: {e}"))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().unwrap_or_default();
-        return Err(format!("vps tee_auth: HTTP {status} — {body}"));
-    }
-
-    let resp = response
-        .json::<SigResp>()
-        .map_err(|e| format!("vps tee_auth parse: {e}"))?;
-
-    info!(
-        "[TEE-AUTH] SUCCESS for game {} (TEE: {})",
-        game_id, TEE_DEVNET_ADDR
-    );
-    Ok(resp.sig)
 }
 
 // ── Item 8: Global session verify ─────────────────────────────────────────────

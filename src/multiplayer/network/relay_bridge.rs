@@ -107,6 +107,18 @@ impl Default for RelayBridge {
     }
 }
 
+impl RelayBridge {
+    /// Reset mailbox progress for a new match. `poll_index` tracks position in
+    /// the *previous* game's relay mailbox — carried unreset into a new game,
+    /// it starts the new (empty) mailbox's poll at a stale offset, so incoming
+    /// messages (pongs, moves) never arrive until the new mailbox coincidentally
+    /// grows past that index. Must run before the next match's session starts.
+    pub fn reset(&mut self) {
+        self.poll_index = 0;
+        self.last_poll = None;
+    }
+}
+
 /// Poll the relay for in-game messages and inject them into the gossip pipeline.
 ///
 /// Only runs while a online game session is active. Decoded messages are sent as
@@ -158,6 +170,23 @@ pub fn relay_poll_incoming(
                     };
                     match serde_json::from_str::<NetworkMessage>(json) {
                         Ok(msg) => {
+                            // NOTE: unlike gossip, this path never wraps/verifies a
+                            // `SignedNetworkMessage` — the relay is trusted as-is, so
+                            // a `Move`'s `agent_id` here is whatever the sender
+                            // claimed (its iroh node_id — see
+                            // `online_game_session.rs`), not a cryptographically
+                            // verified signer. If the per-game roster (built from
+                            // `SessionInfo.signing_pubkey`, a *different* key) is
+                            // active, a relay-delivered move can still fail that
+                            // check even when everything else is correct — this
+                            // log line is what tells you a move arrived via this
+                            // path at all, since the roster-check log doesn't
+                            // otherwise say which transport a rejected move came in on.
+                            info!(
+                                "[relay-bridge] Received {} for game {} via relay (unverified — agent_id is the sender's claimed iroh node_id, not a verified signer)",
+                                msg.kind_str(),
+                                msg.game_id()
+                            );
                             // Feed the shared pipeline; nonce dedup handles gossip overlap.
                             let _ = event_tx.send(NetworkEvent::MessageReceived(msg));
                         }

@@ -165,11 +165,28 @@ fn publish_local_move(
         let new_version = braid_chess::version_hash(&event.next_fen, move_number);
         session.last_version = new_version;
 
-        // agent_id = iroh node's public key bytes (stable identity).
+        // agent_id = the sender's gossip-signing public key (derived from
+        // `session_signing_key`, the same seed `SignedNetworkMessage::sign`
+        // uses) — NOT the iroh node id. This has to be the *claimed* value
+        // that will match what the roster (populated from
+        // `SessionInfo.signing_pubkey`, see `integration/systems.rs`)
+        // expects, because it's only overwritten with the cryptographically
+        // *verified* signer when a message arrives over gossip
+        // (`bind_identity`, in `multiplayer::systems`) — the VPS relay
+        // fallback (`relay_bridge.rs`) delivers messages as plain JSON with
+        // no signature wrapper at all, so whatever's claimed here is what
+        // the receiver's roster check sees, unverified. Using the iroh node
+        // id here (as a prior version did) meant a relay-delivered move's
+        // `agent_id` could never equal the gossip-signing-keyed roster,
+        // failing the "non-participant signer" check for every move that
+        // arrived via relay — which, per every P2P timeout observed this
+        // session, is effectively every move.
         let agent_id = network_state
-            .node_id
-            .as_ref()
-            .map(|id| id.as_bytes().to_vec())
+            .session_signing_key
+            .map(|seed| {
+                use ed25519_dalek::SigningKey;
+                SigningKey::from_bytes(&seed).verifying_key().to_bytes().to_vec()
+            })
             .unwrap_or_default();
 
         // Use move_number as the per-agent sequence number (monotonic, unique).

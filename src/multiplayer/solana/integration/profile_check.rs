@@ -77,7 +77,15 @@ pub fn check_profile_on_connect(
                         } else {
                             ProfileStatus::HasProfileNoUsername
                         };
-                        let elo = Some(profile.elo_rating as u16);
+                        // `elo_rating` is stored on-chain in centiscale (1200 Elo = 120000) —
+                        // casting that raw to u16 saturates at u16::MAX (65535) for every
+                        // realistic rating, which is exactly what showed up as "65535 ELO"
+                        // in the wager-lobby browse list. Must go through the same
+                        // centiscale->display conversion the program itself defines.
+                        let elo = Some(
+                            xfchess_game::elo::rating::centiscale_to_display(profile.elo_rating)
+                                as u16,
+                        );
                         let display_name = if profile.username_set && !profile.username.is_empty() {
                             Some(profile.username.clone())
                         } else {

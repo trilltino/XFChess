@@ -25,13 +25,17 @@ pub enum SessionKeyError {
     Serialization(String),
 }
 
+/// Deterministically orders white/black from a P2P handshake by comparing
+/// pubkey strings. Unrelated to Solana transaction signing (see
+/// `solana::global_session_manager::GlobalSessionKeyManager` for that) — kept
+/// separate and distinctly named so it isn't confused with it.
 #[derive(Resource)]
-pub struct SessionKeyManager {
+pub struct HandshakeOrderingKeyManager {
     game_id: u64,
     session_keypair: Option<Keypair>,
 }
 
-impl Default for SessionKeyManager {
+impl Default for HandshakeOrderingKeyManager {
     fn default() -> Self {
         Self {
             game_id: 0,
@@ -40,7 +44,7 @@ impl Default for SessionKeyManager {
     }
 }
 
-impl SessionKeyManager {
+impl HandshakeOrderingKeyManager {
     pub fn new(game_id: u64) -> Self {
         let mut manager = Self {
             game_id,
@@ -183,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_keypair_roundtrip() {
-        let mut manager = SessionKeyManager::new(999999); // Use unlikely game ID
+        let mut manager = HandshakeOrderingKeyManager::new(999999); // Use unlikely game ID
 
         // Clear any existing keypair
         manager.clear_session_keypair();
@@ -196,7 +200,7 @@ mod tests {
         let pubkey = keypair.pubkey();
 
         // Create a new manager with the same game ID
-        let mut manager2 = SessionKeyManager::new(999999);
+        let mut manager2 = HandshakeOrderingKeyManager::new(999999);
         let loaded_keypair = manager2
             .load_or_create_keypair()
             .expect("Failed to load keypair");
@@ -211,8 +215,8 @@ mod tests {
 
     #[test]
     fn test_different_game_ids() {
-        let manager1 = SessionKeyManager::new(111111);
-        let manager2 = SessionKeyManager::new(222222);
+        let manager1 = HandshakeOrderingKeyManager::new(111111);
+        let manager2 = HandshakeOrderingKeyManager::new(222222);
 
         // Different game IDs should result in different key paths
         let path1 = manager1

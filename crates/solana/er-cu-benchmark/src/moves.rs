@@ -12,7 +12,19 @@ pub struct ValidMove {
     pub next_board: [u8; 68],
 }
 
-/// Generate a 100-move valid game sequence using the chess engine.
+/// Generate a 100-ply valid game sequence using the chess engine: 96 plies of
+/// knight-shuffling to generate CU/latency samples across many `record_move`
+/// calls, followed by a genuine 4-ply Fool's Mate finish (1. f3 e5 2. g4
+/// Qh4#).
+///
+/// Earlier this whole sequence was pure knight-shuffling, which never
+/// develops the position (it returns to the starting position every 4
+/// plies) and so never reaches checkmate — the on-chain 50-move rule
+/// (`apply.rs`'s `halfmove_clock >= 100`) always force-ends it as a draw at
+/// move 100 instead. That meant the ER benchmark only ever exercised the
+/// escrow's draw-split payout path, never the winner-takes-pot path. Ending
+/// on a real checkmate gives a deterministic winner (black) so the benchmark
+/// can verify the smart contract actually pays the winning side.
 /// Returns a vector of ValidMove where each entry contains the UCI move
 /// and the CompactBoard state AFTER that move is applied.
 pub fn generate_100_move_sequence() -> Vec<ValidMove> {
@@ -21,7 +33,7 @@ pub fn generate_100_move_sequence() -> Vec<ValidMove> {
 
     let mut result = Vec::with_capacity(100);
 
-    for i in 0..100 {
+    for i in 0..96 {
         let (src, dst, uci) = if i % 2 == 0 {
             // White turn
             if (i / 2) % 2 == 0 {
@@ -46,6 +58,32 @@ pub fn generate_100_move_sequence() -> Vec<ValidMove> {
         let _ = do_move(&mut game, src, dst, true);
 
         // Build CompactBoard from current game state
+        let cb = CompactBoard {
+            squares: game.board,
+            castling: CASTLE_WK | CASTLE_WQ | CASTLE_BK | CASTLE_BQ,
+            ep_target: game.en_passant_target.unwrap_or(-1),
+            side_to_move: if game.move_counter % 2 == 0 { 1 } else { -1 },
+            _pad: 0,
+        };
+
+        result.push(ValidMove {
+            uci,
+            next_board: cb.to_bytes(),
+        });
+    }
+
+    // Fool's Mate finish — 96 shuffle plies land back on the starting
+    // position (96 is a multiple of 4), so this is a legal continuation:
+    // f2->f3, e7->e5, g2->g4, d8->h4 (Qh4#, checkmate).
+    let finish: [(i8, i8, [u8; 5]); 4] = [
+        (13, 21, *b"f2f3\0"),
+        (52, 36, *b"e7e5\0"),
+        (14, 30, *b"g2g4\0"),
+        (59, 31, *b"d8h4\0"),
+    ];
+    for (src, dst, uci) in finish {
+        let _ = do_move(&mut game, src, dst, true);
+
         let cb = CompactBoard {
             squares: game.board,
             castling: CASTLE_WK | CASTLE_WQ | CASTLE_BK | CASTLE_BQ,

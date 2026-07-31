@@ -709,8 +709,15 @@ fn handle_tournament_match_assigned(
         let opponent_node_id = ev.opponent_node_id.clone();
 
         if let Some(ref peer_node_id) = opponent_node_id {
+            // Both tournament participants fire this event toward each other
+            // symmetrically — `is_white` is the arbitrary but consistent
+            // tie-breaker so exactly one side ends up `is_host` (whichever
+            // side auto-accepts the other's GameInvite and sends back
+            // InviteResponse). Without a consistent split here, both sides
+            // would hit the 12s Connecting timeout every time.
             connect_events.write(crate::multiplayer::network::p2p::ConnectToPeerEvent {
                 peer_node_id: peer_node_id.clone(),
+                is_host: is_white,
             });
         }
 

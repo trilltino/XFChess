@@ -118,7 +118,6 @@ impl Plugin for MainMenuPlugin {
             )
             .add_systems(OnEnter(GameState::MainMenu), music::start_menu_music)
             .init_resource::<BrandLogoState>()
-            .init_resource::<PartnerLogoState>()
             .init_resource::<PlayerColorChoice>()
             .init_resource::<NewsBannerState>()
             .init_resource::<PlayerIdentity>()
@@ -1082,64 +1081,6 @@ impl PlayerIdentity {
 pub struct NewsBannerState {
     pub texture: Option<egui::TextureHandle>,
     pub loaded: bool,
-}
-
-/// Cached partner-badge textures (MagicBlock + Solana), shown while connecting
-/// a wallet for multiplayer.
-#[derive(Resource, Default)]
-pub struct PartnerLogoState {
-    pub magicblock: Option<egui::TextureHandle>,
-    pub solana: Option<egui::TextureHandle>,
-    loaded: bool,
-}
-
-const MAGICBLOCK_LOGO_PATH: &str = "assets/branding/magicblock-logo-white.png";
-const SOLANA_PARTNER_LOGO_PATH: &str = "assets/branding/solana-logo.png";
-
-/// Resolves an asset-relative path against a few candidate roots (mirrors the
-/// brand-logo/font loaders): CWD, "./CWD", and next to the executable for
-/// packaged builds.
-fn resolve_asset_path(rel: &str) -> Option<std::path::PathBuf> {
-    let mut candidates: Vec<std::path::PathBuf> = vec![rel.into(), format!("./{}", rel).into()];
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join(rel));
-        }
-    }
-    candidates.into_iter().find(|p| p.exists())
-}
-
-pub(super) fn ensure_partner_logos(ctx: &egui::Context, logos: &mut PartnerLogoState) {
-    if logos.loaded {
-        return;
-    }
-    logos.loaded = true;
-
-    // egui's wgpu backend caps texture sides at 2048; the MagicBlock wordmark
-    // ships at 3401px wide, so it must be downscaled before `load_texture` or
-    // egui panics (see logs/crash_1785002521.log).
-    const MAX_SIDE: u32 = 2048;
-
-    let load = |rel: &str, name: &str| -> Option<egui::TextureHandle> {
-        let path = resolve_asset_path(rel)?;
-        let bytes = std::fs::read(&path).ok()?;
-        let decoded = image::load_from_memory(&bytes).ok()?;
-        let decoded = if decoded.width() > MAX_SIDE || decoded.height() > MAX_SIDE {
-            let scale = (MAX_SIDE as f32 / decoded.width().max(decoded.height()) as f32).min(1.0);
-            let w = ((decoded.width() as f32 * scale) as u32).max(1);
-            let h = ((decoded.height() as f32 * scale) as u32).max(1);
-            decoded.resize(w, h, image::imageops::FilterType::Lanczos3)
-        } else {
-            decoded
-        };
-        let rgba = decoded.to_rgba8();
-        let size = [rgba.width() as usize, rgba.height() as usize];
-        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-        Some(ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR))
-    };
-
-    logos.magicblock = load(MAGICBLOCK_LOGO_PATH, "magicblock_logo");
-    logos.solana = load(SOLANA_PARTNER_LOGO_PATH, "solana_partner_logo");
 }
 
 /// Cached brand logo texture loaded from the local screenshot file.

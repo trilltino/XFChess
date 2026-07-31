@@ -4,8 +4,7 @@
 //! games. After `authorize_global_session` succeeds the VPS can co-sign every
 //! `global_create_game` / `global_join_game` without another wallet popup.
 //!
-//! Storage: `<data-dir>/global_session_key.enc`  (AES-256-GCM, same pattern as
-//! [`SessionKeyManager`](super::session_key_manager::SessionKeyManager)).
+//! Storage: `<data-dir>/global_session_key.enc` (AES-256-GCM).
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -54,11 +53,28 @@ pub struct GlobalSessionKeyManager {
     data_dir: PathBuf,
 }
 
+/// Appends an `instance_<port>` suffix when `wallet_port` is set to
+/// something other than the default `7454`, so two same-machine instances
+/// (e.g. `just dev2`'s P1/P2, which set `XFCHESS_WALLET_PORT` differently)
+/// never resolve to the same directory. Takes the port as a plain argument
+/// rather than reading the env var itself so the namespacing logic can be
+/// unit-tested without mutating process-global state.
+fn instance_scoped_dir(base: PathBuf, wallet_port: Option<&str>) -> PathBuf {
+    match wallet_port.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) if p != "7454" => base.join(format!("instance_{p}")),
+        _ => base,
+    }
+}
+
 impl GlobalSessionKeyManager {
+    /// Namespaced by `XFCHESS_WALLET_PORT` when set to a non-default value —
+    /// see `integration::systems::get_hot_wallet_path`'s doc comment for why
+    /// two same-machine instances must not share this directory.
     fn storage_dir() -> PathBuf {
-        directories::ProjectDirs::from("com", "xfchess", "XFChess")
+        let base = directories::ProjectDirs::from("com", "xfchess", "XFChess")
             .map(|dirs| dirs.data_local_dir().to_path_buf())
-            .unwrap_or_else(|| std::env::temp_dir().join("XFChess"))
+            .unwrap_or_else(|| std::env::temp_dir().join("XFChess"));
+        instance_scoped_dir(base, std::env::var("XFCHESS_WALLET_PORT").ok().as_deref())
     }
 
     fn derive_key(wallet: &Pubkey) -> Vec<u8> {
@@ -487,5 +503,27 @@ mod tests {
         let (a, _) = find_global_session_pda(&prog, &Pubkey::new_unique());
         let (b, _) = find_global_session_pda(&prog, &Pubkey::new_unique());
         assert_ne!(a, b);
+    }
+
+    /// Guards the `dev2` P1/P2 instance-isolation fix: two windows on one
+    /// machine must not silently share this directory (that was the "logout
+    /// logs me in as the other instance" bug).
+    #[test]
+    fn storage_dir_diverges_for_a_non_default_instance_port() {
+        let base = PathBuf::from("/base");
+        let p1 = instance_scoped_dir(base.clone(), None);
+        let p2 = instance_scoped_dir(base.clone(), Some("7464"));
+        assert_eq!(p1, base, "unset port must keep the pre-fix default path");
+        assert_ne!(p1, p2, "a non-default port must get its own directory");
+    }
+
+    #[test]
+    fn storage_dir_treats_explicit_default_port_same_as_unset() {
+        let base = PathBuf::from("/base");
+        let unset = instance_scoped_dir(base.clone(), None);
+        let explicit_default = instance_scoped_dir(base.clone(), Some("7454"));
+        let blank = instance_scoped_dir(base.clone(), Some("  "));
+        assert_eq!(unset, explicit_default);
+        assert_eq!(unset, blank);
     }
 }

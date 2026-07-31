@@ -4,6 +4,7 @@
 
 pub mod check_highlight;
 pub mod dynamic_lighting;
+pub mod environment;
 pub mod last_move;
 pub mod move_hints;
 pub mod sky;
@@ -11,6 +12,7 @@ pub mod sky;
 // Re-export all public items
 pub use check_highlight::*;
 pub use dynamic_lighting::DynamicLightingPlugin;
+pub use environment::{BackgroundDome, BackgroundEnvironment, EnvironmentPlugin, BACKDROP_PRESETS};
 pub use last_move::{
     init_arrow_assets, update_last_move_highlight_system, ArrowAssets, LastMoveArrow3D,
     LastMoveHighlight,

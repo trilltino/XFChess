@@ -10,8 +10,6 @@ pub mod styles;
 pub mod system_params;
 
 #[cfg(feature = "solana")]
-pub use account::profile_creation;
-#[cfg(feature = "solana")]
 pub use account::solana_panel;
 
 pub use game::game_2d;

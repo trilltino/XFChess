@@ -51,11 +51,9 @@ pub use p2p::{
     p2p_list_games, p2p_list_games_filtered, p2p_poll_messages, p2p_send_message, P2PGameListing,
     P2PListFilter,
 };
-#[cfg(feature = "solana")]
-pub use session::tee_authenticate;
 pub use session::{
-    activate_session, create_session, session_status, sign_and_submit, track_global_session_game,
-    verify_global_session, SessionStatus,
+    activate_session, create_session, fetch_platform_fee_lamports, session_status,
+    sign_and_submit, track_global_session_game, verify_global_session, SessionStatus,
 };
 pub use social::{
     fetch_region, get_contacts, get_online, get_pending_requests, poll_social, push_lobby_invite,

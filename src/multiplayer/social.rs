@@ -379,9 +379,15 @@ fn tick_friends_sync(mut state: ResMut<FriendsState>) {
         .detach();
 }
 
-/// Every ~15s: send our presence heartbeat (`PUT /presence`) so we count as
+/// Every ~4s: send our presence heartbeat (`PUT /presence`) so we count as
 /// online, then fetch the current online count (`GET /presence`). Both run on a
 /// background IO task; the count is drained into [`OnlinePlayersState`].
+///
+/// 4s (not the previous 15s) so the menu's "N online" reads as live — at 15s,
+/// two clients polling on their own independent cadences could each show a
+/// stale count for up to 15s after the other joined/left, which is what made
+/// two side-by-side clients disagree ("1 online" / "2 online") even though
+/// both were actually online.
 fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlayersState>) {
     // Drain any in-flight result first.
     if let Some(rx) = online.fetch_rx.as_ref() {
@@ -399,7 +405,7 @@ fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlaye
         .last_sync
         .map(|t| t.elapsed().as_secs())
         .unwrap_or(u64::MAX);
-    if elapsed < 15 {
+    if elapsed < 4 {
         return;
     }
 

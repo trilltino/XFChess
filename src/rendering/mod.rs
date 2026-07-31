@@ -27,6 +27,7 @@ impl Plugin for RenderingPlugin {
             pieces::PiecePlugin,
             effects::DynamicLightingPlugin,
             effects::SkyPlugin,
+            effects::EnvironmentPlugin,
         ))
         .add_systems(
             Update,

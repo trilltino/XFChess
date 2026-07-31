@@ -731,6 +731,35 @@ body {
     .home-hero {
         padding: 110px 20px 60px;
     }
+
+    /* Default `farthest-corner` ellipse sizing on this very wide, short
+       (1100x450) box gives it a vertical radius of ~318px — its 70% stop
+       (fully transparent) doesn't land until ~408px down from the hero's
+       top. The mobile hero only renders ~283px tall and clips overflow,
+       so the glow got hard-cut while still ~44% visible: the other half
+       of the same seam bug as the silhouette below. Shrink it so its
+       transparent point lands well inside the shortest mobile hero. */
+    .home-hero-glow {
+        width: 90vw;
+        max-width: 500px;
+        height: 200px;
+        top: -20px;
+    }
+
+    /* At 80vw wide, this image's own height can exceed the mobile hero's
+       much shorter fixed-pixel padding — `.home-hero`'s `overflow: hidden`
+       then hard-clips it before its mask (which only reaches fully
+       transparent at 95% of the image's own height) finishes fading,
+       leaving a visible hard edge right at the hero/section boundary.
+       Cap the rendered size and fade out much earlier so it's always
+       fully transparent well within the shortest mobile hero height. */
+    .home-hero-board-silhouette {
+        width: 60vw;
+        max-width: 380px;
+        top: 30px;
+        -webkit-mask-image: linear-gradient(to bottom, black 15%, transparent 45%);
+        mask-image: linear-gradient(to bottom, black 15%, transparent 45%);
+    }
 }
 
 /* MEDIA QUERIES */

@@ -64,10 +64,16 @@ pub struct ScheduleTimeCheck<'info> {
     )]
     pub game: Account<'info, crate::state::Game>,
 
-    /// CHECK: White player (for reference)
+    /// CHECK: White player — not read by this instruction (carried purely
+    /// for the wrapped crank ix's account-meta list, see
+    /// `magicblock::crank::build_time_check_schedule_instruction`), but
+    /// constrained to `game.white` anyway so a future caller can't schedule
+    /// a task naming the wrong players without this being caught here.
+    #[account(constraint = white.key() == game.white @ crate::errors::GameErrorCode::InvalidPlayerAccount)]
     pub white: AccountInfo<'info>,
 
-    /// CHECK: Black player (for reference)
+    /// CHECK: Black player — see `white` above.
+    #[account(constraint = black.key() == game.black @ crate::errors::GameErrorCode::InvalidPlayerAccount)]
     pub black: AccountInfo<'info>,
 
     /// CHECK: MagicBlock program for scheduling

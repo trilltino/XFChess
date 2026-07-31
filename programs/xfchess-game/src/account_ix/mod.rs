@@ -11,9 +11,7 @@ pub mod set_username;
 pub mod treasury;
 pub mod withdraw;
 
-pub use fee_vault_ix::{
-    ClaimFees, CollectFee, CreateSession, InitializeFeeVault, RevokeSession, UpdateElo,
-};
+pub use fee_vault_ix::{CreateSession, RevokeSession, UpdateElo};
 pub use friends_ix::{AcceptFriendRequest, BlockUser, CloseFriendship, SendFriendRequest};
 pub use global_session_ix::{
     AuthorizeGlobalSessionArgs, AuthorizeGlobalSessionCtx, RevokeGlobalSessionCtx,

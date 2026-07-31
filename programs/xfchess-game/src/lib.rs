@@ -24,9 +24,9 @@ pub mod tournament_ix;
 // can find them via their `use super::*` chain.
 pub use account_ix::{
     AcceptFriendRequest, AuthorizeGlobalSessionArgs, AuthorizeGlobalSessionCtx, BlockUser,
-    ClaimFees, CloseFriendship, CollectFee, CreateSession, InitProfile, InitializeFeeVault,
-    LinkExternalElo, RevokeGlobalSessionCtx, RevokeSession, SendFriendRequest, SetUsername,
-    UpdateElo, VerifyProfile, WithdrawExpiredWager, WithdrawGlobalSessionCtx, WithdrawTreasury,
+    CloseFriendship, CreateSession, InitProfile, LinkExternalElo, RevokeGlobalSessionCtx,
+    RevokeSession, SendFriendRequest, SetUsername, UpdateElo, VerifyProfile,
+    WithdrawExpiredWager, WithdrawGlobalSessionCtx, WithdrawTreasury,
 };
 #[cfg(feature = "cranks")]
 pub use crank_ix::{
@@ -46,11 +46,12 @@ pub use governance_ix::{ClaimStaleDispute, DisputeGame, RecoverStuckDelegation, 
 pub use moves_ix::{GlobalRecordMove, RecordMove};
 pub use tournament_ix::{
     AdvanceRound, AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
-    CancelTournament, ClaimTournamentPrize, CloseTournament, DistributeTournamentPrizes,
-    FundSolPrize, FundUsdcPrize, InitializeMatch, InitializeShardsMedium, InitializeShardsSmall,
-    InitializeTournament, InitializeTournamentEscrow, InitializeTournamentShards, LeaveTournament,
-    RecordMatchResult, RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx,
-    SessionCreateGame, SessionJoinGame, StartTournament, SwissMatchResult,
+    CancelTournament, ClaimTournamentPrize, CloseTournament, CompleteSwissTournament,
+    DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize, InitializeMatch,
+    InitializeShardsMedium, InitializeShardsSmall, InitializeTournament,
+    InitializeTournamentEscrow, InitializeTournamentShards, LeaveTournament, RecordMatchResult,
+    RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx, SessionCreateGame,
+    SessionJoinGame, StartTournament, SwissMatchResult,
 };
 
 // Anchor 0.32 #[program] generates `pub use crate::__client_accounts_<snake>::*` at the crate
@@ -192,6 +193,9 @@ pub mod __client_accounts_record_swiss_result {
 pub mod __client_accounts_advance_round {
     pub use crate::tournament_ix::matches::advance_round::__client_accounts_advance_round::*;
 }
+pub mod __client_accounts_complete_swiss_tournament {
+    pub use crate::tournament_ix::matches::complete_swiss::__client_accounts_complete_swiss_tournament::*;
+}
 pub mod __client_accounts_authorize_tournament_session_ctx {
     pub use crate::tournament_ix::session::authorize_tournament_session::__client_accounts_authorize_tournament_session_ctx::*;
 }
@@ -203,15 +207,6 @@ pub mod __client_accounts_session_create_game {
 }
 pub mod __client_accounts_session_join_game {
     pub use crate::tournament_ix::session::session_join_game::__client_accounts_session_join_game::*;
-}
-pub mod __client_accounts_initialize_fee_vault {
-    pub use crate::account_ix::fee_vault_ix::__client_accounts_initialize_fee_vault::*;
-}
-pub mod __client_accounts_collect_fee {
-    pub use crate::account_ix::fee_vault_ix::__client_accounts_collect_fee::*;
-}
-pub mod __client_accounts_claim_fees {
-    pub use crate::account_ix::fee_vault_ix::__client_accounts_claim_fees::*;
 }
 pub mod __client_accounts_withdraw_treasury {
     pub use crate::account_ix::treasury::__client_accounts_withdraw_treasury::*;
@@ -719,6 +714,19 @@ pub mod xfchess_game {
         crate::tournament_ix::matches::advance_round::handler(ctx, tournament_id)
     }
 
+    /// Finalize a Swiss tournament once `advance_round` has pushed
+    /// `current_round` to `total_rounds`: sorts final standings and marks the
+    /// tournament `Completed` so prize distribution/close can proceed. See
+    /// `complete_swiss::handler` for why this instruction exists — Swiss
+    /// otherwise had no terminal step equivalent to single-elimination's
+    /// final-match auto-completion.
+    pub fn complete_swiss_tournament(
+        ctx: Context<CompleteSwissTournament>,
+        tournament_id: u64,
+    ) -> Result<()> {
+        crate::tournament_ix::matches::complete_swiss::handler(ctx, tournament_id)
+    }
+
     // ── Tournament-scoped session delegation ───────────────────────────────
 
     /// Authorize a `session_key` to co-sign game and swiss-result ixs for
@@ -832,23 +840,6 @@ pub mod xfchess_game {
     /// from the [`GlobalSessionDelegation`] vault — zero wallet popup.
     pub fn global_join_game(ctx: Context<GlobalJoinGame>, game_id: u64) -> Result<()> {
         crate::game_ix::global_join::handler(ctx, game_id)
-    }
-
-    // ── Fee Vault ──────────────────────────────────────────────────────────────
-
-    pub fn initialize_fee_vault(
-        ctx: Context<InitializeFeeVault>,
-        host_wallet: Pubkey,
-    ) -> Result<()> {
-        crate::account_ix::fee_vault_ix::handler_initialize_fee_vault(ctx, host_wallet)
-    }
-
-    pub fn collect_fee(ctx: Context<CollectFee>, amount: u64) -> Result<()> {
-        crate::account_ix::fee_vault_ix::handler_collect_fee(ctx, amount)
-    }
-
-    pub fn claim_fees(ctx: Context<ClaimFees>) -> Result<u64> {
-        crate::account_ix::fee_vault_ix::handler_claim_fees(ctx)
     }
 
     /// Withdraw accumulated platform fees from the treasury vault to a

@@ -1774,11 +1774,28 @@ pub fn tournament_sidebar_widget(
     mut contexts: bevy_egui::EguiContexts,
     tournament: Option<Res<crate::multiplayer::solana::tournament::TournamentClientState>>,
     lobby: Option<Res<crate::states::tournament_menu::TournamentLobbyState>>,
+    ai_config: Option<Res<crate::game::ai::resource::ChessAIResource>>,
 ) {
     let Some(tc) = tournament else { return };
     if tc.active_tournament_id.is_none() {
         return;
     };
+    // `active_tournament_id` only ever clears on an explicit "Leave"/"Cancel"
+    // click (screens.rs) — nothing clears it when the tournament actually
+    // finishes for this player, so it can stay `Some(..)` indefinitely after
+    // a tournament the player registered for has long since ended. Rather
+    // than trusting that stale flag alone, also require the current game to
+    // not be an unrelated vs-AI match — this widget showing "TOURNAMENT" /
+    // "waiting for next round" over a vs-Computer game is exactly that
+    // staleness surfacing, not a legitimate reminder.
+    if let Some(ai_config) = &ai_config {
+        if matches!(
+            ai_config.mode,
+            crate::game::ai::resource::GameMode::VsAI { .. }
+        ) {
+            return;
+        }
+    }
 
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
@@ -1996,53 +2013,6 @@ pub fn increment_flash_system(
 /// Floating bottom-left panel with Resign and Offer Draw buttons.
 /// Resign fires `ResignEvent` (winner = opponent).
 /// Offer Draw fires `DrawOfferEvent` (only in online modes).
-
-// -- Item 3: Session key expiry banner ----------------------------------------
-
-/// Renders a dismissible warning banner at the top of the game screen when the
-/// session key is within 24 h of expiry.
-#[cfg(feature = "solana")]
-pub fn session_expiry_banner(
-    mut contexts: bevy_egui::EguiContexts,
-    warning: Option<Res<crate::multiplayer::solana::integration::systems::SessionExpiryWarning>>,
-    mut commands: Commands,
-) {
-    let Some(warn) = warning else { return };
-    let Ok(ctx) = contexts.ctx_mut() else { return };
-
-    let bg = egui::Color32::from_rgba_unmultiplied(180, 100, 0, 220);
-    let text_col = egui::Color32::from_rgb(255, 240, 180);
-
-    egui::Window::new("session_expiry_banner")
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .anchor(egui::Align2::CENTER_TOP, [0.0, 8.0])
-        .fixed_size([520.0, 40.0])
-        .frame(
-            egui::Frame::default()
-                .fill(bg)
-                .corner_radius(6.0)
-                .inner_margin(8.0),
-        )
-        .show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "⚠  Session key expires in {} h — re-authorize in wallet settings to continue playing without popups.",
-                        warn.expires_in_hours
-                    ))
-                    .size(12.0)
-                    .color(text_col),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("✕").clicked() {
-                        commands.remove_resource::<crate::multiplayer::solana::integration::systems::SessionExpiryWarning>();
-                    }
-                });
-            });
-        });
-}
 
 // ── Disconnect recovery banner ────────────────────────────────────────────────
 

@@ -4,5 +4,6 @@ assets/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
 assets/**/*.ttf filter=lfs diff=lfs merge=lfs -text
 assets/**/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/**/*.obj filter=lfs diff=lfs merge=lfs -text
+assets/**/*.hdr filter=lfs diff=lfs merge=lfs -text
 docs/images/*.png filter=lfs diff=lfs merge=lfs -text
 docs/images/*.webp filter=lfs diff=lfs merge=lfs -text

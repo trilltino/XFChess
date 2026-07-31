@@ -78,22 +78,22 @@ pub fn handler_authorize_tournament_session(
         XfchessGameError::UnauthorizedAccess
     );
 
-    // Check player registration across all shards
-    let shards = [
-        &ctx.accounts.tournament_players_shard_0,
-        &ctx.accounts.tournament_players_shard_1,
-        &ctx.accounts.tournament_players_shard_2,
-        &ctx.accounts.tournament_players_shard_3,
-    ];
-
-    let mut is_registered = false;
-    for shard in shards.iter() {
-        if shard.players.iter().any(|p| *p == *player.key) {
-            is_registered = true;
-            break;
-        }
+    // Check player registration across all present shards (1-3 are optional
+    // — small/medium tournaments only initialize shard 0 or 0-1).
+    let mut shards: Vec<&TournamentPlayersShard> = vec![&ctx.accounts.tournament_players_shard_0];
+    if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
+        shards.push(s);
     }
-    require!(is_registered, XfchessGameError::UnauthorizedAccess);
+    if let Some(s) = ctx.accounts.tournament_players_shard_2.as_ref() {
+        shards.push(s);
+    }
+    if let Some(s) = ctx.accounts.tournament_players_shard_3.as_ref() {
+        shards.push(s);
+    }
+    require!(
+        crate::tournament_ix::shards::contains_player(&shards, *player.key),
+        XfchessGameError::UnauthorizedAccess
+    );
 
     let now = Clock::get()?.unix_timestamp;
     let duration = args
@@ -149,30 +149,31 @@ pub struct AuthorizeTournamentSessionCtx<'info> {
     )]
     pub tournament: Account<'info, Tournament>,
 
-    /// TournamentPlayersShard 0 (players 0-63)
+    /// TournamentPlayersShard 0 always present (all tournament sizes).
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 1 (players 64-127)
+    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
+    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_1: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 2 (players 128-191)
+    pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_2: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 3 (players 192-255)
+    pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
+    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_3: Account<'info, TournamentPlayersShard>,
+    pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
 
     #[account(
         init,

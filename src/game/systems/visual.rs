@@ -12,8 +12,18 @@ pub fn flush_pending_turn(
     mut game_timer: ResMut<GameTimer>,
 ) {
     if let Some(pending) = pending_turn.take() {
+        let before = (current_turn.color, current_turn.move_number);
         game_timer.apply_increment(pending.mover);
         current_turn.switch();
+        // Cheap enough to leave on permanently — this is the single place
+        // `CurrentTurn` ever changes, so if a player is ever stuck unable to
+        // move, this line (or its absence) says immediately whether the
+        // turn genuinely never advanced, versus advancing correctly while
+        // something else (input gating, network delivery) blocked play.
+        info!(
+            "[TURN] {:?} move {} -> {:?} move {} (mover was {:?})",
+            before.0, before.1, current_turn.color, current_turn.move_number, pending.mover
+        );
     }
 }
 
@@ -186,31 +196,12 @@ pub fn animate_capture_fade(
     }
 }
 
-/// Setup global scene elements (persistent background, ambient light)
+/// Setup global scene elements (ambient light)
 ///
 /// These elements persist across all game states and provide
-/// a base visual environment.
-pub fn setup_global_scene(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // Global background (pure black environment)
-    let background_color = Color::srgb(0.0, 0.0, 0.0); // Pure black
-
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(2.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: background_color,
-            unlit: true,
-            cull_mode: None,
-            ..default()
-        })),
-        Transform::from_scale(Vec3::splat(1_000_000.0)),
-        bevy::picking::Pickable::IGNORE,
-        Name::new("Global Background"),
-    ));
-
+/// a base visual environment. The background itself is a separate,
+/// swappable dome — see `rendering::effects::environment`.
+pub fn setup_global_scene(mut commands: Commands) {
     // Match the menu board's ambient (GlobalAmbientLight brightness 95) so the
     // in-game board isn't washed out / over-bright.
     commands.spawn(AmbientLight {
@@ -232,6 +223,7 @@ pub fn setup_game_scene(
     mut commands: Commands,
     view_mode: Res<crate::game::view_mode::ViewMode>,
     mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>,
+    mut dome_query: Query<&mut Visibility, With<crate::rendering::effects::BackgroundDome>>,
 ) {
     use crate::core::DespawnOnExit;
     use crate::core::GameState;
@@ -244,9 +236,17 @@ pub fn setup_game_scene(
     if view_mode.is_templeos() {
         // Vibrant solid yellow background matching reference image (#FFFF00)
         commands.insert_resource(ClearColor(Color::srgb(1.0, 1.0, 0.0))); // Pure yellow #FFFF00
+        // TempleOS is a deliberately flat, unlit retro look — the photo
+        // backdrop would clash with it, so hide the dome while it's active.
+        for mut vis in &mut dome_query {
+            *vis = Visibility::Hidden;
+        }
     } else {
         // Default dark background for standard view
         commands.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0))); // Black
+        for mut vis in &mut dome_query {
+            *vis = Visibility::Inherited;
+        }
     }
 
     // Setup camera based on view mode

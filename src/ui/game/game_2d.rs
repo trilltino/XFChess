@@ -451,23 +451,6 @@ pub fn theme_from_index(idx: u8) -> Board2DTheme {
     }
 }
 
-/// Convert a Board2DTheme to its closest index.
-fn theme_to_index(t: &Board2DTheme) -> u8 {
-    if t.dark_sq == Board2DTheme::green().dark_sq {
-        return 1;
-    }
-    if t.dark_sq == Board2DTheme::blue().dark_sq {
-        return 2;
-    }
-    if t.dark_sq == Board2DTheme::purple().dark_sq {
-        return 3;
-    }
-    if t.dark_sq == Board2DTheme::dark().dark_sq {
-        return 4;
-    }
-    0
-}
-
 pub fn render_2d_board(
     mut input_params: InputSystemParams,
     mut contexts: bevy_egui::EguiContexts,
@@ -485,7 +468,7 @@ pub fn render_2d_board(
     current_turn: Res<CurrentTurn>,
     _hud_visibility: Res<crate::ui::game::game_ui::InGameHudVisibility>,
     fading_captures: Query<&FadingCapture>,
-    mut theme: ResMut<Board2DTheme>,
+    theme: Res<Board2DTheme>,
     mut extras: Board2DExtras,
 ) {
     if *view_mode != ViewMode::Standard2D {
@@ -540,7 +523,6 @@ pub fn render_2d_board(
 
     // Collect theme value to avoid borrow in closure
     let current_theme = *theme;
-    let mut pending_theme: Option<Board2DTheme> = None;
 
     // Collect active capture flashes: board square → animation progress (0..1).
     // initial_pos.x = file, initial_pos.z = rank (board coord formula).
@@ -1221,149 +1203,6 @@ pub fn render_2d_board(
                 }
             });
         });
-
-    // Theme picker — small dot row anchored bottom-center.
-    // Runs outside CentralPanel so we can mutably borrow `theme` here.
-    egui::Window::new("board_theme_picker")
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -10.0])
-        .frame(
-            egui::Frame::default()
-                .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 25, 180))
-                .corner_radius(8.0)
-                .inner_margin(egui::Margin::symmetric(8, 5)),
-        )
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 5.0;
-                ui.label(
-                    egui::RichText::new("Board:")
-                        .size(10.0)
-                        .color(egui::Color32::from_gray(140)),
-                );
-                for (t, name) in [
-                    (Board2DTheme::classic(), "Classic"),
-                    (Board2DTheme::green(), "Green"),
-                    (Board2DTheme::blue(), "Blue"),
-                    (Board2DTheme::purple(), "Purple"),
-                    (Board2DTheme::dark(), "Dark"),
-                ] {
-                    let active = current_theme.dark_sq == t.dark_sq;
-                    let size = egui::Vec2::splat(if active { 16.0 } else { 12.0 });
-                    let stroke = if active {
-                        egui::Stroke::new(2.0, egui::Color32::WHITE)
-                    } else {
-                        egui::Stroke::NONE
-                    };
-                    let r = ui.add(
-                        egui::Button::new("")
-                            .fill(t.dark_sq)
-                            .stroke(stroke)
-                            .min_size(size)
-                            .corner_radius(3.0),
-                    );
-                    if r.on_hover_text(name).clicked() {
-                        pending_theme = Some(t);
-                    }
-                    let _ = name;
-                }
-            });
-            ui.add_space(2.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 5.0;
-                ui.label(
-                    egui::RichText::new("Pieces:")
-                        .size(10.0)
-                        .color(egui::Color32::from_gray(140)),
-                );
-                for (idx, label) in [(0u8, "CB"), (1, "α"), (2, "M")] {
-                    let active = extras.settings.piece_set == idx;
-                    let stroke = if active {
-                        egui::Stroke::new(1.5, egui::Color32::WHITE)
-                    } else {
-                        egui::Stroke::NONE
-                    };
-                    let btn_col = if active {
-                        egui::Color32::from_rgb(80, 120, 180)
-                    } else {
-                        egui::Color32::from_gray(55)
-                    };
-                    let r = ui.add(
-                        egui::Button::new(egui::RichText::new(label).size(9.0))
-                            .fill(btn_col)
-                            .stroke(stroke)
-                            .min_size(egui::Vec2::new(20.0, 14.0))
-                            .corner_radius(3.0),
-                    );
-                    let hover = match idx {
-                        1 => "Alpha",
-                        2 => "Merida",
-                        _ => "CBurnett",
-                    };
-                    if r.on_hover_text(hover).clicked() {
-                        extras.settings.piece_set = idx;
-                    }
-                }
-                ui.add_space(6.0);
-                // Eval bar toggle
-                let eval_active = extras.eval_bar.visible;
-                let eval_col = if eval_active {
-                    egui::Color32::from_rgb(60, 160, 80)
-                } else {
-                    egui::Color32::from_gray(55)
-                };
-                let eval_stroke = if eval_active {
-                    egui::Stroke::new(1.5, egui::Color32::WHITE)
-                } else {
-                    egui::Stroke::NONE
-                };
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("E").size(9.0))
-                            .fill(eval_col)
-                            .stroke(eval_stroke)
-                            .min_size(egui::Vec2::new(16.0, 14.0))
-                            .corner_radius(3.0),
-                    )
-                    .on_hover_text("Eval bar (offline only)")
-                    .clicked()
-                {
-                    // toggle via DerefMut — eval_bar is Res so we need a separate path
-                    extras.settings.show_eval_bar = !extras.settings.show_eval_bar;
-                }
-                // Blindfold toggle
-                let bf_col = if extras.settings.blindfold {
-                    egui::Color32::from_rgb(160, 60, 60)
-                } else {
-                    egui::Color32::from_gray(55)
-                };
-                let bf_stroke = if extras.settings.blindfold {
-                    egui::Stroke::new(1.5, egui::Color32::WHITE)
-                } else {
-                    egui::Stroke::NONE
-                };
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("B").size(9.0))
-                            .fill(bf_col)
-                            .stroke(bf_stroke)
-                            .min_size(egui::Vec2::new(16.0, 14.0))
-                            .corner_radius(3.0),
-                    )
-                    .on_hover_text("Blindfold (Ctrl+B)")
-                    .clicked()
-                {
-                    extras.settings.blindfold = !extras.settings.blindfold;
-                }
-            });
-        });
-
-    if let Some(t) = pending_theme {
-        extras.settings.board_theme = theme_to_index(&t);
-        *theme = t;
-    }
 
     // ── Promotion choice ─────────────────────────────────────────────────
     if let (Some(pt), Some(entity), Some(position)) = (

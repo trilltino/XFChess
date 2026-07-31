@@ -14,7 +14,17 @@ use solana_sdk::pubkey::Pubkey;
 
 #[cfg(not(feature = "solana"))]
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub struct Pubkey(pub [u8; 32]);
 
@@ -52,7 +62,26 @@ pub enum NetworkMessage {
     SessionInfo {
         game_id: u64,
         player_pubkey: Pubkey,
+        /// VPS/backend on-chain session-delegation key (used to route which
+        /// key signs this player's on-chain moves) — NOT the key that signs
+        /// this message's own outer P2P envelope. Kept separate from
+        /// `signing_pubkey` below; conflating the two previously made every
+        /// move look like it came from "a non-participant signer" once a
+        /// roster existed at all (see `signing_pubkey`'s doc comment).
         session_pubkey: Pubkey,
+        /// The sender's gossip message-signing pubkey (`OnlineNetworkState
+        /// ::session_signing_key`, a fresh ephemeral keypair generated per
+        /// connection — see `sync_session_key_to_network`). This, not
+        /// `session_pubkey` above, is what the receiver's `bind_identity`
+        /// verifies incoming `Move`/`Resign` envelopes against and sets as
+        /// `agent_id`. The per-game participant roster built in
+        /// `multiplayer::systems` MUST be populated from this field —
+        /// populating it from `session_pubkey` instead means the roster can
+        /// never contain a key that any real move's verified signer will
+        /// ever match, so every move gets rejected as "non-participant"
+        /// as soon as the roster has any entry at all.
+        #[serde(default)]
+        signing_pubkey: Pubkey,
         expires_at: i64,
     },
     BatchPropose {
@@ -235,6 +264,41 @@ impl NetworkMessage {
             NetworkMessage::GameSnapshot { game_id, .. } => *game_id,
             NetworkMessage::Clock { game_id, .. } => *game_id,
             NetworkMessage::Chat { game_id, .. } => *game_id,
+        }
+    }
+
+    /// Short variant name for logging — cheap enough to compute on every
+    /// send/receive without the cost (or noise) of dumping full contents.
+    pub fn kind_str(&self) -> &'static str {
+        match self {
+            NetworkMessage::Move { .. } => "Move",
+            NetworkMessage::SessionInfo { .. } => "SessionInfo",
+            NetworkMessage::BatchPropose { .. } => "BatchPropose",
+            NetworkMessage::BatchAccept { .. } => "BatchAccept",
+            NetworkMessage::BatchReject { .. } => "BatchReject",
+            NetworkMessage::TxMessage { .. } => "TxMessage",
+            NetworkMessage::TxSignature { .. } => "TxSignature",
+            NetworkMessage::Committed { .. } => "Committed",
+            NetworkMessage::ResyncRequest { .. } => "ResyncRequest",
+            NetworkMessage::ResyncResponse { .. } => "ResyncResponse",
+            NetworkMessage::Resign { .. } => "Resign",
+            NetworkMessage::BatchConfirmation { .. } => "BatchConfirmation",
+            NetworkMessage::GameInvite { .. } => "GameInvite",
+            NetworkMessage::InviteResponse { .. } => "InviteResponse",
+            NetworkMessage::GameStart { .. } => "GameStart",
+            NetworkMessage::GameStateBroadcast { .. } => "GameStateBroadcast",
+            NetworkMessage::DrawOffer { .. } => "DrawOffer",
+            NetworkMessage::DrawResponse { .. } => "DrawResponse",
+            NetworkMessage::FlagTimeout { .. } => "FlagTimeout",
+            NetworkMessage::Ping { .. } => "Ping",
+            NetworkMessage::Pong { .. } => "Pong",
+            NetworkMessage::RematchOffer { .. } => "RematchOffer",
+            NetworkMessage::RematchResponse { .. } => "RematchResponse",
+            NetworkMessage::BraidResyncRequest { .. } => "BraidResyncRequest",
+            NetworkMessage::BraidResyncResponse { .. } => "BraidResyncResponse",
+            NetworkMessage::GameSnapshot { .. } => "GameSnapshot",
+            NetworkMessage::Clock { .. } => "Clock",
+            NetworkMessage::Chat { .. } => "Chat",
         }
     }
 }

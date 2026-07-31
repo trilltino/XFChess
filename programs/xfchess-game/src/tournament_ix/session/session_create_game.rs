@@ -31,30 +31,31 @@ pub struct SessionCreateGame<'info> {
     )]
     pub tournament: Box<Account<'info, Tournament>>,
 
-    /// TournamentPlayersShard 0 (players 0-63)
+    /// TournamentPlayersShard 0 always present (all tournament sizes).
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 1 (players 64-127)
+    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
+    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_1: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 2 (players 128-191)
+    pub tournament_players_shard_1: Option<Box<Account<'info, TournamentPlayersShard>>>,
+    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_2: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 3 (players 192-255)
+    pub tournament_players_shard_2: Option<Box<Account<'info, TournamentPlayersShard>>>,
+    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
-    pub tournament_players_shard_3: Box<Account<'info, TournamentPlayersShard>>,
+    pub tournament_players_shard_3: Option<Box<Account<'info, TournamentPlayersShard>>>,
 
     #[account(
         mut,
@@ -76,9 +77,9 @@ pub struct SessionCreateGame<'info> {
     #[account(
         constraint = {
             tournament_players_shard_0.players.iter().any(|p| *p == player.key())
-                || tournament_players_shard_1.players.iter().any(|p| *p == player.key())
-                || tournament_players_shard_2.players.iter().any(|p| *p == player.key())
-                || tournament_players_shard_3.players.iter().any(|p| *p == player.key())
+                || tournament_players_shard_1.as_ref().is_some_and(|s| s.players.iter().any(|p| *p == player.key()))
+                || tournament_players_shard_2.as_ref().is_some_and(|s| s.players.iter().any(|p| *p == player.key()))
+                || tournament_players_shard_3.as_ref().is_some_and(|s| s.players.iter().any(|p| *p == player.key()))
         } @ XfchessGameError::UnauthorizedAccess,
     )]
     /// CHECK: Verified against tournament player list and delegation PDA.

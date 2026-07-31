@@ -75,6 +75,7 @@ pub enum NewMenuPanel {
     HowToPlay,
     Settings,
     Profile,
+    Multiplayer,
 }
 
 impl NewMenuPanel {
@@ -89,6 +90,7 @@ impl NewMenuPanel {
             Self::HowToPlay => 7,
             Self::Settings => 8,
             Self::Profile => 9,
+            Self::Multiplayer => 10,
         }
     }
 }
@@ -455,11 +457,6 @@ pub fn menu_escape_system(
 /// Render the bottom-left button list.
 /// Modals (AI setup, controls popup) are rendered by the caller in `main_menu.rs`.
 pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
-    // MagicBlock + Solana partner badges while the multiplayer connect panel is open
-    if *cx.new_menu_panel == NewMenuPanel::SolanaConnect {
-        render_partner_logos(ctx, cx);
-    }
-
     render_title_logo(ctx, cx);
     render_hint_bar(ctx);
     render_board_caption(ctx, cx);
@@ -558,6 +555,7 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             match current {
                 NewMenuPanel::Main => render_main_panel(ui, cx),
                 NewMenuPanel::PlayOnline => render_play_online_panel(ui, cx),
+                NewMenuPanel::Multiplayer => render_multiplayer_panel(ui, cx),
                 NewMenuPanel::Puzzles => render_puzzles_panel(ui, cx),
                 NewMenuPanel::Tournaments => render_tournaments_panel(ui, cx),
                 NewMenuPanel::SolanaConnect => render_solana_connect_panel(ui, cx),
@@ -729,49 +727,6 @@ fn render_hint_bar(ctx: &egui::Context) {
         });
 }
 
-/// MagicBlock + Solana partner badges, stacked bottom-left directly above the
-/// now-playing music widget — shown while the multiplayer wallet-connect
-/// panel is open. Fixed size (no hover animation); a short tooltip explains
-/// each badge on hover.
-fn render_partner_logos(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
-    super::ensure_partner_logos(ctx, &mut cx.partner_logos);
-
-    egui::Area::new("partner_logos".into())
-        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(18.0, -58.0))
-        .show(ctx, |ui| {
-            ui.vertical(|ui| {
-                if let Some(ref tex) = cx.partner_logos.magicblock {
-                    partner_logo_widget(
-                        ui,
-                        tex,
-                        22.0,
-                        "MagicBlock — Ephemeral Rollups powering XFChess's sub-second on-chain moves.",
-                    );
-                    ui.add_space(6.0);
-                }
-                if let Some(ref tex) = cx.partner_logos.solana {
-                    partner_logo_widget(
-                        ui,
-                        tex,
-                        28.0,
-                        "Solana — the blockchain settling XFChess wagers, ratings, and tournaments.",
-                    );
-                }
-            });
-        });
-}
-
-/// Renders one partner badge at a fixed display height with a short tooltip on hover.
-fn partner_logo_widget(ui: &mut egui::Ui, tex: &egui::TextureHandle, display_h: f32, tooltip: &str) {
-    let [w, h] = tex.size();
-    let dw = (w as f32 / h as f32) * display_h;
-    let resp = ui.add(
-        egui::Image::new(egui::load::SizedTexture::new(tex.id(), [dw, display_h]))
-            .sense(egui::Sense::hover()),
-    );
-    resp.on_hover_text(tooltip);
-}
-
 /// Alpha announcement card shown on the startup (main) menu. Starts docked to
 /// the far right of the screen, locked in place (not draggable). Dismissable;
 /// stays closed for the rest of the session once closed.
@@ -890,7 +845,6 @@ fn render_welcome_panel(
                     //   let [w, h] = tex.size();
                     //   ui.add(egui::Image::new(egui::load::SizedTexture::new(
                     //       tex.id(), [width, width * h as f32 / w as f32])));
-                    // See `ensure_partner_logos`/`partner_logo_widget` for the pattern.
 
                     ui.add_space(6.0);
                     ui.label(
@@ -1049,6 +1003,73 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     let snd = cx.menu_sounds.as_deref();
 
+    if item_expandable_tip(
+        ui,
+        "Multiplayer",
+        "Free casual and rated games — lobbies, spectating, direct connect, and tournaments. No wallet needed.",
+        W,
+    ) {
+        play_click(&mut cx.commands, snd);
+        *cx.new_menu_panel = NewMenuPanel::Multiplayer;
+    }
+    ui.add_space(SP);
+
+    if item_expandable_tip(
+        ui,
+        "Solana Multiplayer",
+        "Wager SOL on the outcome — moves and payouts settle on-chain. Requires a connected wallet.",
+        W,
+    ) {
+        play_click(&mut cx.commands, snd);
+        *cx.new_menu_panel = NewMenuPanel::SolanaConnect;
+    }
+}
+
+/// Off-chain multiplayer options — lobbies, spectating, direct connect, tournaments.
+/// Nested one level under "Play Online" so that panel can offer a plain
+/// "Multiplayer" vs "Solana Multiplayer" choice up front.
+fn render_multiplayer_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
+    const W: f32 = 280.0;
+    const SP: f32 = 6.0;
+
+    ui.horizontal(|ui| {
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("‹ Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
+            )
+            .clicked()
+        {
+            play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+            *cx.new_menu_panel = NewMenuPanel::PlayOnline;
+        }
+        ui.label(
+            egui::RichText::new("Multiplayer")
+                .size(10.0)
+                .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160))
+                .family(egui::FontFamily::Proportional)
+                .strong(),
+        );
+    });
+    let sep_rect = ui.available_rect_before_wrap();
+    let sep_y = ui.cursor().top() + 3.0;
+    ui.painter().hline(
+        sep_rect.left()..=sep_rect.left() + W,
+        sep_y,
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(220, 220, 240, 60),
+        ),
+    );
+    ui.add_space(10.0);
+
+    let snd = cx.menu_sounds.as_deref();
+
     if item(ui, "Create Lobby", W) {
         play_click(&mut cx.commands, snd);
         cx.p2p_host.direct_mode = false;
@@ -1087,12 +1108,6 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         play_click(&mut cx.commands, snd);
         *cx.new_menu_panel = NewMenuPanel::Tournaments;
     }
-    ui.add_space(SP);
-
-    if item_expandable(ui, "Solana Multiplayer", W) {
-        play_click(&mut cx.commands, snd);
-        *cx.new_menu_panel = NewMenuPanel::SolanaConnect;
-    }
 }
 
 /// Raw node-ID P2P connection — no account, no login, not listed anywhere.
@@ -1117,7 +1132,7 @@ fn render_direct_connection_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext)
             .clicked()
         {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
-            *cx.new_menu_panel = NewMenuPanel::PlayOnline;
+            *cx.new_menu_panel = NewMenuPanel::Multiplayer;
         }
         ui.label(
             egui::RichText::new("Direct Connection")
@@ -1199,7 +1214,10 @@ fn render_direct_connection_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext)
                     let peer_node_id = p2p_ui.peer_input.trim().to_string();
                     if let Some(connect_events) = cx.connect_events.as_mut() {
                         connect_events.write(
-                            crate::multiplayer::network::p2p::ConnectToPeerEvent { peer_node_id },
+                            crate::multiplayer::network::p2p::ConnectToPeerEvent {
+                                peer_node_id,
+                                is_host: false,
+                            },
                         );
                     }
                 }
@@ -1331,7 +1349,7 @@ fn render_tournaments_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             .clicked()
         {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
-            *cx.new_menu_panel = NewMenuPanel::PlayOnline;
+            *cx.new_menu_panel = NewMenuPanel::Multiplayer;
         }
         ui.label(
             egui::RichText::new("Tournaments")
@@ -1503,6 +1521,27 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                 sync.moves_submitted = 0;
                 sync.wager_amount = 0;
             }
+            // Reset the wallet/session/profile state too — this resource
+            // drives `initialize_solana_integration`/`authorize_global_session_if_needed`
+            // independently of `PlayerIdentity`/`WalletBridgePoller`, and it
+            // was never cleared here. Left stale, `initialize_solana_integration`
+            // sees `wallet_pubkey.is_some()` and never re-runs, so a
+            // reconnect keeps the *previous* wallet's session keypair,
+            // profile status, and cached display name — silently signing
+            // with the wrong session key and re-showing stale identity.
+            #[cfg(feature = "solana")]
+            if let Some(solana_state) = cx.solana_state.as_mut() {
+                **solana_state = crate::multiplayer::solana::integration::state::SolanaIntegrationState::default();
+            }
+            // Same gap as `SolanaIntegrationState` above: `cached_display_name`/
+            // `cached_keypair_bytes` only populate once (guarded by `is_none()`
+            // in `sync_from_solana_state`) and never re-sync after logging in
+            // as a different wallet, so the lobby UI could keep showing the
+            // previous wallet's identity/ELO.
+            #[cfg(feature = "solana")]
+            if let Some(lobby) = cx.solana_lobby.as_mut() {
+                **lobby = crate::multiplayer::solana::lobby::SolanaLobbyState::default();
+            }
             *cx.player_identity = crate::states::main_menu::PlayerIdentity::default();
             *cx.new_menu_panel = NewMenuPanel::Main;
             // Just disconnect the wallet — stay on the main menu, no login screen.
@@ -1643,24 +1682,33 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             play_click(&mut cx.commands, snd);
             #[cfg(feature = "solana")]
             {
-                if let Some(lobby) = cx.solana_lobby.as_mut() {
-                    lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
-                    lobby.allow_create = true;
-                    // Fresh entry from the main menu should always show the
-                    // create-game form, not a stale WaitingForOpponent/Success
-                    // left over from an earlier create attempt this session.
-                    lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
-                    // Always start the wager at $0 — don't carry over whatever
-                    // amount was left typed in from a previous visit.
-                    lobby.wager_sol = 0.0;
-                    lobby.wager_amount_input.clear();
+                // `create_game`/`join_game` require the wallet's on-chain
+                // PlayerProfile PDA to already exist (it's a plain
+                // `Account<'info, PlayerProfile>`, not `init_if_needed`) — if
+                // it doesn't, the on-chain call fails with AccountNotInitialized
+                // (Anchor 3012) instead of doing anything. Route through the
+                // same profile gate the "Solana Wager P2P" entry point uses
+                // (screens.rs) rather than letting that TX fail silently.
+                let profile_ready = cx.solana_state.as_ref().map(|s| {
+                    s.profile_status == crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername
+                }).unwrap_or(false);
+                if !profile_ready {
+                    crate::multiplayer::solana::tauri_signer::open_profile_step();
+                } else {
+                    if let Some(lobby) = cx.solana_lobby.as_mut() {
+                        lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
+                        lobby.allow_create = true;
+                        // Fresh entry from the main menu should always show the
+                        // create-game form, not a stale WaitingForOpponent/Success
+                        // left over from an earlier create attempt this session.
+                        lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
+                        // Always start the wager at $0 — don't carry over whatever
+                        // amount was left typed in from a previous visit.
+                        lobby.wager_sol = 0.0;
+                        lobby.wager_amount_input.clear();
+                    }
+                    cx.menu_state.set(crate::core::MenuState::SolanaLobby);
                 }
-                // Always open the lobby screen. If the on-chain profile isn't
-                // ready yet, the profile check (profile_check.rs) opens the
-                // Tauri profile step on its own as soon as it resolves — do NOT
-                // fire a popup from here (that was the "click Wagered PVP ->
-                // stray login popup" bug).
-                cx.menu_state.set(crate::core::MenuState::SolanaLobby);
             }
             #[cfg(not(feature = "solana"))]
             cx.menu_state.set(crate::core::MenuState::BraidLobby);
@@ -1671,13 +1719,22 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             play_click(&mut cx.commands, snd);
             #[cfg(feature = "solana")]
             {
-                if let Some(lobby) = cx.solana_lobby.as_mut() {
-                    lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Browse;
-                    // Finding a game is join/browse only — hide the Create tab.
-                    lobby.allow_create = false;
-                    lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
+                // Same profile gate as "Wagered PVP" above — `join_game` also
+                // requires the joiner's PlayerProfile PDA to already exist.
+                let profile_ready = cx.solana_state.as_ref().map(|s| {
+                    s.profile_status == crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername
+                }).unwrap_or(false);
+                if !profile_ready {
+                    crate::multiplayer::solana::tauri_signer::open_profile_step();
+                } else {
+                    if let Some(lobby) = cx.solana_lobby.as_mut() {
+                        lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Browse;
+                        // Finding a game is join/browse only — hide the Create tab.
+                        lobby.allow_create = false;
+                        lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
+                    }
+                    cx.menu_state.set(crate::core::MenuState::SolanaLobby);
                 }
-                cx.menu_state.set(crate::core::MenuState::SolanaLobby);
             }
             #[cfg(not(feature = "solana"))]
             cx.menu_state.set(crate::core::MenuState::BraidLobby);
@@ -1938,6 +1995,29 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                 d.sol_balance = 0.0;
                 d.usd_balance = None;
                 d.balance_loaded = false;
+            }
+            #[cfg(feature = "solana")]
+            if let Some(wallet) = cx.wallet.as_mut() {
+                wallet.pubkey = None;
+                wallet.keypair = None;
+                wallet.ranked_active = false;
+                wallet.tournament_match_id = None;
+            }
+            #[cfg(feature = "solana")]
+            if let Some(sync) = cx.solana_sync.as_mut() {
+                sync.game_id = None;
+                sync.moves_submitted = 0;
+                sync.wager_amount = 0;
+            }
+            // See the Settings-panel Logout handler's comment on why this
+            // reset is required — same gap existed here.
+            #[cfg(feature = "solana")]
+            if let Some(solana_state) = cx.solana_state.as_mut() {
+                **solana_state = crate::multiplayer::solana::integration::state::SolanaIntegrationState::default();
+            }
+            #[cfg(feature = "solana")]
+            if let Some(lobby) = cx.solana_lobby.as_mut() {
+                **lobby = crate::multiplayer::solana::lobby::SolanaLobbyState::default();
             }
             *cx.player_identity = crate::states::main_menu::PlayerIdentity::default();
         }

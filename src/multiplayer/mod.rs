@@ -8,6 +8,7 @@ use tokio::runtime::Runtime;
 
 pub mod error;
 pub mod join_link;
+pub mod monitoring;
 pub mod social;
 pub mod systems;
 pub mod telemetry;
@@ -67,7 +68,7 @@ impl Plugin for MultiplayerPlugin {
             .add_message::<crate::game::events::GameEndedEvent>();
 
         #[cfg(feature = "solana")]
-        app.init_resource::<rollup::session_keys::SessionKeyManager>();
+        app.init_resource::<rollup::session_keys::HandshakeOrderingKeyManager>();
 
         // 2. Register sub-plugins
         app.add_plugins((
@@ -80,6 +81,7 @@ impl Plugin for MultiplayerPlugin {
             spectator::SpectatorPlugin,
             ui::spectator_overlay::SpectatorOverlayPlugin,
             telemetry::FocusTelemetryPlugin,
+            monitoring::GameHealthMonitorPlugin,
         ));
 
         #[cfg(feature = "solana")]
@@ -94,6 +96,7 @@ impl Plugin for MultiplayerPlugin {
             // screens.rs is gated on. Without this, that Option resolves to
             // None at runtime and those buttons silently no-op.
             solana::tournament::TournamentClientPlugin,
+            monitoring::RollupHealthMonitorPlugin,
         ));
 
         // 3. Register core orchestration systems
@@ -111,6 +114,10 @@ impl Plugin for MultiplayerPlugin {
                     systems::handle_pong,
                     systems::record_casual_game_on_end,
                 ),
+            )
+            .add_systems(
+                OnExit(crate::core::states::GameState::InGame),
+                systems::reset_multiplayer_session_state,
             );
 
         // 4. Register feature-specific cross-cutting systems

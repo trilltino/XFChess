@@ -1136,10 +1136,17 @@ function Onboarding() {
     localStorage.setItem("xfchess_wallet", pk);
     setPubkey(pk);
     setWalletProvider(provider);
-    // handleAuth will have already routed us — this fires after onAuth in WalletStep
-    // so we only reach here when onAuth was NOT called (edge case: provider connected
-    // but auth was skipped). Route to profile as safe default.
-    setStep("profile");
+    // Do NOT set step here. `WalletStep.handleConnect` calls `onAuth(...)`
+    // immediately followed by `onContinue(...)` (this function) — always,
+    // unconditionally, every connect. `handleAuth` already routes to
+    // "splash" (known username, most of the fast synchronous path) or
+    // "profile" (no username yet) correctly; a `setStep("profile")` here
+    // used to run right after and clobber that decision back to "profile"
+    // every single time, since both calls land in the same synchronous
+    // tick when `handleAuth` takes its fast path. That's why a wallet with
+    // an already-known handle still got asked "Choose Your Handle" on every
+    // reconnect — this function's only remaining job is the wallet/provider
+    // bookkeeping above.
   };
 
   const handleProfileComplete = (handle: string) => {

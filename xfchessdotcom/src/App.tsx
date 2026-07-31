@@ -3,7 +3,6 @@ import { AnimatePresence } from 'framer-motion';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { ConnectionProvider, WalletProvider, useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
-import { WalletConnectWalletAdapter } from '@solana/wallet-adapter-walletconnect';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { SolanaMobileWalletAdapter, createDefaultAddressSelector, createDefaultAuthorizationResultCache, createDefaultWalletNotFoundHandler } from '@solana-mobile/wallet-adapter-mobile';
 import { clusterApiUrl } from '@solana/web3.js';
@@ -60,21 +59,6 @@ export default function App() {
         () => [
             new PhantomWalletAdapter(),
             new SolflareWalletAdapter(),
-            // WalletConnect is essential for Tauri/Desktop apps to connect to mobile wallets
-            new WalletConnectWalletAdapter({
-                network: network,
-                options: {
-                    // Get your own Project ID at https://cloud.reown.com and set
-                    // VITE_WALLETCONNECT_PROJECT_ID. Fallback keeps dev working.
-                    projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '66e133d368e7ec815db15024d2627e2b',
-                    metadata: {
-                        name: 'XFChess',
-                        description: 'XFChess - Decentralized Chess on Solana',
-                        url: 'https://xfchess.com',
-                        icons: ['https://xfchess.com/logo.png'],
-                    },
-                },
-            }),
             new SolanaMobileWalletAdapter({
                 addressSelector: createDefaultAddressSelector(),
                 appIdentity: {

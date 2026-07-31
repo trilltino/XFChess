@@ -179,7 +179,8 @@ impl Plugin for P2PVpsPlugin {
             // guarantees we observe that event in the same `Last` pass
             // instead of missing it because there's no next frame to catch
             // up on.
-            .add_systems(Last, cleanup_p2p_lobby_on_exit.after(bevy::window::ExitSystems));
+            .add_systems(Last, cleanup_p2p_lobby_on_exit.after(bevy::window::ExitSystems))
+            .add_systems(OnEnter(GameState::GameOver), cleanup_p2p_lobby_on_game_over);
     }
 }
 
@@ -222,6 +223,42 @@ fn cleanup_p2p_lobby_on_exit(
     if let Some(game_id) = vps_state.joining_game_id.clone() {
         if let Err(e) = vps_client::p2p_leave_game_fast(game_id.clone(), &node_id) {
             warn!("[LOBBY] Exit cleanup: leave (joining {}) failed: {}", game_id, e);
+        }
+    }
+}
+
+/// Retires this game's relay listing the moment either player actually
+/// reaches Game Over (checkmate, resignation, timeout, draw) — not just on
+/// an explicit "Leave Lobby" click or app exit (the only two paths that
+/// called `p2p_leave_game`/`_fast` before this). Without this, `list_games`
+/// (backend/src/signing/p2p_relay/routes.rs) keeps a finished game listed as
+/// `InProgress`/full for as long as the client keeps heartbeating it — which
+/// is exactly as long as the player sits on the Game Over screen or hangs
+/// around the main menu afterward — showing up in other players' Browse
+/// Games list as a live, full game that's actually long over.
+fn cleanup_p2p_lobby_on_game_over(
+    vps_state: Res<P2PVpsState>,
+    network_state: Option<Res<OnlineNetworkState>>,
+) {
+    let node_id = network_state
+        .as_ref()
+        .and_then(|ns| {
+            ns.node_id
+                .map(|id| bs58::encode(id.as_bytes()).into_string())
+        })
+        .unwrap_or_default();
+    if node_id.is_empty() {
+        return;
+    }
+
+    if let Some(game_id) = vps_state.hosting_game_id.clone() {
+        if let Err(e) = vps_client::p2p_leave_game_fast(game_id.clone(), &node_id) {
+            warn!("[LOBBY] Game-over cleanup: leave (hosting {}) failed: {}", game_id, e);
+        }
+    }
+    if let Some(game_id) = vps_state.joining_game_id.clone() {
+        if let Err(e) = vps_client::p2p_leave_game_fast(game_id.clone(), &node_id) {
+            warn!("[LOBBY] Game-over cleanup: leave (joining {}) failed: {}", game_id, e);
         }
     }
 }
@@ -443,6 +480,7 @@ fn handle_vps_responses(
                     // Opportunistically try Iroh P2P (dual transport — OK if it fails)
                     connect_events.write(ConnectToPeerEvent {
                         peer_node_id: host_id.clone(),
+                        is_host: false,
                     });
 
                     // Start online game session for reliable move transport
@@ -535,6 +573,7 @@ fn handle_vps_responses(
                 // Opportunistically try Iroh connection to joiner
                 connect_events.write(ConnectToPeerEvent {
                     peer_node_id: joiner_node_id,
+                    is_host: true,
                 });
 
                 // Mark connection state as host/White now so the game knows sides.

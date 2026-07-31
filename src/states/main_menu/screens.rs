@@ -19,8 +19,8 @@ use tracing::{error, info, warn};
 
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::lobby::{
-    spawn_create_game, spawn_join_game, spawn_lookup_game, spawn_poll_opponent_joined, LobbyMode,
-    LobbyStatus,
+    spawn_create_game, spawn_join_game, spawn_lookup_game, spawn_poll_game_start,
+    spawn_poll_opponent_joined, LobbyMode, LobbyStatus,
 };
 
 #[cfg(feature = "solana")]
@@ -75,6 +75,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     crate::multiplayer::network::game_id_store::set(rejoin_id);
                     ctx.ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
                     *ctx.core_mode = crate::core::GameMode::OnlineMultiplayer;
+                    ctx.next_state.set(crate::core::GameState::InGame);
                     ctx.menu_state.set(crate::core::MenuState::Main);
                 }
                 if ui.small_button("Dismiss").clicked() {
@@ -179,6 +180,15 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 .as_ref()
                 .and_then(|r| r.current.as_ref())
                 .map(|s| s.usd_per_sol);
+            let global_session_setup_in_progress = ctx
+                .solana_state
+                .as_ref()
+                .map(|s| s.global_session_setup_in_progress)
+                .unwrap_or(false);
+            let global_session_unavailable_reason = ctx
+                .solana_state
+                .as_ref()
+                .and_then(|s| s.global_session_unavailable_reason.as_deref());
             match lobby.mode {
                 LobbyMode::Create => render_create_tab(
                     ui,
@@ -186,8 +196,17 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     &mut ctx.compliance,
                     node_id_b58.as_deref(),
                     usd_per_sol,
+                    global_session_setup_in_progress,
+                    global_session_unavailable_reason,
                 ),
-                LobbyMode::Join => render_join_tab(ui, lobby, node_id_b58.as_deref(), usd_per_sol),
+                LobbyMode::Join => render_join_tab(
+                    ui,
+                    lobby,
+                    node_id_b58.as_deref(),
+                    usd_per_sol,
+                    global_session_setup_in_progress,
+                    global_session_unavailable_reason,
+                ),
                 LobbyMode::Browse => render_solana_browse_tab(ui, lobby),
                 LobbyMode::Tournament => {
                     render_solana_tournament_tab(ui, lobby, &mut ctx.spectate_events)
@@ -197,14 +216,54 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::item_space(ui);
 
-        // Auto-transition: Success + Create mode ? WaitingForOpponent + start poll.
+        // Auto-transition: Success + Create mode -> WaitingForOpponent + start poll.
         if let LobbyStatus::Success(game_id) = lobby.status {
             if lobby.mode == LobbyMode::Create && lobby.opponent_poll_rx.is_none() {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 spawn_poll_opponent_joined(lobby.cached_rpc_url.clone(), game_id, tx);
                 lobby.opponent_poll_rx = Some(rx);
                 lobby.status = LobbyStatus::WaitingForOpponent { game_id };
+            } else if lobby.mode == LobbyMode::Join {
+                // Our own join_game transaction landing on-chain only means
+                // WE are ready — it mirrors the free P2P flow's JOIN_ACK, not
+                // the host's GAME_START. Wait for the host to click "Host
+                // Game" before actually entering the match (see
+                // `LobbyStatus::EnterGame` below and `spawn_poll_game_start`).
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                spawn_poll_game_start(game_id, tx);
+                lobby.game_start_poll_rx = Some(rx);
+                lobby.status = LobbyStatus::WaitingForHostStart { game_id };
             }
+        } else if let LobbyStatus::EnterGame { game_id } = lobby.status {
+            // Host's GAME_START signal arrived — safe to actually enter now.
+            let wager_lamports = lobby.wager_lamports();
+            start_solana_braid_game(
+                &mut ctx.online_session,
+                &ctx.network_config,
+                ctx.network_state.as_ref().map(|r| &**r),
+                ctx.p2p_state.as_deref_mut(),
+                game_id,
+                false,
+                wager_lamports,
+            );
+            ctx.ai_config.mode = AIGameMode::Multiplayer;
+            *ctx.core_mode = CoreGameMode::OnlineMultiplayer;
+            if let Some(ref mut sync) = ctx.solana_sync {
+                sync.game_id = Some(game_id);
+                sync.wager_amount = wager_lamports;
+            }
+            if let Some(ref mut comp) = ctx.competitive {
+                comp.game_id = Some(game_id);
+                comp.wager_lamports = wager_lamports;
+                comp.active = true;
+            }
+            ctx.game_started_events
+                .write(crate::game::events::GameStartedEvent { game_id });
+            ctx.next_state.set(crate::core::GameState::InGame);
+            ctx.menu_state.set(crate::core::MenuState::Main);
+            // Prevent re-firing on the next frame while the state
+            // transition above is still taking effect.
+            lobby.status = LobbyStatus::Idle;
         }
 
         // Post-action status UI (uses ctx for firing events).
@@ -410,6 +469,49 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 );
                 Layout::small_space(ui);
                 if ui.button("Host Game").clicked() {
+                    // Flip the relay's durable per-game status to InProgress
+                    // so the joiner's `spawn_poll_game_start` sees it — see
+                    // that function's doc comment for why this is a status
+                    // flip rather than a one-shot message.
+                    if let Some(our_node_id) = lobby.cached_node_id.clone() {
+                        let gid = game_id.to_string();
+                        std::thread::spawn(move || {
+                            let mut delivered = false;
+                            for attempt in 1..=5u32 {
+                                match crate::multiplayer::vps_client::p2p_accept_join(
+                                    gid.clone(),
+                                    &our_node_id,
+                                ) {
+                                    Ok(()) => {
+                                        info!(
+                                            "[SOLANA_LOBBY] Marked game {} in-progress (attempt {})",
+                                            gid, attempt
+                                        );
+                                        delivered = true;
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "[SOLANA_LOBBY] p2p_accept_join failed (attempt {}/5) for {}: {}",
+                                            attempt, gid, e
+                                        );
+                                        std::thread::sleep(std::time::Duration::from_millis(
+                                            500 * attempt as u64,
+                                        ));
+                                    }
+                                }
+                            }
+                            if !delivered {
+                                error!(
+                                    "[SOLANA_LOBBY] Could not mark {} in-progress after 5 attempts — joiner is likely stuck waiting",
+                                    gid
+                                );
+                            }
+                        });
+                    } else {
+                        warn!("[SOLANA_LOBBY] No node id available — can't mark game in-progress for joiner");
+                    }
+
                     start_solana_braid_game(
                         &mut ctx.online_session,
                         &ctx.network_config,
@@ -432,46 +534,36 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     }
                     ctx.game_started_events
                         .write(crate::game::events::GameStartedEvent { game_id });
+                    ctx.next_state.set(crate::core::GameState::InGame);
                     ctx.menu_state.set(crate::core::MenuState::Main);
                 }
+            }
+
+            LobbyStatus::WaitingForHostStart { .. } => {
+                ui.spinner();
+                ui.label(
+                    egui::RichText::new("Joined! Waiting for the host to start the match...")
+                        .color(egui::Color32::from_rgb(200, 200, 50)),
+                );
+                Layout::small_space(ui);
+                ui.label(
+                    egui::RichText::new("The host will begin the game when ready.")
+                        .size(12.0)
+                        .color(egui::Color32::LIGHT_GRAY),
+                );
             }
 
             LobbyStatus::Fetched { .. } => {}
 
-            LobbyStatus::Success(game_id) => {
-                ui.label(
-                    egui::RichText::new("Game ready!")
-                        .color(egui::Color32::from_rgb(100, 255, 100))
-                        .strong(),
-                );
-                Layout::small_space(ui);
-                if ui.button("Start Game").clicked() {
-                    let is_host = lobby.mode == LobbyMode::Create;
-                    start_solana_braid_game(
-                        &mut ctx.online_session,
-                        &ctx.network_config,
-                        ctx.network_state.as_ref().map(|r| &**r),
-                        ctx.p2p_state.as_deref_mut(),
-                        game_id,
-                        is_host,
-                        wager_lamports,
-                    );
-                    ctx.ai_config.mode = AIGameMode::Multiplayer;
-                    *ctx.core_mode = CoreGameMode::OnlineMultiplayer;
-                    if let Some(ref mut sync) = ctx.solana_sync {
-                        sync.game_id = Some(game_id);
-                        sync.wager_amount = wager_lamports;
-                    }
-                    if let Some(ref mut comp) = ctx.competitive {
-                        comp.game_id = Some(game_id);
-                        comp.wager_lamports = wager_lamports;
-                        comp.active = true;
-                    }
-                    ctx.game_started_events
-                        .write(crate::game::events::GameStartedEvent { game_id });
-                    ctx.menu_state.set(crate::core::MenuState::Main);
-                }
-            }
+            // Both Create and Join resolve this away in the auto-transition
+            // above before this match ever renders it (Create -> WaitingForOpponent,
+            // Join -> WaitingForHostStart) — kept only so the match stays
+            // exhaustive over `LobbyStatus`.
+            LobbyStatus::Success(_) => {}
+
+            // Resolved (back to Idle) in the auto-transition above before this
+            // match ever renders it — kept only so the match stays exhaustive.
+            LobbyStatus::EnterGame { .. } => {}
 
             LobbyStatus::Error(msg) => {
                 ui.colored_label(egui::Color32::RED, format!(" {}", msg));
@@ -684,6 +776,8 @@ fn render_create_tab(
     // lobby.cached_node_id directly — this param is no longer needed here.
     _node_id: Option<&str>,
     usd_per_sol: Option<f64>,
+    global_session_setup_in_progress: bool,
+    global_session_unavailable_reason: Option<&str>,
 ) {
     use crate::multiplayer::solana::lobby::EloMatchPref;
 
@@ -879,12 +973,41 @@ fn render_create_tab(
     // Free games now go through the same signed on-chain create_game call as
     // wagered games (wager_amount = 0 is a valid, zero-cost path on-chain), so
     // they all require a connected wallet to sign.
+    let has_global_session = lobby.cached_global_session_keypair_bytes.is_some();
+    // One-time session signing is still being set up (a few seconds after
+    // wallet connect, normally) — block instead of racing the click into the
+    // per-game wallet-popup fallback just because it hasn't resolved yet.
+    let global_session_pending = global_session_setup_in_progress
+        && !has_global_session
+        && global_session_unavailable_reason.is_none();
     let can_create = !matches!(lobby.status, LobbyStatus::Pending)
         && wallet_connected
+        && !global_session_pending
         && ((is_free_casual || is_free_rated)
             || (lobby.wager_sol > 0.0 && (lobby.wager_sol as f64) <= balance - 0.002));
 
     let is_devnet = lobby.cached_rpc_url.contains("devnet");
+
+    if global_session_pending {
+        ui.colored_label(
+            egui::Color32::from_rgb(200, 180, 120),
+            "⏳ Setting up one-time session signing…",
+        );
+        Layout::small_space(ui);
+    } else if wallet_connected && !has_global_session && !is_free_casual {
+        // Legacy per-game path — label the platform fee here, before the
+        // wallet popup, instead of letting it show up as an unexplained
+        // number inside Phantom's own transaction breakdown.
+        ui.colored_label(
+            egui::Color32::from_rgb(160, 160, 160),
+            if let Some(reason) = global_session_unavailable_reason {
+                format!("Per-game signing this session ({reason}) — you'll also approve a small platform fee.")
+            } else {
+                "Per-game signing — you'll also approve a small platform fee for this game.".to_string()
+            },
+        );
+        Layout::small_space(ui);
+    }
 
     let create_btn_text = if is_free_casual {
         "Host Free Game"
@@ -956,6 +1079,8 @@ fn render_join_tab(
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
     node_id: Option<&str>,
     usd_per_sol: Option<f64>,
+    global_session_setup_in_progress: bool,
+    global_session_unavailable_reason: Option<&str>,
 ) {
     ui.label(egui::RichText::new("Enter Game ID:").size(14.0));
     ui.text_edit_singleline(&mut lobby.game_id_input);
@@ -1027,10 +1152,25 @@ fn render_join_tab(
         ui.label(egui::RichText::new(balance_line).size(12.0));
 
         let sufficient = lobby.cached_balance >= wager_sol + 0.002;
-        let can_join = lobby.cached_keypair_bytes.is_some() && sufficient;
+        let has_global_session = lobby.cached_global_session_keypair_bytes.is_some();
+        let global_session_pending = global_session_setup_in_progress
+            && !has_global_session
+            && global_session_unavailable_reason.is_none();
+        let can_join = lobby.cached_keypair_bytes.is_some() && sufficient && !global_session_pending;
 
         if !sufficient {
             ui.colored_label(egui::Color32::RED, "Insufficient balance to join");
+        }
+        if global_session_pending {
+            ui.colored_label(
+                egui::Color32::from_rgb(200, 180, 120),
+                "⏳ Setting up one-time session signing…",
+            );
+        } else if !has_global_session {
+            ui.colored_label(
+                egui::Color32::from_rgb(160, 160, 160),
+                "Per-game signing this session — you'll approve the join transaction directly.",
+            );
         }
 
         if ui
@@ -1138,7 +1278,7 @@ fn render_solana_browse_tab(
     let is_loading = lobby.browse_rx.is_some();
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("Open Wagered Games")
+            egui::RichText::new("Open Games")
                 .size(14.0)
                 .strong()
                 .color(egui::Color32::GOLD),
@@ -1161,11 +1301,19 @@ fn render_solana_browse_tab(
         return;
     }
 
+    // Includes both free and wagered on-chain games — `poll_solana_browse`
+    // already fetches both ("P2P" and "solana_wager" tagged). Free games used
+    // to be filtered out here (stake_amount > 0.0), which meant a host who
+    // created a free game via this same Solana Multiplayer panel had no way
+    // to see it listed anywhere inside that panel — the only remaining
+    // listing for it was the unrelated top-level "Join Lobby" screen, which
+    // a joiner has no reason to check after hosting through Solana
+    // Multiplayer. See `poll_lobby_tasks`' announce comment for the other
+    // half of this split.
     let games = lobby.browse_games.clone();
-    let wagered: Vec<_> = games.iter().filter(|g| g.stake_amount > 0.0).collect();
-    if wagered.is_empty() {
+    if games.is_empty() {
         ui.label(
-            egui::RichText::new("No open wagered games right now.")
+            egui::RichText::new("No open games right now.")
                 .size(12.0)
                 .color(egui::Color32::GRAY),
         );
@@ -1173,11 +1321,21 @@ fn render_solana_browse_tab(
     }
 
     egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
-        for game in &wagered {
+        for game in &games {
             let name = game.username.as_deref().unwrap_or(game.display_name.as_str());
             let mins = game.base_time_seconds / 60;
             let inc  = game.increment_seconds;
             let time_str = if inc > 0 { format!("{}+{}", mins, inc) } else { format!("{} min", mins) };
+            let stake_str = if game.stake_amount > 0.0 {
+                format!("{:.3} SOL", game.stake_amount)
+            } else {
+                "Free".to_string()
+            };
+            let stake_color = if game.stake_amount > 0.0 {
+                egui::Color32::GOLD
+            } else {
+                egui::Color32::from_rgb(120, 200, 120)
+            };
 
             egui::Frame::new()
                 .fill(egui::Color32::from_rgba_unmultiplied(40, 35, 20, 220))
@@ -1191,7 +1349,7 @@ fn render_solana_browse_tab(
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(&time_str).size(11.0).color(egui::Color32::from_rgb(160, 190, 255)));
                                 ui.label(egui::RichText::new("·").size(11.0).color(egui::Color32::GRAY));
-                                ui.label(egui::RichText::new(format!("{:.3} SOL", game.stake_amount)).size(11.0).color(egui::Color32::GOLD));
+                                ui.label(egui::RichText::new(&stake_str).size(11.0).color(stake_color));
                                 if let Some(elo) = game.elo {
                                     ui.label(egui::RichText::new("·").size(11.0).color(egui::Color32::GRAY));
                                     ui.label(egui::RichText::new(format!("{} ELO", elo)).size(11.0).color(egui::Color32::from_rgb(200, 160, 255)));

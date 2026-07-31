@@ -62,12 +62,21 @@ pub struct RollupNetworkBridge {
     pending_batches: std::collections::HashMap<String, (Vec<String>, Vec<String>)>,
     /// Hashes of batches we proposed ourselves — used to suppress gossip self-echoes.
     sent_batch_hashes: std::collections::HashSet<String>,
-    /// PDA stored when delegation failed because wallet info wasn't ready yet.
+    /// PDA of the game currently being (re)delegated, or awaiting retry after
+    /// a failure (precondition-not-ready, signing, or broadcast). Set right
+    /// before every delegation attempt is spawned; cleared only on confirmed
+    /// success (see `poll_delegation_tasks`).
     pending_delegation_pda: Option<Pubkey>,
     /// game_id matching pending_delegation_pda.
     pending_game_id: Option<u64>,
     /// Channel receiving delegation result from async task.
     delegation_rx: Option<oneshot::Receiver<Result<Pubkey, String>>>,
+    /// Seconds remaining before `retry_pending_delegation` will attempt
+    /// again after a genuine signing/broadcast failure. Without this, a
+    /// real RPC error (as opposed to the "wallet not ready yet" case, which
+    /// naturally paces itself on wallet-connect) would retry every single
+    /// frame — a retry storm against the RPC endpoint.
+    delegation_retry_cooldown: f32,
     /// Monotonically increasing nonce for record_move replay protection.
     /// Starts at 1 because the program requires nonce == move_log.nonce + 1 (on-chain starts at 0).
     move_nonce: u64,
@@ -690,6 +699,15 @@ fn handle_game_start_delegation(
             .map(|kp| kp.to_bytes().to_vec());
         let _ = wallet_pubkey; // only used above to gate readiness
 
+        // Set unconditionally (not just in the deferred-precondition branches
+        // above) so a genuine signing/broadcast failure — not just "wallet
+        // wasn't ready yet" — also has a PDA/game_id for `poll_delegation_tasks`
+        // to fire `DelegationFailed` with, and for `retry_pending_delegation`
+        // to retry against. Cleared only on confirmed success, in
+        // `poll_delegation_tasks`.
+        bridge.pending_delegation_pda = Some(game_pda);
+        bridge.pending_game_id = Some(game_id);
+
         let (tx, rx) = oneshot::channel();
         bridge.delegation_rx = Some(rx);
 
@@ -824,10 +842,19 @@ fn poll_delegation_tasks(
                 magicblock_resolver.delegated_game_pda = Some(game_pda);
                 magicblock_events.write(MagicBlockEvent::GameDelegated { game_pda });
                 bridge.delegation_rx = None;
+                // Only cleared on confirmed success — a failure leaves these
+                // set so `retry_pending_delegation` picks the same game back
+                // up next frame instead of losing track of it.
+                bridge.pending_delegation_pda = None;
+                bridge.pending_game_id = None;
             }
             Ok(Err(e)) => {
                 error!("Delegation failed: {}", e);
-                // Store the PDA for retry
+                // `pending_delegation_pda` is now always set before a
+                // delegation task is spawned (see `handle_game_start_delegation`
+                // / `retry_pending_delegation`), so this fires for a genuine
+                // signing/broadcast failure too, not just the deferred
+                // wallet-not-ready case.
                 if let Some(pda) = bridge.pending_delegation_pda {
                     magicblock_events.write(MagicBlockEvent::DelegationFailed {
                         game_pda: pda,
@@ -835,13 +862,21 @@ fn poll_delegation_tasks(
                     });
                 }
                 bridge.delegation_rx = None;
+                bridge.delegation_retry_cooldown = 30.0;
             }
             Err(oneshot::error::TryRecvError::Empty) => {
                 // Task still running, nothing to do
             }
             Err(_) => {
                 error!("Delegation task dropped");
+                if let Some(pda) = bridge.pending_delegation_pda {
+                    magicblock_events.write(MagicBlockEvent::DelegationFailed {
+                        game_pda: pda,
+                        error: "delegation task dropped before completing".to_string(),
+                    });
+                }
                 bridge.delegation_rx = None;
+                bridge.delegation_retry_cooldown = 30.0;
             }
         }
     }
@@ -850,12 +885,22 @@ fn poll_delegation_tasks(
 /// Retries a previously-deferred ER delegation once the wallet info is available.
 fn retry_pending_delegation(
     mut bridge: ResMut<RollupNetworkBridge>,
+    time: Res<Time>,
     magicblock_resolver: Res<MagicBlockResolver>,
     solana_state: Option<Res<SolanaIntegrationState>>,
     rollup_manager: Res<EphemeralRollupManager>,
     magicblock_events: MessageWriter<MagicBlockEvent>,
 ) {
     if bridge.delegation_rx.is_some() {
+        return;
+    }
+
+    // Backs off after a genuine signing/broadcast failure (see
+    // `poll_delegation_tasks`) — without this, a real RPC error would retry
+    // every frame instead of just the "wallet not ready yet" case, which
+    // naturally paces itself on wallet-connect.
+    if bridge.delegation_retry_cooldown > 0.0 {
+        bridge.delegation_retry_cooldown -= time.delta_secs();
         return;
     }
 
@@ -882,8 +927,10 @@ fn retry_pending_delegation(
         }
     };
 
-    bridge.pending_delegation_pda = None;
-    bridge.pending_game_id = None;
+    // `pending_delegation_pda`/`pending_game_id` are deliberately NOT cleared
+    // here — only `poll_delegation_tasks` clears them, and only on confirmed
+    // success. If this attempt also fails, they need to still be set so the
+    // next retry (after another cooldown) can find this same game again.
 
     // Same per-game gating as `handle_game_start_delegation` — see its
     // comment for why this can't be the live `global_session_active` flag.
@@ -1373,7 +1420,10 @@ fn apply_pgn_export_result(
 }
 
 /// Handles Magic Block events for logging and error handling
-fn handle_magic_block_events(mut magicblock_events: MessageReader<MagicBlockEvent>) {
+fn handle_magic_block_events(
+    mut magicblock_events: MessageReader<MagicBlockEvent>,
+    mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
+) {
     for event in magicblock_events.read() {
         match event {
             MagicBlockEvent::GameDelegated { game_pda } => {
@@ -1387,6 +1437,21 @@ fn handle_magic_block_events(mut magicblock_events: MessageReader<MagicBlockEven
                     "Magic Block: Failed to delegate game {}: {}",
                     game_pda, error
                 );
+                // Previously logged only, with nothing telling the player.
+                // Backed now by both `retry_pending_delegation` (client-side
+                // retry, with a cooldown) and the backend settlement worker's
+                // redelegate-retry for a still-stuck game — this is
+                // informational, not the fix itself.
+                popup_queue.push(crate::ui::menus::popup::GamePopup {
+                    title: "Ephemeral Rollup sync issue".to_string(),
+                    message: "Having trouble syncing this game to the Ephemeral Rollup — retrying automatically.".to_string(),
+                    copy_text: None,
+                    url: None,
+                    url_label: None,
+                    lifetime: 8.0,
+                    remaining: 8.0,
+                    dismissed: false,
+                });
             }
             MagicBlockEvent::UndelegationFailed { game_pda, error } => {
                 error!(

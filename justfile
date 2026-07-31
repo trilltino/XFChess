@@ -60,17 +60,10 @@ kill:
          Remove-Item $pidFile; \
          Write-Host "  Killed backend PID $oldPid" \
      }; \
-     netstat -aon 2>$null | Select-String " :5174 " | ForEach-Object { \
-         $parts = ($_ -replace '\s+', ' ').Trim().Split(' '); \
-         $ownerPid = $parts[-1]; \
-         if ($ownerPid -match '^\d+$') { Stop-Process -Id $ownerPid -Force } \
-     }; \
-     netstat -aon 2>$null | Select-String " :8090 " | ForEach-Object { \
-         $parts = ($_ -replace '\s+', ' ').Trim().Split(' '); \
-         $ownerPid = $parts[-1]; \
-         if ($ownerPid -match '^\d+$') { \
-             Stop-Process -Id $ownerPid -Force; \
-             Write-Host "  Killed port-8090 owner PID $ownerPid" \
+     foreach ($p in 5173, 5174, 5175, 8090) { \
+         Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { \
+             Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue; \
+             Write-Host "  Killed port-$p owner PID $($_.OwningProcess)" \
          } \
      }; \
      Stop-Process -Name "signing-server" -Force; \

@@ -149,6 +149,22 @@ fn settings_ui(
 
                 Layout::item_space(ui);
 
+                // Background
+                StyledPanel::card().show(ui, |ui| {
+                    ui.heading(TextStyle::heading("Background", TextSize::MD));
+                    Layout::item_space(ui);
+
+                    ui.horizontal(|ui| {
+                        for (idx, (name, _path)) in
+                            crate::rendering::effects::BACKDROP_PRESETS.iter().enumerate()
+                        {
+                            ui.radio_value(&mut settings.background_env, idx as u8, *name);
+                        }
+                    });
+                });
+
+                Layout::item_space(ui);
+
                 // Game Preferences
                 StyledPanel::card().show(ui, |ui| {
                     ui.heading(TextStyle::heading("Game Preferences", TextSize::MD));

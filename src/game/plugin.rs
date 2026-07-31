@@ -246,12 +246,14 @@ impl Plugin for GamePlugin {
                 update_game_timer
                     .in_set(GameSystems::Execution)
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
-                // check_game_over_state is gated on GameOverState changing so it
-                // doesn't poll every frame — it only fires when a move sets a
-                // terminal condition (checkmate, stalemate, timeout, resign).
+                // Gated on is_game_over() rather than is_changed(): the system also
+                // waits for the checkmating move's PieceMoveAnimation/FadingCapture to
+                // finish, which never happens on the same frame GameOverState flips.
+                // A one-shot is_changed() gate would miss that later frame entirely and
+                // leave the game stuck in InGame (see game_logic::check_game_over_state).
                 check_game_over_state
                     .in_set(GameSystems::Execution)
-                    .run_if(|go: Res<GameOverState>| go.is_changed())
+                    .run_if(|go: Res<GameOverState>| go.is_game_over())
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 crate::game::systems::network_move::handle_resign_events
                     .in_set(GameSystems::Execution),
@@ -409,13 +411,6 @@ impl Plugin for GamePlugin {
 
         // Chat now renders inline inside game_status_ui's left panel (see
         // crate::ui::game::left_panel) — no standalone system needed here.
-
-        // Item 3: session key expiry banner
-        #[cfg(feature = "solana")]
-        app.add_systems(
-            bevy_egui::EguiPrimaryContextPass,
-            crate::ui::game::game_ui::session_expiry_banner.run_if(in_state(GameState::InGame)),
-        );
 
         // Disconnect recovery banner (online modes only)
         app.add_systems(

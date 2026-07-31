@@ -117,7 +117,20 @@ pub struct OnlineNetworkState {
     pub subscription_sender: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     /// Raw 32-byte Ed25519 signing key for the on-chain session.
     /// When present, all outgoing [`NetworkMessage`]s are signed before broadcast.
+    ///
+    /// Mirrored into `session_signing_key_shared` below for the actual
+    /// outgoing-message task to read — that task is spawned once at startup
+    /// (`initialize_braid_network`, well before any wallet connects) and
+    /// only ever sees a plain `Option<[u8;32]>` copy taken at spawn time, so
+    /// writing only this ECS-side field would never reach it. This field
+    /// itself is kept for other (synchronous, ECS-side) readers/logging.
     pub session_signing_key: Option<[u8; 32]>,
+    /// Shared cell the outgoing-message tokio task reads fresh on every send,
+    /// so a signing key that becomes available *after* that task was spawned
+    /// (i.e. every real run — wallet connect always happens after app boot)
+    /// actually gets used instead of the task forever seeing the `None` it
+    /// captured at spawn time. See `session_signing_key`'s doc comment.
+    pub session_signing_key_shared: std::sync::Arc<std::sync::RwLock<Option<[u8; 32]>>>,
     /// Per-game expected nonce for online transport replay protection.
     /// Moves with nonce < expected are dropped; nonce >= expected are accepted
     /// and the map is updated to nonce + 1.
@@ -140,6 +153,7 @@ impl Default for OnlineNetworkState {
             bootstrap_sender: None,
             subscription_sender: None,
             session_signing_key: None,
+            session_signing_key_shared: std::sync::Arc::new(std::sync::RwLock::new(None)),
             expected_nonces: std::collections::HashMap::new(),
         }
     }
@@ -186,10 +200,6 @@ pub enum NetworkEvent {
     PeerDiscovered(PeerInfo),
     GameInviteReceived(String, GamePreferences),
     GameInviteAccepted(String),
-    WagerHandshake {
-        node_id: String,
-        game_id: u64,
-    },
     MessageReceived(NetworkMessage),
     GameEnded(String),
     PeerConnected(String),

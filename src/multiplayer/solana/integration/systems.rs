@@ -1,7 +1,6 @@
 use super::state::{BalanceRefreshTimer, SolanaIntegrationState, DEVNET_RPC_URL};
 use crate::core::GameState;
 use crate::game::events::GameStartedEvent;
-use crate::multiplayer::solana::session_key_manager::SessionKeyManager;
 use crate::multiplayer::solana::tournament::TournamentClientState;
 use crate::multiplayer::vps_client::UserStatus;
 use crate::multiplayer::{NetworkMessage, OnlineNetworkState};
@@ -34,6 +33,7 @@ pub fn initialize_solana_integration(
     time: Res<Time>,
     mut rx: Local<Option<crossbeam_channel::Receiver<Option<String>>>>,
     mut retry_secs: Local<f32>,
+    mut commands: Commands,
 ) {
     if solana_state.wallet_pubkey.is_some() {
         return;
@@ -82,71 +82,42 @@ pub fn initialize_solana_integration(
                             // a previous run, if one's saved on disk — lets
                             // `authorize_global_session_if_needed` skip
                             // straight to "active" instead of re-prompting.
+                            // This is optimistic (local file only); the
+                            // backend registration below is what actually
+                            // confirms it against on-chain state, and can
+                            // still flip `global_session_active` back off.
                             solana_state.try_load_global_session(&pubkey);
                             // Re-register with the backend on every connect
-                            // (fire-and-forget, off this thread) — its
-                            // registry is in-memory only and forgets
-                            // everything on restart, so this is what
-                            // recovers finalize/undelegate/settlement for
-                            // this wallet without needing a fresh popup.
+                            // (off this thread) — its registry is in-memory
+                            // only and forgets everything on restart, so this
+                            // is what recovers finalize/undelegate/settlement
+                            // for this wallet without needing a fresh popup.
+                            // Its result now feeds back into
+                            // `global_session_active` (via
+                            // `poll_global_session_register_result`) instead
+                            // of only being logged — a locally-decryptable
+                            // but on-chain-mismatched key (lost/stale file,
+                            // wrong instance, different machine) was
+                            // previously trusted as "active" until the first
+                            // real use failed against the wrong session PDA.
                             if let Some(ref kp) = solana_state.global_session_keypair {
                                 let kp_bytes = kp.to_bytes();
+                                let (tx, rx) = crossbeam_channel::bounded(1);
                                 std::thread::spawn(move || {
-                                    register_global_session_with_backend(pubkey, kp_bytes);
+                                    let outcome =
+                                        register_global_session_with_backend(pubkey, kp_bytes);
+                                    let _ = tx.send(outcome);
                                 });
+                                commands.insert_resource(GlobalSessionRegisterPending { rx });
                             }
 
-                            // Try to load existing session key
-                            match SessionKeyManager::load_session(&pubkey) {
-                                Ok(session_manager) => {
-                                    info!(
-                                        "[SESSION] Loaded existing session key: {}",
-                                        session_manager.pubkey()
-                                    );
-                                    match solana_sdk::signature::Keypair::try_from(
-                                        session_manager.signer().to_bytes().as_slice(),
-                                    ) {
-                                        Ok(kp) => solana_state.session_keypair = Some(kp),
-                                        Err(e) => {
-                                            error!("[SESSION] Failed to convert session manager to Keypair: {}", e);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    info!("[SESSION] No valid session key found ({}), will create new one", e);
-                                    // Create new session key
-                                    let session_manager = SessionKeyManager::new(&pubkey);
-                                    let session_pubkey = session_manager.pubkey();
-                                    match solana_sdk::signature::Keypair::try_from(
-                                        session_manager.signer().to_bytes().as_slice(),
-                                    ) {
-                                        Ok(kp) => solana_state.session_keypair = Some(kp),
-                                        Err(e) => {
-                                            error!("[SESSION] Failed to convert session manager to Keypair: {}", e);
-                                        }
-                                    }
-
-                                    // Save session data (24 hour default)
-                                    if let Err(e) = session_manager.save_session(&pubkey, 24) {
-                                        warn!("[SESSION] Failed to save session key: {}", e);
-                                    }
-
-                                    info!("[SESSION] Created new session key: {}", session_pubkey);
-
-                                    // Authorize session key on-chain (async)
-                                    let _rpc_client = RpcClient::new_with_commitment(
-                                        DEVNET_RPC_URL.to_string(),
-                                        CommitmentConfig::confirmed(),
-                                    );
-                                    let _session_pubkey_clone = session_pubkey;
-                                    let _pubkey_clone = pubkey;
-                                    tokio_runtime.0.spawn(async move {
-                                        // Note: We can't sign without the wallet keypair here
-                                        // In production, this would be done via Tauri wallet popup
-                                        info!("[SESSION] Session key authorization requires wallet signature (deferred to first transaction)");
-                                    });
-                                }
-                            }
+                            // Gossip-signing keypair generation lives entirely in
+                            // `sync_session_key_to_network` now (gated on
+                            // `wallet_pubkey.is_some()`, not on this specific branch
+                            // running) — this code path loses the race against
+                            // `main_menu.rs`'s faster WalletBridge poll almost every
+                            // time in practice, so generating the key here too would
+                            // just be dead code most runs.
                         }
                         Err(e) => {
                             warn!(
@@ -288,7 +259,7 @@ pub fn update_wallet_usd_rate(
             Ok(Ok(rate)) => {
                 solana_state.sol_usd_rate = Some(rate);
                 solana_state.cached_usd_balance = Some(solana_state.balance * rate);
-                info!("[SOLANA] SOL/USD rate updated: ${:.2}", rate);
+                // No per-refresh log — see `wager_rate.rs`'s matching comment.
                 *rx = None;
             }
             Ok(Err(e)) => {
@@ -354,89 +325,51 @@ async fn fetch_sol_usd_rate() -> Result<f64, String> {
         .as_f64()
         .ok_or("Missing rates.usd in backend response")?;
 
-    info!("[SOLANA] SOL/USD: ${:.2}", price);
     Ok(price)
 }
 
-pub fn monitor_network_handshakes(
-    mut solana_state: ResMut<SolanaIntegrationState>,
-    mut network_events: MessageReader<crate::multiplayer::NetworkEvent>,
-    mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
-) {
-    for event in network_events.read() {
-        if let crate::multiplayer::NetworkEvent::WagerHandshake {
-            node_id: _,
-            game_id,
-        } = event
-        {
-            // Push "Check Wallet" notification
-            popup_queue.push(crate::ui::menus::popup::GamePopup {
-                title: "Confirm Wager".to_string(),
-                message: "A wager match is starting. Please confirm the wager transaction in your wallet.".to_string(),
-                copy_text: None,
-                url: None,
-                url_label: None,
-                lifetime: 15.0,
-                remaining: 15.0,
-                dismissed: false,
-            });
-            let game_id_owned = *game_id;
-            let wallet_pubkey = match solana_state.wallet_pubkey {
-                Some(pk) => pk,
-                None => {
-                    warn!(
-                        "[HANDSHAKE] Wallet not connected — cannot join game {} on-chain",
-                        game_id_owned
-                    );
-                    continue;
-                }
-            };
-
-            info!(
-                "[HANDSHAKE] Wager handshake for game {} — joining on-chain via Phantom",
-                game_id_owned
-            );
-
-            let program_id = solana_state.program_id;
-
-            let task = bevy::tasks::IoTaskPool::get().spawn(async move {
-                use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
-                use crate::solana::instructions::join_game_ix;
-
-                let ix = join_game_ix(
-                    program_id,
-                    wallet_pubkey,
-                    wallet_pubkey, // white_player — will be resolved properly via lobby flow
-                    wallet_pubkey, // fee_payer — placeholder; session key used in real path
-                    game_id_owned,
-                )
-                .map_err(|e| format!("build join_game_ix: {}", e))?;
-
-                sign_and_send_via_tauri(&DEVNET_RPC_URL, wallet_pubkey, &[ix], &[])
-                    .map(|_sig| game_id_owned)
-                    .map_err(|e| format!("join_game sign: {}", e))
-            });
-
-            task.detach();
-            solana_state.handshake_completed = false;
-        }
-    }
-}
-
-/// Sync the on-chain session signing key into the P2P network state so that
-/// all outgoing gossip messages are cryptographically signed.
+/// Sync the gossip-signing key into the P2P network state so that all
+/// outgoing gossip messages are cryptographically signed.
+///
+/// Generates the keypair itself (into `solana_state.session_keypair`, kept
+/// for display/logging elsewhere) rather than only copying an
+/// already-generated one — `initialize_solana_integration` used to be the
+/// sole generator, but that only runs on the branch where its *own* Tauri
+/// poll resolves the wallet pubkey, which loses the race against
+/// `main_menu.rs`'s faster WalletBridge HTTP poll almost every time (the
+/// latter's "only set pubkey once" guard then makes
+/// `initialize_solana_integration` return before ever reaching the
+/// keygen). In practice this meant no gossip-signing key was ever
+/// generated, `session_signing_key` stayed `None` for the whole run, and
+/// every P2P message went out unsigned — silently dropped by any peer that
+/// hasn't opted into `allow-unsigned-p2p`. Generating it here instead,
+/// gated only on "wallet connected, no key yet," makes it independent of
+/// which of the two wallet-connect code paths actually wins.
 pub fn sync_session_key_to_network(
-    solana_state: Res<SolanaIntegrationState>,
+    mut solana_state: ResMut<SolanaIntegrationState>,
     mut network_state: ResMut<OnlineNetworkState>,
 ) {
     if network_state.session_signing_key.is_some() {
         return;
+    }
+    if solana_state.wallet_pubkey.is_none() {
+        return;
+    }
+    if solana_state.session_keypair.is_none() {
+        let session_kp = solana_sdk::signature::Keypair::new();
+        info!("[SESSION] Generated gossip-signing key: {}", session_kp.pubkey());
+        solana_state.session_keypair = Some(session_kp);
     }
     if let Some(ref kp) = solana_state.session_keypair {
         let bytes = kp.to_bytes();
         let mut sk = [0u8; 32];
         sk.copy_from_slice(&bytes[..32]);
         network_state.session_signing_key = Some(sk);
+        // The outgoing-message task reads this shared cell, not the plain
+        // field above — see its doc comment.
+        if let Ok(mut shared) = network_state.session_signing_key_shared.write() {
+            *shared = Some(sk);
+        }
         info!("[SESSION] Copied session signing key to P2P network state");
     }
 }
@@ -489,10 +422,54 @@ pub fn authorize_session_key_on_game_start(
         }
 
         let msg_sender = network_state.message_sender.clone();
+        // `SessionInfo` (which populates `opponent_pubkey`, required before
+        // `bridge.rs` can finalize the game on-chain) previously went out
+        // over Iroh gossip only. Moves and resignation already learned this
+        // lesson (see `online_game_session.rs`'s "dual transport" comment) —
+        // gossip alone silently drops this message whenever the direct P2P
+        // link hasn't established (a real, reproduced failure: "[P2P]
+        // Connection timed out after 12s"), leaving both sides stuck logging
+        // "Opponent pubkey unavailable" forever and the game never settling.
+        let node_b58 = network_state
+            .node_id
+            .as_ref()
+            .map(|id| bs58::encode(id.as_bytes()).into_string());
+        // The pubkey that actually signs this connection's outgoing gossip
+        // envelopes (see `sync_session_key_to_network`) — distinct from
+        // `session_pubkey` below. The per-game participant roster
+        // (`multiplayer::systems`'s causal-broadcast check) is keyed off
+        // *this* value, since that's what a received move's verified signer
+        // is compared against, not the VPS session-delegation key.
+        //
+        // `session_signing_key` stores the 32-byte Ed25519 *seed*, not the
+        // public key — `SignedNetworkMessage::sign`/`verify` derive the real
+        // verifying key from it via `SigningKey::from_bytes(seed)
+        // .verifying_key()`. This MUST use the same derivation: an earlier
+        // version of this code passed the raw seed bytes straight into
+        // `Pubkey::new_from_array`, which just reinterprets 32 arbitrary
+        // bytes as if they were already a public key — not a valid Ed25519
+        // public-key derivation, and never equal to what `bind_identity`
+        // actually verifies and sets as `agent_id`. That bug meant the
+        // roster was still populated with a value no real move's verified
+        // signer could ever match, silently reproducing the exact
+        // "non-participant signer" rejection the `signing_pubkey` field was
+        // added to fix in the first place.
+        let signing_pubkey_bytes = network_state.session_signing_key;
 
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
                 use crate::multiplayer::vps_client;
+
+                let Some(signing_pubkey) = signing_pubkey_bytes.map(|seed| {
+                    use ed25519_dalek::SigningKey;
+                    Pubkey::new_from_array(SigningKey::from_bytes(&seed).verifying_key().to_bytes())
+                }) else {
+                    warn!(
+                        "[SESSION] No gossip-signing key yet for game {} — cannot broadcast SessionInfo (moves would be rejected as non-participant on the peer's roster check)",
+                        game_id
+                    );
+                    return;
+                };
 
                 let mut active = false;
                 for _ in 0..60 {
@@ -509,13 +486,24 @@ pub fn authorize_session_key_on_game_start(
                             );
 
                             let expires_at = chrono::Utc::now().timestamp() + 3600;
+                            let msg = NetworkMessage::SessionInfo {
+                                game_id,
+                                player_pubkey: wallet_pubkey,
+                                session_pubkey,
+                                signing_pubkey,
+                                expires_at,
+                            };
+
+                            // Dual transport: VPS relay, so this lands even
+                            // when Iroh gossip isn't connected yet.
+                            if let Some(ref node_b58) = node_b58 {
+                                crate::multiplayer::network::relay_bridge::relay_send(
+                                    &game_id.to_string(),
+                                    node_b58,
+                                    &msg,
+                                );
+                            }
                             if let Some(ref tx) = msg_sender {
-                                let msg = NetworkMessage::SessionInfo {
-                                    game_id,
-                                    player_pubkey: wallet_pubkey,
-                                    session_pubkey,
-                                    expires_at,
-                                };
                                 let _ = tx.send(msg);
                             }
                             break;
@@ -538,12 +526,30 @@ pub fn authorize_session_key_on_game_start(
     }
 }
 
-/// Resolves the storage path for the local hot wallet
+/// Resolves the storage path for the local hot wallet.
+///
+/// Namespaced by `XFCHESS_WALLET_PORT` (same env var `tauri_signer` uses for
+/// the wallet-bridge port) whenever it's set to something other than the
+/// default 7454 — otherwise two instances on one machine (e.g. `just dev2`'s
+/// P1/P2) both read/write the exact same `hot_wallet.json` and end up being
+/// the *same* on-chain wallet, so logging out and back in on one window
+/// resurfaces whichever identity the other window last saved. Mirrors
+/// `network::identity::key_path`'s `XFCHESS_NODE_KEY_PATH` override for the
+/// same class of bug on the P2P node key.
 fn get_hot_wallet_path() -> Option<PathBuf> {
-    ProjectDirs::from("com", "trilltino", "XFChess").map(|proj_dirs| {
-        let config_dir = proj_dirs.config_dir();
-        config_dir.join("hot_wallet.json")
-    })
+    ProjectDirs::from("com", "trilltino", "XFChess")
+        .map(|proj_dirs| hot_wallet_filename(proj_dirs.config_dir(), std::env::var("XFCHESS_WALLET_PORT").ok().as_deref()))
+}
+
+/// Appends an `_<port>` suffix to `hot_wallet.json` when `wallet_port` is set
+/// to something other than the default `7454`. Takes the port as a plain
+/// argument rather than reading the env var itself so the namespacing logic
+/// can be unit-tested without mutating process-global state.
+fn hot_wallet_filename(config_dir: &std::path::Path, wallet_port: Option<&str>) -> PathBuf {
+    match wallet_port.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) if p != "7454" => config_dir.join(format!("hot_wallet_{p}.json")),
+        _ => config_dir.join("hot_wallet.json"),
+    }
 }
 
 /// Loads an existing hot wallet or generates a new one
@@ -773,49 +779,6 @@ pub fn handle_tournament_transactions(
     // Placeholder for transaction logic
 }
 
-// -- Item 3: Session key expiry warning ---------------------------------------
-
-/// Resource inserted when the session key is within 24 h of expiry.
-#[derive(bevy::prelude::Resource, Debug)]
-pub struct SessionExpiryWarning {
-    pub game_id: u64,
-    pub expires_in_hours: u32,
-}
-
-/// System that fires on each GameStartedEvent, checks the session key expiry,
-/// and inserts SessionExpiryWarning if < 24 h remain.
-pub fn check_session_expiry_on_game_start(
-    mut events: bevy::ecs::message::MessageReader<crate::game::events::GameStartedEvent>,
-    solana_state: Option<bevy::prelude::Res<SolanaIntegrationState>>,
-    mut commands: bevy::prelude::Commands,
-) {
-    for ev in events.read() {
-        let wallet = match solana_state.as_ref().and_then(|s| s.wallet_pubkey) {
-            Some(pk) => pk,
-            None => continue,
-        };
-        let expires_at =
-            match crate::multiplayer::solana::session_key_manager::SessionKeyManager::expires_at(
-                &wallet,
-            ) {
-                Some(t) => t,
-                None => continue,
-            };
-        let remaining_secs = expires_at - chrono::Utc::now().timestamp();
-        if remaining_secs < 86_400 {
-            let expires_in_hours = (remaining_secs.max(0) / 3600) as u32;
-            warn!(
-                "[SESSION_EXPIRY] Session expires in {} h for game {}",
-                expires_in_hours, ev.game_id
-            );
-            commands.insert_resource(SessionExpiryWarning {
-                game_id: ev.game_id,
-                expires_in_hours,
-            });
-        }
-    }
-}
-
 // -- Item 8: Global session VPS handshake -------------------------------------
 
 /// Resource present when the VPS has confirmed an active global session for the local wallet.
@@ -903,13 +866,24 @@ pub fn poll_global_session_result(
 /// Mirrors `profile_check.rs`'s background-task + backoff-timer shape: a
 /// `Local` receiver drains a background thread's result, and a cooldown
 /// timer stops a failed attempt from retrying every frame.
+///
+/// Capped at `MAX_ATTEMPTS`: this is purely an optimization (it lets later
+/// games sign locally instead of round-tripping through the wallet popup),
+/// so a wallet that can't complete it — insufficient balance, a stuck
+/// blockhash, whatever — must not be re-prompted with a fresh Solflare
+/// popup forever. Giving up just means every game falls back to the
+/// per-game Tauri wallet-bridge signing that already existed before this
+/// optimization.
 pub fn authorize_global_session_if_needed(
     mut solana_state: ResMut<SolanaIntegrationState>,
     time: Res<Time>,
     mut rx: Local<Option<crossbeam_channel::Receiver<Result<Keypair, String>>>>,
     mut retry_timer: Local<f32>,
     mut attempted_for: Local<Option<Pubkey>>,
+    mut failed_attempts: Local<u32>,
 ) {
+    const MAX_ATTEMPTS: u32 = 3;
+
     let Some(wallet_pubkey) = solana_state.wallet_pubkey else {
         return;
     };
@@ -920,17 +894,39 @@ pub fn authorize_global_session_if_needed(
                 info!("[GLOBAL_SESSION] Authorized — session {}", kp.pubkey());
                 solana_state.global_session_keypair = Some(kp);
                 solana_state.global_session_active = true;
+                solana_state.global_session_unavailable_reason = None;
+                solana_state.global_session_setup_in_progress = false;
                 *rx = None;
             }
             Ok(Err(e)) => {
-                warn!("[GLOBAL_SESSION] Authorization failed: {e}");
+                *failed_attempts += 1;
                 *rx = None;
-                *retry_timer = 30.0; // back off before trying again
+                solana_state.global_session_setup_in_progress = false;
+                if *failed_attempts >= MAX_ATTEMPTS {
+                    warn!(
+                        "[GLOBAL_SESSION] Authorization failed {} times ({e}) — giving up for this session, falling back to per-game wallet signing.",
+                        *failed_attempts
+                    );
+                    *retry_timer = f32::INFINITY; // never retry again this run
+                    solana_state.global_session_unavailable_reason = Some(e);
+                } else {
+                    warn!(
+                        "[GLOBAL_SESSION] Authorization failed ({}/{MAX_ATTEMPTS}): {e}",
+                        *failed_attempts
+                    );
+                    *retry_timer = 30.0; // back off before trying again
+                }
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
             Err(_) => {
+                *failed_attempts += 1;
                 *rx = None;
-                *retry_timer = 30.0;
+                solana_state.global_session_setup_in_progress = false;
+                *retry_timer = if *failed_attempts >= MAX_ATTEMPTS { f32::INFINITY } else { 30.0 };
+                if *failed_attempts >= MAX_ATTEMPTS {
+                    solana_state.global_session_unavailable_reason =
+                        Some("background task dropped".to_string());
+                }
             }
         }
         return;
@@ -951,6 +947,26 @@ pub fn authorize_global_session_if_needed(
             return;
         }
     }
+
+    // Mirrors `establish_global_session`'s DEPOSIT_LAMPORTS (0.1 SOL) +
+    // SESSION_KEY_FUND_LAMPORTS (0.01 SOL), plus a small fee/rent buffer.
+    // A wallet below this can never complete the authorize+fund transaction
+    // — Phantom will show a real "Confirm Transaction" popup that fails
+    // simulation with "funds may be lost if submitted," and the client sits
+    // blocked on that popup for up to `SIGN_TIMEOUT_SECS` (60s) per attempt
+    // with nothing telling the player why. Check first and skip straight to
+    // the labeled unavailable-reason instead of opening a doomed popup.
+    const MIN_BALANCE_FOR_GLOBAL_SESSION_SOL: f64 = 0.115;
+    if solana_state.balance < MIN_BALANCE_FOR_GLOBAL_SESSION_SOL {
+        solana_state.global_session_unavailable_reason = Some(format!(
+            "wallet balance {:.4} SOL is below the {:.3} SOL needed to set up one-time session signing — fund the wallet and it will retry automatically",
+            solana_state.balance, MIN_BALANCE_FOR_GLOBAL_SESSION_SOL
+        ));
+        *attempted_for = Some(wallet_pubkey);
+        *retry_timer = 30.0; // re-check periodically in case the wallet gets funded
+        return;
+    }
+
     *attempted_for = Some(wallet_pubkey);
 
     let program_id: Pubkey = crate::solana::instructions::PROGRAM_ID
@@ -959,6 +975,7 @@ pub fn authorize_global_session_if_needed(
     let rpc_url = DEVNET_RPC_URL.to_string();
     let (tx, receiver) = crossbeam_channel::bounded(1);
     *rx = Some(receiver);
+    solana_state.global_session_setup_in_progress = true;
     std::thread::spawn(move || {
         let _ = tx.send(establish_global_session(wallet_pubkey, program_id, &rpc_url));
     });
@@ -975,8 +992,8 @@ fn establish_global_session(
     rpc_url: &str,
 ) -> Result<Keypair, String> {
     use crate::multiplayer::solana::global_session_manager::{
-        build_authorize_global_session_ix, find_global_session_pda, AuthorizeGlobalSessionArgs,
-        GlobalSessionKeyManager,
+        build_authorize_global_session_ix, build_revoke_global_session_ix,
+        find_global_session_pda, AuthorizeGlobalSessionArgs, GlobalSessionKeyManager,
     };
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
 
@@ -1014,8 +1031,35 @@ fn establish_global_session(
         SESSION_KEY_FUND_LAMPORTS,
     );
 
-    sign_and_send_via_tauri(rpc_url, wallet_pubkey, &[authorize_ix, fund_ix], &[])
-        .map_err(|e| format!("authorize_global_session: {e}"))?;
+    if let Err(e) = sign_and_send_via_tauri(
+        rpc_url,
+        wallet_pubkey,
+        &[authorize_ix.clone(), fund_ix.clone()],
+        &[],
+    ) {
+        // A `GlobalSessionDelegation` that's still enabled on-chain but has
+        // no matching local key (the local file was lost, overwritten by
+        // another instance pre-dating the storage-path fix, or the wallet
+        // authorized from a different machine) makes the program reject
+        // *every* re-authorize attempt with this exact error, identically,
+        // forever — retrying the same instruction can never succeed. Revoke
+        // the stale delegation and authorize again with this attempt's
+        // fresh key instead of leaving the caller's retry loop to spin until
+        // it gives up.
+        if e.contains("GlobalSessionAlreadyActive") {
+            info!(
+                "[GLOBAL_SESSION] On-chain delegation already active with no matching local key — revoking before re-authorizing"
+            );
+            let revoke_ix = build_revoke_global_session_ix(&program_id, &wallet_pubkey, &session_pda);
+            sign_and_send_via_tauri(rpc_url, wallet_pubkey, &[revoke_ix], &[]).map_err(|e2| {
+                format!("authorize_global_session: {e} (revoke retry also failed: {e2})")
+            })?;
+            sign_and_send_via_tauri(rpc_url, wallet_pubkey, &[authorize_ix, fund_ix], &[])
+                .map_err(|e2| format!("authorize_global_session (after revoke): {e2}"))?;
+        } else {
+            return Err(format!("authorize_global_session: {e}"));
+        }
+    }
 
     register_global_session_with_backend(wallet_pubkey, mgr.signer().to_bytes());
 
@@ -1024,6 +1068,58 @@ fn establish_global_session(
 
     Keypair::try_from(mgr.signer().to_bytes().as_slice())
         .map_err(|e| format!("keypair conversion: {e}"))
+}
+
+/// Result of asking the backend to verify+register an already-authorized
+/// global session key. Distinguishes a *confirmed* on-chain mismatch (the
+/// backend read the real `GlobalSessionDelegation` PDA and the key genuinely
+/// doesn't match — the local file is stale/wrong-wallet/wrong-instance, and
+/// must not keep being trusted) from a merely transient failure (backend
+/// unreachable, momentary error), which says nothing about whether the key
+/// is actually still valid on-chain and must not cause a false "not active".
+pub(crate) enum GlobalSessionRegisterOutcome {
+    Confirmed,
+    ConfirmedMismatch,
+    Transient,
+}
+
+/// Holds the background `register_global_session_with_backend` receiver so
+/// `poll_global_session_register_result` can apply its outcome next frame.
+#[derive(bevy::prelude::Resource)]
+pub(crate) struct GlobalSessionRegisterPending {
+    rx: crossbeam_channel::Receiver<GlobalSessionRegisterOutcome>,
+}
+
+/// Drains the background registration result and applies it. The critical
+/// case is `ConfirmedMismatch`: previously this result was only logged, so a
+/// locally-decryptable but on-chain-mismatched session key (lost/stale file,
+/// wrong `dev2` instance, different machine) stayed "active" in
+/// `SolanaIntegrationState` until the first real transaction using it failed
+/// on-chain against the wrong session PDA — by then the player had already
+/// clicked Create/Join expecting the zero-popup path.
+pub fn poll_global_session_register_result(
+    mut solana_state: ResMut<SolanaIntegrationState>,
+    pending: Option<Res<GlobalSessionRegisterPending>>,
+    mut commands: Commands,
+) {
+    let Some(pending) = pending else { return };
+    match pending.rx.try_recv() {
+        Ok(GlobalSessionRegisterOutcome::ConfirmedMismatch) => {
+            warn!(
+                "[GLOBAL_SESSION] Backend confirmed the local session key doesn't match on-chain — clearing it"
+            );
+            solana_state.global_session_active = false;
+            solana_state.global_session_keypair = None;
+            commands.remove_resource::<GlobalSessionRegisterPending>();
+        }
+        Ok(GlobalSessionRegisterOutcome::Confirmed | GlobalSessionRegisterOutcome::Transient) => {
+            commands.remove_resource::<GlobalSessionRegisterPending>();
+        }
+        Err(crossbeam_channel::TryRecvError::Empty) => {}
+        Err(_) => {
+            commands.remove_resource::<GlobalSessionRegisterPending>();
+        }
+    }
 }
 
 /// Best-effort: hand the backend a copy of an already-authorized global
@@ -1035,7 +1131,10 @@ fn establish_global_session(
 /// so it's safe to call on every wallet connect, not just the first-ever
 /// authorization — that repetition matters because the backend's registry
 /// is in-memory only and forgets everything on restart.
-fn register_global_session_with_backend(wallet_pubkey: Pubkey, keypair_bytes: [u8; 64]) {
+fn register_global_session_with_backend(
+    wallet_pubkey: Pubkey,
+    keypair_bytes: [u8; 64],
+) -> GlobalSessionRegisterOutcome {
     let secret_b58 = bs58::encode(keypair_bytes).into_string();
     let url = format!(
         "{}/api/global-session/register",
@@ -1048,15 +1147,57 @@ fn register_global_session_with_backend(wallet_pubkey: Pubkey, keypair_bytes: [u
     match reqwest::blocking::Client::new().post(&url).json(&body).send() {
         Ok(resp) if resp.status().is_success() => {
             info!("[GLOBAL_SESSION] Registered session key with backend");
+            GlobalSessionRegisterOutcome::Confirmed
+        }
+        Ok(resp)
+            if resp.status() == reqwest::StatusCode::FORBIDDEN
+                || resp.status() == reqwest::StatusCode::BAD_GATEWAY =>
+        {
+            warn!(
+                "[GLOBAL_SESSION] Backend rejected registration ({}) — key does not match on-chain state",
+                resp.status()
+            );
+            GlobalSessionRegisterOutcome::ConfirmedMismatch
         }
         Ok(resp) => {
             warn!(
                 "[GLOBAL_SESSION] Backend registration returned {} — finalize/undelegate/settlement won't work for this wallet until it's retried",
                 resp.status()
             );
+            GlobalSessionRegisterOutcome::Transient
         }
         Err(e) => {
             warn!("[GLOBAL_SESSION] Backend registration failed: {e}");
+            GlobalSessionRegisterOutcome::Transient
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guards the `dev2` P1/P2 instance-isolation fix: two windows on one
+    /// machine must not silently share `hot_wallet.json` (that was the
+    /// "logout logs me in as the other instance" bug — this file has no
+    /// wallet-pubkey mismatch check the way the session-key managers do, so
+    /// a shared path here means both windows are silently the *same* wallet).
+    #[test]
+    fn hot_wallet_filename_diverges_for_a_non_default_instance_port() {
+        let dir = PathBuf::from("/config");
+        let p1 = hot_wallet_filename(&dir, None);
+        let p2 = hot_wallet_filename(&dir, Some("7464"));
+        assert_eq!(p1, dir.join("hot_wallet.json"), "unset port must keep the pre-fix default path");
+        assert_ne!(p1, p2, "a non-default port must get its own file");
+    }
+
+    #[test]
+    fn hot_wallet_filename_treats_explicit_default_port_same_as_unset() {
+        let dir = PathBuf::from("/config");
+        let unset = hot_wallet_filename(&dir, None);
+        let explicit_default = hot_wallet_filename(&dir, Some("7454"));
+        let blank = hot_wallet_filename(&dir, Some("  "));
+        assert_eq!(unset, explicit_default);
+        assert_eq!(unset, blank);
     }
 }

@@ -102,10 +102,12 @@ fn poll_sol_usd_refresh(mut rate: ResMut<SolUsdRate>) {
     while let Ok(message) = rate.response_rx.try_recv() {
         match message {
             SolUsdRateMessage::Success(snapshot) => {
-                info!(
-                    "[SOL_USD_RATE] Refreshed SOL/USD quote: 1 SOL = ${:.2}",
-                    snapshot.usd_per_sol
-                );
+                // No per-refresh log here on purpose — this fires every 60s
+                // for the lifetime of the app and added nothing but noise to
+                // every log dump used to debug session/networking issues
+                // this session. Failures below still log; see
+                // `monitoring::log_game_health_snapshot` for the
+                // periodic-status replacement.
                 rate.current = Some(snapshot);
                 rate.last_error = None;
                 rate.is_refreshing = false;

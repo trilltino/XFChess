@@ -150,6 +150,10 @@ pub struct GameSettings {
     /// Show vertical centipawn eval bar (offline/AI games only)
     #[serde(default)]
     pub show_eval_bar: bool,
+
+    /// 3D background dome index — see `rendering::effects::environment::BACKDROP_PRESETS`.
+    #[serde(default)]
+    pub background_env: u8,
 }
 
 impl Default for GameSettings {
@@ -166,6 +170,7 @@ impl Default for GameSettings {
             blindfold: false,
             piece_set: 0,
             show_eval_bar: false,
+            background_env: 0,
         }
     }
 }
