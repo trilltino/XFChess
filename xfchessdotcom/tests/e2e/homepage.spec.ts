@@ -13,9 +13,9 @@ test.describe('Homepage', () => {
       page.getByAltText('XFChess — Competitive Chess Server')
     ).toBeVisible();
 
-    await expect(page.getByRole('heading', { name: 'Winner Takes All' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'A Real 3D Board' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Compete for Pools' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Stake Your Rating' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '2D or 3D' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Open Source' })).toBeVisible();
   });
 
   test('top nav is visible with Home and Play links', async ({ page }) => {

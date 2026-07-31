@@ -13,11 +13,14 @@ Source-control and release discipline (Production Reality Checklist §4). Part o
 
 > **Status: APPLIED** via the GitHub API. Current `main` protection: PRs required,
 > required status checks = `Check`, `Test Suite`, `Web (build + audit)`; conversation
-> resolution + linear history on; force-push/deletion off. **Solo-safe deviations from
-> the list below:** required approvals = **0** and admins **not** hard-enforced — because
-> on a solo repo GitHub won't let you approve your own PR, so "require 1 review" +
-> "include administrators" would lock you out of merging. Tighten both once you add a
-> collaborator. Revert all protection: `gh api -X DELETE repos/trilltino/XFChess/branches/main/protection`.
+> resolution + linear history on; force-push/deletion off; **admins hard-enforced**
+> (as of 2026-07-31) — direct pushes to `main`, including from the repo owner, are
+> rejected; every change (including public-safe syncs from the private repo) goes
+> through a branch + PR + passing checks, self-merged. **Remaining solo-safe
+> deviation:** required approvals = **0** — on a solo repo GitHub won't let you
+> approve your own PR, so "require 1 review" would lock you out of merging entirely.
+> Tighten that once you add a collaborator. Revert all protection:
+> `gh api -X DELETE repos/trilltino/XFChess/branches/main/protection`.
 
 The full policy to grow into (in **GitHub → Settings → Branches**):
 - ✅ Require a pull request before merging
