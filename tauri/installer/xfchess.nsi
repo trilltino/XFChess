@@ -6,10 +6,11 @@
 ; The staged payload is expected next to this script under ..\..\release\win\:
 ;   xfchess.exe          (game, main app)
 ;   xfchess-tauri.exe    (wallet bridge companion)
-;   stockfish.exe        (chess engine)
+;   stockfish.exe        (chess engine — mandatory, release.yml fails the job
+;                          before this script even runs if it couldn't be fetched)
 ;   assets\              (game assets)
 ; All .exe files MUST already be Authenticode-signed before makensis runs, then
-; the resulting Setup.exe is signed too. See DISTRIBUTION.md.
+; the resulting Setup.exe is signed too. See docs/PUBLISHING.md.
 
 !define APP_NAME      "XFChess"
 !define APP_PUBLISHER "trilltino"
@@ -64,7 +65,7 @@ Section "Install"
 
   File "${PAYLOAD_DIR}\${APP_EXE}"
   File "${PAYLOAD_DIR}\${BRIDGE_EXE}"
-  File /nonfatal "${PAYLOAD_DIR}\stockfish.exe"
+  File "${PAYLOAD_DIR}\stockfish.exe"
 
   SetOutPath "$INSTDIR\assets"
   File /r "${PAYLOAD_DIR}\assets\*.*"

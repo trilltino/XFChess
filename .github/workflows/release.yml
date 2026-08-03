@@ -2,7 +2,7 @@ name: Release
 
 # Tag-driven signed installers for Windows + macOS.
 #   git tag v0.1.0 && git push origin v0.1.0
-# Provision the signing secrets first — see docs/DISTRIBUTION.md.
+# Provision the signing secrets first — see docs/PUBLISHING.md.
 
 on:
   push:
@@ -79,13 +79,21 @@ jobs:
           cargo build --release --bin xfchess --features solana
           cargo build --release -p xfchess-tauri
 
-      - name: Download Stockfish (best-effort — AI features degrade gracefully without it)
+      - name: Download Stockfish (required — release must ship with the engine bundled)
         shell: pwsh
-        continue-on-error: true
         run: |
-          Invoke-WebRequest -Uri "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.zip" -OutFile sf.zip
+          curl.exe -fsSL --retry 3 --retry-delay 5 -m 60 -o sf.zip "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.zip"
+          if ($LASTEXITCODE -ne 0) { throw "Stockfish download failed (curl exit $LASTEXITCODE)" }
           Expand-Archive -Path sf.zip -DestinationPath sf_extracted
           Copy-Item -Force "sf_extracted\stockfish\stockfish-windows-x86-64-modern.exe" stockfish.exe
+
+      - name: Verify Stockfish binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path stockfish.exe)) { throw "stockfish.exe missing after download step" }
+          $output = @("uci", "quit") | & .\stockfish.exe
+          if (-not ($output -match "uciok")) { throw "stockfish.exe did not respond to a UCI handshake — binary may be corrupt" }
+          Write-Host "Stockfish OK"
 
       - name: Stage payload
         shell: pwsh
@@ -95,7 +103,7 @@ jobs:
           Copy-Item -Recurse -Force assets/* "$stage/assets/"
           Copy-Item -Force target/release/xfchess.exe "$stage/"
           Copy-Item -Force target/release/xfchess-tauri.exe "$stage/"
-          if (Test-Path stockfish.exe) { Copy-Item -Force stockfish.exe "$stage/" }
+          Copy-Item -Force stockfish.exe "$stage/"
 
       # Sign the binaries BEFORE packaging. Azure Trusted Signing path:
       - name: Sign binaries (Azure Trusted Signing)
@@ -207,13 +215,16 @@ jobs:
           EOF
           chmod +x release/linux/launch.sh
 
-      - name: Download Stockfish (best-effort — AI features degrade gracefully without it)
-        continue-on-error: true
+      - name: Download Stockfish (required — release must ship with the engine bundled)
         run: |
-          curl -sSL -m 60 -o /tmp/sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-ubuntu-x86-64-modern.tar
+          curl -fsSL --retry 3 --retry-delay 5 -m 60 -o /tmp/sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-ubuntu-x86-64-modern.tar
           tar -xf /tmp/sf.tar -C /tmp stockfish/stockfish-ubuntu-x86-64-modern
           cp /tmp/stockfish/stockfish-ubuntu-x86-64-modern release/linux/stockfish
           chmod +x release/linux/stockfish
+
+      - name: Verify Stockfish binary
+        run: |
+          printf 'uci\nquit\n' | release/linux/stockfish | grep -q '^uciok$'
 
       - name: E2E smoke test (headless, connects to production backend)
         env:
@@ -305,13 +316,16 @@ jobs:
           cargo build --release --bin xfchess --features solana
           cargo build --release -p xfchess-tauri
 
-      - name: Download Stockfish (best-effort — AI features degrade gracefully without it)
-        continue-on-error: true
+      - name: Download Stockfish (required — release must ship with the engine bundled)
         run: |
-          curl -sSL -m 60 -o /tmp/sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-macos-x86-64-modern.tar
+          curl -fsSL --retry 3 --retry-delay 5 -m 60 -o /tmp/sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-macos-x86-64-modern.tar
           tar -xf /tmp/sf.tar -C /tmp stockfish/stockfish-macos-x86-64-modern
           cp /tmp/stockfish/stockfish-macos-x86-64-modern "$GITHUB_WORKSPACE/stockfish"
           chmod +x "$GITHUB_WORKSPACE/stockfish"
+
+      - name: Verify Stockfish binary
+        run: |
+          printf 'uci\nquit\n' | "$GITHUB_WORKSPACE/stockfish" | grep -q '^uciok$'
 
       - name: Package, sign, notarize, DMG
         env:

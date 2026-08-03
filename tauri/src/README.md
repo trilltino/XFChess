@@ -32,3 +32,13 @@ type PendingTxInner = Option<(Vec<u8>, oneshot::Sender<Result<Vec<u8>, String>>)
 - `open_url` allowlists schemes (`http/https/mailto/xfchess`); keep it that way.
 - Shell capabilities are scoped to the tournament-admin window only
   ([../capabilities/](../capabilities/)) — never re-grant them to the wallet window.
+- Everything that can create/serve the tournament-admin panel — `open_tournament_admin`,
+  the `/tournament-admin*` axum routes, the `dist_path`/`LocalState` plumbing, and the
+  `XFCHESS_OPEN_ADMIN` auto-open in `main.rs`'s `setup()` — is behind
+  `#[cfg(feature = "tournament-admin")]`. That feature is **not** in `default` and
+  `release.yml` never passes it, so a shipped consumer build has no route, window, or
+  IPC path that can open or serve the admin panel — not merely a missing `dist/` folder
+  best-effort-degrading it away. `show_tournament_admin_window` stays registered in
+  `invoke_handler!` either way (Tauri needs the symbol to exist); without the feature it
+  resolves to a no-op fallback that just logs a warning. If you add a new way to reach
+  the admin panel, gate it the same way — don't rely on the dist folder being absent.

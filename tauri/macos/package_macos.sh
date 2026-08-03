@@ -2,7 +2,7 @@
 # Assemble, sign, notarize, staple and DMG-package XFChess.app on macOS.
 # Run on a macOS runner after `cargo build --release` has produced the binaries.
 #
-# Required env (see docs/DISTRIBUTION.md):
+# Required env (see docs/PUBLISHING.md):
 #   APPLE_SIGNING_IDENTITY   "Developer ID Application: Name (TEAMID)"
 #   APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID
 # Optional:
@@ -24,10 +24,31 @@ mkdir -p "$APPDIR/Contents/MacOS" "$APPDIR/Contents/Resources"
 # Main executable is the game; the wallet bridge + stockfish ship alongside it.
 cp "$TARGET/xfchess"        "$APPDIR/Contents/MacOS/xfchess"
 cp "$TARGET/xfchess-tauri"  "$APPDIR/Contents/MacOS/xfchess-tauri"
-[ -f "$ROOT/stockfish" ] && cp "$ROOT/stockfish" "$APPDIR/Contents/MacOS/stockfish" || true
+
+if [ ! -f "$ROOT/stockfish" ]; then
+  echo "ERROR: $ROOT/stockfish not found — a release build must ship with the engine bundled" >&2
+  exit 1
+fi
+cp "$ROOT/stockfish" "$APPDIR/Contents/MacOS/stockfish"
+
 cp -R "$ROOT/assets" "$APPDIR/Contents/Resources/assets"
-cp "$ROOT/tauri/icons/icon.icns" "$APPDIR/Contents/Resources/icon.icns" 2>/dev/null || \
-  echo "WARN: tauri/icons/icon.icns missing — generate one with 'iconutil' for a proper Dock icon"
+
+if [ -f "$ROOT/tauri/icons/icon.icns" ]; then
+  cp "$ROOT/tauri/icons/icon.icns" "$APPDIR/Contents/Resources/icon.icns"
+else
+  echo "==> No pre-made icon.icns checked in — generating one from tauri/icons/128x128.png"
+  SRC_PNG="$ROOT/tauri/icons/128x128.png"
+  [ -f "$SRC_PNG" ] || { echo "ERROR: neither tauri/icons/icon.icns nor tauri/icons/128x128.png found" >&2; exit 1; }
+  ICONSET="$STAGE/icon.iconset"
+  rm -rf "$ICONSET" && mkdir -p "$ICONSET"
+  for size in 16 32 128 256 512; do
+    double=$((size * 2))
+    sips -z "$size" "$size" "$SRC_PNG" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+    sips -z "$double" "$double" "$SRC_PNG" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APPDIR/Contents/Resources/icon.icns"
+  rm -rf "$ICONSET"
+fi
 
 # Launcher: starts the wallet bridge, then the game. Mirrors the Windows launch.bat.
 cat > "$APPDIR/Contents/MacOS/launch" <<'EOF'

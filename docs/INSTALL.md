@@ -113,7 +113,8 @@ universal/Intel binary yet, so the release won't run on an Intel Mac.
   the bypass step above on the current install.
 - **Chess engine feels weak/strong:** difficulty is adjustable in-game
   (Level 1–8); the default engine is the built-in `XFChessEngine`
-  (native Rust, no setup needed). Stockfish is only used if explicitly
-  selected as the AI engine and a `stockfish` binary is bundled — the
-  current release pipeline doesn't guarantee one ships in the Windows/macOS
-  packages.
+  (native Rust, no setup needed). Stockfish ships bundled with every
+  release on all three platforms and is selectable as the **Engine**
+  option when setting up a Play vs Computer game — if it doesn't work,
+  it's a bug (the release build fails outright if Stockfish can't be
+  bundled), not a missing optional download.

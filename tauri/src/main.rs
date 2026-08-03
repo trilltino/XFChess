@@ -135,6 +135,7 @@ async fn http_server(
     wallet_pubkey: WalletPubkey,
     wallet_username: WalletUsername,
     wallet_jwt: WalletJwt,
+    #[cfg(feature = "tournament-admin")]
     dist_path: std::path::PathBuf,
     needs_profile_step: Arc<std::sync::atomic::AtomicBool>,
   }
@@ -476,6 +477,11 @@ async fn http_server(
   // desktop-only: it renders in the Tauri "tournament-admin" window, loaded from
   // this loopback-only bridge — there is no standalone vite/web dev server.
   // Rebuild the UI with: cd tauri/tournament-admin && npm run build
+  //
+  // Gated behind the `tournament-admin` cargo feature (off by default, and not
+  // passed by release.yml) so a shipped consumer build has no route, window,
+  // or IPC path capable of serving/opening the admin panel at all.
+  #[cfg(feature = "tournament-admin")]
   async fn serve_tournament_admin(
     State(s): State<LocalState>,
     uri: axum::http::Uri,
@@ -483,6 +489,7 @@ async fn http_server(
     serve_dist_file(&s.dist_path, uri.path()).await
   }
 
+  #[cfg(feature = "tournament-admin")]
   async fn serve_dist_file(dist: &std::path::Path, url_path: &str) -> axum::response::Response {
     // Strip /tournament-admin prefix, treat the rest as a relative file path
     let rel = url_path
@@ -554,6 +561,7 @@ async fn http_server(
   // Resolve the tournament-admin dist dir:
   // 1. Next to the binary (production bundle copies it there)
   // 2. CARGO_MANIFEST_DIR-relative (dev: workspace/tauri/tournament-admin/dist)
+  #[cfg(feature = "tournament-admin")]
   let dist_path = {
     let dev_path = std::path::PathBuf::from(concat!(
       env!("CARGO_MANIFEST_DIR"),
@@ -575,6 +583,7 @@ async fn http_server(
     wallet_pubkey,
     wallet_username,
     wallet_jwt,
+    #[cfg(feature = "tournament-admin")]
     dist_path,
     needs_profile_step: Arc::new(std::sync::atomic::AtomicBool::new(false)),
   };
@@ -601,8 +610,13 @@ async fn http_server(
     .route("/api/auth/broadcast-tx", post(api_broadcast_tx))
     .route("/api/game/launch", post(api_game_launch))
     .route("/api/open-profile-step", post(api_open_profile_step))
-    .route("/api/needs-profile-step", get(api_needs_profile_step))
-    // Tournament admin UI (built dist, rendered in the desktop admin window)
+    .route("/api/needs-profile-step", get(api_needs_profile_step));
+
+  // Tournament admin UI (built dist, rendered in the desktop admin window).
+  // Only wired up when compiled with --features tournament-admin — a default
+  // build (what release.yml ships) has no route capable of serving it.
+  #[cfg(feature = "tournament-admin")]
+  let router = router
     .route(
       "/tournament-admin",
       axum::routing::get(serve_tournament_admin),
@@ -614,9 +628,9 @@ async fn http_server(
     .route(
       "/tournament-admin/{*path}",
       axum::routing::get(serve_tournament_admin),
-    )
-    .layer(cors)
-    .with_state(state);
+    );
+
+  let router = router.layer(cors).with_state(state);
 
   let port = http_port();
   let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
@@ -777,8 +791,7 @@ fn kill_wallet_popup() {
   use ::windows::core::BOOL;
   use ::windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
   use ::windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION,
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
   };
   use ::windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowTextW, GetWindowThreadProcessId, PostMessageW, WM_CLOSE,
@@ -922,6 +935,10 @@ fn show_wallet_popup_window(app: tauri::AppHandle) {
   open_wallet_popup(&app);
 }
 
+// Gated behind the `tournament-admin` cargo feature (off by default; not
+// passed by release.yml) — a shipped consumer build gets the no-op fallback
+// below instead, so there's no code path that can ever create this window.
+#[cfg(feature = "tournament-admin")]
 fn open_tournament_admin(app: &tauri::AppHandle) {
   // Window creation MUST run on the main thread in Tauri v2.
   let app2 = app.clone();
@@ -956,6 +973,13 @@ fn open_tournament_admin(app: &tauri::AppHandle) {
       }
     }
   });
+}
+
+#[cfg(not(feature = "tournament-admin"))]
+fn open_tournament_admin(_app: &tauri::AppHandle) {
+  tracing::warn!(
+    "[TournamentAdmin] admin panel is not compiled into this build (needs --features tournament-admin)"
+  );
 }
 
 #[tauri::command]
@@ -1015,6 +1039,8 @@ fn main() {
       // ── Tournament admin auto-open (just dev / just admin / start-tournament-admin.bat) ──
       // Retries until the window exists: on a cold start the event loop may not
       // be able to create windows yet, and a single delayed attempt gets dropped.
+      // Feature-gated: a default/release build never even checks the env var.
+      #[cfg(feature = "tournament-admin")]
       if std::env::var("XFCHESS_OPEN_ADMIN").is_ok_and(|v| v == "1") {
         let h = app.handle().clone();
         tauri::async_runtime::spawn(async move {

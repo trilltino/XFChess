@@ -151,11 +151,18 @@ pattern:
   spliced into a crate's docs via `#![doc = include_str!(...)]`.
 
 **Windows-specific**
-- `stockfish.exe` is `.gitignore`'d — it never exists in a CI checkout, on
-  any platform. Tauri's `bundle.resources` has no "optional" mechanism
-  (unlike the NSIS `File /nonfatal` and the PowerShell `Test-Path` guard
-  used for this exact file elsewhere in the pipeline) — don't list an
-  optional/best-effort file there.
+- `stockfish.exe` is `.gitignore`'d — it never exists in a checkout on any
+  platform, only after `release.yml`'s "Download Stockfish" step fetches it
+  fresh. That download used to be best-effort (`continue-on-error: true`,
+  NSIS `File /nonfatal`) so a flaky fetch would silently ship a release
+  without the engine. As of 2026-08-03 it's mandatory: the download step has
+  no `continue-on-error`, a "Verify Stockfish binary" step spawns it and
+  checks for a `uciok` UCI handshake on all three platforms, and the NSIS
+  `File` directive (and `package_macos.sh`'s copy) are hard failures if the
+  binary is missing. If a future edit reintroduces best-effort semantics
+  here, it's a regression, not a feature. Tauri's `bundle.resources` still
+  has no "optional" mechanism, so don't list an optional/best-effort file
+  there either.
 - PowerShell: `$env:ProgramFiles(x86)` is invalid — a bareword `$env:`
   reference can't be followed by `(x86)`, it parses as a call expression.
   Needs brace syntax: `${env:ProgramFiles(x86)}`.
@@ -164,6 +171,17 @@ pattern:
   separator, and the containing directory won't exist. Only bites manual
   `workflow_dispatch` test runs off a branch — real tags (`v0.4.0`) never
   have slashes — but the version-derivation step sanitizes it anyway now.
+
+**macOS-specific**
+- `tauri/icons/icon.icns` was never checked in (only `icon.ico` +
+  `32x32.png`/`128x128.png` exist), so every DMG shipped with the generic
+  default Dock icon and `package_macos.sh` only printed a `WARN`. As of
+  2026-08-03 the script generates `icon.icns` on the fly from
+  `128x128.png` via `sips`/`iconutil` (both macOS-builtin, no extra CI
+  deps) when no pre-made `.icns` is checked in. It's upscaled from 128px so
+  it won't be crisp at 512/1024 — drop a real `icon.icns` (or a larger
+  source PNG) into `tauri/icons/` whenever a designed icon exists, and the
+  script will prefer it automatically.
 
 ## Verifying this guide is still accurate
 

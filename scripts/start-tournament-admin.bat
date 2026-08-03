@@ -20,7 +20,7 @@ start "XFChess Backend" cmd /k "cd /d %~dp0..\backend && set SIGNING_PORT=8090 &
 
 echo [LAUNCH] Tournament Admin desktop window...
 set XFCHESS_OPEN_ADMIN=1
-cargo run -p xfchess-tauri
+cargo run -p xfchess-tauri --features tournament-admin
 
 popd
 pause

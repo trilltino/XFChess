@@ -83,18 +83,20 @@ build-backend:
 build-game:
     cargo build --bin xfchess --features solana
 
-# Build Tauri host (debug)
+# Build Tauri host (debug). `tournament-admin` feature enables the `just admin`/
+# `just dev`/`just dev2` XFCHESS_OPEN_ADMIN auto-open — deliberately NOT passed by
+# release.yml's own `cargo build`, so the shipped consumer build stays admin-free.
 build-tauri:
-    cargo build -p xfchess-tauri
+    cargo build -p xfchess-tauri --features tournament-admin
 
 # Build all Rust binaries (debug)
 build: build-backend build-game build-tauri
 
-# Release build of everything
+# Release build of everything (local use only — NOT what release.yml ships)
 build-release:
     cargo build -p backend --bin signing-server --release
     cargo build --bin xfchess --features solana --release
-    cargo build -p xfchess-tauri --release
+    cargo build -p xfchess-tauri --features tournament-admin --release
 
 # Build wallet UI (only if dist is missing or forced)
 build-wallet-ui:
