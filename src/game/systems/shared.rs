@@ -1,0 +1,498 @@
+use crate::engine::board_state::ChessEngine;
+use crate::game::components::{
+    FadingCapture, HasMoved, MoveRecord, Piece, PieceColor, PieceMoveAnimation, PieceType,
+};
+use crate::game::events::MoveMadeEvent;
+use crate::game::resources::turn::CurrentTurn;
+use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
+use crate::game::sync::board_state::{BoardMove, BoardStateSync, ChessEngineExt};
+use crate::rendering::pieces::PIECE_ON_BOARD_Y;
+use bevy::audio::{AudioPlayer, AudioSource};
+use bevy::prelude::*;
+
+/// Data required to identify a captured piece target.
+#[derive(Clone, Copy, Debug)]
+pub struct CapturedTarget {
+    pub entity: Entity,
+    pub piece_type: PieceType,
+    pub color: PieceColor,
+}
+
+/// Describes a single chess move — the "what" without the "how".
+///
+/// Groups the value-parameters that were previously passed individually
+/// to [`execute_move`], making call sites easier to read and harder to
+/// get wrong (no positional-argument confusion).
+///
+/// # Reference
+///
+/// - <https://stackoverflow.com/questions/40703863> (parameter object pattern)
+#[derive(Clone, Debug)]
+pub struct MoveContext<'a> {
+    /// Label for log messages (e.g. `"ai"`, `"network_move"`, `"local_input"`).
+    pub origin: &'a str,
+    /// Entity being moved.
+    pub entity: Entity,
+    /// Snapshot of the piece component at move time.
+    pub piece: Piece,
+    /// Destination square `(file, rank)`.
+    pub target: (u8, u8),
+    /// Captured piece, if any.
+    pub capture: Option<CapturedTarget>,
+    /// Promotion target type, if pawn reaches last rank.
+    pub promotion: Option<PieceType>,
+    /// Whether this is the piece's first move (enables castling / double-pawn).
+    pub was_first_move: bool,
+    /// `true` when the move originated from a remote peer.
+    pub remote: bool,
+    /// Move sound handle (optional).
+    pub move_sound: Option<Handle<AudioSource>>,
+    /// Capture sound handle (optional).
+    pub capture_sound: Option<Handle<AudioSource>>,
+    /// Game ID for rollup submission.
+    pub game_id: Option<u64>,
+}
+
+/// Helper to handle audio playback for moves
+pub fn play_move_audio(
+    commands: &mut Commands,
+    move_sound: Option<Handle<AudioSource>>,
+    capture_happened: bool,
+) {
+    if capture_happened {
+        if let Some(_sound) = move_sound {
+            return;
+        }
+    }
+    // Only play move sound if NOT a capture
+    if let Some(sound) = move_sound {
+        commands.spawn(AudioPlayer::new(sound));
+    }
+}
+
+/// Apply visual and logical state for a captured piece.
+///
+/// Inserts a [`FadingCapture`] component that drives a parabolic arc + spin +
+/// scale-to-zero animation before the entity is despawned.
+///
+/// `current_pos` should be the piece's current world `Transform.translation`.
+pub fn apply_capture(
+    commands: &mut Commands,
+    captured_pieces: &mut CapturedPieces,
+    capture_sound: Option<Handle<AudioSource>>,
+    target: CapturedTarget,
+    current_pos: Vec3,
+    move_dir: Vec3,
+) {
+    if let Some(sound) = capture_sound {
+        commands.spawn(AudioPlayer::new(sound));
+    }
+    captured_pieces.add_capture(target.color, target.piece_type);
+
+    // Calculate knockback direction: slide away from the attacker's trajectory
+    // We use the move direction but flatten it to the board plane
+    let mut knockback = move_dir.normalize_or_zero();
+    knockback.y = 0.0;
+
+    // If move_dir was vertical (unlikely in chess), fallback to a default direction
+    if knockback.length_squared() < 0.001 {
+        knockback = Vec3::new(1.0, 0.0, 0.5).normalize();
+    }
+
+    // The tilt axis should be perpendicular to the knockback to make the piece 'lean' back
+    let tilt_axis = Vec3::new(knockback.z, 0.0, -knockback.x).normalize();
+
+    commands.entity(target.entity).insert(FadingCapture {
+        timer: bevy::time::Timer::from_seconds(0.75, bevy::time::TimerMode::Once),
+        initial_pos: current_pos,
+        knockback_dir: knockback,
+        tilt_axis,
+    });
+}
+
+/// Updates ECS components for a moved piece (position, history, animation)
+#[allow(clippy::too_many_arguments)]
+pub fn update_piece_state(
+    origin: &str,
+    entity: Entity,
+    from_pos: (u8, u8),
+    target: (u8, u8),
+    _was_first_move: bool,
+    is_castling: bool,
+    capture: Option<CapturedTarget>,
+    promotion: Option<PieceType>,
+    commands: &mut Commands,
+    pieces: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
+    move_history: &mut MoveHistory,
+    engine: &mut ChessEngine,
+) -> bool {
+    let Ok((_, mut piece_component, mut has_moved)) = pieces.get_mut(entity) else {
+        error!("[SHARED] {origin}: failed to access piece after move");
+        return false;
+    };
+
+    // SAN must be derived from the engine's position *before* this move is
+    // applied (engine.game is only advanced later, in execute_move's step 7).
+    let san = engine.move_to_san(from_pos, target, promotion);
+
+    // Apply promotion if applicable
+    if let Some(new_type) = promotion {
+        debug!("[SHARED] {origin}: Promoting piece to {:?}", new_type);
+        piece_component.piece_type = new_type;
+    }
+
+    let move_record = MoveRecord {
+        piece_type: piece_component.piece_type,
+        piece_color: piece_component.color,
+        from: from_pos,
+        to: target,
+        captured: capture.map(|data| data.piece_type),
+        is_castling,
+        is_en_passant: false,
+        is_check: false,
+        is_checkmate: false,
+    };
+    move_history.add_move_with_san(move_record, san);
+    piece_component.x = target.0;
+    piece_component.y = target.1;
+    // Use PIECE_ON_BOARD_Y so the animation stays on the board surface (y=0.05),
+    // matching the spawn position and the snap target in animate_piece_movement.
+    // Integer coordinates match GLB mesh design and board square positions.
+    commands.entity(entity).insert(PieceMoveAnimation::new(
+        Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
+        Vec3::new(7.0 - target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),
+        0.4,
+    ));
+
+    has_moved.moved = true;
+    has_moved.move_count += 1;
+    true
+}
+
+fn is_castling_move(piece_type: PieceType, from: (u8, u8), to: (u8, u8)) -> bool {
+    piece_type == PieceType::King && from.1 == to.1 && from.0.abs_diff(to.0) == 2
+}
+
+fn castling_rook_move(from: (u8, u8), to: (u8, u8)) -> Option<((u8, u8), (u8, u8))> {
+    if from.1 != to.1 || from.0.abs_diff(to.0) != 2 {
+        return None;
+    }
+
+    let rank = from.1;
+    if to.0 > from.0 {
+        Some(((7, rank), (5, rank)))
+    } else {
+        Some(((0, rank), (3, rank)))
+    }
+}
+
+fn apply_castling_rook_move(
+    commands: &mut Commands,
+    pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
+    from: (u8, u8),
+    to: (u8, u8),
+) {
+    let Some((rook_from, rook_to)) = castling_rook_move(from, to) else {
+        return;
+    };
+
+    let Some((rook_entity, rook_piece)) = pieces_query
+        .iter_mut()
+        .find(|(_, piece, has_moved)| {
+            piece.piece_type == PieceType::Rook
+                && piece.x == rook_from.0
+                && piece.y == rook_from.1
+                && !has_moved.moved
+        })
+        .map(|(entity, piece, _)| (entity, *piece))
+    else {
+        warn!(
+            "[SHARED] castling rook not found for move {:?} -> {:?}",
+            from, to
+        );
+        return;
+    };
+
+    if let Ok((_, mut rook_piece_component, mut rook_has_moved)) = pieces_query.get_mut(rook_entity)
+    {
+        rook_piece_component.x = rook_to.0;
+        rook_piece_component.y = rook_to.1;
+        rook_has_moved.moved = true;
+        rook_has_moved.move_count += 1;
+
+        commands.entity(rook_entity).insert(PieceMoveAnimation::new(
+            Vec3::new(
+                7.0 - rook_from.0 as f32,
+                PIECE_ON_BOARD_Y,
+                rook_from.1 as f32,
+            ),
+            Vec3::new(7.0 - rook_to.0 as f32, PIECE_ON_BOARD_Y, rook_to.1 as f32),
+            0.25,
+        ));
+
+        debug!(
+            "[SHARED] castling rook moved from {:?} to {:?} (entity {:?}, piece {:?})",
+            rook_from, rook_to, rook_entity, rook_piece
+        );
+    }
+}
+
+/// Core function to execute a validated move.
+///
+/// Accepts a [`MoveContext`] (the "what") plus mutable ECS handles (the "how").
+/// This keeps the call-site readable and prevents positional-argument mistakes.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_move(
+    ctx: &MoveContext<'_>,
+    commands: &mut Commands,
+    pending_turn: &mut PendingTurnAdvance,
+    move_history: &mut MoveHistory,
+    captured_pieces: &mut CapturedPieces,
+    engine: &mut ChessEngine,
+    pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
+    move_events: Option<&mut MessageWriter<MoveMadeEvent>>,
+    board_sync: Option<&mut BoardStateSync>,
+    _current_turn: &CurrentTurn,
+) -> bool {
+    // 1. Play Audio
+    play_move_audio(commands, ctx.move_sound.clone(), ctx.capture.is_some());
+
+    // Derive from_pos early — needed by both the capture and update steps.
+    let from_pos = (ctx.piece.x, ctx.piece.y);
+
+    // 2. Handle Capture
+    if let Some(target_cap) = ctx.capture {
+        // The captured piece stands on ctx.target — derive world position
+        // using the same formula as piece spawning: X is mirrored (7 - file)
+        // so the a-file renders on White's left; Z = rank, Y = board surface.
+        let cap_world_pos = Vec3::new(
+            7.0 - ctx.target.0 as f32,
+            PIECE_ON_BOARD_Y,
+            ctx.target.1 as f32,
+        );
+        let move_dir =
+            cap_world_pos - Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32);
+        apply_capture(
+            commands,
+            captured_pieces,
+            ctx.capture_sound.clone(),
+            target_cap,
+            cap_world_pos,
+            move_dir,
+        );
+    }
+
+    // 3. Update Piece State
+    let castling = is_castling_move(ctx.piece.piece_type, from_pos, ctx.target);
+    if !update_piece_state(
+        ctx.origin,
+        ctx.entity,
+        from_pos,
+        ctx.target,
+        ctx.was_first_move,
+        castling,
+        ctx.capture,
+        ctx.promotion,
+        commands,
+        pieces_query,
+        move_history,
+        engine,
+    ) {
+        return false;
+    }
+
+    // 4. Advance Turn
+    pending_turn.request(ctx.piece.color);
+
+    // 4b. Move the rook as part of castling so the windowed board animates both pieces.
+    if castling {
+        apply_castling_rook_move(commands, pieces_query, from_pos, ctx.target);
+    }
+
+    // 5. Update Engine State (for P2P sync and FEN export)
+    update_engine_state_after_move(
+        engine,
+        ctx.piece.piece_type,
+        ctx.piece.color,
+        from_pos,
+        ctx.target,
+        ctx.capture.is_some(),
+        ctx.was_first_move,
+    );
+
+    // 6. Broadcast Board State (for P2P sync)
+    if let Some(sync) = board_sync {
+        // Only broadcast local moves (not remote moves received from network)
+        if !ctx.remote {
+            let board_move = BoardMove {
+                from: from_pos,
+                to: ctx.target,
+                piece_type: ctx.piece.piece_type,
+                piece_color: ctx.piece.color,
+                capture: ctx.capture.map(|c| c.piece_type),
+                promotion: ctx.promotion,
+                move_number: engine.get_move_counter(),
+            };
+            let serialized = sync.serialize_state(engine, captured_pieces, Some(board_move));
+            sync.on_local_move(board_move, serialized);
+        }
+    }
+
+    // 7. Sync ECS → engine once so the FEN for the event is correct.
+    //    Flag prevents update_game_phase from syncing a second time this frame.
+    //
+    //    Before syncing, mark the captured piece as off-board by clearing its
+    //    logical coordinates.  FadingCapture is inserted via deferred Commands
+    //    and won't be applied until after this frame, so the captured entity
+    //    still appears in pieces_query with its original (now-occupied) square.
+    //    Without this, both the capturing piece and the captured piece share the
+    //    same square in the board array — whichever is iterated last "wins" and
+    //    the engine can silently drop the capturing piece from its bitboards,
+    //    making subsequent captures appear blocked.
+    if let Some(cap) = ctx.capture {
+        if let Ok((_, mut p, _)) = pieces_query.get_mut(cap.entity) {
+            p.x = u8::MAX;
+            p.y = u8::MAX;
+        }
+    }
+    engine.sync_ecs_to_engine_mut(pieces_query);
+    engine.synced_this_move = true;
+
+    // 8. Trigger Event with correct FEN
+    if let Some(writer) = move_events {
+        let fen_after = engine.current_fen().to_string();
+        writer.write(MoveMadeEvent {
+            from: from_pos,
+            to: ctx.target,
+            player: format!("{:?}", ctx.piece.color),
+            piece_type: ctx.piece.piece_type,
+            captured_piece: ctx.capture.map(|c| c.piece_type),
+            promotion: ctx.promotion,
+            remote: ctx.remote,
+            game_id: ctx.game_id,
+            next_fen: fen_after,
+        });
+    }
+
+    true
+}
+
+/// Helper to find a piece entity at a specific board coordinate
+pub fn find_piece_on_square(
+    pieces: &Query<(Entity, &Piece, &HasMoved, &Transform)>,
+    position: (u8, u8),
+) -> Option<(Entity, Piece)> {
+    pieces
+        .iter()
+        .find(|(_, piece, _, _)| piece.x == position.0 && piece.y == position.1)
+        .map(|(entity, piece, _, _)| (entity, *piece))
+}
+
+/// Update ChessEngine state after a move.
+///
+/// Tracks:
+/// - halfmove_clock: reset on capture or pawn move
+/// - fullmove_counter: increment after Black's move
+/// - current_turn: flip after each move
+/// - en_passant: set if pawn moved 2 squares
+/// - castling_rights: update if king or rook moved
+fn update_engine_state_after_move(
+    engine: &mut ChessEngine,
+    piece_type: PieceType,
+    piece_color: PieceColor,
+    from: (u8, u8),
+    to: (u8, u8),
+    capture: bool,
+    was_first_move: bool,
+) {
+    // Update halfmove clock: reset on capture or pawn move, otherwise increment
+    let is_pawn_move = piece_type == PieceType::Pawn;
+    if capture || is_pawn_move {
+        engine.halfmove_clock = 0;
+    } else {
+        engine.halfmove_clock += 1;
+    }
+
+    // Update fullmove counter: increment after Black's move
+    if piece_color == PieceColor::Black {
+        engine.fullmove_counter += 1;
+    }
+
+    // Update current turn
+    engine.current_turn = match piece_color {
+        PieceColor::White => PieceColor::Black,
+        PieceColor::Black => PieceColor::White,
+    };
+
+    // Track en passant: set if pawn moved 2 squares
+    if piece_type == PieceType::Pawn && was_first_move {
+        let is_white_double_push = piece_color == PieceColor::White && from.1 == 1 && to.1 == 3;
+        let is_black_double_push = piece_color == PieceColor::Black && from.1 == 6 && to.1 == 4;
+
+        if is_white_double_push {
+            // En passant target is square behind the pawn (rank 3 in 1-8 notation = index 2 in 0-7)
+            engine.en_passant = Some(format!("{}{}", file_to_char(from.0), '3'));
+        } else if is_black_double_push {
+            // En passant target is square behind the pawn (rank 6 in 1-8 notation = index 5 in 0-7)
+            engine.en_passant = Some(format!("{}{}", file_to_char(from.0), '6'));
+        } else {
+            engine.en_passant = None;
+        }
+    } else {
+        engine.en_passant = None;
+    }
+
+    // Update castling rights if king or rook moved
+    update_castling_rights(engine, piece_type, piece_color, from, was_first_move);
+}
+
+/// Convert file index (0-7) to character ('a'-'h')
+fn file_to_char(file: u8) -> char {
+    (b'a' + file) as char
+}
+
+/// Update castling rights when king or rook moves
+fn update_castling_rights(
+    engine: &mut ChessEngine,
+    piece_type: PieceType,
+    piece_color: PieceColor,
+    from: (u8, u8),
+    was_first_move: bool,
+) {
+    // Only update on first move of king or rook
+    if !was_first_move {
+        return;
+    }
+
+    let mut rights: Vec<char> = engine.castling_rights.chars().collect();
+
+    match piece_type {
+        PieceType::King => {
+            // King moved - lose both castling rights for that color
+            if piece_color == PieceColor::White {
+                rights.retain(|&c| c != 'K' && c != 'Q');
+            } else {
+                rights.retain(|&c| c != 'k' && c != 'q');
+            }
+        }
+        PieceType::Rook => {
+            // Rook moved - lose specific castling right
+            // White rooks: kingside at (7, 0), queenside at (0, 0)
+            // Black rooks: kingside at (7, 7), queenside at (0, 7)
+            match (piece_color, from) {
+                (PieceColor::White, (7, 0)) => rights.retain(|&c| c != 'K'),
+                (PieceColor::White, (0, 0)) => rights.retain(|&c| c != 'Q'),
+                (PieceColor::Black, (7, 7)) => rights.retain(|&c| c != 'k'),
+                (PieceColor::Black, (0, 7)) => rights.retain(|&c| c != 'q'),
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+
+    if rights.is_empty() {
+        engine.castling_rights = "-".to_string();
+    } else {
+        engine.castling_rights = rights.into_iter().collect();
+    }
+}

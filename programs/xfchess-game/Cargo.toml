@@ -1,0 +1,143 @@
+[package]
+name = "xfchess-game"
+version = "0.1.0"
+description = "Created with Anchor"
+edition = "2021"
+autotests = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "xfchess_game"
+
+[features]
+default = ["cranks", "move-validation"]
+idl-build = ["anchor-spl/idl-build"]
+move-validation = ["chess-logic-on-chain"]
+cranks = ["magicblock-magic-program-api", "bincode"]
+game-tests = []
+legacy-game-tests = []
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+solana-program = { workspace = true }
+# solana-program version pulled in by anchor-lang
+chess-logic-on-chain = { workspace = true, optional = true }
+ephemeral-rollups-sdk = { workspace = true }
+
+# Crank dependencies (MagicBlock scheduled tasks) — gated by the `cranks` feature
+magicblock-magic-program-api = { version = "=0.13.11", default-features = false, optional = true }
+bincode = { workspace = true, optional = true }
+
+# Ephemeral-Rollups move-path suite. Runs the real on-chain `record_move`
+# logic in-process via solana-program-test (loads target/deploy/xfchess_game.so).
+# Requires `cargo build-sbf` first. See docs/ER_TESTING.md.
+[[test]]
+name = "er_move_tests"
+path = "tests/er_move_tests.rs"
+
+# Delegation/undelegation account-constraint suite (negative paths that don't
+# need a live ER — e.g. the magic_program/magic_context address constraints).
+[[test]]
+name = "er_delegation_tests"
+path = "tests/er_delegation_tests.rs"
+
+# Treasury-withdrawal and close_tournament fixes. Seeds account state directly
+# and runs the built .so via solana-program-test.
+[[test]]
+name = "treasury_tests"
+path = "tests/treasury_tests.rs"
+
+[[test]]
+name = "game_settlement_tests"
+path = "tests/game_settlement_tests.rs"
+
+[[test]]
+name = "profile_session_tests"
+path = "tests/profile_session_tests.rs"
+
+[[test]]
+name = "init_profile_sponsored_tests"
+path = "tests/init_profile_sponsored_tests.rs"
+
+[[test]]
+name = "dispute_tests"
+path = "tests/dispute_tests.rs"
+
+[[test]]
+name = "tournament_registration_tests"
+path = "tests/tournament_registration_tests.rs"
+
+[[test]]
+name = "tournament_registration_e2e_tests"
+path = "tests/tournament_registration_e2e_tests.rs"
+
+[[test]]
+name = "tournament_match_tests"
+path = "tests/tournament_match_tests.rs"
+
+[[test]]
+name = "tournament_prize_tests"
+path = "tests/tournament_prize_tests.rs"
+
+# Permissionless Swiss round advancement (persistency: a round can advance
+# from player signatures + a third-party crank, no backend/authority needed).
+[[test]]
+name = "tournament_round_advancement_tests"
+path = "tests/tournament_round_advancement_tests.rs"
+
+# Byte-level lock of instruction arg layouts that the backend and game-client
+# builders construct by hand (no IDL) — catches enum/arg drift at test time.
+[[test]]
+name = "instruction_layout_tests"
+path = "tests/instruction_layout_tests.rs"
+
+[[test]]
+name = "cancel_time_check_tests"
+path = "tests/cancel_time_check_tests.rs"
+
+# Forced-recovery path for a Game PDA stuck on an unreachable ER validator
+# (delegation_ix::force_recovery / governance_ix::recover_stuck_delegation).
+[[test]]
+name = "er_recovery_tests"
+path = "tests/er_recovery_tests.rs"
+
+# Session-signed create-game path where a PDA (not a wallet) fronts rent +
+# wager — regression coverage for the "signer privilege escalated" CPI bug.
+[[test]]
+name = "global_create_game_tests"
+path = "tests/global_create_game_tests.rs"
+
+# complete_swiss_tournament: final standings sort + Completed transition once
+# all rounds are advanced — closes the gap flagged in advance_round.rs.
+[[test]]
+name = "tournament_swiss_completion_tests"
+path = "tests/tournament_swiss_completion_tests.rs"
+
+# Regression coverage for the platform-fee-lamports=0 bug found while
+# auditing the signing/popup architecture — guards `finalize_game` actually
+# pays a nonzero `country_fee` to `treasury_vault` at settlement.
+[[test]]
+name = "global_session_settlement_tests"
+path = "tests/global_session_settlement_tests.rs"
+
+# docs/PRE_MAINNET_E2E_PLAN.md §1.3: ClaimTimeout instruction-level coverage
+# (TimeoutNotExpired rejection + the black-timed-out/white-wins parity).
+[[test]]
+name = "claim_timeout_tests"
+path = "tests/claim_timeout_tests.rs"
+
+[dev-dependencies]
+tokio = { workspace = true }
+solana-program-test = { workspace = true }
+solana-sdk = { workspace = true }
+solana-system-interface = { version = "3", features = ["bincode"] }
+# Decodes the "Program data: <base64>" log line to verify `emit!`ed events
+# (e.g. StuckDelegationRecovered) actually fire with correct fields.
+base64 = { workspace = true }
+# Reused to craft board state and compute expected next-boards exactly as the
+# program does (zero divergence between test oracle and on-chain validator).
+chess-logic-on-chain = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "allow" }

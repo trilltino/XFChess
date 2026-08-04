@@ -1,0 +1,743 @@
+//! Input handling system for chess game interaction
+//!
+//! This module handles user input events (clicks, drags) for interacting with the chess board.
+//! It uses Bevy's observer pattern for entity-specific event handling.
+//!
+//! # Architecture
+//!
+//! - **Observers**: `on_piece_click` and `on_square_click` capture pointer events.
+//! - **System Params**: `InputSystemParams` groups common resources/queries to reduce argument bloat.
+//! - **Helper Logic**: `try_select_piece` and `try_move_sequence` handle the core game state updates.
+//!
+//! # Selection Logic
+//!
+//! 1. Verify click is primary button (left click).
+//! 2. If valid locally owned piece -> Select it.
+//! 3. If valid target square/piece -> Attempt move.
+//! 4. If invalid -> Clear selection.
+
+use crate::core::states::GameMode;
+use crate::engine::board_state::ChessEngine;
+use crate::game::components::{HasMoved, SelectedPiece};
+use crate::game::resources::player::Players;
+use crate::game::resources::{
+    CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingPromotion,
+    PendingTurnAdvance, Selection,
+};
+use crate::game::systems::shared::{
+    execute_move, find_piece_on_square, CapturedTarget, MoveContext,
+};
+use crate::multiplayer::network::protocol::NetworkMessage;
+#[cfg(feature = "solana")]
+use crate::multiplayer::solana::addon::{CompetitiveMatchState, SolanaGameSync};
+use crate::multiplayer::types::OnlineNetworkState;
+use crate::rendering::pieces::{Piece, PieceColor};
+use crate::rendering::utils::Square;
+use bevy::ecs::system::SystemParam;
+use bevy::picking::events::{Click, Drag, DragEnd, DragStart, Pointer};
+use bevy::picking::pointer::PointerButton;
+use bevy::prelude::*;
+use bevy_egui::egui;
+
+/// Query for mutable access to pieces (used for executing moves)
+pub type PieceMutQuery<'w, 's> = Query<'w, 's, (Entity, &'static mut Piece, &'static mut HasMoved)>;
+
+/// Query for read-only access to pieces (used for validation/selection)
+pub type PieceReadOnlyQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Piece,
+        &'static HasMoved,
+        &'static Transform,
+    ),
+>;
+
+#[derive(Resource, Default)]
+pub struct InGameExitConfirmation {
+    pub visible: bool,
+    pub pending_exit: bool,
+}
+
+pub fn reset_in_game_exit_confirmation(mut confirmation: ResMut<InGameExitConfirmation>) {
+    confirmation.visible = false;
+    confirmation.pending_exit = false;
+}
+
+/// Grouped system parameters for input handling to reduce argument count
+#[derive(SystemParam)]
+pub struct InputSystemParams<'w, 's> {
+    pub commands: Commands<'w, 's>,
+    pub selection: ResMut<'w, Selection>,
+    pub current_turn: Res<'w, CurrentTurn>,
+    pub pieces: ParamSet<'w, 's, (PieceMutQuery<'w, 's>, PieceReadOnlyQuery<'w, 's>)>,
+    pub selected_pieces: Query<'w, 's, Entity, With<SelectedPiece>>,
+    pub game_over: Res<'w, GameOverState>,
+    pub engine: ResMut<'w, ChessEngine>,
+    pub pending_turn: ResMut<'w, PendingTurnAdvance>,
+    pub move_history: ResMut<'w, MoveHistory>,
+    pub captured_pieces: ResMut<'w, CapturedPieces>,
+    pub game_sounds: Option<Res<'w, GameSounds>>,
+    pub move_events: MessageWriter<'w, crate::game::events::MoveMadeEvent>,
+    pub players: Res<'w, Players>,
+    pub game_mode: Res<'w, crate::core::states::GameMode>,
+    pub pending_promotion: Res<'w, PendingPromotion>,
+    #[cfg(feature = "solana")]
+    pub game_sync: Option<Res<'w, SolanaGameSync>>,
+    // pub connection_state: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
+}
+
+/// Returns true if the current turn belongs to a human player.
+pub fn is_human_turn(params: &InputSystemParams) -> bool {
+    // If we're spectating, it's NEVER a human turn (at least for THIS local instance)
+    if *params.game_mode == crate::core::states::GameMode::Spectator {
+        return false;
+    }
+
+    let current = params.players.current(params.current_turn.color);
+    current.is_human
+}
+
+/// Returns true if the human player is allowed to move pieces of the given color.
+/// In PvP (vs AI) mode, the human chose a specific color and can only move that color's pieces.
+/// In network games, only the local player's color can be moved.
+pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bool {
+    // First check if it's a human turn at all
+    if !is_human_turn(params) {
+        return false;
+    }
+    // Default behavior: allow moving any color piece (single-player mode)
+    let both_human = params.players.player_1.is_human && params.players.player_2.is_human;
+
+    if both_human {
+        // In local multiplayer (both human), allow moving current turn's color
+        piece_color == params.current_turn.color
+    } else {
+        // In PvP vs AI mode, human can only move their own color pieces
+        // Find which color the human player has
+        let human_color = if params.players.player_1.is_human {
+            params.players.player_1.color
+        } else {
+            params.players.player_2.color
+        };
+        piece_color == human_color
+    }
+}
+
+// Helper alias for Option<Res> if needed, or just use Option<Res>
+// ResWithStandard is not a thing. Just Option<Res<'w, BraidClientResource>>.
+// Bevy SystemParam macro handles Option<Res<T>>.
+
+/// Helper to check if primary button (left click) was used
+fn is_primary(button: PointerButton) -> bool {
+    matches!(button, PointerButton::Primary)
+}
+
+/// Helper to clear ECS selection markers
+pub fn reset_selected_markers(
+    commands: &mut Commands,
+    selected_pieces: &Query<Entity, With<SelectedPiece>>,
+) {
+    for entity in selected_pieces.iter() {
+        commands.entity(entity).remove::<SelectedPiece>();
+    }
+}
+
+/// Helper to clear all selection state
+pub fn clear_selection_state(
+    commands: &mut Commands,
+    selection: &mut Selection,
+    selected_pieces: &Query<Entity, With<SelectedPiece>>,
+) {
+    reset_selected_markers(commands, selected_pieces);
+    selection.clear();
+    debug!("[INPUT] Selection cleared");
+}
+
+// === Helpers ===
+
+/// Attempts to select a piece
+///
+/// Validates ownership (current turn) and updates selection state.
+/// Also calculates legal moves for the selected piece.
+pub fn try_select_piece(
+    params: &mut InputSystemParams,
+    entity: Entity,
+    piece: Piece,
+    is_square_click: bool,
+) {
+    // Validate that the piece belongs to the current player
+    if piece.color != params.current_turn.color {
+        warn!(
+            "[INPUT] Cannot select piece: piece color {:?} != current turn {:?}",
+            piece.color, params.current_turn.color
+        );
+        return;
+    }
+
+    // If already selected, deselect
+    if params.selection.selected_entity == Some(entity) {
+        clear_selection_state(
+            &mut params.commands,
+            &mut params.selection,
+            &params.selected_pieces,
+        );
+        return;
+    }
+
+    // Select new piece — legal moves come from the per-turn cache built by update_game_phase.
+    clear_selection_state(
+        &mut params.commands,
+        &mut params.selection,
+        &params.selected_pieces,
+    );
+
+    let legal_moves = params
+        .engine
+        .get_legal_moves_for_square((piece.x, piece.y), piece.color);
+    params.selection.selected_entity = Some(entity);
+    params.selection.selected_position = Some((piece.x, piece.y));
+    params.selection.possible_moves = legal_moves;
+    params.commands.entity(entity).insert(SelectedPiece {
+        entity,
+        position: (piece.x, piece.y),
+    });
+
+    if is_square_click {
+        debug!(
+            "[INPUT] Selected via square {:?} at ({}, {})",
+            piece.piece_type, piece.x, piece.y
+        );
+    } else {
+        debug!(
+            "[INPUT] Selected {:?} at ({}, {})",
+            piece.piece_type, piece.x, piece.y
+        );
+    }
+}
+
+/// Attempts to execute a move sequence
+///
+/// Validates move legality, handles multiplayer communication,
+/// and executes the move via `execute_move`.
+pub fn try_move_sequence(
+    params: &mut InputSystemParams,
+    target_pos: (u8, u8),
+    capture_info: Option<CapturedTarget>,
+    context_name: &str,
+) {
+    if !params.selection.is_selected() {
+        return;
+    }
+    let Some(selected_entity) = params.selection.selected_entity else {
+        return;
+    };
+
+    if !params.selection.possible_moves.contains(&target_pos) {
+        if context_name == "piece_click_capture" {
+            debug!("[INPUT] Invalid capture attempt");
+        }
+        clear_selection_state(
+            &mut params.commands,
+            &mut params.selection,
+            &params.selected_pieces,
+        );
+        return;
+    }
+
+    let move_sound = params.game_sounds.as_ref().map(|s| s.move_piece.clone());
+    let capture_sound = params.game_sounds.as_ref().map(|s| s.capture_piece.clone());
+
+    let (selected_piece_data, was_first_move) = {
+        let q = params.pieces.p1();
+        if let Ok((_, p, hm, _)) = q.get(selected_entity) {
+            // Validate that the selected piece belongs to the current player
+            if p.color != params.current_turn.color {
+                warn!("[INPUT] Attempted to move opponent's piece - ignoring");
+                clear_selection_state(
+                    &mut params.commands,
+                    &mut params.selection,
+                    &params.selected_pieces,
+                );
+                return;
+            }
+            (*p, !hm.moved)
+        } else {
+            warn!("[INPUT] Selected piece not found query");
+            return;
+        }
+    };
+
+    // Multiplayer Interception removed for Pure Braid Transition
+
+    #[cfg(feature = "solana")]
+    let game_id = params.game_sync.as_ref().and_then(|s| s.game_id);
+    #[cfg(not(feature = "solana"))]
+    let game_id = None;
+
+    let ctx = MoveContext {
+        origin: context_name,
+        entity: selected_entity,
+        piece: selected_piece_data,
+        target: target_pos,
+        capture: capture_info,
+        promotion: None,
+        was_first_move,
+        remote: false,
+        move_sound,
+        capture_sound,
+        game_id,
+    };
+
+    let success = execute_move(
+        &ctx,
+        &mut params.commands,
+        &mut params.pending_turn,
+        &mut params.move_history,
+        &mut params.captured_pieces,
+        &mut params.engine,
+        &mut params.pieces.p0(),
+        Some(&mut params.move_events),
+        None, // BoardStateSync - would need to add to InputSystemParams
+        &params.current_turn,
+    );
+
+    if success {
+        clear_selection_state(
+            &mut params.commands,
+            &mut params.selection,
+            &params.selected_pieces,
+        );
+    }
+}
+
+// === Observers ===
+
+/// Observer system: Handle click on a piece
+///
+/// Triggers piece selection or capture attempt.
+pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) {
+    if !is_primary(click.event.button) {
+        return;
+    }
+
+    if params.game_over.is_game_over() {
+        return;
+    }
+
+    if params.pending_promotion.is_active() {
+        return;
+    }
+
+    if !is_human_turn(&params) {
+        return;
+    }
+
+    // Skip click handling if we're currently dragging (drag_end will handle it)
+    if params.selection.is_dragging {
+        return;
+    }
+
+    let entity = click.entity;
+
+    let piece_data = params.pieces.p1().get(entity).ok().map(|(_, p, _, _)| *p);
+
+    let Some(clicked_piece) = piece_data else {
+        debug!(
+            "[INPUT] Clicked entity {:?} has no Piece component – ignoring",
+            entity
+        );
+        return;
+    };
+
+    info!(
+        "[INPUT] Clicked piece: {:?} {:?} at ({}, {}) | Current turn: {:?}",
+        clicked_piece.color,
+        clicked_piece.piece_type,
+        clicked_piece.x,
+        clicked_piece.y,
+        params.current_turn.color
+    );
+
+    // Case 1: Clicked our own piece -> Select
+    if clicked_piece.color == params.current_turn.color {
+        if !can_move_color(&params, clicked_piece.color) {
+            warn!(
+                "[INPUT] Cannot interact with {:?} piece: you can only move your own color pieces",
+                clicked_piece.color
+            );
+            return;
+        }
+        try_select_piece(&mut params, entity, clicked_piece, false);
+        return;
+    }
+
+    // Case 2: Clicked enemy piece -> Capture (only if we have a piece selected)
+    if params.selection.is_selected() && clicked_piece.color != params.current_turn.color {
+        if let Some(selected) = params.selection.selected_entity {
+            // Validate that we have a selected piece and it belongs to us
+            let selected_color = params
+                .pieces
+                .p1()
+                .get(selected)
+                .ok()
+                .map(|(_, p, _, _)| p.color);
+            if let Some(color) = selected_color {
+                if can_move_color(&params, color) {
+                    try_move_sequence(
+                        &mut params,
+                        (clicked_piece.x, clicked_piece.y),
+                        Some(CapturedTarget {
+                            entity,
+                            piece_type: clicked_piece.piece_type,
+                            color: clicked_piece.color,
+                        }),
+                        "piece_click_capture",
+                    );
+                } else {
+                    warn!("[INPUT] Cannot capture: selected piece is not yours");
+                }
+            }
+        }
+        return;
+    }
+
+    // Case 3: Clicked enemy piece without selection -> Ignore (can't select enemy pieces)
+    warn!(
+        "[INPUT] Cannot select enemy piece: clicked {:?} but it's {:?}'s turn",
+        clicked_piece.color, params.current_turn.color
+    );
+}
+
+/// Observer system: Handle drag start on a piece
+///
+/// Initiates drag-and-drop by selecting the piece and marking it as dragging.
+pub fn on_piece_drag_start(drag_start: On<Pointer<DragStart>>, mut params: InputSystemParams) {
+    if params.game_over.is_game_over() {
+        return;
+    }
+
+    if !is_human_turn(&params) {
+        return;
+    }
+
+    let entity = drag_start.entity;
+
+    // Get the piece data
+    let piece_data = {
+        let q = params.pieces.p1();
+        if let Ok((_, piece, _, _)) = q.get(entity) {
+            Some(*piece)
+        } else {
+            None
+        }
+    };
+
+    let Some(piece) = piece_data else {
+        return;
+    };
+
+    // Only allow dragging our own pieces (pieces of the color we control)
+    if !can_move_color(&params, piece.color) {
+        warn!(
+            "[INPUT] Cannot drag {:?} piece: you can only move your own color pieces",
+            piece.color
+        );
+        return;
+    }
+
+    // Select the piece and mark as dragging
+    try_select_piece(&mut params, entity, piece, false);
+    params.selection.begin_drag();
+
+    debug!(
+        "[INPUT] Started dragging piece at ({}, {})",
+        piece.x, piece.y
+    );
+}
+
+/// Observer system: Handle drag on a piece
+///
+/// Currently just tracks that dragging is in progress. Visual feedback
+/// could be added here (e.g., lifting the piece, showing ghost).
+pub fn on_piece_drag(_: On<Pointer<Drag>>, _params: InputSystemParams) {
+    // Dragging is handled by the selection state
+    // Visual feedback (like lifting the piece) could be added here
+}
+
+/// Observer system: Handle drag end on a piece
+///
+/// Attempts to execute a move to the square where the piece was dropped.
+pub fn on_piece_drag_end(
+    drag_end: On<Pointer<DragEnd>>,
+    mut params: InputSystemParams,
+    square_query: Query<(Entity, &Square, &Transform)>,
+) {
+    if !params.selection.is_dragging {
+        return;
+    }
+
+    params.selection.end_drag();
+
+    // Get the piece that was dragged from the readonly query in params
+    let dragged_entity = drag_end.entity;
+    let readonly_pieces = params.pieces.p1();
+    let _dragged_piece = readonly_pieces.get(dragged_entity).ok();
+
+    // Find which square the piece was dropped on by checking the piece's current position
+    // or finding the square under the pointer
+    let target_square = if let Ok((_, _, _, transform)) = readonly_pieces.get(dragged_entity) {
+        // Calculate board position from world position.
+        // X is mirrored (world_x = 7 - file), so invert: file = 7 - round(world_x).
+        let world_pos = transform.translation;
+        let file = (7.0 - world_pos.x).round() as i32;
+        let rank = world_pos.z.round() as i32;
+
+        debug!(
+            "[3D_DRAG] World pos: {:?}, Calculated: file={}, rank={}",
+            world_pos, file, rank
+        );
+
+        // Find square at this board position
+        square_query
+            .iter()
+            .find(|(_, square, _)| square.x as i32 == file && square.y as i32 == rank)
+    } else {
+        None
+    };
+
+    if let Some((_, square, _)) = target_square {
+        let target_pos = (square.x, square.y);
+        debug!(
+            "[INPUT] Dropped piece on square ({}, {})",
+            square.x, square.y
+        );
+
+        // Check if there's a piece on this square (capture)
+        let occupant = {
+            let q = params.pieces.p1();
+            find_piece_on_square(&q, target_pos)
+        };
+
+        let capture_info = occupant.map(|(e, p)| CapturedTarget {
+            entity: e,
+            piece_type: p.piece_type,
+            color: p.color,
+        });
+
+        try_move_sequence(&mut params, target_pos, capture_info, "drag_drop");
+    } else {
+        // Dropped on invalid location - cancel drag
+        debug!("[INPUT] Dropped on invalid location - cancelling drag");
+        clear_selection_state(
+            &mut params.commands,
+            &mut params.selection,
+            &params.selected_pieces,
+        );
+    }
+}
+
+/// Observer system: Handle click on a square
+///
+/// Triggers move to empty square or selection of piece on that square.
+pub fn on_square_click(
+    click: On<Pointer<Click>>,
+    mut params: InputSystemParams,
+    square_query: Query<&Square>,
+) {
+    if !is_primary(click.event.button) {
+        return;
+    }
+    if params.game_over.is_game_over() {
+        return;
+    }
+
+    if params.pending_promotion.is_active() {
+        return;
+    }
+
+    if !is_human_turn(&params) {
+        return;
+    }
+
+    // Skip if we're dragging - drag_end handles the drop
+    if params.selection.is_dragging {
+        return;
+    }
+
+    let Ok(square) = square_query.get(click.entity) else {
+        return;
+    };
+
+    let target_pos = (square.x, square.y);
+    debug!("[INPUT] Clicked square at ({}, {})", square.x, square.y);
+
+    let occupant = {
+        let q = params.pieces.p1();
+        find_piece_on_square(&q, target_pos)
+    };
+
+    if let Some((piece_entity, piece)) = occupant {
+        // Only select if it's a piece we control
+        if can_move_color(&params, piece.color) && piece.color == params.current_turn.color {
+            try_select_piece(&mut params, piece_entity, piece, true);
+            return;
+        }
+    }
+
+    let capture_info = occupant.map(|(e, p)| CapturedTarget {
+        entity: e,
+        piece_type: p.piece_type,
+        color: p.color,
+    });
+
+    try_move_sequence(&mut params, target_pos, capture_info, "square_click_move");
+}
+
+/// System: Toggle fullscreen mode when F11 is pressed
+pub fn toggle_fullscreen(mut window_query: Query<&mut Window>) {
+    for mut window in window_query.iter_mut() {
+        window.mode = match window.mode {
+            bevy::window::WindowMode::Windowed => bevy::window::WindowMode::Fullscreen(
+                bevy::window::MonitorSelection::Current,
+                bevy::window::VideoModeSelection::Current,
+            ),
+            _ => bevy::window::WindowMode::Windowed,
+        };
+    }
+}
+
+/// System: Render a small "F11 to minimise" hint in the bottom-right corner when fullscreen.
+pub fn render_fullscreen_hint(mut contexts: bevy_egui::EguiContexts, window_query: Query<&Window>) {
+    let is_fullscreen = window_query
+        .single()
+        .map(|w| !matches!(w.mode, bevy::window::WindowMode::Windowed))
+        .unwrap_or(false);
+
+    if !is_fullscreen {
+        return;
+    }
+
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    egui::Area::new(egui::Id::new("fullscreen_hint"))
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -10.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new("F11  minimise")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgba_unmultiplied(200, 200, 200, 80)),
+            );
+        });
+}
+
+/// System: Handle ESC key to exit to main menu (forfeit/leave game)
+pub fn handle_escape_key(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut confirmation: ResMut<InGameExitConfirmation>,
+) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        confirmation.visible = !confirmation.visible;
+        if !confirmation.visible {
+            confirmation.pending_exit = false;
+        }
+        info!(
+            "[INPUT] ESC pressed - toggling exit confirmation to {}",
+            confirmation.visible
+        );
+    }
+}
+
+pub fn confirm_exit_game(
+    mut confirmation: ResMut<InGameExitConfirmation>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+    game_mode: Res<GameMode>,
+    current_turn: Res<CurrentTurn>,
+    players: Res<Players>,
+    mut game_over: ResMut<GameOverState>,
+    mut resign_events: MessageWriter<crate::game::events::ResignEvent>,
+    network_state: Option<Res<OnlineNetworkState>>,
+    #[cfg(feature = "solana")] competitive_match: Option<Res<CompetitiveMatchState>>,
+) {
+    if !confirmation.pending_exit {
+        return;
+    }
+
+    confirmation.pending_exit = false;
+    confirmation.visible = false;
+
+    let winner = match current_turn.color {
+        PieceColor::White => PieceColor::Black,
+        PieceColor::Black => PieceColor::White,
+    };
+    let winner_label = match winner {
+        PieceColor::White => "white",
+        PieceColor::Black => "black",
+    };
+
+    match *game_mode {
+        GameMode::OnlineMultiplayer => {
+            if let Some(network_state) = network_state.as_ref() {
+                if let Some(session) = network_state.active_session.as_ref() {
+                    if let (Some(sender), Some(game_state)) = (
+                        network_state.message_sender.as_ref(),
+                        session.game_state.as_ref(),
+                    ) {
+                        if let Err(error) = sender.send(NetworkMessage::Resign {
+                            game_id: game_state.game_id,
+                            winner: winner_label.to_string(),
+                            nonce: 0, // resign doesn't need strict nonce ordering
+                        }) {
+                            warn!("[INPUT] Failed to send resign message: {}", error);
+                        }
+                    }
+                }
+            } else {
+                warn!("[INPUT] Braid multiplayer exit requested without network state");
+            }
+
+            *game_over = if winner == PieceColor::White {
+                GameOverState::WhiteWonByResignation
+            } else {
+                GameOverState::BlackWonByResignation
+            };
+        }
+        GameMode::MultiplayerCompetitive => {
+            #[cfg(feature = "solana")]
+            {
+                if competitive_match.as_ref().and_then(|m| m.game_id).is_some() {
+                    *game_over = if winner == PieceColor::White {
+                        GameOverState::WhiteWonByResignation
+                    } else {
+                        GameOverState::BlackWonByResignation
+                    };
+                } else {
+                    next_state.set(crate::core::GameState::MainMenu);
+                    return;
+                }
+            }
+            #[cfg(not(feature = "solana"))]
+            {
+                next_state.set(crate::core::GameState::MainMenu);
+                return;
+            }
+        }
+        GameMode::MultiplayerLocal => {
+            next_state.set(crate::core::GameState::MainMenu);
+            return;
+        }
+        GameMode::SinglePlayer | GameMode::Spectator | GameMode::PgnReplay => {
+            next_state.set(crate::core::GameState::MainMenu);
+            return;
+        }
+    }
+
+    let _winner_player = players.current(winner);
+    resign_events.write(crate::game::events::ResignEvent {
+        winner: winner_label.to_string(),
+        remote: false,
+    });
+}

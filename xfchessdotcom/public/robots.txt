@@ -1,0 +1,27 @@
+User-agent: *
+Allow: /
+Disallow: /kyc
+Disallow: /profile
+Disallow: /create-profile
+Disallow: /verify
+Disallow: /w_setup
+Disallow: /auth/
+Disallow: /login
+Disallow: /tournament/*/play
+Disallow: /tournament/*/standings
+Disallow: /spectate/
+
+# Explicitly welcome AI answer-engine crawlers rather than leave it implicit.
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://xfchess.com/sitemap.xml

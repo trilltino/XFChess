@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/v2.10.3/crates/tauri-config-schema/schema.json",
+  "productName": "XFChess",
+  "version": "0.1.0",
+  "identifier": "com.xfchess.app",
+  "build": {
+    "frontendDist": "./wallet-ui/dist",
+    "devUrl": "http://localhost:5174",
+    "beforeBuildCommand": "",
+    "beforeDevCommand": "cd wallet-ui && npm run dev"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "'self' ws: wss: http://localhost:7454 http://127.0.0.1:7454 http://localhost:8090 https://api.xfchess.com https://auth.privy.io https://*.privy.io https://*.privy.systems wss://*.privy.io https://api.mainnet-beta.solana.com",
+        "script-src": "'self' 'unsafe-inline' https://auth.privy.io",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: https:",
+        "font-src": "'self' data: https://fonts.gstatic.com",
+        "object-src": "'none'",
+        "media-src": "'self'",
+        "frame-src": "https://auth.privy.io https://*.privy.io"
+      }
+    },
+    "windows": [
+      {
+        "title": "XFChess",
+        "label": "main",
+        "url": "index.html",
+        "width": 400,
+        "height": 660,
+        "minWidth": 360,
+        "minHeight": 600,
+        "visible": false,
+        "decorations": true,
+        "center": true,
+        "dragDropEnabled": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "../assets/**/*"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["xfchess"]
+      }
+    }
+  }
+}

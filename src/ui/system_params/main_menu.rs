@@ -1,0 +1,119 @@
+use crate::assets::{GameAssets, LoadingProgress};
+use crate::core::{GameMode as CoreGameMode, GameSettings, GameState, PreviousState};
+use crate::game::ai::ChessAIResource;
+use crate::game::events::GameStartedEvent;
+use crate::game::resources::MenuSounds;
+use crate::game::view_mode::ViewMode;
+use crate::multiplayer::network::online_game_session::OnlineGameSession;
+use crate::multiplayer::network::p2p::{
+    ConnectToPeerEvent, HostGameEvent, P2PConnectionState, P2PUIState,
+};
+use crate::multiplayer::network::p2p_vps::P2PVpsState;
+use crate::multiplayer::social::FriendsState;
+#[cfg(feature = "solana")]
+use crate::multiplayer::solana::addon::{CompetitiveMatchState, SolanaGameSync, SolanaWallet};
+#[cfg(feature = "solana")]
+use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
+#[cfg(feature = "solana")]
+use crate::multiplayer::solana::lobby::SolanaLobbyState;
+#[cfg(feature = "solana")]
+use crate::multiplayer::solana::wager_rate::SolUsdRate;
+use crate::multiplayer::spectator::SpectateViaLinkEvent;
+use crate::multiplayer::{BraidSubscriptionConfig, NetworkConfig, OnlineNetworkState};
+use crate::states::main_menu::new_menu::{MenuExitConfirm, MenuFocusMode};
+use crate::states::main_menu::{CompetitiveMenuState, PlayerColorChoice};
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+use bevy_egui::EguiContexts;
+
+/// System parameter grouping main menu UI resources
+///
+/// Bundles all resources needed by the main menu UI to avoid exceeding
+/// Bevy's system parameter limit (16 parameters).
+///
+/// # Resources Included
+///
+/// - [`EguiContexts`] - UI rendering contexts
+/// - [`NextState<GameState>`] - For transitioning game states
+/// - [`NextState<MenuState>`] - For transitioning menu substates
+/// - [`ChessAIResource`] - AI configuration
+/// - [`ViewMode`] - Camera/view configuration
+/// - [`LoadingProgress`] - Asset loading status
+/// - [`GameAssets`] - Loaded game assets
+///
+/// - [`GameSettings`] - Game settings
+/// - [`CoreGameMode`] - Core game mode selection
+/// - [`CompetitiveMenuState`] - Competitive match UI state
+/// - [`BraidSubscriptionConfig`] - legacy Braid subscription configuration
+/// - [`OnlineNetworkState`] - Network connection state
+/// - [`P2PUIState`] - P2P UI state
+/// - [`P2PConnectionState`] - P2P connection status
+/// - [`EventWriter<HostGameEvent>`] - For hosting games
+/// - [`EventWriter<ConnectToPeerEvent>`] - For connecting to peers
+#[derive(SystemParam)]
+pub struct MainMenuUIContext<'w, 's> {
+    pub commands: Commands<'w, 's>,
+    pub contexts: EguiContexts<'w, 's>,
+    pub next_state: ResMut<'w, NextState<GameState>>,
+    pub menu_state: ResMut<'w, NextState<crate::core::MenuState>>,
+    pub current_menu_state: Option<Res<'w, State<crate::core::MenuState>>>,
+    pub ai_config: ResMut<'w, ChessAIResource>,
+    pub view_mode: ResMut<'w, ViewMode>,
+    pub loading_progress: ResMut<'w, LoadingProgress>,
+    pub game_assets: ResMut<'w, GameAssets>,
+    pub previous_state: ResMut<'w, PreviousState>,
+
+    pub settings: ResMut<'w, GameSettings>,
+    pub core_mode: ResMut<'w, CoreGameMode>,
+    pub competitive_menu: ResMut<'w, CompetitiveMenuState>,
+    pub braid_subscription: Option<ResMut<'w, BraidSubscriptionConfig>>,
+    pub network_state: Option<Res<'w, OnlineNetworkState>>,
+    pub p2p_ui: Option<ResMut<'w, P2PUIState>>,
+    pub p2p_state: Option<ResMut<'w, P2PConnectionState>>,
+    pub p2p_vps_state: Option<ResMut<'w, P2PVpsState>>,
+    pub online_session: ResMut<'w, OnlineGameSession>,
+    pub network_config: Res<'w, NetworkConfig>,
+    pub host_game_events: Option<MessageWriter<'w, HostGameEvent>>,
+    pub connect_events: Option<MessageWriter<'w, ConnectToPeerEvent>>,
+    pub game_started_events: MessageWriter<'w, GameStartedEvent>,
+    pub color_choice: ResMut<'w, PlayerColorChoice>,
+    #[cfg(feature = "solana")]
+    pub wallet: Option<ResMut<'w, SolanaWallet>>,
+    #[cfg(feature = "solana")]
+    pub solana_sync: Option<ResMut<'w, SolanaGameSync>>,
+    #[cfg(feature = "solana")]
+    pub competitive: Option<ResMut<'w, CompetitiveMatchState>>,
+    #[cfg(feature = "solana")]
+    pub solana_lobby: Option<ResMut<'w, SolanaLobbyState>>,
+    #[cfg(feature = "solana")]
+    pub solana_state: Option<ResMut<'w, SolanaIntegrationState>>,
+    #[cfg(feature = "solana")]
+    pub sol_usd_wager_rate: Option<Res<'w, SolUsdRate>>,
+    #[cfg(feature = "solana")]
+    pub tournament_client:
+        Option<ResMut<'w, crate::multiplayer::solana::tournament::TournamentClientState>>,
+    pub tournament_lobby: ResMut<'w, crate::states::tournament_menu::TournamentLobbyState>,
+    pub compliance: ResMut<'w, crate::ui::compliance_modal::ComplianceState>,
+    pub player_identity: ResMut<'w, crate::states::main_menu::PlayerIdentity>,
+    pub brand_logo: ResMut<'w, crate::states::main_menu::BrandLogoState>,
+    pub news_banner: ResMut<'w, crate::states::main_menu::NewsBannerState>,
+    pub p2p_host: ResMut<'w, crate::states::main_menu::P2PHostState>,
+    pub friends: ResMut<'w, FriendsState>,
+    pub backend_region: Res<'w, crate::multiplayer::social::BackendRegion>,
+    pub online_players: Res<'w, crate::multiplayer::social::OnlinePlayersState>,
+    pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
+    pub active_time_control:
+        ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
+    pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
+    pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,
+    pub menu_sounds: Option<Res<'w, MenuSounds>>,
+    pub exit_confirm: ResMut<'w, MenuExitConfirm>,
+    pub focus_mode: ResMut<'w, MenuFocusMode>,
+    pub board_animator: ResMut<'w, crate::states::main_menu::BoardAnimator>,
+    pub spectate_events: Option<MessageWriter<'w, SpectateViaLinkEvent>>,
+    pub tokio_runtime: Res<'w, crate::multiplayer::TokioRuntime>,
+    /// Used by the exit-confirmation dialog to request a graceful shutdown
+    /// instead of `std::process::exit`, so cleanup systems (e.g. notifying
+    /// the P2P relay we're leaving a hosted lobby) get a chance to run first.
+    pub app_exit: MessageWriter<'w, AppExit>,
+}

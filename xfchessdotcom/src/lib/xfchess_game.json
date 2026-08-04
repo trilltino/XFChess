@@ -1,0 +1,8038 @@
+{
+  "address": "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU",
+  "metadata": {
+    "name": "xfchess_game",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "advance_winner",
+      "discriminator": [
+        124,
+        40,
+        219,
+        225,
+        178,
+        147,
+        211,
+        169
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "source_match",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  109,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              },
+              {
+                "kind": "arg",
+                "path": "source_match_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "target_match",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  109,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              },
+              {
+                "kind": "arg",
+                "path": "target_match_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "source_match_index",
+          "type": "u16"
+        },
+        {
+          "name": "_target_match_index",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "authorize_global_session",
+      "docs": [
+        "Create (or refresh) a global persistent session key for `player`.",
+        "After this call the session key can co-sign `global_create_game` and",
+        "`global_join_game` without a wallet popup — for the configured number",
+        "of games and spending budget."
+      ],
+      "discriminator": [
+        71,
+        185,
+        84,
+        139,
+        71,
+        116,
+        77,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "AuthorizeGlobalSessionArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "authorize_session_key",
+      "discriminator": [
+        38,
+        249,
+        219,
+        111,
+        37,
+        144,
+        247,
+        40
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  95,
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "session_pubkey",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "authorize_tournament_session",
+      "docs": [
+        "Authorize a `session_key` to co-sign game and swiss-result ixs for",
+        "`tournament_id` on behalf of the registered player, without a wallet",
+        "popup per match. See [`AuthorizeTournamentSessionArgs`] for caps."
+      ],
+      "discriminator": [
+        156,
+        28,
+        223,
+        238,
+        121,
+        17,
+        61,
+        245
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "TournamentPlayersShard 0 (players 0-63)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "TournamentPlayersShard 1 (players 64-127)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "TournamentPlayersShard 2 (players 128-191)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "TournamentPlayersShard 3 (players 192-255)"
+          ]
+        },
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "AuthorizeTournamentSessionArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cancel_game",
+      "discriminator": [
+        121,
+        194,
+        154,
+        118,
+        103,
+        235,
+        149,
+        52
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "The player initiating the cancel — must be white or black."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "white_authority",
+          "writable": true
+        },
+        {
+          "name": "black_authority",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "cancel_tournament",
+      "discriminator": [
+        249,
+        227,
+        133,
+        5,
+        9,
+        142,
+        29,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "TournamentPlayersShard 0 (players 0-63)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "TournamentPlayersShard 1 (players 64-127)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "TournamentPlayersShard 2 (players 128-191)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "TournamentPlayersShard 3 (players 192-255)"
+          ]
+        },
+        {
+          "name": "usdc_prize_escrow_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  117,
+                  115,
+                  100,
+                  99,
+                  95,
+                  112,
+                  114,
+                  105,
+                  122,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_prize_escrow",
+          "docs": [
+            "USDC prize escrow token account (only used if usdc_prize_mint is Some)."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "usdc_prize_escrow_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "operator_usdc_ata",
+          "docs": [
+            "Operator's USDC ATA — receives returned USDC (only used if usdc_prize_mint is Some)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "usdc_mint",
+          "docs": [
+            "The USDC mint account (only used if usdc_prize_mint is Some)."
+          ],
+          "optional": true
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "Registration, the entry-fee deposits."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "host_treasury",
+          "docs": [
+            "Host treasury wallet — must sign to authorize SOL refunds for Active-phase",
+            "cancellations (fees were already swept there at start). Also receives the",
+            "returned SOL prize guarantee."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_fees",
+      "discriminator": [
+        82,
+        251,
+        233,
+        156,
+        12,
+        52,
+        184,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone can trigger claim — permissionless"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  102,
+                  101,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "host_wallet",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [],
+      "returns": "u64"
+    },
+    {
+      "name": "claim_stale_dispute",
+      "discriminator": [
+        181,
+        240,
+        112,
+        170,
+        63,
+        112,
+        252,
+        58
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "dispute_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  112,
+                  117,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "System-owned wager escrow PDA — paid out via signed CPI."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "docs": [
+            "Permissionless — any signer may trigger once the TTL has elapsed."
+          ],
+          "signer": true
+        },
+        {
+          "name": "white_authority",
+          "docs": [
+            "White player wallet — must match game.white."
+          ],
+          "writable": true
+        },
+        {
+          "name": "black_authority",
+          "docs": [
+            "Black player wallet — must match game.black."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_timeout",
+      "discriminator": [
+        130,
+        234,
+        45,
+        53,
+        120,
+        90,
+        86,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "System-owned wager escrow PDA — paid out via signed CPI."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "docs": [
+            "Permissionless — any signer may trigger the timeout once elapsed."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "white_authority",
+          "docs": [
+            "White player's wallet — must match game.white."
+          ],
+          "writable": true
+        },
+        {
+          "name": "black_authority",
+          "docs": [
+            "Black player's wallet — must match game.black."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_tournament_prize",
+      "discriminator": [
+        219,
+        207,
+        183,
+        94,
+        201,
+        32,
+        78,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_prize_escrow_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  117,
+                  115,
+                  100,
+                  99,
+                  95,
+                  112,
+                  114,
+                  105,
+                  122,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_prize_escrow",
+          "docs": [
+            "USDC prize escrow token account (only used if usdc_prize_mint is Some)."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "usdc_prize_escrow_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "claimant_usdc_ata",
+          "docs": [
+            "Claimant's USDC ATA — receives USDC prize (only used if usdc_prize_mint is Some)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "usdc_mint",
+          "docs": [
+            "The USDC mint account (only used if usdc_prize_mint is Some)."
+          ],
+          "optional": true
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "claimant_wallet",
+          "writable": true
+        },
+        {
+          "name": "claimant",
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "collect_fee",
+      "discriminator": [
+        60,
+        173,
+        247,
+        103,
+        4,
+        93,
+        130,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "VPS backend authority — the only signer allowed to deposit into the fee vault."
+          ],
+          "writable": true,
+          "signer": true,
+          "address": "C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw"
+        },
+        {
+          "name": "fee_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  102,
+                  101,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "crank_time_check",
+      "docs": [
+        "Automatic time check called by the scheduled crank"
+      ],
+      "discriminator": [
+        173,
+        4,
+        97,
+        237,
+        124,
+        141,
+        165,
+        103
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "docs": [
+            "The game account to check"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "white"
+        },
+        {
+          "name": "black"
+        }
+      ],
+      "args": [
+        {
+          "name": "_data",
+          "type": {
+            "defined": {
+              "name": "CrankTimeCheckData"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_game",
+      "discriminator": [
+        124,
+        69,
+        75,
+        66,
+        184,
+        220,
+        72,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_payer",
+          "docs": [
+            "The VPS relayer wallet that covers rent and is reimbursed via fees_advanced."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "wager_amount",
+          "type": "u64"
+        },
+        {
+          "name": "match_type",
+          "type": {
+            "defined": {
+              "name": "MatchType"
+            }
+          }
+        },
+        {
+          "name": "platform_fee",
+          "type": "u64"
+        },
+        {
+          "name": "base_time_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "increment_seconds",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "create_session",
+      "discriminator": [
+        242,
+        193,
+        143,
+        179,
+        150,
+        25,
+        122,
+        227
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              },
+              {
+                "kind": "arg",
+                "path": "session_key"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "session_key",
+          "type": "pubkey"
+        },
+        {
+          "name": "duration",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "spending_limit",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "max_wager",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "delegate_game",
+      "discriminator": [
+        116,
+        183,
+        70,
+        107,
+        112,
+        223,
+        122,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "_game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner_program"
+        },
+        {
+          "name": "buffer",
+          "writable": true
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "fee_payer",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "valid_until",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "dispute_game",
+      "discriminator": [
+        6,
+        124,
+        64,
+        120,
+        202,
+        105,
+        205,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "dispute_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  112,
+                  117,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "Disputing player \\u2014 must be white or black in this game."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "name": "evidence_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "distribute_tournament_prizes",
+      "discriminator": [
+        88,
+        13,
+        187,
+        53,
+        93,
+        202,
+        253,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "can be debited directly. Seeds make it impossible to substitute."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cranker",
+          "docs": [
+            "Anyone may crank; payouts only ever go to recorded winners."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "finalize_game",
+      "discriminator": [
+        203,
+        227,
+        3,
+        167,
+        186,
+        102,
+        76,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "white_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.white",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "black_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.black",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "white_authority",
+          "docs": [
+            "White player wallet — must match game.white."
+          ],
+          "writable": true
+        },
+        {
+          "name": "black_authority",
+          "docs": [
+            "Black player wallet — must match game.black."
+          ],
+          "writable": true
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "System-owned per-game wager escrow PDA (funds moved out via signed CPI)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury_vault",
+          "docs": [
+            "Platform treasury vault — seeded PDA prevents redirection to arbitrary wallets."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_payer",
+          "docs": [
+            "Ephemeral-rollups relayer that funded the game — reimbursed from escrow and",
+            "receives the closed game account's rent. Must be the recorded fee payer."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "fund_sol_prize",
+      "discriminator": [
+        19,
+        238,
+        137,
+        80,
+        105,
+        51,
+        35,
+        154
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Operator funding the guaranteed prize."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "fund_usdc_prize",
+      "discriminator": [
+        171,
+        94,
+        155,
+        165,
+        58,
+        85,
+        203,
+        109
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_prize_escrow_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  117,
+                  115,
+                  100,
+                  99,
+                  95,
+                  112,
+                  114,
+                  105,
+                  122,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_prize_escrow",
+          "docs": [
+            "USDC prize escrow token account (holds the USDC prize pool)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "usdc_prize_escrow_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "operator_usdc_ata",
+          "docs": [
+            "Operator's USDC ATA — source of the funds."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint",
+          "docs": [
+            "The USDC mint account."
+          ]
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Operator funding the prize pool."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "global_create_game",
+      "docs": [
+        "Session-signed `create_game`. The session key co-signs; wager and rent",
+        "are drawn from the [`GlobalSessionDelegation`] vault — zero wallet popup."
+      ],
+      "discriminator": [
+        135,
+        237,
+        143,
+        254,
+        238,
+        143,
+        206,
+        24
+      ],
+      "accounts": [
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_signer",
+          "docs": [
+            "Hot key that signs on behalf of the player."
+          ],
+          "signer": true
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "wager_amount",
+          "type": "u64"
+        },
+        {
+          "name": "match_type",
+          "type": {
+            "defined": {
+              "name": "MatchType"
+            }
+          }
+        },
+        {
+          "name": "platform_fee",
+          "type": "u64"
+        },
+        {
+          "name": "base_time_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "increment_seconds",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "global_join_game",
+      "docs": [
+        "Session-signed `join_game`. The session key co-signs; wager is drawn",
+        "from the [`GlobalSessionDelegation`] vault — zero wallet popup."
+      ],
+      "discriminator": [
+        216,
+        82,
+        54,
+        154,
+        203,
+        105,
+        110,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_signer",
+          "docs": [
+            "Hot key that signs on behalf of the player."
+          ],
+          "signer": true
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_profile",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "white_profile",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.white",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "init_profile",
+      "discriminator": [
+        210,
+        162,
+        212,
+        95,
+        95,
+        186,
+        89,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "player_profile",
+          "writable": true
+        },
+        {
+          "name": "username_record",
+          "docs": [
+            "UsernameRecord PDA ensures uniqueness"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "username"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "username",
+          "type": "string"
+        },
+        {
+          "name": "country",
+          "type": "string"
+        },
+        {
+          "name": "date_of_birth",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_fee_vault",
+      "discriminator": [
+        185,
+        140,
+        228,
+        234,
+        79,
+        203,
+        252,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  102,
+                  101,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "host_wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_match",
+      "discriminator": [
+        156,
+        133,
+        52,
+        179,
+        176,
+        29,
+        64,
+        124
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_match",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  109,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              },
+              {
+                "kind": "arg",
+                "path": "match_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "match_index",
+          "type": "u16"
+        },
+        {
+          "name": "round",
+          "type": "u8"
+        },
+        {
+          "name": "player_white",
+          "type": {
+            "option": "pubkey"
+          }
+        },
+        {
+          "name": "player_black",
+          "type": {
+            "option": "pubkey"
+          }
+        },
+        {
+          "name": "next_match_for_winner",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "next_match_slot",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "initialize_shards_medium",
+      "docs": [
+        "Initialize shards for tournaments with ≤ 128 players (2 shards, ~0.068 SOL)."
+      ],
+      "discriminator": [
+        59,
+        172,
+        7,
+        144,
+        57,
+        98,
+        57,
+        224
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "writable": true
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_shards_small",
+      "docs": [
+        "Initialize shards for tournaments with ≤ 64 players (1 shard, ~0.034 SOL)."
+      ],
+      "discriminator": [
+        161,
+        179,
+        0,
+        52,
+        152,
+        177,
+        194,
+        67
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_tournament",
+      "discriminator": [
+        75,
+        218,
+        86,
+        80,
+        49,
+        127,
+        155,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_prize_escrow_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  117,
+                  115,
+                  100,
+                  99,
+                  95,
+                  112,
+                  114,
+                  105,
+                  122,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_prize_escrow",
+          "docs": [
+            "USDC prize escrow token account (initialized if usdc_mint is Some)."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "usdc_prize_escrow_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "usdc_mint",
+          "docs": [
+            "The USDC mint account (optional)."
+          ],
+          "optional": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "entry_fee",
+          "type": "u64"
+        },
+        {
+          "name": "max_players",
+          "type": "u16"
+        },
+        {
+          "name": "tournament_type",
+          "type": {
+            "defined": {
+              "name": "TournamentType"
+            }
+          }
+        },
+        {
+          "name": "elo_min",
+          "type": "u32"
+        },
+        {
+          "name": "elo_max",
+          "type": "u32"
+        },
+        {
+          "name": "min_players",
+          "type": "u16"
+        },
+        {
+          "name": "prize_shares",
+          "type": {
+            "array": [
+              "u16",
+              10
+            ]
+          }
+        },
+        {
+          "name": "platform_fee",
+          "type": "u64"
+        },
+        {
+          "name": "winner_takes_all",
+          "type": "bool"
+        },
+        {
+          "name": "host_treasury",
+          "type": "pubkey"
+        },
+        {
+          "name": "usdc_mint",
+          "type": {
+            "option": "pubkey"
+          }
+        },
+        {
+          "name": "base_time_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "increment_seconds",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "initialize_tournament_escrow",
+      "discriminator": [
+        150,
+        97,
+        47,
+        136,
+        174,
+        12,
+        30,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_tournament_shards",
+      "discriminator": [
+        10,
+        119,
+        225,
+        171,
+        226,
+        179,
+        18,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "writable": true
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "writable": true
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "writable": true
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "join_game",
+      "discriminator": [
+        107,
+        112,
+        18,
+        38,
+        56,
+        173,
+        60,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "white_profile",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.white",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "leave_tournament",
+      "discriminator": [
+        223,
+        40,
+        200,
+        157,
+        188,
+        21,
+        52,
+        7
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "TournamentPlayersShard 0 (players 0-63)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "TournamentPlayersShard 1 (players 64-127)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "TournamentPlayersShard 2 (players 128-191)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "TournamentPlayersShard 3 (players 192-255)"
+          ]
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "link_external_elo",
+      "discriminator": [
+        112,
+        2,
+        152,
+        9,
+        115,
+        165,
+        224,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "link_authority",
+          "signer": true,
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "username",
+          "type": "string"
+        },
+        {
+          "name": "blitz_rating",
+          "type": "u32"
+        },
+        {
+          "name": "rapid_rating",
+          "type": "u32"
+        },
+        {
+          "name": "bullet_rating",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "process_undelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "base_account",
+          "writable": true
+        },
+        {
+          "name": "buffer"
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_seeds",
+          "type": {
+            "vec": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "record_match_result",
+      "discriminator": [
+        37,
+        251,
+        4,
+        178,
+        56,
+        184,
+        50,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_match",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  109,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              },
+              {
+                "kind": "arg",
+                "path": "match_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "The tournament authority is the trusted source of match results (results",
+            "are not verified against an on-chain game account by design)."
+          ],
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "match_index",
+          "type": "u16"
+        },
+        {
+          "name": "winner",
+          "type": "pubkey"
+        },
+        {
+          "name": "loser",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "record_move",
+      "discriminator": [
+        111,
+        244,
+        88,
+        207,
+        200,
+        48,
+        59,
+        2
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "Session key — must match the session_delegation registered for this game."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session_delegation",
+          "docs": [
+            "Session delegation account linking session_key → wallet for this game."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  95,
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "session_delegation.player",
+                "account": "SessionDelegation"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "move_uci",
+          "type": {
+            "array": [
+              "u8",
+              5
+            ]
+          }
+        },
+        {
+          "name": "next_board",
+          "type": {
+            "array": [
+              "u8",
+              68
+            ]
+          }
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "signature",
+          "type": {
+            "option": "bytes"
+          }
+        },
+        {
+          "name": "parent_nonce",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "record_swiss_result",
+      "discriminator": [
+        19,
+        225,
+        143,
+        213,
+        146,
+        62,
+        205,
+        129
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "TournamentPlayersShard 0 (players 0-63)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "TournamentPlayersShard 1 (players 64-127)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "TournamentPlayersShard 2 (players 128-191)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "TournamentPlayersShard 3 (players 192-255)"
+          ]
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "opponent"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "round",
+          "type": "u8"
+        },
+        {
+          "name": "board",
+          "type": "u16"
+        },
+        {
+          "name": "result",
+          "type": {
+            "defined": {
+              "name": "SwissMatchResult"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "register_player",
+      "discriminator": [
+        242,
+        146,
+        194,
+        234,
+        234,
+        145,
+        228,
+        42
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_profile",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "plus entry-fee deposits (refundable custody until the tournament starts)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "Shard 0 always present (all tournament sizes)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "Shard 1 — present for ≥128-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "Shard 2 — present for 256-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "Shard 3 — present for 256-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "host_treasury",
+          "docs": [
+            "entry fees no longer flow here at registration — they are swept from escrow",
+            "at start_tournament instead. Must match tournament.host_treasury."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "elo",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "resign",
+      "discriminator": [
+        177,
+        177,
+        153,
+        96,
+        88,
+        149,
+        206,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "System-owned wager escrow PDA — paid out via signed CPI."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "The resigning player — must be white or black."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "white_authority",
+          "docs": [
+            "White player wallet — must match game.white."
+          ],
+          "writable": true
+        },
+        {
+          "name": "black_authority",
+          "docs": [
+            "Black player wallet — must match game.black."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "resolve_dispute",
+      "discriminator": [
+        231,
+        6,
+        202,
+        6,
+        96,
+        103,
+        12,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "dispute",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  112,
+                  117,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "System-owned wager escrow PDA — paid out via signed CPI."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "dispute_authority",
+          "docs": [
+            "Only the platform dispute authority may resolve."
+          ],
+          "signer": true,
+          "address": "HAHgvXf6uYxTqEuUnkkzTS1EQD8sYd342zgxM2wdqpa2"
+        },
+        {
+          "name": "white_account",
+          "docs": [
+            "White player wallet — must match game.white."
+          ],
+          "writable": true
+        },
+        {
+          "name": "black_account",
+          "docs": [
+            "Black player wallet — must match game.black."
+          ],
+          "writable": true
+        },
+        {
+          "name": "platform_treasury",
+          "docs": [
+            "Platform treasury — seeded PDA so funds can't be redirected."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "resolution",
+          "type": "string"
+        },
+        {
+          "name": "winner",
+          "type": {
+            "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "revoke_global_session",
+      "docs": [
+        "Immediately disable a global session key."
+      ],
+      "discriminator": [
+        118,
+        200,
+        204,
+        20,
+        10,
+        41,
+        23,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "revoke_session",
+      "discriminator": [
+        86,
+        92,
+        198,
+        120,
+        144,
+        2,
+        7,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "session"
+          ]
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              },
+              {
+                "kind": "account",
+                "path": "session.session_key",
+                "account": "PlayerSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "revoke_session_key",
+      "discriminator": [
+        81,
+        192,
+        32,
+        110,
+        104,
+        116,
+        144,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  95,
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "revoke_tournament_session",
+      "docs": [
+        "Disable an existing tournament session delegation immediately."
+      ],
+      "discriminator": [
+        225,
+        67,
+        53,
+        196,
+        126,
+        106,
+        183,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "schedule_time_check",
+      "docs": [
+        "Schedule an automatic time check crank for a game"
+      ],
+      "discriminator": [
+        152,
+        12,
+        220,
+        83,
+        11,
+        81,
+        135,
+        31
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "game",
+          "docs": [
+            "The game account to monitor for time controls"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "white"
+        },
+        {
+          "name": "black"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ScheduleTimeCheckArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "session_create_game",
+      "docs": [
+        "Session-signed variant of `create_game` for tournament matches.",
+        "The session key (not the player wallet) co-signs; wager and rent",
+        "are drawn from the delegation PDA vault."
+      ],
+      "discriminator": [
+        132,
+        64,
+        249,
+        0,
+        17,
+        170,
+        239,
+        208
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "TournamentPlayersShard 0 (players 0-63)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "TournamentPlayersShard 1 (players 64-127)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "TournamentPlayersShard 2 (players 128-191)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "TournamentPlayersShard 3 (players 192-255)"
+          ]
+        },
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_signer",
+          "docs": [
+            "Session key signer (hot key, not the player wallet)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "wager_amount",
+          "type": "u64"
+        },
+        {
+          "name": "match_type",
+          "type": {
+            "defined": {
+              "name": "MatchType"
+            }
+          }
+        },
+        {
+          "name": "platform_fee",
+          "type": "u64"
+        },
+        {
+          "name": "base_time_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "increment_seconds",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "session_join_game",
+      "docs": [
+        "Session-signed variant of `join_game` for tournament matches.",
+        "The session key (not the player wallet) co-signs; wager and fees",
+        "are drawn from the delegation PDA vault."
+      ],
+      "discriminator": [
+        40,
+        77,
+        108,
+        247,
+        72,
+        71,
+        93,
+        7
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "TournamentPlayersShard 0 (players 0-63)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "TournamentPlayersShard 1 (players 64-127)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "TournamentPlayersShard 2 (players 128-191)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "TournamentPlayersShard 3 (players 192-255)"
+          ]
+        },
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_signer",
+          "docs": [
+            "Session key signer (hot key, not the player wallet)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "white_profile",
+          "docs": [
+            "White player profile for cross-border fee calculation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.white",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_profile",
+          "docs": [
+            "Black player profile (the joining player)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_username",
+      "discriminator": [
+        103,
+        131,
+        39,
+        36,
+        30,
+        228,
+        75,
+        132
+      ],
+      "accounts": [
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "username_record",
+          "docs": [
+            "UsernameRecord PDA ensures uniqueness",
+            "Seeds: [USERNAME_SEED, username.as_bytes()]"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "username"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "relations": [
+            "player_profile"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "username",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "start_tournament",
+      "discriminator": [
+        164,
+        168,
+        208,
+        157,
+        43,
+        10,
+        220,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "TournamentPlayersShard 0 (players 0-63)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "TournamentPlayersShard 1 (players 64-127)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "TournamentPlayersShard 2 (players 128-191)"
+          ]
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "TournamentPlayersShard 3 (players 192-255)"
+          ]
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "host_treasury once the tournament actually starts."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "host_treasury",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "undelegate_game",
+      "discriminator": [
+        40,
+        145,
+        154,
+        66,
+        48,
+        111,
+        127,
+        1
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "_game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_elo",
+      "discriminator": [
+        68,
+        19,
+        100,
+        169,
+        152,
+        2,
+        204,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "VPS backend authority — only this key may update ELO standings."
+          ],
+          "signer": true,
+          "address": "C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw"
+        },
+        {
+          "name": "profile",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "opponent_rating",
+          "type": "u32"
+        },
+        {
+          "name": "opponent_rd",
+          "type": "u32"
+        },
+        {
+          "name": "outcome",
+          "type": "u32"
+        },
+        {
+          "name": "is_ranked",
+          "type": "bool"
+        },
+        {
+          "name": "wager",
+          "type": "u64"
+        },
+        {
+          "name": "won_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "verify_profile",
+      "discriminator": [
+        101,
+        137,
+        36,
+        242,
+        139,
+        119,
+        156,
+        251
+      ],
+      "accounts": [
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "address": "2mh7zXgZHaeDnroJQQdHnLNiierWXdn43VnATbGdATZK"
+        },
+        {
+          "name": "player"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw_expired_wager",
+      "discriminator": [
+        167,
+        176,
+        220,
+        114,
+        145,
+        206,
+        147,
+        179
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "vault_nft_ata",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "player_nft_ata",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "optional": true,
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_global_session",
+      "docs": [
+        "Return the unspent balance of the global-session vault to the player."
+      ],
+      "discriminator": [
+        191,
+        181,
+        188,
+        178,
+        12,
+        178,
+        160,
+        2
+      ],
+      "accounts": [
+        {
+          "name": "session_delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "DisputeRecord",
+      "discriminator": [
+        198,
+        199,
+        79,
+        209,
+        12,
+        215,
+        34,
+        47
+      ]
+    },
+    {
+      "name": "Game",
+      "discriminator": [
+        27,
+        90,
+        166,
+        125,
+        74,
+        100,
+        121,
+        18
+      ]
+    },
+    {
+      "name": "GlobalSessionDelegation",
+      "discriminator": [
+        95,
+        185,
+        219,
+        177,
+        179,
+        100,
+        176,
+        170
+      ]
+    },
+    {
+      "name": "PlatformFeeVault",
+      "discriminator": [
+        108,
+        202,
+        143,
+        121,
+        8,
+        11,
+        125,
+        143
+      ]
+    },
+    {
+      "name": "PlayerProfile",
+      "discriminator": [
+        82,
+        226,
+        99,
+        87,
+        164,
+        130,
+        181,
+        80
+      ]
+    },
+    {
+      "name": "PlayerSession",
+      "discriminator": [
+        89,
+        95,
+        51,
+        45,
+        127,
+        42,
+        173,
+        223
+      ]
+    },
+    {
+      "name": "SessionDelegation",
+      "discriminator": [
+        22,
+        217,
+        208,
+        40,
+        208,
+        22,
+        211,
+        200
+      ]
+    },
+    {
+      "name": "Tournament",
+      "discriminator": [
+        175,
+        139,
+        119,
+        242,
+        115,
+        194,
+        57,
+        92
+      ]
+    },
+    {
+      "name": "TournamentEscrow",
+      "discriminator": [
+        215,
+        126,
+        133,
+        105,
+        83,
+        115,
+        183,
+        244
+      ]
+    },
+    {
+      "name": "TournamentMatch",
+      "discriminator": [
+        234,
+        67,
+        146,
+        28,
+        106,
+        92,
+        30,
+        106
+      ]
+    },
+    {
+      "name": "TournamentPlayersShard",
+      "discriminator": [
+        173,
+        179,
+        126,
+        95,
+        237,
+        141,
+        218,
+        208
+      ]
+    },
+    {
+      "name": "TournamentSessionDelegation",
+      "discriminator": [
+        141,
+        64,
+        89,
+        188,
+        11,
+        125,
+        133,
+        80
+      ]
+    },
+    {
+      "name": "UsernameRecord",
+      "discriminator": [
+        42,
+        172,
+        136,
+        41,
+        240,
+        123,
+        100,
+        204
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "MoveEvent",
+      "discriminator": [
+        121,
+        74,
+        8,
+        121,
+        240,
+        193,
+        169,
+        237
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "GameAlreadyFull",
+      "msg": "Game is already full."
+    },
+    {
+      "code": 6001,
+      "name": "CannotPlaySelf",
+      "msg": "Cannot play against yourself."
+    },
+    {
+      "code": 6002,
+      "name": "GameNotActive",
+      "msg": "Game is not active."
+    },
+    {
+      "code": 6003,
+      "name": "NotPlayerTurn",
+      "msg": "Not your turn."
+    },
+    {
+      "code": 6004,
+      "name": "Overflow",
+      "msg": "Calculation overflow."
+    },
+    {
+      "code": 6005,
+      "name": "NotInGame",
+      "msg": "You are not in this game."
+    },
+    {
+      "code": 6006,
+      "name": "MoveLogFull",
+      "msg": "Move log is full."
+    },
+    {
+      "code": 6007,
+      "name": "GameNotExpired",
+      "msg": "Game has not expired or is not in a withdrawable state."
+    },
+    {
+      "code": 6008,
+      "name": "NotGameCreator",
+      "msg": "Only the game creator can withdraw an expired wager."
+    },
+    {
+      "code": 6009,
+      "name": "MissingTokenAccounts",
+      "msg": "Missing token accounts for NFT/SPL wager payout."
+    },
+    {
+      "code": 6010,
+      "name": "WagerTooHigh",
+      "msg": "Wager amount exceeds the maximum allowed."
+    },
+    {
+      "code": 6011,
+      "name": "InvalidBoardState",
+      "msg": "Invalid board state or FEN."
+    },
+    {
+      "code": 6012,
+      "name": "InvalidMove",
+      "msg": "Invalid or illegal chess move."
+    },
+    {
+      "code": 6013,
+      "name": "UnauthorizedAccess",
+      "msg": "Unauthorized access to this resource."
+    },
+    {
+      "code": 6014,
+      "name": "InvalidSessionKey",
+      "msg": "Invalid session key provided."
+    },
+    {
+      "code": 6015,
+      "name": "SessionExpiredOrDisabled",
+      "msg": "Session has expired or is disabled."
+    },
+    {
+      "code": 6016,
+      "name": "SessionExpired",
+      "msg": "Session is expired or has been revoked."
+    },
+    {
+      "code": 6017,
+      "name": "SessionSpendingLimit",
+      "msg": "Session spending limit exceeded."
+    },
+    {
+      "code": 6018,
+      "name": "SessionNotAuthorized",
+      "msg": "Session not authorized for this operation."
+    },
+    {
+      "code": 6019,
+      "name": "WagerExceedsSessionCap",
+      "msg": "Wager exceeds session per-match cap."
+    },
+    {
+      "code": 6020,
+      "name": "SessionSpendingLimitExceeded",
+      "msg": "Session spending limit would be exceeded."
+    },
+    {
+      "code": 6021,
+      "name": "InvalidNextFen",
+      "msg": "Invalid next FEN provided in batch."
+    },
+    {
+      "code": 6022,
+      "name": "InvalidBatchLength",
+      "msg": "Moves and FENs arrays have different lengths."
+    },
+    {
+      "code": 6023,
+      "name": "BatchTooLarge",
+      "msg": "Batch size exceeds maximum allowed."
+    },
+    {
+      "code": 6024,
+      "name": "InvalidNonce",
+      "msg": "Invalid nonce provided for replay protection."
+    },
+    {
+      "code": 6025,
+      "name": "ParentNonceMismatch",
+      "msg": "Parent nonce mismatch: client's claimed parent state does not match on-chain nonce."
+    },
+    {
+      "code": 6026,
+      "name": "InvalidGameStatus",
+      "msg": "Game is not in the required status for this operation."
+    },
+    {
+      "code": 6027,
+      "name": "GameNotFinished",
+      "msg": "Game is not finished"
+    },
+    {
+      "code": 6028,
+      "name": "InvalidWinner",
+      "msg": "Invalid winner specified"
+    },
+    {
+      "code": 6029,
+      "name": "NotYourTurn",
+      "msg": "Not your turn to move"
+    },
+    {
+      "code": 6030,
+      "name": "DuplicatePlayerAccount",
+      "msg": "Duplicate player account detected"
+    },
+    {
+      "code": 6031,
+      "name": "MissingPlayerAccount",
+      "msg": "Missing player account"
+    },
+    {
+      "code": 6032,
+      "name": "InvalidPlayerAccount",
+      "msg": "Invalid player account"
+    },
+    {
+      "code": 6033,
+      "name": "PrizeAlreadyClaimed",
+      "msg": "Prize already claimed"
+    },
+    {
+      "code": 6034,
+      "name": "InvalidMint",
+      "msg": "Invalid mint for USDC"
+    },
+    {
+      "code": 6035,
+      "name": "GameNotDisputed",
+      "msg": "Game is not currently disputed."
+    },
+    {
+      "code": 6036,
+      "name": "UnauthorizedDisputeResolution",
+      "msg": "Unauthorized to resolve this dispute."
+    },
+    {
+      "code": 6037,
+      "name": "TournamentNotInRegistration",
+      "msg": "Tournament is not in registration phase."
+    },
+    {
+      "code": 6038,
+      "name": "TournamentFull",
+      "msg": "Tournament is full."
+    },
+    {
+      "code": 6039,
+      "name": "AlreadyRegistered",
+      "msg": "Player is already registered for this tournament."
+    },
+    {
+      "code": 6040,
+      "name": "NotTournamentAuthority",
+      "msg": "Unauthorized: Not the tournament authority."
+    },
+    {
+      "code": 6041,
+      "name": "InvalidMatchStatus",
+      "msg": "Invalid tournament match status."
+    },
+    {
+      "code": 6042,
+      "name": "TournamentNotCompleted",
+      "msg": "Tournament is not completed."
+    },
+    {
+      "code": 6043,
+      "name": "NoPrizeToClaim",
+      "msg": "No prize pool to claim or not the winner."
+    },
+    {
+      "code": 6044,
+      "name": "TournamentNotActive",
+      "msg": "Tournament is not active."
+    },
+    {
+      "code": 6045,
+      "name": "EloTooLow",
+      "msg": "Player ELO is below tournament minimum."
+    },
+    {
+      "code": 6046,
+      "name": "EloTooHigh",
+      "msg": "Player ELO is above tournament maximum."
+    },
+    {
+      "code": 6047,
+      "name": "PlayerNotFound",
+      "msg": "Player not found in tournament."
+    },
+    {
+      "code": 6048,
+      "name": "UsdcPrizeNotFunded",
+      "msg": "USDC prize pool has not been funded yet."
+    },
+    {
+      "code": 6049,
+      "name": "PrizeNotFunded",
+      "msg": "Guaranteed prize pool must be funded before registration opens."
+    },
+    {
+      "code": 6050,
+      "name": "PrizeAlreadyFunded",
+      "msg": "Guaranteed prize pool is already funded and cannot be changed."
+    },
+    {
+      "code": 6051,
+      "name": "MinPlayersNotReached",
+      "msg": "Minimum player count not reached."
+    },
+    {
+      "code": 6052,
+      "name": "UsdcTransferFailed",
+      "msg": "USDC transfer failed."
+    },
+    {
+      "code": 6053,
+      "name": "InsufficientTreasuryForRefund",
+      "msg": "Insufficient treasury balance for refunds."
+    },
+    {
+      "code": 6054,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient funds"
+    },
+    {
+      "code": 6055,
+      "name": "InsufficientPrizeFunds",
+      "msg": "Insufficient prize funds"
+    },
+    {
+      "code": 6056,
+      "name": "NoTimeLimit",
+      "msg": "No time limit is set for this game."
+    },
+    {
+      "code": 6057,
+      "name": "TimeoutNotExpired",
+      "msg": "Timeout period has not elapsed yet."
+    },
+    {
+      "code": 6058,
+      "name": "AlreadyFinished",
+      "msg": "Game is already finished."
+    },
+    {
+      "code": 6059,
+      "name": "FeeVaultNotReady",
+      "msg": "Fee vault claim conditions not yet met (threshold or interval)."
+    },
+    {
+      "code": 6060,
+      "name": "NoVestingConfigured",
+      "msg": "Vesting parameters not configured for this tournament."
+    },
+    {
+      "code": 6061,
+      "name": "MathOverflow",
+      "msg": "Math overflow in calculation."
+    },
+    {
+      "code": 6062,
+      "name": "NotTournamentWinner",
+      "msg": "Not a tournament winner."
+    },
+    {
+      "code": 6063,
+      "name": "StakeTooLow",
+      "msg": "Wager amount is below the minimum required"
+    },
+    {
+      "code": 6064,
+      "name": "PoolTooSmallForFees",
+      "msg": "Wager pool is too small to cover the advanced fees"
+    },
+    {
+      "code": 6065,
+      "name": "FeePayerMismatch",
+      "msg": "Fee payer does not match the initial payer"
+    },
+    {
+      "code": 6066,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow occurred"
+    },
+    {
+      "code": 6067,
+      "name": "InvalidArgument",
+      "msg": "Invalid argument"
+    },
+    {
+      "code": 6068,
+      "name": "EloOutOfRange",
+      "msg": "ELO is out of range"
+    },
+    {
+      "code": 6069,
+      "name": "InvalidSession",
+      "msg": "Invalid session"
+    },
+    {
+      "code": 6070,
+      "name": "SpendingLimitExceeded",
+      "msg": "Spending limit exceeded"
+    },
+    {
+      "code": 6071,
+      "name": "WagerLimitExceeded",
+      "msg": "Wager limit exceeded"
+    },
+    {
+      "code": 6072,
+      "name": "InvalidTournamentStatus",
+      "msg": "Invalid tournament status"
+    },
+    {
+      "code": 6073,
+      "name": "InvalidUsername",
+      "msg": "Invalid username format or length."
+    },
+    {
+      "code": 6074,
+      "name": "UnderagePlayer",
+      "msg": "Player must be 18 or older to participate in wagered games."
+    },
+    {
+      "code": 6075,
+      "name": "GlobalSessionAlreadyActive",
+      "msg": "A valid global session already exists for this player."
+    },
+    {
+      "code": 6076,
+      "name": "GlobalSessionNoGamesRemaining",
+      "msg": "Global session has no games remaining; please re-authorize."
+    },
+    {
+      "code": 6077,
+      "name": "GlobalSessionSpendingLimitExceeded",
+      "msg": "Global session spending limit would be exceeded."
+    },
+    {
+      "code": 6078,
+      "name": "ResultMismatch",
+      "msg": "Claimed result does not match the on-chain game result."
+    },
+    {
+      "code": 6079,
+      "name": "GameStillInProgress",
+      "msg": "Game result has not been committed on-chain; cannot finalize a game with no result yet."
+    }
+  ],
+  "types": [
+    {
+      "name": "AuthorizeGlobalSessionArgs",
+      "docs": [
+        "Arguments for `authorize_global_session`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session_key",
+            "docs": [
+              "Hot key allowed to co-sign game instructions."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "duration_secs",
+            "docs": [
+              "Session lifetime in seconds. `None` → [`GlobalSessionDelegation::DEFAULT_DURATION`]."
+            ],
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "spending_limit",
+            "docs": [
+              "Total spending cap in lamports. `None` → [`GlobalSessionDelegation::DEFAULT_SPENDING_LIMIT`]."
+            ],
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "max_wager",
+            "docs": [
+              "Per-game wager cap in lamports. `None` → [`GlobalSessionDelegation::DEFAULT_MAX_WAGER`]."
+            ],
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "games",
+            "docs": [
+              "Number of games this session covers. `None` → [`GlobalSessionDelegation::DEFAULT_GAMES`]."
+            ],
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "deposit_lamports",
+            "docs": [
+              "SOL deposited into the delegation vault for gasless game funding."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorizeTournamentSessionArgs",
+      "docs": [
+        "Arguments for `authorize_tournament_session`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session_key",
+            "docs": [
+              "Hot key allowed to co-sign tournament ixs."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "duration_secs",
+            "docs": [
+              "Session lifetime in seconds. If `None`, uses",
+              "[`TournamentSessionDelegation::DEFAULT_DURATION`]."
+            ],
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "spending_limit",
+            "docs": [
+              "Tournament-wide spending cap (lamports). If `None`, uses",
+              "[`TournamentSessionDelegation::DEFAULT_SPENDING_LIMIT`]."
+            ],
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "max_wager",
+            "docs": [
+              "Per-match wager cap (lamports). If `None`, uses",
+              "[`TournamentSessionDelegation::DEFAULT_MAX_WAGER`]."
+            ],
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "deposit_lamports",
+            "docs": [
+              "Lamports deposited into the delegation PDA vault at authorization",
+              "time. The session key can spend from this vault (up to",
+              "`spending_limit`) without further wallet popups. Any remainder can be",
+              "refunded later via `close_tournament_session`."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CrankTimeCheckData",
+      "docs": [
+        "Empty instruction data for crank_time_check (no parameters needed)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": []
+      }
+    },
+    {
+      "name": "DisputeRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "challenger",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "name": "evidence_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "DisputeStatus"
+              }
+            }
+          },
+          {
+            "name": "resolved_by",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "resolution",
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "resolved_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "bond_amount",
+            "docs": [
+              "Lamports the challenger posted as a bond when opening the dispute. Held in",
+              "this record's PDA; refunded to the challenger if the dispute is upheld or",
+              "auto-resolved after the TTL, forfeited to the treasury if dismissed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DisputeStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Resolved"
+          },
+          {
+            "name": "Dismissed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Game",
+      "docs": [
+        "The core on-chain game account. One PDA per game_id.",
+        "Seeds: [b\"game\", game_id.to_le_bytes()]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "white",
+            "type": "pubkey"
+          },
+          {
+            "name": "black",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "GameStatus"
+              }
+            }
+          },
+          {
+            "name": "last_move_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "fees_advanced",
+            "type": "u64"
+          },
+          {
+            "name": "fee_payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "result",
+            "type": {
+              "defined": {
+                "name": "GameResult"
+              }
+            }
+          },
+          {
+            "name": "board_state",
+            "type": {
+              "array": [
+                "u8",
+                68
+              ]
+            }
+          },
+          {
+            "name": "move_count",
+            "type": "u16"
+          },
+          {
+            "name": "halfmove_clock",
+            "type": "u16"
+          },
+          {
+            "name": "turn",
+            "type": "u16"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "wager_amount",
+            "type": "u64"
+          },
+          {
+            "name": "wager_token",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "game_type",
+            "type": {
+              "defined": {
+                "name": "GameType"
+              }
+            }
+          },
+          {
+            "name": "match_type",
+            "type": {
+              "defined": {
+                "name": "MatchType"
+              }
+            }
+          },
+          {
+            "name": "country_fee",
+            "type": "u64"
+          },
+          {
+            "name": "base_time_seconds",
+            "type": "u64"
+          },
+          {
+            "name": "increment_seconds",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "is_delegated",
+            "type": "bool"
+          },
+          {
+            "name": "tournament_id",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameResult",
+      "docs": [
+        "Outcome recorded when a game is finalised."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Winner",
+            "fields": [
+              "pubkey"
+            ]
+          },
+          {
+            "name": "Draw"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameStatus",
+      "docs": [
+        "Lifecycle state of a game."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "WaitingForOpponent"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Inactive"
+          },
+          {
+            "name": "Disputed"
+          },
+          {
+            "name": "Finished"
+          },
+          {
+            "name": "Settled"
+          },
+          {
+            "name": "Expired"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameType",
+      "docs": [
+        "Match variant — always player vs player; AI games are handled off-chain."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "PvP"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalSessionDelegation",
+      "docs": [
+        "Global persistent session delegation account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "docs": [
+              "The real wallet this delegation is for."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "session_key",
+            "docs": [
+              "Hot key held by the VPS / client that may co-sign game ixs."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "Unix timestamp after which the session key is rejected."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "spending_limit",
+            "docs": [
+              "Max lamports the session key may spend over its lifetime."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_spent",
+            "docs": [
+              "Lamports already consumed by this session (escrows, fees, …)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_wager",
+            "docs": [
+              "Max lamports permitted for any single game wager."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "games_remaining",
+            "docs": [
+              "Games that can still be played before re-auth is required."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "enabled",
+            "docs": [
+              "Flipped to `false` by `revoke_global_session`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Canonical PDA bump stored for CPI sign calls."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MatchStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Completed"
+          },
+          {
+            "name": "Bye"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MatchType",
+      "docs": [
+        "Match type determines fee structure and ELO impact."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Free"
+          },
+          {
+            "name": "Rated"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MoveEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "move_uci",
+            "type": {
+              "array": [
+                "u8",
+                5
+              ]
+            }
+          },
+          {
+            "name": "move_number",
+            "type": "u16"
+          },
+          {
+            "name": "board_state",
+            "type": {
+              "array": [
+                "u8",
+                68
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutType",
+      "docs": [
+        "Prize distribution type"
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "LumpSum"
+          },
+          {
+            "name": "StreamingLinear"
+          },
+          {
+            "name": "StreamingCliff"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlatformFeeVault",
+      "docs": [
+        "Platform fee vault — accumulates 0.05 SOL per ranked game.",
+        "Anyone can trigger `claim_fees` once the threshold or interval is met."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "host_wallet",
+            "docs": [
+              "The wallet that receives claimed fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "total_accumulated",
+            "docs": [
+              "Total lamports accumulated since last claim."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "auto_claim_threshold",
+            "docs": [
+              "Lamports threshold to trigger auto-claim (default: 100_000_000 = 0.1 SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "claim_interval_seconds",
+            "docs": [
+              "Seconds between forced claims even below threshold (default: 86400 = 24h)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "last_claim_at",
+            "type": "i64"
+          },
+          {
+            "name": "total_claimed",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerProfile",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "country",
+            "type": "string"
+          },
+          {
+            "name": "wins",
+            "type": "u32"
+          },
+          {
+            "name": "losses",
+            "type": "u32"
+          },
+          {
+            "name": "draws",
+            "type": "u32"
+          },
+          {
+            "name": "games_played",
+            "type": "u32"
+          },
+          {
+            "name": "elo_rating",
+            "type": "f64"
+          },
+          {
+            "name": "rd",
+            "type": "f64"
+          },
+          {
+            "name": "volatility",
+            "type": "f64"
+          },
+          {
+            "name": "last_played",
+            "type": "i64"
+          },
+          {
+            "name": "win_streak",
+            "type": "u32"
+          },
+          {
+            "name": "best_streak",
+            "type": "u32"
+          },
+          {
+            "name": "tournament_wins",
+            "type": "u32"
+          },
+          {
+            "name": "ranked_games",
+            "type": "u32"
+          },
+          {
+            "name": "total_wagered",
+            "type": "u64"
+          },
+          {
+            "name": "total_won",
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_game_at",
+            "type": "i64"
+          },
+          {
+            "name": "date_of_birth",
+            "docs": [
+              "Unix timestamp of date of birth. Used to enforce 18+ age gate on-chain."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "is_verified",
+            "type": "bool"
+          },
+          {
+            "name": "annual_wins_gbp",
+            "type": "u64"
+          },
+          {
+            "name": "annual_wins_brl",
+            "type": "u64"
+          },
+          {
+            "name": "annual_wins_cad",
+            "type": "u64"
+          },
+          {
+            "name": "annual_wins_eur",
+            "type": "u64"
+          },
+          {
+            "name": "username",
+            "type": "string"
+          },
+          {
+            "name": "username_set",
+            "type": "bool"
+          },
+          {
+            "name": "lichess_username",
+            "type": "string"
+          },
+          {
+            "name": "lichess_verified",
+            "type": "bool"
+          },
+          {
+            "name": "lichess_blitz",
+            "type": "u32"
+          },
+          {
+            "name": "lichess_rapid",
+            "type": "u32"
+          },
+          {
+            "name": "lichess_bullet",
+            "type": "u32"
+          },
+          {
+            "name": "lichess_last_sync",
+            "type": "i64"
+          },
+          {
+            "name": "external_elo_source",
+            "type": "u8"
+          },
+          {
+            "name": "seeded_from_external",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerSession",
+      "docs": [
+        "Per-player session delegation.",
+        "Created by the player once per day: allows a session keypair to sign",
+        "game transactions without a wallet popup for 24 hours."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "docs": [
+              "The owner's main wallet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "session_key",
+            "docs": [
+              "The delegated keypair's public key (stored on the VPS)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "Unix timestamp when this session expires."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "spending_limit",
+            "docs": [
+              "Max lamports the session key may spend in total."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_spent",
+            "docs": [
+              "Lamports spent so far this session."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_wager",
+            "docs": [
+              "Max lamports per individual game wager."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "can_create_games",
+            "type": "bool"
+          },
+          {
+            "name": "can_join_games",
+            "type": "bool"
+          },
+          {
+            "name": "can_claim_prizes",
+            "type": "bool"
+          },
+          {
+            "name": "games_played",
+            "type": "u32"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScheduleTimeCheckArgs",
+      "docs": [
+        "Arguments for scheduling a time check crank"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "task_id",
+            "docs": [
+              "Unique task identifier (typically game_id)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "check_interval_millis",
+            "docs": [
+              "Milliseconds between time checks (e.g., 1000 for 1 second)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "iterations",
+            "docs": [
+              "Number of times to run the check (0 = unlimited until cancelled)"
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionDelegation",
+      "docs": [
+        "Short-lived delegation allowing a VPS session key to submit moves on behalf",
+        "of a player without requiring a wallet popup each time.",
+        "Seeds: [b\"session_delegation\", game_id.to_le_bytes(), player_pubkey]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "max_batch_len",
+            "type": "u16"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwissMatchResult",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Win"
+          },
+          {
+            "name": "Loss"
+          },
+          {
+            "name": "Draw"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwissStanding",
+      "docs": [
+        "Swiss tournament standing for a single player."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "score",
+            "type": "u8"
+          },
+          {
+            "name": "buchholz",
+            "type": "u16"
+          },
+          {
+            "name": "sonneborn",
+            "type": "u16"
+          },
+          {
+            "name": "color_balance",
+            "type": "i8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Tournament",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "entry_fee",
+            "type": "u64"
+          },
+          {
+            "name": "platform_fee",
+            "type": "u64"
+          },
+          {
+            "name": "prize_pool",
+            "type": "u64"
+          },
+          {
+            "name": "max_players",
+            "docs": [
+              "Maximum players (must be power of 2 for single-elimination: 8, 16, 32, 64, 128, 256)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "player_count",
+            "docs": [
+              "Current number of registered players."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "num_registered_players",
+            "docs": [
+              "Current number of registered players."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "TournamentStatus"
+              }
+            }
+          },
+          {
+            "name": "start_time",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "end_time",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "fees_advanced",
+            "type": "u64"
+          },
+          {
+            "name": "fee_payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "tournament_type",
+            "type": {
+              "defined": {
+                "name": "TournamentType"
+              }
+            }
+          },
+          {
+            "name": "current_round",
+            "type": "u8"
+          },
+          {
+            "name": "total_rounds",
+            "docs": [
+              "Total rounds (for Swiss tournaments only)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "total_matches",
+            "docs": [
+              "Total number of matches in the tournament (max_players - 1 for single-elimination)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "final_match_index",
+            "docs": [
+              "Index of the final match (always total_matches - 1)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "elo_min",
+            "docs": [
+              "ELO bracket filtering."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "elo_max",
+            "type": "u32"
+          },
+          {
+            "name": "min_players",
+            "docs": [
+              "Minimum players required to start tournament."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "winner",
+            "docs": [
+              "Tournament winner (set when final completes)."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "second_place",
+            "docs": [
+              "Second place (final loser)."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "third_place",
+            "docs": [
+              "Third place (semifinal loser with higher ELO or first semifinal)."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "fourth_place",
+            "docs": [
+              "Fourth place (other semifinal loser)."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "fifth_place",
+            "docs": [
+              "Fifth place"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "sixth_place",
+            "docs": [
+              "Sixth place"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "seventh_place",
+            "docs": [
+              "Seventh place"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "eighth_place",
+            "docs": [
+              "Eighth place"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "ninth_place",
+            "docs": [
+              "Ninth place"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "tenth_place",
+            "docs": [
+              "Tenth place"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "prize_shares",
+            "docs": [
+              "Prize distribution for top 10: [1st%, 2nd%, 3rd%, 4th%, 5th%, 6th%, 7th%, 8th%, 9th%, 10th%] in basis points.",
+              "64 and below (top 3): [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0] = 60/30/10%",
+              "128 players (top 5): [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0] = 50/25/15/5/5%",
+              "256 players (top 10): [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300] = 40/20/12/8/6/4/3/2/2/3%",
+              "Winner-takes-all: [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0]"
+            ],
+            "type": {
+              "array": [
+                "u16",
+                10
+              ]
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "started_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "completed_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "prizes_claimed",
+            "docs": [
+              "Bitflags for claimed prizes (bit 0 = winner, bit 1 = second_place, etc.)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "platform_fee_pool",
+            "docs": [
+              "Accumulated platform fee pool (from £0.50 cuts) to cover transaction fees and rent"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "usdc_prize_mint",
+            "docs": [
+              "USDC mint address (None = SOL-only tournament)."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "usdc_prize_pool",
+            "docs": [
+              "Total USDC locked in prize escrow (in USDC base units, 6 decimals)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "usdc_prize_funded",
+            "docs": [
+              "True once operator has deposited USDC prize pool."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "host_treasury",
+            "docs": [
+              "Operator treasury wallet — entry fees go here directly."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "prize_token_mint",
+            "docs": [
+              "Prize token mint (None = wrapped SOL, overrides usdc_prize_mint for generic SPL)"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "payout_type",
+            "docs": [
+              "Prize distribution method"
+            ],
+            "type": {
+              "defined": {
+                "name": "PayoutType"
+              }
+            }
+          },
+          {
+            "name": "vesting_params",
+            "docs": [
+              "Streaming vesting parameters (if applicable)"
+            ],
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "VestingParams"
+                }
+              }
+            }
+          },
+          {
+            "name": "base_time_seconds",
+            "docs": [
+              "Total clock per player in seconds for each match (0 = no time limit)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "increment_seconds",
+            "docs": [
+              "Fischer increment added after each move in seconds."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "winner_takes_all",
+            "docs": [
+              "Winner takes all flag."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentEscrow",
+      "docs": [
+        "Minimal account type for the tournament SOL escrow (no data, just holds lamports)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": []
+      }
+    },
+    {
+      "name": "TournamentMatch",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "match_index",
+            "docs": [
+              "Match index within the tournament (0 to total_matches-1)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "round",
+            "docs": [
+              "Round number (0 = first round, 1 = second round, etc.)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "player_white",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "player_black",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "game_pda",
+            "docs": [
+              "On-chain Game PDA for this match (set when the match is started)."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "game_id",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "MatchStatus"
+              }
+            }
+          },
+          {
+            "name": "next_match_for_winner",
+            "docs": [
+              "Index of the next match the winner advances to (None for final)."
+            ],
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "next_match_slot",
+            "docs": [
+              "Slot in the next match (0 = white, 1 = black)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "started_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "completed_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentPlayersShard",
+      "docs": [
+        "Separate PDA account holding player lists and Swiss standings for a single shard.",
+        "Keeps Tournament metadata small so initialization fits CPI realloc limit.",
+        "Space is calculated manually to avoid InitSpace over-allocation.",
+        "Each shard holds up to 64 players; 4 shards support 256-player tournaments."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "shard_id",
+            "type": "u8"
+          },
+          {
+            "name": "players",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "player_elos",
+            "type": {
+              "vec": "u32"
+            }
+          },
+          {
+            "name": "swiss_standings",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "SwissStanding"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentSessionDelegation",
+      "docs": [
+        "Tournament-scoped session delegation account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "docs": [
+              "Tournament this delegation is bound to."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "docs": [
+              "The real wallet this delegation is for."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "session_key",
+            "docs": [
+              "Hot key held by the VPS / client that may co-sign tournament ixs."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "Unix timestamp after which the session key is rejected."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "spending_limit",
+            "docs": [
+              "Max lamports the session key may spend over the tournament's lifetime."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_spent",
+            "docs": [
+              "Lamports already consumed by this session (escrows, fees, …)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_wager",
+            "docs": [
+              "Max lamports permitted for any single game wager."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "games_played",
+            "docs": [
+              "How many games the session key has played so far (monitoring / UI)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "enabled",
+            "docs": [
+              "Flipped to `false` by `revoke_tournament_session`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Canonical PDA bump stored for CPI sign calls."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Registration"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Completed"
+          },
+          {
+            "name": "Closed"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Swiss",
+            "fields": [
+              {
+                "name": "rounds",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "SingleElimination"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UsernameRecord",
+      "docs": [
+        "UsernameRecord PDA ensures username uniqueness across all players",
+        "Seeds: [b\"username\", username.as_bytes()]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VestingParams",
+      "docs": [
+        "Vesting parameters for streaming payouts"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "start_time",
+            "docs": [
+              "When vesting starts (Unix timestamp)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "duration_seconds",
+            "docs": [
+              "Total vesting duration in seconds"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "cliff_seconds",
+            "docs": [
+              "Optional cliff period in seconds"
+            ],
+            "type": {
+              "option": "i64"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "GAME_SEED",
+      "type": "bytes",
+      "value": "[103, 97, 109, 101]"
+    },
+    {
+      "name": "MOVE_LOG_SEED",
+      "type": "bytes",
+      "value": "[109, 111, 118, 101, 95, 108, 111, 103]"
+    },
+    {
+      "name": "PROFILE_SEED",
+      "type": "bytes",
+      "value": "[112, 114, 111, 102, 105, 108, 101]"
+    },
+    {
+      "name": "SESSION_DELEGATION_SEED",
+      "type": "bytes",
+      "value": "[115, 101, 115, 115, 105, 111, 110, 95, 100, 101, 108, 101, 103, 97, 116, 105, 111, 110]"
+    },
+    {
+      "name": "USERNAME_SEED",
+      "type": "bytes",
+      "value": "[117, 115, 101, 114, 110, 97, 109, 101]"
+    },
+    {
+      "name": "WAGER_ESCROW_SEED",
+      "type": "bytes",
+      "value": "[101, 115, 99, 114, 111, 119]"
+    }
+  ]
+}

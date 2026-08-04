@@ -1,0 +1,20 @@
+//! Instruction to correctly close or resolve games after ER undelegation.
+
+use anchor_lang::prelude::*;
+
+/// Accounts the ER infrastructure passes when restoring a `Game` PDA to the
+/// base layer after undelegation. Not called directly by clients.
+#[derive(Accounts)]
+pub struct InitializeAfterUndelegation<'info> {
+    /// CHECK: delegated account being restored
+    #[account(mut)]
+    pub base_account: AccountInfo<'info>,
+    /// CHECK: buffer account
+    #[account()]
+    pub buffer: AccountInfo<'info>,
+    /// CHECK: payer
+    #[account(mut)]
+    pub payer: AccountInfo<'info>,
+    /// CHECK: system program
+    pub system_program: AccountInfo<'info>,
+}

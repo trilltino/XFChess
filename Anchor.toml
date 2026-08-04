@@ -1,0 +1,16 @@
+[features]
+seeds = true
+skip-lint = false
+
+[programs.localnet]
+xfchess_game = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+
+[programs.devnet]
+xfchess_game = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"

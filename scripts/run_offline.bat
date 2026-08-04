@@ -1,0 +1,172 @@
+@echo off
+setlocal EnableDelayedExpansion
+
+echo XFChess Local Fullstack Launcher
+echo --------------------------------------------------
+echo Starts the new 3D-board main menu + all backend services.
+echo In-game: press K to toggle between the new menu and the classic layout.
+echo.
+
+set SCRIPT_DIR=%~dp0
+for %%i in ("%SCRIPT_DIR%..") do set "ROOT=%%~fi"
+set "RELEASE_DIR=%ROOT%\target\debug"
+
+:: Check for Windows Terminal (wt.exe) to use tabs instead of separate windows
+where wt >nul 2>&1
+if !errorlevel! equ 0 (
+    set "LAUNCH_CMD=wt -w 0 nt"
+    set "DIR_FLAG=-d"
+    set "TITLE_FLAG=--title"
+    echo [INFO] Windows Terminal detected. Using tabs for services.
+) else (
+    set "LAUNCH_CMD=start"
+    set "DIR_FLAG=/D"
+    set "TITLE_FLAG="
+    echo [INFO] Windows Terminal not found. Falling back to separate windows.
+)
+
+:: --- Build Optimizations ---
+set CARGO_PROFILE_RELEASE_LTO=true
+set CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+set CARGO_PROFILE_RELEASE_OPT_LEVEL=3
+set CARGO_PROFILE_RELEASE_STRIP=false
+set RUSTFLAGS=-C target-cpu=native
+
+:: --- Environment Configuration ---
+set XFCHESS_FAST_LOCAL_BUILD=1
+set BACKEND_URL=http://127.0.0.1:8090
+set SIGNING_SERVICE_URL=http://127.0.0.1:8090
+
+:: Secrets — non-production dummy values (same convention as the justfile),
+:: never real secrets. Export these yourself first if you need real auth
+:: locally.
+if not defined JWT_SECRET set JWT_SECRET=0000000000000000000000000000000000000000000000000000000000000000
+if not defined IDENTITY_ENCRYPTION_KEY set IDENTITY_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+if not defined IDENTITY_SALT set IDENTITY_SALT=1111111111111111111111111111111111111111111111111111111111111111
+
+:: Solana / Authority Keys (UPDATED to new Program ID)
+:: Pick up the dedicated RPC provider (e.g. Triton) from backend\.env so the
+:: game client doesn't fall back to the heavily rate-limited public devnet
+:: endpoint for its pre-popup blockhash fetch (that rate-limiting is the main
+:: cause of slow/stuck wallet signing popups). Falls back to the free public
+:: devnet RPC if backend\.env has no override or doesn't exist. Export
+:: SOLANA_RPC_URL yourself first to take precedence over both.
+if not defined SOLANA_RPC_URL (
+    for /f "tokens=1,* delims==" %%a in ('findstr /b "SOLANA_RPC_URL=" "%ROOT%\backend\.env" 2^>nul') do set "SOLANA_RPC_URL=%%b"
+)
+if not defined SOLANA_RPC_URL set SOLANA_RPC_URL=https://api.devnet.solana.com
+if not defined HELIUS_API_KEY set HELIUS_API_KEY=
+set MAGIC_BLOCK_RPC_URL=https://devnet.magicblock.app
+set ER_RPC_URL=https://devnet.magicblock.app
+set PROGRAM_ID=8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU
+set FEE_PAYER_KEYS=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
+set VPS_AUTHORITY_KEY=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
+set KYC_AUTHORITY_KEY=61DHPK2JnVmdw4hLAzfjAmStMmh5S6xyw1VHNMXroAPf3CpaTuVLUKLtVoU3syinaiERTM7tHyebaUsNTXgPAgPi
+set TOURNAMENT_FEE_RECIPIENT=uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C
+
+:: --- Kill stale processes from previous run ---
+echo [CLEANUP] Killing stale XFChess processes...
+:: Kill backend by PID file first (precise), then fall back to port owner
+if exist "%ROOT%\backend\.backend.pid" (
+    set /p OLD_PID=<"%ROOT%\backend\.backend.pid"
+    taskkill /F /PID !OLD_PID! >nul 2>&1
+    del "%ROOT%\backend\.backend.pid" >nul 2>&1
+)
+:: Kill anything still holding port 8090
+for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr " :8090 "') do taskkill /F /PID %%a >nul 2>&1
+:: Kill game and tauri by port 8091 (tauri IPC) and by name as last resort
+taskkill /F /IM xfchess.exe >nul 2>&1
+taskkill /F /IM xfchess-tauri.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+:: --- Build Services ---
+echo [BUILD] 1/3 Building Backend Server...
+cd /d "%ROOT%\backend"
+cargo build --bin signing-server
+if !errorlevel! neq 0 exit /b 1
+
+echo [BUILD] 2/3 Checking UI Assets...
+cd /d "%ROOT%"
+if not exist "tauri\wallet-ui\dist" (
+    echo [BUILD] Building Wallet UI...
+    if "!LAUNCH_CMD!"=="start" (
+        cd tauri\wallet-ui && npm install && npm run build && cd ..\..
+    ) else (
+        wt -w 0 nt --title "Build: Wallet UI" cmd /c "cd tauri\wallet-ui && npm install && npm run build"
+    )
+)
+
+if not exist "tauri\tournament-admin\dist" (
+    echo [BUILD] Building Admin UI...
+    if "!LAUNCH_CMD!"=="start" (
+        cd tauri\tournament-admin && npm install && npm run build && cd ..\..
+    ) else (
+        wt -w 0 nt --title "Build: Admin UI" cmd /c "cd tauri\tournament-admin && npm install && npm run build"
+    )
+)
+
+echo [BUILD] 3/3 Building Game ^& Tauri Host...
+cd /d "%ROOT%"
+cargo build --bin xfchess --features solana
+if !errorlevel! neq 0 exit /b 1
+
+cargo build -p xfchess-tauri --features all
+if !errorlevel! neq 0 (
+    echo Tauri build failed.
+    pause
+    exit /b 1
+)
+
+:: --- Launch Services ---
+echo [LAUNCH] 1/5 Monitoring Stack...
+cd /d "%ROOT%\ops\monitoring"
+docker-compose -f docker-compose.local.yml ps >nul 2>&1
+if !errorlevel! neq 0 (
+    echo Starting local monitoring stack...
+    docker-compose -f docker-compose.local.yml up -d
+    timeout /t 5 /nobreak >nul
+)
+cd /d "%ROOT%"
+
+echo [LAUNCH] 2/5 Signing Server...
+if "!LAUNCH_CMD!"=="start" (
+    start "XFChess Backend" /D "%ROOT%\backend" cmd /k "^"%RELEASE_DIR%\signing-server.exe^" 2>&1"
+) else (
+    wt -w 0 nt --title "XFChess Backend" -d "%ROOT%\backend" cmd /k "^"%RELEASE_DIR%\signing-server.exe^" 2>&1"
+)
+
+timeout /t 2 /nobreak >nul
+
+echo [LAUNCH] 3/5 Tauri Host (Wallet Bridge)...
+set XFCHESS_WALLET_MODE=tauri
+if "!LAUNCH_CMD!"=="start" (
+    start "XFChess Tauri" /D "%ROOT%" /MIN cmd /k "^"%RELEASE_DIR%\xfchess-tauri.exe^""
+) else (
+    wt -w 0 nt --title "XFChess Tauri" -d "%ROOT%" cmd /k "^"%RELEASE_DIR%\xfchess-tauri.exe^""
+)
+
+timeout /t 2 /nobreak >nul
+
+echo [LAUNCH] 4/5 XFChess Game...
+start "XFChess Game" /D "%ROOT%" cmd /k "^"%RELEASE_DIR%\xfchess.exe^""
+
+echo [LAUNCH] 5/5 Web Frontend...
+:: Tournament admin is desktop-only: the Tauri host serves the built dist in its
+:: own window (tray icon -> Tournament Admin).
+if "!LAUNCH_CMD!"=="start" (
+    start "XFChess Web" /D "%ROOT%\xfchessdotcom" cmd /k "npm run dev"
+) else (
+    wt -w 0 nt --title "XFChess Web" -d "%ROOT%\xfchessdotcom" cmd /k "npm run dev"
+)
+
+echo.
+echo ========================================
+echo XFChess Local Environment Ready
+echo ========================================
+echo Backend:        http://127.0.0.1:8090
+echo Web Frontend:   http://localhost:5173
+echo Tournament Admin: desktop window (Tauri tray icon -^> Tournament Admin)
+echo Program ID:     %PROGRAM_ID%
+echo ========================================
+echo.
+endlocal

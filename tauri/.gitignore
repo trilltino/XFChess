@@ -1,0 +1,119 @@
+# Dependency directories
+node_modules/
+
+# Optional npm and yarn cache directory
+.npm/
+.yarn/
+.pnpm-store/
+
+# Output of 'npm pack'
+*.tgz
+
+# dotenv environment variables file
+.env
+.env.local
+.env.production
+.env.development
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Tauri specific
+src-tauri/target/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+dist/
+build/
+
+# Test coverage
+coverage/
+*.lcov
+
+# Backup files
+*.bak
+*.backup
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated files
+gen/
+generated/
+
+# Security and sensitive files
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+private/
+
+# Package manager lock files (keep Cargo.lock, ignore others)
+package-lock.json
+yarn.lock
+bun.lockb
+
+# Profiling data
+perf.data
+*.prof
+
+# Documentation build
+docs/_build/
+site/
+
+# Linting and formatting
+.rustfmt.toml.bak
+.clippy.toml.bak
+
+# Platform specific
+# Windows
+*.exe
+*.dll
+*.sys
+
+# macOS
+*.dmg
+*.app
+*.pkg
+
+# Linux
+*.deb
+*.rpm
+*.AppImage

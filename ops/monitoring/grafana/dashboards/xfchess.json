@@ -1,0 +1,255 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "XFChess Dashboard",
+    "tags": ["xfchess"],
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "ER Stale Delegations",
+        "type": "stat",
+        "targets": [{ "expr": "xfchess_settlement_stale_delegated_gauge", "refId": "A" }],
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 1 },
+                { "color": "red", "value": 6 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "ER Push Subscription",
+        "type": "stat",
+        "targets": [{ "expr": "xfchess_er_subscription_connected", "refId": "A" }],
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "options": { "0": { "text": "POLL-ONLY", "color": "yellow" } }, "type": "value" },
+              { "options": { "1": { "text": "LIVE", "color": "green" } }, "type": "value" }
+            ]
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Backend Health",
+        "type": "stat",
+        "targets": [{ "expr": "xfchess_health", "refId": "A" }],
+        "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "options": { "0": { "text": "DOWN", "color": "red" } }, "type": "value" },
+              { "options": { "1": { "text": "UP", "color": "green" } }, "type": "value" }
+            ]
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "HTTP Error Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 0.05 },
+                { "color": "red", "value": 0.1 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Fee Payer Balance",
+        "type": "stat",
+        "targets": [{ "expr": "feepayer_balance_lamports{key_index=\"0\"} / 1000000000", "refId": "A" }],
+        "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "none",
+            "decimals": 3,
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": null },
+                { "color": "yellow", "value": 0.05 },
+                { "color": "green", "value": 0.5 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Settlement Worker — Seconds Since Last Tick",
+        "type": "stat",
+        "targets": [{ "expr": "time() - xfchess_settlement_last_tick_unix", "refId": "A" }],
+        "gridPos": { "h": 4, "w": 8, "x": 0, "y": 4 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "red", "value": 60 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Tournament Scheduler — Seconds Since Last Tick",
+        "type": "stat",
+        "targets": [{ "expr": "time() - xfchess_tournament_scheduler_last_tick_unix", "refId": "A" }],
+        "gridPos": { "h": 4, "w": 8, "x": 8, "y": 4 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "red", "value": 60 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Prize Distributor — Seconds Since Last Tick",
+        "type": "stat",
+        "targets": [{ "expr": "time() - xfchess_prize_distributor_last_tick_unix", "refId": "A" }],
+        "gridPos": { "h": 4, "w": 8, "x": 16, "y": 4 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "red", "value": 120 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "HTTP Requests / sec",
+        "type": "timeseries",
+        "targets": [
+          { "expr": "sum by (endpoint) (rate(http_requests_total[5m]))", "legendFormat": "{{endpoint}}", "refId": "A" }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+      },
+      {
+        "id": 10,
+        "title": "HTTP Request Duration (p95)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(http_request_duration_ms_bucket[5m])))",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "ms" } },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+      },
+      {
+        "id": 11,
+        "title": "Transaction Success Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum by (chain) (rate(transactions_confirmed_total[5m])) / sum by (chain) (rate(transactions_submitted_total[5m]))",
+            "legendFormat": "{{chain}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "percentunit" } },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
+      },
+      {
+        "id": 12,
+        "title": "Solana RPC Latency (p95)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (le, method) (rate(solana_rpc_latency_ms_bucket[5m])))",
+            "legendFormat": "{{method}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "ms" } },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 }
+      },
+      {
+        "id": 13,
+        "title": "Live Presence",
+        "type": "timeseries",
+        "targets": [
+          { "expr": "xfchess_presence_online_gauge", "legendFormat": "players in a game", "refId": "A" },
+          { "expr": "xfchess_presence_games_in_progress_gauge", "legendFormat": "games in progress", "refId": "B" }
+        ],
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 }
+      },
+      {
+        "id": 14,
+        "title": "Anti-Cheat Queue",
+        "type": "timeseries",
+        "targets": [
+          { "expr": "xfchess_anticheat_queue_depth", "legendFormat": "queue depth", "refId": "A" },
+          { "expr": "rate(xfchess_anticheat_dropped_total[5m])", "legendFormat": "dropped/sec", "refId": "B" }
+        ],
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 }
+      },
+      {
+        "id": 15,
+        "title": "Prize Distribution — Held / Flagged",
+        "type": "timeseries",
+        "targets": [
+          { "expr": "rate(xfchess_prize_distribution_held_total[15m])", "legendFormat": "held (anti-cheat pending)", "refId": "A" },
+          { "expr": "rate(xfchess_prize_distribution_flagged_total[15m])", "legendFormat": "flagged places withheld", "refId": "B" }
+        ],
+        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 }
+      },
+      {
+        "id": 16,
+        "title": "Settlement Tick Duration",
+        "type": "timeseries",
+        "targets": [{ "expr": "xfchess_settlement_tick_millis", "legendFormat": "tick duration", "refId": "A" }],
+        "fieldConfig": { "defaults": { "unit": "ms" } },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 }
+      },
+      {
+        "id": 17,
+        "title": "Fee Payer Balance Over Time",
+        "type": "timeseries",
+        "targets": [{ "expr": "feepayer_balance_lamports / 1000000000", "legendFormat": "key {{key_index}}", "refId": "A" }],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 }
+      }
+    ]
+  },
+  "overwrite": true
+}

@@ -1,0 +1,48 @@
+version: '3.8'
+
+# XFChess Full Stack Docker Compose
+# Includes backend, monitoring, and optional services
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: xfchess-backend
+    # Bind to localhost only — Docker's iptables rules bypass UFW, so a bare
+    # "8090:8090" would expose the port publicly on a VPS. Reach it via nginx.
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      - RUST_LOG=info
+      - DATABASE_URL=sqlite:///data/sessions.db?mode=rwc
+      - VAULT_DB_URL=sqlite:///data/vault.db?mode=rwc
+      - SIGNING_PORT=8090
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+      - JWT_SECRET=${JWT_SECRET}
+      - IDENTITY_ENCRYPTION_KEY=${IDENTITY_ENCRYPTION_KEY}
+      - IDENTITY_SALT=${IDENTITY_SALT}
+    volumes:
+      - backend-data:/app/data
+    restart: unless-stopped
+    networks:
+      - xfchess
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Monitoring (Prometheus/Grafana/Alertmanager) does NOT live in this file —
+  # it used to, referencing a ./deploy/ config directory that never existed
+  # in this repo, so it could never actually start. The real, working
+  # monitoring stack is ops/monitoring/docker-compose.yml (run via
+  # ops/monitoring/setup.sh on the server, or setup-local.sh for local dev).
+
+volumes:
+  backend-data:
+    driver: local
+
+networks:
+  xfchess:
+    driver: bridge

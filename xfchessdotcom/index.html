@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Versioned query string: browsers cache favicons unusually
+         aggressively (often surviving normal hard-refreshes), so a stale
+         icon from before this file's current content can otherwise persist
+         indefinitely. Bump the version whenever the favicon changes. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=2" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Deliberately just a bare title here, nothing else. Per-route
+         <title>/description/canonical/OG/Twitter tags come from <SeoHead>
+         (src/components/SeoHead.tsx) via React 19's native head hoisting —
+         React dedupes <title> but does NOT dedupe <meta>/<link> against
+         tags already present in the raw HTML, so any default description/
+         OG/canonical placed here would end up duplicated alongside
+         SeoHead's real ones on every route once JS mounts. The 11 public
+         routes get their real tags baked in at build time anyway (see
+         scripts/prerender.mjs); everything else is genuinely CSR-only, so
+         a zero-JS bot sees just this title until SeoHead runs — a real,
+         documented limit (plan §5), not a bug to paper over with a
+         default that would only break the routes that DO run JS. -->
+    <title>XFChess | Competitive Chess Server</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

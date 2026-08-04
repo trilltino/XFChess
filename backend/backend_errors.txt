@@ -1,0 +1,56 @@
+﻿cargo : warning: profiles for the non root package 
+will be ignored, specify profiles at the workspace 
+root:
+At line:1 char:1
++ cargo check -p backend 2>&1 | Out-File -FilePath 
+backend_errors.txt - ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warni 
+   ng: profil...workspace root::String) [], Remot  
+  eException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+package:   C:\Users\isich\XFChess\crates\iroh-gossi
+p\Cargo.toml
+workspace: C:\Users\isich\XFChess\Cargo.toml
+    Blocking waiting for file lock on build 
+directory
+    Checking backend v0.1.0 
+(C:\Users\isich\XFChess\backend)
+warning: unused import: `extract::FromRef`
+  --> backend\src\signing\mod.rs:14:5
+   |
+14 |     extract::FromRef,
+   |     ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: `backend` (lib) generated 1 warning (run 
+`cargo fix --lib -p backend` to apply 1 suggestion)
+warning: unused variable: `rx`
+  --> backend\src\signing_server.rs:87:28
+   |
+87 |     let (_braid_state, mut rx) = 
+braid_iroh::spawn_node(
+   |                            ^^ help: if this 
+is intentional, prefix it with an underscore: `_rx`
+   |
+   = note: `#[warn(unused_variables)]` on by 
+default
+
+warning: variable does not need to be mutable
+  --> backend\src\signing_server.rs:87:24
+   |
+87 |     let (_braid_state, mut rx) = 
+braid_iroh::spawn_node(
+   |                        ----^^
+   |                        |
+   |                        help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` on by default
+
+warning: `backend` (bin "signing-server") 
+generated 2 warnings (run `cargo fix --bin 
+"signing-server"` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + 
+debuginfo] target(s) in 8m 07s

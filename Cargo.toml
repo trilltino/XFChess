@@ -1,0 +1,285 @@
+[package]
+name = "xfchess"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "xfchess"
+path = "src/main.rs"
+test = false
+
+[[bin]]
+name = "pda"
+path = "src/bin/pda.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "read_game"
+path = "src/bin/read_game.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "tournament_test"
+path = "src/bin/tournament_test.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "tournament_real_test"
+path = "src/bin/tournament_real_test.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "tournament_data_gen"
+path = "src/bin/tournament_data_gen.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "debugger"
+path = "src/bin/debugger.rs"
+
+# Solana-only helper. Declared explicitly so Cargo skips it without the feature;
+# otherwise auto-discovery tries to build it and `cargo test` fails (the file is
+# entirely `#![cfg(feature = "solana")]`, leaving no `main`).
+[[bin]]
+name = "profile_pda"
+path = "src/bin/profile_pda.rs"
+required-features = ["solana"]
+
+# Solana-only RPC benchmark. Gated for the same reason as profile_pda above.
+[[bin]]
+name = "on_chain_benchmark"
+path = "src/bin/on_chain_benchmark.rs"
+required-features = ["solana"]
+
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/zarathustra_net/*",
+    "crates/solana/*",
+    "crates/engine/*",
+    "crates/shared/*",
+    "programs/*",
+    "tauri",
+    "backend",
+]
+exclude = [
+    "references/ephemeral-rollups-sdk/rust",
+    "tauri/viz/src-tauri",
+]
+
+[profile.dev]
+opt-level = 1
+debug = 1        # Only include line numbers, not full symbols (saves GBs of disk space)
+strip = "debuginfo" # Strip debuginfo from the resulting binary (reduces .exe size)
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
+
+# Compile build scripts and proc-macros optimized so they *run* faster during
+# every compile (Bevy / Anchor / serde / sqlx are heavily macro-driven). This
+# speeds up build time and has no effect on the final runtime binary.
+[profile.dev.build-override]
+opt-level = 3
+[profile.release.build-override]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+# Thin LTO: nearly the runtime perf of fat LTO but 2-4x faster to build — a big
+# win for the on-VPS backend build and local release iteration.
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = true
+
+# Size-optimized profile for Solana program
+[profile.release.package.xfchess-game]
+opt-level = "z"
+codegen-units = 1
+
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+authors = ["trilltino"]
+publish = false
+license = "MIT/Apache-2.0"
+repository = "https://github.com/trilltino/XFChess"
+documentation = "https://github.com/trilltino/XFChess"
+homepage = "https://github.com/trilltino/XFChess"
+keywords = ["solana", "chess", "gaming"]
+
+[workspace.dependencies]
+# Anchor 1.1.2 is the version compatible with Solana 3.x's account model; the
+# Anchor 1.0/Solana 3.x migration landed 2026-07-22 and also unblocked the
+# ephemeral-rollups-sdk 0.16.2 bump below. See docs/runbooks/magicblock-lifecycle-devnet.md.
+anchor-lang = { version = "=1.1.2", features = ["init-if-needed"] }
+anchor-spl = "=1.1.2"
+# Solana 3.0.0: paired with the anchor-lang 1.1.2 pin above, same migration.
+solana-program = "=3.0.0"
+solana-program-test = "=3.1.12"
+solana-sdk = "=3.0.0"
+solana-client = "=3.1.12"
+solana-transaction-status = "=3.1.12"
+borsh = "=1.8.0"
+chrono = { version = "=0.4.44", features = ["serde"] }
+serde_bytes = "=0.11.17"
+clap = { version = "=4.5", features = ["derive", "env"] }
+egui = "=0.34"
+iroh = "=1.0.3"
+iroh-base = "=1.0.3"
+bevy_egui = "=0.40.1"
+
+webbrowser = "=1.1.0"
+# 0.16.2 fixes the 2026-07-22 undelegation-buffer disclosure (checks `buffer`
+# is the canonical PDA for `delegated_account`); unblocked by the Anchor/Solana
+# migration above. See docs/runbooks/magicblock-lifecycle-devnet.md.
+ephemeral-rollups-sdk = { version = "=0.16.2", features = ["anchor", "instruction"] }
+axum = "=0.8.9"
+tower-http = "=0.7.0"
+xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
+braid-core = { path = "crates/zarathustra_net/braid-core" }
+braid-http = { path = "crates/zarathustra_net/braid-http" }
+braid-iroh = { path = "crates/zarathustra_net/braid-iroh" }
+braid_chess = { path = "crates/zarathustra_net/braid_chess" }
+iroh-gossip = { path = "crates/zarathustra_net/iroh-gossip" }
+nimzovich_engine = { path = "crates/engine/nimzovich_engine" }
+xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
+chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
+# Exact-pinned because several call sites and feature flags in this repo
+# (bevy_fixed_node, sky — see below; the winit pin) target 0.19's specific
+# rc.3-era API surface, not just the 0.19 line in general; bumping needs those
+# checked, not just a version-string edit. See docs/PUBLISHING.md's "Bevy API
+# drift" note for a concrete case where feature-gated code silently drifted.
+bevy = { version = "=0.19.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg", "hdr"] }
+bevy_sprite = "=0.19.0"
+bevy_text = "=0.19.0"
+bevy_ui = "=0.19.0"
+image = { version = "=0.25.5", default-features = false, features = ["png"] }
+# Pinned to the version Bevy 0.19 pulls in so the winit::window::Icon type
+# unifies with bevy_winit (used to set the OS window/taskbar icon at startup).
+winit = "=0.30.13"
+tokio = { version = "=1.53.1", features = ["full"] }
+tokio-tungstenite = "=0.20.1"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+bincode = "=1.3.3"
+json = { package = "sonic-rs", version = "=0.3" }
+futures = "=0.3"
+parking_lot = "=0.12"
+url = { version = "=2.5", features = ["serde"] }
+websocket = { package = "tokio-websockets", version = "=0.10", features = ["client", "simd", "native-tls", "fastrand", "openssl"] }
+base64 = "=0.22"
+zstd = "=0.13"
+rand = "=0.10"
+regex = "=1.12.3"
+thiserror = "=2.0.18"
+anyhow = "=1.0.102"
+futures-lite = "=2.6.1"
+async-trait = "=0.1.89"
+uuid = { version = "=1.21.0", features = ["v4", "fast-rng"] }
+tracing = "=0.1.44"
+tracing-subscriber = "=0.3.23"
+reqwest = { version = "=0.13.4", features = ["json", "blocking"] }
+bs58 = "=0.5.1"
+crossbeam-channel = "=0.5.15"
+web-time = "=1.1"
+
+[features]
+default = []
+profile = ["bevy/trace_tracy"]
+# Tag the in-game HUD root with `bevy_ui::FixedNode` (viewport-anchored UI).
+# `FixedNode` landed after bevy 0.19.0-rc.3, the version this project pins, so
+# this is opt-in until a release that exports it is pinned. See
+# src/ui/game/hud.rs.
+bevy_fixed_node = []
+# Opt-in physically-based sky/atmosphere for the in-game board scene. OFF by
+# default: bevy 0.19.0-rc.3 still uses the single-camera atmosphere path, and
+# XFChess runs multiple cameras, so this is gated until a release with the
+# multi-camera fix is pinned. See src/rendering/effects/sky.rs.
+sky = []
+# Accept unsigned (0x01) P2P gossip messages. DEV/TEST ONLY — the default
+# build rejects unsigned moves so a peer cannot skip authentication by
+# sending plaintext. See docs/plans/causal-authentication.md (Gap A3).
+allow-unsigned-p2p = []
+# TempleOS tribute board theme (orthographic camera, unlit board, Terry Davis
+# quote). DEV ONLY — compiled out of default builds; enables the main-menu entry.
+templeos = []
+solana = [
+    "anchor-lang",
+    "solana-sdk",
+    "solana-client",
+    "solana-program",
+    "ephemeral-rollups-sdk",
+    "solana-system-interface",
+    "solana-commitment-config",
+    "xfchess-game",
+]
+
+[dependencies]
+bevy.workspace = true
+bevy_sprite = { workspace = true }
+bevy_text = { workspace = true }
+bevy_ui = { workspace = true }
+image = { workspace = true }
+winit = { workspace = true }
+tokio.workspace = true
+futures-lite.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+directories = "6.0.0"
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid.workspace = true
+web-time.workspace = true
+reqwest.workspace = true
+anchor-lang = { workspace = true, optional = true }
+nimzovich_engine = { workspace = true }
+bevy_egui = { workspace = true }
+solana-sdk = { workspace = true, optional = true }
+solana-client = { workspace = true, optional = true }
+webbrowser.workspace = true
+braid_chess.workspace = true
+braid-iroh = { workspace = true, features = ["proxy"] }
+braid-core.workspace = true
+iroh-gossip.workspace = true
+sha2 = "0.10.8"
+aes-gcm = "0.10.3"
+dirs = "5.0.1"
+chrono.workspace = true
+serde_bytes.workspace = true
+openssl = { version = "0.10", features = ["vendored"] }
+rfd = "0.15"
+iroh.workspace = true
+crossbeam-channel.workspace = true
+thiserror.workspace = true
+solana-program = { workspace = true, optional = true }
+bs58.workspace = true
+borsh.workspace = true
+anyhow = { workspace = true }
+clap.workspace = true
+egui.workspace = true
+bincode.workspace = true
+zstd.workspace = true
+futures = { workspace = true }
+base64.workspace = true
+regex.workspace = true
+ed25519-dalek = "2"
+ephemeral-rollups-sdk = { workspace = true, optional = true }
+solana-system-interface = { version = "3", features = ["bincode"], optional = true }
+solana-commitment-config = { version = "3", optional = true }
+xfchess-game = { workspace = true, optional = true }
+
+# docs/PRE_MAINNET_E2E_PLAN.md §6.3: introduces proptest scoped to the one
+# seam identified as this plan's single highest-value test (§1.2, dual-
+# transport move dedup) rather than adopting it workspace-wide.
+[dev-dependencies]
+proptest = "1"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "allow" }

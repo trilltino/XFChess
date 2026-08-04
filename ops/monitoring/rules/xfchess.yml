@@ -1,0 +1,105 @@
+groups:
+  - name: xfchess_app_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on XFChess backend"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      - alert: BackendDown
+        expr: xfchess_health == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "XFChess backend is down"
+          description: "The /metrics scrape itself is failing or reporting unhealthy — check `journalctl -u xfchess-backend`."
+
+      - alert: TransactionFailureRate
+        expr: rate(transactions_failed_total[5m]) / rate(transactions_submitted_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Solana/ER transaction failure rate"
+          description: "Transaction failure rate is {{ $value | humanizePercentage }} for chain {{ $labels.chain }}."
+
+      - alert: RpcLatencyHigh
+        expr: histogram_quantile(0.95, rate(solana_rpc_latency_ms_bucket[5m])) > 2000
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Solana RPC latency is high"
+          description: "P95 latency for {{ $labels.method }} is {{ $value }}ms — check the Triton dashboard for throttling (see docs/runbooks/rpc-degraded.md)."
+
+      - alert: FeePayerLowBalance
+        expr: feepayer_balance_lamports < 10000000
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fee payer balance is critically low"
+          description: "Fee payer has {{ $value }} lamports (< 0.01 SOL) — settlements/cranks will start failing. Top up now."
+
+      # ── ER / MagicBlock health — the signals the original observability
+      # audit found were real but shown nowhere. ────────────────────────────
+      - alert: ERStaleDelegationHigh
+        expr: xfchess_settlement_stale_delegated_gauge > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Multiple games stuck on the Ephemeral Rollup"
+          description: "{{ $value }} delegated games have had no on-chain activity for 20+ minutes — the ER may not be committing/undelegating. See MAGICBLOCK.md's ER-unavailability section."
+
+      - alert: ERSubscriptionDegraded
+        expr: xfchess_er_subscription_connected == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Triton real-time ER push stream is down"
+          description: "The accountSubscribe WS pubsub watch has been disconnected for 10+ minutes — settlement has silently fallen back to 30s poll-only staleness detection. Not user-impacting on its own, but worth checking `journalctl | grep er_watch`."
+
+      # ── Background worker liveness — a worker can panic mid-loop and stop
+      # ticking while the process (and /health) stays "up". ─────────────────
+      - alert: SettlementWorkerStale
+        expr: time() - xfchess_settlement_last_tick_unix > 90
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Settlement worker has stopped ticking"
+          description: "No settlement tick in {{ $value | humanizeDuration }} (expected every 30s) — wager payouts are not being auto-finalized."
+
+      - alert: TournamentSchedulerStale
+        expr: time() - xfchess_tournament_scheduler_last_tick_unix > 90
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tournament scheduled-start scanner has stopped ticking"
+          description: "No tick in {{ $value | humanizeDuration }} (expected every 30s) — scheduled tournaments will not auto-start."
+
+      - alert: PrizeDistributorStale
+        expr: time() - xfchess_prize_distributor_last_tick_unix > 180
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prize distributor has stopped ticking"
+          description: "No tick in {{ $value | humanizeDuration }} (expected every 60s) — completed tournaments will not auto-pay out."
+
+      - alert: AntiCheatQueueBacklog
+        expr: xfchess_anticheat_queue_depth > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Anti-cheat analysis queue is backing up"
+          description: "{{ $value }} games waiting on Stockfish analysis for 10+ minutes — finalized games may be settling without review."

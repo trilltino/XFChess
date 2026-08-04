@@ -1,0 +1,90 @@
+version: '3.8'
+
+# XFChess Monitoring Stack
+# Prometheus + Grafana + Alertmanager for self-hosted observability.
+#
+# All three run with `network_mode: host` rather than Docker's default bridge
+# networking. This was NOT the original design — it replaced a bridge-network
+# + `extra_hosts: host-gateway` setup that looked correct but silently
+# doesn't work: `host-gateway` resolves to the default `docker0` bridge's
+# gateway (172.17.0.1) regardless of which custom network a container is
+# actually on, and a container on a different custom bridge (like
+# `monitoring_monitoring` below, before this fix) has no route to that
+# address at all — scrapes just hang until Prometheus marks the target down.
+# Discovered live after the first real deploy: Prometheus reported
+# xfchess-backend and node as permanently "down".
+#
+# Host networking sidesteps all of that: every service binds directly to a
+# host loopback port (each explicitly pinned to 127.0.0.1, never 0.0.0.0, to
+# preserve the "internal-only, reach via SSH tunnel" security posture), and
+# they all reach each other and the natively-run backend/node_exporter via
+# plain localhost/127.0.0.1 — no cross-network routing to get wrong.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: xfchess-prometheus
+    network_mode: host
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.listen-address=127.0.0.1:9090'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: xfchess-grafana
+    network_mode: host
+    volumes:
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Under host networking Grafana would otherwise listen on 0.0.0.0.
+      - GF_SERVER_HTTP_ADDR=127.0.0.1
+      - GF_SERVER_HTTP_PORT=3000
+      # Reach Grafana via SSH tunnel (ssh -L 3000:127.0.0.1:3000 SERVER), not a public URL.
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # No containerized node-exporter here on purpose: ops/scripts/deploy.ps1
+  # Step 2d already installs node_exporter natively via systemd, bound to
+  # 127.0.0.1:9100. A second one in this compose stack would either conflict
+  # on that port or silently double-count host metrics. Prometheus scrapes
+  # the native one directly via localhost:9100 (see prometheus.yml).
+
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: xfchess-alertmanager
+    network_mode: host
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/config.yml:ro
+      - ./secrets/telegram_bot_token:/etc/alertmanager/secrets/telegram_bot_token:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.listen-address=127.0.0.1:9093'
+      - '--cluster.listen-address='
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  alertmanager-data:
+    driver: local

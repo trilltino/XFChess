@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for XFChess.app.
+  Required for Apple notarization. A Bevy/wgpu game that does P2P networking and
+  spawns stockfish needs the JIT + dyld + network exceptions below; without them
+  notarization succeeds but the app crashes or is sandbox-blocked at runtime.
+-->
+<plist version="1.0">
+<dict>
+  <!-- wgpu / Metal shader compilation and some deps use JIT-style mappings -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- Loading dynamically-linked libs not signed by Apple (vendored openssl, etc.) -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <!-- Outbound + inbound sockets: Iroh/QUIC P2P, localhost wallet bridge, RPC -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <key>com.apple.security.network.server</key>
+  <true/>
+</dict>
+</plist>

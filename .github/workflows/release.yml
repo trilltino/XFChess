@@ -1,0 +1,348 @@
+name: Release
+
+# Tag-driven signed installers for Windows + macOS.
+#   git tag v0.1.0 && git push origin v0.1.0
+# Provision the signing secrets first — see docs/PUBLISHING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Production endpoints baked into the installers/launchers. nginx serves the
+  # frontend + API from the same domain (see ops/nginx/nginx.conf) — there's
+  # no separate api.* subdomain.
+  BACKEND_URL: https://xfchess.com
+  SIGNING_URL: https://xfchess.com
+  # Actual production backend today (xfchess.com has no DNS yet). Update this
+  # to https://xfchess.com/health once DNS + nginx are live, and drop this env.
+  # nginx redirects plain HTTP to HTTPS with a self-signed cert (no DNS yet,
+  # so no real cert either) — hence https:// + -k below.
+  BACKEND_HEALTH_URL: https://178.104.55.19/health
+
+jobs:
+  # ─────────────────────── Verify backend is up ───────────────────────
+  verify-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check production backend health
+        run: |
+          for i in 1 2 3 4 5; do
+            code=$(curl -skS -m 10 -o /tmp/health.json -w '%{http_code}' "$BACKEND_HEALTH_URL" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Backend healthy: $(cat /tmp/health.json)"
+              exit 0
+            fi
+            echo "Attempt $i: backend returned $code, retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Production backend at $BACKEND_HEALTH_URL is not responding — refusing to cut a release."
+          exit 1
+
+  # ───────────────────────────── Windows ─────────────────────────────
+  windows:
+    needs: verify-backend
+    runs-on: windows-latest
+    env:
+      AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Derive version from tag
+        id: ver
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Build web frontends
+        shell: bash
+        env:
+          VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+        run: |
+          (cd xfchessdotcom && npm ci && npm run build)
+          (cd tauri/wallet-ui && npm ci && npm run build)
+
+      - name: Build binaries (release)
+        run: |
+          cargo build --release --bin xfchess --features solana
+          cargo build --release -p xfchess-tauri
+
+      - name: Download Stockfish (required — release must ship with the engine bundled)
+        shell: pwsh
+        run: |
+          curl.exe -fsSL --retry 3 --retry-delay 5 -m 60 -o sf.zip "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.zip"
+          if ($LASTEXITCODE -ne 0) { throw "Stockfish download failed (curl exit $LASTEXITCODE)" }
+          Expand-Archive -Path sf.zip -DestinationPath sf_extracted
+          Copy-Item -Force "sf_extracted\stockfish\stockfish-windows-x86-64-modern.exe" stockfish.exe
+
+      - name: Verify Stockfish binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path stockfish.exe)) { throw "stockfish.exe missing after download step" }
+          $output = @("uci", "quit") | & .\stockfish.exe
+          if (-not ($output -match "uciok")) { throw "stockfish.exe did not respond to a UCI handshake — binary may be corrupt" }
+          Write-Host "Stockfish OK"
+
+      - name: Stage payload
+        shell: pwsh
+        run: |
+          $stage = "release/win"
+          New-Item -ItemType Directory -Force -Path "$stage/assets" | Out-Null
+          Copy-Item -Recurse -Force assets/* "$stage/assets/"
+          Copy-Item -Force target/release/xfchess.exe "$stage/"
+          Copy-Item -Force target/release/xfchess-tauri.exe "$stage/"
+          Copy-Item -Force stockfish.exe "$stage/"
+
+      # Sign the binaries BEFORE packaging. Azure Trusted Signing path:
+      - name: Sign binaries (Azure Trusted Signing)
+        if: env.AZURE_TS_ACCOUNT != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: ${{ github.workspace }}/release/win
+          files-folder-filter: exe
+          files-folder-recurse: true
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" `
+            "/DAPP_VERSION=${{ steps.ver.outputs.version }}" `
+            "/DBACKEND_URL=${{ env.BACKEND_URL }}" `
+            "/DSIGNING_URL=${{ env.SIGNING_URL }}" `
+            tauri/installer/xfchess.nsi
+
+      - name: Sign installer (Azure Trusted Signing)
+        if: env.AZURE_TS_ACCOUNT != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: ${{ github.workspace }}/release
+          files-folder-filter: exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/XFChess-Setup-*.exe
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/XFChess-Setup-*.exe
+
+  # ───────────────────────────── Linux ─────────────────────────────
+  # Native ubuntu-latest build of both the game client (xfchess) and the
+  # wallet-bridge companion (xfchess-tauri), matching Windows/macOS parity.
+  linux:
+    needs: verify-backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Derive version from tag
+        id: ver
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux build + runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev \
+            libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+            libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
+            libxkbcommon-x11-0 mesa-vulkan-drivers libgl1-mesa-dri xvfb \
+            libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Build web frontends
+        env:
+          VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+        run: |
+          (cd tauri/wallet-ui && npm ci && npm run build)
+
+      - name: Build binaries (release)
+        run: |
+          cargo build --release --bin xfchess --features solana
+          cargo build --release -p xfchess-tauri
+
+      - name: Stage payload
+        run: |
+          mkdir -p release/linux/assets
+          cp -r assets/* release/linux/assets/
+          cp target/release/xfchess release/linux/xfchess
+          cp target/release/xfchess-tauri release/linux/xfchess-tauri
+          chmod +x release/linux/xfchess release/linux/xfchess-tauri
+          cat > release/linux/launch.sh <<EOF
+          #!/bin/sh
+          SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+          export BACKEND_URL="\${BACKEND_URL:-${{ env.BACKEND_URL }}}"
+          export SIGNING_SERVICE_URL="\${SIGNING_SERVICE_URL:-${{ env.SIGNING_URL }}}"
+          "\$SCRIPT_DIR/xfchess-tauri" &
+          exec "\$SCRIPT_DIR/xfchess" "\$@"
+          EOF
+          chmod +x release/linux/launch.sh
+
+      - name: Download Stockfish (required — release must ship with the engine bundled)
+        run: |
+          curl -fsSL --retry 3 --retry-delay 5 -m 60 -o /tmp/sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-ubuntu-x86-64-modern.tar
+          tar -xf /tmp/sf.tar -C /tmp stockfish/stockfish-ubuntu-x86-64-modern
+          cp /tmp/stockfish/stockfish-ubuntu-x86-64-modern release/linux/stockfish
+          chmod +x release/linux/stockfish
+
+      - name: Verify Stockfish binary
+        run: |
+          printf 'uci\nquit\n' | release/linux/stockfish | grep -q '^uciok$'
+
+      - name: E2E smoke test (headless, connects to production backend)
+        env:
+          BACKEND_URL: ${{ env.BACKEND_URL }}
+          SIGNING_SERVICE_URL: ${{ env.SIGNING_URL }}
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 &
+          sleep 1
+          cd release/linux
+          set +e
+          DISPLAY=:99 timeout 15 ./xfchess-tauri &
+          bridge_pid=$!
+          DISPLAY=:99 timeout 15 ./xfchess
+          code=$?
+          wait $bridge_pid
+          bridge_code=$?
+          set -e
+          if [ "$code" != "124" ] && [ "$code" != "0" ]; then
+            echo "::error::xfchess exited with code $code — see crash log below"
+            cat logs/crash_*.log 2>/dev/null || true
+            exit 1
+          fi
+          if [ "$bridge_code" != "124" ] && [ "$bridge_code" != "0" ]; then
+            echo "::error::xfchess-tauri exited with code $bridge_code"
+            exit 1
+          fi
+          echo "Smoke test passed (xfchess=$code, xfchess-tauri=$bridge_code)"
+
+      - name: Package tarball
+        run: |
+          cd release
+          tar -czf "XFChess-linux-x86_64-${{ steps.ver.outputs.version }}.tar.gz" linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: release/XFChess-linux-x86_64-*.tar.gz
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/XFChess-linux-x86_64-*.tar.gz
+
+  # ───────────────────────────── macOS ─────────────────────────────
+  macos:
+    needs: verify-backend
+    runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Derive version from tag
+        id: ver
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Import signing certificate
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN=build.keychain
+          security create-keychain -p actions "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN"
+          rm cert.p12
+
+      - name: Build web frontends
+        env:
+          VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+        run: |
+          (cd xfchessdotcom && npm ci && npm run build)
+          (cd tauri/wallet-ui && npm ci && npm run build)
+
+      - name: Build binaries (release)
+        run: |
+          cargo build --release --bin xfchess --features solana
+          cargo build --release -p xfchess-tauri
+
+      - name: Download Stockfish (required — release must ship with the engine bundled)
+        run: |
+          curl -fsSL --retry 3 --retry-delay 5 -m 60 -o /tmp/sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-macos-x86-64-modern.tar
+          tar -xf /tmp/sf.tar -C /tmp stockfish/stockfish-macos-x86-64-modern
+          cp /tmp/stockfish/stockfish-macos-x86-64-modern "$GITHUB_WORKSPACE/stockfish"
+          chmod +x "$GITHUB_WORKSPACE/stockfish"
+
+      - name: Verify Stockfish binary
+        run: |
+          printf 'uci\nquit\n' | "$GITHUB_WORKSPACE/stockfish" | grep -q '^uciok$'
+
+      - name: Package, sign, notarize, DMG
+        env:
+          APP_VERSION: ${{ steps.ver.outputs.version }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash tauri/macos/package_macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: release/XFChess-*.dmg
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/XFChess-*.dmg
