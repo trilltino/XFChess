@@ -45,9 +45,14 @@ against the engine works fully offline; online multiplayer, tournaments, and
 wagered play need an internet connection and, for on-chain features, a Solana
 wallet (Phantom or Solflare).
 
-![Gameplay Screenshot](docs/images/screenshot_1.png)
-![Tournament Interface](docs/images/screenshot_2.png)
-![Multiplayer Match](docs/images/screenshot_3.png)
+![XFChess](docs/images/screenshot_1.png)
+![XFChess](docs/images/screenshot_2.png)
+![XFChess](docs/images/screenshot_3.png)
+![XFChess](docs/images/screenshot_4.png)
+![XFChess](docs/images/screenshot_5.png)
+![XFChess](docs/images/screenshot_6.png)
+![XFChess](docs/images/screenshot_7.png)
+![XFChess](docs/images/screenshot_8.png)
 
 ## Docs
 
