@@ -938,6 +938,7 @@ function ProfileStep({
         const tx = web3.Transaction.from(txBytes);
         let signed: web3.Transaction;
         try {
+          await ensureDevnet(provider, localStorage.getItem("xfchess_wallet_provider"));
           signed = await provider.signTransaction(tx);
         } catch {
           throw new Error("Signature rejected — try again to finish on-chain setup.");
