@@ -119,6 +119,7 @@ tauri/gen/
 !xfchessdotcom/package-lock.json
 !tauri/wallet-ui/package-lock.json
 !tauri/tournament-admin/package-lock.json
+!tauri/viz/package-lock.json
 
 # Generated JSON files — except the Anchor IDL, which the frontend imports
 # directly and which a fresh checkout has no way to regenerate without a full
