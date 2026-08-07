@@ -917,10 +917,11 @@ fn render_create_tab(
     let global_session_pending = global_session_setup_in_progress
         && !has_global_session
         && global_session_unavailable_reason.is_none();
+    let free_game_needs_global_session = (is_free_casual || is_free_rated) && !has_global_session;
     let can_create = !matches!(lobby.status, LobbyStatus::Pending)
         && wallet_connected
         && !global_session_pending
-        && ((is_free_casual || is_free_rated)
+        && (((is_free_casual || is_free_rated) && has_global_session)
             || (lobby.wager_sol > 0.0 && (lobby.wager_sol as f64) <= balance - 0.002));
 
     let is_devnet = lobby.cached_rpc_url.contains("devnet");
@@ -931,7 +932,17 @@ fn render_create_tab(
             "⏳ Setting up one-time session signing…",
         );
         Layout::small_space(ui);
-    } else if wallet_connected && !has_global_session && !is_free_casual {
+    } else if wallet_connected && free_game_needs_global_session {
+        ui.colored_label(
+            egui::Color32::from_rgb(200, 180, 120),
+            if let Some(reason) = global_session_unavailable_reason {
+                format!("Quick-sign session is not ready ({reason}). Reconnect or retry after it finishes; free games no longer use the slow per-game wallet popup.")
+            } else {
+                "Quick-sign session is required for free games. Waiting avoids the slow per-game wallet popup.".to_string()
+            },
+        );
+        Layout::small_space(ui);
+    } else if wallet_connected && !has_global_session {
         // Legacy per-game path — label the platform fee here, before the
         // wallet popup, instead of letting it show up as an unexplained
         // number inside Phantom's own transaction breakdown.

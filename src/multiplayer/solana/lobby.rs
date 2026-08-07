@@ -572,8 +572,18 @@ async fn async_create_game(
     }
 
     // 1. Ask VPS to generate session keypair → get session_pubkey + platform fee.
+    let legacy_start = Instant::now();
+    info!(
+        "[CREATE_GAME] legacy per-game signing path selected for game {game_id} (wager_lamports={wager_lamports}, match_type={match_type})"
+    );
+
+    let step_start = Instant::now();
     let (session_pubkey_str, platform_fee_lamports) =
         vps_client::create_session(game_id, &wallet_pubkey.to_string())?;
+    info!(
+        "[CREATE_GAME] /session/create completed for game {game_id} in {:?}",
+        step_start.elapsed()
+    );
     let session_pubkey: Pubkey = session_pubkey_str
         .parse()
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
@@ -602,11 +612,21 @@ async fn async_create_game(
     } else {
         "Creating game"
     };
+    let step_start = Instant::now();
     let signed_bytes = sign_via_tauri_only(&rpc_url, wallet_pubkey, &ixs, &[], label)
         .map_err(|e| format!("sign bundled TX: {e}"))?;
+    info!(
+        "[CREATE_GAME] wallet signing completed for game {game_id} in {:?}",
+        step_start.elapsed()
+    );
 
     // 4. VPS submits TX + funds session key (no more separate popups).
+    let step_start = Instant::now();
     vps_client::activate_session(game_id, &signed_bytes)?;
+    info!(
+        "[CREATE_GAME] /session/activate completed for game {game_id} in {:?}",
+        step_start.elapsed()
+    );
 
     // Poll for game account to exist on-chain (max 60 seconds)
     let game_pda =
@@ -638,6 +658,10 @@ async fn async_create_game(
                 info!(
                     "[CREATE_GAME] Game account {} confirmed on-chain for game {}",
                     game_pda, game_id
+                );
+                info!(
+                    "[CREATE_GAME] legacy per-game create finished for game {game_id} in {:?}",
+                    legacy_start.elapsed()
                 );
                 break;
             }

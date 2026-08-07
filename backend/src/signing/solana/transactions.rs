@@ -14,7 +14,7 @@ use solana_sdk::{
 };
 use solana_system_interface::instruction as system_instruction;
 use std::time::{Duration, Instant};
-use tracing::warn;
+use tracing::{info, warn};
 
 /// Funds `dest` with `lamports` from `payer`, submit to `rpc_url`.
 pub fn fund_account(
@@ -23,8 +23,12 @@ pub fn fund_account(
     dest: &Pubkey,
     lamports: u64,
 ) -> Result<Signature> {
+    let start = Instant::now();
     if let Ok(balance) = rpc.get_balance(dest) {
         if balance >= lamports {
+            info!(
+                "[SOLANA_TX] fund_account skipped for {dest}; balance already {balance} lamports"
+            );
             return Ok(Signature::default());
         }
     }
@@ -48,7 +52,13 @@ pub fn fund_account(
             return Err(anyhow!("fund_account confirmation timeout for {sig}"));
         }
         match rpc.get_signature_status_with_commitment(&sig, commitment) {
-            Ok(Some(Ok(()))) => return Ok(sig),
+            Ok(Some(Ok(()))) => {
+                info!(
+                    "[SOLANA_TX] fund_account confirmed {sig} for {dest} in {:?}",
+                    start.elapsed()
+                );
+                return Ok(sig);
+            }
             Ok(Some(Err(e))) => return Err(anyhow!("fund_account failed (sig={sig}): {e:?}")),
             Ok(None) | Err(_) => std::thread::sleep(Duration::from_millis(150)),
         }
@@ -183,6 +193,7 @@ pub fn cosign_and_submit_tx(
     session_keypair: &Keypair,
     tx_bytes: &[u8],
 ) -> Result<Signature> {
+    let start = Instant::now();
     let mut tx: Transaction =
         bincode::deserialize(tx_bytes).map_err(|e| anyhow!("deserialize tx: {e}"))?;
     let blockhash = tx.message.recent_blockhash;
@@ -219,7 +230,13 @@ pub fn cosign_and_submit_tx(
             return Err(anyhow!("setup TX confirmation timeout for {sig}"));
         }
         match rpc.get_signature_status_with_commitment(&sig, commitment) {
-            Ok(Some(Ok(()))) => return Ok(sig),
+            Ok(Some(Ok(()))) => {
+                info!(
+                    "[SOLANA_TX] cosign_and_submit_tx confirmed {sig} in {:?}",
+                    start.elapsed()
+                );
+                return Ok(sig);
+            }
             Ok(Some(Err(e))) => {
                 return Err(anyhow!(
                     "setup TX failed (sig={sig}): {e:?} — instructions: {}",
