@@ -47,8 +47,9 @@ pub mod vps_client {
 
 - All async work goes through the shared `TokioRuntime` resource — don't create
   per-system runtimes.
-- `network/braid.rs` is a legacy shell slated for removal
-  ([docs/legacy-cleanup-audit.md](../../docs/legacy-cleanup-audit.md)); live transport
-  is `OnlineGameSession`.
+- `network/braid.rs` and `network/relay.rs` (an unused STUN/TURN client — Iroh
+  does its own NAT traversal) have been deleted; both were unreferenced. Live
+  transport is `OnlineGameSession` over Iroh gossip, plus `network/braid_transport.rs`
+  for the durable backend log.
 - `rollup/`, `solana/`, and `wager_state/` are `#[cfg(feature = "solana")]` — never
   import them unconditionally.

@@ -27,7 +27,10 @@ use crate::multiplayer::types::NetworkEvent;
 #[derive(Resource)]
 pub struct OnlineGameSession {
     /// Base URL of the VPS backend (e.g. `http://127.0.0.1:8090`).
-    /// Used only for VPS `record_move` — never for live P2P traffic.
+    ///
+    /// Serves both the VPS `record_move` REST call *and* the durable Braid
+    /// moves/chat streams (`braid_transport`) — it is on the live move path,
+    /// not just an out-of-band bookkeeping endpoint.
     pub base_url: String,
     /// Posted game identifier.
     pub game_id: String,
@@ -39,16 +42,19 @@ pub struct OnlineGameSession {
     pub next_nonce: u64,
     /// Wager amount in SOL (0 = casual).
     pub wager_amount: f64,
-    /// Content-addressed version of the last move we published.
-    /// Used to populate `GameSnapshot::head_version` for catch-up, and as
-    /// the `content_parent` for the next Braid moves-stream publish
-    /// (`braid_transport::publish_move`/`publish_resign`).
-    pub last_version: String,
-    /// Content-addressed version of the last chat message we published to
-    /// the Braid chat stream — tracked separately from `last_version`
-    /// because the backend scopes causal-chain validation per stream (chat
-    /// doesn't causally build on move content).
-    pub last_chat_version: String,
+    /// Content-addressed version of the last move *this client* published.
+    ///
+    /// Two things read it, both per-sender by design:
+    /// - the `parent_version` of the next outgoing gossip `Move`, which the
+    ///   peer checks against its per-sender equivocation lane
+    ///   (`CausalChainState::head_version`);
+    /// - `GameSnapshot::head_version`, for mid-game catch-up.
+    ///
+    /// It is deliberately *not* the Braid moves-stream parent. That stream is
+    /// shared with the opponent, so its head advances on their writes too;
+    /// `braid_transport::BraidStreamHeads` owns it. The old name
+    /// (`last_version`) invited exactly that conflation.
+    pub last_published_move_version: String,
 }
 
 impl Default for OnlineGameSession {
@@ -60,8 +66,7 @@ impl Default for OnlineGameSession {
             next_move_number: 1,
             next_nonce: 1,
             wager_amount: 0.0,
-            last_version: "0".to_string(),
-            last_chat_version: "0".to_string(),
+            last_published_move_version: "0".to_string(),
         }
     }
 }
@@ -94,8 +99,7 @@ impl OnlineGameSession {
         self.next_move_number = 1;
         self.next_nonce = 1;
         self.wager_amount = 0.0;
-        self.last_version = "0".to_string();
-        self.last_chat_version = "0".to_string();
+        self.last_published_move_version = "0".to_string();
     }
 
     pub fn is_configured(&self) -> bool {
@@ -158,6 +162,7 @@ fn publish_local_move(
     mut move_events: MessageReader<crate::game::events::MoveMadeEvent>,
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
     p2p_conn: Res<crate::multiplayer::network::p2p::P2PConnectionState>,
+    braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
 ) {
     if !session.is_configured() {
         move_events.clear();
@@ -191,11 +196,11 @@ fn publish_local_move(
         }
 
         // Causal chain fields.
-        let parent_version = session.last_version.clone();
+        let parent_version = session.last_published_move_version.clone();
         let new_version = braid_chess::version_hash(&event.next_fen, move_number);
-        session.last_version = new_version.clone();
+        session.last_published_move_version = new_version.clone();
 
-        // agent_id = the sender's gossip-signing public key (derived from
+        // signer_pubkey = the sender's gossip-signing public key (derived from
         // `session_signing_key`, the same seed `SignedNetworkMessage::sign`
         // uses) — NOT the iroh node id. This has to be the *claimed* value
         // that will match what the roster (populated from
@@ -207,12 +212,12 @@ fn publish_local_move(
         // entirely — they're already authenticated and causally validated
         // by the backend (`game_log.rs`), a different, equally real trust
         // boundary. Using the iroh node id here (as a prior version did)
-        // meant a relay-delivered move's `agent_id` could never equal the
+        // meant a relay-delivered move's `signer_pubkey` could never equal the
         // gossip-signing-keyed roster, failing the "non-participant signer"
         // check for every move that arrived via the old relay — which, per
         // every P2P timeout observed this
         // session, is effectively every move.
-        let agent_id = network_state
+        let signer_pubkey = network_state
             .session_signing_key
             .map(|seed| {
                 use ed25519_dalek::SigningKey;
@@ -256,7 +261,7 @@ fn publish_local_move(
                 node_b58.clone(),
             ),
             new_version,
-            parent_version.clone(),
+            braid.heads(),
         );
 
         let msg = NetworkMessage::Move {
@@ -266,7 +271,7 @@ fn publish_local_move(
             next_fen: event.next_fen.clone(),
             nonce,
             timestamp_ms,
-            agent_id,
+            signer_pubkey,
             seq,
             parent_version,
         };
@@ -322,6 +327,7 @@ fn handle_publish_resign(
     mut session: ResMut<OnlineGameSession>,
     mut reader: MessageReader<PublishOnlineResign>,
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
+    braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
 ) {
     if !session.is_configured() {
         reader.clear();
@@ -353,7 +359,7 @@ fn handle_publish_resign(
             node_b58,
             String::new(),
             event.player.clone(),
-            session.last_version.clone(),
+            braid.heads(),
         );
         if let Some(ref tx) = network_state.message_sender {
             if let Err(e) = tx.send(msg) {
@@ -367,9 +373,10 @@ fn handle_publish_resign(
 
 /// Bevy system: send `PublishOnlineChat` events as `NetworkMessage::Chat` over online transport.
 fn handle_publish_chat(
-    mut session: ResMut<OnlineGameSession>,
+    session: Res<OnlineGameSession>,
     mut reader: MessageReader<PublishOnlineChat>,
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
+    braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
 ) {
     if !session.is_configured() {
         reader.clear();
@@ -388,10 +395,6 @@ fn handle_publish_chat(
             .as_ref()
             .map(|id| bs58::encode(id.as_bytes()).into_string())
             .unwrap_or_default();
-        let content_parent = session.last_chat_version.clone();
-        let content_version =
-            braid_chess::version_hash(&format!("chat:{}:{}", event.player, event.timestamp_ms), 0);
-        session.last_chat_version = content_version.clone();
         crate::multiplayer::network::braid_transport::publish_chat(
             session.base_url.clone(),
             session.game_id.clone(),
@@ -400,7 +403,7 @@ fn handle_publish_chat(
             event.player.clone(),
             event.text.clone(),
             event.timestamp_ms,
-            content_parent,
+            braid.heads(),
         );
         if let Some(ref tx) = network_state.message_sender {
             if let Err(e) = tx.send(msg) {
@@ -515,7 +518,7 @@ fn broadcast_snapshot_to_new_peer(
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
     rollup_manager: Res<crate::multiplayer::EphemeralRollupManager>,
 ) {
-    if !session.is_configured() || session.last_version == "0" {
+    if !session.is_configured() || session.last_published_move_version == "0" {
         network_events.clear();
         return;
     }
@@ -532,7 +535,7 @@ fn broadcast_snapshot_to_new_peer(
     }
 
     let committed_fen = rollup_manager.committed_fen.clone();
-    let head_version = session.last_version.clone();
+    let head_version = session.last_published_move_version.clone();
     let msg_tx = network_state.message_sender.clone();
 
     bevy::tasks::IoTaskPool::get()
@@ -560,14 +563,6 @@ fn broadcast_snapshot_to_new_peer(
             }
         })
         .detach();
-}
-
-/// Update `last_version` on the session after a local move is published via
-/// gossip (called by the game's `handle_publish_move` equivalent in systems.rs).
-/// This keeps the catch-up snapshot's `head_version` accurate.
-pub fn advance_session_version(session: &mut OnlineGameSession, fen_after: &str) {
-    let version = braid_chess::version_hash(fen_after, session.next_move_number.saturating_sub(1));
-    session.last_version = version;
 }
 
 /// Build a `MovePayload` for the VPS `record_move` REST call.

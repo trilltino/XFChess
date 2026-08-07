@@ -1,17 +1,13 @@
 //! HTTP 209 subscribe handler.
 //!
-//! A client sends `GET /braid/<path>` with a `Prefer: subscribe=keep-alive`
-//! (or `Subscribe: keep-alive`) header. This handler:
+//! `GET /braid/<path>` with a subscribe header (see
+//! [`braid_http::server::wants_subscribe`] for the spellings accepted) returns
+//! status **209**, writes the current snapshot immediately, then holds the
+//! connection open and streams each subsequent update until the client goes
+//! away. A heartbeat every [`HEARTBEAT_SECS`] keeps proxies from closing an idle
+//! stream, and lets the client tell a quiet resource from a dead connection.
 //!
-//! 1. Returns status **209** with `Content-Type: multipart/mixed; boundary=…`
-//! 2. Immediately writes the current snapshot as the first multipart chunk.
-//! 3. Keeps the connection open and streams subsequent patches via a
-//!    [`tokio::broadcast`] receiver until the client disconnects.
-//! 4. Sends an empty heartbeat every [`HEARTBEAT_SECS`] to prevent proxy
-//!    timeouts.
-//!
-//! For plain GET (no Subscribe header) it returns the current state as JSON
-//! with status 200.
+//! Without a subscribe header it is an ordinary `GET`: current state, status 200.
 
 use crate::resource::protocol::{format_chunk, format_heartbeat};
 use crate::ResourceHub;
@@ -22,29 +18,19 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use braid_http::server::SubscriptionResponse;
 use bytes::Bytes;
 use futures::StreamExt;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::time::interval;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, warn};
 
+/// How often an idle subscription is proven alive.
+///
+/// The client derives its liveness deadline from the `Heartbeats` header built
+/// out of this, so raising it also slows how fast a dead stream is noticed.
 const HEARTBEAT_SECS: u64 = 20;
-const BRAID_BOUNDARY: &str = "xfchess-braid";
-
-fn wants_subscribe(headers: &HeaderMap) -> bool {
-    headers
-        .get("Prefer")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.contains("subscribe"))
-        .unwrap_or(false)
-        || headers
-            .get("Subscribe")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v.eq_ignore_ascii_case("keep-alive"))
-            .unwrap_or(false)
-}
 
 /// GET handler for all Braid resources.
 ///
@@ -55,14 +41,15 @@ pub async fn get_resource(
     Path(res): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    if !wants_subscribe(&headers) {
-        match hub.current_json(&res).await {
+    if !braid_http::server::wants_subscribe(|name| {
+        headers.get(name).and_then(|v| v.to_str().ok())
+    }) {
+        return match hub.current_json(&res).await {
             Some(val) => (StatusCode::OK, Json(val)).into_response(),
             None => StatusCode::NOT_FOUND.into_response(),
-        }
-    } else {
-        subscribe_stream(hub, res).await
+        };
     }
+    subscribe_stream(hub, res).await
 }
 
 /// Build a 209 streaming response for the resource at `path`.
@@ -71,51 +58,47 @@ async fn subscribe_stream(hub: Arc<ResourceHub>, path: String) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let boundary = BRAID_BOUNDARY;
-    let ct = format!("multipart/mixed; boundary=\"{}\"", boundary);
-
-    let snapshot_chunk = format_chunk(boundary, &snapshot);
-    let hb_chunk = format_heartbeat(boundary);
+    let braid = SubscriptionResponse::with_heartbeat_secs(HEARTBEAT_SECS);
+    let snapshot_chunk = format_chunk(&snapshot);
+    let heartbeat = format_heartbeat();
     let rx_stream = BroadcastStream::new(rx);
+    let interval_duration = braid.heartbeat_interval;
 
     let stream = async_stream::stream! {
         debug!("[braid] subscriber connected to {}", path);
 
-        // Initial snapshot
         yield Ok::<Bytes, String>(snapshot_chunk);
 
-        let mut ticker = interval(Duration::from_secs(HEARTBEAT_SECS));
-        ticker.tick().await; // consume immediate first tick
+        let mut ticker = interval(interval_duration);
+        ticker.tick().await; // consume the immediate first tick
 
         tokio::pin!(rx_stream);
         loop {
             tokio::select! {
                 maybe_update = rx_stream.next() => {
                     match maybe_update {
-                        Some(Ok(update)) => {
-                            yield Ok(format_chunk(boundary, &update));
-                        }
-                        Some(Err(e)) => {
-                            warn!("[braid] broadcast lag on {}: {}", path, e);
-                        }
+                        Some(Ok(update)) => yield Ok(format_chunk(&update)),
+                        // A lagging subscriber has already missed updates. Keep
+                        // the stream open: later updates still arrive, and a
+                        // reconnect replays from the snapshot.
+                        Some(Err(e)) => warn!("[braid] broadcast lag on {}: {}", path, e),
                         None => {
                             debug!("[braid] channel closed for {}", path);
                             break;
                         }
                     }
                 }
-                _ = ticker.tick() => {
-                    yield Ok(hb_chunk.clone());
-                }
+                _ = ticker.tick() => yield Ok(heartbeat.clone()),
             }
         }
+        debug!("[braid] subscriber disconnected from {}", path);
     };
 
-    Response::builder()
-        .status(209)
-        .header("Content-Type", ct)
-        .header("Subscribe", "keep-alive")
-        .header("Cache-Control", "no-store")
+    let mut builder = Response::builder().status(braid.status);
+    for (name, value) in braid.headers() {
+        builder = builder.header(name, value);
+    }
+    builder
         .body(Body::from_stream(stream))
-        .unwrap()
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }

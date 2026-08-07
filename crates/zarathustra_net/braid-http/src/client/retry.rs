@@ -2,6 +2,17 @@
 
 use std::time::Duration;
 
+/// Status codes a Braid client retries, matching the reference implementation.
+///
+/// Beyond the familiar transient HTTP codes, two are Braid-specific and easy to
+/// miss:
+///
+/// * **309** — the server is redirecting the subscription; reconnect.
+/// * **432 Missing Parents** — the write named a parent version the server does
+///   not have. Retrying after re-reading the current head is exactly the right
+///   response, and it is the code our own causal-chain conflicts surface as.
+pub const RETRYABLE_STATUS: &[u16] = &[309, 408, 425, 429, 432, 502, 503, 504];
+
 /// Configuration for retry behavior.
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
@@ -23,7 +34,7 @@ impl Default for RetryConfig {
             max_retries: None,
             initial_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(3),
-            retry_on_status: vec![408, 425, 429, 502, 503, 504],
+            retry_on_status: RETRYABLE_STATUS.to_vec(),
             respect_retry_after: true,
         }
     }
@@ -116,16 +127,19 @@ impl RetryState {
         self.decide_retry(retry_after)
     }
 
+    /// Like [`should_retry_status`](Self::should_retry_status), but also honours a
+    /// "missing parents" reason phrase from a server that reports the condition
+    /// in text without using status 432.
     pub fn should_retry_status_with_text(
         &mut self,
         status: u16,
         status_text: Option<&str>,
         retry_after: Option<Duration>,
     ) -> RetryDecision {
-        if let Some(text) = status_text {
-            if text.to_lowercase().contains("missing parents") {
-                return self.decide_retry(retry_after);
-            }
+        let says_missing_parents = status_text
+            .is_some_and(|t| t.to_ascii_lowercase().contains("missing parents"));
+        if says_missing_parents {
+            return self.decide_retry(retry_after);
         }
         self.should_retry_status(status, retry_after)
     }

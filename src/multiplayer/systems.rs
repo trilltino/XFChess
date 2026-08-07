@@ -16,6 +16,41 @@ use crate::multiplayer::network::reorder::IngestOutcome;
 use crate::multiplayer::types::*;
 use crate::multiplayer::TokioRuntime;
 
+/// Peers and topics the Iroh node task currently knows about.
+///
+/// Exists because an iroh-gossip topic is a *separate* swarm per `TopicId`:
+/// `Gossip::subscribe(topic, bootstrap)` only dials the peers in `bootstrap`,
+/// and being neighbours on one topic gives you nothing on another. Moves are
+/// broadcast on the per-game topic `GAME_TOPIC/<game_id>`, but the only
+/// `join_peers` call this code ever made was against the *global* `GAME_TOPIC`
+/// — so the per-game swarm had exactly one member on each side and gossip
+/// never delivered a single move between clients.
+///
+/// Both orderings have to work, since "we learned the peer" and "we joined the
+/// game topic" race with no guaranteed winner:
+/// - peer known first  → [`GossipMesh::subscribe`] passes it as bootstrap.
+/// - topic joined first → [`GossipMesh::add_peer`] back-fills it into every
+///   topic already subscribed.
+#[derive(Default)]
+struct GossipMesh {
+    peers: std::collections::HashSet<EndpointId>,
+    topics: std::collections::HashSet<String>,
+}
+
+impl GossipMesh {
+    /// Record a topic and return the peers to bootstrap it with.
+    fn subscribe(&mut self, topic: &str) -> Vec<EndpointId> {
+        self.topics.insert(topic.to_string());
+        self.peers.iter().copied().collect()
+    }
+
+    /// Record a peer and return every topic it must be joined into.
+    fn add_peer(&mut self, peer: EndpointId) -> Vec<String> {
+        self.peers.insert(peer);
+        self.topics.iter().cloned().collect()
+    }
+}
+
 #[cfg(feature = "solana")]
 use crate::game::events::{GameEndedEvent, MoveMadeEvent};
 use crate::game::resources::history::game_over::GameOverState;
@@ -120,10 +155,17 @@ pub fn initialize_braid_network(
             }
         };
 
+        // Shared between the subscription and bootstrap loops so a peer and a
+        // topic learned in either order still end up joined — see `GossipMesh`.
+        let mesh = std::sync::Arc::new(tokio::sync::Mutex::new(GossipMesh::default()));
+        mesh.lock().await.topics.insert(GAME_TOPIC.to_string());
+
         let node_arc = std::sync::Arc::new(node);
         let node_send = node_arc.clone();
         let node_bootstrap = node_arc.clone();
         let node_sub = node_arc.clone();
+        let mesh_sub = mesh.clone();
+        let mesh_bootstrap = mesh.clone();
 
         // 1. Outgoing message loop
         let event_tx_error = event_tx_clone.clone();
@@ -216,24 +258,49 @@ pub fn initialize_braid_network(
         let event_tx_sub = event_tx_clone.clone();
         tokio::spawn(async move {
             while let Some(topic) = sub_rx.recv().await {
-                info!("[NET] Dynamically subscribing to topic: {}", topic);
+                // Bootstrap with every peer we already know. Subscribing with
+                // an empty bootstrap list (as this did) joins a swarm of one:
+                // the topic exists locally, broadcasts succeed, and nothing is
+                // ever delivered to the opponent.
+                //
+                // The lock is held across the subscribe so the bootstrap loop
+                // can't observe a topic that `SubscriptionManager` hasn't
+                // registered yet (its `join_peers` errors on an unknown topic)
+                // nor add a peer that this snapshot has already missed.
+                let mut mesh = mesh_sub.lock().await;
+                let bootstrap = mesh.subscribe(&topic);
+                info!(
+                    "[NET] Dynamically subscribing to topic: {} ({} bootstrap peer(s))",
+                    topic,
+                    bootstrap.len()
+                );
                 let event_tx_inner = event_tx_sub.clone();
-                match node_sub.subscribe(&topic, vec![]).await {
+                match node_sub.subscribe(&topic, bootstrap).await {
                     Ok(rx_new) => {
                         tokio::spawn(process_gossip_stream(rx_new, event_tx_inner));
                     }
                     Err(e) => {
                         error!("Failed to subscribe to topic {}: {}", topic, e);
+                        mesh.topics.remove(&topic);
                     }
                 }
+                drop(mesh);
             }
         });
 
         // 3. Bootstrap loop
         tokio::spawn(async move {
             while let Some(peer_id) = bootstrap_rx.recv().await {
-                if let Err(e) = node_bootstrap.join_peers(GAME_TOPIC, vec![peer_id]).await {
-                    error!("Failed to join peer {}: {}", peer_id, e);
+                // Join the peer into every topic we hold, not just the global
+                // one — the per-game move topic is the one that matters, and
+                // it may have been subscribed before this peer was known.
+                let topics = mesh_bootstrap.lock().await.add_peer(peer_id);
+                for topic in topics {
+                    if let Err(e) = node_bootstrap.join_peers(&topic, vec![peer_id]).await {
+                        error!("Failed to join peer {} to topic {}: {}", peer_id, topic, e);
+                    } else {
+                        info!("[NET] Joined peer {} into topic {}", peer_id, topic);
+                    }
                 }
             }
         });
@@ -245,17 +312,17 @@ pub fn initialize_braid_network(
 
 /// Bind the causal identity to the verified signer.
 ///
-/// The `agent_id` carried inside a `Move` is set by the sender and is NOT
+/// The `signer_pubkey` carried inside a `Move` is set by the sender and is NOT
 /// authenticated on its own — a malicious peer could put a victim's identity
-/// there. After a signature verifies, we overwrite `agent_id` with the public
+/// there. After a signature verifies, we overwrite `signer_pubkey` with the public
 /// key that actually signed the message (`session_pubkey`). The causal
-/// fork-check in [`handle_network_events`] keys on `agent_id`, so this makes
+/// fork-check in [`handle_network_events`] keys on `signer_pubkey`, so this makes
 /// that identity unforgeable: to act as identity X you must hold X's signing
 /// key. Closes the impersonation gap the TLA+ model assumed away — see
 /// docs/plans/causal-authentication.md (Gap A1).
 fn bind_identity(mut signed: SignedNetworkMessage) -> NetworkMessage {
-    if let NetworkMessage::Move { agent_id, .. } = &mut signed.msg {
-        *agent_id = signed.session_pubkey.clone();
+    if let NetworkMessage::Move { signer_pubkey, .. } = &mut signed.msg {
+        *signer_pubkey = signed.session_pubkey.clone();
     }
     signed.msg
 }
@@ -565,7 +632,7 @@ pub fn handle_network_events(
                     // active). Capped at two — the two participants.
                     //
                     // Must use `signing_pubkey`, NOT `session_pubkey` — the roster is
-                    // checked against `agent_id`, which `bind_identity` sets from the
+                    // checked against `signer_pubkey`, which `bind_identity` sets from the
                     // verified signer of this message's own P2P envelope (i.e. the
                     // sender's `session_signing_key`, an ephemeral per-connection
                     // gossip key). `session_pubkey` is a completely different key
@@ -625,25 +692,25 @@ pub fn handle_network_events(
                     if let NetworkMessage::Move {
                         turn,
                         next_fen,
-                        agent_id,
+                        signer_pubkey,
                         seq,
                         parent_version,
                         ..
                     } = msg
                     {
-                        if !agent_id.is_empty() && *seq > 0 {
-                            // A2: roster check. `agent_id` here is the VERIFIED signer
+                        if !signer_pubkey.is_empty() && *seq > 0 {
+                            // A2: roster check. `signer_pubkey` here is the VERIFIED signer
                             // (bound in `bind_identity`). Once we know this game's
                             // participant session keys (from `SessionInfo`), reject any
                             // move whose signer is not one of them — a stranger cannot
                             // inject a move into a game they are not part of, even with
                             // a valid signature of their own.
                             if let Some(allowed) = causal.roster.get(&game_id) {
-                                if !allowed.is_empty() && !allowed.contains(agent_id) {
+                                if !allowed.is_empty() && !allowed.contains(signer_pubkey) {
                                     warn!(
                                         "[NET] REJECTED move for game {} — signer {:?} not in roster ({} entries: {:?})",
                                         game_id,
-                                        &agent_id[..4.min(agent_id.len())],
+                                        &signer_pubkey[..4.min(signer_pubkey.len())],
                                         allowed.len(),
                                         allowed
                                             .iter()
@@ -660,18 +727,18 @@ pub fn handle_network_events(
                                 info!(
                                     "[NET] Roster check passed for game {} — signer {:?} matched ({} entries on roster)",
                                     game_id,
-                                    &agent_id[..4.min(agent_id.len())],
+                                    &signer_pubkey[..4.min(signer_pubkey.len())],
                                     allowed.len()
                                 );
                             }
 
-                            let agent_key = (game_id, agent_id.clone());
+                            let agent_key = (game_id, signer_pubkey.clone());
                             let last = causal.last_seq.get(&agent_key).copied().unwrap_or(0);
                             if *seq != last + 1 {
                                 warn!(
                                     "[NET] Causal seq gap for game {} agent {:?}: got {} expected {}",
                                     game_id,
-                                    &agent_id[..4.min(agent_id.len())],
+                                    &signer_pubkey[..4.min(signer_pubkey.len())],
                                     seq,
                                     last + 1
                                 );
@@ -1547,12 +1614,78 @@ pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
 }
 
 #[cfg(test)]
+mod gossip_mesh_tests {
+    use super::*;
+
+    fn peer(byte: u8) -> EndpointId {
+        SecretKey::from_bytes(&[byte; 32]).public()
+    }
+
+    /// The bug this exists to prevent: moves are broadcast on
+    /// `GAME_TOPIC/<game_id>`, but the only `join_peers` call was against the
+    /// global `GAME_TOPIC`. An iroh-gossip swarm is per-`TopicId`, so the
+    /// per-game topic had one member on each side and delivered nothing.
+    #[test]
+    fn a_peer_learned_after_subscribing_is_joined_into_the_game_topic() {
+        let mut mesh = GossipMesh::default();
+        mesh.topics.insert(GAME_TOPIC.to_string());
+
+        // Game topic joined before the opponent is known — the common order,
+        // since `start_session` runs at lobby time.
+        let game_topic = format!("{}/{}", GAME_TOPIC, 12345u64);
+        let bootstrap = mesh.subscribe(&game_topic);
+        assert!(bootstrap.is_empty(), "no peers known yet");
+
+        // Opponent arrives via the bootstrap channel.
+        let topics = mesh.add_peer(peer(7));
+        assert!(
+            topics.contains(&game_topic),
+            "the per-game move topic must be back-filled, not just {GAME_TOPIC}"
+        );
+        assert!(topics.contains(&GAME_TOPIC.to_string()));
+    }
+
+    /// The other ordering: peer first, then the topic. The subscribe must
+    /// carry the known peer as bootstrap, since nothing will re-join it later.
+    #[test]
+    fn a_topic_subscribed_after_the_peer_is_known_bootstraps_with_it() {
+        let mut mesh = GossipMesh::default();
+        mesh.add_peer(peer(3));
+
+        let game_topic = format!("{}/{}", GAME_TOPIC, 999u64);
+        let bootstrap = mesh.subscribe(&game_topic);
+
+        assert_eq!(
+            bootstrap,
+            vec![peer(3)],
+            "subscribing with an empty bootstrap list joins a swarm of one"
+        );
+    }
+
+    /// Every peer must reach every topic, regardless of interleaving.
+    #[test]
+    fn all_known_peers_reach_all_known_topics() {
+        let mut mesh = GossipMesh::default();
+        mesh.add_peer(peer(1));
+        let t1 = format!("{}/{}", GAME_TOPIC, 1u64);
+        assert_eq!(mesh.subscribe(&t1), vec![peer(1)]);
+
+        let topics = mesh.add_peer(peer(2));
+        assert!(topics.contains(&t1), "peer 2 must be joined into t1");
+
+        let t2 = format!("{}/{}", GAME_TOPIC, 2u64);
+        let bootstrap = mesh.subscribe(&t2);
+        assert_eq!(bootstrap.len(), 2, "t2 must bootstrap with both peers");
+    }
+}
+
+#[cfg(test)]
 mod auth_tests {
     use super::*;
 
     /// A1 regression: an attacker who signs with their OWN key but stuffs a
-    /// victim's identity into `agent_id` must not be able to act as the victim.
-    /// `bind_identity` discards the claimed `agent_id` and substitutes the
+    /// victim's identity into `signer_pubkey` must not be able to act as the victim.
+    /// `bind_identity` discards the claimed `signer_pubkey` and substitutes the
     /// verified signer, so the causal/roster checks see the attacker's real key.
     #[test]
     fn bind_identity_uses_verified_signer_not_claimed_agent_id() {
@@ -1566,7 +1699,7 @@ mod auth_tests {
             next_fen: "f".to_string(),
             nonce: 1,
             timestamp_ms: 0,
-            agent_id: victim_id.clone(), // forged: claims to be the victim
+            signer_pubkey: victim_id.clone(), // forged: claims to be the victim
             seq: 1,
             parent_version: "0".to_string(),
         };
@@ -1578,13 +1711,13 @@ mod auth_tests {
 
         let bound = bind_identity(signed);
         match bound {
-            NetworkMessage::Move { agent_id, .. } => {
+            NetworkMessage::Move { signer_pubkey, .. } => {
                 assert_eq!(
-                    agent_id, attacker_pub,
-                    "agent_id must be the verified signer"
+                    signer_pubkey, attacker_pub,
+                    "signer_pubkey must be the verified signer"
                 );
                 assert_ne!(
-                    agent_id, victim_id,
+                    signer_pubkey, victim_id,
                     "the forged victim identity must be discarded"
                 );
             }
@@ -1667,7 +1800,7 @@ mod dual_transport_dedup_property_tests {
             next_fen: fen_for(i),
             nonce: (i + 1) as u64,
             timestamp_ms: 0,
-            agent_id: AGENT_ID.to_vec(),
+            signer_pubkey: AGENT_ID.to_vec(),
             seq: (i + 1) as u64,
             parent_version: parent_for(i),
         }

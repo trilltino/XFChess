@@ -1,8 +1,9 @@
 use crate::client::parser::MessageParser;
+use crate::client::HeartbeatConfig;
 use crate::error::{BraidError, Result};
 use crate::protocol;
-use crate::traits::BraidNetwork;
-use crate::types::{BraidRequest, BraidResponse, Update};
+use crate::traits::{BraidNetwork, SubscriptionStreamHandle};
+use crate::types::{BraidRequest, BraidResponse};
 use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
@@ -118,7 +119,7 @@ impl BraidNetwork for NativeNetwork {
         &self,
         url: &str,
         mut request: BraidRequest,
-    ) -> Result<async_channel::Receiver<Result<Update>>> {
+    ) -> Result<SubscriptionStreamHandle> {
         request.subscribe = true;
         let mut req_builder = self.client.get(url).header("Subscribe", "true");
 
@@ -183,61 +184,18 @@ impl BraidNetwork for NativeNetwork {
             headers
         );
 
-        let mut content_length = response.content_length().unwrap_or(0) as usize;
-
-        if content_length == 0 {
-            if let Some(range) = headers.get("content-range") {
-                // Parse Content-Range: unit start-end/total
-                // e.g. "text 0-4455/4455"
-                let parts: Vec<&str> = range.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    if let Some(range_part) = parts.get(1) {
-                        if let Some((start, end)) = range_part.split_once('-') {
-                            if let (Ok(s), Ok(e)) = (
-                                start.parse::<usize>(),
-                                end.split('/').next().unwrap_or("").parse::<usize>(),
-                            ) {
-                                // content_length = e - s; // Redundant assignment fixed below
-                                // Wait, HTTP Content-Range is inclusive: "0-499" means 500 bytes.
-                                // "0-4455/4455"? If total is 4455, bytes are 0-4454.
-                                // If string is "0-4455", it might be start-seq?
-                                // Let's re-read the curl output: "content-range: text 0-4455/4455"
-                                // If total is 4455.
-                                // Usually Content-Range is bytes start-end/total.
-                                // If it is 0-4455... that's 4456 bytes?
-                                // But let's look at `parser.rs` logic for Content-Range.
-                                // It just grabs the unit.
-                                // Wait, Braid `Content-Range` might be different for text?
-                                // Let's assume it works like HTTP.
-                                // Safe bet: if total is there, use total?
-                                // No, valid is end - start.
-                                // Actually, let's just use the length from the part after / if present?
-                                // Or better, let's look at the `dt.js` or `parser.rs`?
-                                // `parser.rs` doesn't parse Content-Range for body length, only for patches.
-                                // It uses `expected_body_length`.
-
-                                // Let's trust "content-length" header if present.
-                                // If not, use the diff.
-                                // HTTP Range: start-end. Length = end - start + 1.
-                                content_length = e - s;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let heartbeat = headers
+            .get("heartbeats")
+            .and_then(|v| HeartbeatConfig::from_header(v));
 
         let (tx, rx) = async_channel::bounded(100);
         let mut stream = response.bytes_stream();
 
         tokio::spawn(async move {
-            // Initialize parser with the HTTP headers and content-length
-            // so it can parse the first message (snapshot) correctly
-            let mut parser = MessageParser::new_with_state(headers, content_length);
-            tracing::debug!(
-                "[BraidHTTP-Parser] Started with content_length={}",
-                content_length
-            );
+            // A 209 body is always a sequence of self-describing update blocks,
+            // whatever the response-level Content-Length or Transfer-Encoding say.
+            let mut parser = MessageParser::for_subscription();
+            tracing::debug!("[BraidHTTP-Parser] Started ({} response)", status);
 
             while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
@@ -253,18 +211,12 @@ impl BraidNetwork for NativeNetwork {
                         );
                         match parser.feed(&chunk) {
                             Ok(messages) => {
+                                // A heartbeat yields no messages at all, which is
+                                // exactly why it must never reach a subscriber.
                                 tracing::trace!(
                                     "[BraidHTTP-Parser] Parsed {} messages",
                                     messages.len()
                                 );
-                                for (i, msg) in messages.iter().enumerate() {
-                                    tracing::trace!(
-                                        "[BraidHTTP-Parser] Message {}: body_len={}, headers={:?}",
-                                        i,
-                                        msg.body.len(),
-                                        msg.headers.keys().collect::<Vec<_>>()
-                                    );
-                                }
                                 for msg in messages {
                                     let update = crate::client::utils::message_to_update(msg);
                                     let _ = tx.send(Ok(update)).await;
@@ -286,6 +238,9 @@ impl BraidNetwork for NativeNetwork {
             tracing::debug!("[BraidHTTP-Parser] Stream ended");
         });
 
-        Ok(rx)
+        Ok(SubscriptionStreamHandle {
+            updates: rx,
+            heartbeat,
+        })
     }
 }

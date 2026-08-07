@@ -12,15 +12,21 @@ pub trait BraidRuntime: Send + Sync + 'static {
     fn now_ms(&self) -> u64;
 }
 
+/// An open subscription's update stream, plus what the server said about it.
+pub struct SubscriptionStreamHandle {
+    /// Decoded updates. Heartbeats are absorbed by the parser and never appear here.
+    pub updates: async_channel::Receiver<Result<Update>>,
+    /// The server's declared heartbeat interval, from the `Heartbeats` response
+    /// header. `None` means the server made no promise, so silence cannot be
+    /// distinguished from death and no liveness deadline is applied.
+    pub heartbeat: Option<crate::client::HeartbeatConfig>,
+}
+
 /// Abstraction for network operations.
 #[async_trait]
 pub trait BraidNetwork: Send + Sync + 'static {
     async fn fetch(&self, url: &str, req: BraidRequest) -> Result<BraidResponse>;
-    async fn subscribe(
-        &self,
-        url: &str,
-        req: BraidRequest,
-    ) -> Result<async_channel::Receiver<Result<Update>>>;
+    async fn subscribe(&self, url: &str, req: BraidRequest) -> Result<SubscriptionStreamHandle>;
 }
 
 /// Abstraction for persistent storage.

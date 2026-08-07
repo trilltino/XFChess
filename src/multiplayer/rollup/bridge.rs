@@ -623,11 +623,25 @@ fn handle_game_start_delegation(
     magicblock_resolver: Res<MagicBlockResolver>,
     solana_state: Option<Res<SolanaIntegrationState>>,
     rollup_manager: Res<EphemeralRollupManager>,
+    competitive: Option<Res<crate::multiplayer::solana::addon::CompetitiveMatchState>>,
 ) {
     for event in game_started_events.read() {
         // Use the Solana on-chain game_id, not the P2P gossip game_id.
         // event.game_id is the Braid/Iroh session ID; rollup_manager.game_id
         // is set from the actual on-chain game account after create/join.
+
+        // Free (non-wagered) games never need ER delegation — skip entirely
+        // so a failure here does not spam the "Ephemeral Rollup sync issue"
+        // popup during normal casual play.
+        let is_wagered = competitive.as_ref().map(|c| c.stake_amount > 0).unwrap_or(false);
+        if !is_wagered {
+            info!(
+                "[DELEGATION] Game {} is free-rated — skipping ER delegation",
+                event.game_id
+            );
+            continue;
+        }
+
         let game_id = if rollup_manager.game_id != 0 {
             rollup_manager.game_id
         } else {

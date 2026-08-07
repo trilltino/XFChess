@@ -35,4 +35,8 @@ wasm = ["dep:gloo-timers", "dep:wasm-bindgen-futures", "dep:js-sys"]
 fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "macros"] }
+# `test-util` gives tests a paused clock, so heartbeat-timeout tests assert the
+# real 27s deadline without actually waiting 27 seconds.
+tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
+axum = { workspace = true }
+tower-http = { workspace = true, features = ["cors"] }

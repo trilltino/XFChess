@@ -35,6 +35,7 @@ use braid_http::types::{BraidRequest, Update};
 use braid_http::BraidClient;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, warn};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Subscribes to Braid resource streams and decodes them as [`ChessMessage`]s.
 ///
@@ -135,9 +136,22 @@ impl ChessSubscriber {
                         }
                     }
                     Some(Err(e)) => {
-                        warn!("[BRAID SUB] Update error: {}", e);
-                        // braid-http will return Timeout on heartbeat miss; other errors
-                        // are usually transient unless the connection fully died.
+                        // Throttle timeout spam: only warn once every 30s.
+                        // braid-http returns Timeout on routine heartbeat miss;
+                        // logging it every poll cycle drowns real events.
+                        static LAST_WARN_NS: AtomicU64 = AtomicU64::new(0);
+                        const WARN_COOLDOWN_SECS: u64 = 30;
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        let last = LAST_WARN_NS.load(Ordering::Relaxed);
+                        if now.saturating_sub(last) >= WARN_COOLDOWN_SECS {
+                            LAST_WARN_NS.store(now, Ordering::Relaxed);
+                            warn!("[BRAID SUB] Update error: {}", e);
+                        } else {
+                            debug!("[BRAID SUB] Update error (throttled): {}", e);
+                        }
                         if matches!(e, braid_http::BraidError::SubscriptionClosed) {
                             error!("[BRAID SUB] Server closed the connection");
                             break;

@@ -278,14 +278,31 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
 /// Deserialise the wire-format signed bytes into a `VersionedTransaction` and
 /// submit it to the Solana RPC, then block until confirmed.
 fn submit_signed_to_rpc(rpc_url: &str, signed_bytes: &[u8]) -> Result<Signature, String> {
+    use solana_client::rpc_config::RpcSendTransactionConfig;
+    use std::time::{Duration, Instant};
+
     let signed_tx: VersionedTransaction =
         bincode::deserialize(signed_bytes).map_err(|e| format!("deserialize_signed_tx: {}", e))?;
 
-    // `confirmed` (not the client default `finalized`) — waiting for finalization
-    // here means ~32 confirmations (~13-20s) instead of ~1-2 (~1-2s) for a status
-    // that's already safe to act on interactively.
     let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
+    let config = RpcSendTransactionConfig {
+        skip_preflight: true,
+        ..Default::default()
+    };
+    let sig = rpc
+        .send_transaction_with_config(&signed_tx, config)
+        .map_err(|e| format!("send_transaction: {}", e))?;
 
-    rpc.send_and_confirm_transaction(&signed_tx)
-        .map_err(|e| format!("send_and_confirm: {}", e))
+    let commitment = CommitmentConfig::confirmed();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if Instant::now() > deadline {
+            return Err(format!("confirmation timeout for signature {sig}"));
+        }
+        match rpc.get_signature_status_with_commitment(&sig, commitment) {
+            Ok(Some(Ok(()))) => return Ok(sig),
+            Ok(Some(Err(e))) => return Err(format!("transaction failed (sig={sig}): {e:?}")),
+            Ok(None) | Err(_) => std::thread::sleep(Duration::from_millis(150)),
+        }
+    }
 }

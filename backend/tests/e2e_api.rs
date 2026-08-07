@@ -22,6 +22,7 @@ use backend::infrastructure::{build_app_router, initialize_pools, run_migrations
 use backend::signing::storage::tournament::TournamentStore;
 use backend::signing::storage::SessionStore;
 use backend::signing::{AppState, SigningConfig};
+use std::sync::Mutex;
 
 /// Per-test unique shared-cache in-memory DB name so the 16-connection pool all
 /// sees the same database and tests don't collide.
@@ -538,12 +539,18 @@ async fn offchain_username_does_not_imply_onchain_profile() {
     assert_eq!(body["username_set"], false);
 }
 
+/// Serialisation guard for the one test that mutates the process-global
+/// RELAY_SHARED_SECRET env var. Without this, Cargo's parallel test runner
+/// lets other threads see the mutated value → flaky random failures.
+static RELAY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// Dual-accept guard on the signing endpoints: a valid per-user JWT *or* the
 /// legacy relay secret is accepted; neither → 401. JWT callers are also
 /// authorized per-wallet on session creation. All RELAY_SHARED_SECRET handling
 /// is kept in this one test to avoid racing the process-global env var.
 #[tokio::test]
 async fn dual_accept_auth_guards_signing_endpoints() {
+    let _guard = RELAY_TEST_LOCK.lock().unwrap();
     std::env::set_var("RELAY_SHARED_SECRET", "e2e-relay-secret");
     let app = spawn_app().await;
 

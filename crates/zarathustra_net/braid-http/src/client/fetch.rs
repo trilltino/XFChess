@@ -141,14 +141,24 @@ impl BraidClient {
         self.fetch_with_retries(url, request).await
     }
 
+    /// Open a subscription to `url`.
+    ///
+    /// Liveness is configured from the server's `Heartbeats` response header: if
+    /// the server declares an interval, the returned [`Subscription`] fails with
+    /// [`BraidError::Timeout`](crate::BraidError::Timeout) when the server goes
+    /// quiet for longer than that. A server that declares nothing gets no
+    /// deadline, because silence and death are then indistinguishable.
+    ///
+    /// For a subscription that reconnects on its own, use
+    /// [`ReliableChannel`](crate::ReliableChannel).
     pub async fn subscribe(
         &self,
         url: &str,
         request: BraidRequest,
     ) -> Result<crate::client::Subscription> {
         self.log_request(url, &request);
-        let rx = self.network.subscribe(url, request).await?;
-        Ok(crate::client::Subscription::new(rx))
+        let handle = self.network.subscribe(url, request).await?;
+        Ok(crate::client::Subscription::new(handle.updates).heartbeat(handle.heartbeat))
     }
 
     async fn fetch_with_retries(&self, url: &str, request: BraidRequest) -> Result<BraidResponse> {
