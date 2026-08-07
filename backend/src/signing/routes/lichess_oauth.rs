@@ -22,7 +22,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::signing::{solana, AppState};
 
@@ -306,8 +306,8 @@ fn render_callback_page(result: Result<ExchangeResponse, String>) -> String {
 
 /// Shared exchange logic used by both `/exchange` (client-supplied verifier)
 /// and `/callback` (server-stored verifier): swap the code for a token, fetch
-/// the Lichess profile, submit `link_external_elo` on-chain, and persist the
-/// link locally.
+/// the Lichess profile, best-effort submit `link_external_elo` on-chain, and
+/// persist the link locally.
 async fn complete_link(
     state: &AppState,
     code: &str,
@@ -458,14 +458,11 @@ async fn complete_link(
     let tx_sig = match solana::sign_and_submit(&rpc, link_authority, &[ix]) {
         Ok(sig) => sig.to_string(),
         Err(e) => {
-            error!(
-                "[LichessOAuth] On-chain submission failed for {}: {}",
+            warn!(
+                "[LichessOAuth] On-chain submission failed for {}; persisting OAuth link locally: {}",
                 wallet_pubkey, e
             );
-            return Err((
-                StatusCode::BAD_GATEWAY,
-                format!("On-chain submission failed: {}", e),
-            ));
+            "offchain-pending".to_string()
         }
     };
 
