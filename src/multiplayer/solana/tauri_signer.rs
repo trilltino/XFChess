@@ -88,10 +88,18 @@ pub fn sign_via_tauri_only(
     local_signers: &[&Keypair],
     label: &str,
 ) -> Result<Vec<u8>, String> {
+    use std::time::Instant;
+
+    let start = Instant::now();
     let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
+    let step_start = Instant::now();
     let blockhash = rpc
         .get_latest_blockhash()
         .map_err(|e| format!("get_latest_blockhash: {}", e))?;
+    info!(
+        "[TAURI-SIGN] latest blockhash fetched for '{label}' in {:?}",
+        step_start.elapsed()
+    );
 
     // Use legacy Transaction to match wallet UI
     let mut tx = Transaction::new_with_payer(instructions, Some(&wallet_pubkey));
@@ -107,7 +115,14 @@ pub fn sign_via_tauri_only(
         .map_err(|e| format!("partial_sign: {}", e))?;
 
     let tx_bytes = bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
-    send_to_tauri_blocking(&tx_bytes, label)
+    let step_start = Instant::now();
+    let signed = send_to_tauri_blocking(&tx_bytes, label)?;
+    info!(
+        "[TAURI-SIGN] wallet bridge returned '{label}' in {:?} (total {:?})",
+        step_start.elapsed(),
+        start.elapsed()
+    );
+    Ok(signed)
 }
 
 /// Build a `VersionedTransaction` (v0), partially sign with `local_signers`
@@ -125,9 +140,14 @@ pub fn sign_and_send_via_tauri(
 ) -> Result<Signature, String> {
     let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
 
+    let step_start = std::time::Instant::now();
     let blockhash = rpc
         .get_latest_blockhash()
         .map_err(|e| format!("get_latest_blockhash: {}", e))?;
+    info!(
+        "[TAURI-SIGN] latest blockhash fetched for '{label}' in {:?}",
+        step_start.elapsed()
+    );
 
     let message = v0::Message::try_compile(&wallet_pubkey, instructions, &[], blockhash)
         .map_err(|e| format!("compile_message: {}", e))?;
@@ -145,7 +165,12 @@ pub fn sign_and_send_via_tauri(
 
     let tx_bytes = bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
 
+    let step_start = std::time::Instant::now();
     let signed_bytes = send_to_tauri_blocking(&tx_bytes, label)?;
+    info!(
+        "[TAURI-SIGN] wallet bridge returned '{label}' in {:?}",
+        step_start.elapsed()
+    );
 
     submit_signed_to_rpc(rpc_url, &signed_bytes)
 }
@@ -195,7 +220,7 @@ const MAX_RESP_LEN: u32 = 64 * 1024;
 fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, String> {
     use std::io::{Read, Write};
     use std::net::TcpStream;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     fn is_timeout(e: &std::io::Error) -> bool {
         matches!(
@@ -212,12 +237,14 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
     let label_bytes = &label.as_bytes()[..label.len().min(256)];
 
     let mut last_err: Option<String> = None;
+    let start = Instant::now();
 
     for port in tcp_port_range() {
         let mut stream = match TcpStream::connect(format!("127.0.0.1:{}", port)) {
             Ok(s) => s,
             Err(_) => continue,
         };
+        info!("[TAURI-SIGN] connected to wallet bridge port {port} for '{label}'");
 
         let _ = stream.set_write_timeout(Some(write_timeout));
         let _ = stream.set_read_timeout(Some(read_timeout));
@@ -232,6 +259,11 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
             last_err = Some(format!("write to port {port} failed"));
             continue;
         }
+        info!(
+            "[TAURI-SIGN] sent '{}' request to bridge port {port} in {:?}; waiting for wallet",
+            label,
+            start.elapsed()
+        );
 
         let mut len_buf = [0u8; 4];
         if let Err(e) = stream.read_exact(&mut len_buf) {
@@ -256,7 +288,14 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
 
         let mut buf = vec![0u8; resp_len as usize];
         match stream.read_exact(&mut buf) {
-            Ok(_) => return Ok(buf),
+            Ok(_) => {
+                info!(
+                    "[TAURI-SIGN] received '{}' response from bridge port {port} in {:?}",
+                    label,
+                    start.elapsed()
+                );
+                return Ok(buf);
+            }
             Err(e) if is_timeout(&e) => return Err(format!("read_signed_bytes: {}", e)),
             Err(e) => {
                 last_err = Some(format!("read_signed_bytes (port {port}): {}", e));
