@@ -63,7 +63,6 @@ impl Plugin for MultiplayerPlugin {
             .init_resource::<NetworkConfig>()
             .init_resource::<crate::multiplayer::types::CausalChainState>()
             .init_resource::<crate::multiplayer::types::PendingMoveBuffer>()
-            .init_resource::<network::braid::BraidSubscriptionConfig>()
             .add_message::<NetworkEvent>()
             .add_message::<crate::game::events::GameStartedEvent>()
             .add_message::<crate::game::events::GameEndedEvent>();

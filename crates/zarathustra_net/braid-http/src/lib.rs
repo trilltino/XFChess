@@ -14,9 +14,25 @@ pub mod traits;
 /// The data model: `Version`, `Patch`, `Update`, request/response builders.
 pub mod types;
 
-pub use client::BraidClient;
-pub use types::{BraidRequest, BraidResponse};
-// Version might be in a submodule of types or directly in types/mod.rs
-pub use error::{BraidError, Result};
 /// Wire format: header parsing/emission, the `209` stream state machine, update framing.
 pub mod protocol;
+/// Server-side helpers for answering a subscription. Transport-neutral — no
+/// framework dependency, just headers and bytes.
+pub mod server;
+
+pub use client::{BraidClient, HeartbeatConfig, ReliableChannel, Subscription};
+pub use error::{BraidError, Result};
+pub use types::{BraidRequest, BraidResponse, Patch, Update, Version};
+
+/// Everything needed to use this crate, in one import.
+///
+/// ```
+/// use braid_http::prelude::*;
+/// ```
+pub mod prelude {
+    pub use crate::client::{BraidClient, HeartbeatConfig, ReliableChannel, Subscription};
+    pub use crate::error::{BraidError, Result};
+    pub use crate::protocol::formatter::{format_heartbeat, format_update};
+    pub use crate::server::SubscriptionResponse;
+    pub use crate::types::{BraidRequest, BraidResponse, Patch, Update, Version};
+}

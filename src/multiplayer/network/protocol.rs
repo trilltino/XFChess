@@ -46,16 +46,27 @@ pub enum NetworkMessage {
         /// Wall-clock time the move was sent (ms since UNIX epoch).
         #[serde(default)]
         timestamp_ms: u64,
-        /// Ed25519 public key (iroh NodeId bytes) of the sender.
+        /// Ed25519 public key of the key that signs this message's gossip
+        /// envelope — i.e. `OnlineNetworkState::session_signing_key`'s derived
+        /// verifying key, **not** the iroh NodeId. (It was documented as the
+        /// NodeId, and a version of the sender did populate it that way; since
+        /// the receiver overwrites it with the verified signer in
+        /// `bind_identity`, the two never matched and every move failed the
+        /// roster check. Hence the explicit name.)
+        ///
         /// Empty on legacy messages — skip causal check if absent.
-        #[serde(default)]
-        agent_id: Vec<u8>,
-        /// Monotonic counter per agent across all games.
+        /// Serialized as `agent_id` for wire compatibility with older peers.
+        #[serde(default, rename = "agent_id")]
+        signer_pubkey: Vec<u8>,
+        /// Monotonic counter per sender across all games.
         /// Allows detecting replays and sequence gaps independently of nonce.
         #[serde(default)]
         seq: u64,
         /// version_hash(prev_fen, prev_turn) of the move this one builds on.
         /// "0" on the first move. Used to detect equivocation forks.
+        ///
+        /// This is the *per-sender gossip* chain, not the shared Braid stream
+        /// head — see `braid_transport::BraidStreamHeads`.
         #[serde(default)]
         parent_version: String,
     },
@@ -74,7 +85,7 @@ pub enum NetworkMessage {
         /// connection — see `sync_session_key_to_network`). This, not
         /// `session_pubkey` above, is what the receiver's `bind_identity`
         /// verifies incoming `Move`/`Resign` envelopes against and sets as
-        /// `agent_id`. The per-game participant roster built in
+        /// `signer_pubkey`. The per-game participant roster built in
         /// `multiplayer::systems` MUST be populated from this field —
         /// populating it from `session_pubkey` instead means the roster can
         /// never contain a key that any real move's verified signer will
@@ -359,7 +370,7 @@ mod tests {
             next_fen: "start".to_string(),
             nonce: 1,
             timestamp_ms: 0,
-            agent_id: vec![],
+            signer_pubkey: vec![],
             seq: 0,
             parent_version: String::new(),
         };
@@ -377,7 +388,7 @@ mod tests {
             next_fen: "start".to_string(),
             nonce: 1,
             timestamp_ms: 0,
-            agent_id: vec![],
+            signer_pubkey: vec![],
             seq: 0,
             parent_version: String::new(),
         };
@@ -389,7 +400,7 @@ mod tests {
             next_fen: "start".to_string(),
             nonce: 1,
             timestamp_ms: 0,
-            agent_id: vec![],
+            signer_pubkey: vec![],
             seq: 0,
             parent_version: String::new(),
         };
@@ -406,7 +417,7 @@ mod tests {
             next_fen: "start".to_string(),
             nonce: 1,
             timestamp_ms: 0,
-            agent_id: vec![],
+            signer_pubkey: vec![],
             seq: 0,
             parent_version: String::new(),
         };

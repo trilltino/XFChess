@@ -2,6 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
+use solana_client::rpc_config::RpcSendTransactionConfig;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
     instruction::Instruction,
@@ -12,6 +13,7 @@ use solana_sdk::{
     transaction::{Transaction, VersionedTransaction},
 };
 use solana_system_interface::instruction as system_instruction;
+use std::time::{Duration, Instant};
 use tracing::warn;
 
 /// Funds `dest` with `lamports` from `payer`, submit to `rpc_url`.
@@ -21,10 +23,36 @@ pub fn fund_account(
     dest: &Pubkey,
     lamports: u64,
 ) -> Result<Signature> {
+    if let Ok(balance) = rpc.get_balance(dest) {
+        if balance >= lamports {
+            return Ok(Signature::default());
+        }
+    }
+
     let ix = system_instruction::transfer(&payer.pubkey(), dest, lamports);
     let blockhash = rpc.get_latest_blockhash()?;
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
-    Ok(rpc.send_and_confirm_transaction(&tx)?)
+
+    let config = RpcSendTransactionConfig {
+        skip_preflight: true,
+        ..Default::default()
+    };
+    let sig = rpc
+        .send_transaction_with_config(&tx, config)
+        .map_err(|e| anyhow!(e))?;
+
+    let commitment = CommitmentConfig::confirmed();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if Instant::now() > deadline {
+            return Err(anyhow!("fund_account confirmation timeout for {sig}"));
+        }
+        match rpc.get_signature_status_with_commitment(&sig, commitment) {
+            Ok(Some(Ok(()))) => return Ok(sig),
+            Ok(Some(Err(e))) => return Err(anyhow!("fund_account failed (sig={sig}): {e:?}")),
+            Ok(None) | Err(_) => std::thread::sleep(Duration::from_millis(150)),
+        }
+    }
 }
 
 /// Signs `ix` with `signer` (fee-payer = signer) and submits to `rpc_url`.
@@ -36,8 +64,27 @@ pub fn sign_and_submit(
     let blockhash = rpc.get_latest_blockhash()?;
     let msg = Message::new(instructions, Some(&signer.pubkey()));
     let tx = Transaction::new(&[signer], msg, blockhash);
-    rpc.send_and_confirm_transaction_with_spinner_and_commitment(&tx, CommitmentConfig::confirmed())
-        .map_err(|e| anyhow!(e))
+
+    let config = RpcSendTransactionConfig {
+        skip_preflight: true,
+        ..Default::default()
+    };
+    let sig = rpc
+        .send_transaction_with_config(&tx, config)
+        .map_err(|e| anyhow!(e))?;
+
+    let commitment = CommitmentConfig::confirmed();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if Instant::now() > deadline {
+            return Err(anyhow!("sign_and_submit confirmation timeout for {sig}"));
+        }
+        match rpc.get_signature_status_with_commitment(&sig, commitment) {
+            Ok(Some(Ok(()))) => return Ok(sig),
+            Ok(Some(Err(e))) => return Err(anyhow!("sign_and_submit failed (sig={sig}): {e:?}")),
+            Ok(None) | Err(_) => std::thread::sleep(Duration::from_millis(150)),
+        }
+    }
 }
 
 /// Signs and submits to the MagicBlock ER with `skip_preflight = true`.
@@ -51,9 +98,6 @@ pub fn sign_and_submit_er(
     signer: &Keypair,
     instructions: &[Instruction],
 ) -> Result<Signature> {
-    use solana_client::rpc_config::RpcSendTransactionConfig;
-    use std::time::{Duration, Instant};
-
     let blockhash = rpc.get_latest_blockhash()?;
     let msg = Message::new(instructions, Some(&signer.pubkey()));
     let tx = Transaction::new(&[signer], msg, blockhash);
@@ -75,13 +119,6 @@ pub fn sign_and_submit_er(
         }
         match rpc.get_signature_status_with_commitment(&sig, commitment) {
             Ok(Some(Ok(()))) => {
-                // Landing latency for this exact endpoint/client combo — the thing
-                // MagicBlock's docs imply only their SDK wrappers guarantee. Logged
-                // here so live devnet validation shows it for free, no separate
-                // script needed. Sub-second/low-hundreds-ms means it actually
-                // executed on the ER; if this creeps toward Solana's ~400ms+ base
-                // block time or higher, that's a sign the router isn't doing what
-                // we assume.
                 tracing::info!(
                     "[ER] tx {sig} confirmed via {} in {}ms",
                     crate::signing::solana::redact_url(&rpc.url()),
@@ -90,10 +127,10 @@ pub fn sign_and_submit_er(
                 return Ok(sig);
             }
             Ok(Some(Err(e))) => return Err(anyhow!("ER record_move failed (sig={sig}): {e:?}")),
-            Ok(None) => std::thread::sleep(Duration::from_millis(400)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(150)),
             Err(e) => {
                 warn!("[ER] poll error (non-fatal): {e}");
-                std::thread::sleep(Duration::from_millis(400));
+                std::thread::sleep(Duration::from_millis(150));
             }
         }
     }
@@ -105,8 +142,26 @@ pub fn sign_and_submit_er(
 /// and `VersionedTransaction` (v0). Uses `confirmed` commitment.
 pub fn submit_signed_tx(rpc: &RpcClient, tx_bytes: &[u8]) -> Result<Signature> {
     let tx: VersionedTransaction = bincode::deserialize(tx_bytes).map_err(|e| anyhow!(e))?;
-    rpc.send_and_confirm_transaction_with_spinner_and_commitment(&tx, CommitmentConfig::confirmed())
-        .map_err(|e| anyhow!(e))
+    let config = RpcSendTransactionConfig {
+        skip_preflight: true,
+        ..Default::default()
+    };
+    let sig = rpc
+        .send_transaction_with_config(&tx, config)
+        .map_err(|e| anyhow!(e))?;
+
+    let commitment = CommitmentConfig::confirmed();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if Instant::now() > deadline {
+            return Err(anyhow!("submit_signed_tx confirmation timeout for {sig}"));
+        }
+        match rpc.get_signature_status_with_commitment(&sig, commitment) {
+            Ok(Some(Ok(()))) => return Ok(sig),
+            Ok(Some(Err(e))) => return Err(anyhow!("submit_signed_tx failed (sig={sig}): {e:?}")),
+            Ok(None) | Err(_) => std::thread::sleep(Duration::from_millis(150)),
+        }
+    }
 }
 
 /// Co-signs a wallet-signed legacy transaction with the provided session keypair,
@@ -128,18 +183,11 @@ pub fn cosign_and_submit_tx(
     session_keypair: &Keypair,
     tx_bytes: &[u8],
 ) -> Result<Signature> {
-    use solana_client::rpc_config::RpcSendTransactionConfig;
-    use std::time::{Duration, Instant};
-
     let mut tx: Transaction =
         bincode::deserialize(tx_bytes).map_err(|e| anyhow!("deserialize tx: {e}"))?;
     let blockhash = tx.message.recent_blockhash;
     tx.partial_sign(&[session_keypair], blockhash);
 
-    // Captured up front so a failure can show exactly what landed on-chain —
-    // e.g. whether the wallet injected an extra instruction (a compute-budget
-    // priority fee, say) that shifted our indices, without needing a separate
-    // Explorer lookup by signature.
     let ix_summary: Vec<String> = tx
         .message
         .instructions
@@ -178,10 +226,10 @@ pub fn cosign_and_submit_tx(
                     ix_summary.join(", ")
                 ));
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(400)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(150)),
             Err(e) => {
                 warn!("[cosign_and_submit_tx] poll error (non-fatal): {e}");
-                std::thread::sleep(Duration::from_millis(400));
+                std::thread::sleep(Duration::from_millis(150));
             }
         }
     }

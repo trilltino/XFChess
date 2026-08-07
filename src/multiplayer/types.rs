@@ -93,7 +93,7 @@ pub struct CausalChainState {
     ///
     /// A2: populated from `SessionInfo` (sent only after the VPS confirms a
     /// session is active). Once non-empty, a `Move` whose verified signer
-    /// (`agent_id`, bound in `bind_identity`) is not listed is rejected before
+    /// (`signer_pubkey`, bound in `bind_identity`) is not listed is rejected before
     /// it can reach the board. Capped at two — the two players.
     pub roster: HashMap<u64, Vec<Vec<u8>>>,
     /// game_id → set of move `version_hash`es already applied to the board,

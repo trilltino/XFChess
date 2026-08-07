@@ -617,7 +617,7 @@ async fn async_create_game(
 
     let start = Instant::now();
     let timeout = Duration::from_secs(60);
-    let poll_interval = Duration::from_secs(1);
+    let poll_interval = Duration::from_millis(150);
 
     info!(
         "[CREATE_GAME] Waiting for game account {} to be confirmed on-chain...",
@@ -720,7 +720,7 @@ async fn async_create_game_via_global_session(
     );
 
     let start = Instant::now();
-    rpc.send_and_confirm_transaction(&tx)
+    fast_send_and_confirm(&rpc, &tx)
         .map_err(|e| format!("global_create_game submit: {e}"))?;
 
     info!(
@@ -946,7 +946,7 @@ async fn async_join_game_via_global_session(
         &[&session_kp],
         blockhash,
     );
-    rpc.send_and_confirm_transaction(&tx)
+    fast_send_and_confirm(&rpc, &tx)
         .map_err(|e| format!("global_join_game submit: {e}"))?;
 
     info!(
@@ -1320,4 +1320,31 @@ pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
             Err(e) => warn!("[SOLANA_BROWSE] Failed to fetch games: {}", e),
         },
     );
+}
+
+fn fast_send_and_confirm(
+    rpc: &RpcClient,
+    tx: &solana_sdk::transaction::Transaction,
+) -> Result<Signature, String> {
+    use solana_client::rpc_config::RpcSendTransactionConfig;
+    let config = RpcSendTransactionConfig {
+        skip_preflight: true,
+        ..Default::default()
+    };
+    let sig = rpc
+        .send_transaction_with_config(tx, config)
+        .map_err(|e| format!("send_transaction: {e}"))?;
+
+    let commitment = CommitmentConfig::confirmed();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if Instant::now() > deadline {
+            return Err(format!("confirmation timeout for signature {sig}"));
+        }
+        match rpc.get_signature_status_with_commitment(&sig, commitment) {
+            Ok(Some(Ok(()))) => return Ok(sig),
+            Ok(Some(Err(e))) => return Err(format!("transaction failed (sig={sig}): {e:?}")),
+            Ok(None) | Err(_) => std::thread::sleep(Duration::from_millis(150)),
+        }
+    }
 }

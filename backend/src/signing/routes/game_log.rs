@@ -86,8 +86,6 @@ use crate::signing::AppState;
 
 const BROADCAST_CAP: usize = 64;
 const HEARTBEAT_SECS: u64 = 20;
-const BOUNDARY_MOVES: &str = "xfchess-moves";
-const BOUNDARY_CHAT: &str = "xfchess-chat";
 const MAX_CHAT_LEN: usize = 500;
 
 /// Genesis parent value for a game's first event — matches the P2P causal
@@ -505,9 +503,18 @@ fn kind_of(msg: &ChessMessage) -> &'static str {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GameEventReq {
-    pub player_pubkey: String,
+    /// Who is claiming to publish this event. **Not always a Solana pubkey**
+    /// despite the wire name: for a wagered game it is the wallet pubkey
+    /// (checked against on-chain `Game.white`/`black`), but for a casual game
+    /// it is an Iroh node-id string (checked against the JOIN_ACK-verified
+    /// pair). `check_participant` handles both; `auth_ok` only treats it as a
+    /// wallet when it parses as one.
+    #[serde(rename = "player_pubkey")]
+    pub sender_identity: String,
     /// Session pubkey returned by global-session/activate — proves the
     /// caller owns this wallet (same check chat.rs used to do).
+    ///
+    /// Currently always empty: no client populates it (see `auth_ok`).
     pub session_token: String,
     pub message: ChessMessage,
     /// `braid_chess::version_hash(..)` computed client-side for this event.
@@ -530,6 +537,14 @@ pub fn routes() -> Router<AppState> {
 struct ParticipantsResp {
     white: String,
     black: String,
+}
+
+/// Body of a `409 CONFLICT` from either PUT route: the stream head the
+/// rejected event should have named as its `content_parent`. Consumed by
+/// the client's `braid_transport::publish` retry.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ParentMismatchResp {
+    pub expected_parent: String,
 }
 
 /// Phase C (`docs/plans/networking-hardening-plan.md`): lets the client seed
@@ -561,7 +576,7 @@ async fn get_moves(
     Path(game_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    get_stream(&state, &game_id, "moves", BOUNDARY_MOVES, headers).await
+    get_stream(&state, &game_id, "moves", headers).await
 }
 
 async fn put_moves(
@@ -583,7 +598,7 @@ async fn get_chat(
     Path(game_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    get_stream(&state, &game_id, "chat", BOUNDARY_CHAT, headers).await
+    get_stream(&state, &game_id, "chat", headers).await
 }
 
 async fn put_chat(
@@ -608,7 +623,6 @@ async fn get_stream(
     state: &AppState,
     game_id: &str,
     stream: &str,
-    boundary: &'static str,
     headers: HeaderMap,
 ) -> Response {
     if !wants_subscribe(&headers) {
@@ -618,16 +632,15 @@ async fn get_stream(
 
     let (history, rx) = state.game_log.subscribe(game_id, stream).await;
 
-    let ct = format!("multipart/mixed; boundary=\"{}\"", boundary);
     // One chunk per historical entry, each shaped exactly like a live
     // update body (a bare `ChessMessage`) — see the module doc comment for
     // why this can't be a single bulk-array snapshot chunk.
     let history_chunks: Vec<Bytes> = history
         .into_iter()
         .enumerate()
-        .map(|(i, entry)| format_chunk(boundary, &BraidUpdate::snapshot(i as u64, entry)))
+        .map(|(i, entry)| format_chunk(&BraidUpdate::snapshot(i as u64, entry)))
         .collect();
-    let hb_chunk = format_heartbeat(boundary);
+    let hb_chunk = format_heartbeat();
     let rx_stream = BroadcastStream::new(rx);
     let game_id_owned = game_id.to_string();
     let stream_owned = stream.to_string();
@@ -649,7 +662,7 @@ async fn get_stream(
             tokio::select! {
                 maybe_update = rx_stream.next() => {
                     match maybe_update {
-                        Some(Ok(update)) => yield Ok(format_chunk(boundary, &update)),
+                        Some(Ok(update)) => yield Ok(format_chunk(&update)),
                         Some(Err(e)) => warn!("[game-log] broadcast lag on {}/{}: {}", game_id_owned, stream_owned, e),
                         None => break,
                     }
@@ -664,9 +677,9 @@ async fn get_stream(
 
     Response::builder()
         .status(209)
-        .header("Content-Type", ct)
-        .header("Cache-Control", "no-cache")
-        .header("Transfer-Encoding", "chunked")
+        .header("Content-Type", "application/http-history")
+        .header("Cache-Control", "no-store")
+        .header("Heartbeats", HEARTBEAT_SECS.to_string())
         .body(Body::from_stream(body_stream))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
@@ -712,7 +725,7 @@ async fn put_event_handler(
         .put_event(
             game_id,
             stream,
-            &req.player_pubkey,
+            &req.sender_identity,
             &req.message,
             &req.content_version,
             &req.content_parent,
@@ -722,7 +735,7 @@ async fn put_event_handler(
         Ok(seq) => {
             info!(
                 "[game-log] {} → {}/{} (kind={}, seq={})",
-                req.player_pubkey, game_id, stream, kind, seq
+                req.sender_identity, game_id, stream, kind, seq
             );
             StatusCode::OK.into_response()
         }
@@ -731,12 +744,22 @@ async fn put_event_handler(
                 "[game-log] rejected event for game {}: parent {} != head {}",
                 game_id, req.content_parent, expected
             );
-            StatusCode::CONFLICT.into_response()
+            // Return the true head so the client can re-chain and retry
+            // instead of wedging. A publisher cannot know this head on its
+            // own: the stream is shared, so the opponent's last event — not
+            // the publisher's — is usually what it has to build on.
+            (
+                StatusCode::CONFLICT,
+                Json(ParentMismatchResp {
+                    expected_parent: expected,
+                }),
+            )
+                .into_response()
         }
         Err(PutEventError::NotAParticipant) => {
             warn!(
                 "[game-log] rejected event for game {}: {} is not a registered participant",
-                game_id, req.player_pubkey
+                game_id, req.sender_identity
             );
             StatusCode::FORBIDDEN.into_response()
         }
@@ -778,7 +801,7 @@ async fn auth_ok(state: &AppState, req: &GameEventReq) -> bool {
         return true;
     }
 
-    let Ok(wallet) = solana_sdk::pubkey::Pubkey::from_str(&req.player_pubkey) else {
+    let Ok(wallet) = solana_sdk::pubkey::Pubkey::from_str(&req.sender_identity) else {
         return true;
     };
     let active = state.active_global_sessions.lock().await;
@@ -1191,6 +1214,96 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(seq, 1);
+    }
+
+    /// The shape the client's re-chain retry depends on: a rejected event
+    /// must report the head it *should* have named. Both players write to one
+    /// shared moves stream, so a publisher genuinely cannot compute this
+    /// itself — without it, the client can only give up, which is what made
+    /// the durable transport silently stop replicating after the first
+    /// player's first event.
+    #[tokio::test]
+    async fn parent_mismatch_reports_the_head_to_re_chain_onto() {
+        let pool = migrated_pool().await;
+        let state = GameLogState::new(pool, None);
+
+        // White's move lands first and becomes the stream head.
+        let white = move_message("fen-white", 1);
+        let v_white = braid_chess::version_hash("fen-white", 1);
+        state
+            .put_event("g1", "moves", "white", &white, &v_white, GENESIS_PARENT)
+            .await
+            .unwrap();
+
+        // Black publishes chaining off genesis — it only tracked its own
+        // moves, so it has never seen white's version. This is the exact
+        // rejection that used to be a dead end.
+        let black = move_message("fen-black", 1);
+        let v_black = braid_chess::version_hash("fen-black", 1);
+        let err = state
+            .put_event("g1", "moves", "black", &black, &v_black, GENESIS_PARENT)
+            .await
+            .unwrap_err();
+
+        let PutEventError::ParentMismatch { expected } = err else {
+            panic!("expected a parent mismatch");
+        };
+        assert_eq!(
+            expected, v_white,
+            "the reported head must be what the client re-chains onto"
+        );
+
+        // Retrying with that head succeeds — the client's retry loop in
+        // `braid_transport::publish` does exactly this.
+        let seq = state
+            .put_event("g1", "moves", "black", &black, &v_black, &expected)
+            .await
+            .unwrap();
+        assert_eq!(seq, 2, "black's move must now be persisted");
+    }
+
+    /// Both players post a `SessionInfo` at game start. The second one used
+    /// to claim genesis as its parent and be rejected, which wedged the whole
+    /// moves stream of every wagered game before move one.
+    #[tokio::test]
+    async fn both_players_session_info_can_land_in_sequence() {
+        let pool = migrated_pool().await;
+        let state = GameLogState::new(pool, None);
+
+        let a = ChessMessage::SessionInfo {
+            player_pubkey: "alice".to_string(),
+            session_pubkey: "as".to_string(),
+            signing_pubkey: "ag".to_string(),
+            expires_at: 0,
+        };
+        let v_a = braid_chess::version_hash("session:alice", 0);
+        state
+            .put_event("g1", "moves", "alice", &a, &v_a, GENESIS_PARENT)
+            .await
+            .unwrap();
+
+        let b = ChessMessage::SessionInfo {
+            player_pubkey: "bob".to_string(),
+            session_pubkey: "bs".to_string(),
+            signing_pubkey: "bg".to_string(),
+            expires_at: 0,
+        };
+        let v_b = braid_chess::version_hash("session:bob", 0);
+        // Chained off alice's, as the client now does after re-chaining.
+        state
+            .put_event("g1", "moves", "bob", &b, &v_b, &v_a)
+            .await
+            .unwrap();
+
+        // And the first real move chains off bob's — the whole point: the
+        // stream is still writable after both SessionInfos.
+        let mv = move_message("fen1", 1);
+        let v_mv = braid_chess::version_hash("fen1", 1);
+        let seq = state
+            .put_event("g1", "moves", "alice", &mv, &v_mv, &v_b)
+            .await
+            .unwrap();
+        assert_eq!(seq, 3);
     }
 
     /// Casual (no-wallet) games never post SessionInfo, so the roster for

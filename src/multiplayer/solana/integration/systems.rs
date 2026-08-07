@@ -442,6 +442,7 @@ pub fn authorize_session_key_on_game_start(
     solana_state: Res<SolanaIntegrationState>,
     network_state: Res<OnlineNetworkState>,
     rollup_manager: Res<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
+    braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
 ) {
     for _event in game_start_events.read() {
         let wallet_pubkey = match solana_state.wallet_pubkey {
@@ -487,12 +488,13 @@ pub fn authorize_session_key_on_game_start(
         // `Pubkey::new_from_array`, which just reinterprets 32 arbitrary
         // bytes as if they were already a public key — not a valid Ed25519
         // public-key derivation, and never equal to what `bind_identity`
-        // actually verifies and sets as `agent_id`. That bug meant the
+        // actually verifies and sets as `signer_pubkey`. That bug meant the
         // roster was still populated with a value no real move's verified
         // signer could ever match, silently reproducing the exact
         // "non-participant signer" rejection the `signing_pubkey` field was
         // added to fix in the first place.
         let signing_pubkey_bytes = network_state.session_signing_key;
+        let braid_heads = braid.heads();
 
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
@@ -537,8 +539,10 @@ pub fn authorize_session_key_on_game_start(
                             // P2P link establishes — a real, previously
                             // reproduced bug ("Opponent pubkey unavailable"
                             // forever, game never settles). SessionInfo is
-                            // sent once, near game start before any moves
-                            // exist, so its causal parent is always genesis.
+                            // Both players post one of these into the same
+                            // shared moves stream, so the parent comes from
+                            // the tracked stream head rather than being
+                            // assumed to be genesis.
                             crate::multiplayer::network::braid_transport::publish_session_info(
                                 crate::multiplayer::network::vps::vps_base(),
                                 game_id.to_string(),
@@ -548,6 +552,7 @@ pub fn authorize_session_key_on_game_start(
                                 session_pubkey.to_string(),
                                 signing_pubkey.to_string(),
                                 expires_at,
+                                braid_heads.clone(),
                             );
                             if let Some(ref tx) = msg_sender {
                                 let _ = tx.send(msg);

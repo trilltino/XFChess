@@ -746,34 +746,11 @@ fn open_in_browser(url: &str) {
 
   #[cfg(windows)]
   {
-    // Two independent things can ask for the wallet popup close together —
-    // the game client's "Connect Wallet" click, and its separate automatic
-    // on-chain profile check. If the popup we last spawned is still alive,
-    // refocus it instead of opening a genuine second Chrome window; wallet-ui
-    // manages its own step transitions internally, so the already-open
-    // window will show the right screen on its own.
-    if let Some(pid) = *wallet_popup_pid_cell().lock().unwrap() {
-      if process_is_alive(pid) {
-        tracing::debug!(
-          "[WalletPopup] popup (pid {pid}) still open — refocusing instead of spawning a duplicate"
-        );
-        std::thread::spawn(move || force_foreground_window(pid));
-        return;
-      }
-    }
-
-    // The popup may instead be sitting hidden (not killed) from a previous
-    // signature — see hide_wallet_popup/post_hide. Reuse it rather than
-    // spawning a fresh Chrome process; if the window has actually vanished
-    // (closed by the user, crashed, etc.) this self-heals to a normal fresh
-    // spawn below rather than leaving the request stuck.
-    if wallet_popup_hidden_at_cell().lock().unwrap().is_some() {
-      if show_and_foreground_wallet_popup() {
-        tracing::debug!("[WalletPopup] reused hidden popup instead of spawning a duplicate");
-        return;
-      }
-      tracing::warn!("[WalletPopup] hidden popup window vanished — spawning a fresh one");
-      *wallet_popup_hidden_at_cell().lock().unwrap() = None;
+    // If a popup window with title XFChess #<port> is already open or hidden,
+    // bring it to front instantly instead of spawning a new browser process.
+    if show_and_foreground_wallet_popup() {
+      tracing::debug!("[WalletPopup] reused existing popup window");
+      return;
     }
 
     // Chrome's per-user (non-admin) installer puts the binary under
@@ -1152,6 +1129,12 @@ fn force_foreground_window(pid: u32) {
 
   // Poll for up to ~3s — the child process needs a moment to create its window.
   for _ in 0..60 {
+    // Check title-based search first: Chrome IPC forwards CLI `--app` calls to
+    // an existing Chrome main process and exits immediately, so `pid` won't match.
+    if show_and_foreground_wallet_popup() {
+      return;
+    }
+
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     let mut ctx: (u32, HWND) = (pid, HWND(std::ptr::null_mut()));

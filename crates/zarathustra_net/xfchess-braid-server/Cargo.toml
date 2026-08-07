@@ -6,6 +6,9 @@ description = "Braid-HTTP 209 subscribe server for XFChess tournament state stre
 license.workspace = true
 
 [dependencies]
+# The wire format lives in braid-http, shared with the client's parser, so the
+# server can never drift from what the client can read.
+braid-http  = { workspace = true }
 axum        = { workspace = true, features = ["ws", "macros"] }
 tower       = "0.5"
 tower-http  = { workspace = true, features = ["cors", "trace"] }

@@ -28,15 +28,16 @@ pub struct MessageParser {
     expected_body_length: usize,
     read_body_length: usize,
     patches: Vec<Patch>,
-    expected_patches: usize,
+    /// `Some(n)` when the block carried a `Patches` header, including `Some(0)`.
+    /// `None` means no such header — the block is a snapshot and has a body.
+    /// Collapsing `Some(0)` into `None` would make a zero-patch update
+    /// indistinguishable from a snapshot; `braid-fuzz` tests exactly that case.
+    expected_patches: Option<usize>,
     patches_read: usize,
     patch_headers: BTreeMap<String, String>,
     expected_patch_length: usize,
     read_patch_length: usize,
     is_encoding_block: bool,
-    /// For chunked transfer encoding, we don't know the body length upfront
-    /// and should read until connection closes or we detect end-of-stream
-    is_chunked: bool,
 }
 
 static HTTP_STATUS_REGEX: Lazy<Regex> =
@@ -55,38 +56,38 @@ impl MessageParser {
             expected_body_length: 0,
             read_body_length: 0,
             patches: Vec::new(),
-            expected_patches: 0,
+            expected_patches: None,
             patches_read: 0,
             patch_headers: BTreeMap::new(),
             expected_patch_length: 0,
             read_patch_length: 0,
             is_encoding_block: false,
-            is_chunked: false,
         }
     }
 
-    pub fn new_with_state(headers: BTreeMap<String, String>, content_length: usize) -> Self {
+    /// A parser for a `209` subscription stream.
+    ///
+    /// The body of a `209` is always a sequence of self-describing update blocks,
+    /// so parsing starts at a header block regardless of what the response-level
+    /// headers said.
+    ///
+    /// This replaces an earlier heuristic that keyed off
+    /// `Transfer-Encoding: chunked` plus a zero `Content-Length`. `reqwest`
+    /// consumes the transfer encoding while decoding and does not reliably expose
+    /// that header, so a conformant server that simply streamed a `209` without
+    /// advertising chunking would have been parsed as one opaque body.
+    #[must_use]
+    pub fn for_subscription() -> Self {
+        MessageParser::new()
+    }
+
+    /// A parser for a single non-streaming response body of known length.
+    #[must_use]
+    pub fn for_response(headers: BTreeMap<String, String>, content_length: usize) -> Self {
         let mut parser = MessageParser::new();
-        parser.headers = headers.clone();
+        parser.headers = headers;
         parser.expected_body_length = content_length;
-
-        // Check for chunked transfer encoding
-        let is_chunked = headers
-            .get("transfer-encoding")
-            .map(|v| v.to_lowercase().contains("chunked"))
-            .unwrap_or(false);
-        parser.is_chunked = is_chunked;
-
-        // For chunked encoding in subscriptions, the body contains braid protocol messages.
-        // Each message starts with headers like "Version:", "Content-Length:" etc.
-        // So we need to parse headers from the stream, not treat it as raw body.
-        // Start in WaitingForHeaders state to parse the first braid message headers.
-        if is_chunked && content_length == 0 {
-            parser.state = ParseState::WaitingForHeaders;
-        } else {
-            parser.state = ParseState::WaitingForBody;
-        }
-
+        parser.state = ParseState::WaitingForBody;
         parser
     }
 
@@ -127,7 +128,7 @@ impl MessageParser {
                         tracing::debug!("[Parser] Found header end at pos {}", pos);
                         self.parse_headers(pos)?;
                         tracing::debug!(
-                            "[Parser] Headers parsed, content-length: {}, patches: {}",
+                            "[Parser] Headers parsed, content-length: {}, patches: {:?}",
                             self.expected_body_length,
                             self.expected_patches
                         );
@@ -143,15 +144,25 @@ impl MessageParser {
                         self.expected_body_length,
                         self.buffer.len()
                     );
-                    if self.expected_patches > 0 {
-                        tracing::debug!("[Parser] Have {} patches to parse", self.expected_patches);
-                        self.state = ParseState::WaitingForPatchHeaders;
+                    if let Some(n) = self.expected_patches {
+                        tracing::debug!("[Parser] Have {} patches to parse", n);
+                        if n == 0 {
+                            // `Patches: 0` is complete at the blank line: no patch
+                            // blocks and no body follow it.
+                            if let Some(msg) = self.finalize_message()? {
+                                messages.push(msg);
+                            }
+                            self.reset();
+                            self.state = ParseState::WaitingForHeaders;
+                        } else {
+                            self.state = ParseState::WaitingForPatchHeaders;
+                        }
                     } else if self.try_parse_body()? {
                         tracing::debug!("[Parser] Body parsed successfully, finalizing message");
                         if let Some(msg) = self.finalize_message()? {
                             tracing::debug!(
                                 "[Parser] Message finalized with {} bytes body",
-                                msg.body.len()
+                                msg.body.as_ref().map_or(0, bytes::Bytes::len)
                             );
                             messages.push(msg);
                         }
@@ -173,7 +184,7 @@ impl MessageParser {
                 ParseState::WaitingForPatchBody => {
                     if self.try_parse_patch_body()? {
                         self.patches_read += 1;
-                        if self.patches_read < self.expected_patches {
+                        if self.patches_read < self.expected_patches.unwrap_or(0) {
                             self.state = ParseState::SkippingSeparator;
                         } else {
                             if let Some(msg) = self.finalize_message()? {
@@ -276,7 +287,9 @@ impl MessageParser {
         }
 
         if let Some(patches_str) = self.headers.get("patches") {
-            self.expected_patches = patches_str.parse().unwrap_or(0);
+            self.expected_patches = Some(patches_str.parse().map_err(|_| {
+                BraidError::HeaderParse(format!("Invalid Patches count: {}", patches_str))
+            })?);
         }
 
         if let Some(len_str) = self
@@ -366,15 +379,23 @@ impl MessageParser {
     }
 
     fn finalize_message(&mut self) -> Result<Option<Message>> {
-        let body = self.body_buffer.split().freeze();
         let headers = std::mem::take(&mut self.headers);
         let url = headers.get("content-location").cloned();
         let encoding = headers.get("encoding").cloned();
 
+        // A `Patches` header — even `Patches: 0` — makes this a patch update with
+        // no body. Its absence makes it a snapshot.
+        let (body, patches) = if self.expected_patches.is_some() {
+            self.body_buffer.clear();
+            (None, Some(std::mem::take(&mut self.patches)))
+        } else {
+            (Some(self.body_buffer.split().freeze()), None)
+        };
+
         Ok(Some(Message {
             headers,
             body,
-            patches: std::mem::take(&mut self.patches),
+            patches,
             status_code: None,
             encoding,
             url,
@@ -387,7 +408,7 @@ impl MessageParser {
         self.expected_body_length = 0;
         self.read_body_length = 0;
         self.patches.clear();
-        self.expected_patches = 0;
+        self.expected_patches = None;
         self.patches_read = 0;
         self.patch_headers.clear();
         self.expected_patch_length = 0;
@@ -412,11 +433,19 @@ impl Default for MessageParser {
     }
 }
 
+/// One decoded block from a Braid stream.
+///
+/// `body` and `patches` are mutually exclusive and mirror the wire exactly: a
+/// block either declared `Content-Length` (a snapshot, `body`) or `Patches: N`
+/// (a patch update, `patches` — possibly empty when `N` is 0).
 #[derive(Debug, Clone)]
 pub struct Message {
     pub headers: BTreeMap<String, String>,
-    pub body: Bytes,
-    pub patches: Vec<Patch>,
+    /// The snapshot body, or `None` if this block carried patches instead.
+    pub body: Option<Bytes>,
+    /// The patches, or `None` if this block carried a snapshot body instead.
+    /// `Some(vec![])` is a `Patches: 0` update, which is not a snapshot.
+    pub patches: Option<Vec<Patch>>,
     pub status_code: Option<u16>,
     pub encoding: Option<String>,
     pub url: Option<String>,
@@ -438,11 +467,14 @@ impl Message {
         self.headers.get("parents").map(|s| s.as_str())
     }
 
+    /// The snapshot body, decoded per the `Encoding` header.
+    ///
+    /// Returns an empty slice for a patch update, which has no body.
     pub fn decode_body(&self) -> Result<Bytes> {
+        let body = self.body.clone().unwrap_or_default();
         match self.encoding.as_deref() {
-            Some("dt") => Ok(self.body.clone()),
+            Some("dt") | None => Ok(body),
             Some(enc) => Err(BraidError::Protocol(format!("Unknown encoding: {}", enc))),
-            None => Ok(self.body.clone()),
         }
     }
 
@@ -464,7 +496,8 @@ impl Message {
     }
 
     pub fn body_text(&self) -> Option<String> {
-        std::str::from_utf8(&self.body).ok().map(|s| s.to_string())
+        let body = self.body.as_ref()?;
+        std::str::from_utf8(body).ok().map(ToString::to_string)
     }
 }
 
@@ -493,7 +526,47 @@ mod tests {
         let data = b"Content-Length: 5\r\n\r\nHello";
         let messages = parser.feed(data).unwrap();
         assert!(!messages.is_empty());
-        assert_eq!(messages[0].body, Bytes::from_static(b"Hello"));
+        assert_eq!(messages[0].body, Some(Bytes::from_static(b"Hello")));
+        assert!(messages[0].patches.is_none(), "a body is not a patch update");
+    }
+
+    #[test]
+    fn zero_patches_is_a_patch_update_not_a_snapshot() {
+        // The distinction `braid-fuzz` tests: `Patches: 0` carries no body, and
+        // must not be mistaken for a snapshot whose body happens to be empty.
+        let mut parser = MessageParser::new();
+        let messages = parser.feed(b"Version: \"v1\"\r\nPatches: 0\r\n\r\n").unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].patches, Some(vec![]));
+        assert!(messages[0].body.is_none());
+    }
+
+    #[test]
+    fn an_empty_snapshot_is_not_a_patch_update() {
+        let mut parser = MessageParser::new();
+        let messages = parser
+            .feed(b"Version: \"v1\"\r\nContent-Length: 0\r\n\r\n")
+            .unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].body, Some(Bytes::new()));
+        assert!(messages[0].patches.is_none());
+    }
+
+    #[test]
+    fn a_heartbeat_yields_no_messages() {
+        // A bare CRLF must be absorbed. If it ever decodes to a Message again,
+        // every heartbeat becomes a versionless update and floods the logs.
+        let mut parser = MessageParser::for_subscription();
+        assert!(parser.feed(b"\r\n").unwrap().is_empty());
+        assert!(parser.feed(b"\r\n\r\n\r\n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_bad_patches_count_is_an_error_not_a_silent_zero() {
+        let mut parser = MessageParser::new();
+        assert!(parser.feed(b"Patches: not-a-number\r\n\r\n").is_err());
     }
 
     #[test]
@@ -511,8 +584,8 @@ mod tests {
 
         let msg = Message {
             headers,
-            body: Bytes::new(),
-            patches: vec![],
+            body: Some(Bytes::new()),
+            patches: None,
             status_code: None,
             encoding: None,
             url: None,
@@ -537,7 +610,10 @@ mod tests {
 
         let messages = parser.feed(data).unwrap();
         assert!(!messages.is_empty());
-        let msg = &messages[0];
-        assert_eq!(msg.patches.len(), 2);
+        let patches = messages[0].patches.as_ref().expect("a patch update");
+        assert_eq!(patches.len(), 2);
+        assert_eq!(patches[0].range, ".a");
+        assert_eq!(patches[1].range, ".b");
+        assert!(messages[0].body.is_none());
     }
 }

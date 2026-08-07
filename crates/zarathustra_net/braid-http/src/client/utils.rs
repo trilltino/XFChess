@@ -1,10 +1,13 @@
 //! Utility functions for the Braid HTTP client.
 
+//! Small shared helpers for the client: header value parsing, message → update
+//! conversion, and the runtime shims that let the same code run on tokio and in
+//! a browser.
+
 use crate::client::parser::Message;
 use crate::error::{BraidError, Result};
 use crate::protocol;
 use crate::types::{Update, Version};
-use bytes::{Bytes, BytesMut};
 use std::time::Duration;
 
 pub fn parse_content_range(header: &str) -> Result<(String, String)> {
@@ -31,48 +34,25 @@ pub fn parse_heartbeat(value: &str) -> Result<Duration> {
     Ok(Duration::from_secs_f64(num))
 }
 
-pub fn version_to_json_string(version: &str) -> String {
-    format!("\"{}\"", version)
-}
-
-pub fn is_retryable_status(status: u16) -> bool {
-    matches!(status, 408 | 425 | 429 | 502 | 503 | 504)
-}
-
-pub fn is_access_denied_status(status: u16) -> bool {
-    matches!(status, 401 | 403)
-}
-
-pub fn exponential_backoff(attempt: u32, base_ms: u64) -> Duration {
-    let delay_ms = base_ms * 2_u64.pow(attempt.min(10));
-    Duration::from_millis(delay_ms)
-}
-
-pub fn merge_bodies(body1: &Bytes, body2: &Bytes) -> Bytes {
-    let mut result = BytesMut::with_capacity(body1.len() + body2.len());
-    result.extend_from_slice(body1);
-    result.extend_from_slice(body2);
-    result.freeze()
-}
-
+/// Convert one parsed wire [`Message`] into the public [`Update`] type.
 pub fn message_to_update(msg: Message) -> Update {
     let version = extract_version(&msg.headers).unwrap_or_else(|| {
-        // Fallback: If version is missing, we use a unique temporary version for this update
-        // to avoid colliding with other "missing" states, but ideally we should skip.
-        // For braid.org/diamond-types, we should use a valid-looking id if we MUST have one.
-        let temp_id = "temp-0".to_string();
+        // An update with no Version can't take part in causal ordering. Give it a
+        // placeholder so it is still delivered, and say so once, here — callers
+        // that care about ordering can check `Update::primary_version`.
         tracing::warn!(
-            "[BraidHTTP] message from {} had no Version header — applying a temporary version, causal ordering may be affected",
+            "[BraidHTTP] update from {} had no Version header — applying a placeholder, causal ordering may be affected",
             msg.url.as_deref().unwrap_or("unknown"),
         );
-        Version::new(&temp_id)
+        Version::new("temp-0")
     });
 
-    let mut builder = if !msg.patches.is_empty() {
-        Update::patched(version, msg.patches)
-    } else {
-        let body = String::from_utf8_lossy(&msg.body).to_string();
-        Update::snapshot(version, body)
+    // Snapshot vs. patch is decided by the wire, not by emptiness: a `Patches: 0`
+    // update has an empty patch list and is still a patch update.
+    let mut builder = match (msg.body, msg.patches) {
+        (_, Some(patches)) => Update::patched(version, patches),
+        (Some(body), None) => Update::snapshot(version, String::from_utf8_lossy(&body).into_owned()),
+        (None, None) => Update::snapshot(version, ""),
     };
 
     if let Some(parents) = extract_parents(&msg.headers) {

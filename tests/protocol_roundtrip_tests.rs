@@ -24,7 +24,7 @@ fn move_msg() -> NetworkMessage {
         next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1".to_string(),
         nonce: 7,
         timestamp_ms: 1_700_000_000_000,
-        agent_id: vec![1, 2, 3],
+        signer_pubkey: vec![1, 2, 3],
         seq: 9,
         parent_version: "v0".to_string(),
     }
@@ -71,4 +71,33 @@ fn resign_message_signs_serializes_and_verifies() {
     let received: SignedNetworkMessage = serde_json::from_str(&json).expect("deserialize");
     assert!(received.verify());
     assert_eq!(received.msg.game_id(), 99);
+}
+
+/// The Rust field was renamed `agent_id` → `signer_pubkey` (the old name
+/// described the iroh NodeId, which is not what it carries). The *wire* name
+/// must not change: a renamed JSON key would make an upgraded client's moves
+/// undecodable to a peer on the old build, and `#[serde(default)]` would
+/// silently fill an empty key rather than erroring — i.e. every move would
+/// fail the receiver's roster check instead of failing loudly.
+#[test]
+fn signer_pubkey_still_serializes_under_the_legacy_wire_name() {
+    let json = serde_json::to_string(&move_msg()).expect("serialize");
+    assert!(
+        json.contains("\"agent_id\""),
+        "wire name must stay `agent_id` for compatibility, got: {json}"
+    );
+    assert!(
+        !json.contains("\"signer_pubkey\""),
+        "the Rust-side name must not leak onto the wire, got: {json}"
+    );
+
+    // A payload written by an old-build peer is byte-identical to the above,
+    // so decoding it is the compatibility check in both directions.
+    let back: NetworkMessage = serde_json::from_str(&json).expect("decode legacy payload");
+    match back {
+        NetworkMessage::Move { signer_pubkey, .. } => {
+            assert_eq!(signer_pubkey, vec![1, 2, 3], "value must survive the rename")
+        }
+        _ => panic!("expected a Move"),
+    }
 }

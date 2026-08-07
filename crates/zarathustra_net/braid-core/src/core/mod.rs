@@ -6,7 +6,7 @@ pub mod traits;
 // Re-export from braid-http
 pub use braid_http::client::{
     BraidClient, ClientConfig, HeartbeatConfig, Message, MessageParser, ParseState, RetryConfig,
-    RetryDecision, RetryState, Subscription, SubscriptionStream,
+    RetryDecision, RetryState, Subscription,
 };
 pub use braid_http::error::{BraidError as ClientError, Result as ClientResult};
 pub use braid_http::protocol as protocol_mod;

@@ -19,7 +19,7 @@ use crate::multiplayer::solana::lobby::SolanaLobbyState;
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::wager_rate::SolUsdRate;
 use crate::multiplayer::spectator::SpectateViaLinkEvent;
-use crate::multiplayer::{BraidSubscriptionConfig, NetworkConfig, OnlineNetworkState};
+use crate::multiplayer::{NetworkConfig, OnlineNetworkState};
 use crate::states::main_menu::new_menu::{MenuExitConfirm, MenuFocusMode};
 use crate::states::main_menu::{CompetitiveMenuState, PlayerColorChoice};
 use bevy::ecs::system::SystemParam;
@@ -44,7 +44,6 @@ use bevy_egui::EguiContexts;
 /// - [`GameSettings`] - Game settings
 /// - [`CoreGameMode`] - Core game mode selection
 /// - [`CompetitiveMenuState`] - Competitive match UI state
-/// - [`BraidSubscriptionConfig`] - legacy Braid subscription configuration
 /// - [`OnlineNetworkState`] - Network connection state
 /// - [`P2PUIState`] - P2P UI state
 /// - [`P2PConnectionState`] - P2P connection status
@@ -66,7 +65,6 @@ pub struct MainMenuUIContext<'w, 's> {
     pub settings: ResMut<'w, GameSettings>,
     pub core_mode: ResMut<'w, CoreGameMode>,
     pub competitive_menu: ResMut<'w, CompetitiveMenuState>,
-    pub braid_subscription: Option<ResMut<'w, BraidSubscriptionConfig>>,
     pub network_state: Option<Res<'w, OnlineNetworkState>>,
     pub p2p_ui: Option<ResMut<'w, P2PUIState>>,
     pub p2p_state: Option<ResMut<'w, P2PConnectionState>>,

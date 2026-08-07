@@ -55,28 +55,150 @@ use crate::multiplayer::TokioRuntime;
 const MIN_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
+/// Genesis parent for a stream's first event — must match `GENESIS_PARENT`
+/// in the backend's `game_log.rs`.
+const GENESIS_PARENT: &str = "0";
+
+/// How many times a publish re-chains onto a server-reported head before
+/// giving up. Each retry costs a round trip, and a move that loses this many
+/// races in a row is better left to gossip (or to the opponent's next
+/// subscribe-time history replay) than retried indefinitely.
+const MAX_PARENT_RETRIES: usize = 3;
+
+// ── Stream head tracking ──────────────────────────────────────────────────
+
+/// The causal head of each Braid stream for the active game, as far as this
+/// client knows.
+///
+/// # Why this can't live on `OnlineGameSession`
+///
+/// The backend validates `content_parent` against the head of the *whole
+/// shared stream* — both players write to `/game/:id/moves`. A head tracked
+/// from only our own publishes is therefore wrong the moment the opponent
+/// writes anything, and the backend answers every later publish with `409
+/// CONFLICT`. That was the original bug: `OnlineGameSession::last_version`
+/// advanced on local moves only, so in a casual game the second player's very
+/// first move was rejected and never persisted, and in a wagered game the two
+/// `SessionInfo` posts (both claiming genesis as parent) wedged the stream
+/// before move one — every later publish then failed forever. Because
+/// [`publish`] is fire-and-forget, nothing surfaced: moves simply never
+/// replicated through the durable path.
+///
+/// So the head is tracked here, advanced from *delivered* messages (i.e. the
+/// server's accepted order, opponent's writes included), and shared with the
+/// publish threads.
+pub struct BraidStreamHeads {
+    moves: String,
+    chat: String,
+    /// Versions this client published. The backend echoes every accepted
+    /// event back to *all* subscribers including the publisher, so without
+    /// this we re-ingest our own moves as though they came from the opponent
+    /// (see [`drain_braid_messages`]).
+    self_published: std::collections::HashSet<String>,
+}
+
+impl Default for BraidStreamHeads {
+    fn default() -> Self {
+        Self {
+            moves: GENESIS_PARENT.to_string(),
+            chat: GENESIS_PARENT.to_string(),
+            self_published: std::collections::HashSet::new(),
+        }
+    }
+}
+
+impl BraidStreamHeads {
+    fn head(&self, stream: &str) -> String {
+        if stream == "chat" {
+            self.chat.clone()
+        } else {
+            self.moves.clone()
+        }
+    }
+
+    fn set_head(&mut self, stream: &str, version: String) {
+        if stream == "chat" {
+            self.chat = version;
+        } else {
+            self.moves = version;
+        }
+    }
+}
+
+/// Shared handle: publish runs on its own thread, draining runs on the Bevy
+/// main thread.
+pub type SharedStreamHeads = std::sync::Arc<std::sync::Mutex<BraidStreamHeads>>;
+
+/// Recompute the `content_version` a message was published under. Must mirror
+/// the `version_hash` inputs used by the `publish_*` helpers below exactly —
+/// this is how a *delivered* message is matched back to the head and
+/// self-published bookkeeping, since `ChessMessage` carries no version field
+/// on the wire.
+fn version_of(message: &ChessMessage) -> Option<String> {
+    Some(match message {
+        ChessMessage::Move(p) => braid_chess::version_hash(&p.fen_after, p.move_number),
+        ChessMessage::Resign { player } => {
+            braid_chess::version_hash(&format!("resign:{player}"), 0)
+        }
+        ChessMessage::Chat(p) => {
+            braid_chess::version_hash(&format!("chat:{}:{}", p.player, p.timestamp_ms), 0)
+        }
+        ChessMessage::SessionInfo { player_pubkey, .. } => {
+            braid_chess::version_hash(&format!("session:{player_pubkey}"), 0)
+        }
+        _ => return None,
+    })
+}
+
+/// Which Braid stream a message belongs to. Mirrors the backend's
+/// `belongs_to_stream`.
+fn stream_of(message: &ChessMessage) -> &'static str {
+    if matches!(message, ChessMessage::Chat(_)) {
+        "chat"
+    } else {
+        "moves"
+    }
+}
+
 // ── Publish (PUT) ─────────────────────────────────────────────────────────
 
+/// Mirrors the backend's `game_log::GameEventReq`. Field names must stay in
+/// sync with that type's serde names, not its Rust names.
 #[derive(Serialize)]
 struct GameEventReq<'a> {
-    player_pubkey: &'a str,
+    /// Wallet pubkey for a wagered game, Iroh node id for a casual one — see
+    /// the backend type's doc comment.
+    #[serde(rename = "player_pubkey")]
+    sender_identity: &'a str,
     session_token: &'a str,
     message: &'a ChessMessage,
     content_version: &'a str,
     content_parent: &'a str,
 }
 
-/// Fire-and-forget PUT, mirroring `relay_send`'s reliability posture: errors
-/// are logged, not fatal — gossip may still deliver the same event.
+/// Body of the backend's `409 CONFLICT`.
+#[derive(serde::Deserialize)]
+struct ParentMismatchResp {
+    expected_parent: String,
+}
+
+/// Fire-and-forget PUT: errors are logged, not fatal — gossip may still
+/// deliver the same event.
+///
+/// The parent is read from [`BraidStreamHeads`] at send time rather than
+/// passed in, because the correct parent is the *shared* stream head and only
+/// this transport tracks it. On `409 CONFLICT` the backend replies with the
+/// head it actually expected; we adopt it and retry, which is what makes two
+/// players writing to one stream work at all.
 fn publish(
     base_url: String,
     game_id: String,
     stream: &'static str,
-    player_pubkey: String,
+    sender_identity: String,
     session_token: String,
     message: ChessMessage,
     content_version: String,
-    content_parent: String,
+    heads: SharedStreamHeads,
 ) {
     std::thread::spawn(move || {
         let client = match crate::multiplayer::network::vps::client() {
@@ -92,88 +214,135 @@ fn publish(
             game_id,
             stream
         );
-        let body = GameEventReq {
-            player_pubkey: &player_pubkey,
-            session_token: &session_token,
-            message: &message,
-            content_version: &content_version,
-            content_parent: &content_parent,
-        };
-        match client.put(&url).json(&body).send() {
-            Ok(resp) if resp.status().is_success() => {
-                debug!("[braid-transport] published to {game_id}/{stream}");
+
+        // Claim the version up-front so the echo of our own event is
+        // recognised even if it arrives before this thread finishes.
+        let mut parent = match heads.lock() {
+            Ok(mut h) => {
+                h.self_published.insert(content_version.clone());
+                h.head(stream)
             }
-            Ok(resp) => warn!(
-                "[NET] Move sync backup (Braid) couldn't save {stream} for game {game_id}: server returned HTTP {}",
-                resp.status()
-            ),
-            Err(e) => warn!(
-                "[NET] Move sync backup (Braid) couldn't save {stream} for game {game_id}: {e}"
-            ),
+            Err(_) => GENESIS_PARENT.to_string(),
+        };
+
+        for attempt in 0..=MAX_PARENT_RETRIES {
+            let body = GameEventReq {
+                sender_identity: &sender_identity,
+                session_token: &session_token,
+                message: &message,
+                content_version: &content_version,
+                content_parent: &parent,
+            };
+            match client.put(&url).json(&body).send() {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(mut h) = heads.lock() {
+                        h.set_head(stream, content_version.clone());
+                    }
+                    debug!("[braid-transport] published to {game_id}/{stream}");
+                    return;
+                }
+                Ok(resp) if resp.status() == reqwest::StatusCode::CONFLICT => {
+                    match resp.json::<ParentMismatchResp>() {
+                        Ok(m) => {
+                            debug!(
+                                "[braid-transport] re-chaining {stream} publish for game {game_id} onto head {} (attempt {})",
+                                m.expected_parent,
+                                attempt + 1
+                            );
+                            if let Ok(mut h) = heads.lock() {
+                                h.set_head(stream, m.expected_parent.clone());
+                            }
+                            parent = m.expected_parent;
+                        }
+                        Err(e) => {
+                            warn!(
+                                "[NET] Move sync backup (Braid) got an unreadable conflict for {stream} on game {game_id}: {e}"
+                            );
+                            return;
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    warn!(
+                        "[NET] Move sync backup (Braid) couldn't save {stream} for game {game_id}: server returned HTTP {}",
+                        resp.status()
+                    );
+                    return;
+                }
+                Err(e) => {
+                    warn!(
+                        "[NET] Move sync backup (Braid) couldn't save {stream} for game {game_id}: {e}"
+                    );
+                    return;
+                }
+            }
         }
+        warn!(
+            "[NET] Move sync backup (Braid) gave up publishing {stream} for game {game_id} after {MAX_PARENT_RETRIES} re-chain attempts"
+        );
     });
 }
 
 pub fn publish_move(
     base_url: String,
     game_id: String,
-    player_pubkey: String,
+    sender_identity: String,
     session_token: String,
     payload: MovePayload,
     content_version: String,
-    content_parent: String,
+    heads: SharedStreamHeads,
 ) {
     publish(
         base_url,
         game_id,
         "moves",
-        player_pubkey,
+        sender_identity,
         session_token,
         ChessMessage::Move(payload),
         content_version,
-        content_parent,
+        heads,
     );
 }
 
 pub fn publish_resign(
     base_url: String,
     game_id: String,
-    player_pubkey: String,
+    sender_identity: String,
     session_token: String,
     resigning_player: String,
-    content_parent: String,
+    heads: SharedStreamHeads,
 ) {
     let content_version = braid_chess::version_hash(&format!("resign:{resigning_player}"), 0);
     publish(
         base_url,
         game_id,
         "moves",
-        player_pubkey,
+        sender_identity,
         session_token,
         ChessMessage::Resign {
             player: resigning_player,
         },
         content_version,
-        content_parent,
+        heads,
     );
 }
 
 pub fn publish_chat(
     base_url: String,
     game_id: String,
-    player_pubkey: String,
+    sender_identity: String,
     session_token: String,
     player: String,
     text: String,
     timestamp_ms: u64,
-    content_parent: String,
+    heads: SharedStreamHeads,
 ) {
     let content_version = braid_chess::version_hash(&format!("chat:{player}:{timestamp_ms}"), 0);
     publish(
         base_url,
         game_id,
         "chat",
-        player_pubkey,
+        sender_identity,
         session_token,
         ChessMessage::Chat(ChatPayload {
             player,
@@ -181,30 +350,33 @@ pub fn publish_chat(
             timestamp_ms,
         }),
         content_version,
-        content_parent,
+        heads,
     );
 }
 
-/// SessionInfo is sent once, near game start, before any moves exist — its
-/// causal parent is always genesis (see the call site's comment in
-/// `solana/integration/systems.rs`).
+/// SessionInfo is sent once per player, near game start. It is *not*
+/// automatically genesis-parented: both players post one into the same shared
+/// moves stream, so whichever lands second must chain off the first —
+/// hardcoding genesis here is what used to wedge every wagered game's moves
+/// stream before move one.
 #[allow(clippy::too_many_arguments)]
 pub fn publish_session_info(
     base_url: String,
     game_id: String,
-    player_pubkey: String,
+    sender_identity: String,
     session_token: String,
     wallet_pubkey: String,
     session_pubkey: String,
     signing_pubkey: String,
     expires_at: i64,
+    heads: SharedStreamHeads,
 ) {
     let content_version = braid_chess::version_hash(&format!("session:{wallet_pubkey}"), 0);
     publish(
         base_url,
         game_id,
         "moves",
-        player_pubkey,
+        sender_identity,
         session_token,
         ChessMessage::SessionInfo {
             player_pubkey: wallet_pubkey,
@@ -213,7 +385,7 @@ pub fn publish_session_info(
             expires_at,
         },
         content_version,
-        "0".to_string(),
+        heads,
     );
 }
 
@@ -223,6 +395,9 @@ pub fn publish_session_info(
 /// same Bevy message bus gossip feeds, with reconnect-on-drop.
 #[derive(Resource, Default)]
 pub struct BraidTransportState {
+    /// Causal head of each stream for the active game, shared with the
+    /// publish threads — see [`BraidStreamHeads`].
+    heads: SharedStreamHeads,
     game_id: String,
     rx: Option<crossbeam_channel::Receiver<ChessMessage>>,
     /// True while the moves+chat subscriptions are both live. Shared with
@@ -251,7 +426,13 @@ impl BraidTransportState {
             game_id,
             rx: Some(rx),
             connected: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            heads: SharedStreamHeads::default(),
         }
+    }
+
+    /// Handle to the shared stream heads, for passing to `publish_*`.
+    pub fn heads(&self) -> SharedStreamHeads {
+        self.heads.clone()
     }
 
     pub fn reset(&mut self) {
@@ -259,6 +440,9 @@ impl BraidTransportState {
         self.rx = None;
         self.connected
             .store(false, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(mut h) = self.heads.lock() {
+            *h = BraidStreamHeads::default();
+        }
     }
 
     pub fn is_connected(&self) -> bool {
@@ -391,6 +575,23 @@ pub fn drain_braid_messages(
         crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id);
 
     while let Ok(msg) = rx.try_recv() {
+        // Advance the shared stream head to whatever the server actually
+        // accepted, and drop the echo of our own publishes. The backend
+        // broadcasts every accepted event to all subscribers *including the
+        // publisher*, so without the `self_published` check we would re-apply
+        // our own moves as if the opponent had sent them, and re-display our
+        // own chat lines twice.
+        let mut is_self_echo = false;
+        if let Some(version) = version_of(&msg) {
+            if let Ok(mut h) = state.heads.lock() {
+                h.set_head(stream_of(&msg), version.clone());
+                is_self_echo = h.self_published.remove(&version);
+            }
+        }
+        if is_self_echo {
+            continue;
+        }
+
         match msg {
             ChessMessage::Move(payload) => {
                 let version = braid_chess::version_hash(&payload.fen_after, payload.move_number);
@@ -409,7 +610,7 @@ pub fn drain_braid_messages(
                     next_fen: payload.fen_after,
                     nonce: 0,
                     timestamp_ms: 0,
-                    agent_id: Vec::new(),
+                    signer_pubkey: Vec::new(),
                     seq: 0,
                     parent_version: String::new(),
                 }));
@@ -486,5 +687,145 @@ impl Plugin for BraidTransportPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BraidTransportState>()
             .add_systems(Update, (sync_braid_subscription, drain_braid_messages));
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use braid_chess::message::{ChatPayload, MovePayload};
+
+    fn move_msg(fen_after: &str, move_number: u32) -> ChessMessage {
+        ChessMessage::Move(MovePayload::from_uci("e2e4", fen_after, move_number, "p"))
+    }
+
+    /// The core invariant the 409 bug violated: the moves-stream head must
+    /// advance on *any* delivered move, not only on ones we published. Both
+    /// players write to `/game/:id/moves`, so after the opponent moves, our
+    /// next publish has to name *their* version as its parent.
+    #[test]
+    fn head_advances_on_opponent_moves_not_just_our_own() {
+        let mut heads = BraidStreamHeads::default();
+        assert_eq!(heads.head("moves"), GENESIS_PARENT);
+
+        // Opponent's move arrives over the subscription.
+        let opponent = move_msg("fen-opponent", 1);
+        let v_opponent = version_of(&opponent).unwrap();
+        heads.set_head(stream_of(&opponent), v_opponent.clone());
+
+        // Our next publish must chain off it. Before the fix this still read
+        // "0" (or our own last version), which the backend rejected with 409.
+        assert_eq!(heads.head("moves"), v_opponent);
+    }
+
+    /// Chat and moves are validated against separate heads by the backend
+    /// (`put_event`'s per-stream `head_sql`), so a chat message must not
+    /// disturb the moves head or vice versa.
+    #[test]
+    fn move_and_chat_heads_are_independent() {
+        let mut heads = BraidStreamHeads::default();
+
+        let mv = move_msg("fen1", 1);
+        heads.set_head(stream_of(&mv), version_of(&mv).unwrap());
+        let moves_head = heads.head("moves");
+
+        let chat = ChessMessage::Chat(ChatPayload {
+            player: "alice".to_string(),
+            text: "gg".to_string(),
+            timestamp_ms: 7,
+        });
+        assert_eq!(stream_of(&chat), "chat");
+        heads.set_head(stream_of(&chat), version_of(&chat).unwrap());
+
+        assert_eq!(heads.head("moves"), moves_head, "chat must not move the moves head");
+        assert_ne!(heads.head("chat"), GENESIS_PARENT);
+        assert_ne!(heads.head("chat"), moves_head);
+    }
+
+    /// `version_of` is what matches a *delivered* message back to what we
+    /// published — it must reproduce each `publish_*` helper's `version_hash`
+    /// inputs exactly, or self-echo detection and head tracking both break.
+    #[test]
+    fn version_of_matches_the_publish_side_hashes() {
+        let mv = move_msg("fen-after", 3);
+        assert_eq!(
+            version_of(&mv).unwrap(),
+            braid_chess::version_hash("fen-after", 3)
+        );
+
+        let resign = ChessMessage::Resign {
+            player: "white".to_string(),
+        };
+        assert_eq!(
+            version_of(&resign).unwrap(),
+            braid_chess::version_hash("resign:white", 0)
+        );
+
+        let chat = ChessMessage::Chat(ChatPayload {
+            player: "bob".to_string(),
+            text: "hi".to_string(),
+            timestamp_ms: 42,
+        });
+        assert_eq!(
+            version_of(&chat).unwrap(),
+            braid_chess::version_hash("chat:bob:42", 0)
+        );
+
+        let session = ChessMessage::SessionInfo {
+            player_pubkey: "wallet1".to_string(),
+            session_pubkey: "s".to_string(),
+            signing_pubkey: "g".to_string(),
+            expires_at: 0,
+        };
+        assert_eq!(
+            version_of(&session).unwrap(),
+            braid_chess::version_hash("session:wallet1", 0)
+        );
+    }
+
+    /// The backend broadcasts accepted events to every subscriber including
+    /// the publisher. Our own move coming back must be recognised and dropped,
+    /// not replayed onto the board as if the opponent had sent it.
+    #[test]
+    fn own_publishes_are_recognised_as_echoes_exactly_once() {
+        let mut heads = BraidStreamHeads::default();
+        let mine = move_msg("fen-mine", 1);
+        let v = version_of(&mine).unwrap();
+
+        // publish() claims the version up-front.
+        heads.self_published.insert(v.clone());
+
+        // First delivery is our own echo.
+        assert!(heads.self_published.remove(&v), "own echo must be detected");
+        // A second, genuinely-remote message with the same version would not
+        // be swallowed (the claim is consumed, not permanent).
+        assert!(!heads.self_published.remove(&v));
+    }
+
+    /// A SessionInfo posted by the opponent must not be mistaken for our own.
+    #[test]
+    fn opponent_session_info_is_not_treated_as_an_echo() {
+        let mut heads = BraidStreamHeads::default();
+        let ours = ChessMessage::SessionInfo {
+            player_pubkey: "us".to_string(),
+            session_pubkey: "s".to_string(),
+            signing_pubkey: "g".to_string(),
+            expires_at: 0,
+        };
+        heads.self_published.insert(version_of(&ours).unwrap());
+
+        let theirs = ChessMessage::SessionInfo {
+            player_pubkey: "them".to_string(),
+            session_pubkey: "s2".to_string(),
+            signing_pubkey: "g2".to_string(),
+            expires_at: 0,
+        };
+        let v_theirs = version_of(&theirs).unwrap();
+        assert!(
+            !heads.self_published.remove(&v_theirs),
+            "opponent SessionInfo must be delivered, not swallowed as an echo"
+        );
     }
 }

@@ -54,6 +54,37 @@ export function getConnectedProvider(): any {
   return (window as any).phantom?.solana ?? (window as any).solflare;
 }
 
+/// Best-effort switch the connected wallet to devnet so that transactions
+/// built against the devnet RPC are not rejected as "mainnet" txs.
+/// Solflare in particular infers the transaction cluster from the dApp's
+/// declared network; if none is declared it can default to mainnet and
+/// refuse to sign devnet blockhashes.
+async function ensureDevnet(provider: any, kind: string | null): Promise<void> {
+  if (!provider) return;
+  // Phantom >=0.16 supports switchNetwork via request()
+  if (kind === "phantom" && provider.request) {
+    try {
+      await provider.request({ method: "switchNetwork", params: { network: "devnet" } });
+      return;
+    } catch { /* ignore — may be unsupported or already on devnet */ }
+  }
+  // Solflare supports cluster selection through connect() or setCluster()
+  if (kind === "solflare") {
+    if (provider.setCluster) {
+      try {
+        await provider.setCluster("devnet");
+        return;
+      } catch { /* ignore */ }
+    }
+    if (provider.request) {
+      try {
+        await provider.request({ method: "switchNetwork", params: { network: "devnet" } });
+        return;
+      } catch { /* ignore */ }
+    }
+  }
+}
+
 async function apiPost<T = unknown>(path: string, body?: unknown): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: "POST",
@@ -757,6 +788,7 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
       }
       const txBytes = Buffer.from(txB64, "base64");
       const tx = deserializeTx(txBytes);
+      await ensureDevnet(provider, localStorage.getItem("xfchess_wallet_provider"));
       const signed = await provider.signTransaction(tx);
       await resolveAndHide(Buffer.from(signed.serialize()).toString("base64"));
     } catch (e: any) {
