@@ -720,8 +720,7 @@ async fn async_create_game_via_global_session(
     );
 
     let start = Instant::now();
-    fast_send_and_confirm(&rpc, &tx)
-        .map_err(|e| format!("global_create_game submit: {e}"))?;
+    fast_send_and_confirm(&rpc, &tx).map_err(|e| format!("global_create_game submit: {e}"))?;
 
     info!(
         "[CREATE_GAME] global_create_game landed for game {} in {:?} (session-signed, no wallet popup)",
@@ -946,8 +945,7 @@ async fn async_join_game_via_global_session(
         &[&session_kp],
         blockhash,
     );
-    fast_send_and_confirm(&rpc, &tx)
-        .map_err(|e| format!("global_join_game submit: {e}"))?;
+    fast_send_and_confirm(&rpc, &tx).map_err(|e| format!("global_join_game submit: {e}"))?;
 
     info!(
         "[JOIN_GAME] global_join_game landed for game {} (session-signed, no wallet popup)",

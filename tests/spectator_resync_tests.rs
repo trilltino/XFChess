@@ -53,7 +53,11 @@ fn resync_advances_applied_move_count_per_move() {
         "applied_move_count must advance so the VPS poll doesn't re-fetch this move"
     );
     let events = app.world().resource::<Messages<NetworkMoveEvent>>();
-    assert_eq!(events.len(), 1, "exactly one NetworkMoveEvent per resync move");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one NetworkMoveEvent per resync move"
+    );
 }
 
 #[test]

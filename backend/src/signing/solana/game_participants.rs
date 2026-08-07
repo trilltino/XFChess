@@ -138,12 +138,15 @@ pub async fn is_session_key_authorized(
     claimed_session_key: &Pubkey,
 ) -> bool {
     let (pda, _bump) = Pubkey::find_program_address(
-        &[SESSION_DELEGATION_SEED, &game_id.to_le_bytes(), wallet.as_ref()],
+        &[
+            SESSION_DELEGATION_SEED,
+            &game_id.to_le_bytes(),
+            wallet.as_ref(),
+        ],
         program_id,
     );
     let rpc = Arc::clone(rpc);
-    let Ok(Ok(data)) = tokio::task::spawn_blocking(move || rpc.get_account_data(&pda)).await
-    else {
+    let Ok(Ok(data)) = tokio::task::spawn_blocking(move || rpc.get_account_data(&pda)).await else {
         return false;
     };
 

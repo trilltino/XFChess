@@ -46,7 +46,9 @@ pub async fn telemetry_middleware(
     let status = response.status().as_u16();
 
     // Record metrics (Metrics uses interior mutability — no lock needed here).
-    app_state.metrics.record_http_request(&endpoint, status, duration_ms);
+    app_state
+        .metrics
+        .record_http_request(&endpoint, status, duration_ms);
 
     // Log request completion
     if status as u16 >= HTTP_STATUS_SERVER_ERROR {

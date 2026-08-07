@@ -64,23 +64,23 @@
 //! delegate.
 
 use axum::{
-    Json, Router,
     body::Body,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
+    Json, Router,
 };
 use braid_chess::ChessMessage;
 use bytes::Bytes;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{broadcast, RwLock};
 use tokio::time::interval;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, info, warn};
-use xfchess_braid_server::resource::protocol::{BraidUpdate, format_chunk, format_heartbeat};
+use xfchess_braid_server::resource::protocol::{format_chunk, format_heartbeat, BraidUpdate};
 
 use crate::signing::AppState;
 
@@ -619,12 +619,7 @@ async fn put_chat(
 
 // ── Shared GET (subscribe) path ──────────────────────────────────────────────
 
-async fn get_stream(
-    state: &AppState,
-    game_id: &str,
-    stream: &str,
-    headers: HeaderMap,
-) -> Response {
+async fn get_stream(state: &AppState, game_id: &str, stream: &str, headers: HeaderMap) -> Response {
     if !wants_subscribe(&headers) {
         let snapshot = state.game_log.snapshot(game_id, stream).await;
         return (StatusCode::OK, Json(snapshot)).into_response();
@@ -844,7 +839,10 @@ mod tests {
     fn wants_subscribe_recognizes_the_actual_client_header() {
         let mut headers = HeaderMap::new();
         headers.insert("Subscribe", "true".parse().unwrap());
-        assert!(wants_subscribe(&headers), "Subscribe: true must count as a subscribe request");
+        assert!(
+            wants_subscribe(&headers),
+            "Subscribe: true must count as a subscribe request"
+        );
     }
 
     #[test]
@@ -1184,7 +1182,14 @@ mod tests {
         let forged = move_message("fen1", 1);
         let vf = braid_chess::version_hash("fen1", 1);
         let err = state
-            .put_event("g1", "moves", "impostor-node-id", &forged, &vf, GENESIS_PARENT)
+            .put_event(
+                "g1",
+                "moves",
+                "impostor-node-id",
+                &forged,
+                &vf,
+                GENESIS_PARENT,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, PutEventError::NotAParticipant));
@@ -1210,7 +1215,14 @@ mod tests {
         let msg = move_message("fen1", 1);
         let v1 = braid_chess::version_hash("fen1", 1);
         let seq = state
-            .put_event("g1", "moves", "any-node-id-at-all", &msg, &v1, GENESIS_PARENT)
+            .put_event(
+                "g1",
+                "moves",
+                "any-node-id-at-all",
+                &msg,
+                &v1,
+                GENESIS_PARENT,
+            )
             .await
             .unwrap();
         assert_eq!(seq, 1);

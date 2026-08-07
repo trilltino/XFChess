@@ -268,7 +268,10 @@ async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() {
         (black_profile_pda, black_profile_data),
         (escrow_pda(game_id), system_account(wager_amount * 2)),
         (treasury_vault_pda(), system_account(1_000_000)),
-        (fee_payer.pubkey(), system_account(fee_payer_starting_balance)),
+        (
+            fee_payer.pubkey(),
+            system_account(fee_payer_starting_balance),
+        ),
         (white, system_account(1_000_000)),
         (black, system_account(1_000_000)),
     ])

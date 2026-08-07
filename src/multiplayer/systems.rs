@@ -2120,7 +2120,10 @@ mod verified_wallets_roster_tests {
         app.update();
 
         let causal = app.world().resource::<CausalChainState>();
-        let roster = causal.roster.get(&GAME_ID).expect("roster must be populated");
+        let roster = causal
+            .roster
+            .get(&GAME_ID)
+            .expect("roster must be populated");
         assert!(roster.contains(&white_signing.to_bytes().to_vec()));
     }
 }
@@ -2154,7 +2157,11 @@ mod session_info_spoof_tests {
         let attacker_signing_key = Pubkey::new_unique(); // attacker's own gossip key
 
         let mut app = App::new();
-        app.insert_resource(EphemeralRollupManager::new(1, false, "startpos".to_string()));
+        app.insert_resource(EphemeralRollupManager::new(
+            1,
+            false,
+            "startpos".to_string(),
+        ));
         app.insert_resource(HandshakeOrderingKeyManager::default());
         app.insert_resource(SolanaIntegrationState::default());
         app.add_message::<NetworkEvent>();

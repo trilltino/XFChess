@@ -242,7 +242,10 @@ mod tests {
     #[test]
     fn empty_snapshot_still_declares_a_zero_length_body() {
         let update = Update::snapshot(Version::new("v1"), "");
-        assert_eq!(rendered(&update), "Version: \"v1\"\r\nContent-Length: 0\r\n\r\n\r\n");
+        assert_eq!(
+            rendered(&update),
+            "Version: \"v1\"\r\nContent-Length: 0\r\n\r\n\r\n"
+        );
     }
 
     #[test]

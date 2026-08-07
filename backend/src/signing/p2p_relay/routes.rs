@@ -464,7 +464,12 @@ mod tests {
     use super::*;
     use solana_sdk::signer::{keypair::Keypair, Signer};
 
-    fn signed_request(signer: &Keypair, claimed_from: &str, game_id: &str, message: &str) -> SendMessageRequest {
+    fn signed_request(
+        signer: &Keypair,
+        claimed_from: &str,
+        game_id: &str,
+        message: &str,
+    ) -> SendMessageRequest {
         let signable = format!("{}:{}:{}", game_id, claimed_from, message);
         let signature = signer.sign_message(signable.as_bytes()).as_ref().to_vec();
         SendMessageRequest {
@@ -478,7 +483,12 @@ mod tests {
     #[test]
     fn genuine_signature_verifies() {
         let real_owner = Keypair::new();
-        let req = signed_request(&real_owner, &real_owner.pubkey().to_string(), "g1", "JOIN_ACK:x|y|1200");
+        let req = signed_request(
+            &real_owner,
+            &real_owner.pubkey().to_string(),
+            "g1",
+            "JOIN_ACK:x|y|1200",
+        );
         assert!(verify_p2p_message_signature(&req));
     }
 
@@ -491,14 +501,24 @@ mod tests {
         let victim = Keypair::new();
         // Attacker signs with their OWN key but claims to be the victim's
         // node_id in the payload — signature won't match the claimed identity.
-        let req = signed_request(&attacker, &victim.pubkey().to_string(), "g1", "JOIN_ACK:victim|hijacked|9999");
+        let req = signed_request(
+            &attacker,
+            &victim.pubkey().to_string(),
+            "g1",
+            "JOIN_ACK:victim|hijacked|9999",
+        );
         assert!(!verify_p2p_message_signature(&req));
     }
 
     #[test]
     fn tampered_message_after_signing_is_rejected() {
         let signer = Keypair::new();
-        let mut req = signed_request(&signer, &signer.pubkey().to_string(), "g1", "JOIN_ACK:x|y|1200");
+        let mut req = signed_request(
+            &signer,
+            &signer.pubkey().to_string(),
+            "g1",
+            "JOIN_ACK:x|y|1200",
+        );
         req.message = "JOIN_ACK:x|y|9999".to_string(); // changed after signing
         assert!(!verify_p2p_message_signature(&req));
     }
