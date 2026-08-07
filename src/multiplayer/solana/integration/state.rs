@@ -83,8 +83,10 @@ pub struct SolanaIntegrationState {
     /// `spawn_verified_participants_fetch`, consumed by
     /// `poll_verified_participants_fetch`. See
     /// `docs/plans/networking-hardening-plan.md`'s Phase C.
-    pub pending_participants_fetch:
-        Option<(u64, tokio::task::JoinHandle<Result<Option<(String, String)>, String>>)>,
+    pub pending_participants_fetch: Option<(
+        u64,
+        tokio::task::JoinHandle<Result<Option<(String, String)>, String>>,
+    )>,
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]

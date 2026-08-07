@@ -41,9 +41,8 @@ pub async fn get_resource(
     Path(res): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    if !braid_http::server::wants_subscribe(|name| {
-        headers.get(name).and_then(|v| v.to_str().ok())
-    }) {
+    if !braid_http::server::wants_subscribe(|name| headers.get(name).and_then(|v| v.to_str().ok()))
+    {
         return match hub.current_json(&res).await {
             Some(val) => (StatusCode::OK, Json(val)).into_response(),
             None => StatusCode::NOT_FOUND.into_response(),

@@ -19,12 +19,18 @@ fn cargo_lock_versions(package_name: &str) -> Vec<String> {
             in_target_package = false;
             continue;
         }
-        if let Some(name) = line.strip_prefix("name = \"").and_then(|s| s.strip_suffix('"')) {
+        if let Some(name) = line
+            .strip_prefix("name = \"")
+            .and_then(|s| s.strip_suffix('"'))
+        {
             in_target_package = name == package_name;
             continue;
         }
         if in_target_package {
-            if let Some(version) = line.strip_prefix("version = \"").and_then(|s| s.strip_suffix('"')) {
+            if let Some(version) = line
+                .strip_prefix("version = \"")
+                .and_then(|s| s.strip_suffix('"'))
+            {
                 versions.push(version.to_string());
             }
         }

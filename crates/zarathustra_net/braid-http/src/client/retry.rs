@@ -136,8 +136,8 @@ impl RetryState {
         status_text: Option<&str>,
         retry_after: Option<Duration>,
     ) -> RetryDecision {
-        let says_missing_parents = status_text
-            .is_some_and(|t| t.to_ascii_lowercase().contains("missing parents"));
+        let says_missing_parents =
+            status_text.is_some_and(|t| t.to_ascii_lowercase().contains("missing parents"));
         if says_missing_parents {
             return self.decide_retry(retry_after);
         }

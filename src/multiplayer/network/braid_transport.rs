@@ -739,7 +739,11 @@ mod tests {
         assert_eq!(stream_of(&chat), "chat");
         heads.set_head(stream_of(&chat), version_of(&chat).unwrap());
 
-        assert_eq!(heads.head("moves"), moves_head, "chat must not move the moves head");
+        assert_eq!(
+            heads.head("moves"),
+            moves_head,
+            "chat must not move the moves head"
+        );
         assert_ne!(heads.head("chat"), GENESIS_PARENT);
         assert_ne!(heads.head("chat"), moves_head);
     }

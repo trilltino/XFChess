@@ -61,10 +61,7 @@ pub fn finish_by_draw_agreement(game: &mut Game, accepter: Pubkey, now: i64) -> 
     let offerer = game
         .draw_offered_by
         .ok_or(GameErrorCode::NoDrawOfferPending)?;
-    require!(
-        accepter != offerer,
-        GameErrorCode::CannotAcceptOwnDrawOffer
-    );
+    require!(accepter != offerer, GameErrorCode::CannotAcceptOwnDrawOffer);
 
     game.result = GameResult::Draw;
     game.status = GameStatus::Finished;
@@ -186,7 +183,11 @@ mod tests {
 
         record_draw_offer(&mut game, white).unwrap();
         assert_eq!(game.draw_offered_by, Some(white));
-        assert_eq!(game.status, GameStatus::Active, "offering alone doesn't end the game");
+        assert_eq!(
+            game.status,
+            GameStatus::Active,
+            "offering alone doesn't end the game"
+        );
 
         finish_by_draw_agreement(&mut game, black, 10).unwrap();
 
@@ -286,7 +287,10 @@ mod tests {
             finish_by_timeout(&mut manual, 10).unwrap();
             let resolved = finish_by_timeout_if_expired(&mut cranked, 10).unwrap();
 
-            assert!(resolved, "crank should resolve an expired game (turn={turn})");
+            assert!(
+                resolved,
+                "crank should resolve an expired game (turn={turn})"
+            );
             assert_eq!(cranked.status, manual.status);
             assert_eq!(cranked.result, manual.result);
         }

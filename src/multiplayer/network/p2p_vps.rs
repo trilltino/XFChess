@@ -630,7 +630,10 @@ fn handle_vps_responses(
                 // GAME_START and is what actually transitions both sides into InGame.
             }
 
-            VpsResponse::JoinerGameStart { game_id, host_display_name } => {
+            VpsResponse::JoinerGameStart {
+                game_id,
+                host_display_name,
+            } => {
                 // Ignore stale signals (e.g. after the joiner already left/cancelled).
                 if vps_state.joining_game_id.as_deref() != Some(game_id.as_str()) {
                     continue;
@@ -693,9 +696,10 @@ fn send_vps_messages(
         return;
     }
 
-    let (Some(id), Some(secret_key_bytes)) =
-        (network_state.node_id.as_ref(), network_state.secret_key_bytes)
-    else {
+    let (Some(id), Some(secret_key_bytes)) = (
+        network_state.node_id.as_ref(),
+        network_state.secret_key_bytes,
+    ) else {
         return;
     };
     let node_id = bs58::encode(id.as_bytes()).into_string();

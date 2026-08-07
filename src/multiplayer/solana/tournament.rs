@@ -936,8 +936,14 @@ pub fn register_tournament(
         DEFAULT_ELO,
     );
 
-    let sig = sign_and_send_via_tauri(rpc_url, wallet_pubkey, &[ix], &[], "Registering for tournament")
-        .map_err(|e| format!("register_player tx: {e}"))?;
+    let sig = sign_and_send_via_tauri(
+        rpc_url,
+        wallet_pubkey,
+        &[ix],
+        &[],
+        "Registering for tournament",
+    )
+    .map_err(|e| format!("register_player tx: {e}"))?;
 
     info!(
         "[TOURNAMENT] register_player confirmed for tournament {} ({})",

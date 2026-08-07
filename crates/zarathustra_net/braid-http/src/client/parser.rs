@@ -527,7 +527,10 @@ mod tests {
         let messages = parser.feed(data).unwrap();
         assert!(!messages.is_empty());
         assert_eq!(messages[0].body, Some(Bytes::from_static(b"Hello")));
-        assert!(messages[0].patches.is_none(), "a body is not a patch update");
+        assert!(
+            messages[0].patches.is_none(),
+            "a body is not a patch update"
+        );
     }
 
     #[test]
@@ -535,7 +538,9 @@ mod tests {
         // The distinction `braid-fuzz` tests: `Patches: 0` carries no body, and
         // must not be mistaken for a snapshot whose body happens to be empty.
         let mut parser = MessageParser::new();
-        let messages = parser.feed(b"Version: \"v1\"\r\nPatches: 0\r\n\r\n").unwrap();
+        let messages = parser
+            .feed(b"Version: \"v1\"\r\nPatches: 0\r\n\r\n")
+            .unwrap();
 
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].patches, Some(vec![]));

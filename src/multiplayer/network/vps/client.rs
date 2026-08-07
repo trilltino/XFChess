@@ -53,8 +53,7 @@ fn default_headers() -> reqwest::header::HeaderMap {
     // Preferred per-user auth: a backend JWT obtained after wallet login.
     if let Ok(guard) = AUTH_TOKEN.read() {
         if let Some(token) = guard.as_ref() {
-            if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
-            {
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
                 h.insert(reqwest::header::AUTHORIZATION, value);
             }
         }

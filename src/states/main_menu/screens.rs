@@ -38,7 +38,10 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         ns.node_id
             .map(|id| bs58::encode(id.as_bytes()).into_string())
     });
-    lobby.cached_secret_key_bytes = ctx.network_state.as_ref().and_then(|ns| ns.secret_key_bytes);
+    lobby.cached_secret_key_bytes = ctx
+        .network_state
+        .as_ref()
+        .and_then(|ns| ns.secret_key_bytes);
 
     ui.vertical_centered(|ui| {
         Layout::section_space(ui);
@@ -3348,7 +3351,10 @@ fn start_p2p_host_game(ctx: &mut MainMenuUIContext) {
                 .map(|id| bs58::encode(id.as_bytes()).into_string())
         })
         .unwrap_or_default();
-    let secret_key_bytes = ctx.network_state.as_ref().and_then(|ns| ns.secret_key_bytes);
+    let secret_key_bytes = ctx
+        .network_state
+        .as_ref()
+        .and_then(|ns| ns.secret_key_bytes);
     // Carries the host's real name to the joiner — GAME_START previously had
     // no payload at all, so the joiner never learned who they were playing
     // (see initialize_players/opponent_display_name).

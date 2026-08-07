@@ -633,7 +633,10 @@ fn handle_game_start_delegation(
         // Free (non-wagered) games never need ER delegation — skip entirely
         // so a failure here does not spam the "Ephemeral Rollup sync issue"
         // popup during normal casual play.
-        let is_wagered = competitive.as_ref().map(|c| c.stake_amount > 0).unwrap_or(false);
+        let is_wagered = competitive
+            .as_ref()
+            .map(|c| c.stake_amount > 0)
+            .unwrap_or(false);
         if !is_wagered {
             info!(
                 "[DELEGATION] Game {} is free-rated — skipping ER delegation",

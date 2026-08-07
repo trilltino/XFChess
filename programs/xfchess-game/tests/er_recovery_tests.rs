@@ -267,9 +267,14 @@ async fn recover_stuck_delegation_emits_audit_event() {
         .process_transaction_with_metadata(tx)
         .await
         .expect("transport-level failure");
-    result.result.expect("recover_stuck_delegation should succeed");
+    result
+        .result
+        .expect("recover_stuck_delegation should succeed");
 
-    let logs = result.metadata.expect("metadata must be present").log_messages;
+    let logs = result
+        .metadata
+        .expect("metadata must be present")
+        .log_messages;
     let event: StuckDelegationRecovered =
         find_event(&logs).expect("StuckDelegationRecovered event must be emitted");
 

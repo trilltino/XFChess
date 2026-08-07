@@ -33,9 +33,9 @@ use async_channel::Receiver;
 use braid_http::client::Subscription;
 use braid_http::types::{BraidRequest, Update};
 use braid_http::BraidClient;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, warn};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Subscribes to Braid resource streams and decodes them as [`ChessMessage`]s.
 ///

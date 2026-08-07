@@ -38,7 +38,8 @@ impl DurationHistogram {
                 self.bucket_counts[i].fetch_add(1, Ordering::Relaxed);
             }
         }
-        self.sum_ms.fetch_add(duration_ms.round() as u64, Ordering::Relaxed);
+        self.sum_ms
+            .fetch_add(duration_ms.round() as u64, Ordering::Relaxed);
         self.count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -123,7 +124,11 @@ impl Metrics {
     /// Record an HTTP request (endpoint = "METHOD /path").
     pub fn record_http_request(&self, endpoint: &str, status: u16, duration_ms: f64) {
         bump(&self.http_requests_total, &(endpoint.to_string(), status));
-        observe(&self.http_request_duration_ms, &endpoint.to_string(), duration_ms);
+        observe(
+            &self.http_request_duration_ms,
+            &endpoint.to_string(),
+            duration_ms,
+        );
     }
 
     /// Record a Solana RPC call (e.g. `getSlot`, `getMultipleAccounts`).
@@ -163,7 +168,12 @@ impl Metrics {
     /// Update fee payer balance (called from the `/health/detailed` fee-payer
     /// check, keyed by fee-payer pool index).
     pub fn update_feepayer_balance(&self, key_index: usize, lamports: u64) {
-        if let Some(gauge) = self.feepayer_balance_lamports.read().unwrap().get(&key_index) {
+        if let Some(gauge) = self
+            .feepayer_balance_lamports
+            .read()
+            .unwrap()
+            .get(&key_index)
+        {
             gauge.store(lamports, Ordering::Relaxed);
             return;
         }
@@ -211,7 +221,8 @@ impl Metrics {
             ));
         }
 
-        output.push_str("\n# HELP http_request_duration_ms HTTP request duration in milliseconds\n");
+        output
+            .push_str("\n# HELP http_request_duration_ms HTTP request duration in milliseconds\n");
         output.push_str("# TYPE http_request_duration_ms histogram\n");
         for (endpoint, hist) in self.http_request_duration_ms.read().unwrap().iter() {
             hist.write_prometheus(
@@ -264,7 +275,9 @@ impl Metrics {
 
         output.push_str("\n# HELP transactions_failed_total Total transactions failed\n");
         output.push_str("# TYPE transactions_failed_total counter\n");
-        for ((chain_type, error_type), count) in self.transactions_failed_total.read().unwrap().iter() {
+        for ((chain_type, error_type), count) in
+            self.transactions_failed_total.read().unwrap().iter()
+        {
             output.push_str(&format!(
                 "transactions_failed_total{{chain=\"{}\",error_type=\"{}\"}} {}\n",
                 chain_type,
@@ -273,7 +286,9 @@ impl Metrics {
             ));
         }
 
-        output.push_str("\n# HELP transaction_confirmation_ms Transaction confirmation time in milliseconds\n");
+        output.push_str(
+            "\n# HELP transaction_confirmation_ms Transaction confirmation time in milliseconds\n",
+        );
         output.push_str("# TYPE transaction_confirmation_ms histogram\n");
         for (chain_type, hist) in self.transaction_confirmation_ms.read().unwrap().iter() {
             hist.write_prometheus(
@@ -313,8 +328,12 @@ mod tests {
         assert!(out.contains("http_requests_total{endpoint=\"GET /health\",status=\"500\"} 1"));
         // 3ms and 12ms both land at-or-under the 25ms bucket; the 4000ms one only
         // shows up in +Inf.
-        assert!(out.contains("http_request_duration_ms_bucket{endpoint=\"GET /health\",le=\"25\"} 2"));
-        assert!(out.contains("http_request_duration_ms_bucket{endpoint=\"GET /health\",le=\"+Inf\"} 3"));
+        assert!(
+            out.contains("http_request_duration_ms_bucket{endpoint=\"GET /health\",le=\"25\"} 2")
+        );
+        assert!(
+            out.contains("http_request_duration_ms_bucket{endpoint=\"GET /health\",le=\"+Inf\"} 3")
+        );
         assert!(out.contains("http_request_duration_ms_count{endpoint=\"GET /health\"} 3"));
     }
 
@@ -328,7 +347,9 @@ mod tests {
         let out = m.export_prometheus_format();
         assert!(out.contains("transactions_submitted_total{chain=\"solana\"} 1"));
         assert!(out.contains("transactions_confirmed_total{chain=\"solana\"} 1"));
-        assert!(out.contains("transactions_failed_total{chain=\"solana\",error_type=\"RpcTimeout\"} 1"));
+        assert!(
+            out.contains("transactions_failed_total{chain=\"solana\",error_type=\"RpcTimeout\"} 1")
+        );
     }
 
     #[test]

@@ -848,18 +848,19 @@ mod tests {
     fn tournament_with_one_match(game_id: u64, completed_at: Option<i64>) -> TournamentRecord {
         let mut t = TournamentRecord::new(1, "t", 0);
         t.completed_at = completed_at;
-        t.matches.push(Some(crate::signing::storage::tournament::TournamentMatch {
-            match_index: 0,
-            round: 0,
-            player_white: Some("white".to_string()),
-            player_black: Some("black".to_string()),
-            winner: Some("white".to_string()),
-            game_id: Some(game_id),
-            status: crate::signing::storage::tournament::MatchStatus::Completed,
-            result_source: None,
-            next_match_for_winner: None,
-            next_match_slot: 0,
-        }));
+        t.matches
+            .push(Some(crate::signing::storage::tournament::TournamentMatch {
+                match_index: 0,
+                round: 0,
+                player_white: Some("white".to_string()),
+                player_black: Some("black".to_string()),
+                winner: Some("white".to_string()),
+                game_id: Some(game_id),
+                status: crate::signing::storage::tournament::MatchStatus::Completed,
+                result_source: None,
+                next_match_for_winner: None,
+                next_match_slot: 0,
+            }));
         t
     }
 

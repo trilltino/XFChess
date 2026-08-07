@@ -45,7 +45,11 @@ fn draw_profile_onboarding(
         return;
     }
     #[cfg(feature = "solana")]
-    if solana_state.as_ref().and_then(|s| s.wallet_pubkey).is_some() {
+    if solana_state
+        .as_ref()
+        .and_then(|s| s.wallet_pubkey)
+        .is_some()
+    {
         return;
     }
 

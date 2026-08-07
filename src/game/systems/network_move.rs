@@ -147,7 +147,10 @@ pub fn handle_network_moves(
                         );
                         // Ask the opponent to resend the authoritative FEN.
                         if let (Some(ns), Some(sess)) = (&network_state, &session) {
-                            let game_id = crate::multiplayer::network::online_game_session::numeric_game_id(&sess.game_id);
+                            let game_id =
+                                crate::multiplayer::network::online_game_session::numeric_game_id(
+                                    &sess.game_id,
+                                );
                             if let Some(tx) = &ns.message_sender {
                                 let _ = tx.send(NetworkMessage::ResyncRequest { game_id });
                             }

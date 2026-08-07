@@ -51,7 +51,9 @@ pub fn message_to_update(msg: Message) -> Update {
     // update has an empty patch list and is still a patch update.
     let mut builder = match (msg.body, msg.patches) {
         (_, Some(patches)) => Update::patched(version, patches),
-        (Some(body), None) => Update::snapshot(version, String::from_utf8_lossy(&body).into_owned()),
+        (Some(body), None) => {
+            Update::snapshot(version, String::from_utf8_lossy(&body).into_owned())
+        }
         (None, None) => Update::snapshot(version, ""),
     };
 
@@ -89,7 +91,10 @@ fn extract_version(headers: &std::collections::BTreeMap<String, String>) -> Opti
         // single, human-readable warning for this — don't double-log the
         // same event here. Headers are still useful when actually
         // debugging a protocol mismatch, so keep them at trace level.
-        tracing::trace!("[BraidHTTP] no version header found. Headers were: {:?}", headers);
+        tracing::trace!(
+            "[BraidHTTP] no version header found. Headers were: {:?}",
+            headers
+        );
     } else {
         tracing::debug!("[BraidHTTP] Parsed version: {:?}", version);
     }

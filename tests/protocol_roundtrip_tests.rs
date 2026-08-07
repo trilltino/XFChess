@@ -96,7 +96,11 @@ fn signer_pubkey_still_serializes_under_the_legacy_wire_name() {
     let back: NetworkMessage = serde_json::from_str(&json).expect("decode legacy payload");
     match back {
         NetworkMessage::Move { signer_pubkey, .. } => {
-            assert_eq!(signer_pubkey, vec![1, 2, 3], "value must survive the rename")
+            assert_eq!(
+                signer_pubkey,
+                vec![1, 2, 3],
+                "value must survive the rename"
+            )
         }
         _ => panic!("expected a Move"),
     }
