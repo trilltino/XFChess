@@ -544,6 +544,28 @@ async fn offchain_username_does_not_imply_onchain_profile() {
 /// lets other threads see the mutated value → flaky random failures.
 static RELAY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+struct RelaySharedSecretGuard {
+    previous: Option<String>,
+}
+
+impl RelaySharedSecretGuard {
+    fn set(value: &str) -> Self {
+        let previous = std::env::var("RELAY_SHARED_SECRET").ok();
+        std::env::set_var("RELAY_SHARED_SECRET", value);
+        Self { previous }
+    }
+}
+
+impl Drop for RelaySharedSecretGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            std::env::set_var("RELAY_SHARED_SECRET", previous);
+        } else {
+            std::env::remove_var("RELAY_SHARED_SECRET");
+        }
+    }
+}
+
 /// Dual-accept guard on the signing endpoints: a valid per-user JWT *or* the
 /// legacy relay secret is accepted; neither → 401. JWT callers are also
 /// authorized per-wallet on session creation. All RELAY_SHARED_SECRET handling
@@ -551,7 +573,7 @@ static RELAY_TEST_LOCK: Mutex<()> = Mutex::new(());
 #[tokio::test]
 async fn dual_accept_auth_guards_signing_endpoints() {
     let _guard = RELAY_TEST_LOCK.lock().unwrap();
-    std::env::set_var("RELAY_SHARED_SECRET", "e2e-relay-secret");
+    let _relay_secret = RelaySharedSecretGuard::set("e2e-relay-secret");
     let app = spawn_app().await;
 
     let move_body = json!({ "game_id": 1, "move_uci": "e2e4", "next_fen": "x", "nonce": 1 });
