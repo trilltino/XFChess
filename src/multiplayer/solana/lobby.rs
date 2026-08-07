@@ -721,7 +721,8 @@ async fn async_create_game_via_global_session(
     );
 
     let start = Instant::now();
-    fast_send_and_confirm(&rpc, &tx).map_err(|e| format!("global_create_game submit: {e}"))?;
+    fast_send_and_confirm(&rpc, &tx, Duration::from_secs(2))
+        .map_err(|e| format!("global_create_game submit: {e}"))?;
 
     info!(
         "[CREATE_GAME] global_create_game landed for game {} in {:?} (session-signed, no wallet popup)",
@@ -946,7 +947,8 @@ async fn async_join_game_via_global_session(
         &[&session_kp],
         blockhash,
     );
-    fast_send_and_confirm(&rpc, &tx).map_err(|e| format!("global_join_game submit: {e}"))?;
+    fast_send_and_confirm(&rpc, &tx, Duration::from_secs(2))
+        .map_err(|e| format!("global_join_game submit: {e}"))?;
 
     info!(
         "[JOIN_GAME] global_join_game landed for game {} (session-signed, no wallet popup)",
@@ -1324,6 +1326,7 @@ pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
 fn fast_send_and_confirm(
     rpc: &RpcClient,
     tx: &solana_sdk::transaction::Transaction,
+    max_confirm_wait: Duration,
 ) -> Result<Signature, String> {
     use solana_client::rpc_config::RpcSendTransactionConfig;
     let config = RpcSendTransactionConfig {
@@ -1335,10 +1338,14 @@ fn fast_send_and_confirm(
         .map_err(|e| format!("send_transaction: {e}"))?;
 
     let commitment = CommitmentConfig::confirmed();
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + max_confirm_wait;
     loop {
         if Instant::now() > deadline {
-            return Err(format!("confirmation timeout for signature {sig}"));
+            warn!(
+                "[SOLANA_TX] signature {sig} accepted by RPC but not confirmed within {:?}; continuing",
+                max_confirm_wait
+            );
+            return Ok(sig);
         }
         match rpc.get_signature_status_with_commitment(&sig, commitment) {
             Ok(Some(Ok(()))) => return Ok(sig),

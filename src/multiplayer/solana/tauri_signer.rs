@@ -15,7 +15,7 @@
 //! (e.g. "Joining game", "Placing wager") shown in the wallet popup instead
 //! of a generic "Awaiting signature" message.
 
-use bevy::prelude::info;
+use bevy::prelude::{info, warn};
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
@@ -276,7 +276,8 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
 }
 
 /// Deserialise the wire-format signed bytes into a `VersionedTransaction` and
-/// submit it to the Solana RPC, then block until confirmed.
+/// submit it to the Solana RPC. Wait briefly for an immediate failure, but do
+/// not block the UI on devnet confirmation latency.
 fn submit_signed_to_rpc(rpc_url: &str, signed_bytes: &[u8]) -> Result<Signature, String> {
     use solana_client::rpc_config::RpcSendTransactionConfig;
     use std::time::{Duration, Instant};
@@ -294,10 +295,15 @@ fn submit_signed_to_rpc(rpc_url: &str, signed_bytes: &[u8]) -> Result<Signature,
         .map_err(|e| format!("send_transaction: {}", e))?;
 
     let commitment = CommitmentConfig::confirmed();
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let max_confirm_wait = Duration::from_secs(2);
+    let deadline = Instant::now() + max_confirm_wait;
     loop {
         if Instant::now() > deadline {
-            return Err(format!("confirmation timeout for signature {sig}"));
+            warn!(
+                "[TAURI-SIGN] signature {sig} accepted by RPC but not confirmed within {:?}; continuing",
+                max_confirm_wait
+            );
+            return Ok(sig);
         }
         match rpc.get_signature_status_with_commitment(&sig, commitment) {
             Ok(Some(Ok(()))) => return Ok(sig),
