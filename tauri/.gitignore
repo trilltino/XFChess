@@ -87,6 +87,7 @@ private/
 
 # Package manager lock files (keep Cargo.lock, ignore others)
 package-lock.json
+!viz/package-lock.json
 yarn.lock
 bun.lockb
 
