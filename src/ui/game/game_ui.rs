@@ -426,20 +426,6 @@ pub fn game_status_ui(mut params: GameUIParams) {
         }
     }
 
-    // --- Main game info panel (Lichess-style right sidebar) ---
-    egui::SidePanel::right("game_panel")
-        .resizable(false)
-        .show_separator_line(false)
-        .exact_width(Layout::SIDE_PANEL_WIDTH)
-        .frame(
-            egui::Frame::default()
-                .fill(UiColors::BG_OVERLAY)
-                .inner_margin(0.0)
-                .stroke(egui::Stroke::NONE),
-        )
-        .show(&ctx, |ui| {
-            render_game_right_panel(ui, &mut params);
-        });
 }
 
 // ── Lichess-style right panel helpers ────────────────────────────────────────
@@ -552,16 +538,17 @@ pub(crate) fn resolve_player_names(
     (white_name, white_elo, black_name, black_elo)
 }
 
-/// Right sidebar: "MOVES" header, scrollable move list, then Resign / Offer
-/// Draw controls. Player identity/clock/captures now live in the center
-/// player bars above/below the board — see `crate::ui::game::player_bar`.
-fn render_game_right_panel(
+/// "MOVES" header, scrollable move list, then Resign / Offer Draw controls.
+/// Rendered in the top-left panel, below the match-info card. Player
+/// identity/clock/captures live in the center player bars above/below the
+/// board — see `crate::ui::game::player_bar`.
+pub(crate) fn render_moves_and_controls(
     ui: &mut egui::Ui,
     params: &mut crate::ui::system_params::game_ui::GameUIParams,
 ) {
     use crate::game::resources::TurnPhase;
 
-    vertically_center(ui, egui::Id::new("right_panel_vcenter"), |ui| {
+    {
         let is_online = matches!(
             *params.game_mode,
             crate::core::GameMode::OnlineMultiplayer
@@ -674,7 +661,7 @@ fn render_game_right_panel(
                     }
                 }
             });
-    });
+    }
 }
 
 pub(crate) fn render_compact_user_row(
@@ -746,20 +733,13 @@ pub(crate) fn render_clock_bar(
     let low_time = time_secs < 10.0;
     let bg_fill = if is_active && low_time {
         egui::Color32::from_rgba_unmultiplied(130, 18, 18, 230)
-    } else if is_active {
-        egui::Color32::from_rgba_unmultiplied(30, 55, 42, 220)
     } else {
         egui::Color32::from_rgba_unmultiplied(22, 22, 28, 200)
     };
-    let (font_size, color) = if is_active {
-        let c = if low_time {
-            egui::Color32::from_rgb(255, 90, 90)
-        } else {
-            egui::Color32::from_gray(240)
-        };
-        (38.0_f32, c)
+    let (font_size, color) = if is_active && low_time {
+        (24.0_f32, egui::Color32::from_rgb(255, 90, 90))
     } else {
-        (24.0_f32, egui::Color32::from_gray(100))
+        (24.0_f32, egui::Color32::from_gray(is_active as u8 * 140 + 100))
     };
 
     egui::Frame::default()

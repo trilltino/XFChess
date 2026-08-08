@@ -70,6 +70,9 @@ struct GameSnapshot {
     /// Unix timestamp of the game's last on-chain update (last move, or last
     /// commit while delegated). Used only for the stale-delegation gauge.
     updated_at: i64,
+    /// Flat platform fee (lamports) set at creation time — the amount
+    /// `settle_finished_game` actually pays to `treasury_vault` on finalize.
+    country_fee: u64,
 }
 
 /// Walks the borsh layout of the Game account (8-byte Anchor discriminator,
@@ -112,7 +115,8 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
     }
     o += 1; // game_type
     o += 1; // match_type
-    o += 8; // country_fee
+    let country_fee = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
+    o += 8;
     let base_time_seconds = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
     o += 8;
     let increment_seconds = u16::from_le_bytes(data.get(o..o + 2)?.try_into().ok()?);
@@ -142,6 +146,7 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
         is_delegated,
         tournament_id,
         updated_at,
+        country_fee,
     })
 }
 
@@ -887,9 +892,17 @@ async fn finalize_on_chain(
 
     worker_metrics::SETTLEMENT_FINALIZED_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     info!(
-        "[settlement] game {} auto-finalized, winner={:?}, sig {}",
+        "[FINALIZED] game {} auto-settled on devnet — winner={:?}, payout sig {}",
         game_id, winner_side, sig
     );
+    if snap.country_fee > 0 {
+        let treasury_vault =
+            Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &program_id).0;
+        info!(
+            "[TREASURY] game {} paid {} lamports platform fee to treasury_vault {}",
+            game_id, snap.country_fee, treasury_vault
+        );
+    }
 
     // Mirror the result into the SQLite game record.
     let repo = GameRepository::new(state.store.pool());
@@ -916,6 +929,23 @@ async fn finalize_on_chain(
             game_id, e
         );
     }
+
+    // Same PGN assembly as the HTTP finalize route (routes::main::finalize_game)
+    // — most games settle through this auto-worker, not the manual route, so
+    // this is the path that actually needs to produce a tagged PGN.
+    crate::signing::game_pgn::assemble_and_store_pgn(
+        &repo,
+        &state.elo_cache,
+        &game_id.to_string(),
+        &white,
+        &black,
+        white_username.as_deref(),
+        black_username.as_deref(),
+        winner_side,
+    )
+    .await;
+    state.elo_cache.invalidate(&white);
+    state.elo_cache.invalidate(&black);
 
     // Same anti-cheat path as the HTTP finalize route — auto-settled games
     // must not skip analysis (crash-and-settle is the cheater's exit).

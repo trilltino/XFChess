@@ -40,10 +40,18 @@ impl PresenceStore {
         Self::default()
     }
 
-    /// Records/replaces a node's presence.
+    /// Records/replaces a node's presence. Only logs when the status
+    /// actually changes (e.g. Online -> InGame) — repeat heartbeats that
+    /// don't change anything stay silent so logs reflect real events.
     pub fn upsert(&self, p: Presence) {
         if let Ok(mut map) = self.inner.write() {
-            info!("[Presence] {} is {:?}", p.display_name, p.status);
+            let changed = map
+                .get(&p.node_id)
+                .map(|prev| prev.status != p.status)
+                .unwrap_or(true);
+            if changed {
+                info!("[Presence] {} is {:?}", p.display_name, p.status);
+            }
             map.insert(p.node_id.clone(), p);
         }
     }

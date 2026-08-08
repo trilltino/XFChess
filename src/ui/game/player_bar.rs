@@ -78,11 +78,18 @@ impl Default for PlayerBarsCache {
 pub fn build_player_bar_data(
     params: &crate::ui::system_params::game_ui::GameUIParams,
 ) -> (PlayerBarData, PlayerBarData) {
-    let local_color = params
-        .p2p_conn
-        .as_ref()
-        .and_then(|c| c.player_color)
-        .unwrap_or(PieceColor::White);
+    let local_color = if *params.game_mode == crate::core::GameMode::SinglePlayer {
+        match params.ai_params.ai_config.mode.ai_color() {
+            PieceColor::White => PieceColor::Black,
+            PieceColor::Black => PieceColor::White,
+        }
+    } else {
+        params
+            .p2p_conn
+            .as_ref()
+            .and_then(|c| c.player_color)
+            .unwrap_or(PieceColor::White)
+    };
     let opp_color = match local_color {
         PieceColor::White => PieceColor::Black,
         PieceColor::Black => PieceColor::White,

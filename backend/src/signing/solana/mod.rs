@@ -50,6 +50,8 @@ pub const PROFILE_SEED: &[u8] = b"profile";
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 /// PDA seed for tournament accounts
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";
+/// PDA seed for the single global platform treasury vault
+pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
 /// MagicBlock magic context account (ER-only)
 pub const MAGIC_CONTEXT_PUBKEY: &str = "MagicContext1111111111111111111111111111111";

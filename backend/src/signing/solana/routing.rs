@@ -76,9 +76,16 @@ pub fn layer_of(instr: Instr) -> Layer {
 /// every Game-lifecycle handler should go through instead of picking
 /// `config.solana_rpc_url` / `config.magic_router_rpc_url` by hand.
 pub fn rpc_for(config: &SigningConfig, instr: Instr) -> RpcClient {
+    let url = rpc_url_for(config, instr);
     match layer_of(instr) {
-        Layer::Base => make_rpc(&config.solana_rpc_url),
-        Layer::Er => make_rpc(&config.magic_router_rpc_url),
+        Layer::Base => {
+            tracing::info!("[ROUTING] {instr:?} -> Base layer {url}");
+            make_rpc(&url)
+        }
+        Layer::Er => {
+            tracing::info!("[ROUTING] {instr:?} -> Ephemeral Rollup {url}");
+            make_rpc(&url)
+        }
     }
 }
 

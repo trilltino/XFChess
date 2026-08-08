@@ -36,6 +36,10 @@ struct SignReq<'a> {
 #[derive(Deserialize)]
 pub(super) struct SigResp {
     pub sig: String,
+    /// RPC endpoint the tx was actually submitted to — only populated by
+    /// ER-routed backend responses (record_move, undelegate_game).
+    #[serde(default)]
+    pub er_endpoint: String,
 }
 
 #[derive(Deserialize)]
