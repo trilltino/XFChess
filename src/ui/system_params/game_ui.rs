@@ -81,4 +81,5 @@ pub struct GameUIParams<'w, 's> {
         bevy::prelude::MessageWriter<'w, crate::multiplayer::network::PublishOnlineChat>,
     pub player_identity: Option<Res<'w, crate::states::main_menu::PlayerIdentity>>,
     pub player_bars_cache: ResMut<'w, crate::ui::game::player_bar::PlayerBarsCache>,
+    pub camera_lock: ResMut<'w, crate::game::camera_modes::CameraLockState>,
 }

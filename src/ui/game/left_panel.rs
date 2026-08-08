@@ -23,11 +23,18 @@ pub fn render_game_left_panel(
     ui: &mut egui::Ui,
     params: &mut crate::ui::system_params::game_ui::GameUIParams,
 ) {
-    let local_color = params
-        .p2p_conn
-        .as_ref()
-        .and_then(|c| c.player_color)
-        .unwrap_or(PieceColor::White);
+    let local_color = if *params.game_mode == GameMode::SinglePlayer {
+        match params.ai_params.ai_config.mode.ai_color() {
+            PieceColor::White => PieceColor::Black,
+            PieceColor::Black => PieceColor::White,
+        }
+    } else {
+        params
+            .p2p_conn
+            .as_ref()
+            .and_then(|c| c.player_color)
+            .unwrap_or(PieceColor::White)
+    };
     let opp_color = match local_color {
         PieceColor::White => PieceColor::Black,
         PieceColor::Black => PieceColor::White,
@@ -38,15 +45,11 @@ pub fn render_game_left_panel(
         GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
     );
 
-    if is_online {
-        render_match_info_card(ui, params, local_color, opp_color, is_spectating);
-    } else {
-        // No chat below to fill the panel, so center the match-info card
-        // in the panel instead of leaving it pinned to the top.
-        vertically_center(ui, egui::Id::new("left_panel_vcenter"), |ui| {
-            render_match_info_card(ui, params, local_color, opp_color, is_spectating);
-        });
-    }
+    // Match-info card and moves/controls are both pinned to the top of the
+    // panel, just below the top HUD bar — not vertically centered.
+    render_match_info_card(ui, params, local_color, opp_color, is_spectating);
+    ui.add_space(10.0);
+    crate::ui::game::game_ui::render_moves_and_controls(ui, params);
 
     // ── Chat (online games only), anchored lower in the panel ──────────────
     if is_online {
@@ -100,8 +103,6 @@ fn render_match_info_card(
         .fill(UiColors::BG_MID)
         .inner_margin(egui::Margin::symmetric(14, 12))
         .show(ui, |ui| {
-            pill(ui, "MATCH", UiColors::ACCENT, egui::Color32::WHITE);
-            ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(headline.to_uppercase())
                     .size(TextSize::MD)

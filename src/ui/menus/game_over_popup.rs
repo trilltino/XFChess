@@ -116,6 +116,7 @@ pub fn cache_pgn_on_game_over(
     history: Res<MoveHistory>,
     game_over: Res<GameOverState>,
     game_mode: Res<crate::core::GameMode>,
+    players: Res<crate::game::resources::player::Players>,
     mut cached: ResMut<CachedGamePgn>,
 ) {
     let pgn_result = match game_over.winner() {
@@ -123,7 +124,9 @@ pub fn cache_pgn_on_game_over(
         Some(PieceColor::Black) => "0-1",
         None => "1/2-1/2",
     };
-    let pgn = build_pgn(&history, pgn_result);
+    let white_name = players.current(PieceColor::White).name.clone();
+    let black_name = players.current(PieceColor::Black).name.clone();
+    let pgn = build_pgn(&history, pgn_result, &white_name, &black_name);
     cached.pgn_string = pgn_to_string(&pgn);
     cached.final_fen = build_final_fen(&history);
     cached.pgn = Some(pgn);
@@ -173,7 +176,12 @@ fn elo_tier(elo: u32) -> Option<&'static str> {
 /// Convert the game's MoveHistory to a `ParsedPgnGame` using the engine
 /// to derive proper SAN notation.  Promotions default to Queen because
 /// MoveRecord doesn't store the promoted-to piece.
-fn build_pgn(history: &MoveHistory, result_str: &str) -> nimzovich_engine::ParsedPgnGame {
+fn build_pgn(
+    history: &MoveHistory,
+    result_str: &str,
+    white_name: &str,
+    black_name: &str,
+) -> nimzovich_engine::ParsedPgnGame {
     use crate::game::components::PieceType;
     use nimzovich_engine::{do_move_with_promo, move_to_san, new_game_no_tt};
     use std::collections::BTreeMap;
@@ -196,9 +204,17 @@ fn build_pgn(history: &MoveHistory, result_str: &str) -> nimzovich_engine::Parse
     }
 
     let mut tags = BTreeMap::new();
-    tags.insert("Event".to_string(), "XFChess Game".to_string());
-    tags.insert("Site".to_string(), "xfchess.app".to_string());
-    tags.insert("Date".to_string(), chrono_or_unknown());
+    tags.insert(
+        "Event".to_string(),
+        format!("{} vs {}", white_name, black_name),
+    );
+    tags.insert("Site".to_string(), "XFChess".to_string());
+    tags.insert(
+        "Date".to_string(),
+        chrono::Local::now().format("%Y.%m.%d").to_string(),
+    );
+    tags.insert("White".to_string(), white_name.to_string());
+    tags.insert("Black".to_string(), black_name.to_string());
     tags.insert("Result".to_string(), result_str.to_string());
 
     nimzovich_engine::ParsedPgnGame {
@@ -209,15 +225,10 @@ fn build_pgn(history: &MoveHistory, result_str: &str) -> nimzovich_engine::Parse
     }
 }
 
-fn chrono_or_unknown() -> String {
-    // No chrono dep — use a placeholder date.
-    "????.??.??".to_string()
-}
-
 /// Render a PGN string from a `ParsedPgnGame`.
 pub fn pgn_to_string(pgn: &nimzovich_engine::ParsedPgnGame) -> String {
     let mut out = String::new();
-    for (k, v) in &pgn.tags {
+    for (k, v) in nimzovich_engine::ordered_tags(&pgn.tags) {
         out.push_str(&format!("[{} \"{}\"]\n", k, v));
     }
     out.push('\n');
@@ -265,6 +276,15 @@ pub fn pgn_to_string(pgn: &nimzovich_engine::ParsedPgnGame) -> String {
 
 // ── Full result popup ─────────────────────────────────────────────────────────
 
+/// Opaque full-screen backdrop so the frozen 3D board (and anything left
+/// highlighted on it at the moment the game ended) isn't visible behind the
+/// game-over popup. Painted first so the popup window draws on top of it.
+fn paint_black_backdrop(ctx: &egui::Context) {
+    egui::CentralPanel::default()
+        .frame(egui::Frame::default().fill(egui::Color32::BLACK))
+        .show(ctx, |_ui| {});
+}
+
 pub fn game_over_popup_system(
     mut contexts: EguiContexts,
     game_over: Res<GameOverState>,
@@ -290,6 +310,7 @@ pub fn game_over_popup_system(
     let alpha: u8 = 220;
 
     let Ok(ctx) = contexts.ctx_mut() else { return };
+    paint_black_backdrop(ctx);
 
     // ── colour palette ────────────────────────────────────────────────────────
     let text_primary = egui::Color32::from_rgba_unmultiplied(240, 240, 240, alpha);
@@ -770,8 +791,15 @@ pub fn game_over_popup_system(
 
     if save_pgn {
         let pgn_text = cached_pgn.pgn_string.clone();
-        let base = dirs::document_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let dir = base.join("xfchess");
+        // Save under the active local profile's own subfolder so each
+        // profile's PGN history stays separate; falls back to the shared
+        // `Documents/xfchess/` folder if no profile is active yet.
+        let dir = match crate::multiplayer::network::identity::load_active_profile() {
+            Some(name) => crate::multiplayer::network::identity::profile_pgn_dir(&name),
+            None => dirs::document_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("xfchess"),
+        };
         let save_result = std::fs::create_dir_all(&dir).and_then(|_| {
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -839,6 +867,7 @@ pub fn spectator_game_over_overlay(
     let alpha: u8 = 220;
 
     let Ok(ctx) = contexts.ctx_mut() else { return };
+    paint_black_backdrop(ctx);
 
     let text_p = egui::Color32::from_rgba_unmultiplied(240, 240, 240, alpha);
     let text_s = egui::Color32::from_rgba_unmultiplied(160, 160, 160, alpha);

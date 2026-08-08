@@ -1,17 +1,20 @@
 //! Game over screen plugin
 //!
 //! Displayed when a game concludes (checkmate, stalemate, or resignation).
-//! Shows a small translucent popup with game results and cinematic camera in background.
+//! The board/pieces/camera are left exactly where they were when the game
+//! ended (see `cleanup_in_game` in `core/state_lifecycle.rs`) — this plugin
+//! records stats and clears the pulsing check-highlight light so it doesn't
+//! persist into the frozen board. The popup plugin covers the frozen scene
+//! with an opaque background (see `ui::menus::game_over_popup`).
 //! For Solana wager games, displays detailed fee breakdown from smart contract.
 
 use crate::core::GameState;
-use crate::game::camera_modes::{CameraViewMode, CinematicSequence};
 use crate::game::resources::{GameOverState, MoveHistory};
-use crate::game::view_mode::ViewMode;
+use crate::rendering::effects::CheckHighlightLight;
 use crate::ui::menus::game_over_popup::GameOverPopupPlugin;
 use bevy::prelude::*;
 
-/// Plugin for game over screen with cinematic camera and popup UI
+/// Plugin for game over screen: stats recording + popup UI
 pub struct GameOverPlugin;
 
 impl Plugin for GameOverPlugin {
@@ -19,74 +22,25 @@ impl Plugin for GameOverPlugin {
         // Add the popup plugin
         app.add_plugins(GameOverPopupPlugin);
 
-        // Setup camera and record stats when entering GameOver
         app.add_systems(
             OnEnter(GameState::GameOver),
-            (setup_cinematic_camera, record_game_stats),
+            (clear_check_highlight, record_game_stats),
         );
-
-        // Reset camera when leaving GameOver
-        app.add_systems(OnExit(GameState::GameOver), reset_camera_on_exit);
     }
 }
 
-/// Marker component for tracking that cinematic mode was auto-started
-#[derive(Component)]
-pub struct AutoCinematicMarker;
-
-/// Setup cinematic camera for game over screen
-/// Automatically switches to cinematic mode for dramatic effect
-fn setup_cinematic_camera(
-    mut camera_view_mode: ResMut<CameraViewMode>,
-    mut cinematic_sequence: ResMut<CinematicSequence>,
-    mut view_mode: ResMut<ViewMode>,
-    persistent_camera: Res<crate::PersistentEguiCamera>,
+/// The check-highlight light is normally cleared by `update_check_highlight_system`
+/// (InGame only) or `DespawnOnExit(InGame)`, but the latter is deliberately
+/// deferred until GameOver is exited (see `cleanup_in_game`) so the frozen
+/// board is visible — so a light left on at the moment of checkmate would
+/// otherwise persist through the whole GameOver screen.
+fn clear_check_highlight(
     mut commands: Commands,
+    lights: Query<Entity, With<CheckHighlightLight>>,
 ) {
-    debug!("[GAME_OVER] Auto-switching to cinematic camera mode");
-
-    // Switch to cinematic camera mode
-    *camera_view_mode = CameraViewMode::Cinematic;
-    // Force the 3D board for the game-over cinematic. `ViewMode` is the single
-    // source of truth; the piece-visibility system keys off its change.
-    *view_mode = ViewMode::Standard3D;
-
-    // Reset and start the cinematic sequence
-    cinematic_sequence.reset();
-
-    // Mark the camera as auto-started so we can reset it later
-    if let Some(camera_entity) = persistent_camera.entity {
-        commands.entity(camera_entity).insert(AutoCinematicMarker);
+    for entity in lights.iter() {
+        commands.entity(entity).despawn();
     }
-
-    debug!("[GAME_OVER] Cinematic camera activated");
-}
-
-/// Reset camera to default mode when leaving game over state
-fn reset_camera_on_exit(
-    mut camera_view_mode: ResMut<CameraViewMode>,
-    mut commands: Commands,
-    persistent_camera: Res<crate::PersistentEguiCamera>,
-    marked_cameras: Query<Entity, With<AutoCinematicMarker>>,
-) {
-    info!("[GAME_OVER] Resetting camera to default mode");
-
-    // Reset camera view mode to Default
-    *camera_view_mode = CameraViewMode::Default;
-
-    // Remove the auto-cinematic marker from camera
-    for entity in marked_cameras.iter() {
-        commands.entity(entity).remove::<AutoCinematicMarker>();
-    }
-
-    // Also try to remove from persistent camera if it exists
-    if let Some(camera_entity) = persistent_camera.entity {
-        commands
-            .entity(camera_entity)
-            .remove::<AutoCinematicMarker>();
-    }
-
-    info!("[GAME_OVER] Camera reset complete");
 }
 
 /// Record game statistics when entering game over state

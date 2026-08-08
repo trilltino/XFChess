@@ -23,14 +23,40 @@ use ephemeral_rollups_sdk::pda::{
 /// The XFChess program ID on Solana
 pub const XFCHESS_PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
-/// Magic Block ER validator endpoint (used for the explorer link only)
-pub const MAGIC_BLOCK_ER_ENDPOINT: &str = "https://devnet-eu.magicblock.app";
+/// Magic Block explorer-link default (used for the explorer link only —
+/// actual move/undelegate RPC routing is owned by the backend, see
+/// MAGICBLOCK.md). Must track the backend's `magic_router_rpc_url` default
+/// (`backend/src/signing/config.rs`), NOT `ER_RPC_URL` — `record_move` and
+/// `undelegate` are routed through the Magic Router
+/// (`https://devnet-router.magicblock.app`), never the bare ER validator
+/// URL, so a link built from that URL would 404 or point at the wrong node.
+/// If the backend's `MAGIC_ROUTER_RPC_URL` env override is ever changed
+/// from its default, this constant drifts — this is a known limitation of
+/// hardcoding it client-side rather than having the backend echo back the
+/// URL it actually used.
+pub const MAGIC_BLOCK_ER_ENDPOINT: &str = "https://devnet-router.magicblock.app";
 
 /// Solana Explorer with custom RPC for viewing ER transactions
 pub const MAGIC_BLOCK_EXPLORER: &str = "https://explorer.solana.com";
 
 /// MagicBlock Delegation Program ID
 pub const DELEGATION_PROGRAM_ID: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
+
+/// Builds a Solana Explorer link that inspects `signature` against a custom
+/// RPC cluster pointed at the ER validator (`?cluster=custom&customUrl=...`)
+/// — per MagicBlock's own guidance, this is how you view an ER transaction
+/// in explorer.solana.com / solscan.io: point the explorer's RPC at the ER
+/// endpoint rather than the base cluster, since the tx never lands on devnet.
+/// Free function (not a `&self` method) so callers inside a spawned async
+/// task — which can't hold a `Res<MagicBlockResolver>` — can still build the
+/// link from a cloned endpoint string.
+pub fn er_explorer_url_for(er_endpoint: &str, signature: &str) -> String {
+    let endpoint = er_endpoint.trim_end_matches('/');
+    format!(
+        "{}/tx/{}?cluster=custom&customUrl={}",
+        MAGIC_BLOCK_EXPLORER, signature, endpoint,
+    )
+}
 
 /// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
 fn anchor_disc(fn_name: &str) -> [u8; 8] {
@@ -132,11 +158,12 @@ impl MagicBlockResolver {
 
     /// Returns the MagicBlock ER explorer URL for a given tx signature.
     pub fn er_explorer_url(&self, signature: &str) -> String {
-        let endpoint = self.config.er_endpoint.trim_end_matches('/');
-        format!(
-            "{}/tx/{}?cluster=custom&customUrl={}",
-            MAGIC_BLOCK_EXPLORER, signature, endpoint,
-        )
+        er_explorer_url_for(&self.config.er_endpoint, signature)
+    }
+
+    /// The configured ER validator endpoint (used to build explorer links).
+    pub fn er_endpoint(&self) -> &str {
+        &self.config.er_endpoint
     }
 
     /// Creates a `delegate_game` Anchor instruction matching the on-chain

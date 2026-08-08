@@ -177,7 +177,9 @@ fn handle_rollup_to_network_events(
     network_state: Res<OnlineNetworkState>,
     mut bridge: ResMut<RollupNetworkBridge>,
     rollup_manager: Res<EphemeralRollupManager>,
+    magicblock_resolver: Res<MagicBlockResolver>,
 ) {
+    let er_endpoint = magicblock_resolver.er_endpoint().to_string();
     for event in rollup_events.read() {
         match event {
             RollupEvent::BatchReady {
@@ -220,6 +222,7 @@ fn handle_rollup_to_network_events(
                 bridge.move_nonce += moves.len() as u64;
                 let moves_owned = moves.clone();
                 let fens_owned = next_fens.clone();
+                let er_endpoint = er_endpoint.clone();
                 info!(
                     "[VPS] Game-end direct submit: {} moves for game {}",
                     moves_owned.len(),
@@ -227,12 +230,21 @@ fn handle_rollup_to_network_events(
                 );
                 bevy::tasks::IoTaskPool::get()
                     .spawn(async move {
+                        use crate::multiplayer::rollup::magicblock::er_explorer_url_for;
                         use crate::multiplayer::vps_client;
                         for (i, (mv, fen)) in moves_owned.iter().zip(fens_owned.iter()).enumerate()
                         {
                             match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
-                                Ok(sig) => {
-                                    info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig)
+                                Ok((sig, resp_endpoint)) => {
+                                    let endpoint = if resp_endpoint.is_empty() {
+                                        &er_endpoint
+                                    } else {
+                                        &resp_endpoint
+                                    };
+                                    info!(
+                                        "[ER] Move {} for game {} delegated & recorded on Ephemeral Rollup, sig {} — inspect: {}",
+                                        mv, gid, sig, er_explorer_url_for(endpoint, &sig)
+                                    )
                                 }
                                 Err(e) => {
                                     error!("[VPS] record_move failed {} game {}: {}", mv, gid, e)
@@ -260,7 +272,9 @@ fn handle_network_to_rollup_events(
     mut rollup_events: MessageWriter<RollupEvent>,
     mut rollup_manager: ResMut<EphemeralRollupManager>,
     mut bridge: ResMut<RollupNetworkBridge>,
+    magicblock_resolver: Res<MagicBlockResolver>,
 ) {
+    let er_endpoint = magicblock_resolver.er_endpoint().to_string();
     for event in network_events.read() {
         let msg = match event {
             NetworkEvent::MessageReceived(m) => m,
@@ -336,13 +350,23 @@ fn handle_network_to_rollup_events(
                     let gid = *game_id;
                     let base_nonce = bridge.move_nonce;
                     bridge.move_nonce += moves.len() as u64;
+                    let er_endpoint = er_endpoint.clone();
                     bevy::tasks::IoTaskPool::get()
                         .spawn(async move {
+                            use crate::multiplayer::rollup::magicblock::er_explorer_url_for;
                             use crate::multiplayer::vps_client;
                             for (i, (mv, fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
                                 match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
-                                    Ok(sig) => {
-                                        info!("[VPS] Move {} recorded game {} sig {}", mv, gid, sig)
+                                    Ok((sig, resp_endpoint)) => {
+                                        let endpoint = if resp_endpoint.is_empty() {
+                                            &er_endpoint
+                                        } else {
+                                            &resp_endpoint
+                                        };
+                                        info!(
+                                        "[ER] Move {} for game {} delegated & recorded on Ephemeral Rollup, sig {} — inspect: {}",
+                                        mv, gid, sig, er_explorer_url_for(endpoint, &sig)
+                                    )
                                     }
                                     Err(e) => error!(
                                         "[VPS] record_move failed {} game {}: {}",
@@ -542,6 +566,7 @@ fn process_batch_commit_requests(
     mut bridge: ResMut<RollupNetworkBridge>,
     mut magicblock_events: MessageWriter<MagicBlockEvent>,
     mut recent_txs: ResMut<RecentTransactions>,
+    magicblock_resolver: Res<MagicBlockResolver>,
 ) {
     if bridge.awaiting_commit_confirmation {
         return;
@@ -560,6 +585,7 @@ fn process_batch_commit_requests(
             base_nonce,
             &mut magicblock_events,
             &mut recent_txs,
+            magicblock_resolver.er_endpoint(),
         );
         bridge.awaiting_commit_confirmation = true;
     }
@@ -589,15 +615,22 @@ fn submit_moves_via_vps(
     base_nonce: u64,
     magicblock_events: &mut MessageWriter<MagicBlockEvent>,
     recent_txs: &mut RecentTransactions,
+    fallback_er_endpoint: &str,
 ) {
+    use crate::multiplayer::rollup::magicblock::er_explorer_url_for;
     use crate::multiplayer::vps_client;
 
     for (i, (move_str, next_fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
         match vps_client::record_move(game_id, move_str, next_fen, base_nonce + i as u64) {
-            Ok(sig) => {
+            Ok((sig, resp_endpoint)) => {
+                let endpoint = if resp_endpoint.is_empty() {
+                    fallback_er_endpoint
+                } else {
+                    resp_endpoint.as_str()
+                };
                 info!(
-                    "[VPS] Move {} recorded for game {}: {}",
-                    move_str, game_id, sig
+                    "[ER] Move {} for game {} delegated & recorded on Ephemeral Rollup, sig {} — inspect: {}",
+                    move_str, game_id, sig, er_explorer_url_for(endpoint, &sig)
                 );
                 recent_txs.push(move_str.clone(), sig.clone());
                 magicblock_events.write(MagicBlockEvent::TransactionRoutedToEr { signature: sig });
@@ -1111,7 +1144,15 @@ fn handle_game_end_undelegation(
         let wager = competitive.as_ref().map(|c| c.stake_amount).unwrap_or(0);
         let (fin_tx, fin_rx) = oneshot::channel::<FinalizationResult>();
         bridge.finalization_rx = Some(fin_rx);
-        spawn_finalization_task(game_id, winner, white_pk, black_pk, wager, fin_tx);
+        spawn_finalization_task(
+            game_id,
+            winner,
+            white_pk,
+            black_pk,
+            wager,
+            fin_tx,
+            magicblock_resolver.er_endpoint().to_string(),
+        );
     }
 }
 
@@ -1125,9 +1166,11 @@ fn spawn_finalization_task(
     black_pk: Pubkey,
     wager_lamports: u64,
     result_tx: oneshot::Sender<FinalizationResult>,
+    fallback_er_endpoint: String,
 ) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
+            use crate::multiplayer::rollup::magicblock::er_explorer_url_for;
             use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
             use crate::multiplayer::vps_client;
             use crate::solana::instructions::PROGRAM_ID as SOLANA_PROGRAM_ID;
@@ -1138,7 +1181,19 @@ fn spawn_finalization_task(
             std::thread::sleep(std::time::Duration::from_secs(2));
 
             match vps_client::vps_undelegate_game(game_id) {
-                Ok(sig) => info!("[UNDELEGATE] ER committed for game {} sig {}", game_id, sig),
+                Ok((sig, resp_endpoint)) => {
+                    let endpoint = if resp_endpoint.is_empty() {
+                        fallback_er_endpoint.as_str()
+                    } else {
+                        resp_endpoint.as_str()
+                    };
+                    info!(
+                        "[UNDELEGATE] ER committed for game {} sig {} — inspect: {}",
+                        game_id,
+                        sig,
+                        er_explorer_url_for(endpoint, &sig)
+                    )
+                }
                 Err(e) => error!(
                     "[UNDELEGATE] Failed for game {}: {e} — continuing to finalize",
                     game_id
@@ -1184,9 +1239,15 @@ fn spawn_finalization_task(
             match vps_client::vps_finalize_game(game_id, win_ref, &w_str, &b_str, wager_lamports) {
                 Ok(result) => {
                     info!(
-                        "[FINALIZE] Game {} finalized on-chain sig {} prize {} lam",
-                        game_id, result.sig, result.winner_lamports
+                        "[FINALIZED] Game {} settled on-chain, payout {} lamports to winner, sig {}",
+                        game_id, result.winner_lamports, result.sig
                     );
+                    if result.country_fee > 0 {
+                        info!(
+                            "[TREASURY] Game {} platform fee: {} lamports paid to treasury_vault",
+                            game_id, result.country_fee
+                        );
+                    }
                     let _ = result_tx.send(FinalizationResult {
                         sig: result.sig,
                         winner_lamports: result.winner_lamports,
@@ -1209,6 +1270,7 @@ fn spawn_finalization_task(
 fn retry_pending_finalization(
     mut bridge: ResMut<RollupNetworkBridge>,
     solana_state: Option<Res<SolanaIntegrationState>>,
+    magicblock_resolver: Res<MagicBlockResolver>,
 ) {
     let pending = match bridge.pending_finalization.take() {
         Some(p) => p,
@@ -1262,6 +1324,7 @@ fn retry_pending_finalization(
         black_pk,
         pending.wager_lamports,
         fin_tx,
+        magicblock_resolver.er_endpoint().to_string(),
     );
 }
 
@@ -1321,6 +1384,8 @@ fn apply_nonce_resync(mut bridge: ResMut<RollupNetworkBridge>) {
 fn handle_game_end_pgn_export(
     mut game_ended_events: MessageReader<GameEndedEvent>,
     rollup_manager: Res<EphemeralRollupManager>,
+    profile: Res<crate::multiplayer::solana::addon::SolanaProfile>,
+    competitive: Res<crate::multiplayer::solana::addon::CompetitiveMatchState>,
     mut bridge: ResMut<RollupNetworkBridge>,
 ) {
     for event in game_ended_events.read() {
@@ -1334,18 +1399,28 @@ fn handle_game_end_pgn_export(
             event.game_id
         };
 
-        let white_name = if rollup_manager.is_creator {
-            "You"
+        // Real wallet usernames/ELO when known (Solana PVP), falling back to
+        // generic labels only if the profile/match resources haven't been
+        // populated yet (e.g. a free game with no on-chain profile fetch).
+        let my_name = if profile.username.is_empty() {
+            "You".to_string()
         } else {
-            "Opponent"
-        }
-        .to_string();
-        let black_name = if rollup_manager.is_creator {
-            "Opponent"
+            profile.username.clone()
+        };
+        let opponent_name = if competitive.opponent_username.is_empty() {
+            "Opponent".to_string()
         } else {
-            "You"
-        }
-        .to_string();
+            competitive.opponent_username.clone()
+        };
+        let my_elo = (competitive.elo_rating > 0).then_some(competitive.elo_rating);
+        let opponent_elo = (competitive.opponent_elo > 0).then_some(competitive.opponent_elo);
+
+        let (white_name, black_name, white_elo, black_elo) = if rollup_manager.is_creator {
+            (my_name, opponent_name, my_elo, opponent_elo)
+        } else {
+            (opponent_name, my_name, opponent_elo, my_elo)
+        };
+
         let result_str = match event.winner.as_deref() {
             Some("white") => "1-0",
             Some("black") => "0-1",
@@ -1358,7 +1433,7 @@ fn handle_game_end_pgn_export(
 
         bevy::tasks::IoTaskPool::get()
             .spawn(async move {
-                use crate::game::replay_braid::braid_move_log_to_parsed_pgn;
+                use crate::game::replay_braid::braid_move_log_to_parsed_pgn_rated;
                 use crate::multiplayer::vps_client;
 
                 let moves = match vps_client::fetch_move_log(game_id) {
@@ -1373,8 +1448,14 @@ fn handle_game_end_pgn_export(
                     }
                 };
 
-                let pgn =
-                    braid_move_log_to_parsed_pgn(&moves, &white_name, &black_name, &result_str);
+                let pgn = braid_move_log_to_parsed_pgn_rated(
+                    &moves,
+                    &white_name,
+                    &black_name,
+                    white_elo,
+                    black_elo,
+                    &result_str,
+                );
                 if pgn.is_none() {
                     warn!(
                         "[PGN-EXPORT] Failed to build PGN for game {} ({} moves)",

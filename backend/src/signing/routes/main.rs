@@ -18,13 +18,19 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signer;
+use solana_sdk::signature::{Keypair, Signer};
 use std::str::FromStr;
 use tracing::{error, info, warn};
 
 use crate::db::repository::GameRepository;
 use crate::signing::{solana, AppState};
 use crate::telemetry::worker_metrics;
+
+/// Lamports used to fund a per-game session key: 0.01 SOL — enough for the
+/// `create_game`/`join_game` init rent (~3.2M) plus ~2000 future tx fees.
+/// Shared by the eager pre-fund in `create_session` and the fallback fund in
+/// `activate_session` so the two can never silently diverge.
+const SESSION_FUND_LAMPORTS: u64 = 10_000_000;
 
 // ── Request / Response types ─────────────────────────────────────────────────
 
@@ -63,9 +69,18 @@ pub struct RecordMoveReq {
 }
 
 /// Response containing transaction signature.
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct SigResp {
     pub sig: String,
+    /// RPC endpoint the transaction was actually submitted to — populated
+    /// only for ER-routed instructions (record_move, undelegate_game) so
+    /// the client can build an accurate `explorer.solana.com/tx/<sig>
+    /// ?cluster=custom&customUrl=<er_endpoint>` link instead of guessing at
+    /// a hardcoded constant that can drift from the backend's real
+    /// `MAGIC_ROUTER_RPC_URL`/`ER_RPC_URL` config. Empty for base-layer
+    /// responses (they're viewable on the normal devnet explorer).
+    #[serde(default)]
+    pub er_endpoint: String,
 }
 
 /// Client blur + think-time telemetry for one ply (see `report_blur_telemetry`).
@@ -199,10 +214,40 @@ pub async fn create_session(
         .gbp_to_lamports(crate::signing::routes::rates::PLATFORM_FEE_GBP)
         .await
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let treasury_vault =
+        Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &state.program_id).0;
     info!(
-        "[VPS] Created session for game {} → {} (fee: {} lamports)",
-        req.game_id, session_pubkey, platform_fee_lamports
+        "[TREASURY] game {} session created — {} lamports platform fee will be recorded at \
+         create_game and paid to treasury_vault {} when the game finishes (0 for Free match type)",
+        req.game_id, platform_fee_lamports, treasury_vault
     );
+
+    // Kick off session-key funding NOW, off the critical path. The freshly
+    // generated per-game key holds zero SOL, but `create_game`/`join_game`
+    // pay their init rent from it (`payer = fee_payer`), so it must be funded
+    // before the setup TX lands. Funding here — while the player is still
+    // reviewing the wallet popup — means `activate_session`'s own
+    // `fund_account` almost always sees the balance already present and skips
+    // its blocking `confirmed` wait, removing a whole serial on-chain
+    // round-trip (~seconds on public RPC) from perceived create/join latency.
+    // `fund_account` is idempotent (balance check) and `activate_session`
+    // still funds+waits if this hasn't landed yet, so there's no correctness
+    // dependency — it's a pure head start. Runs on a blocking thread because
+    // the RPC client and its confirmation poll are synchronous.
+    if let Ok(fee_payer) = Keypair::try_from(state.feepayer.next().to_bytes().as_slice()) {
+        let rpc_url = state.config.solana_rpc_url.clone();
+        let dest = session_pubkey;
+        let game_id = req.game_id;
+        tokio::task::spawn_blocking(move || {
+            let rpc = solana::make_rpc(&rpc_url);
+            if let Err(e) = solana::fund_account(&rpc, &fee_payer, &dest, SESSION_FUND_LAMPORTS) {
+                warn!(
+                    "[VPS] eager session-key pre-fund for game {game_id} failed (activate will retry): {e}"
+                );
+            }
+        });
+    }
+
     Ok(Json(CreateSessionResp {
         session_pubkey: session_pubkey.to_string(),
         platform_fee_lamports,
@@ -251,6 +296,7 @@ pub async fn activate_session(
         );
         return Ok(Json(SigResp {
             sig: "already-active".to_string(),
+            ..Default::default()
         }));
     }
 
@@ -278,8 +324,7 @@ pub async fn activate_session(
     // from /session/create). Funding after submission, as this used to do,
     // never had a chance to help.
     let fee_payer = state.feepayer.next();
-    const FUND_LAMPORTS: u64 = 10_000_000; // 0.01 SOL: covers create_game rent (~3.2M) + ~2000 future TXs
-    solana::fund_account(&rpc, fee_payer, &entry.session_pubkey(), FUND_LAMPORTS).map_err(|e| {
+    solana::fund_account(&rpc, fee_payer, &entry.session_pubkey(), SESSION_FUND_LAMPORTS).map_err(|e| {
         let msg = format!("Could not fund session key for game {}: {e}", req.game_id);
         error!("[VPS] {msg}");
         (StatusCode::BAD_GATEWAY, msg)
@@ -304,6 +349,7 @@ pub async fn activate_session(
 
     Ok(Json(SigResp {
         sig: sig.to_string(),
+        ..Default::default()
     }))
 }
 
@@ -432,8 +478,8 @@ pub async fn record_move(
         StatusCode::BAD_GATEWAY
     })?;
     info!(
-        "[VPS] record_move game {} move {} sig {}",
-        req.game_id, req.move_uci, sig
+        "[ER] game {} move {} recorded on Ephemeral Rollup ({}) sig {}",
+        req.game_id, req.move_uci, er_rpc.url(), sig
     );
 
     // Fire-and-forget DB write with derived FEN
@@ -470,6 +516,7 @@ pub async fn record_move(
 
     Ok(Json(SigResp {
         sig: sig.to_string(),
+        er_endpoint: er_rpc.url(),
     }))
 }
 
@@ -597,12 +644,16 @@ pub async fn delegate_game(
         );
         StatusCode::BAD_GATEWAY
     })?;
-    info!("[VPS] delegate_game game {} sig {}", req.game_id, sig);
+    info!(
+        "[ER] game {} delegated to Ephemeral Rollup ({}) sig {}",
+        req.game_id, state.config.magic_router_rpc_url, sig
+    );
 
     schedule_time_check_crank(&state, &rpc, &program_id, &session_kp, req.game_id).await;
 
     Ok(Json(SigResp {
         sig: sig.to_string(),
+        ..Default::default()
     }))
 }
 
@@ -760,7 +811,10 @@ pub async fn undelegate_game(
         error!("[VPS] undelegate_game failed for game {}: {e}", req.game_id);
         StatusCode::BAD_GATEWAY
     })?;
-    info!("[VPS] undelegate_game game {} sig {}", req.game_id, sig);
+    info!(
+        "[ER] game {} undelegated from Ephemeral Rollup ({}) back to devnet, sig {}",
+        req.game_id, er_rpc.url(), sig
+    );
 
     // Cancel the time-check crank as a separate, best-effort follow-up — never
     // let a cancel failure affect the undelegate result already returned
@@ -770,6 +824,7 @@ pub async fn undelegate_game(
 
     Ok(Json(SigResp {
         sig: sig.to_string(),
+        er_endpoint: er_rpc.url(),
     }))
 }
 
@@ -810,6 +865,54 @@ fn cancel_time_check_crank(
     }
 }
 
+/// Reads the on-chain `Game.country_fee` field (the flat platform fee set at
+/// creation time, in lamports) directly off account bytes, since it's the
+/// authoritative amount `settle_finished_game` actually pays to
+/// `treasury_vault` — recomputing an estimate client/backend-side (e.g. via a
+/// BPS-of-pot guess) can silently diverge from what the program transfers.
+/// Layout must track `Game`'s field order — mirrors (a subset of)
+/// `parse_game_account` in `tasks::settlement_worker`; keep both in sync if
+/// the struct's field order ever changes. Returns `None` on any parse
+/// failure (missing account, unexpected layout) — callers should treat that
+/// as "fee unknown", not "fee zero".
+fn read_game_country_fee(
+    rpc: &solana_client::rpc_client::RpcClient,
+    program_id: &Pubkey,
+    game_id: u64,
+) -> Option<u64> {
+    const RESULT_WINNER: u8 = 1;
+    let game_pda =
+        Pubkey::find_program_address(&[solana::GAME_SEED, &game_id.to_le_bytes()], program_id).0;
+    let data = rpc.get_account_data(&game_pda).ok()?;
+    let mut o = 8usize; // discriminator
+    o += 8; // game_id
+    o += 32 + 32; // white + black
+    o += 1; // status
+    o += 8; // last_move_timestamp
+    o += 8; // fees_advanced
+    o += 32; // fee_payer
+    let result_tag = *data.get(o)?;
+    o += 1;
+    if result_tag == RESULT_WINNER {
+        o += 32; // winner pubkey
+    }
+    o += 68; // board_state
+    o += 2; // move_count
+    o += 2; // turn
+    o += 8; // created_at
+    o += 8; // updated_at
+    o += 8; // wager_amount
+    let wager_token_tag = *data.get(o)?;
+    o += 1;
+    if wager_token_tag == 1 {
+        o += 32; // Some(Pubkey)
+    }
+    o += 1; // game_type
+    o += 1; // match_type
+    let country_fee = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
+    Some(country_fee)
+}
+
 /// POST /game/finalize - Finalizes a game on devnet.
 pub async fn finalize_game(
     State(state): State<AppState>,
@@ -836,14 +939,34 @@ pub async fn finalize_game(
     );
     let rpc = solana::rpc_for(&state.config, solana::RoutedInstr::FinalizeGame);
 
+    // Read the actual fee that will be charged BEFORE finalize closes the
+    // Game account out from under us.
+    let actual_country_fee = read_game_country_fee(&rpc, &state.program_id, req.game_id);
+
     let sig = solana::sign_and_submit(&rpc, &session_kp, &[ix]).map_err(|e| {
         error!("[VPS] finalize_game failed for game {}: {e}", req.game_id);
         StatusCode::BAD_GATEWAY
     })?;
     info!(
-        "[VPS] finalize_game game {} winner={:?} sig {}",
-        req.game_id, req.winner, sig
+        "[FINALIZED] game {} settled on devnet — winner={:?} wager_lamports={} payout sig {}",
+        req.game_id, req.winner, req.wager_lamports, sig
     );
+    let treasury_vault =
+        Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &state.program_id).0;
+    match actual_country_fee {
+        Some(fee) if fee > 0 => info!(
+            "[TREASURY] game {} paid {} lamports platform fee to treasury_vault {}",
+            req.game_id, fee, treasury_vault
+        ),
+        Some(_) => info!(
+            "[TREASURY] game {} — free/unwagered game, no platform fee charged",
+            req.game_id
+        ),
+        None => warn!(
+            "[TREASURY] game {} — could not read on-chain country_fee before finalize; treasury_vault {} payment amount unconfirmed",
+            req.game_id, treasury_vault
+        ),
+    }
 
     // Fire-and-forget DB write (log errors but don't fail the HTTP response)
     let game_id_str = req.game_id.to_string();
@@ -879,34 +1002,20 @@ pub async fn finalize_game(
             error!("[DB] Failed to finalize game {}: {}", game_id_str, e);
         }
 
-        // Assemble and store PGN
-        let moves = repo.get_moves(&game_id_str).await;
-        if let Ok(moves) = moves {
-            use nimzovich_engine::{PgnAssembler, PgnResult};
-            let mut assembler = PgnAssembler::new();
-            let date = chrono::Utc::now().format("%Y.%m.%d").to_string();
-            assembler
-                .tag("Event", "XFChess Game")
-                .tag("Site", "XFChess")
-                .tag("White", white_username.as_deref().unwrap_or(&white))
-                .tag("Black", black_username.as_deref().unwrap_or(&black))
-                .tag("Date", &date);
-            for mv in moves {
-                if let Some(san) = mv.move_san {
-                    assembler.add_move(san);
-                }
-            }
-            let result = match winner.as_deref() {
-                Some("white") => PgnResult::WhiteWins,
-                Some("black") => PgnResult::BlackWins,
-                _ => PgnResult::Draw,
-            };
-            assembler.set_result(result);
-            let pgn = assembler.to_string();
-            if let Err(e) = repo.set_pgn_text(&game_id_str, &pgn).await {
-                error!("[DB] Failed to store PGN for game {}: {}", game_id_str, e);
-            }
-        }
+        // Assemble and store PGN — Event/White/Black/Elo use resolved wallet
+        // usernames and live on-chain ELO, same helper the auto-settlement
+        // worker uses so both finalize paths produce an identical PGN shape.
+        crate::signing::game_pgn::assemble_and_store_pgn(
+            &repo,
+            &elo_cache,
+            &game_id_str,
+            &white,
+            &black,
+            white_username.as_deref(),
+            black_username.as_deref(),
+            winner.as_deref(),
+        )
+        .await;
 
         elo_cache.invalidate(&white);
         elo_cache.invalidate(&black);
@@ -934,7 +1043,12 @@ pub async fn finalize_game(
     const COUNTRY_FEE_BPS: u64 = 100; // 1%
     const ELO_FEE_BPS: u64 = 100; // 1%
     let pot = req.wager_lamports.saturating_mul(2);
-    let country_fee = pot.saturating_mul(COUNTRY_FEE_BPS) / 10_000;
+    // Prefer the real on-chain fee we just read (what the program actually
+    // transfers to treasury_vault) over the BPS-of-pot estimate below, which
+    // only approximates it and can silently diverge from the flat
+    // creation-time fee `settle_finished_game` actually pays out.
+    let country_fee =
+        actual_country_fee.unwrap_or_else(|| pot.saturating_mul(COUNTRY_FEE_BPS) / 10_000);
     let elo_fee = pot.saturating_mul(ELO_FEE_BPS) / 10_000;
     let winner_lamports = if req.winner.is_some() {
         pot.saturating_sub(country_fee).saturating_sub(elo_fee)
@@ -1047,6 +1161,7 @@ pub async fn sign_tx(
 
     Ok(Json(SigResp {
         sig: sig.to_string(),
+        ..Default::default()
     }))
 }
 
@@ -1103,6 +1218,7 @@ pub async fn tee_auth(
     );
     Ok(Json(SigResp {
         sig: "tee-auth-ok".to_string(),
+        ..Default::default()
     }))
 }
 
@@ -1296,6 +1412,7 @@ pub async fn submit_dispute(
     // Return a stub sig so the client can display "dispute submitted".
     Ok(Json(SigResp {
         sig: format!("dispute-{}-pending", req.game_id),
+        ..Default::default()
     }))
 }
 
@@ -1354,6 +1471,7 @@ mod tests {
     fn test_sig_resp_serialization() {
         let resp = SigResp {
             sig: "test_signature".to_string(),
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&resp);

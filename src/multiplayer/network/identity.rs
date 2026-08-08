@@ -93,3 +93,122 @@ pub fn save_guest_username(name: &str) {
         warn!("[identity] Failed to save guest_username: {e}");
     }
 }
+
+// ── Multiple local profiles ─────────────────────────────────────────────────
+//
+// Several people can share one machine, each with their own name and PGN
+// history. `profiles.json` lists every profile ever created plus which one
+// is active; each profile's PGN files live in their own subfolder so games
+// never mix. The pre-existing single `guest_username` file above is kept as
+// legacy/fallback source data — on first read, if `profiles.json` doesn't
+// exist yet but a `guest_username` does, it's migrated in as the first
+// profile automatically so returning players don't see an empty picker.
+
+fn profiles_dir() -> PathBuf {
+    let base = dirs::document_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("xfchess");
+    std::fs::create_dir_all(&base).ok();
+    base
+}
+
+fn profiles_path() -> PathBuf {
+    profiles_dir().join("profiles.json")
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct ProfilesFile {
+    names: Vec<String>,
+    active: Option<String>,
+}
+
+fn read_profiles_file() -> ProfilesFile {
+    match std::fs::read_to_string(profiles_path()) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        Err(_) => {
+            // Migrate the legacy single-profile file, if any, so an existing
+            // player's name and PGN history keep working after the update.
+            match load_guest_username() {
+                Some(name) => ProfilesFile {
+                    names: vec![name.clone()],
+                    active: Some(name),
+                },
+                None => ProfilesFile::default(),
+            }
+        }
+    }
+}
+
+fn write_profiles_file(file: &ProfilesFile) {
+    if let Ok(json) = serde_json::to_string_pretty(file) {
+        if let Err(e) = std::fs::write(profiles_path(), json) {
+            warn!("[identity] Failed to save profiles.json: {e}");
+        }
+    }
+}
+
+/// Names of every local profile ever created, in creation order.
+pub fn list_profiles() -> Vec<String> {
+    read_profiles_file().names
+}
+
+/// The profile active as of the last launch, if any.
+pub fn load_active_profile() -> Option<String> {
+    read_profiles_file().active
+}
+
+/// Create a new local profile (no-op if the name already exists) and make it
+/// the active one. Also ensures its PGN subfolder exists.
+pub fn create_profile(name: &str) {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return;
+    }
+    let mut file = read_profiles_file();
+    if !file.names.iter().any(|n| n == &name) {
+        file.names.push(name.clone());
+    }
+    file.active = Some(name.clone());
+    write_profiles_file(&file);
+    // Keep the legacy single-file path in sync for any code that hasn't
+    // moved to the multi-profile API yet.
+    save_guest_username(&name);
+    ensure_profile_pgn_dir(&name);
+}
+
+/// Switch the active profile to an already-existing name (no-op if unknown).
+pub fn set_active_profile(name: &str) {
+    let mut file = read_profiles_file();
+    if !file.names.iter().any(|n| n == name) {
+        return;
+    }
+    file.active = Some(name.to_string());
+    write_profiles_file(&file);
+    save_guest_username(name);
+    ensure_profile_pgn_dir(name);
+}
+
+/// Filesystem-safe folder name for a profile — replaces path separators and
+/// other characters that would otherwise escape `profiles/` or fail on
+/// Windows.
+fn sanitize_profile_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// PGN save folder for a given profile, e.g.
+/// `Documents/xfchess/profiles/<name>/`. Created on demand.
+pub fn profile_pgn_dir(name: &str) -> PathBuf {
+    profiles_dir().join("profiles").join(sanitize_profile_name(name))
+}
+
+fn ensure_profile_pgn_dir(name: &str) {
+    std::fs::create_dir_all(profile_pgn_dir(name)).ok();
+}

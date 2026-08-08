@@ -222,6 +222,29 @@ impl PgnResult {
     }
 }
 
+/// Standard Seven Tag Roster order, plus the rating tags every PGN viewer
+/// (lichess, chess.com, ChessBase) also expects immediately after Result.
+pub const PGN_TAG_ORDER: &[&str] = &[
+    "Event", "Site", "Date", "Round", "White", "Black", "Result", "WhiteElo", "BlackElo",
+];
+
+/// Order a tag map for display: known STR/rating tags first (in
+/// `PGN_TAG_ORDER`), then any remaining tags alphabetically.
+pub fn ordered_tags(tags: &BTreeMap<String, String>) -> Vec<(&str, &str)> {
+    let mut out: Vec<(&str, &str)> = Vec::with_capacity(tags.len());
+    for key in PGN_TAG_ORDER {
+        if let Some(v) = tags.get(*key) {
+            out.push((*key, v.as_str()));
+        }
+    }
+    for (k, v) in tags {
+        if !PGN_TAG_ORDER.contains(&k.as_str()) {
+            out.push((k.as_str(), v.as_str()));
+        }
+    }
+    out
+}
+
 /// Assembles a PGN document from tags, moves, and a result.
 #[derive(Clone, Debug)]
 pub struct PgnAssembler {
@@ -273,8 +296,10 @@ impl PgnAssembler {
     pub fn to_string(&self) -> String {
         let mut out = String::new();
 
-        // Tags
-        for (k, v) in &self.tags {
+        // Tags — emitted in Seven Tag Roster order (plus common rating
+        // extensions), not the BTreeMap's alphabetical order, so the header
+        // reads the way every other PGN tool expects it to.
+        for (k, v) in ordered_tags(&self.tags) {
             out.push_str(&format!("[{} \"{}\"]\n", k, v));
         }
         out.push('\n');

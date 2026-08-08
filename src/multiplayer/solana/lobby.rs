@@ -628,48 +628,13 @@ async fn async_create_game(
         step_start.elapsed()
     );
 
-    // Poll for game account to exist on-chain (max 60 seconds)
-    let game_pda =
-        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
-    // `confirmed`, not the client default `finalized` — the VPS already waits for
-    // confirmed status before returning, so polling at `finalized` here would add
-    // another ~10-20s on top for no additional safety.
-    let rpc = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
-
-    let start = Instant::now();
-    let timeout = Duration::from_secs(60);
-    let poll_interval = Duration::from_millis(150);
-
+    // `/session/activate` already waits for confirmed commitment server-side.
+    // The additional client-side get-account re-poll was redundant and added
+    // unnecessary latency to the create-game end-to-end path.
     info!(
-        "[CREATE_GAME] Waiting for game account {} to be confirmed on-chain...",
-        game_pda
+        "[CREATE_GAME] legacy per-game create finished for game {game_id} in {:?}",
+        legacy_start.elapsed()
     );
-
-    loop {
-        if start.elapsed() > timeout {
-            return Err(format!(
-                "Game account {} not found after 60s - transaction may have failed",
-                game_pda
-            ));
-        }
-
-        match rpc.get_account(&game_pda) {
-            Ok(_) => {
-                info!(
-                    "[CREATE_GAME] Game account {} confirmed on-chain for game {}",
-                    game_pda, game_id
-                );
-                info!(
-                    "[CREATE_GAME] legacy per-game create finished for game {game_id} in {:?}",
-                    legacy_start.elapsed()
-                );
-                break;
-            }
-            Err(_) => {
-                std::thread::sleep(poll_interval);
-            }
-        }
-    }
 
     Ok(game_id)
 }

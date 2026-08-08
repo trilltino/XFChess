@@ -120,8 +120,8 @@ pub use evaluation::evaluate_position;
 pub use move_gen::{generate_pseudo_legal_moves, is_in_check};
 #[cfg(feature = "std")]
 pub use pgn::{
-    move_to_san, parse_pgn, parse_pgn_annotated, san_to_move, MoveQuality, ParsedPgnGame,
-    PerPlyAnnotation, PgnAssembler, PgnParseError, PgnResult,
+    move_to_san, ordered_tags, parse_pgn, parse_pgn_annotated, san_to_move, MoveQuality,
+    ParsedPgnGame, PerPlyAnnotation, PgnAssembler, PgnParseError, PgnResult,
 };
 
 // Re-export types
