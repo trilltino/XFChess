@@ -34,10 +34,7 @@ impl Plugin for GameOverPlugin {
 /// deferred until GameOver is exited (see `cleanup_in_game`) so the frozen
 /// board is visible — so a light left on at the moment of checkmate would
 /// otherwise persist through the whole GameOver screen.
-fn clear_check_highlight(
-    mut commands: Commands,
-    lights: Query<Entity, With<CheckHighlightLight>>,
-) {
+fn clear_check_highlight(mut commands: Commands, lights: Query<Entity, With<CheckHighlightLight>>) {
     for entity in lights.iter() {
         commands.entity(entity).despawn();
     }

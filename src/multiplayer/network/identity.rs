@@ -206,7 +206,9 @@ fn sanitize_profile_name(name: &str) -> String {
 /// PGN save folder for a given profile, e.g.
 /// `Documents/xfchess/profiles/<name>/`. Created on demand.
 pub fn profile_pgn_dir(name: &str) -> PathBuf {
-    profiles_dir().join("profiles").join(sanitize_profile_name(name))
+    profiles_dir()
+        .join("profiles")
+        .join(sanitize_profile_name(name))
 }
 
 fn ensure_profile_pgn_dir(name: &str) {

@@ -324,7 +324,13 @@ pub async fn activate_session(
     // from /session/create). Funding after submission, as this used to do,
     // never had a chance to help.
     let fee_payer = state.feepayer.next();
-    solana::fund_account(&rpc, fee_payer, &entry.session_pubkey(), SESSION_FUND_LAMPORTS).map_err(|e| {
+    solana::fund_account(
+        &rpc,
+        fee_payer,
+        &entry.session_pubkey(),
+        SESSION_FUND_LAMPORTS,
+    )
+    .map_err(|e| {
         let msg = format!("Could not fund session key for game {}: {e}", req.game_id);
         error!("[VPS] {msg}");
         (StatusCode::BAD_GATEWAY, msg)
@@ -479,7 +485,10 @@ pub async fn record_move(
     })?;
     info!(
         "[ER] game {} move {} recorded on Ephemeral Rollup ({}) sig {}",
-        req.game_id, req.move_uci, er_rpc.url(), sig
+        req.game_id,
+        req.move_uci,
+        er_rpc.url(),
+        sig
     );
 
     // Fire-and-forget DB write with derived FEN
@@ -813,7 +822,9 @@ pub async fn undelegate_game(
     })?;
     info!(
         "[ER] game {} undelegated from Ephemeral Rollup ({}) back to devnet, sig {}",
-        req.game_id, er_rpc.url(), sig
+        req.game_id,
+        er_rpc.url(),
+        sig
     );
 
     // Cancel the time-check crank as a separate, best-effort follow-up — never
