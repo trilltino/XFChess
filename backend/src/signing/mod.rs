@@ -39,6 +39,7 @@ pub mod cacf;
 pub mod config;
 pub mod elo_cache;
 pub mod feepayer;
+pub mod game_pgn;
 pub mod identity;
 pub mod linkage;
 pub mod p2p_relay;

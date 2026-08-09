@@ -14,6 +14,11 @@
 //! - **E**: Rotate camera right
 //! - **Mouse Wheel Up**: Zoom in (lower camera height)
 //! - **Mouse Wheel Down**: Zoom out (raise camera height)
+//! - **R**: Reset camera to the standard position (any lock state)
+//!
+//! WASDQE/mouse-drag/scroll are only active while the camera is in Free mode
+//! (see [`crate::game::camera_modes::CameraLockState`], toggled via the
+//! padlock button in the top HUD bar) — `camera_controls_enabled` gates them.
 //!
 //! # Implementation
 //!
@@ -34,9 +39,7 @@
 //! - Total War series camera controls - RTS standard
 
 use crate::core::states::GameMode;
-use crate::game::camera_modes::{
-    CameraControlsDisabled, CameraViewMode, CinematicSequence, TransitionType,
-};
+use crate::game::camera_modes::CameraLockState;
 use crate::game::resources::{CurrentTurn, Players, Selection};
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::ClearColorConfig;
@@ -989,7 +992,9 @@ pub fn reset_game_camera(
     }
 }
 
-/// System to reset camera to default "Standard Perspective" when 'N' is pressed
+/// System to reset camera to the standard position when 'R' is pressed.
+/// Resets position only — does not change the Locked/Free state. 'N' is kept
+/// as an alias since it was the original binding.
 pub fn camera_reset_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     players: Res<Players>,
@@ -997,7 +1002,7 @@ pub fn camera_reset_system(
     game_mode: Res<GameMode>,
     mut query: Query<(&mut Transform, &mut CameraController)>,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyN) {
+    if keyboard.just_pressed(KeyCode::KeyR) || keyboard.just_pressed(KeyCode::KeyN) {
         // Player color detection enabled
         let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
 
@@ -1063,281 +1068,7 @@ pub fn view_mode_toggle_input_system(
     }
 }
 
-/// System to cycle through camera view modes with 'R' key
-pub fn camera_mode_cycle_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut camera_view_mode: ResMut<CameraViewMode>,
-    mut cinematic_sequence: ResMut<CinematicSequence>,
-    mut commands: Commands,
-    mut query: Query<(Entity, &mut Transform, &mut CameraController), With<Camera3d>>,
-    players: Res<Players>,
-    current_turn: Res<CurrentTurn>,
-    game_mode: Res<GameMode>,
-) {
-    if keyboard.just_pressed(KeyCode::KeyR) {
-        let next_mode = camera_view_mode.next();
-        *camera_view_mode = next_mode;
-        info!("[CAMERA_MODE] Switched to {:?}", next_mode);
-
-        // Reset cinematic sequence when entering or leaving cinematic mode
-        if next_mode == CameraViewMode::Cinematic {
-            cinematic_sequence.reset();
-        }
-
-        // Apply camera position for the new mode
-        {
-            if let Ok((camera_entity, mut transform, mut controller)) = query.single_mut() {
-                let board_center = Vec3::new(3.5, 0.0, 3.5);
-
-                match next_mode {
-                    CameraViewMode::TopDownWhite => {
-                        // Nearly overhead from white's side — rank 1 at bottom, a–h left to right
-                        let height = 14.0;
-                        let z_behind = 2.0;
-                        let translation = Vec3::new(3.5, height, -z_behind);
-                        *transform = Transform::from_translation(translation)
-                            .looking_at(board_center, Vec3::Y);
-                        controller.target_zoom = height;
-                        controller.current_zoom = height;
-                        commands
-                            .entity(camera_entity)
-                            .remove::<CameraControlsDisabled>();
-                    }
-                    CameraViewMode::TopDownBlack => {
-                        // Nearly overhead from black's side — rank 8 at bottom, h–a left to right
-                        let height = 14.0;
-                        let z_behind = 2.0;
-                        let translation = Vec3::new(3.5, height, 7.0 + z_behind);
-                        *transform = Transform::from_translation(translation)
-                            .looking_at(board_center, Vec3::Y);
-                        controller.target_zoom = height;
-                        controller.current_zoom = height;
-                        commands
-                            .entity(camera_entity)
-                            .remove::<CameraControlsDisabled>();
-                    }
-                    CameraViewMode::Fixed => {
-                        // Static angled view at center
-                        let height = 14.0;
-                        let distance = 6.0;
-
-                        // Determine player color for orientation
-                        let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
-
-                        let camera_pos = if is_black_view {
-                            Vec3::new(3.5, height, 7.0 + distance)
-                        } else {
-                            Vec3::new(3.5, height, -distance)
-                        };
-
-                        *transform = Transform::from_translation(camera_pos)
-                            .looking_at(board_center, Vec3::Y);
-                        controller.target_zoom = height;
-                        controller.current_zoom = height;
-                        commands
-                            .entity(camera_entity)
-                            .insert(CameraControlsDisabled);
-                    }
-                    CameraViewMode::Default => {
-                        // Standard 3D perspective - same as game setup
-                        let initial_height = 16.0;
-                        let distance_behind = 8.0;
-
-                        let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
-
-                        let camera_pos = if is_black_view {
-                            Vec3::new(3.5, initial_height, 7.0 + distance_behind)
-                        } else {
-                            Vec3::new(3.5, initial_height, -distance_behind)
-                        };
-
-                        *transform = Transform::from_translation(camera_pos)
-                            .looking_at(board_center, Vec3::Y);
-                        controller.target_zoom = initial_height;
-                        controller.current_zoom = initial_height;
-                        controller.initialized = false;
-                        commands
-                            .entity(camera_entity)
-                            .remove::<CameraControlsDisabled>();
-                    }
-                    CameraViewMode::Cinematic => {
-                        // Cinematic mode - controls disabled, sequence takes over
-                        commands
-                            .entity(camera_entity)
-                            .insert(CameraControlsDisabled);
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Component marker for cinematic fade overlay
-#[derive(Component)]
-pub struct CinematicFadeOverlayComponent;
-
-/// System to update cinematic camera with elaborate movements
-pub fn cinematic_camera_system(
-    time: Res<Time>,
-    mut sequence: ResMut<CinematicSequence>,
-    camera_view_mode: Res<CameraViewMode>,
-    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera3d>>,
-    mut commands: Commands,
-    fade_query: Query<Entity, With<CinematicFadeOverlayComponent>>,
-    mut color_query: Query<&mut BackgroundColor>,
-) {
-    if *camera_view_mode != CameraViewMode::Cinematic {
-        // Remove any existing fade overlay when not in cinematic mode
-        for entity in fade_query.iter() {
-            commands.entity(entity).despawn();
-        }
-        return;
-    }
-
-    let dt = time.delta_secs();
-    let num_frames = sequence.keyframes.len();
-    let current_frame_idx = sequence.current_frame % num_frames;
-    let next_frame_idx = (sequence.current_frame + 1) % num_frames;
-
-    // Copy frame data to avoid borrow issues
-    let current_frame = sequence.keyframes[current_frame_idx].clone();
-    let next_frame = sequence.keyframes[next_frame_idx].clone();
-    let should_fade = sequence.should_fade_at_transition();
-
-    // Handle fading - spawn fade overlay if needed
-    if sequence.is_fading {
-        sequence.fade_time += dt;
-        let fade_t = (sequence.fade_time / sequence.fade_duration).clamp(0.0, 1.0);
-
-        // Ensure fade overlay exists
-        if fade_query.is_empty() {
-            commands.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
-                ZIndex(1000), // High z-index to cover everything
-                CinematicFadeOverlayComponent,
-                Name::new("Cinematic Fade Overlay"),
-            ));
-        }
-
-        if sequence.fade_out {
-            // Fading out (to black)
-            sequence.fade_progress = fade_t;
-            if fade_t >= 1.0 {
-                // Finished fade out, start fade in
-                sequence.fade_out = false;
-                sequence.fade_time = 0.0;
-                sequence.current_frame = next_frame_idx;
-            }
-        } else {
-            // Fading in (from black)
-            sequence.fade_progress = 1.0 - fade_t;
-            if fade_t >= 1.0 {
-                // Finished fade in
-                sequence.is_fading = false;
-                sequence.fade_progress = 0.0;
-                sequence.fade_time = 0.0;
-            }
-        }
-
-        // Update fade overlay color
-        for entity in fade_query.iter() {
-            if let Ok(mut bg) = color_query.get_mut(entity) {
-                *bg = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, sequence.fade_progress));
-            }
-        }
-        return;
-    } else {
-        // Remove fade overlay when not fading
-        for entity in fade_query.iter() {
-            commands.entity(entity).despawn();
-        }
-    }
-
-    // Check if we need to start a fade at this transition
-    sequence.elapsed_in_frame += dt;
-    if sequence.elapsed_in_frame >= current_frame.duration_secs && should_fade {
-        sequence.is_fading = true;
-        sequence.fade_out = true;
-        sequence.fade_time = 0.0;
-        sequence.fade_progress = 0.0;
-        return;
-    }
-
-    // Normal interpolation
-    let t = (sequence.elapsed_in_frame / current_frame.duration_secs).min(1.0);
-    let smooth_t = t * t * (3.0 - 2.0 * t); // Smooth step interpolation
-
-    for (mut transform, mut controller) in camera_query.iter_mut() {
-        // Calculate position based on transition type
-        let new_position = match current_frame.transition_type {
-            TransitionType::Linear => current_frame.position.lerp(next_frame.position, smooth_t),
-            TransitionType::EaseInOut => {
-                // Cubic ease in-out
-                let ease_t = if t < 0.5 {
-                    4.0 * t * t * t
-                } else {
-                    1.0 - ((-2.0 * t + 2.0).powi(3) / 2.0)
-                };
-                current_frame.position.lerp(next_frame.position, ease_t)
-            }
-            TransitionType::Elliptical {
-                center,
-                axis_x,
-                axis_z,
-                start_angle,
-                end_angle,
-            } => {
-                // Interpolate angle
-                let angle = start_angle + (end_angle - start_angle) * smooth_t;
-
-                // Calculate position on ellipse
-                let x = center.x + axis_x * angle.cos();
-                let z = center.z + axis_z * angle.sin();
-
-                // Interpolate height separately
-                let y = current_frame.position.lerp(next_frame.position, smooth_t).y;
-
-                Vec3::new(x, y, z)
-            }
-        };
-
-        // Calculate look_at (can also be interpolated for smooth transitions)
-        let new_look_at = current_frame.look_at.lerp(next_frame.look_at, smooth_t);
-
-        // Interpolate zoom/height
-        let target_zoom = current_frame
-            .target_zoom
-            .lerp(next_frame.target_zoom, smooth_t);
-
-        // Apply transform
-        *transform = Transform::from_translation(new_position).looking_at(new_look_at, Vec3::Y);
-        controller.target_zoom = target_zoom;
-        controller.current_zoom = target_zoom;
-
-        // Advance to next frame when complete
-        if sequence.elapsed_in_frame >= current_frame.duration_secs && !sequence.is_fading {
-            sequence.elapsed_in_frame = 0.0;
-            sequence.current_frame = next_frame_idx;
-            debug!(
-                "[CINEMATIC] Advanced to keyframe {}",
-                sequence.current_frame
-            );
-        }
-    }
-}
-
-/// Run condition to check if camera controls are enabled
-pub fn camera_controls_enabled(
-    camera_view_mode: Res<CameraViewMode>,
-    query: Query<(), (With<Camera3d>, With<CameraControlsDisabled>)>,
-) -> bool {
-    !camera_view_mode.is_fixed() && query.is_empty()
+/// Run condition: camera pan/rotate/zoom systems only run while Free.
+pub fn camera_controls_enabled(camera_lock: Res<CameraLockState>) -> bool {
+    !camera_lock.locked
 }

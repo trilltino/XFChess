@@ -243,12 +243,20 @@ pub fn wallet_connect_overlay_system(
     };
 
     let mut cancelled = false;
+    let mut retry = false;
+    let message = wallet_connect_overlay_message(&poller);
+    let button_text = if poller.bridge_status_error.is_some() {
+        "Retry"
+    } else {
+        "Cancel"
+    };
+
     egui::Window::new("##wallet_connect_overlay")
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .fixed_size([340.0, 200.0])
+        .fixed_size([340.0, 220.0])
         .order(egui::Order::Foreground)
         .frame(overlay_frame)
         .show(&ctx, |ui| {
@@ -265,37 +273,86 @@ pub fn wallet_connect_overlay_system(
                 ui.spinner();
                 ui.add_space(12.0);
                 ui.label(
-                    egui::RichText::new("Approve the connection in your\nbrowser wallet extension")
+                    egui::RichText::new(message)
                         .size(11.0)
                         .color(egui::Color32::from_rgb(160, 170, 200))
                         .family(egui::FontFamily::Proportional),
                 );
-                ui.add_space(20.0);
-                if ui
-                    .add_sized(
-                        [120.0, 34.0],
-                        egui::Button::new(
-                            egui::RichText::new("Cancel")
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(180, 180, 200)),
-                        )
-                        .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
-                        .corner_radius(6.0)
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
-                        )),
-                    )
-                    .clicked()
-                {
-                    cancelled = true;
+                ui.add_space(12.0);
+                if let Some(err) = &poller.bridge_status_error {
+                    ui.label(
+                        egui::RichText::new(err)
+                            .size(10.0)
+                            .color(egui::Color32::from_rgb(220, 120, 120))
+                            .family(egui::FontFamily::Proportional),
+                    );
+                    ui.add_space(10.0);
                 }
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_sized(
+                            [120.0, 34.0],
+                            egui::Button::new(
+                                egui::RichText::new(button_text)
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(180, 180, 200)),
+                            )
+                            .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
+                            .corner_radius(6.0)
+                            .stroke(egui::Stroke::new(
+                                1.0,
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                            )),
+                        )
+                        .clicked()
+                    {
+                        if poller.bridge_status_error.is_some() {
+                            retry = true;
+                        } else {
+                            cancelled = true;
+                        }
+                    }
+                    if poller.bridge_status_error.is_some() {
+                        if ui
+                            .add_sized(
+                                [120.0, 34.0],
+                                egui::Button::new(
+                                    egui::RichText::new("Cancel")
+                                        .size(11.0)
+                                        .color(egui::Color32::from_rgb(180, 180, 200)),
+                                )
+                                .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
+                                .corner_radius(6.0)
+                                .stroke(egui::Stroke::new(
+                                    1.0,
+                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                                )),
+                            )
+                            .clicked()
+                        {
+                            cancelled = true;
+                        }
+                    }
+                });
             });
         });
 
     if cancelled {
         poller.show_connect_overlay = false;
-        poller.enabled = false;
+    }
+    if retry {
+        poller.bridge_status_error = None;
+        poller.timer = 5.0;
+        poller.status_rx = None;
+        poller.show_connect_overlay = true;
+    }
+}
+
+fn wallet_connect_overlay_message(poller: &WalletBridgePoller) -> &'static str {
+    if poller.bridge_status_error.is_some() {
+        "Cannot reach the wallet bridge. Verify the desktop app is running, then retry."
+    } else {
+        "Approve the connection in your browser wallet extension."
     }
 }
 
@@ -493,7 +550,10 @@ pub struct BridgeMeResp {
 #[derive(Resource, Default)]
 pub struct WalletBridgePoller {
     /// Channel for incoming (pubkey, username) from a `/status` poll.
-    pub status_rx: Option<crossbeam_channel::Receiver<(Option<String>, Option<String>)>>,
+    pub status_rx:
+        Option<crossbeam_channel::Receiver<Result<(Option<String>, Option<String>), String>>>,
+    /// Last observed bridge status error, if any.
+    pub bridge_status_error: Option<String>,
     /// Channel for incoming (sol_balance, usd_per_sol, gbp_per_sol).
     pub balance_rx: Option<crossbeam_channel::Receiver<(f64, f64, f64)>>,
     /// Channel for an in-flight `GET /token` + `GET /auth/me` call.
@@ -606,107 +666,120 @@ fn poll_wallet_bridge(
 
     // --- receive status response ---
     if let Some(ref rx) = poller.status_rx {
-        if let Ok((pubkey_opt, username_opt)) = rx.try_recv() {
-            poller.status_rx = None;
-            if let Some(pk) = pubkey_opt {
-                poller.show_connect_overlay = false;
-                // Bridge username is only a provisional value for the brief window
-                // before the authoritative `/auth/me` fetch resolves. The bridge's
-                // in-memory cache can go stale relative to the account's real,
-                // backend-stored username (e.g. across Tauri sidecar restarts), so
-                // once we have a real identity it must never be silently clobbered
-                // by this — otherwise the profile-retry loop below (which only
-                // runs while `username` is `None`) never gets a chance to correct
-                // it, and the game display can drift from the website permanently.
-                if player_identity.username.is_none() {
-                    if let Some(ref uname) = username_opt {
-                        if !uname.is_empty() {
-                            info!(
-                                "[WalletBridge] Username from bridge (provisional): {}",
-                                uname
-                            );
-                            player_identity.username = Some(uname.clone());
+        match rx.try_recv() {
+            Ok(Ok((pubkey_opt, username_opt))) => {
+                poller.status_rx = None;
+                poller.bridge_status_error = None;
+                if let Some(pk) = pubkey_opt {
+                    poller.show_connect_overlay = false;
+                    // Bridge username is only a provisional value for the brief window
+                    // before the authoritative `/auth/me` fetch resolves. The bridge's
+                    // in-memory cache can go stale relative to the account's real,
+                    // backend-stored username (e.g. across Tauri sidecar restarts), so
+                    // once we have a real identity it must never be silently clobbered
+                    // by this — otherwise the profile-retry loop below (which only
+                    // runs while `username` is `None`) never gets a chance to correct
+                    // it, and the game display can drift from the website permanently.
+                    if player_identity.username.is_none() {
+                        if let Some(ref uname) = username_opt {
+                            if !uname.is_empty() {
+                                info!(
+                                    "[WalletBridge] Username from bridge (provisional): {}",
+                                    uname
+                                );
+                                player_identity.username = Some(uname.clone());
+                            }
                         }
                     }
-                }
 
-                let is_new_pubkey = poller.known_pubkey.as_deref() != Some(&pk);
-                if is_new_pubkey {
-                    info!("[WalletBridge] New pubkey detected: {}", pk);
-                    // Reset identity so we don't show stale data from previous wallet
-                    if poller.known_pubkey.is_some() {
-                        player_identity.username = None;
-                        player_identity.elo = None;
-                        player_identity.country = None;
-                        player_identity.jwt_token = None;
-                        player_identity.can_wager = false;
-                        player_identity.has_onchain_profile = false;
-                    }
-                    poller.known_pubkey = Some(pk.clone());
-                    player_identity.pubkey_str = Some(pk.clone());
-                }
-
-                // Primary: fetch JWT from bridge then call /auth/me
-                if poller.me_rx.is_none() && player_identity.jwt_token.is_none() {
-                    let (tx, rx) = crossbeam_channel::bounded(1);
-                    poller.me_rx = Some(rx);
-                    bevy::tasks::IoTaskPool::get()
-                        .spawn(async move {
-                            let res = fetch_bridge_me();
-                            let _ = tx.send(res);
-                        })
-                        .detach();
-                }
-
-                // Fallback: kick off raw VPS profile fetch if JWT path is unavailable
-                if poller.me_rx.is_none()
-                    && player_identity.pending_profile_rx.is_none()
-                    && player_identity.jwt_token.is_none()
-                    && (player_identity.username.is_none()
-                        || username_opt.is_none()
-                        || username_opt.as_deref() == Some(""))
-                {
-                    let (tx, rx) = crossbeam_channel::bounded(1);
-                    player_identity.pending_profile_rx = Some(rx);
-                    let pk2 = pk.clone();
-                    bevy::tasks::IoTaskPool::get()
-                        .spawn(async move {
-                            let res =
-                                crate::multiplayer::network::vps::identity::fetch_player_profile(
-                                    &pk2,
-                                );
-                            let _ = tx.send(res);
-                        })
-                        .detach();
-                }
-
-                // Trigger balance fetch on new pubkey or when Refresh was clicked (balance_rx is None)
-                if is_new_pubkey || poller.balance_rx.is_none() {
+                    // Handle pubkey changes and kick off profile/balance fetches
+                    let is_new_pubkey = poller.known_pubkey.as_deref() != Some(&pk);
                     if is_new_pubkey {
-                        // Fresh connection — show a loading state rather than a
-                        // stale/default "$0.00" until this fetch actually lands.
-                        poller.data.lock().unwrap().balance_loaded = false;
+                        info!("[WalletBridge] New pubkey detected: {}", pk);
+                        // Reset identity so we don't show stale data from previous wallet
+                        if poller.known_pubkey.is_some() {
+                            player_identity.username = None;
+                            player_identity.elo = None;
+                            player_identity.country = None;
+                            player_identity.jwt_token = None;
+                            player_identity.can_wager = false;
+                            player_identity.has_onchain_profile = false;
+                        }
+                        poller.known_pubkey = Some(pk.clone());
+                        player_identity.pubkey_str = Some(pk.clone());
                     }
-                    let (btx, brx) = crossbeam_channel::bounded(1);
-                    poller.balance_rx = Some(brx);
-                    let data_arc = poller.data.clone();
-                    bevy::tasks::IoTaskPool::get()
-                        .spawn(async move {
-                            let (sol, usd_per_sol, gbp_per_sol) = fetch_sol_rates(&pk);
-                            let _ = btx.send((sol, usd_per_sol, gbp_per_sol));
-                            let mut d = data_arc.lock().unwrap();
-                            d.sol_balance = sol;
-                            d.usd_balance = if usd_per_sol > 0.0 {
-                                Some(sol * usd_per_sol)
-                            } else {
-                                None
-                            };
-                            d.sol_usd_rate = usd_per_sol;
-                            d.sol_gbp_rate = gbp_per_sol;
-                            d.balance_loaded = true;
-                        })
-                        .detach();
+
+                    // Primary: fetch JWT from bridge then call /auth/me
+                    if poller.me_rx.is_none() && player_identity.jwt_token.is_none() {
+                        let (tx, rx) = crossbeam_channel::bounded(1);
+                        poller.me_rx = Some(rx);
+                        bevy::tasks::IoTaskPool::get()
+                            .spawn(async move {
+                                let res = fetch_bridge_me();
+                                let _ = tx.send(res);
+                            })
+                            .detach();
+                    }
+
+                    // Fallback: kick off raw VPS profile fetch if JWT path is unavailable
+                    if poller.me_rx.is_none()
+                        && player_identity.pending_profile_rx.is_none()
+                        && player_identity.jwt_token.is_none()
+                        && (player_identity.username.is_none()
+                            || username_opt.is_none()
+                            || username_opt.as_deref() == Some(""))
+                    {
+                        let (tx, rx) = crossbeam_channel::bounded(1);
+                        player_identity.pending_profile_rx = Some(rx);
+                        let pk2 = pk.clone();
+                        bevy::tasks::IoTaskPool::get()
+                            .spawn(async move {
+                                let res =
+                                    crate::multiplayer::network::vps::identity::fetch_player_profile(
+                                        &pk2,
+                                    );
+                                let _ = tx.send(res);
+                            })
+                            .detach();
+                    }
+
+                    // Trigger balance fetch on new pubkey or when Refresh was clicked (balance_rx is None)
+                    if is_new_pubkey || poller.balance_rx.is_none() {
+                        if is_new_pubkey {
+                            // Fresh connection — show a loading state rather than a
+                            // stale/default "$0.00" until this fetch actually lands.
+                            poller.data.lock().unwrap().balance_loaded = false;
+                        }
+                        let (btx, brx) = crossbeam_channel::bounded(1);
+                        poller.balance_rx = Some(brx);
+                        let data_arc = poller.data.clone();
+                        bevy::tasks::IoTaskPool::get()
+                            .spawn(async move {
+                                let (sol, usd_per_sol, gbp_per_sol) = fetch_sol_rates(&pk);
+                                let _ = btx.send((sol, usd_per_sol, gbp_per_sol));
+                                let mut d = data_arc.lock().unwrap();
+                                d.sol_balance = sol;
+                                d.usd_balance = if usd_per_sol > 0.0 {
+                                    Some(sol * usd_per_sol)
+                                } else {
+                                    None
+                                };
+                                d.sol_usd_rate = usd_per_sol;
+                                d.sol_gbp_rate = gbp_per_sol;
+                                d.balance_loaded = true;
+                            })
+                            .detach();
+                    }
                 }
+            }
+            Ok(Err(err)) => {
+                poller.status_rx = None;
+                poller.bridge_status_error = Some(err);
+                poller.show_connect_overlay = true;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => {
+                poller.status_rx = None;
             }
         }
     }
@@ -829,32 +902,28 @@ fn sync_bridge_pubkey_to_solana(
 }
 
 /// GET http://localhost:7454/status and extract pubkey + username.
-fn fetch_bridge_status() -> (Option<String>, Option<String>) {
-    let client = match reqwest::blocking::Client::builder()
+fn fetch_bridge_status() -> Result<(Option<String>, Option<String>), String> {
+    let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
-    {
-        Ok(c) => c,
-        Err(_) => return (None, None),
-    };
+        .map_err(|e| format!("bridge client build: {e}"))?;
     let port = std::env::var("XFCHESS_WALLET_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(7454);
-    let resp = match client.get(format!("http://127.0.0.1:{port}/status")).send() {
-        Ok(r) => r,
-        Err(_) => return (None, None),
-    };
-    let json: serde_json::Value = match resp.json() {
-        Ok(v) => v,
-        Err(_) => return (None, None),
-    };
+    let resp = client
+        .get(format!("http://127.0.0.1:{port}/status"))
+        .send()
+        .map_err(|e| format!("bridge /status: {e}"))?;
+    let json: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("bridge /status parse: {e}"))?;
     let pubkey = json["pubkey"].as_str().map(|s| s.to_string());
     let username = json["username"]
         .as_str()
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    (pubkey, username)
+    Ok((pubkey, username))
 }
 
 /// Fetch JWT from bridge `GET /token`, then call backend `GET /auth/me`.
@@ -1046,7 +1115,7 @@ fn load_local_profile_on_startup(mut player_identity: ResMut<PlayerIdentity>) {
     if player_identity.username.is_some() {
         return;
     }
-    if let Some(name) = crate::multiplayer::network::identity::load_guest_username() {
+    if let Some(name) = crate::multiplayer::network::identity::load_active_profile() {
         info!("[PROFILE] Loaded local profile name: {}", name);
         player_identity.username = Some(name);
         player_identity.is_guest = true;
@@ -1111,7 +1180,7 @@ pub struct BrandLogoState {
     pub loaded: bool,
 }
 
-const BRAND_LOGO_PATH: &str = "assets/xfchess-title.png";
+const BRAND_LOGO_PATH: &str = "assets/branding/xfchess-title.png";
 
 pub(super) fn ensure_brand_logo_texture(
     ctx: &egui::Context,

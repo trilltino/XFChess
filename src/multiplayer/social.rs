@@ -314,31 +314,42 @@ fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlaye
 }
 
 /// One-shot region fetch — spawns a background task on first run, then drains
-/// the channel every frame until a value arrives.
+/// the channel every frame until a value arrives. Never re-fires after that:
+/// `state` moves from `NotStarted` -> `Pending` -> `Done` and stays `Done`.
 fn fetch_backend_region_once(
     mut region: ResMut<BackendRegion>,
-    mut state: Local<Option<Receiver<(String, String, u32)>>>,
+    mut state: Local<RegionFetchState>,
 ) {
-    if state.is_none() {
-        let (tx, rx) = bounded::<(String, String, u32)>(1);
-        *state = Some(rx);
-        bevy::tasks::IoTaskPool::get()
-            .spawn(async move {
-                let start = std::time::Instant::now();
-                let (tag, label) = crate::multiplayer::vps_client::fetch_region()
-                    .unwrap_or_else(|_| ("unknown".to_string(), "Unknown Region".to_string()));
-                let latency_ms = start.elapsed().as_millis() as u32;
-                let _ = tx.send((tag, label, latency_ms));
-            })
-            .detach();
-    }
-
-    if let Some(ref rx) = *state {
-        if let Ok((tag, label, latency_ms)) = rx.try_recv() {
-            region.tag = tag;
-            region.label = label;
-            region.latency_ms = Some(latency_ms);
-            *state = None;
+    match &*state {
+        RegionFetchState::NotStarted => {
+            let (tx, rx) = bounded::<(String, String, u32)>(1);
+            *state = RegionFetchState::Pending(rx);
+            bevy::tasks::IoTaskPool::get()
+                .spawn(async move {
+                    let start = std::time::Instant::now();
+                    let (tag, label) = crate::multiplayer::vps_client::fetch_region()
+                        .unwrap_or_else(|_| ("unknown".to_string(), "Unknown Region".to_string()));
+                    let latency_ms = start.elapsed().as_millis() as u32;
+                    let _ = tx.send((tag, label, latency_ms));
+                })
+                .detach();
         }
+        RegionFetchState::Pending(rx) => {
+            if let Ok((tag, label, latency_ms)) = rx.try_recv() {
+                region.tag = tag;
+                region.label = label;
+                region.latency_ms = Some(latency_ms);
+                *state = RegionFetchState::Done;
+            }
+        }
+        RegionFetchState::Done => {}
     }
+}
+
+#[derive(Default)]
+enum RegionFetchState {
+    #[default]
+    NotStarted,
+    Pending(Receiver<(String, String, u32)>),
+    Done,
 }

@@ -26,16 +26,32 @@ pub async fn telemetry_middleware(
     next: Next,
 ) -> Response {
     let start = Instant::now();
-    let endpoint = format!("{} {}", request.method(), request.uri().path());
+    let path = request.uri().path().to_string();
+    let endpoint = format!("{} {}", request.method(), path);
     let context = RequestContext::new(&endpoint);
 
+    // High-frequency heartbeat/poll routes are expected traffic, not events —
+    // log them at `debug` so `info`-level terminals only show real activity
+    // (moves, auth, tournament actions, errors). Nothing else changes: they
+    // still go through metrics and error/warn logging below like any route.
+    let is_routine_poll = matches!(path.as_str(), "/region" | "/presence");
+
     // Log request start
-    tracing::info!(
-        request_id = %context.request_id,
-        method = %request.method(),
-        path = %request.uri().path(),
-        "request_started"
-    );
+    if is_routine_poll {
+        tracing::debug!(
+            request_id = %context.request_id,
+            method = %request.method(),
+            path = %path,
+            "request_started"
+        );
+    } else {
+        tracing::info!(
+            request_id = %context.request_id,
+            method = %request.method(),
+            path = %path,
+            "request_started"
+        );
+    }
 
     // Process request
     let response = next.run(request).await;
@@ -62,6 +78,15 @@ pub async fn telemetry_middleware(
         );
     } else if status >= HTTP_STATUS_CLIENT_ERROR {
         tracing::warn!(
+            request_id = %context.request_id,
+            method = %context.endpoint.split_whitespace().next().unwrap_or("UNKNOWN"),
+            path = %context.endpoint.split_whitespace().nth(1).unwrap_or("/"),
+            status = status,
+            duration_ms = duration_ms,
+            "request_completed"
+        );
+    } else if is_routine_poll {
+        tracing::debug!(
             request_id = %context.request_id,
             method = %context.endpoint.split_whitespace().next().unwrap_or("UNKNOWN"),
             path = %context.endpoint.split_whitespace().nth(1).unwrap_or("/"),
