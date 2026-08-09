@@ -163,6 +163,9 @@ fn publish_local_move(
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
     p2p_conn: Res<crate::multiplayer::network::p2p::P2PConnectionState>,
     braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
+    #[cfg(feature = "solana")] solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
 ) {
     if !session.is_configured() {
         move_events.clear();
@@ -244,6 +247,26 @@ fn publish_local_move(
             .map(|id| bs58::encode(id.as_bytes()).into_string())
             .unwrap_or_default();
 
+        // The backend's game-log participant check (`check_participant` in
+        // `game_log.rs`) verifies `sender_identity` against the on-chain
+        // `Game.white`/`black` wallet pubkeys for a wallet-authenticated
+        // game — it has no idea what an Iroh node id is. Sending `node_b58`
+        // there for a wagered/wallet game always resolves to `Mismatch` and
+        // gets the move rejected with 403, silently killing the Braid
+        // fallback exactly when gossip needs it (gossip flaking is the
+        // common case this fallback exists for). Casual (no-wallet) games
+        // have no on-chain `Game` account, so the backend falls back to a
+        // first-two-seen roster regardless of what identity string is used
+        // — `node_b58` remains correct and is kept as the fallback here.
+        #[cfg(feature = "solana")]
+        let braid_sender_identity = solana_state
+            .as_ref()
+            .and_then(|s| s.wallet_pubkey)
+            .map(|pk| pk.to_string())
+            .unwrap_or_else(|| node_b58.clone());
+        #[cfg(not(feature = "solana"))]
+        let braid_sender_identity = node_b58.clone();
+
         // Dual transport: also PUT to the Braid moves log so the move lands
         // (and is durably recorded) even when the Iroh gossip link isn't
         // established. The opponent dedups cross-transport via
@@ -252,7 +275,7 @@ fn publish_local_move(
         crate::multiplayer::network::braid_transport::publish_move(
             session.base_url.clone(),
             session.game_id.clone(),
-            node_b58.clone(),
+            braid_sender_identity,
             String::new(),
             MovePayload::from_uci(
                 uci.clone(),
@@ -328,6 +351,9 @@ fn handle_publish_resign(
     mut reader: MessageReader<PublishOnlineResign>,
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
     braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
+    #[cfg(feature = "solana")] solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
 ) {
     if !session.is_configured() {
         reader.clear();
@@ -353,10 +379,21 @@ fn handle_publish_resign(
             .as_ref()
             .map(|id| bs58::encode(id.as_bytes()).into_string())
             .unwrap_or_default();
+        // See the matching comment in `publish_local_move` — `resign` is
+        // also participant-checked server-side, so a wallet game needs the
+        // wallet pubkey here, not the Iroh node id.
+        #[cfg(feature = "solana")]
+        let braid_sender_identity = solana_state
+            .as_ref()
+            .and_then(|s| s.wallet_pubkey)
+            .map(|pk| pk.to_string())
+            .unwrap_or_else(|| node_b58.clone());
+        #[cfg(not(feature = "solana"))]
+        let braid_sender_identity = node_b58.clone();
         crate::multiplayer::network::braid_transport::publish_resign(
             session.base_url.clone(),
             session.game_id.clone(),
-            node_b58,
+            braid_sender_identity,
             String::new(),
             event.player.clone(),
             braid.heads(),

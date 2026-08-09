@@ -109,12 +109,16 @@ pub fn report_blur(
 }
 
 /// Ask VPS to build, sign, and submit a `record_move` instruction on the ER.
+/// Returns `(signature, er_endpoint)` — `er_endpoint` is the exact RPC URL
+/// the backend actually submitted through, straight from `routing::rpc_for`,
+/// so callers can build an accurate ER explorer link instead of guessing at
+/// a hardcoded client-side constant.
 pub fn record_move(
     game_id: u64,
     move_uci: &str,
     next_fen: &str,
     nonce: u64,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let response = client()?
         .post(format!("{}/move/record", vps_base()))
         .json(&RecordMoveReq {
@@ -133,7 +137,7 @@ pub fn record_move(
     let resp = response
         .json::<SigResp>()
         .map_err(|e| format!("vps record_move parse: {e}"))?;
-    Ok(resp.sig)
+    Ok((resp.sig, resp.er_endpoint))
 }
 
 /// Ask the VPS to delegate a game to the Ephemeral Rollup on the caller's
@@ -160,7 +164,8 @@ pub fn vps_delegate_game(game_id: u64) -> Result<String, String> {
 }
 
 /// Ask VPS to commit ER state back to devnet by submitting `undelegate_game` on the ER.
-pub fn vps_undelegate_game(game_id: u64) -> Result<String, String> {
+/// Returns `(signature, er_endpoint)` — see [`record_move`] for why.
+pub fn vps_undelegate_game(game_id: u64) -> Result<(String, String), String> {
     let response = client()?
         .post(format!("{}/game/undelegate", vps_base()))
         .json(&UndelegateGameReq { game_id })
@@ -174,7 +179,7 @@ pub fn vps_undelegate_game(game_id: u64) -> Result<String, String> {
     let resp = response
         .json::<SigResp>()
         .map_err(|e| format!("vps undelegate_game parse: {e}"))?;
-    Ok(resp.sig)
+    Ok((resp.sig, resp.er_endpoint))
 }
 
 /// Ask VPS to finalize the game on devnet (set Finished, pay wager, update ELO).

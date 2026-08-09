@@ -25,6 +25,22 @@ pub fn braid_move_log_to_parsed_pgn(
     black_name: &str,
     result: &str,
 ) -> Option<ParsedPgnGame> {
+    braid_move_log_to_parsed_pgn_rated(moves, white_name, black_name, None, None, result)
+}
+
+/// Same as [`braid_move_log_to_parsed_pgn`], but also stamps `WhiteElo`/
+/// `BlackElo` tags when the wallet's on-chain ELO is known (Solana PVP).
+/// Local/offline games pass `None` for both and get no rating tags, matching
+/// standard PGN practice of omitting Elo tags rather than faking a value.
+#[allow(clippy::too_many_arguments)]
+pub fn braid_move_log_to_parsed_pgn_rated(
+    moves: &[MovePayload],
+    white_name: &str,
+    black_name: &str,
+    white_elo: Option<u32>,
+    black_elo: Option<u32>,
+    result: &str,
+) -> Option<ParsedPgnGame> {
     if moves.is_empty() {
         return None;
     }
@@ -60,9 +76,24 @@ pub fn braid_move_log_to_parsed_pgn(
     }
 
     let mut tags = BTreeMap::new();
+    tags.insert(
+        "Event".to_string(),
+        format!("{} vs {}", white_name, black_name),
+    );
+    tags.insert("Site".to_string(), "XFChess".to_string());
+    tags.insert(
+        "Date".to_string(),
+        chrono::Local::now().format("%Y.%m.%d").to_string(),
+    );
     tags.insert("White".to_string(), white_name.to_string());
     tags.insert("Black".to_string(), black_name.to_string());
     tags.insert("Result".to_string(), result.to_string());
+    if let Some(elo) = white_elo {
+        tags.insert("WhiteElo".to_string(), elo.to_string());
+    }
+    if let Some(elo) = black_elo {
+        tags.insert("BlackElo".to_string(), elo.to_string());
+    }
 
     info!(
         "[replay-braid] Assembled ParsedPgnGame: {} half-moves",
@@ -89,7 +120,7 @@ pub fn braid_move_log_to_pgn_text(
     let pgn = braid_move_log_to_parsed_pgn(moves, white_name, black_name, result)?;
 
     let mut out = String::new();
-    for (k, v) in &pgn.tags {
+    for (k, v) in nimzovich_engine::ordered_tags(&pgn.tags) {
         out.push_str(&format!("[{} \"{}\"]\n", k, v));
     }
     out.push('\n');

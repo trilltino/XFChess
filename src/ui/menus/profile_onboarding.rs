@@ -1,16 +1,18 @@
-//! First-run local profile onboarding.
+//! Local profile picker, shown on launch until a profile is active.
 //!
-//! Shown once, only when no local profile name has ever been saved
-//! (`Documents/xfchess/guest_username` doesn't exist yet, per
-//! `load_local_profile_on_startup` in `states/main_menu.rs`) and no wallet
-//! is connected. Confirming saves the name locally via
-//! `multiplayer::network::identity::save_guest_username` and populates
-//! `PlayerIdentity` immediately — every later launch reads it back silently,
-//! with no prompt.
+//! Several people can share one machine. Every profile ever created on this
+//! device (`identity::list_profiles`) is offered as a clickable entry;
+//! picking one activates it immediately via `identity::set_active_profile`.
+//! A "+" entry reveals a name field to create a new profile
+//! (`identity::create_profile`), which also gets its own PGN save subfolder
+//! (`identity::profile_pgn_dir`). Confirming either path populates
+//! `PlayerIdentity` immediately — every later launch loads the last-active
+//! profile silently, with no prompt, unless a wallet connects instead.
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+use crate::multiplayer::network::identity;
 use crate::states::main_menu::PlayerIdentity;
 use crate::ui::styles::StyledPanel;
 
@@ -20,6 +22,9 @@ const MAX_NAME_LEN: usize = 20;
 pub struct ProfileOnboardingState {
     draft: String,
     error: Option<String>,
+    /// Show the "new profile" name field instead of the profile list. Forced
+    /// true automatically when no profiles exist yet.
+    creating: bool,
 }
 
 pub struct ProfileOnboardingPlugin;
@@ -39,8 +44,8 @@ fn draw_profile_onboarding(
         Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
     >,
 ) {
-    // A name already exists — persisted local profile, or a wallet is
-    // already connected and will populate one shortly — nothing to prompt.
+    // A profile is already active, or a wallet is already connected and will
+    // populate one shortly — nothing to prompt.
     if player_identity.username.is_some() {
         return;
     }
@@ -55,14 +60,22 @@ fn draw_profile_onboarding(
 
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
-    let mut confirmed = false;
+    let existing = identity::list_profiles();
+    // No profiles yet on this device — skip straight to the name field.
+    if existing.is_empty() {
+        state.creating = true;
+    }
+
+    let mut activate: Option<String> = None;
+    let mut confirmed_new = false;
+    let mut back_to_list = false;
 
     egui::Window::new("profile_onboarding")
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .fixed_size([340.0, 220.0])
+        .fixed_size([340.0, if state.creating { 220.0 } else { 260.0 }])
         .frame(StyledPanel::popup())
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
@@ -72,57 +85,119 @@ fn draw_profile_onboarding(
                         .family(egui::FontFamily::Name("CinzelBold".into())),
                 );
                 ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(
-                        "Choose a name, saved locally on this device. Used for Computer \
-                         games and local online games — connecting a Solana wallet later \
-                         uses your on-chain profile name instead.",
-                    )
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(160, 160, 175)),
-                );
-                ui.add_space(16.0);
 
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut state.draft)
-                        .hint_text("Your name")
-                        .char_limit(MAX_NAME_LEN)
-                        .desired_width(240.0),
-                );
-                let enter_pressed =
-                    resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-
-                if let Some(err) = state.error.clone() {
-                    ui.add_space(6.0);
-                    ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
-                }
-
-                ui.add_space(16.0);
-                if ui
-                    .add_sized(
-                        [160.0, 38.0],
-                        egui::Button::new(
-                            egui::RichText::new("Continue")
-                                .size(14.0)
-                                .strong()
-                                .color(egui::Color32::from_rgb(20, 18, 10)),
+                if state.creating {
+                    ui.label(
+                        egui::RichText::new(
+                            "Choose a name, saved locally on this device. Used for Computer \
+                             games and local online games — connecting a Solana wallet later \
+                             uses your on-chain profile name instead.",
                         )
-                        .fill(egui::Color32::from_rgb(244, 187, 68)),
-                    )
-                    .clicked()
-                    || enter_pressed
-                {
-                    confirmed = true;
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(160, 160, 175)),
+                    );
+                    ui.add_space(16.0);
+
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut state.draft)
+                            .hint_text("Your name")
+                            .char_limit(MAX_NAME_LEN)
+                            .desired_width(240.0),
+                    );
+                    let enter_pressed =
+                        resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                    if let Some(err) = state.error.clone() {
+                        ui.add_space(6.0);
+                        ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
+                    }
+
+                    ui.add_space(16.0);
+                    if ui
+                        .add_sized(
+                            [160.0, 38.0],
+                            egui::Button::new(
+                                egui::RichText::new("Continue")
+                                    .size(14.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(20, 18, 10)),
+                            )
+                            .fill(egui::Color32::from_rgb(244, 187, 68)),
+                        )
+                        .clicked()
+                        || enter_pressed
+                    {
+                        confirmed_new = true;
+                    }
+
+                    if !existing.is_empty() {
+                        ui.add_space(8.0);
+                        if ui.link("Back to profile list").clicked() {
+                            back_to_list = true;
+                        }
+                    }
+                } else {
+                    ui.label(
+                        egui::RichText::new("Pick a local profile, or create a new one.")
+                            .size(12.0)
+                            .color(egui::Color32::from_rgb(160, 160, 175)),
+                    );
+                    ui.add_space(12.0);
+
+                    for name in &existing {
+                        if ui
+                            .add_sized(
+                                [240.0, 34.0],
+                                egui::Button::new(egui::RichText::new(name).size(14.0)),
+                            )
+                            .clicked()
+                        {
+                            activate = Some(name.clone());
+                        }
+                        ui.add_space(4.0);
+                    }
+
+                    ui.add_space(8.0);
+                    if ui
+                        .add_sized(
+                            [240.0, 34.0],
+                            egui::Button::new(
+                                egui::RichText::new("+ New profile")
+                                    .size(14.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(20, 18, 10)),
+                            )
+                            .fill(egui::Color32::from_rgb(244, 187, 68)),
+                        )
+                        .clicked()
+                    {
+                        state.creating = true;
+                        state.draft.clear();
+                        state.error = None;
+                    }
                 }
             });
         });
 
-    if confirmed {
+    if let Some(name) = activate {
+        identity::set_active_profile(&name);
+        player_identity.username = Some(name);
+        player_identity.is_guest = true;
+    }
+
+    if back_to_list {
+        state.creating = false;
+        state.error = None;
+    }
+
+    if confirmed_new {
         let trimmed = state.draft.trim();
         if trimmed.is_empty() {
             state.error = Some("Enter a name to continue.".to_string());
+        } else if existing.iter().any(|n| n == trimmed) {
+            state.error = Some("That name is already taken on this device.".to_string());
         } else {
-            crate::multiplayer::network::identity::save_guest_username(trimmed);
+            identity::create_profile(trimmed);
             player_identity.username = Some(trimmed.to_string());
             player_identity.is_guest = true;
             state.error = None;

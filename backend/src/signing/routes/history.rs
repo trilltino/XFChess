@@ -166,9 +166,7 @@ pub async fn get_game_pgn(
 
     use nimzovich_engine::{PgnAssembler, PgnResult};
     let mut assembler = PgnAssembler::new();
-    assembler
-        .tag("Event", "XFChess Game")
-        .tag("Site", "XFChess");
+    assembler.tag("Event", "XFChess PVP").tag("Site", "XFChess");
     for mv in moves {
         if let Some(san) = mv.move_san {
             assembler.add_move(san);

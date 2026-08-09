@@ -127,7 +127,7 @@ impl ComputedStates for InGameplay {
 /// Run condition: true while in any gameplay state (InGame, Paused, GameOver).
 ///
 /// Use this for systems that must keep ticking across the `InGame → GameOver`
-/// boundary, e.g. `cinematic_camera_system`.
+/// boundary.
 pub fn in_gameplay(state: Res<State<GameState>>) -> bool {
     InGameplay::compute(*state.get()).is_some()
 }

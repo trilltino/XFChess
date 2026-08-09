@@ -69,9 +69,7 @@ impl Plugin for GamePlugin {
             .init_resource::<PendingPromotion>()
             .init_resource::<GameSounds>()
             .init_resource::<MenuSounds>()
-            .init_resource::<super::camera_modes::CameraViewMode>()
-            .init_resource::<super::camera_modes::CinematicSequence>()
-            .init_resource::<super::camera_modes::CinematicFadeOverlay>()
+            .init_resource::<super::camera_modes::CameraLockState>()
             .init_resource::<InGameHudVisibility>()
             .init_resource::<IncrementFlash>()
             .init_resource::<Board2DTheme>()
@@ -107,7 +105,7 @@ impl Plugin for GamePlugin {
             .register_type::<Player>()
             .register_type::<Players>()
             .register_type::<super::view_mode::ViewMode>()
-            .register_type::<super::camera_modes::CameraViewMode>()
+            .register_type::<super::camera_modes::CameraLockState>()
             .add_message::<PromotionSelected>()
             .add_message::<crate::game::events::MoveMadeEvent>()
             .add_message::<crate::game::events::NetworkMoveEvent>()
@@ -205,7 +203,6 @@ impl Plugin for GamePlugin {
                 camera_rotation_system
                     .in_set(GameSystems::Input)
                     .run_if(super::systems::camera::camera_controls_enabled),
-                camera_mode_cycle_system.in_set(GameSystems::Input),
                 camera_rotate_on_turn_detection_system
                     .in_set(GameSystems::Input)
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
@@ -500,13 +497,6 @@ impl Plugin for GamePlugin {
         app.add_systems(
             Update,
             (toggle_in_game_hud, confirm_exit_game).run_if(in_state(GameState::InGame)),
-        );
-
-        // Cinematic camera must run in both InGame and GameOver so the game-over
-        // cinematic actually ticks. InGameplay covers InGame + Paused + GameOver.
-        app.add_systems(
-            Update,
-            cinematic_camera_system.run_if(crate::core::in_gameplay),
         );
 
         // Debug system - toggle with F12 key

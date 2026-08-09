@@ -53,7 +53,7 @@ export default function TitleBar() {
         </span>
       </div>
 
-      <div style={{ display: "flex", height: "100%" }}>
+      <div data-tauri-drag-region="false" style={{ display: "flex", height: "100%" }}>
         <TitleBarButton label="Minimize" onClick={() => invoke("minimize_tournament_admin").catch(() => {})}>
           <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor" /></svg>
         </TitleBarButton>
@@ -94,6 +94,8 @@ function TitleBarButton({
   const [hover, setHover] = useState(false);
   return (
     <button
+      type="button"
+      data-tauri-drag-region="false"
       aria-label={label}
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
