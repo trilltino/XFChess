@@ -134,33 +134,64 @@ async fn process_undelegation_rejects_non_canonical_buffer() {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
-    let mut ctx = start(vec![game_account(
-        GAME_ID,
-        white,
-        black,
-        start_board(),
-        1,
-        0,
-        GameStatus::Active,
-    )])
+    // The canonical-buffer-PDA rejection lives inside
+    // `ephemeral_rollups_sdk::cpi::undelegate_account` (pinned 0.16.2), not in
+    // our own program code (see the comment on `process_undelegation` in
+    // `lib.rs`). Reading that function's source directly
+    // (`ephemeral-rollups-sdk-0.16.2/src/cpi.rs:290-306`) shows it checks, in
+    // order: (1) `buffer.is_signer`, (2) `buffer.owner == DELEGATION_PROGRAM_ID`,
+    // (3) `buffer == canonical_undelegate_buffer_pda(delegated_account)`. To
+    // actually exercise check (3) — the one this test is named for — the
+    // spoofed buffer must first pass (1) and (2), otherwise the tx fails
+    // earlier with `MissingRequiredSignature`/`InvalidAccountOwner` instead
+    // and check (3) is never reached.
+    let spoofed_buffer_kp = Keypair::new();
+    let spoofed_buffer = spoofed_buffer_kp.pubkey();
+
+    let mut ctx = start(vec![
+        game_account(GAME_ID, white, black, start_board(), 1, 0, GameStatus::Active),
+        (
+            spoofed_buffer,
+            solana_sdk::account::Account {
+                lamports: 1_000_000_000,
+                data: vec![],
+                owner: ephemeral_rollups_sdk::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        ),
+    ])
     .await;
 
     let payer = ctx.payer.pubkey();
-    let spoofed_buffer = Pubkey::new_unique(); // not the canonical undelegate-buffer PDA
-    let ix = process_undelegation_ix(
+    let mut ix = process_undelegation_ix(
         GAME_ID,
         payer,
         spoofed_buffer,
         vec![b"game".to_vec(), GAME_ID.to_le_bytes().to_vec()],
     );
+    // `InitializeAfterUndelegation::buffer` is a bare `AccountInfo`, not
+    // `Signer`, so Anchor's derived `to_account_metas` never marks it as a
+    // signer — the SDK's runtime check (not Anchor) is what actually
+    // requires it. In production the ER validator infra signs with the
+    // buffer keypair it created at delegation time; here we must flip the
+    // same flag by hand to reach check (3).
+    for meta in ix.accounts.iter_mut() {
+        if meta.pubkey == spoofed_buffer {
+            meta.is_signer = true;
+        }
+    }
 
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&spoofed_buffer_kp]).await.unwrap_err();
     assert_eq!(
-        custom_code(&err),
-        Some(ec(
-            xfchess_game::errors::GameErrorCode::InvalidUndelegationBuffer
-        )),
-        "a buffer that isn't this account's canonical undelegate-buffer PDA must be rejected"
+        err,
+        solana_sdk::transaction::TransactionError::InstructionError(
+            0,
+            solana_sdk::instruction::InstructionError::InvalidSeeds
+        ),
+        "a buffer that isn't this account's canonical undelegate-buffer PDA must be rejected \
+         with InvalidSeeds (ephemeral_rollups_sdk::cpi::undelegate_account's own check) — \
+         GameErrorCode::InvalidUndelegationBuffer is unused dead code, not what actually fires"
     );
 }
 

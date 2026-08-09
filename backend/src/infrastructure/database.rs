@@ -205,6 +205,18 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_024 = include_str!("../../migrations/024_flagged_games.sql");
     run_script(&pools.session_pool, migration_024, "024").await?;
 
+    // ── Migration 025: session_wallet_activations (per-wallet activation idempotency) ──
+    let migration_025 = include_str!("../../migrations/025_session_wallet_activations.sql");
+    run_script(&pools.session_pool, migration_025, "025").await?;
+
+    // ── Migration 026: sessions.is_global (per-game vs global session flow) ──
+    let migration_026 = include_str!("../../migrations/026_sessions_is_global.sql");
+    run_script(&pools.session_pool, migration_026, "026").await?;
+
+    // ── Migration 027: game_event_log (durable Braid moves/resign/chat log) ──
+    let migration_027 = include_str!("../../migrations/027_game_event_log.sql");
+    run_script(&pools.session_pool, migration_027, "027").await?;
+
     info!("[Database] All migrations completed successfully");
     Ok(())
 }
