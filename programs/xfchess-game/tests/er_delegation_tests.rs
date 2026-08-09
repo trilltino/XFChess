@@ -149,7 +149,15 @@ async fn process_undelegation_rejects_non_canonical_buffer() {
     let spoofed_buffer = spoofed_buffer_kp.pubkey();
 
     let mut ctx = start(vec![
-        game_account(GAME_ID, white, black, start_board(), 1, 0, GameStatus::Active),
+        game_account(
+            GAME_ID,
+            white,
+            black,
+            start_board(),
+            1,
+            0,
+            GameStatus::Active,
+        ),
         (
             spoofed_buffer,
             solana_sdk::account::Account {
