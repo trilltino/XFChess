@@ -8,42 +8,31 @@
 
 **[Install](docs/INSTALL.md)** · **[MagicBlock Integration](MAGICBLOCK.md)** · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Environment Guide](docs/ENVIRONMENTS.md) · [Runbooks](docs/runbooks/) · [Full Docs Index](docs/README.md)
 
-XFChess is a forever-free, open source 3D chess platform: local play against a
-built-in engine, online multiplayer and tournaments, and optional Solana-backed
-wagered play with on-chain escrow, ELO, and dispute resolution — all in one
-client, no separate "crypto mode."
+# XFChess
 
-The native client is written in Rust on [Bevy](https://bevyengine.org/) (ECS,
-3D rendering, [egui](https://github.com/emilk/egui) UI). Chess logic — move
-generation, legality, check/checkmate — lives in the `nimzovich_engine` crate,
-which is `no_std`-compatible so the exact same logic runs both as a full
-alpha-beta search engine on the client and, via `chess-logic-on-chain`, inside
-the Solana program itself. Multiplayer sync is peer-to-peer over
-[Iroh](https://iroh.computer/) QUIC gossip, backed by a Rust port of the
-[Braid-HTTP 209](https://braid.org/) streaming-subscribe protocol as a durable
-server-side fallback and catch-up path, so moves, chat, and clock state still
-replicate correctly even when a direct P2P link never establishes. The backend
-is an async [Axum](https://github.com/tokio-rs/axum) server on Tokio, backed
-by SQLite via [SQLx](https://github.com/launchbadge/sqlx); it builds Solana
-transactions but never signs them — the player's wallet or a delegated
-session key does that, client-side, so the backend never touches a private
-key. On-chain game state, wager escrow, ELO, and tournaments run through an
-[Anchor](https://www.anchor-lang.com/) program, with
-[MagicBlock](https://www.magicblock.gg/) Ephemeral Rollups delegating the live
-game account off mainnet for sub-second move recording before committing the
-result back. The web frontend (`xfchessdotcom/`) is
-[React](https://react.dev/) + [Vite](https://vite.dev/) +
-[Chakra UI](https://chakra-ui.com/); the desktop build is wrapped with
-[Tauri](https://tauri.app/). Production observability runs on
-[Prometheus](https://prometheus.io/) + [Grafana](https://grafana.com/).
+XFChess is a free, open-source 3D chess client for local engine play, online multiplayer, tournaments, and optional Solana-backed wagered matches.
 
-Just want to play? Grab a prebuilt build from
-[Releases](https://github.com/trilltino/XFChess/releases) — see
-[docs/INSTALL.md](docs/INSTALL.md) for per-platform steps (including the
-SmartScreen/Gatekeeper prompts unsigned builds currently trigger). Single-player
-against the engine works fully offline; online multiplayer, tournaments, and
-wagered play need an internet connection and, for on-chain features, a Solana
-wallet (Phantom or Solflare).
+**MagicBlock Ephemeral Rollups** provide the live execution layer for wagered games. When a wagered match starts, its game account is delegated off Solana mainnet to an Ephemeral Rollup, where moves and state transitions are recorded with sub-second latency. When the game ends, the final state is committed back to Solana. This keeps the game itself fast while retaining on-chain settlement.
+
+The native client is written in **Rust with Bevy**, using ECS for game state and 3D rendering, with egui for UI. All chess rules — move generation, legality, check, and checkmate — are implemented in the `nimzovich_engine` crate. The crate is `no_std`-compatible, allowing the same ruleset to run as a full alpha-beta engine on the client and, through `chess-logic-on-chain`, inside the Solana program.
+
+Online multiplayer uses **Iroh QUIC gossip** for peer-to-peer synchronization. A Rust implementation of the **Braid-HTTP 209 streaming-subscribe protocol** provides a durable server-side fallback and catch-up path when a direct P2P connection cannot be established.
+
+The backend is an async **Axum/Tokio** server with **SQLite via SQLx**. It builds Solana transactions but never signs them. Transactions are signed client-side by the player's wallet or delegated session key, so the backend never handles private keys.
+
+The **Anchor** Solana program manages on-chain escrow, ELO, and tournament state.
+
+The web frontend in `xfchessdotcom/` uses **React, Vite, and Chakra UI**. The desktop application is packaged with **Tauri**. Production observability uses **Prometheus and Grafana**.
+
+## Getting Started
+
+Prebuilt releases are available for players who do not want to build from source. See `docs/INSTALL.md` for platform-specific installation instructions, including the SmartScreen and Gatekeeper prompts currently triggered by unsigned builds.
+
+* **Local engine play:** works fully offline.
+* **Online multiplayer and tournaments:** require an internet connection.
+* **Wagered matches:** require an internet connection and a Solana wallet such as Phantom or Solflare.
+* **On-chain features:** use Solana for escrow, settlement, ELO, and tournament state.
+
 
 ![XFChess](docs/images/screenshot_1.png)
 ![XFChess](docs/images/screenshot_2.png)
