@@ -245,7 +245,11 @@ pub fn wallet_connect_overlay_system(
     let mut cancelled = false;
     let mut retry = false;
     let message = wallet_connect_overlay_message(&poller);
-    let button_text = if poller.bridge_status_error.is_some() { "Retry" } else { "Cancel" };
+    let button_text = if poller.bridge_status_error.is_some() {
+        "Retry"
+    } else {
+        "Cancel"
+    };
 
     egui::Window::new("##wallet_connect_overlay")
         .title_bar(false)
@@ -351,7 +355,6 @@ fn wallet_connect_overlay_message(poller: &WalletBridgePoller) -> &'static str {
         "Approve the connection in your browser wallet extension."
     }
 }
-
 
 /// Wrapper for [`main_menu_ui`] that surfaces query-single errors as warnings.
 fn main_menu_ui_wrapper(mut ctx: MainMenuUIContext) {
@@ -547,7 +550,8 @@ pub struct BridgeMeResp {
 #[derive(Resource, Default)]
 pub struct WalletBridgePoller {
     /// Channel for incoming (pubkey, username) from a `/status` poll.
-    pub status_rx: Option<crossbeam_channel::Receiver<Result<(Option<String>, Option<String>), String>>>,
+    pub status_rx:
+        Option<crossbeam_channel::Receiver<Result<(Option<String>, Option<String>), String>>>,
     /// Last observed bridge status error, if any.
     pub bridge_status_error: Option<String>,
     /// Channel for incoming (sol_balance, usd_per_sol, gbp_per_sol).
@@ -779,7 +783,6 @@ fn poll_wallet_bridge(
             }
         }
     }
-    
 
     // --- receive balance response ---
     if let Some(ref rx) = poller.balance_rx {

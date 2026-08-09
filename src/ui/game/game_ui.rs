@@ -425,7 +425,6 @@ pub fn game_status_ui(mut params: GameUIParams) {
                 });
         }
     }
-
 }
 
 // ── Lichess-style right panel helpers ────────────────────────────────────────
@@ -739,7 +738,10 @@ pub(crate) fn render_clock_bar(
     let (font_size, color) = if is_active && low_time {
         (24.0_f32, egui::Color32::from_rgb(255, 90, 90))
     } else {
-        (24.0_f32, egui::Color32::from_gray(is_active as u8 * 140 + 100))
+        (
+            24.0_f32,
+            egui::Color32::from_gray(is_active as u8 * 140 + 100),
+        )
     };
 
     egui::Frame::default()
