@@ -389,14 +389,15 @@ pub async fn session_status(
 pub async fn record_move(
     State(state): State<AppState>,
     Json(req): Json<RecordMoveReq>,
-) -> Result<Json<SigResp>, StatusCode> {
-    let entry = state
-        .store
-        .get(req.game_id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
+) -> Result<Json<SigResp>, (StatusCode, String)> {
+    let entry = state.store.get(req.game_id).await.ok_or_else(|| {
+        let msg = format!("No session found for game {}", req.game_id);
+        error!("[VPS] {msg}");
+        (StatusCode::NOT_FOUND, msg)
+    })?;
     if !entry.active {
-        return Err(StatusCode::PRECONDITION_FAILED);
+        let msg = format!("Session for game {} is not active", req.game_id);
+        return Err((StatusCode::PRECONDITION_FAILED, msg));
     }
 
     // ── Engine-side validation (replay from previous FEN) ──
@@ -416,18 +417,30 @@ pub async fn record_move(
     let mut game = nimzovich_engine::on_chain::CompactBoard::from_fen(&prev_fen).to_on_chain_game();
 
     // Parse UCI into fixed 5-byte array
-    let mv_bytes = uci_to_fixed5(&req.move_uci).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mv_bytes = uci_to_fixed5(&req.move_uci).map_err(|_| {
+        let msg = format!("Bad move_uci '{}' for game {}", req.move_uci, req.game_id);
+        (StatusCode::BAD_REQUEST, msg)
+    })?;
 
     // Validate and apply
     let _outcome = nimzovich_engine::on_chain_moves::validate_and_apply(&mut game, &mv_bytes)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|e| {
+            let msg = format!(
+                "Move {} rejected by engine for game {}: {e:?}",
+                req.move_uci, req.game_id
+            );
+            (StatusCode::BAD_REQUEST, msg)
+        })?;
 
     // Derive next FEN from the engine (discard client-provided next_fen)
     let next_board = game.to_compact_board().to_bytes();
     let derived_next_fen = game.to_compact_board().to_fen();
 
-    let program_id = Pubkey::from_str(&state.config.program_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|e| {
+        let msg = format!("Bad configured program_id: {e}");
+        error!("[VPS] {msg}");
+        (StatusCode::INTERNAL_SERVER_ERROR, msg)
+    })?;
     let session_pk = entry.session_pubkey();
     let session_kp = entry.keypair();
 
@@ -471,17 +484,22 @@ pub async fn record_move(
         )
     }
     .map_err(|e| {
-        error!(
-            "[VPS] Failed to build record_move instruction for game {}: {}",
+        let msg = format!(
+            "Failed to build record_move instruction for game {}: {}",
             req.game_id, e
         );
-        StatusCode::INTERNAL_SERVER_ERROR
+        error!("[VPS] {msg}");
+        (StatusCode::INTERNAL_SERVER_ERROR, msg)
     })?;
     let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::RecordMove);
 
+    // Same empty-body 502 problem as delegate_game/undelegate_game — this is
+    // the route every single move goes through, so an opaque failure here is
+    // the single most disruptive place for it to happen.
     let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
-        error!("[VPS] record_move failed for game {}: {e}", req.game_id);
-        StatusCode::BAD_GATEWAY
+        let msg = format!("record_move failed for game {}: {e}", req.game_id);
+        error!("[VPS] {msg}");
+        (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
         "[ER] game {} move {} recorded on Ephemeral Rollup ({}) sig {}",
@@ -491,17 +509,23 @@ pub async fn record_move(
         sig
     );
 
-    // Fire-and-forget DB write with derived FEN
+    // Persist the move before responding — this used to be a fire-and-forget
+    // `tokio::spawn`, which raced the very next `record_move` call: that
+    // call's `prev_fen` lookup above reads this same history via
+    // `repo.get_moves`, so if the spawned write for move N hadn't landed yet
+    // when move N+1's request arrived (routine for a batch submitted in a
+    // tight loop, e.g. `submit_moves_via_vps`/game-end batches), move N+1 got
+    // replay-validated against a stale FEN and was rejected by the engine as
+    // illegal — reproduced live: a 2-move batch's *first* move failed this
+    // way. Awaiting it costs a couple of local SQLite writes (sub-ms) per
+    // move, worth it for correctness.
     let game_id_str = req.game_id.to_string();
     let player_wallet = entry.wallet_pubkey.to_string();
     let move_uci = req.move_uci.clone();
     let next_fen = derived_next_fen;
-    tokio::spawn(async move {
-        let repo = GameRepository::new(pool);
-        if let Err(e) = repo.upsert_game(&game_id_str).await {
-            error!("[DB] Failed to upsert game {}: {}", game_id_str, e);
-            return;
-        }
+    if let Err(e) = repo.upsert_game(&game_id_str).await {
+        error!("[DB] Failed to upsert game {}: {}", game_id_str, e);
+    } else {
         let move_number = repo.get_next_move_number(&game_id_str).await.unwrap_or(1) as i32;
 
         let san = generate_san(&repo, &game_id_str, &move_uci, move_number)
@@ -521,7 +545,7 @@ pub async fn record_move(
         {
             error!("[DB] Failed to insert move for game {}: {}", game_id_str, e);
         }
-    });
+    }
 
     Ok(Json(SigResp {
         sig: sig.to_string(),
@@ -611,34 +635,41 @@ fn uci_to_fixed5(uci: &str) -> Result<[u8; 5], ()> {
 pub async fn delegate_game(
     State(state): State<AppState>,
     Json(req): Json<DelegateGameReq>,
-) -> Result<Json<SigResp>, StatusCode> {
-    let entry = state
-        .store
-        .get(req.game_id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
-    let program_id = Pubkey::from_str(&state.config.program_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<SigResp>, (StatusCode, String)> {
+    let entry = state.store.get(req.game_id).await.ok_or_else(|| {
+        let msg = format!("No session found for game {}", req.game_id);
+        error!("[VPS] {msg}");
+        (StatusCode::NOT_FOUND, msg)
+    })?;
+    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|e| {
+        let msg = format!("Bad configured program_id: {e}");
+        error!("[VPS] {msg}");
+        (StatusCode::INTERNAL_SERVER_ERROR, msg)
+    })?;
     let session_kp = entry.keypair();
     let session_pk = entry.session_pubkey();
     let payer = state.feepayer.next();
 
     let ix = solana::delegate_game_ix(&program_id, req.game_id, &payer.pubkey(), &session_pk)
         .map_err(|e| {
-            error!(
-                "[VPS] Failed to build delegate_game instruction for game {}: {}",
+            let msg = format!(
+                "Failed to build delegate_game instruction for game {}: {}",
                 req.game_id, e
             );
-            StatusCode::INTERNAL_SERVER_ERROR
+            error!("[VPS] {msg}");
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
         })?;
 
     let rpc = solana::rpc_for(&state.config, solana::RoutedInstr::DelegateGame);
+    // The client only ever saw `HTTP 502 —  —` on failure otherwise — see
+    // the identical fix + rationale on `undelegate_game`.
     let blockhash = rpc.get_latest_blockhash().map_err(|e| {
-        error!(
-            "[VPS] delegate_game get_latest_blockhash failed for game {}: {e}",
+        let msg = format!(
+            "delegate_game get_latest_blockhash failed for game {}: {e}",
             req.game_id
         );
-        StatusCode::BAD_GATEWAY
+        error!("[VPS] {msg}");
+        (StatusCode::BAD_GATEWAY, msg)
     })?;
     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
         &[ix],
@@ -647,11 +678,12 @@ pub async fn delegate_game(
         blockhash,
     );
     let sig = rpc.send_and_confirm_transaction(&tx).map_err(|e| {
-        error!(
-            "[VPS] delegate_game failed for game {} (sig would be unknown — send failed): {e}",
+        let msg = format!(
+            "delegate_game failed for game {} (sig would be unknown — send failed): {e}",
             req.game_id
         );
-        StatusCode::BAD_GATEWAY
+        error!("[VPS] {msg}");
+        (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
         "[ER] game {} delegated to Ephemeral Rollup ({}) sig {}",
@@ -800,25 +832,36 @@ pub async fn resolve_game_signer(
 pub async fn undelegate_game(
     State(state): State<AppState>,
     Json(req): Json<UndelegateGameReq>,
-) -> Result<Json<SigResp>, StatusCode> {
+) -> Result<Json<SigResp>, (StatusCode, String)> {
     let session_kp = resolve_game_signer(&state, req.game_id)
         .await
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or_else(|| {
+            let msg = format!("No session found for game {}", req.game_id);
+            error!("[VPS] {msg}");
+            (StatusCode::NOT_FOUND, msg)
+        })?;
     let session_pk = session_kp.pubkey();
 
     let ix =
         solana::undelegate_game_ix(&state.program_id, &session_pk, req.game_id).map_err(|e| {
-            error!(
-                "[VPS] Failed to build undelegate_game instruction for game {}: {}",
+            let msg = format!(
+                "Failed to build undelegate_game instruction for game {}: {}",
                 req.game_id, e
             );
-            StatusCode::INTERNAL_SERVER_ERROR
+            error!("[VPS] {msg}");
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
         })?;
     let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::UndelegateGame);
 
+    // The client only ever sees `HTTP 502 —  —` on failure otherwise
+    // (`vps_undelegate_game` folds the response body straight into its error
+    // string) — the real reason (stale ER state, RPC timeout, session key
+    // mismatch, ...) stayed stuck in this process's own log, which isn't
+    // where anyone debugging a two-client test is looking.
     let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
-        error!("[VPS] undelegate_game failed for game {}: {e}", req.game_id);
-        StatusCode::BAD_GATEWAY
+        let msg = format!("undelegate_game failed for game {}: {e}", req.game_id);
+        error!("[VPS] {msg}");
+        (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
         "[ER] game {} undelegated from Ephemeral Rollup ({}) back to devnet, sig {}",

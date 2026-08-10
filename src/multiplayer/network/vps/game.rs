@@ -380,39 +380,28 @@ pub fn get_broadcast_delay(game_id: &str) -> Result<u64, String> {
 /// Used by Braid reconnection recovery: the caller filters the returned list
 /// to find moves that arrived after a given `since_version` hash.
 pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, String> {
-    #[derive(serde::Deserialize)]
-    struct MoveEntry {
-        move_uci: String,
-        fen_after: String,
-        move_number: u32,
-        player: Option<String>,
-    }
-    #[derive(serde::Deserialize)]
-    struct MovesResp {
-        moves: Vec<MoveEntry>,
-    }
-
+    // Path and response shape must match `game_log.rs`'s registered route
+    // exactly: `GET /game/{id}/moves` (singular "game"), returning a bare
+    // JSON array of `ChessMessage`s (the plain-GET snapshot path, see
+    // `GameLogState::snapshot` — not the `{"moves": [...]}` envelope this
+    // used to assume, which never matched either the URL or the body shape
+    // the backend actually serves and made this 404 on every call).
     let response = client()?
-        .get(format!("{}/games/{}/moves", vps_base(), game_id))
+        .get(format!("{}/game/{}/moves", vps_base(), game_id))
         .send()
         .map_err(|e| format!("fetch_move_log: {e}"))?;
     if !response.status().is_success() {
         let status = response.status();
         return Err(format!("fetch_move_log: HTTP {status}"));
     }
-    let resp = response
-        .json::<MovesResp>()
+    let messages = response
+        .json::<Vec<braid_chess::ChessMessage>>()
         .map_err(|e| format!("fetch_move_log parse: {e}"))?;
-    Ok(resp
-        .moves
+    Ok(messages
         .into_iter()
-        .map(|m| {
-            braid_chess::MovePayload::from_uci(
-                m.move_uci,
-                m.fen_after,
-                m.move_number,
-                m.player.unwrap_or_default(),
-            )
+        .filter_map(|m| match m {
+            braid_chess::ChessMessage::Move(payload) => Some(payload),
+            _ => None,
         })
         .collect())
 }

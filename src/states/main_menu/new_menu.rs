@@ -1593,22 +1593,13 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         cx.wallet_bridge.enabled = true;
         cx.wallet_bridge.timer = 5.0;
         cx.wallet_bridge.show_connect_overlay = true;
-        // Signal the Tauri bridge to open the wallet popup in Chrome
-        std::thread::spawn(|| {
-            use std::io::Write;
-            use std::net::TcpStream;
-            let base: u16 = std::env::var("XFCHESS_WALLET_PORT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(7454);
-            for offset in 2u16..=11 {
-                let port = base.saturating_sub(offset);
-                if let Ok(mut s) = TcpStream::connect(format!("127.0.0.1:{}", port)) {
-                    let _ = s.write_all(b"OPEN");
-                    break;
-                }
-            }
-        });
+        // Signal the Tauri bridge to open the wallet popup in Chrome. Must go
+        // through the shared helper, not a hand-rolled port scan here — this
+        // used to have its own inlined copy of the old top-down scan with no
+        // awareness of the port-announcement file, so it kept hitting the
+        // exact same "wrong live listener" stall that open_wallet_browser()
+        // was already fixed to avoid, completely bypassing that fix.
+        crate::multiplayer::solana::tauri_signer::open_wallet_browser();
     }
 
     // Wagered options only shown once wallet is connected

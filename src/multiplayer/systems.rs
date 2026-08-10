@@ -965,9 +965,35 @@ pub fn sweep_stale_move_buffers(
 pub fn feed_local_moves_to_rollup(
     mut move_events: MessageReader<MoveMadeEvent>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
-    network_state: Res<OnlineNetworkState>,
 ) {
-    if network_state.active_session.is_none() {
+    // `game_id != 0` is the real "is there an active on-chain game" signal.
+    // This used to also require `OnlineNetworkState::active_session` to be
+    // `Some`, but that field is only ever set by the `NetworkMessage::GameStart`
+    // handler (the old direct-invite P2P flow's `GameInvite`/`InviteResponse`/
+    // `GameStart` handshake) — the current Solana lobby flow (VPS relay +
+    // `JOIN_ACK`) never sends that message, so `active_session` stayed `None`
+    // for the entire game. That silently meant no move was ever fed into the
+    // rollup batch, so nothing was ever recorded on the Ephemeral Rollup and
+    // no `[ER] Move ... recorded` log ever appeared — reproduced live across
+    // two full two-client devnet games, zero record_move calls in either.
+    if rollup_manager.game_id == 0 {
+        return;
+    }
+    // Only the creator submits moves to the ER — same single-writer reasoning
+    // as delegation (`handle_game_start_delegation`'s doc comment: "If both
+    // players delegate simultaneously the second TX fails..."). The backend
+    // holds one shared per-game session key for `record_move`, so either
+    // client CAN ask it to submit — but if both do, they submit overlapping
+    // move sets with independently-assigned nonces, which collides with the
+    // program's strict nonce-per-turn ordering and fails the backend's own
+    // replay-validation ("Move ... rejected by engine"). Reproduced live: a
+    // 4-move game had the joiner submit its own 2 moves while the creator's
+    // manager (already fed by `feed_remote_moves_to_rollup` below) submitted
+    // an overlapping set — every `record_move` call failed. The joiner
+    // doesn't need `pending_batch` for anything else: `committed_fen`/
+    // `committed_turn` resync comes from `NetworkMessage::Committed`
+    // separately, not from what this function feeds.
+    if !rollup_manager.is_creator {
         return;
     }
 
@@ -1002,9 +1028,10 @@ pub fn feed_local_moves_to_rollup(
 pub fn feed_remote_moves_to_rollup(
     mut remote_events: MessageReader<crate::game::events::RemoteMoveApplied>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
-    network_state: Res<OnlineNetworkState>,
 ) {
-    if network_state.active_session.is_none() {
+    // See `feed_local_moves_to_rollup`'s comment — `active_session` used to
+    // be gated here too, and was just as dead for the same reason.
+    if rollup_manager.game_id == 0 {
         return;
     }
     if !rollup_manager.is_creator {
@@ -1063,10 +1090,11 @@ pub fn finalize_game_on_end(
     mut game_end_events: MessageReader<GameEndedEvent>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
     mut rollup_events: MessageWriter<crate::multiplayer::rollup::manager::RollupEvent>,
-    network_state: Res<OnlineNetworkState>,
 ) {
+    // See `feed_local_moves_to_rollup`'s comment — `active_session` used to
+    // be gated here too, and was just as dead for the same reason.
     for _event in game_end_events.read() {
-        if network_state.active_session.is_none() {
+        if rollup_manager.game_id == 0 {
             continue;
         }
         if let Some((moves, next_fens)) = rollup_manager.force_flush() {
@@ -1447,25 +1475,35 @@ pub fn handle_resync_request(
     }
 }
 
-/// Send a [`NetworkMessage::Ping`] on a fixed interval while a game session is active.
+/// Send a [`NetworkMessage::Ping`] on a fixed interval while a game session
+/// is active. Purely a liveness/RTT probe now — it no longer declares
+/// abandonment itself (see the removed-block note below); the opponent's
+/// backend `/presence` heartbeat (`social::check_opponent_presence`) is the
+/// general-purpose signal for that, feeding `opponent_disconnect_ui`
+/// directly.
+///
+/// This used to also declare `GameOverState::*WonByAbandonment` when
+/// `since_last_pong` exceeded `timeout_secs`, gated on `!braid_state.
+/// is_connected()` (our own Braid subscription being down) to avoid
+/// false-positiving relay-only games where gossip Ping/Pong never gets
+/// through at all. That guard was backwards: `is_connected()` reflects only
+/// *our* HTTP connectivity to the backend, not the opponent's — so the
+/// branch fired only when *we* had lost our own connection, which is
+/// exactly the situation where we're least able to conclude the *opponent*
+/// abandoned. It could declare a false win off nothing but our own network
+/// hiccup, and it could never fire for the (far more common) case of the
+/// backend staying reachable while the opponent's app was simply gone.
 pub fn tick_heartbeat(
     time: Res<Time>,
     mut heartbeat: ResMut<HeartbeatState>,
     network_state: Res<OnlineNetworkState>,
     session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
     game_mode: Res<crate::core::states::GameMode>,
-    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
-    mut game_over: ResMut<crate::game::resources::history::game_over::GameOverState>,
-    mut next_state: ResMut<NextState<crate::core::GameState>>,
-    braid_state: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
 ) {
     use crate::core::states::GameMode;
     use crate::multiplayer::network::protocol::NetworkMessage;
 
     if *game_mode != GameMode::OnlineMultiplayer {
-        return;
-    }
-    if heartbeat.timed_out {
         return;
     }
 
@@ -1496,38 +1534,10 @@ pub fn tick_heartbeat(
                 game_id,
                 timestamp_ms: ts,
             };
-            // Gossip-only now — see the timeout check below, which no
-            // longer fires on gossip silence alone when the Braid
-            // subscription is confirmed alive.
             if let Some(tx) = &network_state.message_sender {
                 let _ = tx.send(ping);
             }
         }
-    }
-
-    // Declare disconnect if pong is overdue over gossip AND the Braid
-    // moves/chat subscription is also down — otherwise this is exactly the
-    // "relay-only" case the old relay's Ping/Pong fallback existed to
-    // prevent from false-positiving: gossip's Ping/Pong genuinely isn't
-    // getting through, but the opponent's moves are still arriving via
-    // Braid, so the game is not actually abandoned.
-    if heartbeat.since_last_pong >= heartbeat.timeout_secs && !braid_state.is_connected() {
-        heartbeat.timed_out = true;
-        warn!(
-            "[NET] Heartbeat timeout — opponent disconnected after {:.0}s silence",
-            heartbeat.since_last_pong
-        );
-        // Treat as a win for the local player (opponent abandoned). Which color
-        // that is depends on which side we're playing, tracked on connect in
-        // `p2p::handle_network_events` (host=White, joiner=Black).
-        use crate::game::resources::history::game_over::GameOverState;
-        use crate::rendering::pieces::PieceColor;
-        *game_over = match p2p_conn.as_ref().and_then(|c| c.player_color) {
-            Some(PieceColor::White) => GameOverState::WhiteWonByAbandonment,
-            Some(PieceColor::Black) => GameOverState::BlackWonByAbandonment,
-            None => GameOverState::Aborted,
-        };
-        next_state.set(crate::core::GameState::GameOver);
     }
 }
 
@@ -1569,11 +1579,21 @@ pub fn reset_multiplayer_session_state(
     mut p2p_conn: ResMut<crate::multiplayer::network::p2p::P2PConnectionState>,
     mut heartbeat: ResMut<HeartbeatState>,
     mut braid_transport: ResMut<crate::multiplayer::network::braid_transport::BraidTransportState>,
+    mut liveness: ResMut<crate::multiplayer::social::OpponentLivenessState>,
+    #[cfg(feature = "solana")] mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
 ) {
     *p2p_conn = crate::multiplayer::network::p2p::P2PConnectionState::default();
     *heartbeat = HeartbeatState::default();
     braid_transport.reset();
-    info!("[NET] Reset P2P connection, heartbeat, and Braid transport state on match exit");
+    // Without this, a stale opponent-last-seen timestamp from the previous
+    // match's opponent could immediately read as "stale" against the new
+    // match's clock, false-positiving a disconnect banner at kickoff.
+    *liveness = crate::multiplayer::social::OpponentLivenessState::default();
+    #[cfg(feature = "solana")]
+    {
+        *rollup_manager = crate::multiplayer::rollup::manager::EphemeralRollupManager::default();
+    }
+    info!("[NET] Reset P2P connection, heartbeat, Braid transport, and opponent-liveness state on match exit");
 }
 
 pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {

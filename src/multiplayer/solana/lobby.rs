@@ -5,8 +5,7 @@
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
-use std::time::{Duration, Instant};
+use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot;
 
 use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
@@ -545,7 +544,7 @@ async fn async_create_game(
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::tauri_signer::sign_via_tauri_only;
     use crate::multiplayer::vps_client;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     // Gate: only wallets with profile + email + KYC may create a wagered match.
     if wager_lamports > 0 {
@@ -660,7 +659,6 @@ async fn async_create_game_via_global_session(
     };
     use crate::solana::instructions::WAGER_ESCROW_SEED;
     use solana_sdk::signature::{Keypair, Signer};
-    use solana_sdk::transaction::Transaction;
     use std::time::Instant;
 
     let session_kp = Keypair::try_from(session_keypair_bytes.as_slice())
@@ -699,19 +697,15 @@ async fn async_create_game_via_global_session(
     );
 
     let rpc = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
-    let blockhash = rpc
-        .get_latest_blockhash()
-        .map_err(|e| format!("get_latest_blockhash: {e}"))?;
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&session_kp.pubkey()),
-        &[&session_kp],
-        blockhash,
-    );
 
     let start = Instant::now();
-    fast_send_and_confirm(&rpc, &tx, Duration::from_secs(2))
-        .map_err(|e| format!("global_create_game submit: {e}"))?;
+    crate::multiplayer::solana::submit::submit_local_tx(
+        &rpc,
+        &session_kp,
+        &[ix],
+        crate::multiplayer::solana::submit::SubmitConfig::fast(),
+    )
+    .map_err(|e| format!("global_create_game submit: {e}"))?;
 
     info!(
         "[CREATE_GAME] global_create_game landed for game {} in {:?} (session-signed, no wallet popup)",
@@ -885,7 +879,6 @@ async fn async_join_game_via_global_session(
     };
     use crate::solana::instructions::{PROFILE_SEED, WAGER_ESCROW_SEED};
     use solana_sdk::signature::{Keypair, Signer};
-    use solana_sdk::transaction::Transaction;
 
     let session_kp = Keypair::try_from(session_keypair_bytes.as_slice())
         .map_err(|e| format!("session keypair: {e}"))?;
@@ -897,13 +890,26 @@ async fn async_join_game_via_global_session(
     let player_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, wallet_pubkey.as_ref()], &program_id).0;
 
-    // Need the white player's pubkey to derive their profile PDA — read the
-    // game account (confirmed commitment; the account only needs to exist,
-    // not be freshly written).
     let rpc = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::confirmed());
-    let game_data = rpc
-        .get_account_data(&game_pda)
-        .map_err(|e| format!("fetch game account: {e}"))?;
+
+    // Need the white player's pubkey (via the game account) to derive their
+    // profile PDA, and a blockhash to build the tx. Neither read depends on
+    // the other, so fetch them concurrently on separate threads rather than
+    // blocking the executor on two sequential RPC round trips.
+    let game_data_result = std::thread::scope(|scope| {
+        let blockhash_handle =
+            scope.spawn(|| rpc.get_latest_blockhash().map_err(|e| e.to_string()));
+        let game_data = rpc
+            .get_account_data(&game_pda)
+            .map_err(|e| format!("fetch game account: {e}"));
+        let blockhash = blockhash_handle
+            .join()
+            .map_err(|_| "blockhash fetch thread panicked".to_string())?
+            .map_err(|e| format!("get_latest_blockhash: {e}"))?;
+        game_data.map(|data| (data, blockhash))
+    });
+    let (game_data, blockhash) = game_data_result?;
+
     const WHITE_OFFSET: usize = 8 + 8;
     if game_data.len() < WHITE_OFFSET + 32 {
         return Err("game account too small to read white pubkey".to_string());
@@ -927,17 +933,18 @@ async fn async_join_game_via_global_session(
         game_id,
     );
 
-    let blockhash = rpc
-        .get_latest_blockhash()
-        .map_err(|e| format!("get_latest_blockhash: {e}"))?;
-    let tx = Transaction::new_signed_with_payer(
+    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
         &[ix],
         Some(&session_kp.pubkey()),
         &[&session_kp],
         blockhash,
     );
-    fast_send_and_confirm(&rpc, &tx, Duration::from_secs(2))
-        .map_err(|e| format!("global_join_game submit: {e}"))?;
+    crate::multiplayer::solana::submit::submit_and_poll(
+        &rpc,
+        &tx,
+        crate::multiplayer::solana::submit::SubmitConfig::fast(),
+    )
+    .map_err(|e| format!("global_join_game submit: {e}"))?;
 
     info!(
         "[JOIN_GAME] global_join_game landed for game {} (session-signed, no wallet popup)",
@@ -975,6 +982,7 @@ fn poll_lobby_tasks(
                 sync.game_id = Some(game_id);
                 sync.wager_amount = lobby.wager_lamports();
                 competitive.wager_lamports = lobby.wager_lamports();
+                competitive.stake_amount = lobby.wager_lamports();
                 competitive.game_id = Some(game_id);
                 competitive.active = true;
                 lobby.status = LobbyStatus::Success(game_id);
@@ -1312,34 +1320,3 @@ pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
     );
 }
 
-fn fast_send_and_confirm(
-    rpc: &RpcClient,
-    tx: &solana_sdk::transaction::Transaction,
-    max_confirm_wait: Duration,
-) -> Result<Signature, String> {
-    use solana_client::rpc_config::RpcSendTransactionConfig;
-    let config = RpcSendTransactionConfig {
-        skip_preflight: true,
-        ..Default::default()
-    };
-    let sig = rpc
-        .send_transaction_with_config(tx, config)
-        .map_err(|e| format!("send_transaction: {e}"))?;
-
-    let commitment = CommitmentConfig::confirmed();
-    let deadline = Instant::now() + max_confirm_wait;
-    loop {
-        if Instant::now() > deadline {
-            warn!(
-                "[SOLANA_TX] signature {sig} accepted by RPC but not confirmed within {:?}; continuing",
-                max_confirm_wait
-            );
-            return Ok(sig);
-        }
-        match rpc.get_signature_status_with_commitment(&sig, commitment) {
-            Ok(Some(Ok(()))) => return Ok(sig),
-            Ok(Some(Err(e))) => return Err(format!("transaction failed (sig={sig}): {e:?}")),
-            Ok(None) | Err(_) => std::thread::sleep(Duration::from_millis(150)),
-        }
-    }
-}

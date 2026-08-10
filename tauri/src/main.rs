@@ -88,6 +88,15 @@ fn http_port() -> u16 {
     .unwrap_or(7454)
 }
 
+/// Path used to announce the raw-TCP wallet bridge's actual bound port to
+/// the game client, keyed by `base_port` (XFCHESS_WALLET_PORT) so multiple
+/// local instances (e.g. `just dev2`'s P1/P2) never collide on one file.
+/// Must match `wallet_bridge_port_file()` in the game client's
+/// `src/multiplayer/solana/tauri_signer.rs`.
+fn wallet_bridge_port_file(base_port: u16) -> std::path::PathBuf {
+  std::env::temp_dir().join(format!("xfchess-wallet-bridge-{base_port}.port"))
+}
+
 /// Get the backend API base URL.
 ///
 /// Defaults to the production Hetzner backend — same resolution order and
@@ -783,7 +792,16 @@ fn open_in_browser(url: &str) {
           Ok(child) => {
             let pid = child.id();
             *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
-            std::thread::spawn(move || force_foreground_window(pid));
+            // Deliberately NOT force-focusing the popup here (that used to
+            // call force_foreground_window(pid)). Stealing OS foreground
+            // focus from the game meant the *next* click back on the game
+            // window — e.g. Cancel on the "Connect Wallet" overlay — was
+            // consumed by Windows just to refocus it instead of reaching
+            // Bevy/egui, making the overlay look broken/unclickable. The
+            // popup still opens and Windows flashes its taskbar icon on its
+            // own; the user can switch to it when it actually needs a click
+            // (most reconnects now resolve silently via `onlyIfTrusted` and
+            // never need one at all — see WalletStep's autoConnect).
           }
           Err(e) => tracing::warn!("[WalletPopup] failed to spawn {path}: {e}"),
         }
@@ -1097,81 +1115,6 @@ fn process_is_alive(pid: u32) -> bool {
   }
 }
 
-/// Windows blocks background processes from stealing focus from the current
-/// foreground window (the game), so a freshly-spawned Chrome popup just
-/// flashes in the taskbar instead of coming to front. Poll for the new
-/// window by process id and force it forward via the standard
-/// AttachThreadInput dance once it appears.
-#[cfg(windows)]
-fn force_foreground_window(pid: u32) {
-  // Leading `::` needed: this crate's own `mod windows;` (window builders)
-  // shadows the external `windows` crate name.
-  use ::windows::core::BOOL;
-  use ::windows::Win32::Foundation::{HWND, LPARAM};
-  use ::windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
-  use ::windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsWindowVisible,
-    SetForegroundWindow, ShowWindow, SW_RESTORE,
-  };
-
-  extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    unsafe {
-      let ctx = &mut *(lparam.0 as *mut (u32, HWND));
-      let mut owner_pid: u32 = 0;
-      GetWindowThreadProcessId(hwnd, Some(&mut owner_pid));
-      if owner_pid == ctx.0 && IsWindowVisible(hwnd).as_bool() {
-        ctx.1 = hwnd;
-        return BOOL(0); // stop enumeration
-      }
-      BOOL(1)
-    }
-  }
-
-  // Poll for up to ~3s — the child process needs a moment to create its window.
-  for _ in 0..60 {
-    // Check title-based search first: Chrome IPC forwards CLI `--app` calls to
-    // an existing Chrome main process and exits immediately, so `pid` won't match.
-    if show_and_foreground_wallet_popup() {
-      return;
-    }
-
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
-    let mut ctx: (u32, HWND) = (pid, HWND(std::ptr::null_mut()));
-    unsafe {
-      let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
-    }
-
-    if !ctx.1 .0.is_null() {
-      unsafe {
-        let target = ctx.1;
-        let foreground = GetForegroundWindow();
-        let foreground_tid = GetWindowThreadProcessId(foreground, None);
-        let current_tid = GetCurrentThreadId();
-        let _ = AttachThreadInput(current_tid, foreground_tid, true);
-        let _ = ShowWindow(target, SW_RESTORE);
-        let _ = SetForegroundWindow(target);
-        let _ = AttachThreadInput(current_tid, foreground_tid, false);
-      }
-      return;
-    }
-  }
-
-  // The spawned process's own PID never grew a visible window — most likely
-  // Chrome's single-instance-per-profile IPC kicked in (see open_in_browser's
-  // doc comment): our `--app=` invocation got forwarded to a *different*,
-  // already-running Chrome process and the spawned PID exited immediately,
-  // so there's nothing to find under `pid` even though the popup may have
-  // genuinely opened/navigated under that other process. Fall back to the
-  // same title-based search `hide_wallet_popup`/`kill_wallet_popup` use,
-  // which doesn't care which process actually owns the window.
-  tracing::warn!(
-    "[WalletPopup] no window grew under spawned pid {pid} within 3s — falling back to title search (likely Chrome forwarded to an existing session)"
-  );
-  if !show_and_foreground_wallet_popup() {
-    tracing::warn!("[WalletPopup] title-based fallback also found no popup window");
-  }
-}
 
 #[tauri::command]
 fn show_wallet_popup_window(app: tauri::AppHandle) {
@@ -1319,6 +1262,7 @@ fn main() {
         let app_handle = app.handle().clone();
         let pending_for_tcp = pending_tx.clone();
         let notify_for_tcp = pending_notify.clone();
+        let wallet_pubkey_for_tcp = wallet_pubkey.clone();
         let base_port: u16 = std::env::var("XFCHESS_WALLET_PORT")
           .ok()
           .and_then(|v| v.parse().ok())
@@ -1329,13 +1273,21 @@ fn main() {
             .build()
             .expect("[WalletBridge] tokio runtime");
           rt.block_on(async move {
-            // Try binding on ports base-11 through base-2
+            // Try binding on ports base-11 through base-2, lowest first (must
+            // match the client's scan order in tcp_port_range() so a cold
+            // client's fallback scan — used only if the port-file handshake
+            // below is unavailable — finds us on its first live attempt
+            // instead of walking past an unrelated listener on another port
+            // in range, which can itself be a live HTTP/TCP server that eats
+            // several seconds before closing the connection).
             let mut listener = None;
-            for offset in 2u16..=11 {
+            let mut bound_port: u16 = 0;
+            for offset in (2u16..=11).rev() {
               let port = base_port.saturating_sub(offset);
               if let Ok(l) = TcpListener::bind(format!("127.0.0.1:{}", port)).await {
                 tracing::info!("[WalletBridge] Listening on port {}", port);
                 listener = Some(l);
+                bound_port = port;
                 break;
               }
             }
@@ -1346,11 +1298,21 @@ fn main() {
                 return;
               }
             };
+
+            // Announce the actual bound port so the client can connect
+            // directly instead of scanning — the scan is a fallback only.
+            let port_file = wallet_bridge_port_file(base_port);
+            if let Err(e) = std::fs::write(&port_file, bound_port.to_string()) {
+              tracing::warn!(
+                "[WalletBridge] failed to write port file {port_file:?}: {e}"
+              );
+            }
             loop {
               if let Ok((mut stream, _)) = listener.accept().await {
                 let app2 = app_handle.clone();
                 let pending2 = pending_for_tcp.clone();
                 let notify2 = notify_for_tcp.clone();
+                let wallet_pubkey2 = wallet_pubkey_for_tcp.clone();
                 tokio::spawn(async move {
                   let mut prefix = [0u8; 4];
                   if stream.read_exact(&mut prefix).await.is_err() {
@@ -1359,6 +1321,25 @@ fn main() {
 
                   if &prefix == b"OPEN" {
                     open_wallet_popup(&app2);
+                    return;
+                  }
+
+                  // `query_wallet_pubkey_from_tauri()` in the game client
+                  // (src/multiplayer/solana/integration/systems.rs) polls
+                  // this every few seconds — respond with whatever `/wallet`
+                  // last recorded, or a 0-length response (client reads
+                  // that as "not connected") rather than falling through to
+                  // the signing-protocol parse below, which used to
+                  // misread these 4 bytes as an implausible label length
+                  // and reject/warn on every single poll.
+                  if &prefix == b"PKEY" {
+                    let pk = wallet_pubkey2.0.lock().unwrap().clone().unwrap_or_default();
+                    let pk_bytes = pk.into_bytes();
+                    let len_bytes = (pk_bytes.len() as u32).to_le_bytes();
+                    let _ = stream.write_all(&len_bytes).await;
+                    if !pk_bytes.is_empty() {
+                      let _ = stream.write_all(&pk_bytes).await;
+                    }
                     return;
                   }
 

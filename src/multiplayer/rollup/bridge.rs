@@ -37,6 +37,10 @@ struct FinalizationResult {
 /// Maximum seconds to wait for the Game PDA to return to devnet after undelegation.
 const MAX_UNDELEGATE_WAIT_SECS: u64 = 60;
 
+/// Maximum seconds the joiner waits to observe the creator's delegation
+/// landing on-chain before giving up (see `wait_for_delegation`).
+const MAX_JOINER_DELEGATION_WAIT_SECS: u64 = 60;
+
 /// Stores the last few on-chain move transaction signatures so the UI can display them.
 #[derive(Resource, Default, Clone)]
 pub struct RecentTransactions {
@@ -89,6 +93,18 @@ pub struct RollupNetworkBridge {
     nonce_rx: Option<oneshot::Receiver<u64>>,
     /// Channel receiving the assembled PGN game after game-end export.
     pgn_rx: Option<oneshot::Receiver<Option<nimzovich_engine::ParsedPgnGame>>>,
+    /// Channel receiving the joiner-side delegation-observed result (see
+    /// `wait_for_delegation`). Deliberately separate from `delegation_rx`:
+    /// that channel feeds `retry_pending_delegation`, which resubmits a
+    /// `delegate_game` transaction on failure — the joiner must never do
+    /// that (it isn't `game.fee_payer`; the on-chain check would just
+    /// reject it), so its wait loop needs its own channel that nothing else
+    /// retries against.
+    joiner_delegation_wait_rx: Option<oneshot::Receiver<Result<Pubkey, String>>>,
+    /// game_id currently being waited on by `joiner_delegation_wait_rx`, so a
+    /// repeated `GameStartedEvent` for the same game doesn't spawn a second
+    /// waiter task.
+    joiner_delegation_wait_game_id: Option<u64>,
 }
 
 /// Maximum frames to wait for opponent pubkey before giving up on deferred finalization.
@@ -146,6 +162,7 @@ impl Plugin for RollupNetworkBridgePlugin {
         app.add_systems(Update, handle_magic_block_events);
 
         app.add_systems(Update, poll_delegation_tasks);
+        app.add_systems(Update, poll_joiner_delegation_wait);
         app.add_systems(Update, retry_pending_finalization);
 
         // Post-finalization: apply payout result to game-over popup resource.
@@ -663,20 +680,6 @@ fn handle_game_start_delegation(
         // event.game_id is the Braid/Iroh session ID; rollup_manager.game_id
         // is set from the actual on-chain game account after create/join.
 
-        // Free (non-wagered) games never need ER delegation — skip entirely
-        // so a failure here does not spam the "Ephemeral Rollup sync issue"
-        // popup during normal casual play.
-        let is_wagered = competitive
-            .as_ref()
-            .map(|c| c.stake_amount > 0)
-            .unwrap_or(false);
-        if !is_wagered {
-            info!(
-                "[DELEGATION] Game {} is free-rated — skipping ER delegation",
-                event.game_id
-            );
-            continue;
-        }
 
         let game_id = if rollup_manager.game_id != 0 {
             rollup_manager.game_id
@@ -692,10 +695,50 @@ fn handle_game_start_delegation(
         // If both players delegate simultaneously the second TX fails with
         // AccountOwnedByWrongProgram because the PDA owner changed after the first delegation.
         if !rollup_manager.is_creator {
+            // The joiner still needs to learn *when* delegation lands —
+            // `can_move_color` (game/systems/input.rs) blocks all moves
+            // until `magicblock_resolver.is_delegated()` is true, and that
+            // flag only ever gets set locally by whoever ran the delegation
+            // task (`poll_delegation_tasks`). Without this, the joiner's own
+            // resolver never transitions out of `Undelegated` and they can
+            // never move for the entire game. So the joiner instead polls
+            // the game PDA's owner until it becomes the MagicBlock
+            // Delegation Program, mirroring the reverse wait already done
+            // for undelegation below.
+            if magicblock_resolver.is_delegated()
+                || bridge.joiner_delegation_wait_game_id == Some(game_id)
+            {
+                continue;
+            }
+
+            let rpc_client = match magicblock_resolver.solana_rpc.clone() {
+                Some(client) => client,
+                None => {
+                    error!("[DELEGATION] No Solana RPC client configured (joiner wait)");
+                    continue;
+                }
+            };
+
             info!(
-                "[DELEGATION] Game {} — joiner does not delegate; skipping",
+                "[DELEGATION] Game {} — joiner does not delegate; waiting to observe creator's delegation",
                 game_id
             );
+
+            let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+            let game_pda =
+                Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &program_id).0;
+
+            bridge.joiner_delegation_wait_game_id = Some(game_id);
+            let (tx, rx) = oneshot::channel();
+            bridge.joiner_delegation_wait_rx = Some(rx);
+
+            bevy::tasks::IoTaskPool::get()
+                .spawn(async move {
+                    let result = wait_for_delegation(game_pda, game_id, rpc_client).await;
+                    let _ = tx.send(result);
+                })
+                .detach();
+
             continue;
         }
 
@@ -833,16 +876,12 @@ async fn spawn_delegation_task(
         let ix = resolver
             .create_delegation_instruction(game_pda, session_kp.pubkey(), session_kp.pubkey())
             .map_err(|e| format!("build delegation ix: {}", e))?;
-        let blockhash = rpc_client
-            .get_latest_blockhash()
-            .map_err(|e| format!("get_latest_blockhash: {e}"))?;
-        let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&session_kp.pubkey()),
-            &[&session_kp],
-            blockhash,
-        );
-        return match rpc_client.send_and_confirm_transaction(&tx) {
+        // Uses the shared fast submit+poll path (skip_preflight, 150ms poll,
+        // 2s deadline) instead of the SDK-default `send_and_confirm_transaction`,
+        // which runs preflight simulation — the only write path in this
+        // codebase that used to, adding a needless extra RPC round trip.
+        use crate::multiplayer::solana::submit::{submit_local_tx, SubmitConfig};
+        return match submit_local_tx(&rpc_client, &session_kp, &[ix], SubmitConfig::fast()) {
             Ok(sig) => {
                 info!(
                     "[DELEGATION-TASK] SUCCESS for game {} sig: {} (session-signed, no wallet popup)",
@@ -852,7 +891,7 @@ async fn spawn_delegation_task(
             }
             Err(e) => {
                 error!("[DELEGATION-TASK] FAILED for game {}: {}", game_id, e);
-                Err(e.to_string())
+                Err(e)
             }
         };
     }
@@ -874,6 +913,85 @@ async fn spawn_delegation_task(
         Err(e) => {
             error!("[DELEGATION-TASK] FAILED for game {}: {}", game_id, e);
             Err(e)
+        }
+    }
+}
+
+/// Joiner-side counterpart to `spawn_delegation_task`. The joiner never
+/// submits a `delegate_game` transaction itself (see the non-creator branch
+/// of `handle_game_start_delegation`), so it has no local signal that
+/// delegation actually completed. Poll the game PDA's owner until it
+/// becomes the MagicBlock Delegation Program — the same on-chain signal
+/// `spawn_finalization_task` already polls for in reverse (owner returning
+/// to the xfchess program after undelegation).
+async fn wait_for_delegation(
+    game_pda: Pubkey,
+    game_id: u64,
+    rpc_client: Arc<RpcClient>,
+) -> Result<Pubkey, String> {
+    use crate::multiplayer::rollup::magicblock::DELEGATION_PROGRAM_ID;
+
+    let delegation_program_id: Pubkey = DELEGATION_PROGRAM_ID
+        .parse()
+        .map_err(|_| "bad delegation program id".to_string())?;
+
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(MAX_JOINER_DELEGATION_WAIT_SECS);
+    loop {
+        match rpc_client.get_account(&game_pda) {
+            Ok(acc) if acc.owner == delegation_program_id => {
+                info!(
+                    "[DELEGATION] Game {} observed delegated (joiner) — PDA owner is now the delegation program",
+                    game_id
+                );
+                return Ok(game_pda);
+            }
+            Ok(_) => {}  // not delegated yet
+            Err(_) => {} // transient RPC error — keep polling
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "game {} not observed delegated after {}s",
+                game_id, MAX_JOINER_DELEGATION_WAIT_SECS
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+}
+
+/// Polls the joiner's delegation-observation task and applies the result
+/// locally once it lands. This is the only place a joiner's own
+/// `MagicBlockResolver` ever transitions to `Delegated` — without it,
+/// `can_move_color`'s ER-not-delegated gate (`game/systems/input.rs`) blocks
+/// the joiner from moving for the entire game.
+fn poll_joiner_delegation_wait(
+    mut bridge: ResMut<RollupNetworkBridge>,
+    mut magicblock_resolver: ResMut<MagicBlockResolver>,
+    mut magicblock_events: MessageWriter<MagicBlockEvent>,
+) {
+    if let Some(ref mut rx) = bridge.joiner_delegation_wait_rx {
+        match rx.try_recv() {
+            Ok(Ok(game_pda)) => {
+                info!("Delegation observed by joiner for game {}", game_pda);
+                magicblock_resolver.delegation_status = DelegationStatus::Delegated;
+                magicblock_resolver.delegated_game_pda = Some(game_pda);
+                magicblock_events.write(MagicBlockEvent::GameDelegated { game_pda });
+                bridge.joiner_delegation_wait_rx = None;
+                bridge.joiner_delegation_wait_game_id = None;
+            }
+            Ok(Err(e)) => {
+                error!("[DELEGATION] Joiner delegation wait failed: {}", e);
+                bridge.joiner_delegation_wait_rx = None;
+                bridge.joiner_delegation_wait_game_id = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                // Still waiting, nothing to do.
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                error!("[DELEGATION] Joiner delegation wait task dropped");
+                bridge.joiner_delegation_wait_rx = None;
+                bridge.joiner_delegation_wait_game_id = None;
+            }
         }
     }
 }
@@ -1141,7 +1259,7 @@ fn handle_game_end_undelegation(
             continue;
         }
 
-        let wager = competitive.as_ref().map(|c| c.stake_amount).unwrap_or(0);
+        let wager = competitive.as_ref().map(|c| c.wager_lamports).unwrap_or(0);
         let (fin_tx, fin_rx) = oneshot::channel::<FinalizationResult>();
         bridge.finalization_rx = Some(fin_rx);
         spawn_finalization_task(
@@ -1177,7 +1295,15 @@ fn spawn_finalization_task(
             use solana_client::rpc_client::RpcClient;
             use solana_commitment_config::CommitmentConfig;
 
-            // Brief pause before undelegation so the final move batch lands first.
+            // Brief pause before requesting undelegation: the ER processes the
+            // last recorded move(s) asynchronously relative to this task, and
+            // undelegating too early can race the final move commit. There is
+            // no queryable "last move landed" signal to poll on instead (the
+            // move record and the undelegation request go through different
+            // paths), so this stays a fixed sleep rather than a poll loop —
+            // unlike the PDA-ownership wait below, which does poll actual
+            // on-chain state. Not reduced without live devnet verification
+            // that a shorter pause still reliably avoids the race.
             std::thread::sleep(std::time::Duration::from_secs(2));
 
             match vps_client::vps_undelegate_game(game_id) {

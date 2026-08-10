@@ -429,10 +429,45 @@ pub fn game_status_ui(mut params: GameUIParams) {
 
 // ── Lichess-style right panel helpers ────────────────────────────────────────
 
+#[cfg(test)]
+mod tests {
+    use super::resolve_online_player_name;
+    use crate::states::main_menu::PlayerIdentity;
+
+    #[test]
+    fn prefers_signed_in_username_for_local_hud_name() {
+        let identity = PlayerIdentity {
+            username: Some("Alice".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(resolve_online_player_name(Some(&identity), Some("Bob")), "Alice");
+    }
+
+    #[test]
+    fn falls_back_to_profile_name_when_identity_has_no_username() {
+        let identity = PlayerIdentity::default();
+
+        assert_eq!(resolve_online_player_name(Some(&identity), Some("Bob")), "Bob");
+    }
+}
+
 /// Resolve display name + ELO string for both colors from whichever source
 /// applies to the current game (spectator feed, Solana competitive match, or
 /// plain local `Players`). Shared by the right sidebar and the left game-info
 /// panel so both show identical player identity data.
+fn resolve_online_player_name(
+    player_identity: Option<&crate::states::main_menu::PlayerIdentity>,
+    fallback_name: Option<&str>,
+) -> String {
+    player_identity
+        .and_then(|id| id.username.as_ref())
+        .filter(|name| !name.trim().is_empty())
+        .cloned()
+        .or_else(|| fallback_name.map(str::to_string))
+        .unwrap_or_default()
+}
+
 pub(crate) fn resolve_player_names(
     params: &crate::ui::system_params::game_ui::GameUIParams,
     local_color: PieceColor,
@@ -506,14 +541,23 @@ pub(crate) fn resolve_player_names(
                 params.solana_profile.as_ref(),
                 params.competitive_match.as_ref(),
             ) {
+                // The local player's name should come from the sign-in
+                // identity (`PlayerIdentity`, populated as soon as the wallet
+                // UI hands off) rather than `SolanaProfile.username`, which
+                // stays empty until a separate async VPS fetch resolves —
+                // that race is why the local panel showed "Player".
+                let local_name = resolve_online_player_name(
+                    params.player_identity.as_ref().map(|id| id.as_ref()),
+                    Some(profile.username.as_str()),
+                );
                 let is_white_local = local_color == PieceColor::White;
                 if is_white_local {
-                    white_name = profile.username.clone();
+                    white_name = local_name;
                     white_elo = format!("{}", profile.elo);
                     black_name = comp.opponent_username.clone();
                     black_elo = format!("{}", comp.opponent_elo);
                 } else {
-                    black_name = profile.username.clone();
+                    black_name = local_name;
                     black_elo = format!("{}", profile.elo);
                     white_name = comp.opponent_username.clone();
                     white_elo = format!("{}", comp.opponent_elo);
@@ -1298,11 +1342,14 @@ pub fn ping_chip_ui(
         });
 }
 
-/// Watches P2PConnectionState for drops during an active game and renders a
-/// "Waiting N s for reconnect" banner. Auto-fires FlagTimeoutEvent at 0.
+/// Watches P2PConnectionState (and, independently, the opponent's backend
+/// `/presence` heartbeat — see `OpponentLivenessState`) for drops during an
+/// active game and renders a "Waiting N s for reconnect" banner. Auto-fires
+/// FlagTimeoutEvent at 0.
 pub fn opponent_disconnect_ui(
     mut contexts: bevy_egui::EguiContexts,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    liveness: Res<crate::multiplayer::social::OpponentLivenessState>,
     game_over: Res<crate::game::resources::GameOverState>,
     game_mode: Res<GameMode>,
     mut disc: ResMut<OpponentDisconnectState>,
@@ -1322,21 +1369,27 @@ pub fn opponent_disconnect_ui(
         return;
     }
 
-    // Detect disconnect / reconnect
+    // Detect disconnect / reconnect. Two independent signals, either one
+    // enough to declare "gone": the P2P/gossip transport state (fast, but
+    // only meaningful when a direct link was ever established) and the
+    // opponent's backend presence heartbeat (slower, but works for
+    // relay-only games too — see `check_opponent_presence`). Both must be
+    // healthy again to clear the banner, so a lingering stale presence
+    // sample can't mask a P2P reconnect declaring "all clear" too early.
     if let Some(conn) = p2p_conn.as_ref() {
-        match &conn.status {
-            P2PConnectionStatus::InGame => {
-                // Reconnected — clear state
-                if disc.disconnected_at.is_some() && !disc.timed_out {
-                    disc.disconnected_at = None;
-                }
+        let is_gone = matches!(
+            conn.status,
+            P2PConnectionStatus::Disconnected | P2PConnectionStatus::Error(_)
+        ) || liveness.is_opponent_stale();
+        if is_gone {
+            if disc.disconnected_at.is_none() && !disc.timed_out {
+                disc.disconnected_at = Some(std::time::Instant::now());
             }
-            P2PConnectionStatus::Disconnected | P2PConnectionStatus::Error(_) => {
-                if disc.disconnected_at.is_none() && !disc.timed_out {
-                    disc.disconnected_at = Some(std::time::Instant::now());
-                }
+        } else if conn.status == P2PConnectionStatus::InGame {
+            // Reconnected — clear state
+            if disc.disconnected_at.is_some() && !disc.timed_out {
+                disc.disconnected_at = None;
             }
-            _ => {}
         }
     }
 

@@ -15,7 +15,7 @@
 //! (e.g. "Joining game", "Placing wager") shown in the wallet popup instead
 //! of a generic "Awaiting signature" message.
 
-use bevy::prelude::{info, warn};
+use bevy::prelude::info;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
@@ -54,10 +54,51 @@ pub fn open_profile_step() {
 }
 
 /// TCP port range derived from XFCHESS_WALLET_PORT (default 7454).
-/// The Tauri side binds TCP on (base-11)..=(base-2).
+/// The Tauri side binds TCP on (base-11)..=(base-2). Only used as a
+/// fallback — see `discovered_bridge_port()` — since scanning a shared
+/// range can hit an unrelated live listener (e.g. another local instance's
+/// HTTP wallet-bridge server) and stall for seconds before it closes the
+/// connection, instead of failing fast.
 fn tcp_port_range() -> std::ops::RangeInclusive<u16> {
     let base: u16 = wallet_bridge_port();
     base.saturating_sub(11)..=base.saturating_sub(2)
+}
+
+/// Path the Tauri side writes its actual bound TCP port to on startup.
+/// Must match `wallet_bridge_port_file()` in `tauri/src/main.rs`.
+fn wallet_bridge_port_file() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "xfchess-wallet-bridge-{}.port",
+        wallet_bridge_port()
+    ))
+}
+
+/// The port the Tauri bridge announced it actually bound to, if its port
+/// file is present and parses. Trying this first (before falling back to
+/// `tcp_port_range()`) skips the scan entirely on the common path.
+fn discovered_bridge_port() -> Option<u16> {
+    std::fs::read_to_string(wallet_bridge_port_file())
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+/// Ports to attempt, in order: the bridge's announced port first (if known),
+/// then the full scan range as a fallback for a stale/missing port file.
+/// `pub` so other call sites that need to reach the raw TCP bridge (e.g.
+/// `integration::systems::query_wallet_pubkey_from_tauri`) go through this
+/// single implementation instead of hand-rolling their own scan that can
+/// drift out of sync with it — see the wallet-bridge port-discovery audit.
+pub fn candidate_ports() -> Vec<u16> {
+    let mut ports = Vec::with_capacity(11);
+    if let Some(p) = discovered_bridge_port() {
+        ports.push(p);
+    }
+    for p in tcp_port_range() {
+        if !ports.contains(&p) {
+            ports.push(p);
+        }
+    }
+    ports
 }
 
 /// Fire-and-forget: requests the Tauri wallet popup window for wallet connection.
@@ -67,7 +108,7 @@ pub fn open_wallet_browser() {
         // Send OPEN command over TCP to the Tauri wallet bridge.
         use std::io::Write;
         use std::net::TcpStream;
-        for port in tcp_port_range() {
+        for port in candidate_ports() {
             if let Ok(mut s) = TcpStream::connect(format!("127.0.0.1:{}", port)) {
                 let _ = s.write_all(b"OPEN");
                 break;
@@ -239,7 +280,7 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
     let mut last_err: Option<String> = None;
     let start = Instant::now();
 
-    for port in tcp_port_range() {
+    for port in candidate_ports() {
         let mut stream = match TcpStream::connect(format!("127.0.0.1:{}", port)) {
             Ok(s) => s,
             Err(_) => continue,
@@ -317,37 +358,17 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
 /// Deserialise the wire-format signed bytes into a `VersionedTransaction` and
 /// submit it to the Solana RPC. Wait briefly for an immediate failure, but do
 /// not block the UI on devnet confirmation latency.
+///
+/// Delegates the actual send+poll to `submit::submit_and_poll` — the shared
+/// strategy (`skip_preflight`, 150ms polling, 2s deadline) used by every
+/// locally-submitted transaction in this codebase, not just wallet-signed
+/// ones. See that module's doc comment for why this exists as one function.
 fn submit_signed_to_rpc(rpc_url: &str, signed_bytes: &[u8]) -> Result<Signature, String> {
-    use solana_client::rpc_config::RpcSendTransactionConfig;
-    use std::time::{Duration, Instant};
+    use super::submit::{submit_and_poll, SubmitConfig};
 
     let signed_tx: VersionedTransaction =
         bincode::deserialize(signed_bytes).map_err(|e| format!("deserialize_signed_tx: {}", e))?;
 
     let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
-    let config = RpcSendTransactionConfig {
-        skip_preflight: true,
-        ..Default::default()
-    };
-    let sig = rpc
-        .send_transaction_with_config(&signed_tx, config)
-        .map_err(|e| format!("send_transaction: {}", e))?;
-
-    let commitment = CommitmentConfig::confirmed();
-    let max_confirm_wait = Duration::from_secs(2);
-    let deadline = Instant::now() + max_confirm_wait;
-    loop {
-        if Instant::now() > deadline {
-            warn!(
-                "[TAURI-SIGN] signature {sig} accepted by RPC but not confirmed within {:?}; continuing",
-                max_confirm_wait
-            );
-            return Ok(sig);
-        }
-        match rpc.get_signature_status_with_commitment(&sig, commitment) {
-            Ok(Some(Ok(()))) => return Ok(sig),
-            Ok(Some(Err(e))) => return Err(format!("transaction failed (sig={sig}): {e:?}")),
-            Ok(None) | Err(_) => std::thread::sleep(Duration::from_millis(150)),
-        }
-    }
+    submit_and_poll(&rpc, &signed_tx, SubmitConfig::fast())
 }

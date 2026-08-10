@@ -164,12 +164,7 @@ export async function resolveExistingUsername(
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-type Step = "consent" | "wallet" | "profile" | "splash" | "sign";
-
-interface ConsentRecord {
-  version: number;
-  accepted_at: number;
-}
+type Step = "wallet" | "profile" | "splash" | "sign";
 
 interface AuthResponse {
   token: string;
@@ -196,9 +191,6 @@ const INPUT_BG   = "rgba(255,255,255,0.04)";
 const RED        = PRIMARY;
 const RED_DIM    = PRIMARY_DIM;
 const RED_BORDER = PRIMARY_BORDER;
-
-const CONSENT_VERSION = 1;
-
 
 // ---------------------------------------------------------------------------
 // Keyframes
@@ -395,7 +387,7 @@ function ErrorMsg({ msg }: { msg: string }) {
 }
 
 function StepDots({ step }: { step: Step }) {
-  const steps: Step[] = ["consent", "wallet", "profile", "splash"];
+  const steps: Step[] = ["wallet", "profile", "splash"];
   const idx = steps.indexOf(step);
   return (
     <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 28 }}>
@@ -406,92 +398,6 @@ function StepDots({ step }: { step: Step }) {
         }} />
       ))}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step 0 — Legal / GDPR Consent
-// ---------------------------------------------------------------------------
-function ConsentStep({ onAccept, onClose }: { onAccept: () => void; onClose?: () => void }) {
-  const [checkedTos, setTos] = useState(false);
-  const [checkedGdpr, setGdpr] = useState(false);
-  const [checkedAge, setAge] = useState(false);
-  const canContinue = checkedTos && checkedGdpr && checkedAge;
-
-  return (
-    <Card showClose={true} onClose={onClose} style={{ maxWidth: 360, padding: "20px 24px" }}>
-      <div style={{ textAlign: "center" as const, marginBottom: 24 }}>
-        <LogoMark size={44} />
-        <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 6, letterSpacing: "0.12em", textTransform: "uppercase" as const }}>
-          Legal &amp; Privacy
-        </p>
-      </div>
-
-      <div style={{
-        height: 280, overflowY: "auto" as const, marginBottom: 20, paddingRight: 8,
-        fontSize: 13, lineHeight: 1.7, color: TEXT_DIM,
-      }}>
-        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}> Terms of Service</p>
-        <p style={{ marginBottom: 12 }}>
-          XFChess is a decentralised chess platform operating on the Solana blockchain. By using
-          this application you acknowledge that wagered games involve real cryptocurrency. All wagers
-          are final and governed solely by on-chain smart contract logic. XForceSolutions Ltd accepts no
-          liability for smart contract bugs, network outages, or losses arising from gameplay. You
-          must be 18+ to participate in wagered games.
-        </p>
-
-        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}> Privacy &amp; GDPR Notice</p>
-        <p style={{ marginBottom: 8 }}>We collect and store the following data securely:</p>
-        <ul style={{ paddingLeft: 18, marginBottom: 12 }}>
-          <li>Solana wallet public key (public by nature on-chain)</li>
-          <li>Game history &amp; move records (used for anti-cheat and tournament verification)</li>
-          <li>Session tokens (short-lived JWTs, stored only in memory)</li>
-        </ul>
-        <p style={{ marginBottom: 12 }}>
-          We do <strong>not</strong> sell your data to third parties. Identity/tax data (collected
-          only if you opt into wagering under CARF 2026 compliance) is stored in a zero-knowledge
-          encrypted vault and used exclusively for regulatory reporting. You may request deletion at
-          any time by emailing <a href="mailto:privacy@xfchess.com">privacy@xfchess.com</a>.
-        </p>
-        <p style={{ marginBottom: 12 }}>
-          Your rights under GDPR include: access, rectification, erasure, restriction of processing,
-          data portability, and objection. The data controller is XForceSolutions Ltd. For complaints,
-          contact the ICO (UK) or your local supervisory authority.
-        </p>
-
-        <p style={{ fontWeight: 700, color: TEXT, fontSize: 14, marginBottom: 6 }}> CARF 2026 Compliance</p>
-        <p style={{ marginBottom: 8 }}>
-          XFChess is a Reporting Crypto-Asset Service Provider (RCASP) under CARF 2026. If you
-          wager cryptocurrency assets, we are legally required to collect, verify, and in some
-          jurisdictions report identity information (name, address, tax ID) to local tax authorities.
-          This applies only to wagered play. Free &amp; casual games are unaffected.
-        </p>
-      </div>
-
-      <div style={{ marginBottom: 20 }}>
-        {[
-          { checked: checkedTos, set: setTos, label: "I have read and accept the Terms of Service" },
-          { checked: checkedGdpr, set: setGdpr, label: "I consent to data collection as described in the Privacy Notice" },
-          { checked: checkedAge, set: setAge, label: "I confirm I am 18 years of age or older" },
-        ].map(({ checked, set, label }) => (
-          <label key={label} style={{
-            display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12,
-            cursor: "pointer", fontSize: 13, color: TEXT_DIM,
-          }}>
-            <div onClick={() => set(!checked)} style={{
-              width: 18, height: 18, minWidth: 18, borderRadius: 5,
-              border: `2px solid ${checked ? RED : BORDER}`, background: checked ? RED_DIM : "transparent",
-              display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1, transition: "all 0.15s",
-            }}>
-              {checked && <span style={{ color: RED, fontSize: 11, fontWeight: 800 }}></span>}
-            </div>
-            <span onClick={() => set(!checked)}>{label}</span>
-          </label>
-        ))}
-      </div>
-
-      <PrimaryBtn onClick={onAccept} disabled={!canContinue}>Continue</PrimaryBtn>
-    </Card>
   );
 }
 
@@ -1018,13 +924,25 @@ function Onboarding() {
   const hasExistingSession = () =>
     !!(localStorage.getItem("xfchess_wallet_pubkey") || localStorage.getItem("xfchess_wallet"));
 
+  // Computed once, at mount — a reconnect (skip Wallet-Sign-In's manual
+  // button click, skip the Splash screen) vs. a genuine first-time login
+  // (show both, they're the only feedback the user gets that anything
+  // happened). Must not flip mid-flow: a brand-new login writes the same
+  // localStorage keys hasExistingSession() reads, so re-evaluating it after
+  // handleAuth runs would wrongly reclassify a first-timer as "returning"
+  // for the rest of this same session.
+  const [wasReturningSession] = useState<boolean>(hasExistingSession);
+
   const [step, setStep] = useState<Step>(() => {
     const params = new URLSearchParams(window.location.search);
     const s = params.get("step");
     if (s === "connect_wallet") return "wallet";
     if (s === "profile") return "profile";
-    if (s === "sign") return hasExistingSession() ? "sign" : "consent";
-    return "consent";
+    // No legal/consent gate on devnet — every entry point (fresh login,
+    // returning session, or a signing deep link) goes straight to "wallet"
+    // so Connect Wallet always lands directly on Phantom/Solflare.
+    if (s === "sign") return "sign";
+    return "wallet";
   });
   // Only the `?step=profile` deep link (opened by open_profile_step() when
   // the game client is blocking a wager on a missing on-chain profile) needs
@@ -1044,29 +962,11 @@ function Onboarding() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [walletProvider, setWalletProvider] = useState<any>(null);
 
+  // No consent gate to check on devnet (see `step` above) — nothing left to
+  // await before rendering. `ready` stays purely to gate the spinner frame
+  // that used to cover this async check.
   useEffect(() => {
-    // Every launch starts at a fresh login — no auto-reconnect to a
-    // previous session, no cached wallet, no skip-straight-to-game. The
-    // bridge's /status + wallet.json used to let a stale in-memory or
-    // on-disk pubkey silently re-launch the game without a new signature,
-    // which also meant a leftover Phantom session could hijack a launch
-    // where the player meant to use Solflare instead. Ownership must be
-    // re-proven (a real signMessage) every single time.
-    const init = async () => {
-      try {
-        const record = await apiGet<ConsentRecord | null>("/api/consent");
-        if (record && record.version >= CONSENT_VERSION) {
-          // Only advance the default "consent" step — a "sign"/"profile"/"wallet"
-          // deep link already resolved to the right step above and must not be
-          // clobbered once this async check lands.
-          setStep(cur => (cur === "consent" ? "wallet" : cur));
-        }
-      } catch { /* ignore */ }
-
-      setReady(true);
-    };
-    init();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setReady(true);
   }, []);
 
   // Poll for profile-step requests from the game client (e.g. "Wagered PVP" clicked)
@@ -1118,11 +1018,6 @@ function Onboarding() {
     })();
   }, [step, requireOnchain, handleResolved, pubkey]);
 
-  const handleConsent = async () => {
-    try { await apiPost("/api/consent", { version: CONSENT_VERSION }); } catch { /* non-critical */ }
-    setStep("wallet");
-  };
-
   const handleAuth = async (token: string, user: string, nextPubkey: string) => {
     localStorage.setItem("xfchess_token", token);
     localStorage.setItem("xfchess_wallet_pubkey", nextPubkey);
@@ -1146,8 +1041,15 @@ function Onboarding() {
     if (user && user !== registrationPlaceholder) {
       localStorage.setItem("xfchess_username", user);
       setUsername(user);
-      setStep("splash");
       handleGameLaunch(nextPubkey, user);
+      // Splash's "Welcome, X" is onboarding feedback for a first-ever login —
+      // a returning session already knows who it is, so just close and drop
+      // the player straight into the game instead of an extra screen+delay.
+      if (wasReturningSession) {
+        closePopup();
+      } else {
+        setStep("splash");
+      }
       return;
     }
 
@@ -1182,8 +1084,12 @@ function Onboarding() {
       setUsername("Player");
       setStep("profile");
     } else {
-      setStep("splash");
       handleGameLaunch(nextPubkey, resolvedUser);
+      if (wasReturningSession) {
+        closePopup();
+      } else {
+        setStep("splash");
+      }
     }
   };
 
@@ -1235,7 +1141,6 @@ function Onboarding() {
     <div style={{ ...page }}>
       <GridBg />
       <SiteNav />
-      {step === "consent" && <ConsentStep onAccept={handleConsent} onClose={closePopup} />}
 
       {step === "wallet"  && <WalletStep
         onContinue={handleWalletContinue}
@@ -1273,7 +1178,6 @@ function Onboarding() {
           <div style={{ textAlign: "center" as const }}>
             <LogoMark size={40} />
             <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 16 }}>
-              Welcome back, <span style={{ color: TEXT, fontWeight: 600 }}>{username}</span>.
               Approve the pending transaction below to continue.
             </p>
           </div>
