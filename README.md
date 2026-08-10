@@ -8,42 +8,30 @@
 
 **[Install](docs/INSTALL.md)** · **[MagicBlock Integration](MAGICBLOCK.md)** · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Environment Guide](docs/ENVIRONMENTS.md) · [Runbooks](docs/runbooks/) · [Full Docs Index](docs/README.md)
 
-XFChess is a forever-free, open source 3D chess platform: local play against a
-built-in engine, online multiplayer and tournaments, and optional Solana-backed
-wagered play with on-chain escrow, ELO, and dispute resolution — all in one
-client, no separate "crypto mode."
+# XFChess
 
-The native client is written in Rust on [Bevy](https://bevyengine.org/) (ECS,
-3D rendering, [egui](https://github.com/emilk/egui) UI). Chess logic — move
-generation, legality, check/checkmate — lives in the `nimzovich_engine` crate,
-which is `no_std`-compatible so the exact same logic runs both as a full
-alpha-beta search engine on the client and, via `chess-logic-on-chain`, inside
-the Solana program itself. Multiplayer sync is peer-to-peer over
-[Iroh](https://iroh.computer/) QUIC gossip, backed by a Rust port of the
-[Braid-HTTP 209](https://braid.org/) streaming-subscribe protocol as a durable
-server-side fallback and catch-up path, so moves, chat, and clock state still
-replicate correctly even when a direct P2P link never establishes. The backend
-is an async [Axum](https://github.com/tokio-rs/axum) server on Tokio, backed
-by SQLite via [SQLx](https://github.com/launchbadge/sqlx); it builds Solana
-transactions but never signs them — the player's wallet or a delegated
-session key does that, client-side, so the backend never touches a private
-key. On-chain game state, wager escrow, ELO, and tournaments run through an
-[Anchor](https://www.anchor-lang.com/) program, with
-[MagicBlock](https://www.magicblock.gg/) Ephemeral Rollups delegating the live
-game account off mainnet for sub-second move recording before committing the
-result back. The web frontend (`xfchessdotcom/`) is
-[React](https://react.dev/) + [Vite](https://vite.dev/) +
-[Chakra UI](https://chakra-ui.com/); the desktop build is wrapped with
-[Tauri](https://tauri.app/). Production observability runs on
-[Prometheus](https://prometheus.io/) + [Grafana](https://grafana.com/).
+**Real-time, fully on-chain 3D chess powered by MagicBlock Ephemeral Rollups.**
 
-Just want to play? Grab a prebuilt build from
-[Releases](https://github.com/trilltino/XFChess/releases) — see
-[docs/INSTALL.md](docs/INSTALL.md) for per-platform steps (including the
-SmartScreen/Gatekeeper prompts unsigned builds currently trigger). Single-player
-against the engine works fully offline; online multiplayer, tournaments, and
-wagered play need an internet connection and, for on-chain features, a Solana
-wallet (Phantom or Solflare).
+XFChess is an open-source chess platform featuring local play, P2P multiplayer, and trustless wagered matches. It solves the latency constraints of on-chain gaming by utilizing Ephemeral Rollups to process game loops at web2 speeds, while retaining Solana L1 for secure financial settlement.
+
+## The Ephemeral Rollup Architecture
+
+ER integration is the core of XFChess, eliminating the need for a separate "crypto mode." The architecture operates in three phases:
+
+1. **State Delegation:** When a wagered or tournament match begins, the active game account is delegated from Solana mainnet to a MagicBlock ER.
+2. **Sub-Second Execution:** Moves are recorded on the ER via session keys. The `nimzovich_engine` crate (`no_std` compatible) runs trustlessly within the SVM compute budget, performing O(1) bitboard legality and checkmate validation with zero heap allocation.
+3. **Atomic L1 Settlement:** Upon a terminal game state, the ER closes and the finalized board state commits back to L1. The Anchor program handles escrow payout, dispute resolution, and ELO updates automatically based on this cryptographic proof.
+
+## Technical Stack
+
+| Component | Technology & Implementation |
+| :--- | :--- |
+| **Smart Contracts** | Solana Anchor (Manages wager escrow, ELO, and state delegation). |
+| **Game Client** | Rust, Bevy (ECS, 3D rendering, egui). Wrapped with Tauri for desktop deployments. |
+| **Web Frontend** | React, Vite, Chakra UI. |
+| **Networking** | Iroh QUIC gossip (Direct P2P sync). Rust port of Braid-HTTP 209 streaming-subscribe protocol (server-side fallback). |
+| **Backend** | Async Axum server (Tokio), SQLite (SQLx). Builds transactions; client signs via Phantom/Solflare (zero backend key exposure). |
+| **Observability** | Prometheus, Grafana, Docker. |
 
 ![XFChess](docs/images/screenshot_1.png)
 ![XFChess](docs/images/screenshot_2.png)
