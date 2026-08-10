@@ -293,9 +293,9 @@ dev2: kill build build-wallet-ui build-admin-ui build-web-ui
      Set-Content -Path "$root\tmp\dev2-tauri-p1.ps1"  -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-game-p1.ps1"   -Value "$env_common; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p1'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
      Set-Content -Path "$root\tmp\dev2-web.ps1"        -Value "Set-Location '$root\xfchessdotcom'; npm run dev" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7464'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7464'; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p2'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7474'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$root\tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p2'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
      $wt = (Get-Command wt -ErrorAction SilentlyContinue).Source; \
      if (-not $wt) { $cand = "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe"; if (Test-Path $cand) { $wt = $cand } }; \
      if ($wt) { \
@@ -317,7 +317,7 @@ dev2: kill build build-wallet-ui build-admin-ui build-web-ui
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-game-p2.ps1'" -WindowStyle Normal \
      }
     @Write-Host "  [P1] Backend :8090  Wallet UI :5174  Bridge :7454  (window: XFChess P1)" -ForegroundColor Cyan
-    @Write-Host "  [P2] Wallet UI :5175  Bridge :7464  (window: XFChess P2)" -ForegroundColor Yellow
+    @Write-Host "  [P2] Wallet UI :5175  Bridge :7474  (window: XFChess P2)" -ForegroundColor Yellow
     @Write-Host "  Web Frontend: http://localhost:5173" -ForegroundColor White
     @Write-Host "  Tournament Admin: desktop window opens automatically from P1 — local token: dev" -ForegroundColor Green
 

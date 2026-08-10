@@ -29,6 +29,8 @@ use crate::game::systems::shared::{
 };
 use crate::multiplayer::network::protocol::NetworkMessage;
 #[cfg(feature = "solana")]
+use crate::multiplayer::rollup::magicblock::MagicBlockResolver;
+#[cfg(feature = "solana")]
 use crate::multiplayer::solana::addon::{CompetitiveMatchState, SolanaGameSync};
 use crate::multiplayer::types::OnlineNetworkState;
 use crate::rendering::pieces::{Piece, PieceColor};
@@ -85,6 +87,8 @@ pub struct InputSystemParams<'w, 's> {
     pub pending_promotion: Res<'w, PendingPromotion>,
     #[cfg(feature = "solana")]
     pub game_sync: Option<Res<'w, SolanaGameSync>>,
+    #[cfg(feature = "solana")]
+    pub magicblock_resolver: Option<Res<'w, MagicBlockResolver>>,
     // pub connection_state: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
 }
 
@@ -107,6 +111,22 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
     if !is_human_turn(params) {
         return false;
     }
+
+    #[cfg(feature = "solana")]
+    if let Some(solana_sync) = &params.game_sync {
+        if let Some(game_id) = solana_sync.game_id {
+            if let Some(resolver) = params.magicblock_resolver.as_ref() {
+                if !resolver.is_delegated() {
+                    warn!(
+                        "[INPUT] Solana game {} not delegated to ER yet; moves are blocked",
+                        game_id
+                    );
+                    return false;
+                }
+            }
+        }
+    }
+
     // Default behavior: allow moving any color piece (single-player mode)
     let both_human = params.players.player_1.is_human && params.players.player_2.is_human;
 

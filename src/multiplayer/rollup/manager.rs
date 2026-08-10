@@ -237,7 +237,23 @@ impl Plugin for EphemeralRollupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EphemeralRollupManager>()
             .add_message::<RollupEvent>()
-            .add_systems(Update, (handle_rollup_events, check_for_auto_flush));
+            .add_systems(Update, handle_rollup_events);
+        // Periodic auto-flush used to be driven from here too
+        // (`check_for_auto_flush`, since removed), racing
+        // `bridge::process_batch_commit_requests` — both watched the same
+        // `should_flush()`/`prepare_batch_for_commit()` state and whichever
+        // system's turn came first that frame won `pending_batch.take()`.
+        // This system's path sent the batch over the slow negotiated
+        // `BatchPropose`/`BatchAccept` P2P round-trip
+        // (`bridge::handle_rollup_to_network_events`'s `RollupEvent::BatchReady`
+        // arm); if the game ended before the peer's accept came back, the
+        // batch just sat in `bridge.pending_batches`, forever unsubmitted —
+        // reproduced live: a game's first move (`f2f3`) never reached
+        // `record_move` at all, and every move after it then failed replay
+        // validation against a backend history that still didn't include it.
+        // `process_batch_commit_requests` submits directly via the VPS with
+        // no round-trip (the same path the game-end batch already used
+        // successfully), so it's now the sole periodic-flush path.
     }
 }
 
@@ -309,17 +325,3 @@ fn handle_rollup_events(
     }
 }
 
-fn check_for_auto_flush(
-    mut rollup_manager: ResMut<EphemeralRollupManager>,
-    mut rollup_events: MessageWriter<RollupEvent>,
-) {
-    if rollup_manager.status == GameStateStatus::Pending && rollup_manager.should_flush() {
-        if let Some((moves, next_fens)) = rollup_manager.prepare_batch_for_commit() {
-            rollup_events.write(RollupEvent::BatchReady {
-                game_id: rollup_manager.game_id,
-                moves,
-                next_fens,
-            });
-        }
-    }
-}

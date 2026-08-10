@@ -291,6 +291,26 @@ impl ChessEngine {
         &self.fen
     }
 
+    /// The side to move, read from the same FEN field [`is_check`] uses.
+    ///
+    /// This is the authoritative "whose turn is it" for anything derived from
+    /// [`is_check`]/[`has_legal_moves`] — notably checkmate/stalemate
+    /// attribution. Deliberately NOT the `CurrentTurn` Bevy resource: that is
+    /// advanced by a *different* system (`systems::visual`'s pending-turn
+    /// apply) than the engine position is, so the two are out of sync for one
+    /// frame on the remote-move path. That skew produced a real, reproduced
+    /// bug — the two clients in one game each declared the *opposite* player
+    /// checkmated for the same 4 moves (`1.f3 e5 2.g4 Qh4#`), because the
+    /// mover's client had already advanced `CurrentTurn` while the receiver's
+    /// had not. With a wager attached, that decides who gets paid.
+    pub fn side_to_move(&self) -> PieceColor {
+        if self.fen.contains(" w ") {
+            PieceColor::White
+        } else {
+            PieceColor::Black
+        }
+    }
+
     pub fn is_check(&self) -> bool {
         let side = if self.fen.contains(" w ") { 1 } else { -1 };
         nimzovich_engine::is_in_check(&self.game, side)
@@ -459,5 +479,69 @@ mod tests {
         assert_eq!(ChessEngine::coords_to_uci(0, 0), "a1");
         assert_eq!(ChessEngine::coords_to_uci(4, 3), "e4");
         assert_eq!(ChessEngine::uci_to_coords("e4"), Some((4, 3)));
+    }
+
+    /// Position after Fool's Mate (`1.f3 e5 2.g4 Qh4#`) — the exact game two
+    /// live clients disagreed about, each declaring the *opposite* side
+    /// checkmated. White is mated here; Black wins.
+    const FOOLS_MATE_FEN: &str = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
+
+    /// `side_to_move` must agree with the FEN's own side-to-move field, since
+    /// `is_check` reads that same field. Checkmate attribution pairs the two,
+    /// so any disagreement names the wrong loser (and pays the wrong winner).
+    #[test]
+    fn side_to_move_matches_fen_field() {
+        let mut engine = ChessEngine::default();
+        assert_eq!(engine.side_to_move(), PieceColor::White, "start pos is white");
+
+        engine.set_from_fen(FOOLS_MATE_FEN).unwrap();
+        assert_eq!(
+            engine.side_to_move(),
+            PieceColor::White,
+            "FEN says 'w' — white is to move and is the mated side"
+        );
+
+        engine
+            .set_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1")
+            .unwrap();
+        assert_eq!(engine.side_to_move(), PieceColor::Black);
+    }
+
+    /// The regression itself: in the mated position the engine must report
+    /// check + no legal moves, and attribute both to White. Previously the
+    /// mate was detected correctly but attributed via the `CurrentTurn` Bevy
+    /// resource, which lags a frame on the remote-move path — so the client
+    /// that *received* `Qh4#` blamed Black and declared White the winner.
+    #[test]
+    fn fools_mate_attributes_checkmate_to_white() {
+        let mut engine = ChessEngine::default();
+        engine.set_from_fen(FOOLS_MATE_FEN).unwrap();
+        engine.rebuild_legal_move_cache();
+
+        assert!(engine.is_check(), "white king must be in check");
+        assert!(
+            !engine.has_legal_moves(),
+            "white must have no legal escape — this is mate"
+        );
+
+        // Mirrors `update_game_phase`'s branch exactly.
+        let loser = engine.side_to_move();
+        assert_eq!(loser, PieceColor::White, "white is checkmated, not black");
+    }
+
+    /// Guard the other direction too, so a future change can't silently flip
+    /// the mapping: Scholar's-mate-style position with Black mated.
+    #[test]
+    fn black_mated_position_attributes_to_black() {
+        let mut engine = ChessEngine::default();
+        // 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6?? 4.Qxf7# — black to move, black mated.
+        engine
+            .set_from_fen("r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4")
+            .unwrap();
+        engine.rebuild_legal_move_cache();
+
+        assert!(engine.is_check(), "black king must be in check");
+        assert!(!engine.has_legal_moves(), "black must be mated");
+        assert_eq!(engine.side_to_move(), PieceColor::Black);
     }
 }

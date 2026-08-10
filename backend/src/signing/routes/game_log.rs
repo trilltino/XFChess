@@ -704,6 +704,20 @@ fn wants_subscribe(headers: &HeaderMap) -> bool {
 
 // ── Shared PUT (publish) path ────────────────────────────────────────────────
 
+/// SQLITE_BUSY / SQLITE_BUSY_SNAPSHOT (code 517) under concurrent access.
+/// The pool's `busy_timeout` PRAGMA (`infrastructure/database.rs`) already
+/// waits out ordinary lock contention, but that does not cover a WAL read
+/// snapshot going stale mid-transaction — busy_timeout makes SQLite wait
+/// longer for the *same* transaction to acquire a lock, but a stale
+/// snapshot never becomes valid no matter how long it waits. The only fix
+/// is a fresh `BEGIN` (a new snapshot), which is why this is retried at the
+/// handler level, not inside `put_event`'s own transaction.
+fn is_db_locked(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .map(|d| d.message().to_lowercase().contains("database is locked"))
+        .unwrap_or(false)
+}
+
 async fn put_event_handler(
     state: &AppState,
     game_id: &str,
@@ -715,18 +729,49 @@ async fn put_event_handler(
     }
 
     let kind = kind_of(&req.message);
-    match state
-        .game_log
-        .put_event(
-            game_id,
-            stream,
-            &req.sender_identity,
-            &req.message,
-            &req.content_version,
-            &req.content_parent,
-        )
-        .await
-    {
+
+    // `game_event_log` sees heavy concurrent traffic — every poller in the
+    // app (matchmaking, p2p, rates, tournaments, friends...) shares this
+    // same SQLite pool — and a move write can occasionally lose the
+    // SQLITE_BUSY_SNAPSHOT race despite `busy_timeout` (see `is_db_locked`).
+    // Reproduced live: a move write 500'd in 2ms (not a 5s timeout), and
+    // because this durable path is the fallback the client relies on when
+    // gossip alone doesn't land, that single dropped write meant the
+    // opponent's client never learned the move happened at all. Retrying
+    // the whole `put_event` call gets a fresh transaction/snapshot each
+    // time; any other error (or exhausting retries) falls through unchanged.
+    const DB_LOCK_RETRY_ATTEMPTS: u32 = 3;
+    let mut outcome = None;
+    for attempt in 1..=DB_LOCK_RETRY_ATTEMPTS {
+        let result = state
+            .game_log
+            .put_event(
+                game_id,
+                stream,
+                &req.sender_identity,
+                &req.message,
+                &req.content_version,
+                &req.content_parent,
+            )
+            .await;
+        match result {
+            Err(PutEventError::Db(ref e))
+                if attempt < DB_LOCK_RETRY_ATTEMPTS && is_db_locked(e) =>
+            {
+                warn!(
+                    "[game-log] db locked for game {} (attempt {attempt}/{DB_LOCK_RETRY_ATTEMPTS}) — retrying with a fresh transaction",
+                    game_id
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            other => {
+                outcome = Some(other);
+                break;
+            }
+        }
+    }
+
+    match outcome.expect("loop always sets outcome before exiting") {
         Ok(seq) => {
             info!(
                 "[game-log] {} → {}/{} (kind={}, seq={})",

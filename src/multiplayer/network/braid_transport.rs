@@ -629,7 +629,12 @@ pub fn drain_braid_messages(
                     timestamp_ms: payload.timestamp_ms,
                 });
             }
-            ChessMessage::SessionInfo { signing_pubkey, .. } => {
+            ChessMessage::SessionInfo {
+                player_pubkey,
+                session_pubkey,
+                signing_pubkey,
+                expires_at,
+            } => {
                 // Mirrors `handle_network_events`'s gossip-side roster
                 // building exactly (`systems.rs`) — this is the durable
                 // fallback for the same real bug described at this
@@ -647,6 +652,48 @@ pub fn drain_braid_messages(
                         game_id_u64,
                         entry.len()
                     );
+                }
+
+                // The roster update above only feeds move-signer
+                // verification. `handle_session_info_from_network`
+                // (multiplayer/systems.rs) is the only place
+                // `SolanaIntegrationState::opponent_pubkey` gets set —
+                // required before `bridge.rs` can finalize a game
+                // on-chain — and it listens only for
+                // `NetworkEvent::MessageReceived(NetworkMessage::SessionInfo)`.
+                // Without re-emitting that event here too, a SessionInfo
+                // that only arrives via Braid (because gossip dropped it —
+                // the exact failure this dual-transport send exists for)
+                // never reaches that handler, and both sides get stuck
+                // logging "Opponent pubkey unavailable" forever at game
+                // end, never settling on-chain.
+                #[cfg(feature = "solana")]
+                {
+                    use solana_sdk::pubkey::Pubkey;
+                    use std::str::FromStr;
+                    match (
+                        Pubkey::from_str(&player_pubkey),
+                        Pubkey::from_str(&session_pubkey),
+                        Pubkey::from_str(&signing_pubkey),
+                    ) {
+                        (Ok(player_pubkey), Ok(session_pubkey), Ok(signing_pubkey)) => {
+                            network_events.write(NetworkEvent::MessageReceived(
+                                NetworkMessage::SessionInfo {
+                                    game_id: game_id_u64,
+                                    player_pubkey,
+                                    session_pubkey,
+                                    signing_pubkey,
+                                    expires_at,
+                                },
+                            ));
+                        }
+                        _ => {
+                            warn!(
+                                "[braid-transport] SessionInfo for game {} had an unparseable pubkey — opponent_pubkey not updated via Braid fallback",
+                                game_id_u64
+                            );
+                        }
+                    }
                 }
             }
             // OfferDraw/AcceptDraw/DeclineDraw/Clock/EngineAnalysis aren't

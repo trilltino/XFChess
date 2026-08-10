@@ -88,16 +88,23 @@ pub fn update_game_phase(
 
     let in_check = engine.is_check();
     let has_legal_moves = engine.has_legal_moves();
+    // Attribute the result to the engine's side-to-move, NOT `CurrentTurn`.
+    // `in_check`/`has_legal_moves` above are both evaluated relative to the
+    // engine's position; `CurrentTurn` is advanced by a different system and
+    // lags by a frame on the remote-move path, so pairing the two flipped the
+    // verdict for whichever client received the mating move over the network.
+    // See `ChessEngine::side_to_move`'s doc comment for the reproduction.
+    let side_to_move = engine.side_to_move();
 
     if !has_legal_moves && in_check {
         // Checkmate
         game_phase.0 = GamePhase::Checkmate;
-        *game_over = match current_turn.color {
+        *game_over = match side_to_move {
             PieceColor::White => GameOverState::BlackWon,
             PieceColor::Black => GameOverState::WhiteWon,
         };
         info!("[GAME] ========== CHECKMATE! ==========");
-        info!("[GAME] {:?} is in checkmate!", current_turn.color);
+        info!("[GAME] {:?} is in checkmate!", side_to_move);
     } else if !has_legal_moves {
         // Stalemate
         game_phase.0 = GamePhase::Stalemate;
@@ -107,7 +114,7 @@ pub fn update_game_phase(
         if previous_phase != GamePhase::Check {
             game_phase.0 = GamePhase::Check;
             info!("[GAME] ========== CHECK DETECTED ==========");
-            info!("[GAME] {:?} King is under attack!", current_turn.color);
+            info!("[GAME] {:?} King is under attack!", side_to_move);
         } else {
             game_phase.0 = GamePhase::Check;
         }

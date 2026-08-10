@@ -155,16 +155,16 @@ pub fn initialize_solana_integration(
 }
 
 pub fn query_wallet_pubkey_from_tauri() -> Option<String> {
+    use crate::multiplayer::solana::tauri_signer::candidate_ports;
     use std::io::{Read, Write};
     use std::net::TcpStream;
 
-    let base: u16 = std::env::var("XFCHESS_WALLET_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(7454);
-    let tcp_start = base.saturating_sub(11);
-    let tcp_end = base.saturating_sub(2);
-    for port in tcp_start..=tcp_end {
+    // Announced port first, full scan only as a fallback — same discovery
+    // path as open_wallet_browser()/send_to_tauri_blocking(), not a
+    // hand-rolled copy of it (see the wallet-bridge port-discovery audit:
+    // this used to have its own inline scan that never got the port-file
+    // fast path and would drift out of sync with the canonical one).
+    for port in candidate_ports() {
         let mut stream = match TcpStream::connect(("127.0.0.1", port)) {
             Ok(s) => s,
             Err(_) => continue,

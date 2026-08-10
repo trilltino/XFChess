@@ -71,6 +71,38 @@ pub struct OnlinePlayersState {
     pub fetch_rx: Option<Receiver<usize>>,
 }
 
+/// How long the opponent's `/presence` heartbeat (posted every ~4s by
+/// `tick_presence_sync`, for every online player, menu or in-game) may go
+/// stale before [`check_opponent_presence`] treats them as gone. Comfortably
+/// above the heartbeat cadence to absorb normal jitter/latency, and far below
+/// the 60s reconnect grace `opponent_disconnect_ui` gives afterward.
+const OPPONENT_PRESENCE_TIMEOUT_SECS: i64 = 15;
+
+/// Backend-verified liveness of the opponent during an online game — see
+/// [`check_opponent_presence`] for why this exists alongside the P2P/gossip
+/// disconnect signal. Reset every match by `reset_multiplayer_session_state`
+/// so a stale timestamp from a previous opponent never carries into the next.
+#[derive(Resource, Default)]
+pub struct OpponentLivenessState {
+    opponent_last_seen: Option<chrono::DateTime<chrono::Utc>>,
+    since_last_poll: f32,
+    fetch_rx: Option<Receiver<Option<chrono::DateTime<chrono::Utc>>>>,
+}
+
+impl OpponentLivenessState {
+    /// True once the opponent's last known `/presence` heartbeat is older
+    /// than [`OPPONENT_PRESENCE_TIMEOUT_SECS`]. `false` (not stale) until a
+    /// first sample ever arrives, so the opening seconds of a match — before
+    /// the first poll completes — never false-positive as a disconnect.
+    pub fn is_opponent_stale(&self) -> bool {
+        self.opponent_last_seen
+            .map(|t| {
+                chrono::Utc::now() - t > chrono::Duration::seconds(OPPONENT_PRESENCE_TIMEOUT_SECS)
+            })
+            .unwrap_or(false)
+    }
+}
+
 /// Bevy resource tracking the backend region + measured latency to it.
 #[derive(Resource, Default)]
 pub struct BackendRegion {
@@ -147,6 +179,7 @@ impl Plugin for SocialPlugin {
             .init_resource::<LobbyFetchState>()
             .init_resource::<BackendRegion>()
             .init_resource::<OnlinePlayersState>()
+            .init_resource::<OpponentLivenessState>()
             .add_systems(
                 Update,
                 (
@@ -155,6 +188,7 @@ impl Plugin for SocialPlugin {
                     tick_friends_sync,
                     tick_presence_sync,
                     fetch_backend_region_once,
+                    check_opponent_presence,
                 ),
             );
     }
@@ -311,6 +345,73 @@ fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlaye
             let _ = tx.send(count);
         })
         .detach();
+}
+
+/// Polls the backend's `/presence` store for the opponent's node ID every
+/// ~4s and records when they were last seen, feeding
+/// [`OpponentLivenessState::is_opponent_stale`].
+///
+/// Exists because neither existing P2P/gossip disconnect signal reliably
+/// covers the common "relay-only" case: `NeighborDown`
+/// (`network::p2p::handle_network_events`) only fires when a direct Iroh
+/// gossip neighbor link was actually established — VPS-lobby and tournament
+/// games only attempt that opportunistically (see `ConnectToPeerEvent`'s doc
+/// comment) — and the old gossip-ping-silence check in `tick_heartbeat`
+/// guarded itself on *our own* Braid connectivity, not the opponent's,
+/// meaning it could never fire while the backend stayed reachable to us —
+/// exactly the scenario where an opponent quitting still needs to be caught.
+/// This asks the backend directly instead: `tick_presence_sync` already
+/// posts a `/presence` heartbeat for every online player unconditionally
+/// (menu or in-game), so its absence is a reliable, transport-agnostic
+/// signal that the opponent is gone. `opponent_disconnect_ui`
+/// (`ui/game/game_ui.rs`) ORs this in alongside the P2P transport-state
+/// signal — a second, independent vote into that one decision point, not a
+/// competing one.
+fn check_opponent_presence(
+    time: Res<Time>,
+    mut liveness: ResMut<OpponentLivenessState>,
+    game_mode: Res<crate::core::states::GameMode>,
+    p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+) {
+    use crate::core::states::GameMode;
+
+    let is_online = matches!(
+        *game_mode,
+        GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
+    );
+    let Some(opponent_node_id) = p2p_conn.as_ref().and_then(|c| c.peer_node_id.clone()) else {
+        return;
+    };
+    if !is_online {
+        return;
+    }
+
+    if let Some(rx) = &liveness.fetch_rx {
+        if let Ok(seen) = rx.try_recv() {
+            if seen.is_some() {
+                liveness.opponent_last_seen = seen;
+            }
+            liveness.fetch_rx = None;
+        }
+    }
+
+    liveness.since_last_poll += time.delta_secs();
+    if liveness.fetch_rx.is_none() && liveness.since_last_poll >= 4.0 {
+        liveness.since_last_poll = 0.0;
+        let (tx, rx) = bounded(1);
+        liveness.fetch_rx = Some(rx);
+        bevy::tasks::IoTaskPool::get()
+            .spawn(async move {
+                let seen = get_online().ok().and_then(|list| {
+                    list.into_iter()
+                        .find(|p| p.node_id == opponent_node_id)
+                        .and_then(|p| chrono::DateTime::parse_from_rfc3339(&p.updated_at).ok())
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                });
+                let _ = tx.send(seen);
+            })
+            .detach();
+    }
 }
 
 /// One-shot region fetch — spawns a background task on first run, then drains

@@ -1,6 +1,5 @@
 pub mod plugin;
 pub mod profile_check;
-pub mod rpc;
 pub mod state;
 pub mod systems;
 

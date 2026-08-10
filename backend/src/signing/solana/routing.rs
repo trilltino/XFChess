@@ -95,7 +95,34 @@ pub fn rpc_for(config: &SigningConfig, instr: Instr) -> RpcClient {
 pub fn rpc_url_for(config: &SigningConfig, instr: Instr) -> String {
     match layer_of(instr) {
         Layer::Base => config.solana_rpc_url.clone(),
-        Layer::Er => config.magic_router_rpc_url.clone(),
+        // ER writes go straight to the ER validator, NOT the Magic Router.
+        //
+        // The router serves `getLatestBlockhash` from its own chain, but
+        // forwards any transaction that touches a *delegated* account to the
+        // ER validator that owns that delegation — a different chain, with a
+        // different blockhash domain. The transaction then fails validation
+        // with `-32003 ... Blockhash not found`, no matter how fresh the
+        // blockhash was or how many times it is refetched.
+        //
+        // Reproduced deterministically by `bin/er_probe` (kept in-tree so this
+        // can be re-checked if MagicBlock changes the router's behaviour):
+        //
+        //   router      + no delegated account -> accepted
+        //   ER validator+ no delegated account -> accepted
+        //   router      + delegated account    -> "Blockhash not found"
+        //   ER validator+ delegated account    -> accepted
+        //
+        // That last pair is the whole bug: it made every `record_move`,
+        // `undelegate_game` and `schedule_time_check` fail for the entire life
+        // of this integration — no chess move was ever recorded on the ER.
+        //
+        // Caveat: this pins ER writes to `ER_RPC_URL` (default devnet-eu).
+        // `DelegateConfig.validator` is `None`, so MagicBlock chooses the
+        // validator; today it lands on devnet-eu, which is what makes this
+        // correct. If a game is ever delegated to a different validator, this
+        // URL must follow it (read the delegation record) or writes will fail
+        // the same way. Use `er_probe` to confirm before changing endpoints.
+        Layer::Er => config.er_rpc_url.clone(),
     }
 }
 

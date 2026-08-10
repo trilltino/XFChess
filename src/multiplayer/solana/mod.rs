@@ -2,7 +2,7 @@ pub mod addon;
 pub mod global_session_manager;
 pub mod integration;
 pub mod lobby;
-pub mod session_authorization;
+pub mod submit;
 pub mod tauri_signer;
 pub mod tournament;
 pub mod tournament_session;
