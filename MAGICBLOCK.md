@@ -1,6 +1,104 @@
 # MagicBlock Integration
 
-XFChess uses MagicBlock Ephemeral Rollups for the latency-sensitive move path. The Solana `Game` PDA remains the lifecycle source of truth; MagicBlock is the fast execution layer for delegated game state. Escrow, treasury, profiles, ELO, and final payouts are settled back on the base layer after the delegated state is committed and undelegated.
+> **XFChess uses on-chain chess logic for authoritative game-state transitions
+> and MagicBlock Ephemeral Rollups for low-latency execution of delegated live
+> games, while Solana remains the canonical settlement layer.**
+
+Normal Solana transaction latency is not ideal for a real-time chess move path,
+but moving the move path off-chain entirely would give up the property that
+makes wagered play trustworthy. MagicBlock is how XFChess gets both: a live
+game's `Game` PDA is delegated to an Ephemeral Rollup, moves execute there with
+low latency against the *same* on-chain chess rules, and the result is committed
+back to Solana for settlement.
+
+## The Layers
+
+```text
+                    SOURCE OF TRUTH
+                         Solana
+                           |
+                    Game PDA + rules
+                           |
+                    delegated execution
+                           v
+                  MagicBlock ER
+                           |
+                  low-latency moves
+                           |
+                  commit + undelegate
+                           v
+                    Solana base
+                           |
+                     settlement
+```
+
+| Layer | Role |
+| --- | --- |
+| Solana `Game` PDA | Canonical game and lifecycle state |
+| On-chain chess logic (`chess-logic-on-chain`) | Authoritative move validation and state transition |
+| MagicBlock ER | Low-latency execution environment for delegated game state |
+| Magic Router | Routing layer that forwards delegated-game transactions to the right endpoint |
+| Solana base layer | Escrow, treasury, ELO, profiles, final settlement |
+
+The distinction that matters most: **MagicBlock is an execution layer, not a
+second source of truth.** It changes *where* the authoritative chess transition
+runs, not *what* decides it. The chess rules are the same Rust code either way —
+`nimzovich_engine`'s `no_std` subset, compiled into the Anchor program behind
+its `move-validation` feature (on by default). `record_move` re-derives the
+resulting board in-program and rejects any client-proposed board that doesn't
+match.
+
+## Execution vs Settlement
+
+```text
+MAGICBLOCK / ER              SOLANA BASE LAYER
+----------------             -----------------
+Live game execution          Escrow
+Move validation              Treasury
+Game state transitions       Payouts
+Clock / timeout execution    ELO
+Terminal game result         Profiles
+                             Settlement bookkeeping
+```
+
+This boundary is intentional, not incidental. **Money never moves inside the ER
+hot path.** Terminal instructions (checkmate detection, `resign`,
+`claim_timeout`) only record a `GameResult` on the delegated `Game` PDA;
+`finalize_game` is what moves value, and it runs on base, once, after commit and
+undelegation.
+
+The enforcement is structural rather than a runtime flag: while delegated, the
+`Game` PDA is owned by the delegation program, so any base-layer instruction
+declaring `game: Account<'info, Game>` — every escrow, treasury, and profile
+path — is rejected by Anchor's own owner check.
+
+## Live Move Execution Path
+
+1. Game is created on the Solana base layer (`create_game`).
+2. Players join and wager/escrow state is established on base (`join_game`).
+3. Session keys are authorized, so moves don't need a wallet popup each time.
+4. `delegate_game` delegates the `Game` PDA to MagicBlock.
+5. The backend routes delegated `Game` writes through Magic Router / the ER.
+6. `record_move` executes the authoritative chess transition.
+7. The on-chain chess logic validates and applies the move, derives the next
+   board, and updates the `Game` PDA.
+8. Terminal results are recorded without moving funds.
+9. MagicBlock commits the delegated state.
+10. `undelegate_game` returns the `Game` PDA to normal program ownership.
+11. `finalize_game` executes settlement on Solana base.
+
+The chess move is **not** simply recorded by an off-chain server and later
+trusted. At step 7, the program deserializes the stored board, runs
+`validate_and_apply` itself, and compares its own derived result against what
+the client submitted — a mismatch fails the transaction with
+`GameErrorCode::InvalidBoardState`. Checkmate, stalemate, insufficient material,
+and the 50-move rule are all detected in-program
+(`programs/xfchess-game/src/moves_ix/apply.rs`).
+
+What runs on-chain is the chess *rules* — legality and state transition. The
+full alpha-beta search does not: `chess-logic-on-chain` depends on
+`nimzovich_engine` with `default-features = false`, so the `search` module is
+never compiled into the program. Search is a client concern.
 
 ## Pinned Stack
 
