@@ -220,7 +220,7 @@ pub fn multiplayer_menu_system(
                                                             let vps_url = crate::multiplayer::network::vps::vps_base();
 
                                                             // 1. Build Leave Transaction
-                                                            let build_url = format!("{}/tournament/{}/build-leave-tx", vps_url, t_id);
+                                                            let build_url = format!("{}/api/tournament/{}/build-leave-tx", vps_url, t_id);
                                                             // A fast, bounded timeout — this is a plain instruction build,
                                                             // not on-chain work, so an unreachable/hung backend should
                                                             // fail quickly instead of leaving this thread (and the leave
@@ -243,13 +243,13 @@ pub fn multiplayer_menu_system(
 
                                                                             if sign_res.is_ok() {
                                                                                 // 3. Confirm with backend
-                                                                                let leave_url = format!("{}/tournament/{}/leave", vps_url, t_id);
+                                                                                let leave_url = format!("{}/api/tournament/{}/leave", vps_url, t_id);
                                                                                 let _ = client.post(&leave_url)
                                                                                     .json(&serde_json::json!({ "player": pubkey_str }))
                                                                                     .send();
 
                                                                                 // 4. Refresh tournaments list
-                                                                                let refresh_url = format!("{}/tournament/my?player={}", vps_url, pubkey_str);
+                                                                                let refresh_url = format!("{}/api/tournament/my?player={}", vps_url, pubkey_str);
                                                                                 if let Ok(refresh_resp) = reqwest::blocking::get(&refresh_url) {
                                                                                     if let Ok(new_data) = refresh_resp.json::<Vec<TournamentSummary>>() {
                                                                                         let _ = sender.try_send(new_data);
@@ -294,7 +294,7 @@ pub fn multiplayer_menu_system(
 
                                         std::thread::spawn(move || {
                                             let vps_url = crate::multiplayer::network::vps::vps_base();
-                                            let url = format!("{}/tournament/my?player={}", vps_url, pubkey_str);
+                                            let url = format!("{}/api/tournament/my?player={}", vps_url, pubkey_str);
                                             match reqwest::blocking::get(&url) {
                                                 Ok(resp) if resp.status().is_success() => {
                                                     if let Ok(data) = resp.json::<Vec<TournamentSummary>>() {

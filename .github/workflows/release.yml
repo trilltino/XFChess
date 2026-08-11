@@ -104,6 +104,11 @@ jobs:
           Copy-Item -Force target/release/xfchess.exe "$stage/"
           Copy-Item -Force target/release/xfchess-tauri.exe "$stage/"
           Copy-Item -Force stockfish.exe "$stage/"
+          # wallet-ui is served by xfchess-tauri itself from next to its own
+          # binary (see wallet_ui_dist_path in tauri/src/main.rs) — without
+          # this, the wallet-signing popup has nowhere real to load.
+          New-Item -ItemType Directory -Force -Path "$stage/wallet-ui" | Out-Null
+          Copy-Item -Recurse -Force tauri/wallet-ui/dist "$stage/wallet-ui/"
 
       # Sign the binaries BEFORE packaging. Azure Trusted Signing path:
       - name: Sign binaries (Azure Trusted Signing)
@@ -205,6 +210,10 @@ jobs:
           cp target/release/xfchess release/linux/xfchess
           cp target/release/xfchess-tauri release/linux/xfchess-tauri
           chmod +x release/linux/xfchess release/linux/xfchess-tauri
+          # wallet-ui is served by xfchess-tauri itself from next to its own
+          # binary (see wallet_ui_dist_path in tauri/src/main.rs).
+          mkdir -p release/linux/wallet-ui
+          cp -r tauri/wallet-ui/dist release/linux/wallet-ui/
           cat > release/linux/launch.sh <<EOF
           #!/bin/sh
           SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"

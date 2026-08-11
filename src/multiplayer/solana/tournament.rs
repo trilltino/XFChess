@@ -889,7 +889,7 @@ struct RegistrationInfo {
 fn fetch_registration_info(rpc_base: &str, tournament_id: u64) -> Result<RegistrationInfo, String> {
     let resp = crate::multiplayer::network::vps::client_fast()?
         .get(format!(
-            "{}/tournament/{}/registration-info",
+            "{}/api/tournament/{}/registration-info",
             rpc_base, tournament_id
         ))
         .send()

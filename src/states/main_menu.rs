@@ -676,19 +676,21 @@ fn poll_wallet_bridge(
                 poller.bridge_status_error = None;
                 if let Some(pk) = pubkey_opt {
                     poller.show_connect_overlay = false;
-                    // Bridge username is only a provisional value for the brief window
-                    // before the authoritative `/auth/me` fetch resolves. The bridge's
-                    // in-memory cache can go stale relative to the account's real,
-                    // backend-stored username (e.g. across Tauri sidecar restarts), so
-                    // once we have a real identity it must never be silently clobbered
-                    // by this — otherwise the profile-retry loop below (which only
-                    // runs while `username` is `None`) never gets a chance to correct
-                    // it, and the game display can drift from the website permanently.
-                    if player_identity.username.is_none() {
+                    // The bridge only ever holds a username from two trustworthy
+                    // sources: wallet-connect (`POST /wallet`) or a rename that
+                    // just succeeded against the backend (`PATCH
+                    // /api/auth/username`, mirrored into the bridge's cache at
+                    // the point it's confirmed to have taken effect — see
+                    // api_set_username in tauri/src/main.rs). So it's safe to
+                    // adopt whenever it differs, not just while `username` is
+                    // still `None` — that used to mean an in-game rename never
+                    // showed up until the whole game restarted and re-primed
+                    // this from scratch.
+                    if player_identity.username.as_deref() != username_opt.as_deref() {
                         if let Some(ref uname) = username_opt {
                             if !uname.is_empty() {
                                 info!(
-                                    "[WalletBridge] Username from bridge (provisional): {}",
+                                    "[WalletBridge] Username from bridge: {}",
                                     uname
                                 );
                                 player_identity.username = Some(uname.clone());

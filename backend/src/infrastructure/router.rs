@@ -38,8 +38,19 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
     // Note: tournament routes now use AppState directly
     let tournament_router = base
         .clone()
+        // Also mounted under /api/tournament(s) (not just the bare paths): the
+        // web frontend has its own unrelated pages at the exact same bare
+        // "/tournaments" and "/tournament/:id" paths, and nginx has no way
+        // to tell "the game client wants JSON" from "a browser wants the
+        // page" on an identical path — it always resolves to the frontend's
+        // SPA catch-all, silently 200-ing with HTML instead of proxying
+        // here. /api/ is already fully proxied to the backend with no such
+        // collision. The bare mounts stay for now (harmless, purely additive).
+        .nest("/api/tournaments", tournament_routes::tournaments_routes())
         .nest("/tournaments", tournament_routes::tournaments_routes())
+        .nest("/api/tournament", tournament_routes::tournament_routes())
         .nest("/tournament", tournament_routes::tournament_routes())
+        .nest("/api/tournament", swiss_read_routes())
         .nest("/tournament", swiss_read_routes())
         .nest(
             "/admin/tournament",
