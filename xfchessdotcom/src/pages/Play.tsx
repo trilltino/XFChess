@@ -69,6 +69,7 @@ const PlayPage = () => {
                 style={{
                   padding: '20px 28px',
                   background: 'transparent',
+                  color: '#fff',
                   border: 'none',
                   cursor: 'pointer',
                   display: 'flex',
