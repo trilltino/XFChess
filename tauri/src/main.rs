@@ -510,7 +510,10 @@ async fn http_server(
     let profile_url = format!("{wallet_url}?step=profile");
     tracing::info!("[HTTP] opening profile step: {profile_url}");
     tokio::task::spawn_blocking(move || {
-      open_in_browser(&profile_url);
+      // false: wallet-ui's own splash-step poll loop (needs-profile-step)
+      // already detects this and transitions client-side, so reusing a
+      // popup that's already open is fine here — unlike the signing case.
+      open_in_browser(&profile_url, false);
     });
     StatusCode::OK
   }
@@ -760,7 +763,7 @@ async fn http_server(
 /// Open the wallet UI in the user's real Chrome browser so Phantom/Solflare
 /// extensions are available. WebView2 inside Tauri cannot load extensions.
 fn open_wallet_popup(_app: &tauri::AppHandle) {
-  open_wallet_popup_with_step(None);
+  open_wallet_popup_with_step(None, false);
 }
 
 /// Open the wallet UI to approve a pending transaction. Passing `?step=sign`
@@ -771,10 +774,19 @@ fn open_wallet_popup(_app: &tauri::AppHandle) {
 /// logged in used to show a fresh "log in again" screen instead of the sign
 /// prompt, and the pending tx would silently time out 60s later.
 fn open_wallet_popup_for_signing(_app: &tauri::AppHandle) {
-  open_wallet_popup_with_step(Some("sign"));
+  // force_fresh=true: reusing whatever the popup already had loaded (e.g.
+  // still sitting on the splash screen from an earlier, unrelated open) is
+  // exactly the bug this function's own doc comment above describes fixing
+  // once already — the reuse-by-title-match optimization in open_in_browser
+  // brings that stale window to the foreground WITHOUT navigating it, so a
+  // signing request silently never reaches the sign screen, and the pending
+  // tx (still handled correctly by TransactionSigner's own SSE-driven state
+  // regardless of `step`) times out with nothing on screen prompting it.
+  // A fresh popup guarantees today's ?step=sign URL actually loads.
+  open_wallet_popup_with_step(Some("sign"), true);
 }
 
-fn open_wallet_popup_with_step(step: Option<&str>) {
+fn open_wallet_popup_with_step(step: Option<&str>, force_fresh: bool) {
   let wallet_url =
     std::env::var("XFCHESS_WALLET_URL")
       .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
@@ -783,7 +795,10 @@ fn open_wallet_popup_with_step(step: Option<&str>) {
     None => wallet_url,
   };
   tracing::info!("[WalletPopup] opening in system browser: {url}");
-  open_in_browser(&url);
+  if force_fresh {
+    kill_wallet_popup();
+  }
+  open_in_browser(&url, force_fresh);
 }
 
 /// Open a URL in Chrome app-mode (compact popup, no address bar).
@@ -797,7 +812,7 @@ fn wallet_popup_pid_cell() -> &'static std::sync::Mutex<Option<u32>> {
   CELL.get_or_init(|| std::sync::Mutex::new(None))
 }
 
-fn open_in_browser(url: &str) {
+fn open_in_browser(url: &str, force_fresh: bool) {
   let ts = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
     .unwrap_or_default()
@@ -809,7 +824,14 @@ fn open_in_browser(url: &str) {
   {
     // If a popup window with title XFChess #<port> is already open or hidden,
     // bring it to front instantly instead of spawning a new browser process.
-    if show_and_foreground_wallet_popup() {
+    // Skipped when force_fresh: reusing it means whatever page it already
+    // had loaded stays loaded — no navigation happens — which silently
+    // stranded signing requests behind a stale splash/login screen (see
+    // open_wallet_popup_for_signing's doc comment). The caller already
+    // killed any existing popup before reaching here in that case, so this
+    // check would find nothing anyway; skipping it outright avoids a race
+    // against how quickly that close actually takes effect.
+    if !force_fresh && show_and_foreground_wallet_popup() {
       tracing::debug!("[WalletPopup] reused existing popup window");
       return;
     }
