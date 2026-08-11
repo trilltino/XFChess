@@ -982,6 +982,30 @@ function Onboarding() {
     setReady(true);
   }, []);
 
+  // Fallback when this popup has no wallet in its own localStorage yet the
+  // bridge's in-memory /status already knows one (set by the earlier
+  // Connect Wallet popup's POST /wallet) — this is exactly the gap that
+  // left TransactionSigner permanently un-rendered (it's gated on `pubkey`)
+  // even though a real pending signature was sitting in /pending the whole
+  // time: nothing on screen ever showed a way to approve it. Whatever the
+  // root cause of the popup not sharing localStorage this time around
+  // (fresh process, cleared storage, etc.), the bridge's own state is the
+  // one thing that's always current for *this* connected wallet, so fall
+  // back to asking it directly instead of assuming an empty localStorage
+  // means "no wallet connected".
+  useEffect(() => {
+    if (pubkey) return;
+    apiGet<{ connected: boolean; pubkey: string | null }>("/status")
+      .then((s) => {
+        if (s.pubkey) {
+          localStorage.setItem("xfchess_wallet_pubkey", s.pubkey);
+          setPubkey(s.pubkey);
+        }
+      })
+      .catch(() => { /* bridge unreachable — nothing to fall back to */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Poll for profile-step requests from the game client (e.g. "Wagered PVP" clicked)
   useEffect(() => {
     if (step !== "splash") return;

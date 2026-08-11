@@ -80,12 +80,56 @@ type PendingTxNotify = tokio::sync::watch::Sender<()>;
 /// same read timeout on its end of this same TCP connection.
 const SIGN_TIMEOUT_SECS: u64 = 60;
 
-/// Get the HTTP port for the wallet signing service.
-fn http_port() -> u16 {
+/// The port the axum HTTP server actually bound to, once it has. Two
+/// instances on one machine with no XFCHESS_WALLET_PORT override both try
+/// the same nominal port; the second one's bind fails outright (logged, not
+/// fatal), leaving that whole process running with no HTTP server at all —
+/// every URL built from the nominal port (the wallet-signing popup, /status
+/// polling, wallet-ui itself) then points at nothing. Set once bind_http_port
+/// finds a free port; every other caller of http_port() picks it up
+/// transparently instead of trusting the nominal value blindly.
+static ACTUAL_HTTP_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+
+fn nominal_http_port() -> u16 {
   std::env::var("XFCHESS_WALLET_PORT")
     .ok()
     .and_then(|v| v.parse().ok())
     .unwrap_or(7454)
+}
+
+/// Get the HTTP port for the wallet signing service — the real bound port
+/// if the server has started, else the nominal (env-derived) one.
+fn http_port() -> u16 {
+  ACTUAL_HTTP_PORT.get().copied().unwrap_or_else(nominal_http_port)
+}
+
+/// Path the HTTP bridge writes its actual bound port to, so the game client
+/// (a separate process) can discover it instead of assuming the nominal
+/// value always matches. Mirrors wallet_bridge_port_file() below for the
+/// raw-TCP listener; must match http_bridge_port_file() in the game
+/// client's src/multiplayer/solana/tauri_signer.rs.
+fn http_bridge_port_file() -> std::path::PathBuf {
+  std::env::temp_dir().join(format!(
+    "xfchess-wallet-http-{}.port",
+    nominal_http_port()
+  ))
+}
+
+/// Bind the HTTP server, trying the nominal port first and then a small
+/// range above it if that's taken (another instance already bound it).
+/// Writes whichever port actually worked to http_bridge_port_file() and
+/// records it in ACTUAL_HTTP_PORT before returning.
+async fn bind_http_port() -> Option<(TcpListener, u16)> {
+  let nominal = nominal_http_port();
+  for port in std::iter::once(nominal).chain(nominal.saturating_add(1)..=nominal.saturating_add(10)) {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    if let Ok(listener) = TcpListener::bind(addr).await {
+      let _ = ACTUAL_HTTP_PORT.set(port);
+      let _ = std::fs::write(http_bridge_port_file(), port.to_string());
+      return Some((listener, port));
+    }
+  }
+  None
 }
 
 /// Path used to announce the raw-TCP wallet bridge's actual bound port to
@@ -747,16 +791,18 @@ async fn http_server(
 
   let router = router.layer(cors).with_state(state);
 
-  let port = http_port();
-  let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-  tracing::info!("[HTTP] Wallet bridge listening on http://localhost:{port}");
-  match TcpListener::bind(addr).await {
-    Ok(listener) => {
+  match bind_http_port().await {
+    Some((listener, port)) => {
+      tracing::info!("[HTTP] Wallet bridge listening on http://localhost:{port}");
       if let Err(e) = axum::serve(listener, router).await {
         tracing::error!("[HTTP] Wallet bridge error: {e}");
       }
     }
-    Err(e) => tracing::error!("[HTTP] Failed to bind wallet bridge on :{port}: {e}"),
+    None => tracing::error!(
+      "[HTTP] Failed to bind wallet bridge on :{}-{}: all candidate ports in use",
+      nominal_http_port(),
+      nominal_http_port().saturating_add(10)
+    ),
   }
 }
 

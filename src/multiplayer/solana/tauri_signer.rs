@@ -29,12 +29,37 @@ use solana_sdk::{
 /// Maximum seconds to wait for the user to approve the transaction in Phantom.
 const SIGN_TIMEOUT_SECS: u64 = 60;
 
-/// HTTP port for this instance's Tauri wallet bridge, from XFCHESS_WALLET_PORT (default 7454).
-pub fn wallet_bridge_port() -> u16 {
+fn nominal_wallet_bridge_port() -> u16 {
     std::env::var("XFCHESS_WALLET_PORT")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(7454)
+}
+
+/// Path the Tauri bridge's HTTP server writes its actual bound port to.
+/// Must match `http_bridge_port_file()` in `tauri/src/main.rs`. The bridge
+/// tries the nominal port first and only falls back to scanning upward if
+/// that's already taken (e.g. a second local instance with no
+/// XFCHESS_WALLET_PORT override) — without reading this file back, every
+/// HTTP call this client makes to the bridge would still target the
+/// nominal port even when the bridge itself is actually listening
+/// somewhere else, which looked identical to the bridge not running at all.
+fn http_bridge_port_file() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "xfchess-wallet-http-{}.port",
+        nominal_wallet_bridge_port()
+    ))
+}
+
+/// HTTP port for this instance's Tauri wallet bridge: the bridge's
+/// announced actual port if its port file is present and parses, else the
+/// nominal XFCHESS_WALLET_PORT-derived value (default 7454) — matching the
+/// common single-instance case where they're always the same.
+pub fn wallet_bridge_port() -> u16 {
+    std::fs::read_to_string(http_bridge_port_file())
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or_else(nominal_wallet_bridge_port)
 }
 
 /// Base HTTP URL for this instance's Tauri wallet bridge, e.g. `http://127.0.0.1:7454`.
