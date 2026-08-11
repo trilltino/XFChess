@@ -450,16 +450,15 @@ function WalletStep({
       if (!provider) {
         throw new Error(`${WALLET_META[walletName].label} extension not detected.`);
       }
-      // Try a silent reconnect first — if this origin was already approved
-      // in a prior session, this resolves with no popup at all. Only shows
-      // a real approval prompt on the very first-ever connection (or after
-      // the user has revoked access), instead of on every app launch.
-      let resp: any;
-      try {
-        resp = await provider.connect({ onlyIfTrusted: true });
-      } catch {
-        resp = await provider.connect();
-      }
+      // Always a real approval prompt — no silent onlyIfTrusted reconnect.
+      // That fast path resolved with no popup at all once an extension had
+      // trusted this origin once, which is exactly what made "Connect
+      // Wallet" silently reuse whichever wallet was approved first instead
+      // of asking every time, especially confusing across multiple windows
+      // sharing one real browser profile (each window is its own bridge
+      // origin by port, but the extension's own trust memory isn't
+      // necessarily scoped that finely).
+      const resp: any = await provider.connect();
       // Phantom: publicKey is on the response object
       // Solflare: publicKey is on the provider after connect, not on resp
       pubkey = resp?.publicKey?.toBase58?.()
