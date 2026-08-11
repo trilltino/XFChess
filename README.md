@@ -8,6 +8,8 @@
 
 **[Install](docs/INSTALL.md)** · **[MagicBlock Integration](MAGICBLOCK.md)** · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Environment Guide](docs/ENVIRONMENTS.md) · [Runbooks](docs/runbooks/) · [Full Docs Index](docs/README.md)
 
+> Inspired by [*Ephemeral Rollups are All You Need*](https://arxiv.org/pdf/2311.02650).
+
 XFChess is a forever-free, open source 3D chess platform: local play against a
 built-in engine, online multiplayer and tournaments, and Solana-backed wagered
 play with on-chain escrow, ELO, and dispute resolution — all in one client, no
