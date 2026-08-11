@@ -52,14 +52,20 @@ pub struct SessionStatus {
 /// Returns `(session_pubkey_base58, platform_fee_lamports)`.
 /// `platform_fee_lamports` is calculated by the backend from the live SOL/GBP rate (10p per player = 20p total).
 pub fn create_session(game_id: u64, wallet_pubkey: &str) -> Result<(String, u64), String> {
-    let resp = client_fast()?
+    let response = client_fast()?
         .post(format!("{}/session/create", vps_base()))
         .json(&CreateSessionReq {
             game_id,
             wallet_pubkey,
         })
         .send()
-        .map_err(|e| format!("vps create_session: {e}"))?
+        .map_err(|e| format!("vps create_session: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("vps create_session: HTTP {status} — {body}"));
+    }
+    let resp = response
         .json::<CreateSessionResp>()
         .map_err(|e| format!("vps create_session parse: {e}"))?;
     Ok((resp.session_pubkey, resp.platform_fee_lamports))
@@ -76,10 +82,16 @@ struct PlatformFeeResp {
 /// piggyback the fee on. Same backend-computed figure either way
 /// (`rates::PLATFORM_FEE_GBP`), so the two paths can never silently diverge.
 pub fn fetch_platform_fee_lamports() -> Result<u64, String> {
-    let resp = client_fast()?
+    let response = client_fast()?
         .get(format!("{}/api/rates/platform-fee", vps_base()))
         .send()
-        .map_err(|e| format!("vps platform_fee: {e}"))?
+        .map_err(|e| format!("vps platform_fee: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("vps platform_fee: HTTP {status} — {body}"));
+    }
+    let resp = response
         .json::<PlatformFeeResp>()
         .map_err(|e| format!("vps platform_fee parse: {e}"))?;
     Ok(resp.platform_fee_lamports)
@@ -114,14 +126,20 @@ pub fn activate_session(game_id: u64, signed_tx_bytes: &[u8]) -> Result<String, 
 pub fn sign_and_submit(game_id: u64, tx_bytes: &[u8]) -> Result<String, String> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
-    let resp = client()?
+    let response = client()?
         .post(format!("{}/session/sign", vps_base()))
         .json(&SignReq {
             game_id,
             tx_b64: &b64,
         })
         .send()
-        .map_err(|e| format!("vps sign_and_submit: {e}"))?
+        .map_err(|e| format!("vps sign_and_submit: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("vps sign_and_submit: HTTP {status} — {body}"));
+    }
+    let resp = response
         .json::<SigResp>()
         .map_err(|e| format!("vps sign_and_submit parse: {e}"))?;
     Ok(resp.sig)

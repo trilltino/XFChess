@@ -1,10 +1,34 @@
 #![allow(dead_code)]
 use tracing::{error, info, warn, Level};
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::EnvFilter;
+
+/// Where the bridge's logs land. Release builds run with no console attached
+/// (windows_subsystem = "windows" — see main.rs), so `tracing_subscriber::fmt()`
+/// writing to stdout alone went nowhere anyone could ever read it — every
+/// "why is signing broken" report from a real install was undebuggable from
+/// the outside. Logging to a real file fixes that regardless of platform.
+pub fn log_dir() -> std::path::PathBuf {
+  dirs::data_local_dir()
+    .unwrap_or_else(|| std::path::PathBuf::from("."))
+    .join("xfchess")
+    .join("logs")
+}
 
 pub fn init_logging() {
   let env_filter =
     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("xfchess_tauri=info"));
+
+  let dir = log_dir();
+  let _ = std::fs::create_dir_all(&dir);
+  // Daily rotation: this runs every time the game launches, so an unrotated
+  // single file would grow forever across a player's entire install history.
+  let file_appender = tracing_appender::rolling::daily(&dir, "wallet-bridge.log");
+  // `_guard` must outlive the program — non_blocking's background writer
+  // thread stops flushing once its guard drops. Leaking is the standard
+  // tracing-appender pattern for a writer that should live as long as main().
+  let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+  Box::leak(Box::new(guard));
 
   tracing_subscriber::fmt()
     .with_max_level(Level::TRACE)
@@ -13,8 +37,14 @@ pub fn init_logging() {
     .with_file(false)
     .with_line_number(false)
     .with_env_filter(env_filter)
+    .with_ansi(false)
+    // Still write to stdout too — free in dev (visible in a terminal) and
+    // harmless in release (goes nowhere, same as before this change).
+    .with_writer(std::io::stdout.and(non_blocking))
     .compact()
     .init();
+
+  info!("[Logging] Writing to {}", dir.join("wallet-bridge.log.<date>").display());
 }
 
 pub fn log_window_event(window: &str, event: &str, details: Option<&str>) {
