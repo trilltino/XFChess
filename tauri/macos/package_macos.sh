@@ -97,7 +97,11 @@ fi
 echo "==> Building DMG"
 DMG="$ROOT/release/XFChess-${VERSION}.dmg"
 rm -f "$DMG"
-hdiutil create -volname "XFChess" -srcfolder "$APPDIR" -ov -format UDZO "$DMG"
+# An Applications symlink alongside the .app is what makes the mounted DMG
+# show a drag-to-install target — without it the window contains only the
+# app icon and there's nothing to drag it onto.
+ln -sf /Applications "$STAGE/Applications"
+hdiutil create -volname "XFChess" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 
 if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
   echo "==> Notarizing $DMG"
