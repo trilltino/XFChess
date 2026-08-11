@@ -330,8 +330,41 @@ if (-not $SkipBuild) {
     Run-Remote "cd /opt/xfchess/src && git fetch --all --prune && git checkout -f $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src"
     # Build as the (nologin) xfchess user via -s /bin/bash, with cargo on PATH; this is a
     # workspace, so build with -p backend from the repo root.
-    $buildCmd = 'su -s /bin/bash xfchess -c ''export CARGO_HOME=/opt/xfchess/.cargo RUSTUP_HOME=/opt/xfchess/.rustup HOME=/opt/xfchess PATH=/opt/xfchess/.cargo/bin:$PATH && cd /opt/xfchess/src && cargo build --release -p backend --bin signing-server-http'''
-    Run-Remote $buildCmd
+    #
+    # Written to a script file and launched detached (nohup, redirected stdio,
+    # backgrounded) rather than run as a blocking foreground SSH command: a
+    # cold-cache build (new deps, e.g. after a vendored-crate swap) can run well
+    # past typical SSH/session limits, and a dropped connection SIGHUPs a
+    # foreground remote process, killing the build outright. A script file also
+    # sidesteps nested quoting through su -c / sh -c / ssh's own argv join.
+    Run-Remote @'
+cat > /opt/xfchess/build_backend.sh << 'BUILDEOF'
+#!/bin/sh
+export CARGO_HOME=/opt/xfchess/.cargo RUSTUP_HOME=/opt/xfchess/.rustup HOME=/opt/xfchess PATH=/opt/xfchess/.cargo/bin:$PATH
+cd /opt/xfchess/src
+cargo build --release -p backend --bin signing-server-http > /tmp/xfchess_build.log 2>&1
+echo $? > /tmp/xfchess_build.done
+BUILDEOF
+chmod +x /opt/xfchess/build_backend.sh
+chown xfchess:xfchess /opt/xfchess/build_backend.sh
+'@
+    Run-Remote "rm -f /tmp/xfchess_build.done /tmp/xfchess_build.log"
+    Run-Remote "su -s /bin/bash xfchess -c 'nohup /opt/xfchess/build_backend.sh </dev/null >/dev/null 2>&1 &'"
+    Write-Host "Backend build launched detached on the server (survives SSH disconnects)." -ForegroundColor DarkGray
+
+    $buildTimeoutSec = 2400
+    $buildElapsed = 0
+    $buildExit = $null
+    while ($buildElapsed -lt $buildTimeoutSec) {
+        Start-Sleep -Seconds 15
+        $buildElapsed += 15
+        $check = & ssh @SSH_ARGS $DEST "test -f /tmp/xfchess_build.done && cat /tmp/xfchess_build.done" 2>&1
+        if ($check -match '^\d+$') { $buildExit = [int]$check; break }
+        if ($buildElapsed % 60 -eq 0) { Write-Host "  [${buildElapsed}s] backend still building..." -ForegroundColor DarkGray }
+    }
+    if ($null -eq $buildExit) { throw "Backend build timed out after ${buildTimeoutSec}s. Check: ssh ${DEST} tail -50 /tmp/xfchess_build.log" }
+    if ($buildExit -ne 0) { throw "Backend build failed (exit $buildExit). Check: ssh ${DEST} tail -80 /tmp/xfchess_build.log" }
+    Write-Host "Backend build succeeded (${buildElapsed}s)." -ForegroundColor Green
 }
 
 # ── Step 4: Snapshot databases + binary ──────────────────────────────────────
