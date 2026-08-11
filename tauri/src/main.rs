@@ -506,7 +506,7 @@ async fn http_server(
       .store(true, std::sync::atomic::Ordering::Relaxed);
     let wallet_url =
       std::env::var("XFCHESS_WALLET_URL")
-      .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui", http_port()));
+      .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
     let profile_url = format!("{wallet_url}?step=profile");
     tracing::info!("[HTTP] opening profile step: {profile_url}");
     tokio::task::spawn_blocking(move || {
@@ -777,7 +777,7 @@ fn open_wallet_popup_for_signing(_app: &tauri::AppHandle) {
 fn open_wallet_popup_with_step(step: Option<&str>) {
   let wallet_url =
     std::env::var("XFCHESS_WALLET_URL")
-      .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui", http_port()));
+      .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
   let url = match step {
     Some(s) => format!("{wallet_url}?step={s}"),
     None => wallet_url,
