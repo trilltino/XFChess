@@ -323,7 +323,11 @@ if (-not $SkipBuild) {
     # -f: a prior server-side `cargo build` regenerates Cargo.lock in the worktree,
     # which blocks a plain checkout ("local changes would be overwritten"). This
     # checkout is disposable build state, not anyone's work — safe to force past.
-    Run-Remote "cd /opt/xfchess/src && git fetch --all --tags --prune && git checkout -f $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src"
+    # No --tags: the build only needs the target commit (reachable via branch refs),
+    # and fetching tags aborts the whole chain if a local tag ref (e.g. left over
+    # from a prior origin pointing at a different repo history) collides with a
+    # same-named tag pointing at a different commit upstream.
+    Run-Remote "cd /opt/xfchess/src && git fetch --all --prune && git checkout -f $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src"
     # Build as the (nologin) xfchess user via -s /bin/bash, with cargo on PATH; this is a
     # workspace, so build with -p backend from the repo root.
     $buildCmd = 'su -s /bin/bash xfchess -c ''export CARGO_HOME=/opt/xfchess/.cargo RUSTUP_HOME=/opt/xfchess/.rustup HOME=/opt/xfchess PATH=/opt/xfchess/.cargo/bin:$PATH && cd /opt/xfchess/src && cargo build --release -p backend --bin signing-server-http'''
