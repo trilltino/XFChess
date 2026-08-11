@@ -4,7 +4,21 @@ import bs58 from "bs58";
 // ---------------------------------------------------------------------------
 // REST API bridge — works in Chrome AND Tauri webview
 // ---------------------------------------------------------------------------
-const BRIDGE_PORT = import.meta.env.VITE_BRIDGE_PORT ?? "7454";
+// In dev (`npm run dev`), this page is served by Vite's own dev server
+// (port 5174) — window.location.port would be *that*, not the bridge's, so
+// dev needs the explicit override/default below. In every real build,
+// though, the bridge serves this page itself (see wallet_ui_dist_path in
+// tauri/src/main.rs), so window.location.port IS the bridge's actual port —
+// and it must be read from there, not hardcoded at build time. A second
+// local instance (different XFCHESS_WALLET_PORT, e.g. two windows open at
+// once) binds its bridge to a *different* port than the first; a
+// build-time constant here would make every instance's popup talk to
+// whichever one happened to grab the shared default port first — wrong
+// wallet, wrong pending signature, no error, just silently talking to the
+// other window's bridge.
+const BRIDGE_PORT = import.meta.env.DEV
+  ? (import.meta.env.VITE_BRIDGE_PORT ?? "7454")
+  : (window.location.port || "7454");
 const API_BASE = `http://localhost:${BRIDGE_PORT}`;
 
 // Every instance's popup window is otherwise titled the same static
