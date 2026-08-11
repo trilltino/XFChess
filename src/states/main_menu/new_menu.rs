@@ -565,13 +565,13 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
 fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     super::ensure_brand_logo_texture(ctx, &mut cx.brand_logo);
 
-    // Image when the asset loaded; otherwise fall back to styled text so the
-    // title is never blank if the logo file can't be found at runtime.
-    let image = cx.brand_logo.texture.as_ref().map(|handle| {
+    let Some((id, display_w, display_h)) = cx.brand_logo.texture.as_ref().map(|handle| {
         let [w, h] = handle.size();
         let display_h = 150.0_f32;
         (handle.id(), (w as f32 / h as f32) * display_h, display_h)
-    });
+    }) else {
+        return;
+    };
 
     let clicked_id = egui::Id::new("title_logo_clicked");
     let fade_id = egui::Id::new("title_logo_fade");
@@ -594,30 +594,12 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 20.0))
         .show(ctx, |ui| {
             ui.set_opacity(alpha);
-            let resp = match image {
-                Some((id, display_w, display_h)) => ui
-                    .add(egui::Image::new(egui::load::SizedTexture::new(
-                        id,
-                        [display_w, display_h],
-                    )))
-                    .interact(egui::Sense::click()),
-                None => ui
-                    .vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new("XFCHESS")
-                                .size(60.0)
-                                .strong()
-                                .color(egui::Color32::from_rgb(235, 238, 245)),
-                        );
-                        ui.label(
-                            egui::RichText::new("COMPETITIVE CHESS SERVER")
-                                .size(15.0)
-                                .color(egui::Color32::from_rgba_unmultiplied(200, 205, 215, 200)),
-                        );
-                    })
-                    .response
-                    .interact(egui::Sense::click()),
-            };
+            let resp = ui
+                .add(egui::Image::new(egui::load::SizedTexture::new(
+                    id,
+                    [display_w, display_h],
+                )))
+                .interact(egui::Sense::click());
 
             // A click starts the fade-out.
             if resp.clicked() {
@@ -1599,6 +1581,7 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         // awareness of the port-announcement file, so it kept hitting the
         // exact same "wrong live listener" stall that open_wallet_browser()
         // was already fixed to avoid, completely bypassing that fix.
+        #[cfg(feature = "solana")]
         crate::multiplayer::solana::tauri_signer::open_wallet_browser();
     }
 

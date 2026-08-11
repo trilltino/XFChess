@@ -66,6 +66,11 @@ pub struct RecordMoveReq {
     pub next_fen: String,
     #[serde(default)]
     pub nonce: u64,
+    /// Wallet of the player whose move this is (White on odd plies, Black
+    /// on even) — see `resolve_move_signer`'s doc comment for why this
+    /// can't be inferred from `SessionStore` alone.
+    #[serde(default)]
+    pub mover_wallet: String,
 }
 
 /// Response containing transaction signature.
@@ -105,6 +110,16 @@ pub struct FinalizeResp {
     pub winner_lamports: u64,
     /// Treasury fee deducted in lamports.
     pub country_fee: u64,
+    /// Real backend-advanced operating cost for this game (create + join +
+    /// delegate + N*record_move + undelegate + the MagicBlock ER session
+    /// fee) — the on-chain `Game.fees_advanced` value read just before
+    /// finalize closes the account, which `settle_finished_game` reimburses
+    /// to `treasury_vault` out of the pot. 0 for free games (nothing is
+    /// reimbursed there — see `lifecycle::settlement`'s wager_amount gate).
+    pub operating_cost_lamports: u64,
+    /// Flat ELO-linking fee split between both players' wallets at
+    /// settlement (`ELO_FEE_LAMPORTS` on-chain), 0 for free games.
+    pub elo_fee: u64,
 }
 
 /// Nonce response for /game/:id/nonce.
@@ -390,15 +405,26 @@ pub async fn record_move(
     State(state): State<AppState>,
     Json(req): Json<RecordMoveReq>,
 ) -> Result<Json<SigResp>, (StatusCode, String)> {
-    let entry = state.store.get(req.game_id).await.ok_or_else(|| {
-        let msg = format!("No session found for game {}", req.game_id);
-        error!("[VPS] {msg}");
-        (StatusCode::NOT_FOUND, msg)
+    let mover_wallet = Pubkey::from_str(&req.mover_wallet).map_err(|_| {
+        let msg = format!(
+            "Bad or missing mover_wallet '{}' for game {}",
+            req.mover_wallet, req.game_id
+        );
+        (StatusCode::BAD_REQUEST, msg)
     })?;
-    if !entry.active {
-        let msg = format!("Session for game {} is not active", req.game_id);
-        return Err((StatusCode::PRECONDITION_FAILED, msg));
-    }
+    let (session_kp, is_global) = resolve_move_signer(&state, req.game_id, mover_wallet)
+        .await
+        .map_err(|e| {
+            let msg = format!(
+                "No usable session for game {} / mover {}: {e:?}",
+                req.game_id, mover_wallet
+            );
+            error!("[VPS] {msg}");
+            match e {
+                MoveSignerError::NoSession => (StatusCode::NOT_FOUND, msg),
+                MoveSignerError::SessionInactive => (StatusCode::PRECONDITION_FAILED, msg),
+            }
+        })?;
 
     // ── Engine-side validation (replay from previous FEN) ──
     let pool = state.store.pool();
@@ -441,8 +467,7 @@ pub async fn record_move(
         error!("[VPS] {msg}");
         (StatusCode::INTERNAL_SERVER_ERROR, msg)
     })?;
-    let session_pk = entry.session_pubkey();
-    let session_kp = entry.keypair();
+    let session_pk = session_kp.pubkey();
 
     // Internal signing for data-level replay protection
     let mut hasher = Sha256::new();
@@ -456,13 +481,17 @@ pub async fn record_move(
     // Games created via the global-session flow never get a per-game
     // `SessionDelegation` account, so `record_move` (which requires one)
     // fails on-chain for them — `global_record_move` checks
-    // `GlobalSessionDelegation` instead. `entry.is_global` (set by
-    // `create_with_keypair`, see migration 026) is what tells these apart.
-    let ix = if entry.is_global {
+    // `GlobalSessionDelegation` instead. `is_global` reflects *this specific
+    // mover's* session flow (from `resolve_move_signer`), not a game-level
+    // flag — the two players in a game can be on different flows at once.
+    // Likewise `mover_wallet`, not any stored-on-the-row wallet, is what the
+    // delegation PDA must be derived from — see `resolve_move_signer`'s doc
+    // comment for why.
+    let ix = if is_global {
         solana::global_record_move_ix(
             &program_id,
             &session_pk,
-            &entry.wallet_pubkey,
+            &mover_wallet,
             req.game_id,
             mv_bytes,
             next_board,
@@ -474,7 +503,7 @@ pub async fn record_move(
         solana::record_move_ix(
             &program_id,
             &session_pk,
-            &entry.wallet_pubkey,
+            &mover_wallet,
             req.game_id,
             mv_bytes,
             next_board,
@@ -493,6 +522,11 @@ pub async fn record_move(
     })?;
     let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::RecordMove);
 
+    // Serialize against any other ER write in flight for this game (another
+    // record_move, an undelegate, the time-check crank) — see
+    // `er_game_lock`'s doc comment.
+    let _er_lock = er_game_lock(&state, req.game_id).await;
+
     // Same empty-body 502 problem as delegate_game/undelegate_game — this is
     // the route every single move goes through, so an opaque failure here is
     // the single most disruptive place for it to happen.
@@ -502,11 +536,12 @@ pub async fn record_move(
         (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
-        "[ER] game {} move {} recorded on Ephemeral Rollup ({}) sig {}",
+        "[ER] game {} move {} recorded on Ephemeral Rollup ({}) sig {} — FEN after: {}",
         req.game_id,
         req.move_uci,
         er_rpc.url(),
-        sig
+        sig,
+        derived_next_fen
     );
 
     // Persist the move before responding — this used to be a fire-and-forget
@@ -520,7 +555,7 @@ pub async fn record_move(
     // way. Awaiting it costs a couple of local SQLite writes (sub-ms) per
     // move, worth it for correctness.
     let game_id_str = req.game_id.to_string();
-    let player_wallet = entry.wallet_pubkey.to_string();
+    let player_wallet = mover_wallet.to_string();
     let move_uci = req.move_uci.clone();
     let next_fen = derived_next_fen;
     if let Err(e) = repo.upsert_game(&game_id_str).await {
@@ -773,6 +808,14 @@ pub(crate) async fn schedule_time_check_crank(
     };
 
     let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::ScheduleTimeCheck);
+
+    // Self-contained lock: this function is called from both `delegate_game`
+    // (a client request) and `settlement_worker`'s periodic redelegate pass,
+    // with no other coordination between those two callers. See
+    // `er_game_lock`'s doc comment — this is exactly the collision that
+    // stranded a real-wager game's checkmate move on 2026-08-10.
+    let _er_lock = er_game_lock(state, game_id).await;
+
     match solana::sign_and_submit_er(&er_rpc, session_kp, &[ix]) {
         Ok(sig) => {
             info!("[VPS] schedule_time_check game {} sig {}", game_id, sig);
@@ -785,6 +828,30 @@ pub(crate) async fn schedule_time_check_crank(
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
+}
+
+/// Acquires the per-game lock serializing ER-routed writes for `game_id`.
+/// See `AppState::er_write_locks`'s doc comment for why this exists —
+/// briefly: the ER rejects two concurrent writes to the same delegated
+/// account outright, and this backend has multiple independent triggers
+/// (a client's `record_move`/`undelegate_game` request,
+/// `schedule_time_check_crank`'s own follow-up call, `settlement_worker`'s
+/// periodic redelegate pass) that can all touch the same game with no other
+/// coordination between them. Hold the returned guard for the entire
+/// ER-touching portion of the caller — dropping it early re-opens the race.
+///
+/// Only the outer map lock (held briefly, to get-or-insert the per-game
+/// entry) is shared across games; looking up game A's lock never blocks a
+/// concurrent lookup for game B.
+async fn er_game_lock(state: &AppState, game_id: u64) -> tokio::sync::OwnedMutexGuard<()> {
+    let per_game = {
+        let mut locks = state.er_write_locks.lock().await;
+        locks
+            .entry(game_id)
+            .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    per_game.lock_owned().await
 }
 
 /// Resolves the signing keypair for `game_id`: prefers the per-game
@@ -828,6 +895,69 @@ pub async fn resolve_game_signer(
         .and_then(|kp| solana_sdk::signature::Keypair::try_from(kp.to_bytes().as_slice()).ok())
 }
 
+/// Resolves the signing keypair for one specific player's move within a
+/// game, and which on-chain instruction it must go through.
+///
+/// A single relayer (the creator's client) submits *both* players' moves
+/// for a game through this one backend, so `record_move` cannot just grab
+/// "the" session on file for `game_id` — the two players can be on
+/// completely different session flows at once (one using a long-lived
+/// global session, the other a fresh per-game one), and even within the
+/// per-game flow, `SessionStore` only ever tracks one physical keypair per
+/// `game_id` shared by both players' on-chain `SessionDelegation`s (see
+/// `SessionStore::create`'s "return the existing session pubkey" early
+/// return) — the *account* that keypair authenticates as differs by which
+/// wallet's delegation PDA is passed, which depends on whose move this is.
+/// Picking the wrong one doesn't just misattribute a move — the on-chain
+/// `apply_recorded_move` explicitly checks the claimed mover against
+/// `game.turn`'s expected player and rejects the transaction with
+/// `NotYourTurn` (confirmed live 2026-08-10: every non-creator move failed
+/// exactly this way once the ER-routing fix let record_move calls actually
+/// reach the chain for the first time).
+///
+/// Resolution order per `mover_wallet`:
+/// 1. An active *global* session for that wallet specifically (not
+///    whichever wallet's global flag happens to be set on the game's
+///    `SessionStore` row) → `global_record_move` with that wallet's own
+///    global session keypair.
+/// 2. Otherwise, the per-game shared session on file for `game_id` → plain
+///    `record_move`, deriving the `SessionDelegation` PDA from
+///    `mover_wallet` (not the row's stored wallet, which only ever reflects
+///    whoever activated their session first/most-recently).
+#[derive(Debug, PartialEq, Eq)]
+pub enum MoveSignerError {
+    /// Neither a global session for `mover_wallet` nor any per-game session
+    /// exists for `game_id`.
+    NoSession,
+    /// A per-game session exists but hasn't finished activation yet (the
+    /// wallet-signed setup TX hasn't confirmed) — global sessions have no
+    /// equivalent gate, see `resolve_move_signer`'s doc comment.
+    SessionInactive,
+}
+
+pub async fn resolve_move_signer(
+    state: &AppState,
+    game_id: u64,
+    mover_wallet: Pubkey,
+) -> Result<(Keypair, bool /* is_global */), MoveSignerError> {
+    {
+        let sessions = state.active_global_sessions.lock().await;
+        if let Some(kp) = sessions.get(&mover_wallet) {
+            // Global sessions are marked usable at registration time (no
+            // separate wallet-signed setup TX to wait for), so there's no
+            // `active` flag to check here.
+            let owned =
+                Keypair::try_from(kp.to_bytes().as_slice()).map_err(|_| MoveSignerError::NoSession)?;
+            return Ok((owned, true));
+        }
+    }
+    let entry = state.store.get(game_id).await.ok_or(MoveSignerError::NoSession)?;
+    if !entry.active {
+        return Err(MoveSignerError::SessionInactive);
+    }
+    Ok((entry.keypair(), false))
+}
+
 /// POST /game/undelegate - Undelegates a game from ER to devnet.
 pub async fn undelegate_game(
     State(state): State<AppState>,
@@ -852,6 +982,11 @@ pub async fn undelegate_game(
             (StatusCode::INTERNAL_SERVER_ERROR, msg)
         })?;
     let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::UndelegateGame);
+
+    // Held through the `cancel_time_check_crank` call below too — both are
+    // ER writes for this same game and must not race a concurrent
+    // record_move or crank. See `er_game_lock`'s doc comment.
+    let _er_lock = er_game_lock(&state, req.game_id).await;
 
     // The client only ever sees `HTTP 502 —  —` on failure otherwise
     // (`vps_undelegate_game` folds the response body straight into its error
@@ -919,21 +1054,33 @@ fn cancel_time_check_crank(
     }
 }
 
-/// Reads the on-chain `Game.country_fee` field (the flat platform fee set at
-/// creation time, in lamports) directly off account bytes, since it's the
-/// authoritative amount `settle_finished_game` actually pays to
-/// `treasury_vault` — recomputing an estimate client/backend-side (e.g. via a
-/// BPS-of-pot guess) can silently diverge from what the program transfers.
-/// Layout must track `Game`'s field order — mirrors (a subset of)
-/// `parse_game_account` in `tasks::settlement_worker`; keep both in sync if
-/// the struct's field order ever changes. Returns `None` on any parse
-/// failure (missing account, unexpected layout) — callers should treat that
-/// as "fee unknown", not "fee zero".
-fn read_game_country_fee(
+/// The on-chain fee-related fields read off a `Game` account just before
+/// finalize closes it — see `read_game_fee_breakdown`.
+struct GameFeeBreakdown {
+    /// Real backend-advanced cost accrued via `lifecycle::transitions`
+    /// (create/join/delegate/record_move/undelegate + the ER session fee) —
+    /// what `settle_finished_game` reimburses to `treasury_vault` from the
+    /// pot, clamped by what's left after the flat tx-fee deduction.
+    fees_advanced: u64,
+    /// The flat platform fee set at creation time, in lamports.
+    country_fee: u64,
+}
+
+/// Reads the on-chain `Game.fees_advanced` and `Game.country_fee` fields
+/// directly off account bytes, since they're the authoritative amounts
+/// `settle_finished_game` actually pays to `treasury_vault` — recomputing an
+/// estimate client/backend-side (e.g. via a BPS-of-pot guess) can silently
+/// diverge from what the program transfers. Layout must track `Game`'s field
+/// order — mirrors (a subset of) `parse_game_account` in
+/// `tasks::settlement_worker`; keep both in sync if the struct's field order
+/// ever changes. Returns `None` on any parse failure (missing account,
+/// unexpected layout) — callers should treat that as "fee unknown", not "fee
+/// zero".
+fn read_game_fee_breakdown(
     rpc: &solana_client::rpc_client::RpcClient,
     program_id: &Pubkey,
     game_id: u64,
-) -> Option<u64> {
+) -> Option<GameFeeBreakdown> {
     const RESULT_WINNER: u8 = 1;
     let game_pda =
         Pubkey::find_program_address(&[solana::GAME_SEED, &game_id.to_le_bytes()], program_id).0;
@@ -943,6 +1090,7 @@ fn read_game_country_fee(
     o += 32 + 32; // white + black
     o += 1; // status
     o += 8; // last_move_timestamp
+    let fees_advanced = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
     o += 8; // fees_advanced
     o += 32; // fee_payer
     let result_tag = *data.get(o)?;
@@ -964,20 +1112,122 @@ fn read_game_country_fee(
     o += 1; // game_type
     o += 1; // match_type
     let country_fee = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
-    Some(country_fee)
+    Some(GameFeeBreakdown {
+        fees_advanced,
+        country_fee,
+    })
 }
 
+/// Flat ELO-linking fee split between both players at settlement — mirrors
+/// `ELO_FEE_LAMPORTS` in `programs/xfchess-game/src/constants.rs`. Keep the
+/// two in sync; this crate doesn't depend on the program crate.
+const ELO_FEE_LAMPORTS: u64 = 5_000;
+
 /// POST /game/finalize - Finalizes a game on devnet.
+/// COUNTRY_FEE estimate — 1% of pot — used only as a fallback when the real
+/// on-chain fee can't be read: either `read_game_fee_breakdown` failed, or (for
+/// an already-finalized game, see `finalize_game`'s early-return) the `Game`
+/// account is already closed and there's nothing left to read.
+fn estimate_country_fee(wager_lamports: u64) -> u64 {
+    const COUNTRY_FEE_BPS: u64 = 100; // 1%
+    wager_lamports.saturating_mul(2).saturating_mul(COUNTRY_FEE_BPS) / 10_000
+}
+
+/// Winner payout after fees — reproduces `settle_finished_game`'s exact
+/// deduction order (tx-fee reimbursement, platform/operating-cost
+/// reimbursement, country fee, then the flat per-player ELO fee) rather than
+/// a BPS-of-pot guess, since the real on-chain amounts are flat constants,
+/// not percentages. `country_fee` and `operating_cost` should be the real
+/// on-chain values when available (see `estimate_country_fee` for the
+/// country_fee fallback; pass 0 for `operating_cost` when the `Game` account
+/// is already closed and `fees_advanced` can no longer be read).
+fn compute_winner_lamports(
+    wager_lamports: u64,
+    country_fee: u64,
+    operating_cost: u64,
+    has_winner: bool,
+) -> u64 {
+    if !has_winner || wager_lamports == 0 {
+        return 0; // draw or free game: handled on-chain / nothing to distribute
+    }
+    let pot = wager_lamports.saturating_mul(2);
+    let tx_fee = 10_000u64.min(pot);
+    let remaining = pot.saturating_sub(tx_fee);
+    let platform_reimbursement = operating_cost.min(remaining);
+    let remaining = remaining.saturating_sub(platform_reimbursement);
+    let cfee = country_fee.min(remaining);
+    let remaining = remaining.saturating_sub(cfee);
+    let per_player = (ELO_FEE_LAMPORTS / 2).min(remaining / 2);
+    remaining.saturating_sub(per_player.saturating_mul(2))
+}
+
 pub async fn finalize_game(
     State(state): State<AppState>,
     Json(req): Json<FinalizeGameReq>,
-) -> Result<Json<FinalizeResp>, StatusCode> {
+) -> Result<Json<FinalizeResp>, (StatusCode, String)> {
+    // Both players' clients independently detect game-end locally and each
+    // calls this route — deliberately, so finalization doesn't depend on one
+    // specific client staying connected. Whichever call lands on-chain first
+    // closes the `Game` account (`EndGame`'s `close = fee_payer`); the other
+    // then fails with Anchor's `AccountNotInitialized`, wastes a tx fee, and
+    // logs a scary-looking ERROR for what is actually a successful game.
+    // Short-circuit here: if `complete_game` (below) already ran for this
+    // `game_id`, the game is already settled — return that result instead of
+    // repeating a doomed on-chain call. Confirmed live 2026-08-10: two
+    // consecutive real games each produced exactly one Success + one Failed
+    // finalize on Solscan; this eliminates the Failed half in the common
+    // case (the two calls arriving more than an SQLite read apart).
+    let repo = GameRepository::new(state.store.pool());
+    if let Ok(Some(existing)) = repo.get_game(&req.game_id.to_string()).await {
+        if existing.status == "completed" {
+            if let Some(sig) = existing.finalize_sig {
+                info!(
+                    "[VPS] finalize_game for game {} already completed (sig {sig}) — returning cached result",
+                    req.game_id
+                );
+                let country_fee = estimate_country_fee(req.wager_lamports);
+                // Game account is already closed by this point (cached path) —
+                // fees_advanced can't be re-read, so operating cost/elo_fee
+                // fall back to 0/estimate-only, same caveat estimate_country_fee
+                // already carries.
+                let winner_lamports = compute_winner_lamports(
+                    req.wager_lamports,
+                    country_fee,
+                    0,
+                    req.winner.is_some(),
+                );
+                let elo_fee = if req.wager_lamports > 0 {
+                    ELO_FEE_LAMPORTS
+                } else {
+                    0
+                };
+                return Ok(Json(FinalizeResp {
+                    sig,
+                    winner_lamports,
+                    country_fee,
+                    operating_cost_lamports: 0,
+                    elo_fee,
+                }));
+            }
+        }
+    }
+
     let session_kp = resolve_game_signer(&state, req.game_id)
         .await
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or_else(|| {
+            let msg = format!("No session found for game {}", req.game_id);
+            error!("[VPS] {msg}");
+            (StatusCode::NOT_FOUND, msg)
+        })?;
 
-    let white = Pubkey::from_str(&req.white_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let black = Pubkey::from_str(&req.black_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let white = Pubkey::from_str(&req.white_pubkey).map_err(|e| {
+        let msg = format!("Bad white_pubkey '{}': {e}", req.white_pubkey);
+        (StatusCode::BAD_REQUEST, msg)
+    })?;
+    let black = Pubkey::from_str(&req.black_pubkey).map_err(|e| {
+        let msg = format!("Bad black_pubkey '{}': {e}", req.black_pubkey);
+        (StatusCode::BAD_REQUEST, msg)
+    })?;
     let winner = req.winner.as_deref();
 
     // Use session key as fee_payer for now (will be replaced with ER relayer pubkey in production)
@@ -993,31 +1243,32 @@ pub async fn finalize_game(
     );
     let rpc = solana::rpc_for(&state.config, solana::RoutedInstr::FinalizeGame);
 
-    // Read the actual fee that will be charged BEFORE finalize closes the
+    // Read the actual fees that will be charged BEFORE finalize closes the
     // Game account out from under us.
-    let actual_country_fee = read_game_country_fee(&rpc, &state.program_id, req.game_id);
+    let fee_breakdown = read_game_fee_breakdown(&rpc, &state.program_id, req.game_id);
 
     let sig = solana::sign_and_submit(&rpc, &session_kp, &[ix]).map_err(|e| {
-        error!("[VPS] finalize_game failed for game {}: {e}", req.game_id);
-        StatusCode::BAD_GATEWAY
+        let msg = format!("finalize_game failed for game {}: {e}", req.game_id);
+        error!("[VPS] {msg}");
+        (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
-        "[FINALIZED] game {} settled on devnet — winner={:?} wager_lamports={} payout sig {}",
-        req.game_id, req.winner, req.wager_lamports, sig
+        "[FINALIZED] game {} settled on devnet — winner={:?} wager_lamports={} payout sig {} — inspect: https://solscan.io/tx/{}?cluster=devnet",
+        req.game_id, req.winner, req.wager_lamports, sig, sig
     );
     let treasury_vault =
         Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &state.program_id).0;
-    match actual_country_fee {
-        Some(fee) if fee > 0 => info!(
-            "[TREASURY] game {} paid {} lamports platform fee to treasury_vault {}",
-            req.game_id, fee, treasury_vault
+    match &fee_breakdown {
+        Some(f) if f.country_fee > 0 => info!(
+            "[TREASURY] game {} paid {} lamports platform fee + {} lamports operating-cost reimbursement to treasury_vault {}",
+            req.game_id, f.country_fee, f.fees_advanced, treasury_vault
         ),
-        Some(_) => info!(
-            "[TREASURY] game {} — free/unwagered game, no platform fee charged",
-            req.game_id
+        Some(f) => info!(
+            "[TREASURY] game {} — free/unwagered game, no platform fee charged (backend ate {} lamports operating cost with no clawback)",
+            req.game_id, f.fees_advanced
         ),
         None => warn!(
-            "[TREASURY] game {} — could not read on-chain country_fee before finalize; treasury_vault {} payment amount unconfirmed",
+            "[TREASURY] game {} — could not read on-chain fee breakdown before finalize; treasury_vault {} payment amount unconfirmed",
             req.game_id, treasury_vault
         ),
     }
@@ -1092,28 +1343,32 @@ pub async fn finalize_game(
         .await;
     });
 
-    // Fee breakdown mirroring the on-chain contract constants.
-    // COUNTRY_FEE = 1% of pot, ELO_FEE = 1% of pot, both deducted from winner payout.
-    const COUNTRY_FEE_BPS: u64 = 100; // 1%
-    const ELO_FEE_BPS: u64 = 100; // 1%
-    let pot = req.wager_lamports.saturating_mul(2);
-    // Prefer the real on-chain fee we just read (what the program actually
-    // transfers to treasury_vault) over the BPS-of-pot estimate below, which
-    // only approximates it and can silently diverge from the flat
-    // creation-time fee `settle_finished_game` actually pays out.
-    let country_fee =
-        actual_country_fee.unwrap_or_else(|| pot.saturating_mul(COUNTRY_FEE_BPS) / 10_000);
-    let elo_fee = pot.saturating_mul(ELO_FEE_BPS) / 10_000;
-    let winner_lamports = if req.winner.is_some() {
-        pot.saturating_sub(country_fee).saturating_sub(elo_fee)
+    // Prefer the real on-chain values we just read (what the program actually
+    // transfers) over estimates, which only approximate them and can
+    // silently diverge from what `settle_finished_game` actually pays out.
+    let country_fee = fee_breakdown
+        .as_ref()
+        .map(|f| f.country_fee)
+        .unwrap_or_else(|| estimate_country_fee(req.wager_lamports));
+    let operating_cost_lamports = fee_breakdown.as_ref().map(|f| f.fees_advanced).unwrap_or(0);
+    let winner_lamports = compute_winner_lamports(
+        req.wager_lamports,
+        country_fee,
+        operating_cost_lamports,
+        req.winner.is_some(),
+    );
+    let elo_fee = if req.wager_lamports > 0 {
+        ELO_FEE_LAMPORTS
     } else {
-        0 // draw: each player gets their wager back minus fees (handled on-chain)
+        0
     };
 
     Ok(Json(FinalizeResp {
         sig: sig.to_string(),
         winner_lamports,
         country_fee,
+        operating_cost_lamports,
+        elo_fee,
     }))
 }
 
@@ -1515,10 +1770,109 @@ mod tests {
             move_uci: "e2e4".to_string(),
             next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
             nonce: 1,
+            mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
         };
 
         let json = serde_json::to_string(&req);
         assert!(json.is_ok());
+    }
+
+    /// Pins the bug found live on devnet 2026-08-10: a single relayer
+    /// backend submits *both* players' moves for a game, and the two
+    /// players can be on completely different session flows at once (one
+    /// long-lived global session, one fresh per-game session) — resolving
+    /// "the" session for a `game_id` instead of the specific mover's wallet
+    /// silently signed every move as the wrong player, which the on-chain
+    /// program only surfaced as an opaque `NotYourTurn` once the record_move
+    /// calls actually started reaching the chain. See `resolve_move_signer`'s
+    /// doc comment for the full mechanism.
+    #[tokio::test]
+    async fn resolve_move_signer_picks_the_correct_players_session() {
+        use crate::infrastructure::{initialize_pools, run_migrations};
+        use crate::signing::storage::tournament::TournamentStore;
+        use crate::signing::SigningConfig;
+
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let db_url = |tag: &str| {
+            format!("sqlite:file:xfchess_resolve_move_signer_{tag}_{nanos}?mode=memory&cache=shared")
+        };
+        let pools = initialize_pools(&db_url("session"), &db_url("vault"))
+            .await
+            .expect("init pools");
+        run_migrations(&pools).await.expect("run migrations");
+        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+
+        let config = SigningConfig {
+            port: 0,
+            solana_rpc_url: "http://127.0.0.1:1".into(),
+            solana_mainnet_rpc_url: None,
+            er_rpc_url: "http://127.0.0.1:1".into(),
+            magic_router_rpc_url: "http://127.0.0.1:1".into(),
+            program_id: "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into(),
+            jwt_secret: "test-secret-not-for-production".into(),
+            identity_encryption_key: "0".repeat(64),
+            identity_salt: "0".repeat(64),
+            fee_payer_keys: vec![],
+            vps_authority_key: None,
+            kyc_authority_key: None,
+            link_authority_key: None,
+            treasury_authority_key: None,
+            admin_token: None,
+            tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
+            usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
+            lichess_client_id: String::new(),
+        };
+        let state = AppState::new(
+            config,
+            pools.session_pool.clone(),
+            pools.vault_pool.clone(),
+            std::sync::Arc::new(tournament_store),
+        );
+
+        let game_id = 999_999u64;
+
+        // White: long-lived global session, registered independently of any game.
+        let white_wallet = Keypair::new().pubkey();
+        let white_global_kp = Keypair::new();
+        let white_global_pubkey = white_global_kp.pubkey();
+        state
+            .active_global_sessions
+            .lock()
+            .await
+            .insert(white_wallet, white_global_kp);
+
+        // Black: classic per-game flow — one shared session keypair for the
+        // whole game, separately authorized on-chain by each wallet.
+        let black_wallet = Keypair::new().pubkey();
+        let classic_session_pubkey = state
+            .store
+            .create(game_id, black_wallet)
+            .await
+            .expect("create classic session");
+        state.store.activate(game_id).await;
+
+        let (white_kp, white_is_global) = resolve_move_signer(&state, game_id, white_wallet)
+            .await
+            .expect("white should resolve to its global session");
+        assert!(white_is_global, "white registered a global session");
+        assert_eq!(white_kp.pubkey(), white_global_pubkey);
+
+        let (black_kp, black_is_global) = resolve_move_signer(&state, game_id, black_wallet)
+            .await
+            .expect("black should resolve to the classic per-game session");
+        assert!(!black_is_global, "black used the classic per-game flow");
+        assert_eq!(black_kp.pubkey(), classic_session_pubkey);
+
+        // The actual bug: before this fix, both calls above returned
+        // whichever session happened to be on file, so this always failed.
+        assert_ne!(
+            white_kp.pubkey(),
+            black_kp.pubkey(),
+            "each player must resolve to their own session, not one shared/clobbered signer"
+        );
     }
 
     #[test]
@@ -1616,6 +1970,7 @@ mod tests {
                 move_uci: move_uci.to_string(),
                 next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
                 nonce: 1,
+                mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
             };
             assert_eq!(req.move_uci, move_uci);
         }
@@ -1629,6 +1984,7 @@ mod tests {
             move_uci: "e2e4".to_string(),
             next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
             nonce: 0, // Using #[serde(default)]
+            mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
         };
         assert_eq!(req.nonce, 0);
     }

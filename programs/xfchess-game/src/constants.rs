@@ -138,9 +138,20 @@ pub const MIN_WAGER_LAMPORTS: u64 = 1_000_000;
 pub const CREATE_GAME_COST: u64 = 5_000; // lamports
 pub const JOIN_GAME_COST: u64 = 5_000;
 pub const DELEGATE_COST: u64 = 5_000;
+/// Base-layer tx-fee advance for the `undelegate_game` instruction. Accrued
+/// in `lifecycle::transitions::mark_undelegated` — previously defined but
+/// never added to `fees_advanced`.
 pub const UNDELEGATE_COST: u64 = 5_000;
-pub const COMMIT_ER_COST: u64 = 5_000; // per ER→L1 commit (0 if MagicBlock sponsors)
 pub const RECORD_RESULT_COST: u64 = 5_000;
+
+/// Flat model of the MagicBlock ER-validator-side "session fee" implicitly
+/// deducted from the session key's balance around commit/undelegate — an ER
+/// infrastructure cost, not a Solana base-layer tx fee, so it's invisible to
+/// any on-chain instruction. Mirrors the identical constant the benchmark's
+/// cost model assumes (`ER_SESSION_FEE_LAMPORTS`,
+/// crates/solana/er-cu-benchmark/src/cost_reporter.rs) — keep both in sync.
+/// Accrued once per game in `lifecycle::transitions::mark_undelegated`.
+pub const ER_SESSION_FEE_LAMPORTS: u64 = 300_000;
 
 /// How often (ms) the Ephemeral Rollup commits delegated game state back to the
 /// base layer. A fixed cadence — must not be derived from per-game arguments.

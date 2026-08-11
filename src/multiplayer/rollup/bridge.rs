@@ -32,6 +32,11 @@ struct FinalizationResult {
     sig: String,
     winner_lamports: u64,
     country_fee: u64,
+    /// Real backend-advanced operating cost reimbursed to treasury_vault
+    /// from the pot (0 for free games — see `vps::game::FinalizeResult`).
+    operating_cost_lamports: u64,
+    /// Flat ELO-linking fee split between both players (0 for free games).
+    elo_fee: u64,
 }
 
 /// Maximum seconds to wait for the Game PDA to return to devnet after undelegation.
@@ -105,6 +110,23 @@ pub struct RollupNetworkBridge {
     /// repeated `GameStartedEvent` for the same game doesn't spawn a second
     /// waiter task.
     joiner_delegation_wait_game_id: Option<u64>,
+    /// True while the final game-end move batch (from `RollupEvent::GameEndBatch`,
+    /// see `handle_rollup_to_network_events`) is still being submitted.
+    /// `handle_game_end_undelegation` must not undelegate while this is true —
+    /// undelegating while the game-ending move (e.g. the checkmate move) is
+    /// still in flight races the ER's own commit, which the ER rejects with
+    /// `InvalidWritableAccount` ("illegally used as writable"), permanently
+    /// stranding that game's result (and any wager) since the move never
+    /// lands and the game can never reach `Finished`. Reproduced live
+    /// 2026-08-10 on a real-wager game. Set when the batch task is spawned,
+    /// cleared by `poll_game_end_flush` once it completes.
+    game_end_moves_flushing: bool,
+    /// Signals completion of the in-flight game-end move batch (see
+    /// `game_end_moves_flushing`). `Ok(())` regardless of whether individual
+    /// moves succeeded — this only tracks "attempted", since the game state
+    /// itself (not this flag) is the source of truth for whether the game
+    /// actually finished.
+    game_end_flush_rx: Option<oneshot::Receiver<()>>,
 }
 
 /// Maximum frames to wait for opponent pubkey before giving up on deferred finalization.
@@ -151,7 +173,26 @@ impl Plugin for RollupNetworkBridgePlugin {
         app.add_message::<MagicBlockEvent>();
 
         // Core network bridge systems
-        app.add_systems(Update, handle_rollup_to_network_events);
+        //
+        // `handle_rollup_to_network_events` must run after
+        // `systems::finalize_game_on_end` (which decides whether there's a
+        // move batch to flush and, if so, emits `RollupEvent::GameEndBatch`)
+        // and `retry_pending_finalization` must run after
+        // `handle_rollup_to_network_events` (which is what actually sets
+        // `game_end_moves_flushing = true` for that batch). Without this
+        // explicit chain, Bevy doesn't guarantee these three run in this
+        // order within the same tick, so `retry_pending_finalization` could
+        // check the flag before it's been set — reproduced live 2026-08-11:
+        // deferring by "one pass through pending_finalization" alone wasn't
+        // enough, because `retry_pending_finalization` could still run
+        // later in the *same* frame as the system that sets the flag, which
+        // isn't a real frame boundary. Explicit ordering is the actual fix;
+        // the one-frame defer in `handle_game_end_undelegation` is now
+        // redundant with this but harmless to leave in place.
+        app.add_systems(
+            Update,
+            handle_rollup_to_network_events.after(crate::multiplayer::systems::finalize_game_on_end),
+        );
         app.add_systems(Update, handle_network_to_rollup_events);
         app.add_systems(Update, process_batch_commit_requests);
 
@@ -163,7 +204,11 @@ impl Plugin for RollupNetworkBridgePlugin {
 
         app.add_systems(Update, poll_delegation_tasks);
         app.add_systems(Update, poll_joiner_delegation_wait);
-        app.add_systems(Update, retry_pending_finalization);
+        app.add_systems(Update, poll_game_end_flush);
+        app.add_systems(
+            Update,
+            retry_pending_finalization.after(handle_rollup_to_network_events),
+        );
 
         // Post-finalization: apply payout result to game-over popup resource.
         app.add_systems(Update, apply_finalization_result);
@@ -189,14 +234,45 @@ fn send_network_msg(state: &OnlineNetworkState, msg: NetworkMessage) {
     }
 }
 
+/// Resolves both players' wallet pubkeys — mirrors the identical inline
+/// logic previously duplicated at the finalization call sites.
+/// `is_creator ↔ white; joiner ↔ black`.
+fn resolve_white_black(
+    is_creator: bool,
+    solana_state: Option<&SolanaIntegrationState>,
+) -> Option<(Pubkey, Pubkey)> {
+    let s = solana_state?;
+    let local = s.wallet_pubkey?;
+    let opponent = s.opponent_pubkey?;
+    Some(if is_creator {
+        (local, opponent)
+    } else {
+        (opponent, local)
+    })
+}
+
+/// Which wallet made the move at 1-based ply `nonce` — White moves on odd
+/// plies, Black on even (matches the on-chain `apply_recorded_move`'s
+/// `game.turn % 2 == 1 -> white` check exactly, since `nonce` and
+/// `game.turn` track the same ply count).
+fn mover_wallet_for_ply(nonce: u64, white: Pubkey, black: Pubkey) -> Pubkey {
+    if nonce % 2 == 1 {
+        white
+    } else {
+        black
+    }
+}
+
 fn handle_rollup_to_network_events(
     mut rollup_events: MessageReader<RollupEvent>,
     network_state: Res<OnlineNetworkState>,
     mut bridge: ResMut<RollupNetworkBridge>,
     rollup_manager: Res<EphemeralRollupManager>,
     magicblock_resolver: Res<MagicBlockResolver>,
+    solana_state: Option<Res<SolanaIntegrationState>>,
 ) {
     let er_endpoint = magicblock_resolver.er_endpoint().to_string();
+    let white_black = resolve_white_black(rollup_manager.is_creator, solana_state.as_deref());
     for event in rollup_events.read() {
         match event {
             RollupEvent::BatchReady {
@@ -234,6 +310,13 @@ fn handle_rollup_to_network_events(
                 moves,
                 next_fens,
             } => {
+                let Some((white_pk, black_pk)) = white_black else {
+                    warn!(
+                        "[VPS] Game-end batch for game {} dropped — no wallet state to attribute movers",
+                        game_id
+                    );
+                    continue;
+                };
                 let gid = *game_id;
                 let base_nonce = bridge.move_nonce;
                 bridge.move_nonce += moves.len() as u64;
@@ -245,13 +328,22 @@ fn handle_rollup_to_network_events(
                     moves_owned.len(),
                     gid
                 );
+                // Gate undelegation (see `handle_game_end_undelegation`) until
+                // this batch — which may include the game-ending move itself
+                // — has actually been attempted. Set before spawning, cleared
+                // by `poll_game_end_flush` once `flush_tx` fires.
+                bridge.game_end_moves_flushing = true;
+                let (flush_tx, flush_rx) = oneshot::channel::<()>();
+                bridge.game_end_flush_rx = Some(flush_rx);
                 bevy::tasks::IoTaskPool::get()
                     .spawn(async move {
                         use crate::multiplayer::rollup::magicblock::er_explorer_url_for;
                         use crate::multiplayer::vps_client;
                         for (i, (mv, fen)) in moves_owned.iter().zip(fens_owned.iter()).enumerate()
                         {
-                            match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
+                            let ply = base_nonce + i as u64;
+                            let mover = mover_wallet_for_ply(ply, white_pk, black_pk).to_string();
+                            match vps_client::record_move(gid, mv, fen, ply, &mover) {
                                 Ok((sig, resp_endpoint)) => {
                                     let endpoint = if resp_endpoint.is_empty() {
                                         &er_endpoint
@@ -268,6 +360,7 @@ fn handle_rollup_to_network_events(
                                 }
                             }
                         }
+                        let _ = flush_tx.send(());
                     })
                     .detach();
             }
@@ -290,8 +383,10 @@ fn handle_network_to_rollup_events(
     mut rollup_manager: ResMut<EphemeralRollupManager>,
     mut bridge: ResMut<RollupNetworkBridge>,
     magicblock_resolver: Res<MagicBlockResolver>,
+    solana_state: Option<Res<SolanaIntegrationState>>,
 ) {
     let er_endpoint = magicblock_resolver.er_endpoint().to_string();
+    let white_black = resolve_white_black(rollup_manager.is_creator, solana_state.as_deref());
     for event in network_events.read() {
         let msg = match event {
             NetworkEvent::MessageReceived(m) => m,
@@ -364,6 +459,13 @@ fn handle_network_to_rollup_events(
                 // Submit the accepted batch via VPS record_move on the ER.
                 if let Some((moves, next_fens)) = bridge.pending_batches.remove(batch_hash.as_str())
                 {
+                    let Some((white_pk, black_pk)) = white_black else {
+                        warn!(
+                            "[VPS] Accepted batch for game {} dropped — no wallet state to attribute movers",
+                            game_id
+                        );
+                        continue;
+                    };
                     let gid = *game_id;
                     let base_nonce = bridge.move_nonce;
                     bridge.move_nonce += moves.len() as u64;
@@ -373,7 +475,9 @@ fn handle_network_to_rollup_events(
                             use crate::multiplayer::rollup::magicblock::er_explorer_url_for;
                             use crate::multiplayer::vps_client;
                             for (i, (mv, fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
-                                match vps_client::record_move(gid, mv, fen, base_nonce + i as u64) {
+                                let ply = base_nonce + i as u64;
+                                let mover = mover_wallet_for_ply(ply, white_pk, black_pk).to_string();
+                                match vps_client::record_move(gid, mv, fen, ply, &mover) {
                                     Ok((sig, resp_endpoint)) => {
                                         let endpoint = if resp_endpoint.is_empty() {
                                             &er_endpoint
@@ -584,6 +688,7 @@ fn process_batch_commit_requests(
     mut magicblock_events: MessageWriter<MagicBlockEvent>,
     mut recent_txs: ResMut<RecentTransactions>,
     magicblock_resolver: Res<MagicBlockResolver>,
+    solana_state: Option<Res<SolanaIntegrationState>>,
 ) {
     if bridge.awaiting_commit_confirmation {
         return;
@@ -591,6 +696,16 @@ fn process_batch_commit_requests(
     if rollup_manager.status != GameStateStatus::Pending || !rollup_manager.should_flush() {
         return;
     }
+
+    let Some((white_pk, black_pk)) =
+        resolve_white_black(rollup_manager.is_creator, solana_state.as_deref())
+    else {
+        warn!(
+            "[VPS] Batch flush for game {} skipped — no wallet state to attribute movers",
+            rollup_manager.game_id
+        );
+        return;
+    };
 
     if let Some((moves, next_fens)) = rollup_manager.prepare_batch_for_commit() {
         let base_nonce = bridge.move_nonce;
@@ -600,6 +715,8 @@ fn process_batch_commit_requests(
             &moves,
             &next_fens,
             base_nonce,
+            white_pk,
+            black_pk,
             &mut magicblock_events,
             &mut recent_txs,
             magicblock_resolver.er_endpoint(),
@@ -630,6 +747,8 @@ fn submit_moves_via_vps(
     moves: &[String],
     next_fens: &[String],
     base_nonce: u64,
+    white_pk: Pubkey,
+    black_pk: Pubkey,
     magicblock_events: &mut MessageWriter<MagicBlockEvent>,
     recent_txs: &mut RecentTransactions,
     fallback_er_endpoint: &str,
@@ -638,7 +757,9 @@ fn submit_moves_via_vps(
     use crate::multiplayer::vps_client;
 
     for (i, (move_str, next_fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
-        match vps_client::record_move(game_id, move_str, next_fen, base_nonce + i as u64) {
+        let ply = base_nonce + i as u64;
+        let mover = mover_wallet_for_ply(ply, white_pk, black_pk).to_string();
+        match vps_client::record_move(game_id, move_str, next_fen, ply, &mover) {
             Ok((sig, resp_endpoint)) => {
                 let endpoint = if resp_endpoint.is_empty() {
                     fallback_er_endpoint
@@ -679,7 +800,6 @@ fn handle_game_start_delegation(
         // Use the Solana on-chain game_id, not the P2P gossip game_id.
         // event.game_id is the Braid/Iroh session ID; rollup_manager.game_id
         // is set from the actual on-chain game account after create/join.
-
 
         let game_id = if rollup_manager.game_id != 0 {
             rollup_manager.game_id
@@ -935,8 +1055,8 @@ async fn wait_for_delegation(
         .parse()
         .map_err(|_| "bad delegation program id".to_string())?;
 
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_secs(MAX_JOINER_DELEGATION_WAIT_SECS);
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(MAX_JOINER_DELEGATION_WAIT_SECS);
     loop {
         match rpc_client.get_account(&game_pda) {
             Ok(acc) if acc.owner == delegation_program_id => {
@@ -991,6 +1111,25 @@ fn poll_joiner_delegation_wait(
                 error!("[DELEGATION] Joiner delegation wait task dropped");
                 bridge.joiner_delegation_wait_rx = None;
                 bridge.joiner_delegation_wait_game_id = None;
+            }
+        }
+    }
+}
+
+/// Clears `game_end_moves_flushing` once the game-end move batch (spawned in
+/// `handle_rollup_to_network_events`'s `GameEndBatch` arm) finishes attempting
+/// every move — the signal `handle_game_end_undelegation`/
+/// `retry_pending_finalization` wait on before undelegating, see
+/// `game_end_moves_flushing`'s doc comment for why.
+fn poll_game_end_flush(mut bridge: ResMut<RollupNetworkBridge>) {
+    if let Some(ref mut rx) = bridge.game_end_flush_rx {
+        match rx.try_recv() {
+            Ok(()) | Err(oneshot::error::TryRecvError::Closed) => {
+                bridge.game_end_moves_flushing = false;
+                bridge.game_end_flush_rx = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                // Still flushing, nothing to do.
             }
         }
     }
@@ -1161,6 +1300,15 @@ fn handle_game_end_undelegation(
     mut bridge: ResMut<RollupNetworkBridge>,
 ) {
     for event in game_ended_events.read() {
+        // Same single-authoritative-side reasoning as `finalize_game_on_end`'s
+        // gate (systems.rs): both players' clients detect game end locally and
+        // deterministically, so without this check both processes independently
+        // race to undelegate/finalize the same delegated PDA. Restrict the
+        // on-chain settlement pipeline to the host; `settlement_worker.rs` on
+        // the backend is the safety net if the host's client dies mid-flow.
+        if !rollup_manager.is_creator {
+            continue;
+        }
         // Use the Solana on-chain game_id (rollup_manager), not the P2P event ID.
         let game_id = if rollup_manager.game_id != 0 {
             rollup_manager.game_id
@@ -1260,17 +1408,35 @@ fn handle_game_end_undelegation(
         }
 
         let wager = competitive.as_ref().map(|c| c.wager_lamports).unwrap_or(0);
-        let (fin_tx, fin_rx) = oneshot::channel::<FinalizationResult>();
-        bridge.finalization_rx = Some(fin_rx);
-        spawn_finalization_task(
+
+        // Deliberately never fire `spawn_finalization_task` on this same
+        // frame, even when `white_pk`/`black_pk` are already known. This
+        // system and `finalize_game_on_end` (which decides whether there's a
+        // move batch to flush, in `systems.rs`) both read the same raw
+        // `GameEndedEvent` with no ordering constraint between them — Bevy
+        // does not guarantee `finalize_game_on_end` (and the downstream
+        // `handle_rollup_to_network_events` that actually sets
+        // `game_end_moves_flushing`) has run before this system does on the
+        // same tick. Checking the flag here inline was tried and failed live
+        // 2026-08-11: the flag still read `false` on the first frame even
+        // though a flush was about to start, so undelegate fired immediately
+        // anyway and lost the exact same race. Always deferring by at least
+        // one frame guarantees every other same-tick system — including the
+        // one that sets the flag — has already run by the time
+        // `retry_pending_finalization` actually checks it.
+        let local_pk = if rollup_manager.is_creator {
+            white_pk
+        } else {
+            black_pk
+        };
+        bridge.pending_finalization = Some(PendingFinalization {
             game_id,
             winner,
-            white_pk,
-            black_pk,
-            wager,
-            fin_tx,
-            magicblock_resolver.er_endpoint().to_string(),
-        );
+            local_pk,
+            is_creator: rollup_manager.is_creator,
+            frames_waited: 0,
+            wager_lamports: wager,
+        });
     }
 }
 
@@ -1378,6 +1544,8 @@ fn spawn_finalization_task(
                         sig: result.sig,
                         winner_lamports: result.winner_lamports,
                         country_fee: result.country_fee,
+                        operating_cost_lamports: result.operating_cost_lamports,
+                        elo_fee: result.elo_fee,
                     });
                 }
                 Err(e) => {
@@ -1437,6 +1605,26 @@ fn retry_pending_finalization(
         return;
     }
 
+    // See `game_end_moves_flushing`'s doc comment — must not undelegate while
+    // the game-end move batch is still being submitted. Shares the same
+    // frame budget as the opponent-pubkey wait above rather than a separate
+    // counter; either reason blocking this long is equally worth giving up on.
+    if bridge.game_end_moves_flushing {
+        let new_frames = pending.frames_waited + 1;
+        if new_frames > MAX_FINALIZATION_WAIT_FRAMES {
+            warn!(
+                "[FINALIZE] Move batch still flushing after {} frames for game {} — finalizing anyway",
+                new_frames, pending.game_id
+            );
+        } else {
+            bridge.pending_finalization = Some(PendingFinalization {
+                frames_waited: new_frames,
+                ..pending
+            });
+            return;
+        }
+    }
+
     info!(
         "[FINALIZE] Opponent pubkey arrived after {} frames for game {} — finalizing",
         pending.frames_waited, pending.game_id
@@ -1472,9 +1660,14 @@ fn apply_finalization_result(
                 if result.winner_lamports > 0 {
                     info.winning_prize = result.winner_lamports;
                 }
-                if result.country_fee > 0 {
-                    info.country_fee = result.country_fee;
-                }
+                // Overwrite unconditionally (not `if > 0`) — a real 0 (draw,
+                // free game) is a confirmed value, not "still unknown", and
+                // the pre-finalize estimate set in fetch_game_payout_info
+                // must not outlive a successful response.
+                info.country_fee = result.country_fee;
+                info.elo_fee = result.elo_fee;
+                info.operating_cost = result.operating_cost_lamports;
+                info.fee_breakdown_confirmed = true;
                 info.game_ended_at = Some(std::time::Instant::now());
             }
         }
@@ -1685,5 +1878,141 @@ fn handle_magic_block_events(
                 info!("Magic Block: Transaction routed to ER: {}", signature);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod game_end_ordering_tests {
+    //! Headless regression test for the bug fixed 2026-08-11: a real-wager
+    //! game's checkmate move raced `handle_game_end_undelegation`'s
+    //! undelegate call, because nothing guaranteed the game-end move batch
+    //! (`finalize_game_on_end` -> `RollupEvent::GameEndBatch` ->
+    //! `handle_rollup_to_network_events` setting `game_end_moves_flushing`)
+    //! had actually started — let alone finished — before finalize fired.
+    //! Two prior attempts at this fix both failed live because they assumed
+    //! Bevy orders systems by declaration or by an artificial one-frame
+    //! defer; neither is a real guarantee. The actual fix is the explicit
+    //! `.after()` chain in `RollupNetworkBridgePlugin::build`. This test
+    //! exercises the real plugin (no mocked scheduling) and asserts the
+    //! exact invariant that broke live: `finalization_rx` (set only right
+    //! before the undelegate/finalize network task is spawned) must never
+    //! become `Some` while `game_end_moves_flushing` is `true`. No window,
+    //! GPU, wallet, or live backend involved — `bevy::tasks::IoTaskPool`
+    //! tasks run on a background thread and are never awaited here; only
+    //! the synchronous portion of each system (which is what orders the
+    //! flag write against the finalize check) is under test.
+    use super::*;
+    use crate::game::events::GameEndedEvent;
+    use crate::multiplayer::rollup::magicblock::DelegationStatus;
+    use crate::multiplayer::solana::addon::CompetitiveMatchState;
+    use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
+    use crate::multiplayer::systems::finalize_game_on_end;
+    use crate::multiplayer::types::OnlineNetworkState;
+    use bevy::prelude::MinimalPlugins;
+
+    fn build_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Deliberately NOT adding the full `RollupNetworkBridgePlugin`: most
+        // of its other systems (delegation polling, PGN export, popup
+        // queueing, causal-chain cleanup...) need resources/message types
+        // that belong to entirely different plugins in the real app and are
+        // irrelevant to the ordering bug under test. Bevy 0.19 panics the
+        // whole `update()` if *any* scheduled system's parameters fail
+        // validation, so pulling in the whole plugin here would fail before
+        // ever reaching the systems actually being tested. Register only
+        // the four systems whose relative order matters, with the exact
+        // same `.after()` chain `RollupNetworkBridgePlugin::build` uses.
+        app.add_message::<GameEndedEvent>();
+        app.add_message::<RollupEvent>();
+        app.add_message::<MagicBlockEvent>();
+        app.insert_resource(RollupNetworkBridge::new());
+        app.insert_resource(MagicBlockResolver::default());
+        app.init_resource::<RecentTransactions>();
+
+        app.add_systems(
+            Update,
+            (
+                finalize_game_on_end,
+                handle_rollup_to_network_events.after(finalize_game_on_end),
+                handle_game_end_undelegation,
+                retry_pending_finalization.after(handle_rollup_to_network_events),
+                poll_game_end_flush,
+            ),
+        );
+
+        // A pending move so `finalize_game_on_end`'s `force_flush()` returns
+        // `Some(..)` and actually emits `RollupEvent::GameEndBatch` — an
+        // empty batch would never set `game_end_moves_flushing` at all,
+        // which would trivially (and misleadingly) pass this test.
+        let mut mgr = EphemeralRollupManager::new(777, true, "startpos".to_string());
+        mgr.add_local_move("g2g4".to_string(), "fen_after_g2g4".to_string());
+        app.insert_resource(mgr);
+
+        let white = Pubkey::new_unique();
+        let black = Pubkey::new_unique();
+        app.insert_resource(SolanaIntegrationState {
+            wallet_pubkey: Some(white),
+            opponent_pubkey: Some(black),
+            ..Default::default()
+        });
+        app.insert_resource(CompetitiveMatchState {
+            wager_lamports: 1_000_000,
+            ..Default::default()
+        });
+        app.insert_resource(OnlineNetworkState::default());
+
+        // Delegated + a real PDA — otherwise `handle_game_end_undelegation`
+        // takes the free-rated (never-delegated) early-return path instead
+        // of the one under test.
+        {
+            let mut resolver = app.world_mut().resource_mut::<MagicBlockResolver>();
+            resolver.delegation_status = DelegationStatus::Delegated;
+            resolver.delegated_game_pda = Some(Pubkey::new_unique());
+        }
+
+        app
+    }
+
+    #[test]
+    fn finalize_never_fires_while_game_end_batch_still_flushing() {
+        let mut app = build_test_app();
+
+        app.world_mut().write_message(GameEndedEvent {
+            game_id: 777,
+            winner: Some("black".to_string()),
+            reason: "checkmate".to_string(),
+        });
+
+        // Frame 1: the event is processed. With the explicit `.after()`
+        // chain, `finalize_game_on_end` -> `handle_rollup_to_network_events`
+        // (sets the flag) -> `retry_pending_finalization` (must see it set)
+        // all resolve within this single `update()` call.
+        app.update();
+        let bridge = app.world().resource::<RollupNetworkBridge>();
+        assert!(
+            bridge.game_end_moves_flushing,
+            "expected the move batch to be flushing after the first frame — \
+             test setup problem, not the bug under test, if this fails"
+        );
+        assert!(
+            bridge.finalization_rx.is_none(),
+            "REGRESSION: finalize/undelegate fired while the game-end move \
+             batch was still flushing — this is the exact race that \
+             stranded a real-wager game live on 2026-08-11"
+        );
+
+        // Frame 2: still flushing (the spawned IoTaskPool task hasn't been
+        // awaited — nothing here drives it to completion), so this must
+        // still hold even once `handle_game_end_undelegation` has had a
+        // second chance to populate `pending_finalization`.
+        app.update();
+        let bridge = app.world().resource::<RollupNetworkBridge>();
+        assert!(
+            bridge.finalization_rx.is_none(),
+            "REGRESSION: finalize/undelegate fired on a later frame while \
+             still flushing"
+        );
     }
 }

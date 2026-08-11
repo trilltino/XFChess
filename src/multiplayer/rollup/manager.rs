@@ -324,4 +324,3 @@ fn handle_rollup_events(
         }
     }
 }
-

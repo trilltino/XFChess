@@ -1021,6 +1021,21 @@ pub fn authorize_global_session_if_needed(
     mut attempted_for: Local<Option<Pubkey>>,
     mut failed_attempts: Local<u32>,
 ) {
+    // Disabled 2026-08-11 pending a real fix: confirmed on-chain fund leaks
+    // (revoke never reclaims the old deposit — see `establish_global_session`)
+    // and a live repro where this exact flow got a Solflare "network
+    // mismatch: current network devnet, but this transaction is for mainnet"
+    // rejection with no user action involved, plus wagered `global_create_game`
+    // still hitting `InsufficientFunds` (6060) because the vault's real
+    // balance isn't checked against a specific wager, only the soft
+    // spending_limit/max_wager caps (see the InsufficientFunds writeup this
+    // session). Until there's a top-up instruction and the blockhash/network
+    // mismatch is root-caused, every wallet should just use the proven
+    // per-game Tauri wallet-bridge signing path below (`cached_global_session_keypair_bytes`
+    // stays `None` — see `sync_from_solana_state` in lobby.rs). Re-enable by
+    // deleting this early return once those are fixed and redeployed.
+    return;
+    #[allow(unreachable_code)]
     const MAX_ATTEMPTS: u32 = 3;
 
     let Some(wallet_pubkey) = solana_state.wallet_pubkey else {
@@ -1139,8 +1154,9 @@ fn establish_global_session(
     rpc_url: &str,
 ) -> Result<Keypair, String> {
     use crate::multiplayer::solana::global_session_manager::{
-        build_authorize_global_session_ix, build_revoke_global_session_ix, find_global_session_pda,
-        global_session_is_live_onchain, AuthorizeGlobalSessionArgs, GlobalSessionKeyManager,
+        build_authorize_global_session_ix, build_revoke_global_session_ix,
+        build_withdraw_global_session_ix, find_global_session_pda, global_session_is_live_onchain,
+        AuthorizeGlobalSessionArgs, GlobalSessionKeyManager,
     };
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
 
@@ -1218,10 +1234,20 @@ fn establish_global_session(
             }
             let revoke_ix =
                 build_revoke_global_session_ix(&program_id, &wallet_pubkey, &session_pda);
+            // Bundled with the revoke (one signature, no extra popup): a
+            // stale session's leftover deposit is otherwise permanently
+            // stranded — `revoke_global_session` only flips `enabled`, it
+            // never returns lamports, and the fresh authorize below deposits
+            // a brand new amount on top instead of reusing it. Confirmed
+            // live 2026-08-11: a wallet whose local key file went missing
+            // once ended up with a `GlobalSessionDelegation` vault at 2x the
+            // expected balance from exactly this path.
+            let withdraw_ix =
+                build_withdraw_global_session_ix(&program_id, &wallet_pubkey, &session_pda);
             sign_and_send_via_tauri(
                 rpc_url,
                 wallet_pubkey,
-                &[revoke_ix],
+                &[revoke_ix, withdraw_ix],
                 &[],
                 "Revoking stale quick-sign session",
             )

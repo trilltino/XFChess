@@ -34,6 +34,7 @@ const distDir = path.join(root, 'dist');
 const ROUTES = [
   { path: '/home', file: 'src/pages/Home.tsx', name: 'Home' },
   { path: '/features', file: 'src/pages/Features.tsx', name: 'Features' },
+  { path: '/demo', file: 'src/pages/Demo.tsx', name: 'Demo' },
   { path: '/play', file: 'src/pages/Play.tsx', name: 'default' },
   { path: '/tournaments', file: 'src/pages/Tournaments.tsx', name: 'Tournaments' },
   { path: '/computer', file: 'src/pages/ChessComputer.tsx', name: 'ChessComputer' },

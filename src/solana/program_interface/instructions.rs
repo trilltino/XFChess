@@ -203,6 +203,51 @@ pub fn join_game_ix(
 }
 
 // ---------------------------------------------------------------------------
+// cancel_game
+// ---------------------------------------------------------------------------
+
+/// Build a `cancel_game` instruction — refunds the escrowed wager to
+/// `white`/`black` and marks the game cancelled.
+///
+/// On-chain signature:
+/// ```ignore
+/// pub fn cancel_game(ctx, game_id: u64)
+/// ```
+///
+/// `player` (the caller, wallet-signed) must be `white` or `black`.
+/// `white`/`black` should be read from the on-chain `Game` account — pass
+/// `Pubkey::default()` for `black` if the game has no joiner yet; the program
+/// only validates/refunds `black_authority` when `game.black != default()`.
+pub fn cancel_game_ix(
+    program_id: Pubkey,
+    player: Pubkey,
+    white: Pubkey,
+    black: Pubkey,
+    game_id: u64,
+) -> Result<Instruction> {
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
+
+    let mut data = anchor_discriminator("cancel_game").to_vec();
+    data.extend_from_slice(&game_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(player, true),
+            AccountMeta::new(white, false),
+            AccountMeta::new(black, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // record_move
 // ---------------------------------------------------------------------------
 

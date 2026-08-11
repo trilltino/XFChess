@@ -1093,7 +1093,20 @@ pub fn finalize_game_on_end(
 ) {
     // See `feed_local_moves_to_rollup`'s comment — `active_session` used to
     // be gated here too, and was just as dead for the same reason.
+    //
+    // Checkmate/stalemate/timeout are detected identically and deterministically
+    // by both clients, so without this gate BOTH players' processes independently
+    // re-submit the same trailing move batch to the backend at game end. The
+    // backend's `er_game_lock` only serializes those concurrent writes against
+    // each other, it doesn't prevent them — two processes racing the same
+    // delegated PDA is exactly what produced live `InvalidWritableAccount`
+    // failures on the final move (reproduced 2026-08-11, game 8344535065683900662).
+    // Restricting the final-batch submission to a single authoritative side
+    // (the host) removes the race outright instead of trying to order around it.
     for _event in game_end_events.read() {
+        if !rollup_manager.is_creator {
+            continue;
+        }
         if rollup_manager.game_id == 0 {
             continue;
         }
@@ -1580,7 +1593,9 @@ pub fn reset_multiplayer_session_state(
     mut heartbeat: ResMut<HeartbeatState>,
     mut braid_transport: ResMut<crate::multiplayer::network::braid_transport::BraidTransportState>,
     mut liveness: ResMut<crate::multiplayer::social::OpponentLivenessState>,
-    #[cfg(feature = "solana")] mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
+    #[cfg(feature = "solana")] mut rollup_manager: ResMut<
+        crate::multiplayer::rollup::manager::EphemeralRollupManager,
+    >,
 ) {
     *p2p_conn = crate::multiplayer::network::p2p::P2PConnectionState::default();
     *heartbeat = HeartbeatState::default();

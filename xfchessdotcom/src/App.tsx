@@ -27,6 +27,7 @@ import TournamentPlay from './pages/TournamentPlay';
 import { ProfileViewer } from './pages/ProfileViewer';
 import { LichessCallback } from './pages/LichessCallback';
 import { Features } from './pages/Features';
+import { Demo } from './pages/Demo';
 import { OrganizationSchema } from './components/StructuredData';
 import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
 import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
@@ -176,6 +177,7 @@ function AppContent() {
                 <div className={`nav-links ${isMenuOpen ? 'active' : ''}`}>
                     <Link to="/home" className="nav-link" onClick={() => setIsMenuOpen(false)}>Home</Link>
                     <Link to="/play" className="nav-link" onClick={() => setIsMenuOpen(false)} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
+                    <Link to="/demo" className="nav-link" onClick={() => setIsMenuOpen(false)}>Demo</Link>
                     {connected && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             {username ? (
@@ -264,6 +266,7 @@ function AppContent() {
                         <Route path="/spectate/:game_id" element={<Spectate />} />
                         <Route path="/computer" element={<ChessComputer />} />
                         <Route path="/features" element={<Features />} />
+                        <Route path="/demo" element={<Demo />} />
                     </Routes>
                 </AnimatePresence>
             </div>

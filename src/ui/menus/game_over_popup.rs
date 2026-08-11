@@ -18,6 +18,9 @@ pub struct GameOverPayoutInfo {
     pub country_fee: u64,
     pub elo_fee: u64,
     pub rent_return: u64,
+    /// Real backend-advanced operating cost (ER session/undelegate fees etc)
+    /// reimbursed to treasury_vault from the pot. 0 for free games.
+    pub operating_cost: u64,
     pub winning_prize: u64,
     pub is_draw: bool,
 
@@ -28,6 +31,11 @@ pub struct GameOverPayoutInfo {
 
     // Settlement
     pub payout_confirmed: bool,
+    /// True once the real fee breakdown (country_fee/elo_fee/operating_cost)
+    /// has been overwritten with the on-chain-confirmed values from
+    /// `/game/finalize` — before this, the fields hold pre-finalize
+    /// estimates and should not be trusted for exact display.
+    pub fee_breakdown_confirmed: bool,
     pub finalize_sig: Option<String>,
     pub game_ended_at: Option<std::time::Instant>,
     pub settlement_started_at: Option<std::time::Instant>,
@@ -56,9 +64,24 @@ impl GameOverPayoutInfo {
     /// cached yet (this popup should never block on a price feed).
     fn format_sol_usd(lamports: u64, usd_per_sol: Option<f64>) -> String {
         let sol = lamports as f64 / 1_000_000_000.0;
+        let sol_str = Self::format_sol_dynamic(sol);
         match usd_per_sol.filter(|r| *r > 0.0) {
-            Some(rate) => format!("${:.2} (≈{:.3} SOL)", sol * rate, sol),
-            None => format!("{:.3} SOL", sol),
+            Some(rate) => format!("${:.2} (≈{})", sol * rate, sol_str),
+            None => sol_str,
+        }
+    }
+
+    /// Dynamic-precision SOL formatting: 3dp is enough for wager/prize-sized
+    /// amounts (always >= MIN_WAGER_LAMPORTS = 0.001 SOL), but rounds small
+    /// operating-cost line items (e.g. the ~0.0003 SOL ER session fee) to
+    /// "0.000 SOL" — bump to 6dp below 0.001 SOL so they stay visible.
+    fn format_sol_dynamic(sol: f64) -> String {
+        if sol == 0.0 {
+            "0 SOL".to_string()
+        } else if sol.abs() >= 0.001 {
+            format!("{:.3} SOL", sol)
+        } else {
+            format!("{:.6} SOL", sol)
         }
     }
 
@@ -468,6 +491,7 @@ pub fn game_over_popup_system(
                             ("Pot (2× wager)", (info.wager_amount * 2) as i64, true),
                             ("Treasury fee", -(info.country_fee as i64), false),
                             ("ELO fee", -(info.elo_fee as i64), false),
+                            ("Network fee", -(info.operating_cost as i64), false),
                             ("Rent returned", info.rent_return as i64, true),
                         ];
                         for (label, lamports, is_positive) in rows {
@@ -670,6 +694,17 @@ pub fn game_over_popup_system(
                                 trigger_dispute = true;
                             }
                         }
+                    } else {
+                        // No pot to deduct from — the backend eats the ER/
+                        // undelegate operating cost outright with no clawback
+                        // (see lifecycle::settlement's wager_amount gate).
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new("Free game — network costs covered by XFChess")
+                                .size(11.0)
+                                .italics()
+                                .color(text_secondary),
+                        );
                     }
                 }
 
@@ -1066,10 +1101,21 @@ pub fn fetch_game_payout_info(
             payout_info.is_rated = true;
 
             if let Some(_comp) = competitive {
-                payout_info.country_fee = 10_000_000;
-                payout_info.elo_fee = 10_000_000;
-                payout_info.rent_return = 2_280_000;
+                // Pre-finalize estimates only — `apply_finalization_result`
+                // (multiplayer::rollup::bridge) unconditionally overwrites
+                // these with the real on-chain values once `/game/finalize`
+                // responds, and flips `fee_breakdown_confirmed`. Mirrors the
+                // backend's `estimate_country_fee`/`ELO_FEE_LAMPORTS`
+                // (programs/xfchess-game/src/constants.rs) — keep in sync.
+                const ELO_FEE_LAMPORTS_ESTIMATE: u64 = 5_000;
+                const COUNTRY_FEE_BPS_ESTIMATE: u64 = 100; // 1%
+                const OPERATING_COST_ESTIMATE: u64 = 320_000; // ~DELEGATE+UNDELEGATE+ER session fee
                 let total_pot = sync.wager_amount * 2;
+                payout_info.country_fee = total_pot * COUNTRY_FEE_BPS_ESTIMATE / 10_000;
+                payout_info.elo_fee = ELO_FEE_LAMPORTS_ESTIMATE;
+                payout_info.operating_cost = OPERATING_COST_ESTIMATE;
+                payout_info.rent_return = 2_280_000;
+                payout_info.fee_breakdown_confirmed = false;
                 payout_info.winning_prize = total_pot
                     .saturating_sub(payout_info.country_fee)
                     .saturating_sub(payout_info.elo_fee);
@@ -1131,5 +1177,34 @@ impl Plugin for GameOverPopupPlugin {
 
         #[cfg(feature = "solana")]
         app.add_systems(OnEnter(GameState::GameOver), fetch_game_payout_info);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_sol_dynamic_zero() {
+        assert_eq!(GameOverPayoutInfo::format_sol_dynamic(0.0), "0 SOL");
+    }
+
+    #[test]
+    fn format_sol_dynamic_sub_millisol_uses_six_decimals() {
+        // 300_000 lamports = 0.0003 SOL — would round to "0.000 SOL" at 3dp.
+        let sol = 300_000.0 / 1_000_000_000.0;
+        assert_eq!(GameOverPayoutInfo::format_sol_dynamic(sol), "0.000300 SOL");
+    }
+
+    #[test]
+    fn format_sol_dynamic_wager_sized_uses_three_decimals() {
+        let sol = 1_000_000.0 / 1_000_000_000.0; // MIN_WAGER_LAMPORTS
+        assert_eq!(GameOverPayoutInfo::format_sol_dynamic(sol), "0.001 SOL");
+    }
+
+    #[test]
+    fn fetch_game_payout_info_estimate_is_unconfirmed() {
+        let info = GameOverPayoutInfo::default();
+        assert!(!info.fee_breakdown_confirmed);
     }
 }

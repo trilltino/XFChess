@@ -162,7 +162,9 @@ mod tests {
     fn rpc_for_matches_layer_of() {
         let cfg = SigningConfig {
             solana_rpc_url: "https://base.example".to_string(),
-            magic_router_rpc_url: "https://er.example".to_string(),
+            // ER-layer instructions route to the ER validator directly, not
+            // the Magic Router — see this module's `rpc_url_for` doc comment.
+            er_rpc_url: "https://er.example".to_string(),
             ..test_config()
         };
         assert_eq!(

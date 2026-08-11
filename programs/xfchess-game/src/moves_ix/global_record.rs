@@ -67,6 +67,13 @@ pub fn handler(
         timestamp,
     )?;
 
+    // See `record::handler`'s matching comment — plain-text FEN for explorers
+    // that can't decode the `MoveEvent` below without this program's IDL.
+    msg!(
+        "FEN: {}",
+        chess_logic_on_chain::nimzovich_engine::CompactBoard::from_bytes(&next_board).to_fen()
+    );
+
     emit!(crate::events::MoveEvent {
         game_id: _game_id,
         player: moving_player,

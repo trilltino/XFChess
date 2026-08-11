@@ -39,6 +39,11 @@ export const PAGE_METADATA: Record<string, PageMetadata> = {
     'Competitive Chess Server',
     'Play competitive chess with real prizes. Join tournaments, climb the ranked ladder, and challenge players worldwide on XFChess.',
   ),
+  demo: page(
+    '/demo',
+    'Demo',
+    'Watch XFChess in action — ranked matches, wagered PvP, and tournament play, all on-chain.',
+  ),
   features: page(
     '/features',
     'Features',

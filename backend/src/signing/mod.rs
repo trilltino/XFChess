@@ -115,6 +115,23 @@ pub struct AppState {
     // ── Global session management ──────────────────────────────────────────────
     pub active_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
 
+    /// Per-game locks serializing ER-routed writes (`record_move`,
+    /// `undelegate_game`, `schedule_time_check`, `cancel_time_check`).
+    ///
+    /// The ER rejects two concurrent writes to the same delegated account
+    /// with `InvalidWritableAccount` ("illegally used as writable") — not an
+    /// Anchor error, a rejection from MagicBlock's own runtime before our
+    /// program even runs. Before this lock existed, `delegate_game`'s own
+    /// follow-up `schedule_time_check_crank` call, `settlement_worker`'s
+    /// periodic redelegate-and-reschedule pass, and a client's `record_move`
+    /// batch could all independently fire ER writes for the same game with
+    /// no coordination between them. Reproduced live 2026-08-10: a
+    /// hand-recovery attempt got `InvalidWritableAccount` on every retry
+    /// (three attempts, up to 15s apart) despite no client-side race being
+    /// possible — the backend's own concurrent writers were still racing
+    /// each other. See `signing::routes::main::with_er_game_lock`.
+    pub er_write_locks: Arc<Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
+
     pub solana_rpc_url: String,
     pub program_id: Pubkey,
     /// Shared blocking RPC client — avoids a new TCP connection per route call.
@@ -313,6 +330,7 @@ impl AppState {
             game_log,
             metrics,
             active_global_sessions: Arc::new(Mutex::new(HashMap::new())),
+            er_write_locks: Arc::new(Mutex::new(HashMap::new())),
             solana_rpc_url,
             program_id,
             solana_rpc,

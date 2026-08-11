@@ -9,10 +9,91 @@ use solana_sdk::{
 use solana_system_interface::instruction as system_instruction;
 
 use crate::{
-    apply_compute_budget, cu_logger::CuLogger, fetch_profile_elo, instructions as ix,
-    moves::generate_100_move_sequence, unique_id, with_retry, LAMPORTS_PER_SOL,
-    TOURNAMENT_STATUS_COMPLETED,
+    apply_compute_budget, cost_reporter::ER_SESSION_FEE_LAMPORTS, cu_logger::CuLogger,
+    fetch_profile_elo, instructions as ix, moves::generate_100_move_sequence, unique_id,
+    with_retry, LAMPORTS_PER_SOL, TOURNAMENT_STATUS_COMPLETED,
 };
+
+/// Flat on-chain fee-accounting constants — mirror
+/// `programs/xfchess-game/src/constants.rs` (this crate doesn't depend on
+/// the program crate). Used by `verify_fee_accounting` to reproduce
+/// `lifecycle::transitions`/`lifecycle::settlement`'s exact math.
+const CREATE_GAME_COST: u64 = 5_000;
+const JOIN_GAME_COST: u64 = 5_000;
+const DELEGATE_COST: u64 = 5_000;
+const UNDELEGATE_COST: u64 = 5_000;
+const RECORD_RESULT_COST: u64 = 5_000;
+/// Flat tx-fee reimbursement `settle_finished_game` pays before anything
+/// else — mirrors `lifecycle::settlement::settle_finished_game`'s `tx_fee`.
+const SETTLEMENT_TX_FEE: u64 = 10_000;
+
+/// Reconciles `Game.fees_advanced` (read once the undelegate has landed back
+/// on the base layer) against the exact sum of flat costs
+/// `lifecycle::transitions` accrues for a full create->join->delegate->N
+/// moves->undelegate lifecycle — proves the fee-accounting fix (undelegate
+/// now accrues `UNDELEGATE_COST` + `ER_SESSION_FEE_LAMPORTS`, previously
+/// silently dropped) actually lands on real MagicBlock devnet, not just that
+/// the constants exist.
+fn verify_fees_advanced(fees_advanced: u64, move_count: u64) -> anyhow::Result<()> {
+    let expected = CREATE_GAME_COST
+        + JOIN_GAME_COST
+        + DELEGATE_COST
+        + move_count * RECORD_RESULT_COST
+        + UNDELEGATE_COST
+        + ER_SESSION_FEE_LAMPORTS;
+    println!(
+        "   fees_advanced: {} lamports (expected {} lamports for {} moves)",
+        fees_advanced, expected, move_count
+    );
+    if fees_advanced != expected {
+        anyhow::bail!(
+            "fee-accounting mismatch: Game.fees_advanced was {fees_advanced} lamports, \
+             expected {expected} lamports (create {CREATE_GAME_COST} + join {JOIN_GAME_COST} + \
+             delegate {DELEGATE_COST} + {move_count}*record {RECORD_RESULT_COST} + undelegate \
+             {UNDELEGATE_COST} + ER session fee {ER_SESSION_FEE_LAMPORTS}) — mark_undelegated's \
+             accrual may have regressed"
+        );
+    }
+    Ok(())
+}
+
+/// Reconciles the `treasury_vault` balance delta at `finalize_game` against
+/// `lifecycle::settlement::settle_finished_game`'s exact reimbursement
+/// formula (`fees_advanced.min(pot - tx_fee)`), not just `fees_advanced`
+/// itself — the real on-chain payout is clamped by what's left in the pot
+/// after the flat tx-fee deduction.
+async fn verify_treasury_reimbursement(
+    base_rpc: &RpcClient,
+    treasury_vault: Pubkey,
+    treasury_before: u64,
+    fees_advanced: u64,
+    wager_lamports: u64,
+) -> anyhow::Result<()> {
+    let treasury_after = with_retry(|| base_rpc.get_balance(&treasury_vault)).await?;
+    let treasury_delta = treasury_after.saturating_sub(treasury_before);
+
+    let pot = wager_lamports.saturating_mul(2);
+    let remaining = pot.saturating_sub(SETTLEMENT_TX_FEE);
+    let expected_reimbursement = fees_advanced.min(remaining);
+
+    println!(
+        "   treasury_vault: {} -> {} SOL ({:+} lamports, expected {} lamports)",
+        treasury_before as f64 / LAMPORTS_PER_SOL as f64,
+        treasury_after as f64 / LAMPORTS_PER_SOL as f64,
+        treasury_delta,
+        expected_reimbursement
+    );
+    if treasury_delta != expected_reimbursement {
+        anyhow::bail!(
+            "treasury reimbursement mismatch: treasury_vault balance increased by \
+             {treasury_delta} lamports, expected {expected_reimbursement} lamports \
+             (fees_advanced {fees_advanced} lamports, clamped by pot-minus-tx-fee \
+             {remaining} lamports) — settle_finished_game's platform_reimbursement \
+             may have regressed"
+        );
+    }
+    Ok(())
+}
 
 /// Guaranteed SOL prize pool funded before a Swiss or single-elimination
 /// benchmark tournament opens registration — small enough to run repeatedly
@@ -622,6 +703,7 @@ pub async fn run_1v1_game_flow(
     // instead of a fixed sleep").
     println!("   Waiting for ER relay to land on L1 (polling game PDA owner)...");
     let undelegate_wait_start = std::time::Instant::now();
+    let mut fees_advanced_after_undelegate: Option<u64> = None;
     loop {
         match base_rpc.get_account(&game_pda) {
             Ok(acc) if acc.owner == program_id => {
@@ -629,6 +711,7 @@ pub async fn run_1v1_game_flow(
                     "   Game PDA owner restored to program after {:?}",
                     undelegate_wait_start.elapsed()
                 );
+                fees_advanced_after_undelegate = ix::parse_game_fees_advanced(&acc.data);
                 break;
             }
             Ok(acc) => {
@@ -648,6 +731,19 @@ pub async fn run_1v1_game_flow(
             }
         }
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+
+    // Step 10.75: Verify the fee-accounting fix — Game.fees_advanced must now
+    // include UNDELEGATE_COST + ER_SESSION_FEE_LAMPORTS from mark_undelegated,
+    // not just create/join/delegate/record_move. Skipped (warn, not fail) if
+    // the 60s wait above gave up before ownership actually returned, since
+    // then the base-layer read wouldn't reflect the undelegate yet.
+    println!("   Step 10.75: Verifying fees_advanced accounting...");
+    match fees_advanced_after_undelegate {
+        Some(fees_advanced) => verify_fees_advanced(fees_advanced, 100)?,
+        None => println!(
+            "   [Warning] Could not read fees_advanced (game PDA owner never returned to program) — skipping fee-accounting check."
+        ),
     }
 
     // Step 10.5: Resign game to mark status as Finished — but the scripted
@@ -708,6 +804,9 @@ pub async fn run_1v1_game_flow(
         fetch_profile_elo(base_rpc, program_id, black.pubkey()).unwrap_or(1200.0);
     let white_balance_before = with_retry(|| base_rpc.get_balance(&white.pubkey())).await?;
     let black_balance_before = with_retry(|| base_rpc.get_balance(&black.pubkey())).await?;
+    let treasury_vault =
+        solana_sdk::pubkey::Pubkey::find_program_address(&[b"treasury_vault"], &program_id).0;
+    let treasury_before = with_retry(|| base_rpc.get_balance(&treasury_vault)).await?;
 
     // fee_payer must be `game.fee_payer` exactly (game_ix/finalize.rs:39
     // constrains `fee_payer.key() == game.fee_payer`) — Step 2 created this
@@ -768,6 +867,24 @@ pub async fn run_1v1_game_flow(
         black_balance_before,
     )
     .await?;
+
+    // Step 12: Verify the treasury reimbursement matches the fee-accounting
+    // fix — 1_000_000 lamports is the wager passed to create_game_ix in Step 2.
+    println!("   Step 12: Verifying treasury_vault reimbursement...");
+    if let Some(fees_advanced) = fees_advanced_after_undelegate {
+        verify_treasury_reimbursement(
+            base_rpc,
+            treasury_vault,
+            treasury_before,
+            fees_advanced,
+            1_000_000,
+        )
+        .await?;
+    } else {
+        println!(
+            "   [Warning] fees_advanced was never read post-undelegate — skipping treasury reimbursement check."
+        );
+    }
 
     println!("   1v1 game flow complete!");
     Ok(logger.total_cu())

@@ -43,6 +43,13 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     let escrow_balance = ctx.accounts.escrow_pda.lamports();
     let pot = escrow::pot(wager_amount)?;
 
+    // wager_amount == 0 always means MatchType::Free (every Free-match
+    // construction site sets both together — see game_ix/common.rs,
+    // lifecycle/guards.rs, lifecycle/terminal.rs, governance_ix/resolution.rs).
+    // This gate is what makes Free games a pure backend-eaten operating cost
+    // with no treasury clawback: there's no pot, so `fees_advanced` (including
+    // the ER session/undelegate fees accrued in mark_undelegated) is simply
+    // never reimbursed — the account just closes with that data discarded.
     if wager_amount > 0 && wager_token.is_none() && escrow_balance >= pot {
         let sp = &ctx.accounts.system_program;
         let escrow = &ctx.accounts.escrow_pda;

@@ -16,8 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `braid-http` | reqwest-based Braid-HTTP 209 client (Rust port of braid.org JS) | Game client |
 | `braid-iroh` | Iroh QUIC transport for Braid | Game client, backend |
 | `braid_chess` | Typed chess messages + resources + publish/subscribe (was `braid_uri`) | Game client, backend |
-| `iroh-gossip` | Gossip broadcast over Iroh | Backend relay |
-| `iroh-h3`, `iroh-h3-axum`, `iroh-h3-client` | HTTP/3 layer over Iroh | Not currently used by anything — each crate's own README says so explicitly and recommends considering removal |
+| `iroh-h3`, `iroh-h3-axum`, `iroh-h3-client` | HTTP/3 layer over Iroh | Live: `braid-iroh`'s `proxy` feature mounts `iroh-h3-axum`'s handler on every spawned node (`braid-iroh/src/node.rs`) and `iroh-h3-client` backs the spectator TCP bridge (`src/multiplayer/systems.rs` sets `proxy_config: Some(..)`). The "not used by anything" note each crate's own README carries is stale for this repo — do not remove based on that alone. |
 | `xfchess-braid-server` | Axum integration for HTTP-209 subscribe | Backend |
 | `swiss-pairing` | FIDE Dutch Swiss algorithm (simplified: no transposition/exchange search) | Backend |
 

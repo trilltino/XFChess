@@ -23,6 +23,23 @@ const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 /// MagicBlock delegation program ID (same one `delegate_game_ix` parses inline).
 const DELEGATION_PROGRAM_ID: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 
+/// Parses `Game.fees_advanced` directly off raw account bytes fetched from
+/// either the base layer or the ER (the field means the same thing in both
+/// places — it's only reimbursed from the pot at `finalize_game` on the base
+/// layer). Mirrors the offset walk in
+/// `backend/src/signing/routes/main.rs::read_game_fee_breakdown` and
+/// `tasks::settlement_worker::parse_game_account` — keep all three in sync if
+/// `Game`'s field order ever changes. Returns `None` on unexpected layout.
+pub fn parse_game_fees_advanced(data: &[u8]) -> Option<u64> {
+    let mut o = 8usize; // discriminator
+    o += 8; // game_id
+    o += 32 + 32; // white + black
+    o += 1; // status
+    o += 8; // last_move_timestamp
+    let bytes: [u8; 8] = data.get(o..o + 8)?.try_into().ok()?;
+    Some(u64::from_le_bytes(bytes))
+}
+
 fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
     hasher.update(format!("global:{}", fn_name).as_bytes());

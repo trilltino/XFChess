@@ -1127,6 +1127,7 @@ function Onboarding() {
     }
   };
 
+
   if (!ready) {
     return (
       <div style={{ ...page }}>

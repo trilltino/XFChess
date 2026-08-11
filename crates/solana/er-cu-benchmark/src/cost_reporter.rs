@@ -3,17 +3,22 @@
 //! Cost model (MagicBlock public nodes):
 //!   - Base fee per TX on ER:           0 lamports (free per-TX)
 //!   - Session fee (at undelegation):    300_000 lamports (0.0003 SOL)
-//!   - Commit fee (commit_move_batch):   100_000 lamports (0.0001 SOL)
 //!   - Base-layer TXs:                   5_000 base + 10_000 priority = 15_000 lamports
+//!
+//! There used to be a "commit fee (commit_move_batch)" line here too, but
+//! `commit_move_batch` is not a real instruction in the production program —
+//! it never had a handler, and `game_flows.rs`'s own 1v1 flow labels that
+//! step "Bypassed in event-based architecture". Removed rather than kept as
+//! an always-zero line item that implied a cost path that doesn't exist.
 
 use crate::cu_logger::CuLogger;
 use crate::{BASE_TX_FEE, LAMPORTS_PER_SOL, SOL_GBP_RATE};
 
-/// MagicBlock ER session fee charged at undelegation (0.0003 SOL).
+/// MagicBlock ER session fee charged at undelegation (0.0003 SOL). Mirrors
+/// `ER_SESSION_FEE_LAMPORTS` in `programs/xfchess-game/src/constants.rs`,
+/// which is now actually accrued into `Game.fees_advanced` at undelegation
+/// (`lifecycle::transitions::mark_undelegated`) — keep the two in sync.
 pub const ER_SESSION_FEE_LAMPORTS: u64 = 300_000;
-
-/// MagicBlock ER commit fee per commit_move_batch (0.0001 SOL).
-pub const ER_COMMIT_FEE_LAMPORTS: u64 = 100_000;
 
 /// A cost report for a test scenario.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,8 +33,6 @@ pub struct CostReport {
     pub priority_fees_sol: f64,
     /// ER session fees (0.0003 SOL × number of undelegate_game calls).
     pub er_session_fees_sol: f64,
-    /// ER commit fees (0.0001 SOL × number of commit_move_batch calls).
-    pub er_commit_fees_sol: f64,
     pub breakdown: Vec<InstructionCost>,
 }
 
@@ -68,12 +71,10 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
         "authorize_tournament_session",
     ];
 
-    // ER instructions that carry a MagicBlock network fee (not per-move, but per-session/commit).
-    // undelegate_game  -> 0.0003 SOL session fee
-    // commit_move_batch -> 0.0001 SOL commit fee
+    // ER instructions that carry a MagicBlock network fee (not per-move, but per-session).
+    // undelegate_game -> 0.0003 SOL session fee
     let mut paid_tx_count = 0u64;
     let mut er_session_count = 0u64; // undelegate_game calls
-    let mut er_commit_count = 0u64; // commit_move_batch calls
     let mut paid_breakdown_map: std::collections::HashMap<String, (u64, u64)> =
         std::collections::HashMap::new();
 
@@ -87,20 +88,14 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
             *count += 1;
         } else if entry.instruction == "undelegate_game" {
             er_session_count += 1;
-        } else if entry.instruction == "commit_move_batch" {
-            er_commit_count += 1;
         }
     }
 
     let base_tx_fees_lamports = paid_tx_count * BASE_TX_FEE;
     let priority_fees_lamports = paid_tx_count * 10_000;
     let er_session_fees_lamports = er_session_count * ER_SESSION_FEE_LAMPORTS;
-    let er_commit_fees_lamports = er_commit_count * ER_COMMIT_FEE_LAMPORTS;
 
-    let total_lamports = base_tx_fees_lamports
-        + priority_fees_lamports
-        + er_session_fees_lamports
-        + er_commit_fees_lamports;
+    let total_lamports = base_tx_fees_lamports + priority_fees_lamports + er_session_fees_lamports;
     let total_sol = total_lamports as f64 / LAMPORTS_PER_SOL as f64;
     let total_gbp = total_sol * SOL_GBP_RATE;
 
@@ -132,7 +127,6 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
         base_tx_fees_sol: base_tx_fees_lamports as f64 / LAMPORTS_PER_SOL as f64,
         priority_fees_sol: priority_fees_lamports as f64 / LAMPORTS_PER_SOL as f64,
         er_session_fees_sol: er_session_fees_lamports as f64 / LAMPORTS_PER_SOL as f64,
-        er_commit_fees_sol: er_commit_fees_lamports as f64 / LAMPORTS_PER_SOL as f64,
         breakdown,
     }
 }
@@ -165,10 +159,6 @@ pub fn print_cost_report(report: &CostReport) {
     println!(
         "     ER Session Fees:     {:.6} SOL  (0.0003 SOL × undelegations)",
         report.er_session_fees_sol
-    );
-    println!(
-        "     ER Commit Fees:      {:.6} SOL  (0.0001 SOL × commits)",
-        report.er_commit_fees_sol
     );
     println!();
     println!("   ╔══════════════════════════════════════════════════════╗");
