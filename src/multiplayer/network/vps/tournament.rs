@@ -119,7 +119,7 @@ pub fn list_tournament_games() -> Result<Vec<TournamentGameListing>, String> {
     for t in tournaments.into_iter().filter(|t| t.is_tournament) {
         let resp = match client()?
             .get(format!(
-                "{}/tournament/{}/bracket",
+                "{}/api/tournament/{}/bracket",
                 vps_base(),
                 t.tournament_id
             ))
@@ -158,9 +158,15 @@ pub fn list_tournament_games() -> Result<Vec<TournamentGameListing>, String> {
 }
 
 /// Fetch the list of advertised tournaments from the VPS.
+///
+/// Deliberately `/api/tournaments`, not the bare `/tournaments` path: the
+/// web frontend has its own unrelated marketing page at that exact path, and
+/// in production nginx has no way to distinguish "browser wants the page"
+/// from "game client wants JSON" on an identical URL — it always resolves
+/// to the frontend's SPA catch-all. See infrastructure/router.rs (backend).
 pub fn list_tournaments() -> Result<Vec<TournamentSummary>, String> {
     let resp = client()?
-        .get(format!("{}/tournaments", vps_base()))
+        .get(format!("{}/api/tournaments", vps_base()))
         .send()
         .map_err(|e| format!("vps list_tournaments: {e}"))?;
     if !resp.status().is_success() {
@@ -179,7 +185,7 @@ pub fn tournament_session_create_game(
 ) -> Result<String, String> {
     let resp = client()?
         .post(format!(
-            "{}/tournament/{}/session-create-game",
+            "{}/api/tournament/{}/session-create-game",
             vps_base(),
             tournament_id
         ))
@@ -211,7 +217,7 @@ pub fn tournament_session_join_game(
 ) -> Result<String, String> {
     let resp = client()?
         .post(format!(
-            "{}/tournament/{}/session-join-game",
+            "{}/api/tournament/{}/session-join-game",
             vps_base(),
             tournament_id
         ))
@@ -248,7 +254,7 @@ pub fn join_tournament(
         body["password"] = serde_json::Value::String(pw.to_string());
     }
     let resp = client()?
-        .post(format!("{}/tournament/{}/join", vps_base(), tournament_id))
+        .post(format!("{}/api/tournament/{}/join", vps_base(), tournament_id))
         .json(&body)
         .send()
         .map_err(|e| format!("vps join_tournament: {e}"))?;

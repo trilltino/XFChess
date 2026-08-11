@@ -33,6 +33,15 @@ cp "$ROOT/stockfish" "$APPDIR/Contents/MacOS/stockfish"
 
 cp -R "$ROOT/assets" "$APPDIR/Contents/Resources/assets"
 
+# wallet-ui is served by xfchess-tauri itself from next to its own binary
+# (see wallet_ui_dist_path in tauri/src/main.rs, resolved via current_exe()).
+if [ ! -d "$ROOT/tauri/wallet-ui/dist" ]; then
+  echo "ERROR: $ROOT/tauri/wallet-ui/dist not found — build it first: cd tauri/wallet-ui && npm run build" >&2
+  exit 1
+fi
+mkdir -p "$APPDIR/Contents/MacOS/wallet-ui"
+cp -R "$ROOT/tauri/wallet-ui/dist" "$APPDIR/Contents/MacOS/wallet-ui/dist"
+
 if [ -f "$ROOT/tauri/icons/icon.icns" ]; then
   cp "$ROOT/tauri/icons/icon.icns" "$APPDIR/Contents/Resources/icon.icns"
 else

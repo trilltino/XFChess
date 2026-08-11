@@ -115,7 +115,7 @@ struct MatchmakingStatus {
 }
 
 async fn poll_tournaments(backend_url: &str) -> Result<Vec<TournamentInfo>, reqwest::Error> {
-  let url = format!("{}/tournaments/active", backend_url);
+  let url = format!("{}/api/tournaments/active", backend_url);
   reqwest::get(&url)
     .await?
     .json::<Vec<TournamentInfo>>()

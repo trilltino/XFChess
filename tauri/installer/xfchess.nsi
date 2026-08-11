@@ -9,6 +9,7 @@
 ;   stockfish.exe        (chess engine — mandatory, release.yml fails the job
 ;                          before this script even runs if it couldn't be fetched)
 ;   assets\              (game assets)
+;   wallet-ui\dist\       (built wallet-signing popup UI, served by xfchess-tauri)
 ; All .exe files MUST already be Authenticode-signed before makensis runs, then
 ; the resulting Setup.exe is signed too. See docs/PUBLISHING.md.
 
@@ -70,6 +71,12 @@ Section "Install"
   SetOutPath "$INSTDIR\assets"
   File /r "${PAYLOAD_DIR}\assets\*.*"
 
+  ; wallet-ui: served by xfchess-tauri itself from wallet-ui\dist next to its
+  ; own exe (resolved via current_exe().parent() — see main.rs). Without this
+  ; the wallet-signing popup has nowhere real to load.
+  SetOutPath "$INSTDIR\wallet-ui\dist"
+  File /r "${PAYLOAD_DIR}\wallet-ui\dist\*.*"
+
   ; Launcher: sets production endpoints, starts the wallet bridge, then the game.
   ; This completes the dev .bat (which started only the bridge).
   SetOutPath "$INSTDIR"
@@ -121,6 +128,7 @@ Section "Uninstall"
   Delete "$INSTDIR\launch.vbs"
   Delete "$INSTDIR\uninstall.exe"
   RMDir /r "$INSTDIR\assets"
+  RMDir /r "$INSTDIR\wallet-ui"
   RMDir "$INSTDIR"
 
   Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"

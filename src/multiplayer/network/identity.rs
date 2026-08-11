@@ -6,8 +6,35 @@
 //! changes — the **social identity anchor**.
 
 use iroh::SecretKey;
+use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use tracing::{info, warn};
+
+/// Arbitrary fixed loopback port used purely as an OS-level exclusivity
+/// mutex — never actually served. Binding it is how a process claims
+/// "I am the one persisted node identity on this machine right now".
+const IDENTITY_MUTEX_PORT: u16 = 47771;
+
+/// Holds the bound listener for the process's lifetime when we're the
+/// primary instance. Never accepted on; its only job is to keep the port
+/// held so a second launch's bind attempt fails. The OS reclaims it
+/// automatically on exit or crash — no stale-lock cleanup needed, unlike a
+/// PID file.
+static IDENTITY_MUTEX: OnceLock<Option<TcpListener>> = OnceLock::new();
+
+/// A same-process-only identity used when another instance already holds
+/// the persisted one. Cached so repeated calls to `load_or_create()` within
+/// this process return the same key instead of a fresh random one each time.
+static FALLBACK_KEY: OnceLock<SecretKey> = OnceLock::new();
+
+/// True if this process holds the persisted node identity (i.e. no other
+/// instance was already running when we started).
+fn is_primary_instance() -> bool {
+    IDENTITY_MUTEX
+        .get_or_init(|| TcpListener::bind(("127.0.0.1", IDENTITY_MUTEX_PORT)).ok())
+        .is_some()
+}
 
 fn key_path() -> PathBuf {
     // Override for running multiple instances on one machine (e.g. `just dev2`).
@@ -31,7 +58,27 @@ fn key_path() -> PathBuf {
 }
 
 /// Load the persisted node secret key, or generate + save a new one.
+///
+/// If another instance is already running on this machine and holds the
+/// persisted identity, returns a same-process-only fallback key instead —
+/// two live instances sharing one node ID isn't a config a player can even
+/// see, let alone fix, and it silently breaks P2P between them (the relay
+/// rejects the second connection as a duplicate endpoint).
 pub fn load_or_create() -> SecretKey {
+    if !is_primary_instance() {
+        return FALLBACK_KEY
+            .get_or_init(|| {
+                let key = SecretKey::generate();
+                warn!(
+                    "[identity] Another XFChess instance is already running — using a \
+                     temporary identity for this one (not persisted; P2P between the \
+                     two won't use your usual node ID)."
+                );
+                key
+            })
+            .clone();
+    }
+
     let path = key_path();
 
     if path.exists() {

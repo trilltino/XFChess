@@ -160,6 +160,7 @@ async fn http_server(
     wallet_jwt: WalletJwt,
     #[cfg(feature = "tournament-admin")]
     dist_path: std::path::PathBuf,
+    wallet_ui_dist_path: std::path::PathBuf,
     needs_profile_step: Arc<std::sync::atomic::AtomicBool>,
   }
 
@@ -444,6 +445,7 @@ async fn http_server(
     }
   }
   async fn api_set_username(
+    State(s): State<LocalState>,
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
@@ -456,7 +458,21 @@ async fn http_server(
       }
     }
     match req.send().await {
-      Ok(resp) => forward_backend_response(resp).await,
+      Ok(resp) => {
+        // The rename only actually took effect on the backend if it
+        // succeeded — mirror it into our own in-memory cache too, so the
+        // running game client's next GET /status sees it immediately
+        // instead of the stale name it started this session with (that
+        // used to require a full game restart to pick up).
+        if resp.status().is_success() {
+          if let Some(username) = body["username"].as_str() {
+            if !username.is_empty() {
+              *s.wallet_username.0.lock().unwrap() = Some(username.to_string());
+            }
+          }
+        }
+        forward_backend_response(resp).await
+      }
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
   }
@@ -489,7 +505,8 @@ async fn http_server(
     s.needs_profile_step
       .store(true, std::sync::atomic::Ordering::Relaxed);
     let wallet_url =
-      std::env::var("XFCHESS_WALLET_URL").unwrap_or_else(|_| "http://localhost:5174".to_string());
+      std::env::var("XFCHESS_WALLET_URL")
+      .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui", http_port()));
     let profile_url = format!("{wallet_url}?step=profile");
     tracing::info!("[HTTP] opening profile step: {profile_url}");
     tokio::task::spawn_blocking(move || {
@@ -545,14 +562,29 @@ async fn http_server(
     State(s): State<LocalState>,
     uri: axum::http::Uri,
   ) -> impl IntoResponse {
-    serve_dist_file(&s.dist_path, uri.path()).await
+    serve_dist_file(&s.dist_path, "/tournament-admin", uri.path()).await
   }
 
-  #[cfg(feature = "tournament-admin")]
-  async fn serve_dist_file(dist: &std::path::Path, url_path: &str) -> axum::response::Response {
-    // Strip /tournament-admin prefix, treat the rest as a relative file path
+  // Serves the wallet-ui SPA (built dist/) from the same loopback bridge the
+  // popup already opens — always compiled in (unlike tournament-admin) since
+  // every player needs wallet signing, not just desktop admins. Without this,
+  // the popup has nowhere real to point at other than an external URL that
+  // doesn't exist in a shipped build (see XFCHESS_WALLET_URL's default below).
+  async fn serve_wallet_ui(
+    State(s): State<LocalState>,
+    uri: axum::http::Uri,
+  ) -> impl IntoResponse {
+    serve_dist_file(&s.wallet_ui_dist_path, "/wallet-ui", uri.path()).await
+  }
+
+  async fn serve_dist_file(
+    dist: &std::path::Path,
+    prefix: &str,
+    url_path: &str,
+  ) -> axum::response::Response {
+    // Strip the mount prefix, treat the rest as a relative file path
     let rel = url_path
-      .strip_prefix("/tournament-admin")
+      .strip_prefix(prefix)
       .unwrap_or(url_path)
       .trim_start_matches('/')
       .split('?')
@@ -589,7 +621,7 @@ async fn http_server(
             .header("Content-Type", "text/html; charset=utf-8")
             .body(axum::body::Body::from(bytes))
             .unwrap_or_else(|_| StatusCode::NOT_FOUND.into_response()),
-          Err(_) => (StatusCode::NOT_FOUND, "Tournament admin not found. Build it first: cd tauri/tournament-admin && npm run build").into_response(),
+          Err(_) => (StatusCode::NOT_FOUND, format!("{prefix} dist not found. Build it first: cd tauri{prefix} && npm run build")).into_response(),
         }
       }
     }
@@ -636,6 +668,21 @@ async fn http_server(
     }
   };
 
+  // Resolve the wallet-ui dist dir the same way: next to the binary in a
+  // production bundle, or CARGO_MANIFEST_DIR-relative in dev.
+  let wallet_ui_dist_path = {
+    let dev_path =
+      std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/wallet-ui/dist"));
+    if dev_path.exists() {
+      dev_path
+    } else {
+      std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("wallet-ui/dist")))
+        .unwrap_or(dev_path)
+    }
+  };
+
   let state = LocalState {
     app,
     pending,
@@ -645,6 +692,7 @@ async fn http_server(
     wallet_jwt,
     #[cfg(feature = "tournament-admin")]
     dist_path,
+    wallet_ui_dist_path,
     needs_profile_step: Arc::new(std::sync::atomic::AtomicBool::new(false)),
   };
 
@@ -656,6 +704,9 @@ async fn http_server(
     .route("/hide", post(post_hide))
     .route("/status", get(get_status))
     .route("/token", get(get_token).post(post_token))
+    .route("/wallet-ui", get(serve_wallet_ui))
+    .route("/wallet-ui/", get(serve_wallet_ui))
+    .route("/wallet-ui/{*path}", get(serve_wallet_ui))
     .route("/api/consent", get(api_get_consent).post(api_post_consent))
     .route("/api/auth/login", post(api_login))
     .route("/api/auth/register", post(api_register))
@@ -725,7 +776,8 @@ fn open_wallet_popup_for_signing(_app: &tauri::AppHandle) {
 
 fn open_wallet_popup_with_step(step: Option<&str>) {
   let wallet_url =
-    std::env::var("XFCHESS_WALLET_URL").unwrap_or_else(|_| "http://localhost:5174".to_string());
+    std::env::var("XFCHESS_WALLET_URL")
+      .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui", http_port()));
   let url = match step {
     Some(s) => format!("{wallet_url}?step={s}"),
     None => wallet_url,
