@@ -111,9 +111,36 @@ Section "Install"
   FileWrite $1 "CreateObject($\"WScript.Shell$\").Run $\"$\"$\"$INSTDIR\launch.bat$\"$\"$\", 0, False$\r$\n"
   FileClose $1
 
+  ; Second-instance launcher: sets a distinct XFCHESS_WALLET_PORT (and node
+  ; identity path) before starting its own bridge+game pair, so testing
+  ; multiplayer against yourself on one PC actually works — two instances
+  ; launched from the plain shortcut both default to the same port, so the
+  ; second bridge's HTTP server either fails outright or (now) falls back to
+  ; a port neither the game nor the wallet popup can reliably discover,
+  ; since nothing distinguishes "this instance's" bridge from any other's.
+  ; An explicit different port sidesteps that ambiguity entirely instead of
+  ; trying to guess it away after the fact. Mirrors `just dev2`'s P2 setup.
+  FileOpen $2 "$INSTDIR\launch-second-instance.bat" w
+  FileWrite $2 "@echo off$\r$\n"
+  FileWrite $2 "setlocal$\r$\n"
+  FileWrite $2 "set SCRIPT_DIR=%~dp0$\r$\n"
+  FileWrite $2 "set BACKEND_URL=${BACKEND_URL}$\r$\n"
+  FileWrite $2 "set SIGNING_SERVICE_URL=${SIGNING_URL}$\r$\n"
+  FileWrite $2 "set XFCHESS_WALLET_PORT=7464$\r$\n"
+  FileWrite $2 "set XFCHESS_NODE_KEY_PATH=%LOCALAPPDATA%\xfchess\node_key_2$\r$\n"
+  FileWrite $2 "start $\"XFChess Wallet (2nd)$\" /D $\"%SCRIPT_DIR%$\" $\"%SCRIPT_DIR%${BRIDGE_EXE}$\"$\r$\n"
+  FileWrite $2 "start $\"XFChess (2nd)$\" /D $\"%SCRIPT_DIR%$\" $\"%SCRIPT_DIR%${APP_EXE}$\"$\r$\n"
+  FileWrite $2 "endlocal$\r$\n"
+  FileClose $2
+
+  FileOpen $3 "$INSTDIR\launch-second-instance.vbs" w
+  FileWrite $3 "CreateObject($\"WScript.Shell$\").Run $\"$\"$\"$INSTDIR\launch-second-instance.bat$\"$\"$\", 0, False$\r$\n"
+  FileClose $3
+
   ; Shortcuts
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\launch.vbs" "" "$INSTDIR\${APP_EXE}" 0
+  CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME} (2nd Instance).lnk" "$INSTDIR\launch-second-instance.vbs" "" "$INSTDIR\${APP_EXE}" 0
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\launch.vbs" "" "$INSTDIR\${APP_EXE}" 0
 
   ; Registry / Add-Remove Programs
@@ -136,12 +163,15 @@ Section "Uninstall"
   Delete "$INSTDIR\stockfish.exe"
   Delete "$INSTDIR\launch.bat"
   Delete "$INSTDIR\launch.vbs"
+  Delete "$INSTDIR\launch-second-instance.bat"
+  Delete "$INSTDIR\launch-second-instance.vbs"
   Delete "$INSTDIR\uninstall.exe"
   RMDir /r "$INSTDIR\assets"
   RMDir /r "$INSTDIR\wallet-ui"
   RMDir "$INSTDIR"
 
   Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"
+  Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME} (2nd Instance).lnk"
   RMDir "$SMPROGRAMS\${APP_NAME}"
   Delete "$DESKTOP\${APP_NAME}.lnk"
 
