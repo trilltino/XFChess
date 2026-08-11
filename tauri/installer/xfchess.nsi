@@ -62,6 +62,16 @@ BrandingText "${APP_NAME} ${APP_VERSION}"
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
+  ; Kill any already-running instance first. Overwriting a locked binary below
+  ; fails with a bare "Error opening file for writing <name>.exe" — no
+  ; explanation that it's because a previous session's process (game or wallet
+  ; bridge) is still holding the file open. Silent (nsExec, not Exec) so no
+  ; console flash; ignore the exit code — "no such process" is the common,
+  ; harmless case on a first-ever install.
+  nsExec::Exec 'taskkill /F /IM ${APP_EXE} /T'
+  nsExec::Exec 'taskkill /F /IM ${BRIDGE_EXE} /T'
+  Sleep 500
+
   SetOutPath "$INSTDIR"
 
   File "${PAYLOAD_DIR}\${APP_EXE}"
