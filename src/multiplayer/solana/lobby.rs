@@ -726,6 +726,55 @@ async fn async_create_game_via_global_session(
     Ok(game_id)
 }
 
+/// Cancels a wagered lobby on-chain, refunding the escrowed wager back to
+/// `white`/`black`. This is a real transaction — before this existed,
+/// "cancelling" a hosted lobby only left the P2P relay listing (see
+/// `p2p_leave_game`) and permanently stranded any wager in `escrow_pda`,
+/// since nothing ever called the on-chain `cancel_game` instruction.
+///
+/// Fetches the `Game` account first (rather than trusting client-side
+/// state) so `black` is correct even if a joiner's on-chain `join_game` beat
+/// this cancel — passing a stale/default `black` when someone actually
+/// joined would make the on-chain `black_authority` constraint fail closed
+/// (safe) rather than silently skip their refund.
+pub fn cancel_game_on_chain(
+    rpc_url: String,
+    program_id: Pubkey,
+    wallet_pubkey: Pubkey,
+    game_id: u64,
+) -> Result<solana_sdk::signature::Signature, String> {
+    use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
+    use crate::solana::instructions::cancel_game_ix;
+
+    let rpc = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::confirmed());
+    let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let data = rpc
+        .get_account_data(&game_pda)
+        .map_err(|e| format!("fetch game account: {e}"))?;
+    // Anchor discriminator (8) + game_id (8) precede white/black — see
+    // `settlement_worker.rs::parse_game_account` for the same layout used
+    // server-side.
+    let white = data
+        .get(16..48)
+        .map(Pubkey::try_from)
+        .and_then(Result::ok)
+        .ok_or_else(|| "game account too short for white pubkey".to_string())?;
+    let black = data
+        .get(48..80)
+        .map(Pubkey::try_from)
+        .and_then(Result::ok)
+        .ok_or_else(|| "game account too short for black pubkey".to_string())?;
+
+    let ix = cancel_game_ix(program_id, wallet_pubkey, white, black, game_id)
+        .map_err(|e| format!("build cancel_game_ix: {e}"))?;
+
+    sign_and_send_via_tauri(&rpc_url, wallet_pubkey, &[ix], &[], "Cancelling wagered game")
+        .map(|sig| {
+            info!("[CANCEL_GAME] game {} cancelled on-chain, sig {}", game_id, sig);
+            sig
+        })
+}
+
 async fn async_lookup_game(
     rpc_url: String,
     program_id: solana_sdk::pubkey::Pubkey,
@@ -1169,13 +1218,16 @@ fn sync_from_solana_state(
     // Re-synced every frame (not once-and-cached like the wallet pubkey
     // below) since authorization completes asynchronously in the background
     // and needs to flip this from None to Some without a reconnect.
-    lobby.cached_global_session_keypair_bytes = match solana.global_session_active {
-        true => solana
-            .global_session_keypair
-            .as_ref()
-            .map(|kp| kp.to_bytes().to_vec()),
-        false => None,
-    };
+    //
+    // Forced to always `None` for now — global-session usage is disabled
+    // (see `authorize_global_session_if_needed`'s doc comment) but
+    // `try_load_global_session` at wallet-connect can still flip
+    // `global_session_active` true from an already-valid local file/on-chain
+    // session without going through that gate, so this is the actual
+    // enforcement point every game-creation call site reads from.
+    let _ = &solana.global_session_active;
+    let _ = &solana.global_session_keypair;
+    lobby.cached_global_session_keypair_bytes = None;
     if !region.tag.is_empty() {
         lobby.cached_region = Some(region.tag.clone());
     }
@@ -1319,4 +1371,3 @@ pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
         },
     );
 }
-

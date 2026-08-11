@@ -19,15 +19,14 @@ pub fn wager_ui_system(
         Err(_) => return,
     };
 
-    // Appends "(≈$X.XX)" next to a raw SOL amount when a live rate is
-    // available; empty otherwise so callers can no-op on `None` amounts
-    // (e.g. "Free Game") via `Option::map`. Deliberately doesn't touch
-    // `wager_display()`/`pot_display()` in state.rs — those have exact-string
-    // unit tests.
-    let usd_suffix = |sol: f64| -> String {
+    // USD is the primary display currency everywhere else in the client (see
+    // wager_rate.rs) — this HUD only fell back to raw SOL because it predates
+    // that convention. Falls back to a plain SOL amount when no live rate has
+    // loaded yet, same as the wager lobby.
+    let usd_or_sol = |sol: f64| -> String {
         match sol_usd_rate.usd_for_sol(sol) {
-            Some(usd) => format!(" (≈${:.2})", usd),
-            None => String::new(),
+            Some(usd) => format!("${:.2}", usd),
+            None => format!("{:.4} SOL", sol),
         }
     };
 
@@ -48,9 +47,12 @@ pub fn wager_ui_system(
                 // Wager amount
                 ui.horizontal(|ui| {
                     ui.label("Your Wager:");
-                    let suffix = wager_state.wager_amount.map(usd_suffix).unwrap_or_default();
+                    let text = wager_state
+                        .wager_amount
+                        .map(usd_or_sol)
+                        .unwrap_or_else(|| wager_state.wager_display());
                     ui.label(
-                        egui::RichText::new(format!("{}{}", wager_state.wager_display(), suffix))
+                        egui::RichText::new(text)
                             .color(egui::Color32::GOLD)
                             .strong(),
                     );
@@ -59,9 +61,12 @@ pub fn wager_ui_system(
                 // Total pot
                 ui.horizontal(|ui| {
                     ui.label("Total Pot:");
-                    let suffix = wager_state.total_pot.map(usd_suffix).unwrap_or_default();
+                    let text = wager_state
+                        .total_pot
+                        .map(usd_or_sol)
+                        .unwrap_or_else(|| wager_state.pot_display());
                     ui.label(
-                        egui::RichText::new(format!("{}{}", wager_state.pot_display(), suffix))
+                        egui::RichText::new(text)
                             .color(egui::Color32::GREEN)
                             .strong(),
                     );
@@ -79,13 +84,9 @@ pub fn wager_ui_system(
                         ui.horizontal(|ui| {
                             ui.label("Country Fee:");
                             ui.label(
-                                egui::RichText::new(format!(
-                                    "{} SOL{}",
-                                    country_fee,
-                                    usd_suffix(country_fee)
-                                ))
-                                .color(egui::Color32::LIGHT_BLUE)
-                                .small(),
+                                egui::RichText::new(usd_or_sol(country_fee))
+                                    .color(egui::Color32::LIGHT_BLUE)
+                                    .small(),
                             );
                         });
                     }
@@ -95,13 +96,9 @@ pub fn wager_ui_system(
                         ui.horizontal(|ui| {
                             ui.label("ELO Fee:");
                             ui.label(
-                                egui::RichText::new(format!(
-                                    "{} SOL{}",
-                                    elo_fee,
-                                    usd_suffix(elo_fee)
-                                ))
-                                .color(egui::Color32::LIGHT_BLUE)
-                                .small(),
+                                egui::RichText::new(usd_or_sol(elo_fee))
+                                    .color(egui::Color32::LIGHT_BLUE)
+                                    .small(),
                             );
                         });
                     }
@@ -115,14 +112,10 @@ pub fn wager_ui_system(
                         ui.horizontal(|ui| {
                             ui.label("Total Fees:");
                             ui.label(
-                                egui::RichText::new(format!(
-                                    "{} SOL{}",
-                                    total_fees,
-                                    usd_suffix(total_fees)
-                                ))
-                                .color(egui::Color32::YELLOW)
-                                .strong()
-                                .small(),
+                                egui::RichText::new(usd_or_sol(total_fees))
+                                    .color(egui::Color32::YELLOW)
+                                    .strong()
+                                    .small(),
                             );
                         });
                     }

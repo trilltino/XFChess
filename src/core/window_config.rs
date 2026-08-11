@@ -4,7 +4,7 @@
 //! and modification of window properties.
 
 use bevy::prelude::*;
-use bevy::window::{MonitorSelection, PresentMode, VideoModeSelection, Window};
+use bevy::window::{MonitorSelection, PresentMode, Window};
 
 /// Configuration for the primary application window
 ///
@@ -50,10 +50,10 @@ impl WindowConfig {
             resizable: self.resizable,
             present_mode: PresentMode::AutoVsync,
             mode: if self.fullscreen {
-                bevy::window::WindowMode::Fullscreen(
-                    MonitorSelection::Current,
-                    VideoModeSelection::Current,
-                )
+                // Borderless (maximized window), not exclusive Fullscreen: exclusive
+                // fullscreen owns the whole display surface, so nothing — including the
+                // wallet popup — can render on top without minimizing the game first.
+                bevy::window::WindowMode::BorderlessFullscreen(MonitorSelection::Current)
             } else {
                 bevy::window::WindowMode::Windowed
             },

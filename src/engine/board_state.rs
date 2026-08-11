@@ -492,7 +492,11 @@ mod tests {
     #[test]
     fn side_to_move_matches_fen_field() {
         let mut engine = ChessEngine::default();
-        assert_eq!(engine.side_to_move(), PieceColor::White, "start pos is white");
+        assert_eq!(
+            engine.side_to_move(),
+            PieceColor::White,
+            "start pos is white"
+        );
 
         engine.set_from_fen(FOOLS_MATE_FEN).unwrap();
         assert_eq!(

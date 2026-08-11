@@ -301,6 +301,31 @@ pub fn build_revoke_global_session_ix(
     }
 }
 
+/// Build a `withdraw_global_session` instruction — reclaims whatever balance
+/// sits above the vault's own rent-exempt minimum, back to `player`. Safe to
+/// call regardless of `enabled`/expiry state; it only touches lamports, not
+/// the delegation fields. Used before a revoke+reauthorize cycle so a stale
+/// session's leftover deposit isn't silently stranded when a fresh one is
+/// created (see `establish_global_session`'s doc comment).
+pub fn build_withdraw_global_session_ix(
+    program_id: &Pubkey,
+    player: &Pubkey,
+    session_pda: &Pubkey,
+) -> solana_sdk::instruction::Instruction {
+    let discriminator = anchor_discriminator("withdraw_global_session");
+
+    let accounts = vec![
+        AccountMeta::new(*session_pda, false),
+        AccountMeta::new(*player, true),
+    ];
+
+    solana_sdk::instruction::Instruction {
+        program_id: *program_id,
+        accounts,
+        data: discriminator.to_vec(),
+    }
+}
+
 /// Build a `global_create_game` instruction.
 pub fn build_global_create_game_ix(
     program_id: &Pubkey,

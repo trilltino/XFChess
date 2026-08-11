@@ -145,7 +145,11 @@ braid-core = { path = "crates/zarathustra_net/braid-core" }
 braid-http = { path = "crates/zarathustra_net/braid-http" }
 braid-iroh = { path = "crates/zarathustra_net/braid-iroh" }
 braid_chess = { path = "crates/zarathustra_net/braid_chess" }
-iroh-gossip = { path = "crates/zarathustra_net/iroh-gossip" }
+# Vendored copy removed 2026-08-10: it was an unmodified snapshot of upstream
+# v0.101.0 (see former crates/zarathustra_net/iroh-gossip/FORK_NOTES.md), which
+# is also the exact version published on crates.io — no local patches existed.
+# "net" is already in iroh-gossip's own default features.
+iroh-gossip = { version = "0.101.0" }
 nimzovich_engine = { path = "crates/engine/nimzovich_engine" }
 xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
 chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
@@ -280,6 +284,14 @@ xfchess-game = { workspace = true, optional = true }
 # transport move dedup) rather than adopting it workspace-wide.
 [dev-dependencies]
 proptest = "1"
+
+# Used by tauri_signer::bring_wallet_popup_to_front — same feature set and
+# version as tauri/Cargo.toml's own `windows` dependency.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "allow" }

@@ -441,14 +441,20 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(resolve_online_player_name(Some(&identity), Some("Bob")), "Alice");
+        assert_eq!(
+            resolve_online_player_name(Some(&identity), Some("Bob")),
+            "Alice"
+        );
     }
 
     #[test]
     fn falls_back_to_profile_name_when_identity_has_no_username() {
         let identity = PlayerIdentity::default();
 
-        assert_eq!(resolve_online_player_name(Some(&identity), Some("Bob")), "Bob");
+        assert_eq!(
+            resolve_online_player_name(Some(&identity), Some("Bob")),
+            "Bob"
+        );
     }
 }
 

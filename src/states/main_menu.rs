@@ -202,6 +202,7 @@ impl Plugin for MainMenuPlugin {
 pub fn wallet_connect_overlay_system(
     mut contexts: EguiContexts,
     mut poller: ResMut<WalletBridgePoller>,
+    keyboard: Res<ButtonInput<KeyCode>>,
 ) {
     if !poller.show_connect_overlay {
         return;
@@ -242,7 +243,10 @@ pub fn wallet_connect_overlay_system(
         ..egui::Frame::NONE
     };
 
-    let mut cancelled = false;
+    // Escape always dismisses the overlay, even if a fresh popup's
+    // force-focus (see tauri's open_in_browser) races a click on Cancel and
+    // eats it as a mere refocus — keyboard input isn't subject to that.
+    let mut cancelled = keyboard.just_pressed(KeyCode::Escape);
     let mut retry = false;
     let message = wallet_connect_overlay_message(&poller);
     let button_text = if poller.bridge_status_error.is_some() {

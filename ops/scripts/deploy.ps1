@@ -84,10 +84,10 @@ function Upload($local, $remote) {
 Write-Host "`n=== Git preflight checks ===" -ForegroundColor Magenta
 Push-Location $ROOT
 
-# private, not origin: since the open-core split (chore: split backend into
-# private repo), origin no longer carries backend/ at all — private is the
-# full source of truth this deploy actually needs to build and ship.
-$remoteUrl = git remote get-url private 2>&1
+# origin is the one source of truth (no private/public repo split anymore —
+# backend/ and ops/ live directly on trilltino/XFChess), so this deploy
+# builds and ships straight from origin's tree.
+$remoteUrl = git remote get-url origin 2>&1
 if ($LASTEXITCODE -ne 0 -or $remoteUrl -notmatch "xfchess") {
     Write-Host "ABORT: This does not look like the XFChess repository." -ForegroundColor Red; exit 1
 }
@@ -104,12 +104,12 @@ if ($dirty) {
     exit 1
 }
 
-git fetch private --quiet 2>&1 | Out-Null
-$behind = git rev-list "HEAD..private/$branch" --count 2>&1
+git fetch origin --quiet 2>&1 | Out-Null
+$behind = git rev-list "HEAD..origin/$branch" --count 2>&1
 if ($behind -match '^\d+$' -and [int]$behind -gt 0) {
-    Write-Host "ABORT: $behind commit(s) behind private/$branch. Run: git pull private $branch" -ForegroundColor Red; exit 1
+    Write-Host "ABORT: $behind commit(s) behind origin/$branch. Run: git pull origin $branch" -ForegroundColor Red; exit 1
 }
-Write-Host "Sync:   up to date with private/$branch" -ForegroundColor Green
+Write-Host "Sync:   up to date with origin/$branch" -ForegroundColor Green
 
 $commitHash   = git rev-parse --short HEAD
 $commitMsg    = git log -1 --pretty="%s"

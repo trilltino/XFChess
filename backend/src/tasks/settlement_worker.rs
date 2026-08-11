@@ -892,8 +892,8 @@ async fn finalize_on_chain(
 
     worker_metrics::SETTLEMENT_FINALIZED_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     info!(
-        "[FINALIZED] game {} auto-settled on devnet — winner={:?}, payout sig {}",
-        game_id, winner_side, sig
+        "[FINALIZED] game {} auto-settled on devnet — winner={:?}, payout sig {} — inspect: https://solscan.io/tx/{}?cluster=devnet",
+        game_id, winner_side, sig, sig
     );
     if snap.country_fee > 0 {
         let treasury_vault =

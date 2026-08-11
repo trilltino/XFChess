@@ -65,6 +65,16 @@ pub fn handler(
         timestamp,
     )?;
 
+    // Human-readable FEN in the plain program log, not just the base64
+    // `MoveEvent` below — Solscan (and any explorer without this program's
+    // IDL registered) can't decode `emit!` event data, so the board state
+    // otherwise only shows as an opaque blob. `from_bytes` is a zero-cost
+    // transmute; `to_fen` is a ~64-square string build, negligible CU cost.
+    msg!(
+        "FEN: {}",
+        chess_logic_on_chain::nimzovich_engine::CompactBoard::from_bytes(&next_board).to_fen()
+    );
+
     // Emit MoveEvent for Ledger-based history tracking (zero rent cost)
     emit!(crate::events::MoveEvent {
         game_id: _game_id,

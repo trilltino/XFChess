@@ -129,6 +129,12 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     | LobbyStatus::Success(_)
             );
 
+        let usd_per_sol = ctx
+            .sol_usd_wager_rate
+            .as_ref()
+            .and_then(|r| r.current.as_ref())
+            .map(|s| s.usd_per_sol);
+
         if !in_post_state {
             // Entered via "Find Wagered Game" ⇒ join/browse only; never let the
             // hidden Create tab stay active.
@@ -180,11 +186,6 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     .map(|id| bs58::encode(id.as_bytes()).into_string())
             });
             let secret_key_bytes = ctx.network_state.as_ref().and_then(|ns| ns.secret_key_bytes);
-            let usd_per_sol = ctx
-                .sol_usd_wager_rate
-                .as_ref()
-                .and_then(|r| r.current.as_ref())
-                .map(|s| s.usd_per_sol);
             let global_session_setup_in_progress = ctx
                 .solana_state
                 .as_ref()
@@ -213,7 +214,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     global_session_setup_in_progress,
                     global_session_unavailable_reason,
                 ),
-                LobbyMode::Browse => render_solana_browse_tab(ui, lobby),
+                LobbyMode::Browse => render_solana_browse_tab(ui, lobby, usd_per_sol),
                 LobbyMode::Tournament => {
                     render_solana_tournament_tab(ui, lobby, &mut ctx.spectate_events)
                 }
@@ -359,14 +360,22 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 // Pot preview
                 let wager = lobby.wager_sol;
                 if wager > 0.0 {
-                    ui.label(
-                        egui::RichText::new(format!(
+                    let pot_line = match usd_per_sol.filter(|r| *r > 0.0) {
+                        Some(rate) => format!(
+                            "Your escrow: ${:.2}  |  Total pot: ${:.2}",
+                            wager as f64 * rate,
+                            wager as f64 * 2.0 * rate
+                        ),
+                        None => format!(
                             "Your escrow: {:.4} SOL  |  Total pot: {:.4} SOL",
                             wager,
                             wager * 2.0
-                        ))
-                        .color(egui::Color32::GOLD)
-                        .size(12.0),
+                        ),
+                    };
+                    ui.label(
+                        egui::RichText::new(pot_line)
+                            .color(egui::Color32::GOLD)
+                            .size(12.0),
                     );
                 }
 
@@ -1222,6 +1231,7 @@ fn start_solana_braid_game(
 fn render_solana_browse_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
+    usd_per_sol: Option<f64>,
 ) {
     use crate::multiplayer::solana::lobby::{spawn_join_game, LobbyStatus};
 
@@ -1277,7 +1287,10 @@ fn render_solana_browse_tab(
             let inc  = game.increment_seconds;
             let time_str = if inc > 0 { format!("{}+{}", mins, inc) } else { format!("{} min", mins) };
             let stake_str = if game.stake_amount > 0.0 {
-                format!("{:.3} SOL", game.stake_amount)
+                match usd_per_sol.filter(|r| *r > 0.0) {
+                    Some(rate) => format!("${:.2}", game.stake_amount * rate),
+                    None => format!("{:.3} SOL", game.stake_amount),
+                }
             } else {
                 "Free".to_string()
             };
@@ -1909,6 +1922,15 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
 
     let region_label = &ctx.backend_region.label;
     let region_latency = ctx.backend_region.latency_ms;
+    #[cfg(feature = "solana")]
+    let usd_per_sol = ctx
+        .sol_usd_wager_rate
+        .as_ref()
+        .and_then(|r| r.current.as_ref())
+        .map(|s| s.usd_per_sol)
+        .filter(|r| *r > 0.0);
+    #[cfg(not(feature = "solana"))]
+    let usd_per_sol: Option<f64> = None;
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         for game in &games {
@@ -1921,7 +1943,10 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                 format!("{} min", mins)
             };
             let stake_str = if game.stake_amount > 0.0 {
-                format!("{:.3} SOL", game.stake_amount)
+                match usd_per_sol {
+                    Some(rate) => format!("${:.2}", game.stake_amount * rate),
+                    None => format!("{:.3} SOL", game.stake_amount),
+                }
             } else {
                 "Free".to_string()
             };
@@ -3213,15 +3238,53 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     })
                     .unwrap_or_default();
                 // Non-blocking — don't freeze the render thread on cancel
-                std::thread::spawn(move || {
-                    if let Err(e) =
-                        crate::multiplayer::vps_client::p2p_leave_game(game_id.clone(), &node_id)
-                    {
-                        warn!("[LOBBY] Leave failed on cancel: {}", e);
+                {
+                    let game_id = game_id.clone();
+                    std::thread::spawn(move || {
+                        if let Err(e) =
+                            crate::multiplayer::vps_client::p2p_leave_game(game_id.clone(), &node_id)
+                        {
+                            warn!("[LOBBY] Leave failed on cancel: {}", e);
+                        } else {
+                            info!("[LOBBY] Cancelled hosting for {}", game_id);
+                        }
+                    });
+                }
+
+                // A wagered lobby also has an on-chain `Game`/`escrow_pda` —
+                // leaving the P2P relay alone never touched that, so the
+                // wager sat stranded in escrow forever with no way to get it
+                // back. Submit the real `cancel_game` transaction too.
+                #[cfg(feature = "solana")]
+                if ctx.p2p_host.stake_amount > 0.0 {
+                    if let (Some(wallet_pubkey), Ok(game_id_u64)) = (
+                        ctx.solana_state.as_ref().and_then(|s| s.wallet_pubkey),
+                        game_id.parse::<u64>(),
+                    ) {
+                        std::thread::spawn(move || {
+                            let program_id: solana_sdk::pubkey::Pubkey =
+                                crate::solana::instructions::PROGRAM_ID.parse().unwrap();
+                            match crate::multiplayer::solana::lobby::cancel_game_on_chain(
+                                crate::multiplayer::solana::integration::state::DEVNET_RPC_URL
+                                    .to_string(),
+                                program_id,
+                                wallet_pubkey,
+                                game_id_u64,
+                            ) {
+                                Ok(sig) => info!(
+                                    "[LOBBY] cancel_game landed on-chain for {game_id_u64}, sig {sig} — wager refunded"
+                                ),
+                                Err(e) => warn!(
+                                    "[LOBBY] cancel_game failed for {game_id_u64}: {e} — wager may still be in escrow, retry from the lobby"
+                                ),
+                            }
+                        });
                     } else {
-                        info!("[LOBBY] Cancelled hosting for {}", game_id);
+                        warn!(
+                            "[LOBBY] Cancel Hosting: wagered lobby {game_id} but no wallet pubkey available — could not submit cancel_game, wager left in escrow"
+                        );
                     }
-                });
+                }
             }
 
             ctx.p2p_host.game_id = None;

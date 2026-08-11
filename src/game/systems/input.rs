@@ -619,9 +619,8 @@ pub fn on_square_click(
 pub fn toggle_fullscreen(mut window_query: Query<&mut Window>) {
     for mut window in window_query.iter_mut() {
         window.mode = match window.mode {
-            bevy::window::WindowMode::Windowed => bevy::window::WindowMode::Fullscreen(
+            bevy::window::WindowMode::Windowed => bevy::window::WindowMode::BorderlessFullscreen(
                 bevy::window::MonitorSelection::Current,
-                bevy::window::VideoModeSelection::Current,
             ),
             _ => bevy::window::WindowMode::Windowed,
         };

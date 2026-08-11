@@ -15,6 +15,14 @@ struct RecordMoveReq<'a> {
     move_uci: &'a str,
     next_fen: &'a str,
     nonce: u64,
+    /// Wallet of the player whose move this actually is — White on odd
+    /// plies, Black on even. Required because a single relayer (the
+    /// creator's client) submits both players' moves through one backend,
+    /// and the backend must sign with — and derive the on-chain
+    /// `SessionDelegation`/`GlobalSessionDelegation` PDA from — the correct
+    /// player's session, not whichever session happens to be on file for
+    /// the game. See backend's `record_move` handler doc comment.
+    mover_wallet: &'a str,
 }
 
 #[derive(Serialize)]
@@ -45,6 +53,12 @@ pub struct FinalizeResult {
     pub winner_lamports: u64,
     /// Country/treasury fee deducted in lamports.
     pub country_fee: u64,
+    /// Real backend-advanced operating cost (create/join/delegate/moves/
+    /// undelegate + the MagicBlock ER session fee) reimbursed to
+    /// treasury_vault from the pot. 0 for free games (nothing reimbursed).
+    pub operating_cost_lamports: u64,
+    /// Flat ELO-linking fee split between both players. 0 for free games.
+    pub elo_fee: u64,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +68,10 @@ struct FinalizeResp {
     pub winner_lamports: u64,
     #[serde(default)]
     pub country_fee: u64,
+    #[serde(default)]
+    pub operating_cost_lamports: u64,
+    #[serde(default)]
+    pub elo_fee: u64,
 }
 
 #[derive(Serialize)]
@@ -118,6 +136,7 @@ pub fn record_move(
     move_uci: &str,
     next_fen: &str,
     nonce: u64,
+    mover_wallet: &str,
 ) -> Result<(String, String), String> {
     let response = client()?
         .post(format!("{}/move/record", vps_base()))
@@ -126,6 +145,7 @@ pub fn record_move(
             move_uci,
             next_fen,
             nonce,
+            mover_wallet,
         })
         .send()
         .map_err(|e| format!("vps record_move: {e}"))?;
@@ -215,6 +235,8 @@ pub fn vps_finalize_game(
         sig: resp.sig,
         winner_lamports: resp.winner_lamports,
         country_fee: resp.country_fee,
+        operating_cost_lamports: resp.operating_cost_lamports,
+        elo_fee: resp.elo_fee,
     })
 }
 

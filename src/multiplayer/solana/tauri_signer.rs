@@ -104,6 +104,7 @@ pub fn candidate_ports() -> Vec<u16> {
 /// Fire-and-forget: requests the Tauri wallet popup window for wallet connection.
 /// Spawns a background thread so Bevy is never blocked.
 pub fn open_wallet_browser() {
+    bring_wallet_popup_to_front();
     std::thread::spawn(|| {
         // Send OPEN command over TCP to the Tauri wallet bridge.
         use std::io::Write;
@@ -116,6 +117,74 @@ pub fn open_wallet_browser() {
         }
     });
 }
+
+/// Bring the wallet popup window to the front — called from *this* process
+/// (the game client) rather than the Tauri sidecar, because that's the only
+/// way it reliably works on Windows.
+///
+/// `SetForegroundWindow` only succeeds for a caller whose own process
+/// currently owns the foreground window, was started by it, or just
+/// received real user input (see the Win32 docs for the exact rule). The
+/// Tauri sidecar (`xfchess-tauri.exe`) is a background process that never
+/// itself has focus, so it satisfies none of those — neither
+/// `AttachThreadInput` nor a synthesized Alt keystroke made its foreground
+/// calls reliable in practice (both tried and dropped; see git history on
+/// `tauri/src/main.rs`'s `force_foreground_window`). This process
+/// (`xfchess.exe`), by contrast, unquestionably *is* the foreground process
+/// at the exact moment the user clicks "Connect Wallet" or triggers a
+/// signing request, so a plain `SetForegroundWindow` call from here hits
+/// Windows' first, unconditional exemption and needs no workaround at all.
+///
+/// Finds the window by the same `XFChess #<port>` title Tauri's own
+/// hide/show logic uses (stamped by `tauri/wallet-ui/src/App.tsx`) and polls
+/// briefly since a freshly-spawned Chrome/Edge process needs a moment to
+/// create its window. Tauri still owns actually spawning/reusing the
+/// popup process — this only makes an existing (or about-to-exist) window
+/// visible once it appears.
+#[cfg(windows)]
+fn bring_wallet_popup_to_front() {
+    let expected_title = format!("XFChess #{}", wallet_bridge_port());
+    std::thread::spawn(move || {
+        use windows::core::BOOL;
+        use windows::Win32::Foundation::{HWND, LPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EnumWindows, GetWindowTextW, SetForegroundWindow, ShowWindow, SW_SHOW,
+        };
+
+        extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            unsafe {
+                let ctx = &mut *(lparam.0 as *mut (String, HWND));
+                let mut buf = [0u16; 256];
+                let len = GetWindowTextW(hwnd, &mut buf);
+                if len <= 0 || String::from_utf16_lossy(&buf[..len as usize]) != ctx.0 {
+                    return BOOL(1);
+                }
+                ctx.1 = hwnd;
+                BOOL(0)
+            }
+        }
+
+        // Poll for ~3s — a fresh Chrome/Edge process needs a moment to
+        // create its window and stamp its title.
+        for _ in 0..60 {
+            let mut ctx: (String, HWND) = (expected_title.clone(), HWND(std::ptr::null_mut()));
+            unsafe {
+                let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
+            }
+            if !ctx.1 .0.is_null() {
+                unsafe {
+                    let _ = ShowWindow(ctx.1, SW_SHOW);
+                    let _ = SetForegroundWindow(ctx.1);
+                }
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn bring_wallet_popup_to_front() {}
 
 /// Like `sign_and_send_via_tauri` but returns the signed transaction bytes
 /// without submitting to RPC. Used by the VPS flow where the VPS submits.
@@ -262,6 +331,11 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::{Duration, Instant};
+
+    // Every signing request needs the popup raised, not just the initial
+    // Connect Wallet click — see `bring_wallet_popup_to_front`'s doc comment
+    // for why this has to be issued from this process, not the Tauri sidecar.
+    bring_wallet_popup_to_front();
 
     fn is_timeout(e: &std::io::Error) -> bool {
         matches!(

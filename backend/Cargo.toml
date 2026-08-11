@@ -65,7 +65,7 @@ borsh = { workspace = true }
 
 # Braid/Iroh dependencies
 braid-iroh = { path = "../crates/zarathustra_net/braid-iroh" }
-iroh-gossip = { path = "../crates/zarathustra_net/iroh-gossip" }
+iroh-gossip = { workspace = true }
 braid_chess = { path = "../crates/zarathustra_net/braid_chess" }
 
 # Solana dependencies
