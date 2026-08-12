@@ -306,17 +306,21 @@ pub fn build_app(game_config: GameConfig) -> App {
                 ..default()
             })
             .set(LogPlugin {
-                // Release used to drop straight to "error" only, which meant
-                // every P2P connect/disconnect/timeout log and every rollup
-                // delegate/finalize/undelegate log (all info!/warn!) vanished
-                // from shipped builds — a player's stuck-game report was
-                // undebuggable from their own client log. Keep warn-level
-                // P2P/rollup diagnostics in release; still far quieter than
-                // the full debug-build filter.
+                // Release used to drop xfchess's own target to "warn" only —
+                // meant to keep noise out of a console release builds don't
+                // even have (windows_subsystem = "windows"). Now that
+                // xfchess=info goes to a real log file (file_log_layer)
+                // instead of a terminal, that tradeoff no longer holds: every
+                // subscription/topic/gossip info! line (exactly the detail
+                // needed to root-cause "made a move, opponent's client never
+                // saw it" reports) was invisible in every shipped build.
+                // Third-party crates (iroh, braid_*) stay at warn — their
+                // info-level output is much higher volume and rarely the
+                // first place a gameplay bug actually shows up.
                 filter: if cfg!(debug_assertions) {
                     "info,wgpu_core=warn,wgpu_hal=warn,xfchess=info,bevy_gltf=error,bevy_image=error,iroh=warn,iroh_relay=warn,iroh_gossip=warn,netwatch=warn,portmapper=warn,braid_chess=warn,braid_http=warn,braid_core=warn".to_string()
                 } else {
-                    "error,xfchess=warn,iroh=warn,iroh_relay=warn,iroh_gossip=warn,braid_chess=warn,braid_http=warn,braid_core=warn".to_string()
+                    "error,xfchess=info,iroh=warn,iroh_relay=warn,iroh_gossip=warn,braid_chess=warn,braid_http=warn,braid_core=warn".to_string()
                 },
                 custom_layer: file_log_layer,
                 ..default()

@@ -1596,6 +1596,9 @@ pub fn reset_multiplayer_session_state(
     #[cfg(feature = "solana")] mut rollup_manager: ResMut<
         crate::multiplayer::rollup::manager::EphemeralRollupManager,
     >,
+    #[cfg(feature = "solana")] mut rollup_bridge: ResMut<
+        crate::multiplayer::rollup::bridge::RollupNetworkBridge,
+    >,
 ) {
     *p2p_conn = crate::multiplayer::network::p2p::P2PConnectionState::default();
     *heartbeat = HeartbeatState::default();
@@ -1607,8 +1610,16 @@ pub fn reset_multiplayer_session_state(
     #[cfg(feature = "solana")]
     {
         *rollup_manager = crate::multiplayer::rollup::manager::EphemeralRollupManager::default();
+        // RollupNetworkBridge was never reset here — a failed delegation
+        // retry/cooldown from one game (and the "Ephemeral Rollup Sync
+        // Issue" popup it drives) stayed live in this resource forever,
+        // including into a completely unrelated later casual game that
+        // never touches ER at all. That's exactly the "popup comes up as
+        // if they're the same thing" report: two genuinely separate game
+        // modes sharing one leftover piece of state.
+        *rollup_bridge = crate::multiplayer::rollup::bridge::RollupNetworkBridge::default();
     }
-    info!("[NET] Reset P2P connection, heartbeat, Braid transport, and opponent-liveness state on match exit");
+    info!("[NET] Reset P2P connection, heartbeat, Braid transport, opponent-liveness, and rollup bridge state on match exit");
 }
 
 pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
