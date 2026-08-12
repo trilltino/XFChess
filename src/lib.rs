@@ -16,12 +16,37 @@ pub mod xf_animate;
 
 use bevy::asset::AssetMetaCheck;
 use bevy::audio::{AudioPlugin, Volume};
-use bevy::log::LogPlugin;
+use bevy::log::{BoxedLayer, LogPlugin};
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// Bevy's default logging is stdout-only. Release builds run with no
+/// console attached (see main.rs's windows_subsystem = "windows"), so every
+/// P2P/rollup/turn-advance log a player's own client produced was invisible
+/// to them, same gap this already had to be closed for the wallet bridge
+/// (tauri/src/utils/logging.rs) — a "stuck, can't move" report had nothing
+/// to go on beyond a screenshot. `Box::leak`ing the guard is the standard
+/// tracing-appender pattern for a writer that must live as long as the app.
+fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
+    let dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("xfchess")
+        .join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let file_appender = tracing_appender::rolling::daily(&dir, "game.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    Box::leak(Box::new(guard));
+    use tracing_subscriber::Layer;
+    Some(
+        tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(non_blocking)
+            .boxed(),
+    )
+}
 
 pub use core::persistent_camera::PersistentEguiCamera;
 
@@ -293,6 +318,7 @@ pub fn build_app(game_config: GameConfig) -> App {
                 } else {
                     "error,xfchess=warn,iroh=warn,iroh_relay=warn,iroh_gossip=warn,braid_chess=warn,braid_http=warn,braid_core=warn".to_string()
                 },
+                custom_layer: file_log_layer,
                 ..default()
             }),
     )
