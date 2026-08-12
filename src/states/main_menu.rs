@@ -121,7 +121,13 @@ impl Plugin for MainMenuPlugin {
             .init_resource::<PlayerColorChoice>()
             .init_resource::<NewsBannerState>()
             .init_resource::<PlayerIdentity>()
-            .add_systems(Startup, load_local_profile_on_startup)
+            // No startup system pre-fills PlayerIdentity.username from the
+            // locally-cached profile name (identity::load_active_profile) —
+            // that used to mean every launch silently skipped straight past
+            // picking a profile with no prompt at all. Leaving `username`
+            // unset here is exactly the condition the first-run onboarding
+            // modal already gates on, so every launch now shows the profile
+            // picker fresh instead.
             .init_resource::<crate::assets::GameAssets>()
             .init_resource::<crate::assets::LoadingProgress>()
             .init_resource::<crate::assets::AssetLoadingTimer>()
@@ -1103,23 +1109,6 @@ pub struct PlayerIdentity {
     /// Shown as a second, clearly-labeled stat, never merged with `elo`.
     pub lichess_elo: Option<u32>,
     pub lichess_verified: bool,
-}
-
-/// Populate `PlayerIdentity.username` from the locally-persisted profile
-/// name (`identity::load_guest_username`, `Documents/xfchess/guest_username`),
-/// if one was ever saved — runs once at startup, before the main menu ever
-/// renders, so a returning player's name is read silently with no prompt.
-/// Leaves `username` unset (triggering the first-run onboarding modal) when
-/// no local profile has ever been saved.
-fn load_local_profile_on_startup(mut player_identity: ResMut<PlayerIdentity>) {
-    if player_identity.username.is_some() {
-        return;
-    }
-    if let Some(name) = crate::multiplayer::network::identity::load_active_profile() {
-        info!("[PROFILE] Loaded local profile name: {}", name);
-        player_identity.username = Some(name);
-        player_identity.is_guest = true;
-    }
 }
 
 impl PlayerIdentity {
