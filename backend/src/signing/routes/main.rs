@@ -717,7 +717,15 @@ pub async fn delegate_game(
             "delegate_game failed for game {} (sig would be unknown — send failed): {e}",
             req.game_id
         );
+        // Debug, not just Display, logged separately: ClientError's Display
+        // impl collapses a simulation failure to one summary line ("Attempt
+        // to load a program that does not exist") with no indication of
+        // *which* account/program the runtime was even looking at. The
+        // Debug impl carries the full RpcResponseErrorData (including the
+        // simulation's `logs`), which is the only way to actually pin this
+        // down instead of guessing.
         error!("[VPS] {msg}");
+        error!("[VPS] delegate_game full error detail for game {}: {e:?}", req.game_id);
         (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
@@ -996,6 +1004,7 @@ pub async fn undelegate_game(
     let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
         let msg = format!("undelegate_game failed for game {}: {e}", req.game_id);
         error!("[VPS] {msg}");
+        error!("[VPS] undelegate_game full error detail for game {}: {e:?}", req.game_id);
         (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
