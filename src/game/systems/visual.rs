@@ -20,7 +20,10 @@ pub fn flush_pending_turn(
         // move, this line (or its absence) says immediately whether the
         // turn genuinely never advanced, versus advancing correctly while
         // something else (input gating, network delivery) blocked play.
-        info!(
+        // warn! (not info!): the release build's log filter is
+        // "xfchess=warn", so an info! here would be silently dropped in
+        // exactly the shipped builds where this diagnostic matters most.
+        warn!(
             "[TURN] {:?} move {} -> {:?} move {} (mover was {:?})",
             before.0, before.1, current_turn.color, current_turn.move_number, pending.mover
         );
