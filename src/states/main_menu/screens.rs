@@ -574,7 +574,7 @@ pub(super) fn render_spectator_popup(
             // "accept" step.
             let live_games: Vec<_> = cached_games
                 .iter()
-                .filter(|g| g.players_joined >= g.capacity)
+                .filter(|g| g.status == "InProgress" && g.players_joined >= g.capacity)
                 .collect();
 
             if live_games.is_empty() {
@@ -1320,10 +1320,12 @@ fn render_solana_browse_tab(
                             });
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let full = game.players_joined >= game.capacity;
+                            let joinable = game.status == "Open";
+                            let full = !joinable || game.players_joined >= game.capacity;
                             let can_join = lobby.cached_keypair_bytes.is_some()
                                 && lobby.cached_balance >= game.stake_amount + 0.002
-                                && !full;
+                                && joinable
+                                && game.players_joined < game.capacity;
                             if ui.add_enabled(can_join, egui::Button::new(
                                 egui::RichText::new(if full { "Full" } else { "Join" }).size(12.0).strong()
                             ).fill(if can_join { egui::Color32::from_rgb(140, 80, 0) } else { egui::Color32::from_rgb(60, 60, 60) }).corner_radius(4.0).min_size(egui::vec2(60.0, 28.0))).clicked() {
@@ -2038,10 +2040,10 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
 
                         // Right: join button
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let full = game.players_joined >= game.capacity;
-                            if ui.add_enabled(!full, egui::Button::new(
-                                egui::RichText::new(if full { "Full" } else { "Join" }).size(13.0).color(egui::Color32::WHITE).strong()
-                            ).fill(if full { egui::Color32::from_rgb(60, 60, 60) } else { egui::Color32::from_rgb(40, 140, 80) }).corner_radius(4.0).min_size(egui::vec2(70.0, 32.0))).clicked() {
+                            let joinable = game.status == "Open" && game.players_joined < game.capacity;
+                            if ui.add_enabled(joinable, egui::Button::new(
+                                egui::RichText::new(if joinable { "Join" } else { "Busy" }).size(13.0).color(egui::Color32::WHITE).strong()
+                            ).fill(if joinable { egui::Color32::from_rgb(40, 140, 80) } else { egui::Color32::from_rgb(60, 60, 60) }).corner_radius(4.0).min_size(egui::vec2(70.0, 32.0))).clicked() {
                                 info!("[LOBBY] Joining: {}", game.game_id);
                                 let game_id = game.game_id.clone();
                                 let stake_amount = game.stake_amount;

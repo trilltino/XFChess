@@ -125,6 +125,7 @@ async fn bind_http_port() -> Option<(TcpListener, u16)> {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     if let Ok(listener) = TcpListener::bind(addr).await {
       let _ = ACTUAL_HTTP_PORT.set(port);
+      std::env::set_var("XFCHESS_ACTUAL_WALLET_PORT", port.to_string());
       let _ = std::fs::write(http_bridge_port_file(), port.to_string());
       return Some((listener, port));
     }
@@ -882,56 +883,57 @@ fn open_in_browser(url: &str, force_fresh: bool) {
       return;
     }
 
-    // Chrome's per-user (non-admin) installer puts the binary under
-    // %LOCALAPPDATA% instead of Program Files — that's actually the more
-    // common layout on end-user machines than the two Program Files paths
-    // below, so check it first. Fall back to Edge (bundled with every
-    // Windows 10/11 install) in --app mode before giving up on a compact
-    // popup entirely — without one of these, a Chrome-less machine falls
-    // through to `open::that`, which opens a normal maximized browser tab
-    // instead of the small popup this UI is designed for.
-    let local_appdata_chrome = std::env::var("LOCALAPPDATA")
-      .ok()
-      .map(|v| format!(r"{v}\Google\Chrome\Application\chrome.exe"));
-    let mut browser_paths: Vec<&str> = Vec::new();
-    if let Some(ref p) = local_appdata_chrome {
-      browser_paths.push(p.as_str());
-    }
-    browser_paths.push(r"C:\Program Files\Google\Chrome\Application\chrome.exe");
-    browser_paths.push(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe");
-    browser_paths.push(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe");
-    browser_paths.push(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe");
-
-    let app_flag = format!("--app={}", url_ts);
-    for path in &browser_paths {
-      if std::path::Path::new(path).exists() {
-        match Command::new(path)
-          .args([&app_flag, "--window-size=460,720"])
-          .spawn()
-        {
-          Ok(child) => {
-            let pid = child.id();
-            *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
-            // Deliberately NOT force-focusing the popup here (that used to
-            // call force_foreground_window(pid)). Stealing OS foreground
-            // focus from the game meant the *next* click back on the game
-            // window — e.g. Cancel on the "Connect Wallet" overlay — was
-            // consumed by Windows just to refocus it instead of reaching
-            // Bevy/egui, making the overlay look broken/unclickable. The
-            // popup still opens and Windows flashes its taskbar icon on its
-            // own; the user can switch to it when it actually needs a click
-            // (most reconnects now resolve silently via `onlyIfTrusted` and
-            // never need one at all — see WalletStep's autoConnect).
-          }
-          Err(e) => tracing::warn!("[WalletPopup] failed to spawn {path}: {e}"),
-        }
-        return;
+    fn get_chromium_default_browser() -> Option<String> {
+      let output = std::process::Command::new("reg")
+        .args(["query", r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice", "/v", "ProgId"])
+        .output()
+        .ok()?;
+      let stdout = String::from_utf8_lossy(&output.stdout);
+      let prog_id = stdout.lines().find(|l| l.contains("ProgId"))?.split_whitespace().last()?;
+      
+      let hkcr = format!(r"HKCR\{}\shell\open\command", prog_id);
+      let output = std::process::Command::new("reg")
+        .args(["query", &hkcr, "/ve"])
+        .output()
+        .ok()?;
+      let stdout = String::from_utf8_lossy(&output.stdout);
+      
+      let path_str = stdout.lines().find(|l| l.contains("REG_SZ"))?;
+      let idx = path_str.find("REG_SZ")?;
+      let cmd = path_str[idx + 6..].trim();
+      let path = if cmd.starts_with('"') {
+          let end_quote = cmd[1..].find('"')?;
+          cmd[1..end_quote + 1].to_string()
+      } else {
+          let path_part = cmd.split(" --").next().unwrap_or(cmd).split(" %").next().unwrap_or(cmd);
+          path_part.trim().to_string()
+      };
+      let lower = path.to_lowercase();
+      if lower.contains("chrome.exe") || lower.contains("msedge.exe") || lower.contains("brave.exe") || lower.contains("vivaldi.exe") || lower.contains("opera.exe") {
+          return Some(path);
       }
+      None
     }
-    // Last resort: default browser (cross-platform via the `open` crate).
-    // This opens a normal, non-compact browser window/tab — expected only
-    // when neither Chrome nor Edge is found at any known path.
-    tracing::warn!("[WalletPopup] no Chrome/Edge found at known paths — falling back to default browser (will not be a compact popup)");
+
+    if let Some(chromium_browser) = get_chromium_default_browser() {
+        if std::path::Path::new(&chromium_browser).exists() {
+            let app_flag = format!("--app={}", url_ts);
+            match Command::new(&chromium_browser)
+                .args([&app_flag, "--window-size=460,720"])
+                .spawn()
+            {
+                Ok(child) => {
+                    let pid = child.id();
+                    *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
+                    return;
+                }
+                Err(e) => tracing::warn!("[WalletPopup] failed to spawn {chromium_browser}: {e}"),
+            }
+        }
+    }
+
+    // Fall back to default browser via open::that() if not Chromium or spawn failed
+    tracing::info!("[WalletPopup] Opening in default browser (not chromium --app)");
     let _ = open::that(&url_ts);
   }
   #[cfg(not(windows))]

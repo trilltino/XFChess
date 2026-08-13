@@ -21,12 +21,12 @@ impl UsernameRecord {
 pub fn validate_username(username: &str) -> Result<()> {
     // Check length
     let len = username.len();
-    require!(len >= 3 && len <= 20, UsernameError::InvalidLength);
+    require!(len >= 3 && len <= 20, crate::errors::GameErrorCode::InvalidLength);
 
     // Check valid characters
     for ch in username.chars() {
         let valid = ch.is_ascii_alphanumeric() || ch == '_' || ch == '-';
-        require!(valid, UsernameError::InvalidCharacters);
+        require!(valid, crate::errors::GameErrorCode::InvalidCharacters);
     }
 
     // Check reserved names (case-insensitive)
@@ -46,25 +46,13 @@ pub fn validate_username(username: &str) -> Result<()> {
     ];
     for r in reserved {
         if lower == r || lower.starts_with(r) {
-            return Err(UsernameError::ReservedUsername.into());
+            return Err(crate::errors::GameErrorCode::ReservedUsername.into());
         }
     }
 
     Ok(())
 }
 
-#[error_code]
-pub enum UsernameError {
-    #[msg("Username must be 3-20 characters")]
-    InvalidLength,
-    #[msg("Username can only contain A-Z, a-z, 0-9, _, -")]
-    InvalidCharacters,
-    #[msg("This username is reserved")]
-    ReservedUsername,
-    #[msg("Username already taken")]
-    UsernameTaken,
-    #[msg("Username not set")]
-    UsernameNotSet,
-    #[msg("Cannot change username yet - cooldown active")]
-    ChangeCooldown,
-}
+// Username-specific error variants are consolidated into `GameErrorCode` in
+// `errors.rs` so Anchor's IDL builder does not find multiple #[error_code]
+// enums across the crate.

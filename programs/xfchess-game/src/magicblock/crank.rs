@@ -38,8 +38,8 @@ pub fn build_time_check_schedule_instruction(
     data.extend_from_slice(
         &anchor_lang::prelude::borsh::to_vec(
             &crate::crank_ix::crank_time_check::CrankTimeCheckData {},
-        )
-        .map_err(|_| crate::crank_ix::schedule_time_check::ErrorCode::InvalidArgument)?,
+            )
+            .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?,
     );
     let crank_ix = Instruction {
         program_id: crate::ID,
@@ -57,7 +57,7 @@ pub fn build_time_check_schedule_instruction(
         iterations: iterations as i64,
         instructions: vec![crank_ix],
     }))
-    .map_err(|_| crate::crank_ix::schedule_time_check::ErrorCode::InvalidArgument)?;
+    .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?;
 
     Ok(Instruction::new_with_bytes(
         ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID,
@@ -81,7 +81,7 @@ pub fn build_time_check_cancel_instruction(
     let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask {
         task_id: task_id as i64,
     })
-    .map_err(|_| crate::crank_ix::cancel_time_check::ErrorCode::InvalidArgument)?;
+    .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?;
 
     Ok(Instruction::new_with_bytes(
         ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID,

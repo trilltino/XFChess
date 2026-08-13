@@ -246,6 +246,21 @@ pub enum GameErrorCode {
     #[msg("Invalid username format or length.")]
     InvalidUsername,
 
+    // Username-specific granular errors (moved into the central error
+    // enum so Anchor's IDL builder sees a single error definition).
+    #[msg("Username must be 3-20 characters")]
+    InvalidLength,
+    #[msg("Username can only contain A-Z, a-z, 0-9, _, -")]
+    InvalidCharacters,
+    #[msg("This username is reserved")]
+    ReservedUsername,
+    #[msg("Username already taken")]
+    UsernameTaken,
+    #[msg("Username not set")]
+    UsernameNotSet,
+    #[msg("Cannot change username yet - cooldown active")]
+    ChangeCooldown,
+
     // ── Age verification ──────────────────────────────────────────────────────
     #[msg("Player must be 18 or older to participate in wagered games.")]
     UnderagePlayer, // date_of_birth indicates player is under 18

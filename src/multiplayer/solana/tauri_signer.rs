@@ -56,6 +56,13 @@ fn http_bridge_port_file() -> std::path::PathBuf {
 /// nominal XFCHESS_WALLET_PORT-derived value (default 7454) — matching the
 /// common single-instance case where they're always the same.
 pub fn wallet_bridge_port() -> u16 {
+    if let Some(port) = std::env::var("XFCHESS_ACTUAL_WALLET_PORT")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+    {
+        return port;
+    }
+
     std::fs::read_to_string(http_bridge_port_file())
         .ok()
         .and_then(|s| s.trim().parse().ok())

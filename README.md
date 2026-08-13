@@ -304,6 +304,16 @@ scripts\build.bat
 scripts\build_program.bat
 ```
 
+If your local Anchor 1.1.2 toolchain is broken, use the Docker-backed helpers:
+
+```powershell
+scripts\anchor_build_linux.bat
+scripts\anchor_deploy_linux.bat
+```
+
+- `scripts\anchor_build_linux.bat` builds the Solana program with a clean Anchor 1.1.2 environment inside a Linux container and places `target/deploy/xfchess_game.so` in the workspace root.
+- `scripts\anchor_deploy_linux.bat` builds and deploys the program from the same Docker-backed environment using your local Solana wallet config.
+
 ### Web Frontend
 
 ```bash

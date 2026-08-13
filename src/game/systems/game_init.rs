@@ -187,8 +187,9 @@ pub fn initialize_players(
     player_identity: Res<crate::states::main_menu::PlayerIdentity>,
 ) {
     if let crate::core::states::GameMode::MultiplayerLocal = *core_mode {
+        let p1_name = player_identity.display_name().to_string();
         *players = Players {
-            player_1: Player::new(1, "Player 1".to_string(), PieceColor::White, true),
+            player_1: Player::new(1, p1_name, PieceColor::White, true),
             player_2: Player::new(2, "Player 2".to_string(), PieceColor::Black, true),
         };
         info!("[GAME_INIT] Local PvP players initialized (both human)");
@@ -229,13 +230,14 @@ pub fn initialize_players(
             PieceColor::Black => PieceColor::White,
         };
 
+        let human_name = player_identity.display_name().to_string();
         *players = match ai_color {
             PieceColor::White => Players {
                 player_1: Player::new(1, "AI".to_string(), PieceColor::White, false),
-                player_2: Player::new(2, "Player 1".to_string(), PieceColor::Black, true),
+                player_2: Player::new(2, human_name, PieceColor::Black, true),
             },
             PieceColor::Black => Players {
-                player_1: Player::new(1, "Player 1".to_string(), PieceColor::White, true),
+                player_1: Player::new(1, human_name, PieceColor::White, true),
                 player_2: Player::new(2, "AI".to_string(), PieceColor::Black, false),
             },
         };

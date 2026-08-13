@@ -1354,6 +1354,7 @@ pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
                         display_name: g.display_name,
                         stake_amount: g.stake_amount,
                         game_type: g.game_type,
+                        status: g.status,
                         base_time_seconds: g.base_time_seconds,
                         increment_seconds: g.increment_seconds,
                         username: g.username,
