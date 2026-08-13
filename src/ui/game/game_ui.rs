@@ -1361,6 +1361,7 @@ pub fn opponent_disconnect_ui(
     mut disc: ResMut<OpponentDisconnectState>,
     mut timeout_writer: bevy::prelude::MessageWriter<crate::game::events::FlagTimeoutEvent>,
     current_turn: Res<crate::game::resources::CurrentTurn>,
+    first_move_deadline: Res<crate::game::resources::FirstMoveDeadline>,
 ) {
     use crate::multiplayer::network::p2p::P2PConnectionStatus;
     if game_over.is_game_over() {
@@ -1372,6 +1373,16 @@ pub fn opponent_disconnect_ui(
         GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
     );
     if !is_online {
+        return;
+    }
+
+    // The first-move grace period owns the pre-game abort path. Showing the
+    // 60s disconnect countdown at the same time is confusing and can produce
+    // two competing timeout outcomes before White has even made move one.
+    if first_move_deadline.active {
+        if disc.disconnected_at.is_some() && !disc.timed_out {
+            disc.disconnected_at = None;
+        }
         return;
     }
 

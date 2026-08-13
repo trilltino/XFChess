@@ -59,8 +59,6 @@ pub struct CancelTimeCheck<'info> {
     pub magic_program: AccountInfo<'info>,
 }
 
-#[error_code]
-pub enum ErrorCode {
-    #[msg("Invalid argument")]
-    InvalidArgument,
-}
+// Crank-specific small error enums removed; use the central `GameErrorCode`
+// in `crate::errors` (e.g. `GameErrorCode::InvalidArgument`) to avoid
+// multiple #[error_code] enums in the crate which the IDL builder rejects.

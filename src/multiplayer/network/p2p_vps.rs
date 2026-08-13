@@ -154,6 +154,7 @@ pub struct VpsGameListing {
     pub display_name: String,
     pub stake_amount: f64,
     pub game_type: String,
+    pub status: String,
     pub base_time_seconds: u32,
     pub increment_seconds: u16,
     pub username: Option<String>,
@@ -300,7 +301,8 @@ fn sync_vps_relay_settings(
     }
 }
 
-/// Poll VPS for available game listings every 5 seconds.
+/// Poll VPS for available game listings frequently enough that cancelled,
+/// filled, and newly-opened rooms do not linger in the menu.
 fn poll_vps_game_list(mut vps_state: ResMut<P2PVpsState>) {
     if !vps_state.use_vps_relay {
         return;
@@ -308,7 +310,7 @@ fn poll_vps_game_list(mut vps_state: ResMut<P2PVpsState>) {
 
     let should_poll = vps_state
         .last_poll
-        .map(|t| t.elapsed().as_secs() > 5)
+        .map(|t| t.elapsed().as_secs_f32() >= 1.0)
         .unwrap_or(true);
 
     if !should_poll {
@@ -464,6 +466,7 @@ fn handle_vps_responses(
                         display_name: g.display_name,
                         stake_amount: g.stake_amount,
                         game_type: g.game_type,
+                        status: g.status,
                         base_time_seconds: g.base_time_seconds,
                         increment_seconds: g.increment_seconds,
                         username: g.username,

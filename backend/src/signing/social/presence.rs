@@ -56,12 +56,12 @@ impl PresenceStore {
         }
     }
 
-    /// Everyone not `Offline` and updated within the last 5 minutes.
+    /// Everyone not `Offline` and updated within the last 15 seconds.
     pub fn get_all_online(&self) -> Vec<Presence> {
         self.inner
             .read()
             .map(|m| {
-                let cutoff = Utc::now() - chrono::Duration::minutes(5);
+                let cutoff = Utc::now() - chrono::Duration::seconds(15);
                 m.values()
                     .filter(|p| p.updated_at > cutoff && p.status != PresenceStatus::Offline)
                     .cloned()
