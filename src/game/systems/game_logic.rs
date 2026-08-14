@@ -250,28 +250,55 @@ pub fn update_game_timer(
     }
 }
 
-/// System to transition game state when game is over
+/// System to flag a finished game for the "press Enter" prompt.
 ///
-/// Watches for changes in [`GameOverState`] and updates the Bevy State machine.
-/// This ensures systems that should only run during active gameplay are stopped.
+/// Watches for changes in [`GameOverState`]. Instead of instantly switching
+/// to the black GameOver stats screen, it activates [`PendingGameOver`] so
+/// the final position stays visible with a flashing
+/// "Press Enter to see game stats" banner. The actual `InGame → GameOver`
+/// transition happens in [`confirm_game_over_prompt`] (Enter key) or when the
+/// banner is clicked in the UI.
 pub fn check_game_over_state(
     game_over: Res<GameOverState>,
     state: Res<State<crate::core::GameState>>,
-    mut next_state: ResMut<NextState<crate::core::GameState>>,
+    mut pending: ResMut<PendingGameOver>,
     animations: Query<(), (With<PieceMoveAnimation>, Without<FadingCapture>)>,
     fades: Query<(), With<FadingCapture>>,
 ) {
-    // Only transition if we are currently InGame and the game is effectively over
+    // Only flag once we are currently InGame and the game is effectively over.
     // Wait for active animations and capture fades to finish so the final move is visible
     if *state.get() == crate::core::GameState::InGame
         && game_over.is_game_over()
         && animations.is_empty()
         && fades.is_empty()
+        && !pending.active
     {
         info!(
-            "[GAME] Game over condition met ({:?}) - transitioning to GameOver state",
+            "[GAME] Game over condition met ({:?}) - showing 'press Enter to see game stats' prompt",
             *game_over
         );
+        pending.active = true;
+    }
+}
+
+/// While a finished game is pending acknowledgement, pressing Enter opens the
+/// GameOver stats screen (the black screen with the result popup).
+pub fn confirm_game_over_prompt(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    state: Res<State<crate::core::GameState>>,
+    game_over: Res<GameOverState>,
+    mut pending: ResMut<PendingGameOver>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+) {
+    if *state.get() != crate::core::GameState::InGame
+        || !pending.active
+        || !game_over.is_game_over()
+    {
+        return;
+    }
+    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+        info!("[GAME] Game over acknowledged - transitioning to GameOver state");
+        pending.active = false;
         next_state.set(crate::core::GameState::GameOver);
     }
 }

@@ -1866,6 +1866,7 @@ fn handle_magic_block_events(
                     lifetime: 8.0,
                     remaining: 8.0,
                     dismissed: false,
+                    created_at: std::time::Instant::now(),
                 });
             }
             MagicBlockEvent::UndelegationFailed { game_pda, error } => {

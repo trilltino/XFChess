@@ -163,27 +163,52 @@ fn profiles_path() -> PathBuf {
     profiles_dir().join("profiles.json")
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+pub struct ProfileEntry {
+    pub name: String,
+    pub save_path: Option<PathBuf>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct ProfilesFile {
+    #[serde(default)]
+    profiles: Vec<ProfileEntry>,
+    #[serde(default)]
     names: Vec<String>,
     active: Option<String>,
 }
 
 fn read_profiles_file() -> ProfilesFile {
-    match std::fs::read_to_string(profiles_path()) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+    let mut file = match std::fs::read_to_string(profiles_path()) {
+        Ok(s) => serde_json::from_str::<ProfilesFile>(&s).unwrap_or_default(),
         Err(_) => {
             // Migrate the legacy single-profile file, if any, so an existing
             // player's name and PGN history keep working after the update.
             match load_guest_username() {
                 Some(name) => ProfilesFile {
-                    names: vec![name.clone()],
+                    profiles: vec![ProfileEntry { name: name.clone(), save_path: None }],
+                    names: vec![],
                     active: Some(name),
                 },
                 None => ProfilesFile::default(),
             }
         }
+    };
+
+    // Migrate legacy `names` array to `profiles` array.
+    if !file.names.is_empty() {
+        for name in file.names.drain(..) {
+            if !file.profiles.iter().any(|p| p.name == name) {
+                file.profiles.push(ProfileEntry {
+                    name,
+                    save_path: None,
+                });
+            }
+        }
+        write_profiles_file(&file);
     }
+
+    file
 }
 
 fn write_profiles_file(file: &ProfilesFile) {
@@ -196,7 +221,7 @@ fn write_profiles_file(file: &ProfilesFile) {
 
 /// Names of every local profile ever created, in creation order.
 pub fn list_profiles() -> Vec<String> {
-    read_profiles_file().names
+    read_profiles_file().profiles.into_iter().map(|p| p.name).collect()
 }
 
 /// The profile active as of the last launch, if any.
@@ -206,14 +231,17 @@ pub fn load_active_profile() -> Option<String> {
 
 /// Create a new local profile (no-op if the name already exists) and make it
 /// the active one. Also ensures its PGN subfolder exists.
-pub fn create_profile(name: &str) {
+pub fn create_profile(name: &str, save_path: Option<PathBuf>) {
     let name = name.trim().to_string();
     if name.is_empty() {
         return;
     }
     let mut file = read_profiles_file();
-    if !file.names.iter().any(|n| n == &name) {
-        file.names.push(name.clone());
+    if !file.profiles.iter().any(|p| p.name == name) {
+        file.profiles.push(ProfileEntry {
+            name: name.clone(),
+            save_path,
+        });
     }
     file.active = Some(name.clone());
     write_profiles_file(&file);
@@ -226,7 +254,7 @@ pub fn create_profile(name: &str) {
 /// Switch the active profile to an already-existing name (no-op if unknown).
 pub fn set_active_profile(name: &str) {
     let mut file = read_profiles_file();
-    if !file.names.iter().any(|n| n == name) {
+    if !file.profiles.iter().any(|p| p.name == name) {
         return;
     }
     file.active = Some(name.to_string());
@@ -253,9 +281,25 @@ fn sanitize_profile_name(name: &str) -> String {
 /// PGN save folder for a given profile, e.g.
 /// `Documents/xfchess/profiles/<name>/`. Created on demand.
 pub fn profile_pgn_dir(name: &str) -> PathBuf {
+    let file = read_profiles_file();
+    if let Some(profile) = file.profiles.iter().find(|p| p.name == name) {
+        if let Some(path) = &profile.save_path {
+            return path.clone();
+        }
+    }
     profiles_dir()
         .join("profiles")
         .join(sanitize_profile_name(name))
+}
+
+/// Delete a profile from the saved list. Does not delete their PGN folder.
+pub fn delete_profile(name: &str) {
+    let mut file = read_profiles_file();
+    file.profiles.retain(|p| p.name != name);
+    if file.active.as_deref() == Some(name) {
+        file.active = None;
+    }
+    write_profiles_file(&file);
 }
 
 fn ensure_profile_pgn_dir(name: &str) {

@@ -1825,6 +1825,72 @@ pub fn disconnect_recovery_banner(
         });
 }
 
+// ── Game over prompt banner ─────────────────────────────────────────────────
+
+/// Flashing bottom-of-screen banner shown once a game has ended.
+///
+/// Keeps the final position on screen (instead of instantly cutting to the
+/// black stats screen) until the player presses Enter — handled by
+/// `game_logic::confirm_game_over_prompt` — or clicks the banner itself.
+pub fn game_over_prompt_banner(
+    mut contexts: bevy_egui::EguiContexts,
+    state: Res<State<crate::core::GameState>>,
+    game_over: Res<crate::game::resources::GameOverState>,
+    mut pending: ResMut<crate::game::resources::PendingGameOver>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+) {
+    if *state.get() != crate::core::GameState::InGame
+        || !pending.active
+        || !game_over.is_game_over()
+    {
+        return;
+    }
+
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+
+    // Smooth flash (~1.6 s period) between dim and bright.
+    let t = ctx.input(|i| i.time);
+    let pulse = 0.5 + 0.5 * (t * 4.0).sin();
+    let text_alpha = (140.0 + 115.0 * pulse) as u8;
+    let border_alpha = (90.0 + 130.0 * pulse) as u8;
+    let gold_text = egui::Color32::from_rgba_unmultiplied(244, 187, 68, text_alpha);
+    let gold_border = egui::Color32::from_rgba_unmultiplied(244, 187, 68, border_alpha);
+
+    let mut clicked = false;
+    egui::Window::new("game_over_prompt")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -96.0])
+        .frame(
+            egui::Frame::default()
+                .fill(egui::Color32::from_rgba_unmultiplied(13, 17, 23, 235))
+                .stroke(egui::Stroke::new(1.5, gold_border))
+                .corner_radius(8.0)
+                .inner_margin(12.0),
+        )
+        .show(ctx, |ui| {
+            let resp = ui.add(
+                egui::Button::new(
+                    egui::RichText::new("Press Enter to see game stats")
+                        .size(16.0)
+                        .strong()
+                        .color(gold_text),
+                )
+                .frame(false),
+            );
+            if resp.clicked() {
+                clicked = true;
+            }
+        });
+
+    if clicked {
+        info!("[GAME] Game over banner clicked - transitioning to GameOver state");
+        pending.active = false;
+        next_state.set(crate::core::GameState::GameOver);
+    }
+}
+
 /// Initiates avatar fetches for both players and drains channel bytes into PendingBytes entries.
 /// Actual egui texture creation happens inside game_status_ui (needs egui context).
 pub fn avatar_fetch_system(

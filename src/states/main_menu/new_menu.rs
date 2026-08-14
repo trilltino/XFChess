@@ -464,10 +464,12 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             d.remove::<bool>(egui::Id::new(("panel_fade", current.discriminant())));
         });
     }
+    // ~0.4s ease-in-out — a slow, natural fade when navigating between
+    // panels (fast enough to feel responsive, slow enough to notice).
     let alpha = ctx.animate_bool_with_time(
         egui::Id::new(("panel_fade", current.discriminant())),
         true,
-        0.15,
+        0.4,
     );
 
     // ── Exit confirmation dialog ─────────────────────────────────────────────
@@ -638,7 +640,7 @@ fn caption_nav_arrow(ui: &mut egui::Ui, glyph: &str) -> egui::Response {
 pub(super) fn render_board_caption(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     let caption = super::famous_games::FAMOUS_GAMES[cx.board_animator.game_index].caption;
     egui::Area::new("board_caption".into())
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 230.0))
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 262.0))
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if caption_nav_arrow(ui, "‹").clicked() {

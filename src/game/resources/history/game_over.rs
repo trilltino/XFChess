@@ -305,6 +305,21 @@ impl GameOverState {
     }
 }
 
+/// Marks that a game-over condition has been detected but the player has not
+/// yet acknowledged it.
+///
+/// While `active`, the board stays on screen with a flashing
+/// "Press Enter to see game stats" banner at the bottom instead of instantly
+/// switching to the black GameOver stats screen. Pressing Enter (or clicking
+/// the banner) clears this and performs the `InGame → GameOver` transition.
+/// Applies to every game mode (local, vs AI, online, Solana) because all
+/// end conditions funnel through [`GameOverState`] → `check_game_over_state`.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingGameOver {
+    /// True while waiting for the player to acknowledge the finished game.
+    pub active: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

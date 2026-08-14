@@ -39,6 +39,7 @@ pub struct Board2DExtras<'w> {
     pub cm_flash: Res<'w, CheckmateFlashState>,
     pub board_fade: Res<'w, BoardFadeState>,
     pub player_bars: Res<'w, crate::ui::game::player_bar::PlayerBarsCache>,
+    pub bar_layout: ResMut<'w, crate::ui::game::player_bar::PlayerBarLayoutCache>,
 }
 
 // The local is_black_view function is removed in favor of the shared helper in camera.rs
@@ -564,23 +565,32 @@ pub fn render_2d_board(
         .show(ctx, |ui| {
             let available = ui.available_size();
             // Reserve room for the opponent/local player bars directly
-            // above/below the board (see `player_bar::PLAYER_BAR_HEIGHT`) —
-            // same constant the 3D view uses for its floating overlay bars,
-            // so the board reads the same size in both view modes.
-            let bars_h = crate::ui::game::player_bar::PLAYER_BAR_HEIGHT * 2.0 + 16.0;
+            // above/below the board. Instead of trusting a fixed constant we
+            // use the heights the bars *actually* rendered at last frame
+            // (they grow when captured-piece trays appear) plus a small
+            // headroom per bar, so the whole stack — top bar, board, bottom
+            // bar — always fits inside the available 2D space and the bottom
+            // player name is never clipped at the window edge.
+            const BAR_GAP: f32 = 8.0; // gap between each bar and the board
+            const BAR_HEADROOM: f32 = 8.0; // safety margin per bar
+            let bars_h = extras.bar_layout.top_h
+                + extras.bar_layout.bottom_h
+                + BAR_HEADROOM * 2.0
+                + BAR_GAP * 2.0;
             let board_size = available.x.min((available.y - bars_h).max(0.0));
             let square_size = board_size / 8.0;
 
             let x_offset = (available.x - board_size) / 2.0;
 
-            ui.horizontal(|ui| {
+            let top_bar = ui.horizontal(|ui| {
                 ui.add_space(x_offset);
                 ui.vertical(|ui| {
                     ui.set_width(board_size);
                     crate::ui::game::player_bar::render_player_bar(ui, &extras.player_bars.top);
                 });
             });
-            ui.add_space(8.0);
+            extras.bar_layout.top_h = top_bar.response.rect.height();
+            ui.add_space(BAR_GAP);
             ui.horizontal(|ui| {
                 ui.add_space(x_offset);
 
@@ -1214,14 +1224,18 @@ pub fn render_2d_board(
                     );
                 }
             });
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.add_space(BAR_GAP);
+            let bottom_bar = ui.horizontal(|ui| {
                 ui.add_space(x_offset);
                 ui.vertical(|ui| {
                     ui.set_width(board_size);
-                    crate::ui::game::player_bar::render_player_bar(ui, &extras.player_bars.bottom);
+                    crate::ui::game::player_bar::render_player_bar(
+                        ui,
+                        &extras.player_bars.bottom,
+                    );
                 });
             });
+            extras.bar_layout.bottom_h = bottom_bar.response.rect.height();
         });
 
     // ── Promotion choice ─────────────────────────────────────────────────

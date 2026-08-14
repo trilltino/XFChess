@@ -29,8 +29,10 @@ pub struct GamePopup {
     pub lifetime: f32,
     /// Remaining time (decremented each frame; private — set by the queue).
     pub(crate) remaining: f32,
-    /// Whether the user clicked the  to dismiss early.
+    /// Whether the user clicked the X to dismiss early.
     pub(crate) dismissed: bool,
+    /// When this popup was created — used for fade-in / fade-out.
+    pub(crate) created_at: std::time::Instant,
 }
 
 impl GamePopup {
@@ -44,6 +46,7 @@ impl GamePopup {
             lifetime: 12.0,
             remaining: 12.0,
             dismissed: false,
+            created_at: std::time::Instant::now(),
         }
     }
 
@@ -99,12 +102,13 @@ fn tick_popups(mut queue: ResMut<GamePopupQueue>, time: Res<Time>) {
 }
 
 /// Render all active popups as egui windows stacked bottom-right.
+/// Styled to match the "XFChess Alpha" welcome dialog with fade-in/fade-out.
 fn render_popups(
     mut queue: ResMut<GamePopupQueue>,
     mut contexts: EguiContexts,
     mut ready: Local<u32>,
+    _time: Res<Time>,
 ) {
-    // Skip first 2 frames: egui pass may not be initialized yet on frame 0-1
     *ready += 1;
     if *ready < 3 || queue.entries.is_empty() {
         return;
@@ -116,14 +120,53 @@ fn render_popups(
     let width = 300.0_f32;
     let mut y_offset = margin;
 
-    // Render newest on top (iterate in reverse so we compute offsets bottom-up)
+    const FADE_IN_DUR: f32 = 0.3;
+    const FADE_OUT_DUR: f32 = 1.5;
+
     let count = queue.entries.len();
     for i in (0..count).rev() {
         let popup = &queue.entries[i];
 
-        let accent = egui::Color32::from_rgb(244, 187, 68); // gold
+        // Fade alpha: fade in over FADE_IN_DUR, fade out over FADE_OUT_DUR
+        let elapsed = popup.created_at.elapsed().as_secs_f32();
+        let total = popup.lifetime;
+        let fade_alpha = if elapsed < FADE_IN_DUR {
+            (elapsed / FADE_IN_DUR).clamp(0.0, 1.0)
+        } else if total.is_finite() && elapsed > total - FADE_OUT_DUR {
+            ((total - elapsed) / FADE_OUT_DUR).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+
+        if fade_alpha <= 0.001 && total.is_finite() {
+            queue.entries[i].dismissed = true;
+            continue;
+        }
+
+        // Alpha-dialog frame (same as welcome panel in new_menu.rs)
+        let panel_frame = egui::Frame {
+            corner_radius: egui::CornerRadius::same(8),
+            fill: egui::Color32::from_rgba_unmultiplied(8, 8, 12, (240.0 * fade_alpha) as u8),
+            stroke: egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, (28.0 * fade_alpha) as u8),
+            ),
+            inner_margin: egui::Margin::symmetric(18, 16),
+            ..egui::Frame::NONE
+        };
+
+        let body_color = egui::Color32::from_rgba_unmultiplied(
+            210, 215, 225, (255.0 * fade_alpha) as u8,
+        );
+        let accent_faded = egui::Color32::from_rgba_unmultiplied(
+            100, 200, 255, (255.0 * fade_alpha) as u8,
+        );
+        let close_color = egui::Color32::from_rgba_unmultiplied(
+            180, 180, 180, (255.0 * fade_alpha) as u8,
+        );
 
         let mut open = true;
+        let mut close_clicked = false;
         let title = popup.title.clone();
         let message = popup.message.clone();
         let copy_text = popup.copy_text.clone();
@@ -132,50 +175,81 @@ fn render_popups(
             .url_label
             .clone()
             .unwrap_or_else(|| "Open".to_string());
-        let remaining = popup.remaining;
-        let lifetime = popup.lifetime;
 
         let win_resp = egui::Window::new(&title)
-            .id(egui::Id::new(("popup", &title))) // Use stable ID based on title
-            .open(&mut open)
+            .id(egui::Id::new(("popup", &title)))
+            .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .movable(false)
             .anchor(egui::Align2::RIGHT_BOTTOM, [-margin, -(y_offset)])
             .fixed_size([width, 0.0])
-            .frame(
-                egui::Frame::default()
-                    .fill(egui::Color32::from_rgba_unmultiplied(10, 33, 26, 230))
-                    .stroke(egui::Stroke::new(1.0, accent))
-                    .corner_radius(12.0)
-                    .inner_margin(14.0),
-            )
+            .frame(panel_frame)
             .show(ctx, |ui| {
-                // Accent bar at top
-                let (bar_rect, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 3.0),
-                    egui::Sense::hover(),
-                );
-                ui.painter().rect_filled(bar_rect, 2.0, accent);
+                ui.set_opacity(fade_alpha);
+
+                // Header: centered title + close button on the right
+                let header_height = 24.0;
+                let close_width = 24.0;
+                let title_width = (ui.available_width() - close_width).max(0.0);
+                ui.horizontal(|ui| {
+                    // Title centered in the remaining width
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(title_width, header_height),
+                        egui::Layout::from_main_dir_and_cross_align(
+                            egui::Direction::TopDown,
+                            egui::Align::Center,
+                        )
+                        .with_main_align(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new(&title)
+                                    .size(17.0)
+                                    .color(accent_faded)
+                                    .strong(),
+                            );
+                        },
+                    );
+
+                    // Close button
+                    let close = ui.add_sized(
+                        [close_width, header_height],
+                        egui::Button::new(
+                            egui::RichText::new("X").size(13.0).color(close_color),
+                        )
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE),
+                    );
+                    if close.clicked() {
+                        close_clicked = true;
+                    }
+                    if close.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                });
+
+                ui.add_space(8.0);
+                ui.add(egui::Separator::default().horizontal());
                 ui.add_space(8.0);
 
+                // Body
                 ui.label(
-                    egui::RichText::new(&message)
-                        .size(12.5)
-                        .color(egui::Color32::from_rgb(200, 200, 200)),
+                    egui::RichText::new(&message).size(12.0).color(body_color),
                 );
 
-                // Copy button
                 if let Some(ref ct) = copy_text {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new(format!(
-                                "{}…{}",
+                                "{}\u{2026}{}",
                                 &ct[..ct.len().min(6)],
                                 &ct[ct.len().saturating_sub(4)..]
                             ))
                             .size(11.0)
-                            .color(egui::Color32::from_rgb(160, 160, 160))
+                            .color(egui::Color32::from_rgba_unmultiplied(
+                                160, 160, 160, (255.0 * fade_alpha) as u8,
+                            ))
                             .monospace(),
                         );
                         if ui
@@ -190,11 +264,10 @@ fn render_popups(
                     });
                 }
 
-                // URL button
                 if let Some(ref u) = url {
                     ui.add_space(4.0);
                     if ui
-                        .button(egui::RichText::new(&url_label).size(12.0).color(accent))
+                        .button(egui::RichText::new(&url_label).size(12.0).color(accent_faded))
                         .clicked()
                     {
                         let url_to_open = u.clone();
@@ -203,34 +276,16 @@ fn render_popups(
                         }
                     }
                 }
-
-                // Progress bar for timed popups
-                if lifetime.is_finite() {
-                    ui.add_space(8.0);
-                    let progress = (remaining / lifetime).clamp(0.0, 1.0);
-                    let (pb_rect, _) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), 3.0),
-                        egui::Sense::hover(),
-                    );
-                    ui.painter().rect_filled(
-                        pb_rect,
-                        1.0,
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 25),
-                    );
-                    let mut filled = pb_rect;
-                    filled.max.x = pb_rect.min.x + pb_rect.width() * progress;
-                    ui.painter().rect_filled(filled, 1.0, accent);
-                }
             });
 
-        // Accumulate vertical space for next popup
+        if close_clicked { open = false; }
+
         if let Some(inner) = win_resp {
             y_offset += inner.response.rect.height() + 8.0;
         } else {
             y_offset += 120.0;
         }
 
-        // If the  button was clicked, mark dismissed
         if !open {
             queue.entries[i].dismissed = true;
         }

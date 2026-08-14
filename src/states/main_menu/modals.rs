@@ -26,23 +26,41 @@ pub(super) fn render_ai_setup_modal(
     next_state: &mut NextState<GameState>,
     active_tc: &mut crate::game::resources::active_time_control::ActiveTimeControl,
 ) {
+    // Restyled to match the "XFChess Alpha" welcome dialog / notification look:
+    // dark card fill, faint white border, same header with a separator.
+    let panel_frame = egui::Frame {
+        corner_radius: egui::CornerRadius::same(8),
+        fill: egui::Color32::from_rgba_unmultiplied(8, 8, 12, 240),
+        stroke: egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 28),
+        ),
+        inner_margin: egui::Margin::symmetric(18, 16),
+        ..egui::Frame::NONE
+    };
+
     egui::Window::new("Game Setup")
         .collapsible(false)
         .resizable(false)
         .title_bar(false)
         .fixed_size(egui::Vec2::new(380.0, 420.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .frame(StyledPanel::popup())
+        .frame(panel_frame)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(TextStyle::popup_title("GAME SETUP"));
+                ui.label(
+                    egui::RichText::new("GAME SETUP")
+                        .size(17.0)
+                        .color(egui::Color32::from_rgb(100, 200, 255))
+                        .strong(),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(
                             egui::Button::new(
                                 egui::RichText::new("X")
-                                    .size(12.0)
-                                    .color(UiColors::TEXT_POPUP_BODY),
+                                    .size(13.0)
+                                    .color(egui::Color32::from_rgb(180, 180, 180)),
                             )
                             .fill(egui::Color32::TRANSPARENT)
                             .stroke(egui::Stroke::NONE),
@@ -54,13 +72,15 @@ pub(super) fn render_ai_setup_modal(
                 });
             });
 
-            ui.add_space(14.0);
+            ui.add_space(8.0);
+            ui.add(egui::Separator::default().horizontal());
+            ui.add_space(8.0);
 
             // Strength section
             ui.label(
                 egui::RichText::new("Strength")
                     .size(13.0)
-                    .color(UiColors::TEXT_POPUP_BODY),
+                    .color(egui::Color32::from_rgb(210, 215, 225)),
             );
             ui.add_space(6.0);
 
@@ -107,7 +127,7 @@ pub(super) fn render_ai_setup_modal(
             ui.label(
                 egui::RichText::new("Time Control")
                     .size(13.0)
-                    .color(UiColors::TEXT_POPUP_BODY),
+                    .color(egui::Color32::from_rgb(210, 215, 225)),
             );
             ui.add_space(6.0);
 
@@ -141,7 +161,7 @@ pub(super) fn render_ai_setup_modal(
             ui.label(
                 egui::RichText::new("Engine")
                     .size(13.0)
-                    .color(UiColors::TEXT_POPUP_BODY),
+                    .color(egui::Color32::from_rgb(210, 215, 225)),
             );
             ui.add_space(6.0);
 
