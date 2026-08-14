@@ -59,6 +59,7 @@ impl Plugin for GamePlugin {
             .init_resource::<crate::game::resources::active_time_control::ActiveTimeControl>()
             .init_resource::<CapturedPieces>()
             .init_resource::<GameOverState>()
+            .init_resource::<PendingGameOver>()
             .init_resource::<DebugThrottle>()
             .init_resource::<PendingTurnAdvance>()
             .init_resource::<TurnStateContext>()
@@ -80,7 +81,8 @@ impl Plugin for GamePlugin {
             .init_resource::<super::replay::PgnReplayState>()
             .init_resource::<crate::ui::game::game_ui::TimeoutHourglassState>()
             .init_resource::<crate::ui::game::game_ui::AvatarCache>()
-            .init_resource::<crate::ui::game::player_bar::PlayerBarsCache>();
+            .init_resource::<crate::ui::game::player_bar::PlayerBarsCache>()
+            .init_resource::<crate::ui::game::player_bar::PlayerBarLayoutCache>();
 
         // Register types for reflection (needed for inspector)
         app.register_type::<CurrentTurn>()
@@ -136,6 +138,17 @@ impl Plugin for GamePlugin {
                 global_ambient.color = Color::srgb(0.82, 0.87, 1.0);
                 global_ambient.brightness = 800.0;
             },
+        );
+
+        // Clear the pending game-over prompt whenever a (new) game starts or the
+        // stats screen is entered, so a stale prompt never leaks across games.
+        app.add_systems(
+            OnEnter(GameState::InGame),
+            |mut pending: ResMut<PendingGameOver>| pending.active = false,
+        );
+        app.add_systems(
+            OnEnter(GameState::GameOver),
+            |mut pending: ResMut<PendingGameOver>| pending.active = false,
         );
 
         // Setup gameplay camera and board scene when entering InGame
@@ -518,6 +531,21 @@ impl Plugin for GamePlugin {
         app.add_systems(
             Update,
             handle_escape_key.run_if(in_state(GameState::InGame)),
+        );
+
+        // Enter key acknowledges the finished game and opens the stats screen
+        app.add_systems(
+            Update,
+            confirm_game_over_prompt.run_if(in_state(GameState::InGame)),
+        );
+
+        // Flashing "Press Enter to see game stats" banner at the bottom of the
+        // game while the finished position stays on screen.
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            crate::ui::game::game_ui::game_over_prompt_banner
+                .run_if(in_state(GameState::InGame))
+                .run_if(not(in_mode(GameMode::PgnReplay))),
         );
 
         // Global visual setup

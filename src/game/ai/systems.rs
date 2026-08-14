@@ -58,11 +58,19 @@ struct StockfishInner {
 impl StockfishInner {
     fn new() -> Result<Self, String> {
         let stockfish_path = resolve_stockfish_path()?;
-        let mut child = Command::new(&stockfish_path)
-            .stdin(Stdio::piped())
+        
+        let mut cmd = Command::new(&stockfish_path);
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
+            .stderr(Stdio::null());
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+
+        let mut child = cmd.spawn()
             .map_err(|e| {
                 format!(
                     "Failed to spawn Stockfish at '{}': {}",

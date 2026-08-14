@@ -18,6 +18,30 @@ use bevy_egui::egui;
 /// (`render_center_player_bars_3d`) so the two never drift apart.
 pub const PLAYER_BAR_HEIGHT: f32 = 64.0;
 
+/// Last-frame measured heights of the two 2D player bars. The 2D board
+/// layout (`game_2d::render_2d_board`) reserves this much space above and
+/// below the board — instead of trusting a fixed constant — so the whole
+/// stack (top bar, board, bottom bar) always fits inside the available 2D
+/// space and the bottom bar is never clipped at the window edge, even when
+/// a captured-piece tray makes a bar grow taller than
+/// [`PLAYER_BAR_HEIGHT`].
+#[derive(Resource)]
+pub struct PlayerBarLayoutCache {
+    pub top_h: f32,
+    pub bottom_h: f32,
+}
+
+impl Default for PlayerBarLayoutCache {
+    fn default() -> Self {
+        Self {
+            // Generous first-frame guess; corrected from frame two onward
+            // with the actually rendered heights.
+            top_h: PLAYER_BAR_HEIGHT + 12.0,
+            bottom_h: PLAYER_BAR_HEIGHT + 12.0,
+        }
+    }
+}
+
 /// Everything one player bar needs to render — resolved once per frame.
 #[derive(Clone)]
 pub struct PlayerBarData {

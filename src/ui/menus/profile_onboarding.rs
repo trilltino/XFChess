@@ -67,6 +67,7 @@ fn draw_profile_onboarding(
     }
 
     let mut activate: Option<String> = None;
+    let mut delete_target: Option<String> = None;
     let mut confirmed_new = false;
     let mut back_to_list = false;
 
@@ -145,15 +146,31 @@ fn draw_profile_onboarding(
                     ui.add_space(12.0);
 
                     for name in &existing {
-                        if ui
-                            .add_sized(
-                                [240.0, 34.0],
-                                egui::Button::new(egui::RichText::new(name).size(14.0)),
-                            )
-                            .clicked()
-                        {
-                            activate = Some(name.clone());
-                        }
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_sized(
+                                    [202.0, 34.0],
+                                    egui::Button::new(egui::RichText::new(name).size(14.0)),
+                                )
+                                .clicked()
+                            {
+                                activate = Some(name.clone());
+                            }
+                            if ui
+                                .add_sized(
+                                    [34.0, 34.0],
+                                    egui::Button::new(
+                                        egui::RichText::new("X")
+                                            .color(egui::Color32::from_rgb(255, 60, 60))
+                                            .strong()
+                                            .size(14.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                delete_target = Some(name.clone());
+                            }
+                        });
                         ui.add_space(4.0);
                     }
 
@@ -197,10 +214,17 @@ fn draw_profile_onboarding(
         } else if existing.iter().any(|n| n == trimmed) {
             state.error = Some("That name is already taken on this device.".to_string());
         } else {
-            identity::create_profile(trimmed);
+            let folder = rfd::FileDialog::new()
+                .set_title("Choose Save Location")
+                .pick_folder();
+            identity::create_profile(trimmed, folder);
             player_identity.username = Some(trimmed.to_string());
             player_identity.is_guest = true;
             state.error = None;
         }
+    }
+
+    if let Some(name) = delete_target {
+        identity::delete_profile(&name);
     }
 }

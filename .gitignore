@@ -72,6 +72,8 @@ release/
 
 # Anchor
 .anchor/
+.anchor112/
+anchor-build-output.txt
 
 # Vite cache
 xfchessdotcom/node_modules/.vite/
