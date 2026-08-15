@@ -263,10 +263,22 @@ fn publish(
                     }
                 }
                 Ok(resp) => {
-                    warn!(
-                        "[NET] Move sync backup (Braid) couldn't save {stream} for game {game_id}: server returned HTTP {}",
-                        resp.status()
-                    );
+                    let status = resp.status();
+                    // Capture the backend's error body — it names the exact
+                    // rejection reason (e.g. `NotAParticipant`), which is
+                    // what made the v0.2.7 casual-P2P 403s diagnosable.
+                    let body = resp.text().unwrap_or_default();
+                    if status == reqwest::StatusCode::FORBIDDEN
+                        || status == reqwest::StatusCode::UNAUTHORIZED
+                    {
+                        warn!(
+                            "[braid-transport] Backend rejected our identity for {stream} on game {game_id} (HTTP {status}, sender={sender_identity}, body={body:?}) — check wallet-pubkey vs node-id selection for this game type"
+                        );
+                    } else {
+                        warn!(
+                            "[braid-transport] couldn't save {stream} for game {game_id}: server returned HTTP {status} (body={body:?})"
+                        );
+                    }
                     return;
                 }
                 Err(e) => {

@@ -71,6 +71,14 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 if ui.button("Rejoin").clicked() {
                     if let Some(ref mut sync) = ctx.solana_sync {
                         sync.game_id = Some(rejoin_id);
+                        // Deliberately false: the rejoin path never sets
+                        // `rollup_manager.game_id`, so
+                        // `handle_game_start_delegation` never kicks off ER
+                        // delegation for it — gating input on delegation here
+                        // would deadlock White for the whole game (the
+                        // pre-v0.2.8 `game_id`-keyed gate did exactly that).
+                        // Moves flow via Braid/gossip instead.
+                        sync.requires_delegation = false;
                     }
                     if let Some(ref mut comp) = ctx.competitive {
                         comp.game_id = Some(rejoin_id);
@@ -258,6 +266,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             if let Some(ref mut sync) = ctx.solana_sync {
                 sync.game_id = Some(game_id);
                 sync.wager_amount = wager_lamports;
+                sync.requires_delegation = wager_lamports > 0;
             }
             if let Some(ref mut comp) = ctx.competitive {
                 comp.game_id = Some(game_id);
@@ -472,6 +481,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                     if let Some(ref mut sync) = ctx.solana_sync {
                         sync.game_id = Some(game_id);
                         sync.wager_amount = wager_lamports;
+                        sync.requires_delegation = wager_lamports > 0;
                     }
                     if let Some(ref mut comp) = ctx.competitive {
                         comp.game_id = Some(game_id);
@@ -3542,6 +3552,15 @@ fn generate_room_code(base_time_minutes: u32) -> String {
 
 /// Puts the host directly into the game (the free/non-wagered path).
 fn enter_p2p_host_game(ctx: &mut MainMenuUIContext, game_id: &str) {
+    // Pure casual P2P entry: clear any stale on-chain game context from a
+    // previous Solana lobby / tournament match, or the old `game_id` leaks
+    // into this game (see `clear_on_chain_game_state`).
+    #[cfg(feature = "solana")]
+    crate::multiplayer::solana::addon::clear_on_chain_game_state(
+        ctx.solana_sync.as_deref_mut(),
+        ctx.competitive.as_deref_mut(),
+    );
+
     ctx.ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
     *ctx.core_mode = crate::core::GameMode::OnlineMultiplayer;
     if let Some(ref mut p2p) = ctx.p2p_state {

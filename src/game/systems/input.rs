@@ -112,14 +112,19 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
         return false;
     }
 
+    // Gate only games that genuinely require Ephemeral-Rollup delegation
+    // (wagered lobby games, tournaments, rejoins — see
+    // `SolanaGameSync::requires_delegation`). Keying this off `game_id`
+    // alone (pre-v0.2.8) permanently locked White in stake-0 free lobby
+    // games, where `game_id` is set but delegation never completes.
     #[cfg(feature = "solana")]
     if let Some(solana_sync) = &params.game_sync {
-        if let Some(game_id) = solana_sync.game_id {
+        if solana_sync.requires_delegation {
             if let Some(resolver) = params.magicblock_resolver.as_ref() {
                 if !resolver.is_delegated() {
                     warn!(
-                        "[INPUT] Solana game {} not delegated to ER yet; moves are blocked",
-                        game_id
+                        "[INPUT] Solana game {:?} not delegated to ER yet; moves are blocked",
+                        solana_sync.game_id
                     );
                     return false;
                 }

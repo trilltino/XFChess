@@ -455,6 +455,12 @@ fn handle_vps_responses(
     network_config: Res<crate::multiplayer::types::NetworkConfig>,
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
     mut active_tc: ResMut<crate::game::resources::active_time_control::ActiveTimeControl>,
+    #[cfg(feature = "solana")] mut solana_sync: Option<
+        ResMut<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
+    #[cfg(feature = "solana")] mut competitive: Option<
+        ResMut<crate::multiplayer::solana::addon::CompetitiveMatchState>,
+    >,
 ) {
     while let Ok(response) = vps_state.response_rx.try_recv() {
         match response {
@@ -646,6 +652,18 @@ fn handle_vps_responses(
                 info!(
                     "[P2P VPS] Host started game {} (stake={:.3}) — entering as joiner (Black)",
                     game_id, stake
+                );
+
+                // Pure casual P2P entry: clear any stale on-chain game
+                // context from a previous Solana lobby / tournament match
+                // before entering (see `clear_on_chain_game_state`). For a
+                // wagered game this is a no-op — `SolanaGameSync` is still
+                // default here, the on-chain join lands later via the lobby
+                // `EnterGame` flow.
+                #[cfg(feature = "solana")]
+                crate::multiplayer::solana::addon::clear_on_chain_game_state(
+                    solana_sync.as_deref_mut(),
+                    competitive.as_deref_mut(),
                 );
 
                 ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
