@@ -765,6 +765,8 @@ fn handle_tournament_match_assigned(
         ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
         solana_sync.game_id = Some(game_id);
         solana_sync.wager_amount = 0;
+        // Tournament games run through ER delegation even with a zero wager.
+        solana_sync.requires_delegation = true;
         competitive.game_id = Some(game_id);
         competitive.wager_lamports = 0;
         competitive.active = true;

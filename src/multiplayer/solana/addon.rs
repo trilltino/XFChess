@@ -43,6 +43,16 @@ pub struct SolanaGameSync {
     pub last_signature: Option<Signature>,
     pub rpc_url: String,
     pub result_tx: Option<tokio::sync::mpsc::Sender<SolanaResult<Signature>>>,
+    /// True only for games whose move flow genuinely depends on MagicBlock
+    /// Ephemeral-Rollup delegation: wagered lobby games, tournament games,
+    /// and rejoins of either. Move input is gated on delegation completing
+    /// (`can_move_color` in `game/systems/input.rs`) *only* when this is set.
+    ///
+    /// Pre-v0.2.8 the gate keyed off `game_id.is_some()` instead — which
+    /// permanently locked White in stake-0 free lobby games (`game_id` set,
+    /// but no delegation ever completes for them) and in pure casual P2P
+    /// games that inherited a stale `game_id` from an earlier Solana game.
+    pub requires_delegation: bool,
 }
 
 impl Default for SolanaGameSync {
@@ -55,7 +65,29 @@ impl Default for SolanaGameSync {
             last_signature: None,
             rpc_url: "https://api.devnet.solana.com".to_string(),
             result_tx: None,
+            requires_delegation: false,
         }
+    }
+}
+
+/// Clears any on-chain game context (`SolanaGameSync` +
+/// `CompetitiveMatchState`) when entering a pure casual P2P game.
+///
+/// Without this, leftover `game_id`/`active` from a previous Solana lobby or
+/// tournament match leaks into the casual game: the input gate would block
+/// White forever waiting for a delegation a casual game never gets, and the
+/// Braid publisher would send the wallet pubkey as its identity instead of
+/// the Iroh node id the backend's casual relay roster actually knows (HTTP
+/// 403) — the two failure modes that broke free P2P games in v0.2.7.
+pub fn clear_on_chain_game_state(
+    sync: Option<&mut SolanaGameSync>,
+    competitive: Option<&mut CompetitiveMatchState>,
+) {
+    if let Some(sync) = sync {
+        *sync = SolanaGameSync::default();
+    }
+    if let Some(competitive) = competitive {
+        *competitive = CompetitiveMatchState::default();
     }
 }
 

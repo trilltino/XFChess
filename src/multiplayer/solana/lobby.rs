@@ -1030,6 +1030,10 @@ fn poll_lobby_tasks(
             Ok(Ok(game_id)) => {
                 sync.game_id = Some(game_id);
                 sync.wager_amount = lobby.wager_lamports();
+                // Only wagered games go through the ER delegation flow that
+                // move input waits on; stake-0 free games must stay playable
+                // immediately (see `SolanaGameSync::requires_delegation`).
+                sync.requires_delegation = lobby.wager_lamports() > 0;
                 competitive.wager_lamports = lobby.wager_lamports();
                 competitive.stake_amount = lobby.wager_lamports();
                 competitive.game_id = Some(game_id);

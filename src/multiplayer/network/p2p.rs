@@ -354,6 +354,12 @@ fn handle_network_events(
     mut game_started: MessageWriter<GameStartedEvent>,
     mut core_mode: ResMut<crate::core::GameMode>,
     mut ai_config: ResMut<crate::game::ai::ChessAIResource>,
+    #[cfg(feature = "solana")] mut solana_sync: Option<
+        ResMut<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
+    #[cfg(feature = "solana")] mut competitive: Option<
+        ResMut<crate::multiplayer::solana::addon::CompetitiveMatchState>,
+    >,
 ) {
     for event in network_events.read() {
         match event {
@@ -505,6 +511,15 @@ fn handle_network_events(
                                         *core_mode = crate::core::GameMode::OnlineMultiplayer;
                                         ai_config.mode =
                                             crate::game::ai::resource::GameMode::Multiplayer;
+                                        // Pure casual P2P entry: clear any stale on-chain
+                                        // game context from a previous Solana lobby /
+                                        // tournament match (see
+                                        // `clear_on_chain_game_state`).
+                                        #[cfg(feature = "solana")]
+                                        crate::multiplayer::solana::addon::clear_on_chain_game_state(
+                                            solana_sync.as_deref_mut(),
+                                            competitive.as_deref_mut(),
+                                        );
                                         // Joiner won't receive its own gossip broadcast,
                                         // so transition to InGame directly here.
                                         game_started.write(GameStartedEvent { game_id: *game_id });
@@ -545,6 +560,16 @@ fn handle_network_events(
                                 connection_state.status = P2PConnectionStatus::InGame;
                                 *core_mode = crate::core::GameMode::OnlineMultiplayer;
                                 ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+
+                                // Pure casual P2P entry: clear any stale on-chain
+                                // game context from a previous Solana lobby /
+                                // tournament match (see
+                                // `clear_on_chain_game_state`).
+                                #[cfg(feature = "solana")]
+                                crate::multiplayer::solana::addon::clear_on_chain_game_state(
+                                    solana_sync.as_deref_mut(),
+                                    competitive.as_deref_mut(),
+                                );
 
                                 game_started.write(GameStartedEvent { game_id: *game_id });
 

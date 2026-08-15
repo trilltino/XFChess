@@ -244,7 +244,13 @@ pub fn render_solana_panel(
         ui.add_space(10.0);
 
         // --- Wager Section ---
-        if competitive.active || sync.game_id.is_some() {
+        // A free on-chain game (stake 0) is a live match too, but it is not
+        // a wager — showing "ACTIVE WAGER / Amount: —" for it (the
+        // pre-v0.2.8 behavior, keyed off `game_id.is_some()`) read as a
+        // broken connection/escrow state.
+        let has_on_chain_game = sync.game_id.is_some();
+        let wager_active = competitive.active || sync.wager_amount > 0;
+        if wager_active {
             ui.group(|ui| {
                 ui.label(egui::RichText::new("ACTIVE WAGER").strong());
                 let lamports = if competitive.wager_lamports > 0 {
@@ -266,6 +272,13 @@ pub fn render_solana_panel(
                     ui.label(format!("Game ID: {}", id));
                 } else {
                     ui.label("Game ID: —");
+                }
+            });
+        } else if has_on_chain_game {
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("ACTIVE MATCH (FREE)").strong());
+                if let Some(id) = sync.game_id {
+                    ui.label(format!("Game ID: {}", id));
                 }
             });
         } else {
