@@ -529,7 +529,11 @@ pub fn finalize_game_ix(
 
 /// Builds a `link_external_elo` instruction for devnet.
 ///
-/// Links a verified Lichess account to a player profile.
+/// Links a verified Lichess account to a player profile. Account order
+/// mirrors `LinkExternalElo` in the program: player_profile,
+/// player (readonly), lichess_username_record (the uniqueness lock — see
+/// `LichessUsernameRecord`'s doc comment), link_authority (signer, also the
+/// payer for that record's first creation), system_program.
 pub fn link_external_elo_ix(
     program_id: &Pubkey,
     link_authority: &Pubkey,
@@ -541,6 +545,8 @@ pub fn link_external_elo_ix(
 ) -> Instruction {
     let player_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
+    let lichess_username_record_pda =
+        Pubkey::find_program_address(&[b"lichess_username", username.as_bytes()], program_id).0;
 
     let mut data = anchor_discriminator("link_external_elo").to_vec();
     data.extend(borsh_string(username));
@@ -553,7 +559,9 @@ pub fn link_external_elo_ix(
         accounts: vec![
             AccountMeta::new(player_profile_pda, false),
             AccountMeta::new_readonly(*player, false),
+            AccountMeta::new(lichess_username_record_pda, false),
             AccountMeta::new(*link_authority, true),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,
     }

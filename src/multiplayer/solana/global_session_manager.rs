@@ -81,6 +81,91 @@ pub fn global_session_is_live_onchain(rpc_url: &str, session_pda: &Pubkey) -> bo
     enabled && now < expires_at && games_remaining > 0
 }
 
+/// Reports whether a `GlobalSessionDelegation` account exists at `session_pda`
+/// at all, regardless of whether it's still `is_valid` (see
+/// `global_session_is_live_onchain`) — i.e. whether there could be a stale,
+/// unclaimed deposit sitting in it from a prior authorize.
+///
+/// This is the fix for the fund-leak bug `establish_global_session` used to
+/// have: it only ever bundled `withdraw_global_session` ahead of a fresh
+/// authorize when the account was still *live* (`GlobalSessionAlreadyActive`
+/// path). An account that had simply **expired** (30-day default duration)
+/// or run out of `games_remaining` is not "live" by that check, so a plain
+/// re-authorize proceeded straight through the on-chain guard and deposited
+/// a brand-new amount on top of whatever was already stranded there —
+/// compounding on every natural re-auth. Callers should reclaim via
+/// `withdraw_global_session` whenever this returns `true`, independent of
+/// whether a `revoke_global_session` is also needed first.
+pub fn global_session_account_exists(rpc_url: &str, session_pda: &Pubkey) -> bool {
+    use solana_client::rpc_client::RpcClient;
+    use solana_commitment_config::CommitmentConfig;
+
+    const MIN_LEN: usize = 108;
+
+    let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
+    rpc.get_account_data(session_pda)
+        .map(|data| data.len() >= MIN_LEN)
+        .unwrap_or(false)
+}
+
+/// Generous over-estimate of the rent-exempt minimum
+/// `global_create_game`/`global_join_game` allocate for the `Game` PDA out
+/// of the session vault (`programs/xfchess-game/src/game_ix/global_create.rs`'s
+/// `Rent::get()?.minimum_balance(8 + Game::INIT_SPACE)` debit). `Game`'s
+/// actual on-chain rent is roughly 0.003 SOL for its ~350-odd bytes; this
+/// constant is deliberately padded well above that rather than hand-mirroring
+/// the exact struct layout client-side, so a drift between the two (a new
+/// field added on-chain, say) makes this check *more* conservative, never
+/// less — the on-chain `debit_program_pda` check remains the actual
+/// correctness boundary regardless of what this estimates.
+const GAME_ACCOUNT_RENT_ESTIMATE_LAMPORTS: u64 = 5_000_000; // 0.005 SOL
+
+/// Whether `session_pda`'s live on-chain balance can cover a wager of
+/// `wager_lamports` plus the `Game` account rent that `global_create_game`/
+/// `global_join_game` also draws from the same vault — the pre-submit check
+/// that closes the bug where a player could sail past the soft
+/// `spending_limit`/`max_wager` caps (self-declared at authorize time, not
+/// balance-aware) and only find out the vault was actually empty when the
+/// on-chain `debit_program_pda` guard rejected the transaction with a bare
+/// `InsufficientFunds` (6060) — after already paying the transaction fee.
+/// This check is advisory: it can only ever be *more* conservative than the
+/// real on-chain check (see `GAME_ACCOUNT_RENT_ESTIMATE_LAMPORTS`), never
+/// less, so it can produce a false "insufficient" but never a false "ok."
+///
+/// Returns `Err` with a message suitable for surfacing to the player
+/// directly (not an internal/RPC error string) when funds look short, or
+/// when the account can't be read at all (treated as "not ready to play" —
+/// safer than assuming ok and submitting a doomed transaction).
+pub fn check_global_session_can_afford_wager(
+    rpc_url: &str,
+    session_pda: &Pubkey,
+    wager_lamports: u64,
+) -> Result<(), String> {
+    use solana_client::rpc_client::RpcClient;
+    use solana_commitment_config::CommitmentConfig;
+
+    let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
+    let account = rpc
+        .get_account(session_pda)
+        .map_err(|e| format!("Could not read quick-sign session balance: {e}"))?;
+
+    let rent_exempt_min = rpc
+        .get_minimum_balance_for_rent_exemption(account.data.len())
+        .unwrap_or(0);
+    let spendable = account.lamports.saturating_sub(rent_exempt_min);
+    let required = wager_lamports.saturating_add(GAME_ACCOUNT_RENT_ESTIMATE_LAMPORTS);
+
+    if spendable < required {
+        return Err(format!(
+            "Quick-sign session balance too low for this wager: has {:.4} SOL spendable, \
+             needs ~{:.4} SOL (wager + game setup cost). Re-authorize quick-sign to top up.",
+            spendable as f64 / 1_000_000_000.0,
+            required as f64 / 1_000_000_000.0,
+        ));
+    }
+    Ok(())
+}
+
 // ── Disk-persisted global session keypair ─────────────────────────────────────
 
 /// Encrypted session key record stored on disk.

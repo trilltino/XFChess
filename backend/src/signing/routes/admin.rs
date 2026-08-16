@@ -596,24 +596,25 @@ async fn treasury_fee_report(
     })))
 }
 
-/// Withdraw `lamports` from the platform treasury vault to `wallet`, signed by
-/// `treasury_authority`. Double-gated: the X-API-Key transport gate PLUS an
-/// ADMIN_TOKEN second factor in the body (this is a financially-irreversible
-/// money path). Requires the on-chain `withdraw_treasury` instruction to be
-/// deployed and `TREASURY_AUTHORITY_KEY` set to the treasury_authority keypair.
-/// Signs and submits an on-chain `withdraw_treasury` instruction paying
-/// `req.lamports` to `req.wallet`. Requires the `ADMIN_TOKEN` second factor
-/// in the request body (checked in constant time) in addition to the
-/// transport-level admin auth — the only admin route with this extra gate,
-/// since it's the only one that moves real funds outside normal settlement.
+/// Records a request to withdraw `lamports` from the platform treasury vault
+/// to `wallet`, and hands back the exact `treasury_signer` command an
+/// operator must run on a separate, minimally-networked host to actually
+/// execute it. This process **never holds or uses the treasury signing
+/// key** — see `bin/treasury_signer.rs`'s module doc: a compromise of this
+/// always-on, internet-facing host must not also be able to drain the
+/// treasury. Double-gated: the X-API-Key transport gate PLUS an ADMIN_TOKEN
+/// second factor in the body (this is a financially-irreversible money
+/// path) — the only admin route with this extra gate, since it's the only
+/// one that moves real funds outside normal settlement. The audit log entry
+/// is written here (request time), and `treasury_signer` itself logs the
+/// actual signature on submission — the two are correlated by wallet +
+/// lamports + reason in the audit trail.
 async fn treasury_refund(
     State(state): State<AppState>,
     Json(req): Json<RefundReq>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     use crate::infrastructure::auth_middleware::constant_time_eq;
-    use crate::signing::solana::{make_rpc, sign_and_submit, withdraw_treasury_ix};
     use solana_sdk::pubkey::Pubkey;
-    use solana_sdk::signature::Signer;
     use std::str::FromStr;
 
     // Second factor — constant-time; reject if ADMIN_TOKEN is unset or mismatched.
@@ -632,84 +633,43 @@ async fn treasury_refund(
             Json(json!({ "ok": false, "error": "amount_must_be_positive" })),
         );
     }
-    let destination = match Pubkey::from_str(&req.wallet) {
-        Ok(pk) => pk,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "ok": false, "error": "invalid_wallet_pubkey" })),
-            );
-        }
-    };
-
-    let program_id = state.program_id;
-    let rpc_url = state.config.solana_rpc_url.clone();
-    let authority = state.treasury_authority.clone();
-    let amount = req.lamports;
-
-    let submit_started = std::time::Instant::now();
-    state.metrics.record_transaction_submitted("solana");
-    let result = tokio::task::spawn_blocking(move || {
-        let rpc = make_rpc(&rpc_url);
-        let ix = withdraw_treasury_ix(&program_id, &authority.pubkey(), &destination, amount);
-        sign_and_submit(&rpc, &authority, &[ix])
-    })
-    .await;
-
-    match result {
-        Ok(Ok(sig)) => {
-            state.metrics.record_transaction_confirmed(
-                "solana",
-                submit_started.elapsed().as_millis() as f64,
-            );
-            add_audit(
-                "treasury_refund",
-                &req.wallet,
-                &format!(
-                    "{} lamports reason={} sig={}",
-                    req.lamports, req.reason, sig
-                ),
-            );
-            info!(
-                "[admin] treasury_refund {} lamports -> {} ({}) sig {}",
-                req.lamports, req.wallet, req.reason, sig
-            );
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "ok": true,
-                    "wallet": req.wallet,
-                    "lamports": req.lamports,
-                    "signature": sig.to_string(),
-                })),
-            )
-        }
-        Ok(Err(e)) => {
-            let category = crate::signing::solana::classify_error_str(&e.to_string()).to_string();
-            state.metrics.record_transaction_failed("solana", &category);
-            add_audit(
-                "treasury_refund_failed",
-                &req.wallet,
-                &format!("{} lamports reason={} err={}", req.lamports, req.reason, e),
-            );
-            error!("[admin] treasury_refund on-chain submit failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({ "ok": false, "error": "onchain_submit_failed", "detail": e.to_string() }),
-                ),
-            )
-        }
-        Err(e) => {
-            state
-                .metrics
-                .record_transaction_failed("solana", "TaskJoinError");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "ok": false, "error": "task_join_failed", "detail": e.to_string() })),
-            )
-        }
+    if Pubkey::from_str(&req.wallet).is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": "invalid_wallet_pubkey" })),
+        );
     }
+
+    add_audit(
+        "treasury_refund_requested",
+        &req.wallet,
+        &format!(
+            "{} lamports reason={} — awaiting manual execution via treasury_signer",
+            req.lamports, req.reason
+        ),
+    );
+    info!(
+        "[admin] treasury_refund requested: {} lamports -> {} ({}); operator must run treasury_signer",
+        req.lamports, req.wallet, req.reason
+    );
+
+    let command = format!(
+        "TREASURY_AUTHORITY_KEY=<...> SOLANA_RPC_URL={} PROGRAM_ID={} \
+         cargo run --bin treasury_signer -- {} {} \"{}\"",
+        state.config.solana_rpc_url, state.program_id, req.wallet, req.lamports, req.reason
+    );
+
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "ok": true,
+            "status": "awaiting_manual_execution",
+            "wallet": req.wallet,
+            "lamports": req.lamports,
+            "reason": req.reason,
+            "run_on_isolated_host": command,
+        })),
+    )
 }
 
 async fn tournament_escrow_balance(

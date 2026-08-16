@@ -5,6 +5,15 @@
 //! upheld (or the game is ruled a draw), forfeited to the treasury if the ruling
 //! goes to the opponent. The game is set to `Settled` so `finalize_game` cannot
 //! re-process it.
+//!
+//! **Deliberately never touches ELO or profile stats** (`wins`/`losses`/
+//! `draws`/`win_streak`/`ranked_games`, all mutated by
+//! `lifecycle::settlement::update_profiles` on the normal path) — confirmed
+//! product decision, not an oversight or a TODO. A disputed game is
+//! inherently contested; its outcome shouldn't feed either player's
+//! competitive rating even after a ruling. Only the wager pot and the
+//! challenger's bond move here. Do not add an `update_profiles` call to this
+//! path without that decision being deliberately revisited.
 
 use crate::common::escrow;
 use crate::constants::*;

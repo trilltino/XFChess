@@ -78,11 +78,77 @@ pub fn wallet_bridge_base_url() -> String {
 
 /// Fire-and-forget POST to this instance's Tauri bridge asking it to open the
 /// profile-creation step in the wallet popup.
+///
+/// "Fire-and-forget" used to also mean "silent on failure" — the result was
+/// discarded outright, so if this instance's bridge was unreachable (e.g. a
+/// second local dev instance whose `xfchess-tauri` failed to bind its own
+/// port because `XFCHESS_WALLET_PORT` wasn't actually set for it, and is now
+/// running with no HTTP server at all — see the comment on `bind_http_port`
+/// in `tauri/src/main.rs`), the popup would just never appear with zero
+/// trace anywhere. Now logs exactly that, at the URL this specific instance
+/// resolved, so "the popup didn't come up" is diagnosable from this
+/// process's own log instead of a guess.
+///
+/// The real bug this fixes: this function used to only POST to the bridge
+/// and rely on *it* to bring the (already-open, hidden) popup back to front.
+/// That's exactly the unreliable path `bring_wallet_popup_to_front`'s own
+/// doc comment warns about — `SetForegroundWindow` called from a background
+/// process (the Tauri sidecar) routinely loses to Windows' foreground-lock
+/// rules, especially against a busy fullscreen game render loop. The bridge
+/// call still succeeds (server-side logs show "reused existing popup
+/// window" every time), which is exactly why this looked like nothing was
+/// happening rather than an outright error: the request works, the window
+/// just never visibly comes forward. `open_wallet_browser` already gets this
+/// right — it calls `bring_wallet_popup_to_front` from *this* process (the
+/// one that just received the user's click, so it hits Windows' unconditional
+/// exemption) before ever talking to the bridge. Do the same here.
 pub fn open_profile_step() {
+    bring_wallet_popup_to_front();
     std::thread::spawn(|| {
         let url = format!("{}/api/open-profile-step", wallet_bridge_base_url());
-        let _ = reqwest::blocking::Client::new().post(url).send();
+        match reqwest::blocking::Client::new().post(&url).send() {
+            Ok(resp) if resp.status().is_success() => {}
+            Ok(resp) => bevy::prelude::warn!(
+                "[open_profile_step] bridge at {url} responded {} — popup will not open",
+                resp.status()
+            ),
+            Err(e) => bevy::prelude::warn!(
+                "[open_profile_step] could not reach this instance's Tauri bridge at {url}: {e} — \
+                 popup will not open. If running two local instances, confirm this one's \
+                 XFCHESS_WALLET_PORT was actually set before xfchess-tauri started (a mismatch \
+                 leaves that bridge silently running with no HTTP server bound)."
+            ),
+        }
     });
+}
+
+/// Fire-and-forget: tells the Tauri bridge exactly which backend this game
+/// client resolved via `vps_base()`, so the bridge proxies `/api/auth/*`
+/// calls to the SAME backend instead of independently re-deriving the same
+/// env-var precedence (see `get_backend_url`'s doc comment in
+/// `tauri/src/main.rs`) — the split-brain case where only one of the two
+/// processes had `SIGNING_SERVICE_URL`/`BACKEND_URL` set used to make the
+/// wallet popup silently talk to production while the game itself talked to
+/// a local dev backend (or vice versa), which looks exactly like a server
+/// outage from the popup's side. Called once alongside every `open_wallet_browser()`
+/// ping — cheap and idempotent, so there's no need to track "did we already
+/// tell it" across calls. Same silent-failure fix as `open_profile_step`
+/// above — a failure here means every subsequent proxied `/api/auth/*` call
+/// from the popup targets the wrong backend, worth knowing immediately
+/// rather than discovering it as a mystery 401/502 later.
+fn sync_backend_url_to_bridge() {
+    let url = crate::multiplayer::network::vps::vps_base();
+    let bridge_url = format!("{}/api/set-backend-url", wallet_bridge_base_url());
+    if let Err(e) = reqwest::blocking::Client::new()
+        .post(&bridge_url)
+        .json(&serde_json::json!({ "url": url }))
+        .send()
+    {
+        bevy::prelude::warn!(
+            "[sync_backend_url_to_bridge] could not reach this instance's Tauri bridge at \
+             {bridge_url}: {e} — the wallet popup may end up talking to the wrong backend"
+        );
+    }
 }
 
 /// TCP port range derived from XFCHESS_WALLET_PORT (default 7454).
@@ -137,6 +203,7 @@ pub fn candidate_ports() -> Vec<u16> {
 /// Spawns a background thread so Bevy is never blocked.
 pub fn open_wallet_browser() {
     bring_wallet_popup_to_front();
+    std::thread::spawn(sync_backend_url_to_bridge);
     std::thread::spawn(|| {
         // Send OPEN command over TCP to the Tauri wallet bridge.
         use std::io::Write;

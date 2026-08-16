@@ -59,10 +59,31 @@ pub struct UserStatus {
 }
 
 /// Validates and stores a KYC submission (tax ID hashed, never stored raw).
+///
+/// Requires a valid Bearer JWT — previously this accepted `wallet_pubkey` as
+/// a bare, unauthenticated field in the request body, so anyone could submit
+/// PII attributed to an arbitrary wallet with zero proof of ownership (see
+/// the identity audit: KYC/CACF eligibility was "keyed on a bare wallet
+/// string supplied by the calling route, not re-verified against a fresh
+/// signature," unlike `login`/`register`/`delete`). The JWT's wallet is now
+/// the sole source of truth for whose KYC record this is; `req.wallet_pubkey`
+/// is only checked for consistency with it, never trusted on its own.
 pub async fn submit_kyc(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<KycRequest>,
 ) -> Result<Json<OkResponse>, StatusCode> {
+    crate::signing::routes::auth::require_caller_owns_wallet(
+        &state,
+        &headers,
+        req.wallet_pubkey.trim(),
+    )
+    .await
+    .map_err(|(status, msg)| {
+        warn!("[kyc] {msg}");
+        status
+    })?;
+
     if req.wallet_pubkey.trim().is_empty()
         || req.full_name.trim().is_empty()
         || req.dob.trim().is_empty()

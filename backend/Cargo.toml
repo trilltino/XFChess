@@ -71,6 +71,10 @@ braid_chess = { path = "../crates/zarathustra_net/braid_chess" }
 # Solana dependencies
 solana-sdk = { workspace = true }
 solana-client = { workspace = true }
+solana-transaction-status = { workspace = true }
+
+# System resource checks for /health/detailed (memory, disk)
+sysinfo = "0.33"
 solana-system-interface = { version = "3", features = ["bincode"] }
 solana-commitment-config = "3"
 # For deriving MagicBlock delegation bookkeeping PDAs (buffer/record/metadata)

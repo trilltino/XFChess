@@ -71,12 +71,15 @@ pub struct OnlinePlayersState {
     pub fetch_rx: Option<Receiver<usize>>,
 }
 
-/// How long the opponent's `/presence` heartbeat (posted every ~4s by
+/// How long the opponent's `/presence` heartbeat (posted every ~2s by
 /// `tick_presence_sync`, for every online player, menu or in-game) may go
 /// stale before [`check_opponent_presence`] treats them as gone. Comfortably
-/// above the heartbeat cadence to absorb normal jitter/latency, and far below
-/// the 60s reconnect grace `opponent_disconnect_ui` gives afterward.
-const OPPONENT_PRESENCE_TIMEOUT_SECS: i64 = 15;
+/// above the heartbeat cadence to absorb normal jitter/latency, and matches
+/// the backend's own `ONLINE_FRESHNESS_SECS` window
+/// (`backend/src/signing/social/presence.rs`) — no point being stricter
+/// client-side than the backend's own online/offline cutoff. Far below the
+/// grace period `opponent_disconnect_ui` gives afterward.
+const OPPONENT_PRESENCE_TIMEOUT_SECS: i64 = 6;
 
 /// Backend-verified liveness of the opponent during an online game — see
 /// [`check_opponent_presence`] for why this exists alongside the P2P/gossip
@@ -290,13 +293,15 @@ fn tick_friends_sync(mut state: ResMut<FriendsState>) {
         .detach();
 }
 
-/// Every ~4s: send our presence heartbeat (`PUT /presence`) so we count as
+/// Every ~2s: send our presence heartbeat (`PUT /presence`) so we count as
 /// online, then fetch the current online count (`GET /presence`). Both run on a
 /// background IO task; the count is drained into [`OnlinePlayersState`].
 ///
-/// 4s (not the previous 15s) so the menu's "N online" reads as live — at 15s,
-/// two clients polling on their own independent cadences could each show a
-/// stale count for up to 15s after the other joined/left, which is what made
+/// 2s (not the previous 15s, then 4s) so the menu's "N online" reads as live,
+/// and — more importantly — so an opponent disconnect during a game is
+/// detected in a few seconds instead of up to ~19s. At 15s, two clients
+/// polling on their own independent cadences could each show a stale count
+/// for up to 15s after the other joined/left, which is what made
 /// two side-by-side clients disagree ("1 online" / "2 online") even though
 /// both were actually online.
 fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlayersState>) {
@@ -316,7 +321,7 @@ fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlaye
         .last_sync
         .map(|t| t.elapsed().as_secs())
         .unwrap_or(u64::MAX);
-    if elapsed < 4 {
+    if elapsed < 2 {
         return;
     }
 
@@ -396,7 +401,7 @@ fn check_opponent_presence(
     }
 
     liveness.since_last_poll += time.delta_secs();
-    if liveness.fetch_rx.is_none() && liveness.since_last_poll >= 4.0 {
+    if liveness.fetch_rx.is_none() && liveness.since_last_poll >= 2.0 {
         liveness.since_last_poll = 0.0;
         let (tx, rx) = bounded(1);
         liveness.fetch_rx = Some(rx);

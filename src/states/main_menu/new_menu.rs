@@ -1859,7 +1859,20 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                 if let Some(pubkey) = cx.wallet_bridge.known_pubkey.clone() {
                     let base = crate::multiplayer::network::vps::vps_base();
                     std::thread::spawn(move || {
-                        let client = reqwest::blocking::Client::new();
+                        // Backend now requires the caller's JWT to match
+                        // `wallet_pubkey` here (previously unauthenticated —
+                        // see backend/src/signing/routes/lichess_oauth.rs's
+                        // doc comment on `init_oauth`), so this must go
+                        // through the shared client that attaches the
+                        // session's stored `Authorization: Bearer …` header
+                        // instead of a bare `reqwest::Client::new()`.
+                        let client = match crate::multiplayer::network::vps::client_fast() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                tracing::warn!("[Lichess] failed to build HTTP client: {e}");
+                                return;
+                            }
+                        };
                         // Base58 pubkeys are alphanumeric only — no percent-encoding needed.
                         let url = format!("{base}/api/auth/lichess/init?wallet_pubkey={pubkey}");
                         match client

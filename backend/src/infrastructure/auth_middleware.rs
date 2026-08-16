@@ -113,17 +113,17 @@ pub async fn require_relay_secret(request: Request, next: Next) -> Result<Respon
 ///
 /// This is the rollout bridge from the shared secret to per-user auth: old
 /// clients (relay secret) and new clients (JWT) both work, so the secret can be
-/// retired once clients have migrated. When neither `RELAY_SHARED_SECRET` is set
-/// nor a JWT is presented, it fails **open** (relying on the network firewall),
-/// preserving prior behaviour for un-migrated deployments.
+/// retired once clients have migrated. The game client fetches a JWT
+/// automatically on every wallet connection before any session/lobby action
+/// (see `src/multiplayer/network/vps/client.rs`), so this guard fails
+/// **closed**: if neither a valid JWT nor `RELAY_SHARED_SECRET` is presented,
+/// the request is rejected rather than allowed through on the assumption that
+/// a firewall is doing the job instead.
 pub async fn require_relay_or_jwt(
     State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    use std::sync::Once;
-    static UNSET_WARNING: Once = Once::new();
-
     // 1) Preferred: a valid, non-revoked per-user JWT.
     if let Some(token) = request
         .headers()
@@ -141,7 +141,7 @@ pub async fn require_relay_or_jwt(
         // Invalid token → fall through to the relay-secret path (dual-accept).
     }
 
-    // 2) Legacy: the shared relay secret.
+    // 2) Legacy: the shared relay secret. Unset/empty → fail closed.
     match env::var("RELAY_SHARED_SECRET") {
         Ok(secret) if !secret.is_empty() => {
             let provided = request
@@ -156,13 +156,9 @@ pub async fn require_relay_or_jwt(
             }
         }
         _ => {
-            UNSET_WARNING.call_once(|| {
-                tracing::warn!(
-                    "[auth] No JWT and RELAY_SHARED_SECRET unset — signing endpoints are \
-                     unauthenticated and rely on the network firewall"
-                );
-            });
-            Ok(next.run(request).await)
+            crate::telemetry::worker_metrics::AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Err(StatusCode::UNAUTHORIZED)
         }
     }
 }

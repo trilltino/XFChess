@@ -142,18 +142,57 @@ fn wallet_bridge_port_file(base_port: u16) -> std::path::PathBuf {
   std::env::temp_dir().join(format!("xfchess-wallet-bridge-{base_port}.port"))
 }
 
+/// Backend URL the game client (a separate process) has explicitly told us
+/// it resolved, via `POST /api/set-backend-url` — see `open_wallet_browser()`
+/// in `src/multiplayer/solana/tauri_signer.rs`. Preferred over independently
+/// re-deriving the same env-var precedence here, which is exactly what let
+/// the two processes silently disagree (see `get_backend_url`'s doc comment)
+/// if only one of them had `SIGNING_SERVICE_URL`/`BACKEND_URL` set in its
+/// environment.
+static BACKEND_URL_OVERRIDE: std::sync::OnceLock<std::sync::Mutex<Option<String>>> =
+  std::sync::OnceLock::new();
+
+fn backend_url_override_cell() -> &'static std::sync::Mutex<Option<String>> {
+  BACKEND_URL_OVERRIDE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
 /// Get the backend API base URL.
 ///
-/// Defaults to the production Hetzner backend — same resolution order and
-/// same default as the game client's `vps_base()` (`src/multiplayer/network/vps/client.rs`).
-/// These two MUST stay in sync: if this ever defaults somewhere the game client
-/// doesn't (e.g. a local dev server), every `/api/auth/*` call proxied through
-/// this bridge silently 502s while the game client's own VPS calls succeed —
-/// a confusing split-brain failure that looks like a server outage but isn't.
+/// Resolution order:
+/// 1. Explicit override from the game client (`set_backend_url_override`).
+/// 2. `SIGNING_SERVICE_URL` / `BACKEND_URL` env vars — same order as the game
+///    client's own fallback in `vps_base()` (`src/multiplayer/network/vps/client.rs`),
+///    used when this process never heard from a game client (e.g. the popup
+///    was opened standalone, or an older game client build that predates
+///    `set-backend-url`).
+/// 3. Production Hetzner backend.
+///
+/// (1) and (2) MUST stay in the same order/precedence as the game client's
+/// own resolution — if they ever diverge, `/api/auth/*` calls proxied
+/// through this bridge silently 502 while the game client's own VPS calls
+/// succeed, a confusing split-brain failure that looks like a server outage
+/// but isn't.
 fn get_backend_url() -> String {
+  if let Some(url) = backend_url_override_cell().lock().unwrap().clone() {
+    return url;
+  }
   std::env::var("SIGNING_SERVICE_URL")
     .or_else(|_| std::env::var("BACKEND_URL"))
     .unwrap_or_else(|_| "https://xfchess.com".to_string())
+}
+
+/// Record the backend URL the game client says it resolved. Logged loudly
+/// on every change (not just once) so a mismatch between two locally-running
+/// instances, or a stale override from a previous session's game client,
+/// is visible in the bridge's own log instead of only manifesting as
+/// confusing 502s downstream.
+fn set_backend_url_override(url: String) {
+  let mut cell = backend_url_override_cell().lock().unwrap();
+  let changed = cell.as_deref() != Some(url.as_str());
+  if changed {
+    tracing::info!("[Backend] target set by game client: {url}");
+  }
+  *cell = Some(url);
 }
 
 /// Per-instance cache directory, scoped by the wallet bridge port so that
@@ -379,26 +418,40 @@ async fn http_server(
     }
   }
 
-  async fn proxy_post(url: &str, body: serde_json::Value) -> axum::response::Response {
-    let client = reqwest::Client::new();
-    match client.post(url).json(&body).send().await {
-      Ok(resp) => forward_backend_response(resp).await,
-      Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
-    }
-  }
-
-  async fn proxy_post_auth(
-    url: &str,
-    body: serde_json::Value,
+  // Forwards the two client headers that matter for a proxied backend call:
+  // - Authorization, so JWT-gated backend routes still see the caller's
+  //   token.
+  // - X-Session-Id (set by wallet-ui from the `sid` it read off its own
+  //   popup URL, see App.tsx) re-sent as `x-request-id` — the backend's own
+  //   router already mints/propagates/logs `x-request-id` per request
+  //   (see infrastructure/router.rs's TraceLayer span), so reusing that
+  //   exact header name means every backend log line for this call already
+  //   carries the SAME id Tauri and the browser console log against, with
+  //   zero backend-side changes needed.
+  fn forward_client_headers(
+    mut req: reqwest::RequestBuilder,
     headers: &axum::http::HeaderMap,
-  ) -> axum::response::Response {
-    let client = reqwest::Client::new();
-    let mut req = client.post(url).json(&body);
+  ) -> reqwest::RequestBuilder {
     if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
       if let Ok(v) = auth.to_str() {
         req = req.header("Authorization", v);
       }
     }
+    if let Some(sid) = headers.get("x-session-id") {
+      if let Ok(v) = sid.to_str() {
+        req = req.header("x-request-id", v);
+      }
+    }
+    req
+  }
+
+  async fn proxy_post(
+    url: &str,
+    body: serde_json::Value,
+    headers: &axum::http::HeaderMap,
+  ) -> axum::response::Response {
+    let client = reqwest::Client::new();
+    let req = forward_client_headers(client.post(url).json(&body), headers);
     match req.send().await {
       Ok(resp) => forward_backend_response(resp).await,
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
@@ -407,31 +460,35 @@ async fn http_server(
 
   // Auth proxy routes — capture JWT from responses so GET /token can serve it
   async fn api_login(
-    State(s): State<LocalState>,
+    State(_s): State<LocalState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    let resp = proxy_post(&format!("{}/api/auth/login", get_backend_url()), body).await;
-    resp
+    proxy_post(&format!("{}/api/auth/login", get_backend_url()), body, &headers).await
   }
   async fn api_register(
-    State(s): State<LocalState>,
+    State(_s): State<LocalState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/register", get_backend_url()), body).await
+    proxy_post(&format!("{}/api/auth/register", get_backend_url()), body, &headers).await
   }
   async fn api_login_email(
-    State(s): State<LocalState>,
+    State(_s): State<LocalState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/login-email", get_backend_url()), body).await
+    proxy_post(&format!("{}/api/auth/login-email", get_backend_url()), body, &headers).await
   }
   async fn api_register_email(
-    State(s): State<LocalState>,
+    State(_s): State<LocalState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
     proxy_post(
       &format!("{}/api/auth/register-email", get_backend_url()),
       body,
+      &headers,
     )
     .await
   }
@@ -453,11 +510,14 @@ async fn http_server(
     let token = s.wallet_jwt.0.lock().unwrap().clone();
     Json(serde_json::json!({ "token": token }))
   }
-  async fn api_link_wallet(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/link-wallet", get_backend_url()), body).await
+  async fn api_link_wallet(
+    headers: axum::http::HeaderMap,
+    Json(body): Json<serde_json::Value>,
+  ) -> impl IntoResponse {
+    proxy_post(&format!("{}/api/auth/link-wallet", get_backend_url()), body, &headers).await
   }
   async fn api_sync_profile(headers: axum::http::HeaderMap) -> impl IntoResponse {
-    proxy_post_auth(
+    proxy_post(
       &format!("{}/api/auth/sync-profile", get_backend_url()),
       serde_json::Value::Null,
       &headers,
@@ -468,7 +528,7 @@ async fn http_server(
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post_auth(
+    proxy_post(
       &format!("{}/api/auth/add-email", get_backend_url()),
       body,
       &headers,
@@ -478,12 +538,7 @@ async fn http_server(
   async fn api_me(headers: axum::http::HeaderMap) -> impl IntoResponse {
     let client = reqwest::Client::new();
     let url = format!("{}/api/auth/me", get_backend_url());
-    let mut req = client.get(&url);
-    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
-      if let Ok(v) = auth.to_str() {
-        req = req.header("Authorization", v);
-      }
-    }
+    let req = forward_client_headers(client.get(&url), &headers);
     match req.send().await {
       Ok(resp) => forward_backend_response(resp).await,
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
@@ -496,12 +551,7 @@ async fn http_server(
   ) -> impl IntoResponse {
     let client = reqwest::Client::new();
     let url = format!("{}/api/auth/username", get_backend_url());
-    let mut req = client.patch(&url).json(&body);
-    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
-      if let Ok(v) = auth.to_str() {
-        req = req.header("Authorization", v);
-      }
-    }
+    let req = forward_client_headers(client.patch(&url).json(&body), &headers);
     match req.send().await {
       Ok(resp) => {
         // The rename only actually took effect on the backend if it
@@ -527,7 +577,7 @@ async fn http_server(
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post_auth(
+    proxy_post(
       &format!("{}/api/auth/init-profile-tx", get_backend_url()),
       body,
       &headers,
@@ -536,12 +586,126 @@ async fn http_server(
   }
 
   // POST /api/auth/broadcast-tx — broadcast a signed transaction (proxied)
-  async fn api_broadcast_tx(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+  async fn api_broadcast_tx(
+    headers: axum::http::HeaderMap,
+    Json(body): Json<serde_json::Value>,
+  ) -> impl IntoResponse {
     proxy_post(
       &format!("{}/api/auth/broadcast-tx", get_backend_url()),
       body,
+      &headers,
     )
     .await
+  }
+
+  // GET /api/fresh-blockhash — lets wallet-ui refresh the blockhash on an
+  // already-built unsigned tx immediately before the wallet extension's
+  // signTransaction() call, instead of trusting whatever blockhash the
+  // backend baked in when it originally built the tx (e.g.
+  // /api/auth/init-profile-tx). That bake-time blockhash can go stale by the
+  // time the user actually clicks through the extension's approval popup —
+  // reproduced live as broadcast-tx 502ing with "Blockhash not found" even
+  // though signing itself succeeded. Solana blockhashes are only valid for
+  // ~60-90s; there's no bound on how long a real human takes to approve a
+  // wallet popup, so the fix is to fetch as late as possible, not to make
+  // the original build-time fetch happen faster. Proxies to the backend's
+  // already-public, allow-listed `/api/rpc` (getLatestBlockhash is on that
+  // list) rather than requiring wallet-ui to know the real backend URL
+  // directly — same reasoning as every other `/api/*` route in this file.
+  async fn api_fresh_blockhash() -> impl IntoResponse {
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "getLatestBlockhash",
+      "params": [{ "commitment": "confirmed" }]
+    });
+    let resp = match client
+      .post(format!("{}/api/rpc", get_backend_url()))
+      .json(&body)
+      .send()
+      .await
+    {
+      Ok(r) => r,
+      Err(e) => return (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
+    };
+    let value: serde_json::Value = match resp.json().await {
+      Ok(v) => v,
+      Err(e) => {
+        return (
+          StatusCode::BAD_GATEWAY,
+          format!("bad blockhash response: {e}"),
+        )
+          .into_response()
+      }
+    };
+    let blockhash = value["result"]["value"]["blockhash"].as_str();
+    let last_valid_block_height = value["result"]["value"]["lastValidBlockHeight"].as_u64();
+    match blockhash {
+      Some(bh) => Json(serde_json::json!({
+        "blockhash": bh,
+        "lastValidBlockHeight": last_valid_block_height,
+      }))
+      .into_response(),
+      None => (
+        StatusCode::BAD_GATEWAY,
+        format!("no blockhash in RPC response: {value}"),
+      )
+        .into_response(),
+    }
+  }
+
+  // POST /api/set-backend-url — the game client posts its own resolved
+  // vps_base() here (see open_wallet_browser in
+  // src/multiplayer/solana/tauri_signer.rs) so this bridge proxies to
+  // exactly the same backend the game client itself is talking to, instead
+  // of independently re-deriving the same env vars and risking a
+  // split-brain mismatch (see get_backend_url's doc comment).
+  async fn api_set_backend_url(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+    match body["url"].as_str() {
+      Some(url) if !url.is_empty() => {
+        set_backend_url_override(url.to_string());
+        StatusCode::OK
+      }
+      _ => StatusCode::BAD_REQUEST,
+    }
+  }
+
+  // GET /api/backend-url — lets wallet-ui log/display which backend this
+  // session is actually proxying to, so a prod/local mismatch is visible in
+  // the popup's own console instead of only surfacing as a mystery 502.
+  async fn api_get_backend_url() -> impl IntoResponse {
+    Json(serde_json::json!({
+      "url": get_backend_url(),
+      "explicit": backend_url_override_cell().lock().unwrap().is_some(),
+    }))
+  }
+
+  // POST /api/ready — wallet-ui pings this once its React app has mounted
+  // and is ready to render the login/sign UI. Closes the readiness gap
+  // `open_in_browser` used to fly blind on: previously the only signal that
+  // the popup was usable was the window-title poll (WINDOW_FOUND), which
+  // only proves the OS window exists, not that React has actually taken
+  // over the page — a slow bundle load left a window that LOOKED ready but
+  // couldn't respond to anything yet. Body carries the `sid` this page read
+  // from its own URL so the log line ties back to the exact OPEN_POPUP_START
+  // that spawned it.
+  async fn api_ready(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+    let sid = body["sid"].as_str().unwrap_or("-").to_string();
+    mark_session_ready(&sid);
+    StatusCode::OK
+  }
+
+  // POST /api/debug-log — temporary diagnostic passthrough so a specific
+  // branch inside wallet-ui's JS (which only logs to that popup's own
+  // browser console, awkward to get to in --app mode) shows up in this same
+  // Tauri console instead. Tracking the repeated-login-loop bug where a
+  // profile-less wallet somehow gets its popup hidden and the whole
+  // WalletStep flow re-run instead of landing on ProfileStep.
+  async fn api_debug_log(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+    let msg = body["msg"].as_str().unwrap_or("(no msg)");
+    tracing::info!("[JS] {msg}");
+    StatusCode::OK
   }
 
   // POST /api/open-profile-step — game client calls this when user tries to wager without
@@ -589,9 +753,12 @@ async fn http_server(
   // Generic passthrough for remaining /api/** calls to backend
   async fn api_check_wallet(
     axum::extract::Path(pubkey): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
   ) -> impl IntoResponse {
+    let client = reqwest::Client::new();
     let url = format!("{}/api/auth/check-wallet/{pubkey}", get_backend_url());
-    match reqwest::get(&url).await {
+    let req = forward_client_headers(client.get(&url), &headers);
+    match req.send().await {
       Ok(resp) => forward_backend_response(resp).await,
       Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
     }
@@ -768,9 +935,14 @@ async fn http_server(
     .route("/api/auth/check-wallet/{pubkey}", get(api_check_wallet))
     .route("/api/auth/init-profile-tx", post(api_init_profile_tx))
     .route("/api/auth/broadcast-tx", post(api_broadcast_tx))
+    .route("/api/fresh-blockhash", get(api_fresh_blockhash))
     .route("/api/game/launch", post(api_game_launch))
     .route("/api/open-profile-step", post(api_open_profile_step))
-    .route("/api/needs-profile-step", get(api_needs_profile_step));
+    .route("/api/needs-profile-step", get(api_needs_profile_step))
+    .route("/api/set-backend-url", post(api_set_backend_url))
+    .route("/api/backend-url", get(api_get_backend_url))
+    .route("/api/ready", post(api_ready))
+    .route("/api/debug-log", post(api_debug_log));
 
   // Tournament admin UI (built dist, rendered in the desktop admin window).
   // Only wired up when compiled with --features tournament-admin — a default
@@ -807,6 +979,82 @@ async fn http_server(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Session lifecycle correlation — a fresh `sid` is minted every time the
+// popup is (re)opened for a login/sign attempt, threaded through the popup
+// URL, echoed back by wallet-ui as an `X-Session-Id` header on every fetch,
+// and forwarded to the backend as `x-request-id` (see `forward_session_id`)
+// so the *same* ID appears in Tauri's log, the browser console, and the
+// backend's request-scoped tracing spans for one end-to-end attempt — the
+// only way to tell, after the fact, which Chrome-spawn/window-discovery/
+// wallet-relay/backend-call log lines all belong to the same click.
+// ---------------------------------------------------------------------------
+
+struct PopupSession {
+  id: String,
+  opened_at: std::time::Instant,
+  ready_logged: bool,
+}
+
+fn current_session_cell() -> &'static std::sync::Mutex<Option<PopupSession>> {
+  static CELL: std::sync::OnceLock<std::sync::Mutex<Option<PopupSession>>> =
+    std::sync::OnceLock::new();
+  CELL.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn new_session_id() -> String {
+  uuid::Uuid::new_v4().to_string()
+}
+
+/// Start tracking a new popup session, logging `OPEN_POPUP_START`, and
+/// return its ID for embedding into the popup URL.
+fn begin_session() -> String {
+  let id = new_session_id();
+  tracing::info!(sid = %id, event = "OPEN_POPUP_START", "[Lifecycle] OPEN_POPUP_START");
+  *current_session_cell().lock().unwrap() = Some(PopupSession {
+    id: id.clone(),
+    opened_at: std::time::Instant::now(),
+    ready_logged: false,
+  });
+  id
+}
+
+/// Log `WINDOW_FOUND` (or the timeout case) against whichever session is
+/// current, if any — `resize_wallet_popup_window`/the resize watcher don't
+/// otherwise know the sid, since they're matched purely by OS window title.
+fn log_window_event(event: &str) {
+  let guard = current_session_cell().lock().unwrap();
+  if let Some(s) = guard.as_ref() {
+    tracing::info!(
+      sid = %s.id, event = %event, elapsed_ms = s.opened_at.elapsed().as_millis() as u64,
+      "[Lifecycle] {event}"
+    );
+  }
+}
+
+/// Called from `POST /api/ready` once wallet-ui's React app has mounted.
+/// `sid` comes from the page itself (read from its own URL) rather than
+/// trusting "whichever session is current" — a stale/reused popup page
+/// pinging this after a newer session has already started would otherwise
+/// misattribute REACT_READY to the wrong attempt.
+fn mark_session_ready(sid: &str) {
+  let mut guard = current_session_cell().lock().unwrap();
+  if let Some(s) = guard.as_mut() {
+    if s.id == sid && !s.ready_logged {
+      s.ready_logged = true;
+      tracing::info!(
+        sid = %sid, event = "REACT_READY", elapsed_ms = s.opened_at.elapsed().as_millis() as u64,
+        "[Lifecycle] REACT_READY"
+      );
+      return;
+    }
+  }
+  drop(guard);
+  if !sid.is_empty() && sid != "-" {
+    tracing::debug!(sid = %sid, "[Lifecycle] REACT_READY for a session that is no longer current (stale popup page)");
+  }
+}
+
 /// Open the wallet UI in the user's real Chrome browser so Phantom/Solflare
 /// extensions are available. WebView2 inside Tauri cannot load extensions.
 fn open_wallet_popup(_app: &tauri::AppHandle) {
@@ -834,14 +1082,15 @@ fn open_wallet_popup_for_signing(_app: &tauri::AppHandle) {
 }
 
 fn open_wallet_popup_with_step(step: Option<&str>, force_fresh: bool) {
+  let sid = begin_session();
   let wallet_url =
     std::env::var("XFCHESS_WALLET_URL")
       .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
   let url = match step {
-    Some(s) => format!("{wallet_url}?step={s}"),
-    None => wallet_url,
+    Some(s) => format!("{wallet_url}?step={s}&sid={sid}"),
+    None => format!("{wallet_url}?sid={sid}"),
   };
-  tracing::info!("[WalletPopup] opening in system browser: {url}");
+  tracing::info!(sid = %sid, "[WalletPopup] opening in system browser: {url}");
   if force_fresh {
     kill_wallet_popup();
   }
@@ -878,9 +1127,27 @@ fn open_in_browser(url: &str, force_fresh: bool) {
     // killed any existing popup before reaching here in that case, so this
     // check would find nothing anyway; skipping it outright avoids a race
     // against how quickly that close actually takes effect.
-    if !force_fresh && show_and_foreground_wallet_popup() {
-      tracing::debug!("[WalletPopup] reused existing popup window");
-      return;
+    if !force_fresh {
+      if show_and_foreground_wallet_popup() {
+        tracing::info!("[WalletPopup] reused existing popup window for {url_ts}");
+        resize_wallet_popup_window(WALLET_POPUP_WIDTH, WALLET_POPUP_HEIGHT);
+        return;
+      }
+      // No window matched `XFChess #{http_port()}` — either none exists yet,
+      // or a prior one was actually closed (not just hidden) between calls.
+      // Falling through spawns a brand-new browser process at `url_ts`,
+      // which is a FULL fresh page load: React remounts from scratch, so
+      // whatever step the popup was previously on (e.g. mid ProfileStep) is
+      // lost and the whole WalletStep login flow runs again. Bumped to
+      // `info!` (was `debug!`, invisible at the default log level) because
+      // this exact silent fallthrough is the leading suspect for the
+      // "repeated login loop" bug — a caller that assumed reuse (e.g.
+      // `open_profile_step`'s `force_fresh: false`) gets a full respawn
+      // instead every time this fires.
+      tracing::info!(
+        "[WalletPopup] no existing popup window found for {url_ts} — spawning a fresh one \
+         (this will restart the login flow if one was already in progress)"
+      );
     }
 
     fn get_chromium_default_browser() -> Option<String> {
@@ -919,12 +1186,13 @@ fn open_in_browser(url: &str, force_fresh: bool) {
         if std::path::Path::new(&chromium_browser).exists() {
             let app_flag = format!("--app={}", url_ts);
             match Command::new(&chromium_browser)
-                .args([&app_flag, "--window-size=460,720"])
+                .args([&app_flag, &format!("--window-size={WALLET_POPUP_WIDTH},{WALLET_POPUP_HEIGHT}")])
                 .spawn()
             {
                 Ok(child) => {
                     let pid = child.id();
                     *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
+                    spawn_wallet_popup_resize_watcher();
                     return;
                 }
                 Err(e) => tracing::warn!("[WalletPopup] failed to spawn {chromium_browser}: {e}"),
@@ -1187,6 +1455,119 @@ fn show_and_foreground_wallet_popup() -> bool {
 #[cfg(not(windows))]
 fn show_and_foreground_wallet_popup() -> bool {
   false
+}
+
+/// Target size for the wallet popup window — a compact sign-in card, not a
+/// full browser window. Must match the `--window-size` flag passed at spawn
+/// in `open_in_browser`.
+const WALLET_POPUP_WIDTH: i32 = 460;
+const WALLET_POPUP_HEIGHT: i32 = 720;
+
+/// Force the popup window to `WALLET_POPUP_WIDTH`x`WALLET_POPUP_HEIGHT`,
+/// keeping its current top-left position. `--window-size` on spawn is not
+/// enough on its own: this popup deliberately runs in the user's real Chrome
+/// profile (see `kill_wallet_popup`'s doc comment), and Chrome restores the
+/// *previous* app window's remembered bounds from that shared profile after
+/// creation, silently overriding the CLI flag — which is why a user dragging
+/// the window bigger once makes every future popup open oversized, forever,
+/// no matter what the spawn flag says. Same title/owning-process match as
+/// `kill_wallet_popup`.
+#[cfg(windows)]
+fn resize_wallet_popup_window(width: i32, height: i32) -> bool {
+  use ::windows::core::BOOL;
+  use ::windows::Win32::Foundation::{HWND, LPARAM};
+  use ::windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowTextW, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
+  };
+
+  let expected_title = format!("XFChess #{}", http_port());
+
+  extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe {
+      let ctx = &mut *(lparam.0 as *mut (String, HWND));
+      let mut title_buf = [0u16; 256];
+      let len = GetWindowTextW(hwnd, &mut title_buf);
+      if len <= 0 || String::from_utf16_lossy(&title_buf[..len as usize]) != ctx.0 {
+        return BOOL(1);
+      }
+      ctx.1 = hwnd;
+      BOOL(0)
+    }
+  }
+
+  let mut ctx: (String, HWND) = (expected_title, HWND(std::ptr::null_mut()));
+  unsafe {
+    let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
+  }
+  if ctx.1 .0.is_null() {
+    return false;
+  }
+  unsafe {
+    let _ = SetWindowPos(
+      ctx.1,
+      None,
+      0,
+      0,
+      width,
+      height,
+      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+  }
+  true
+}
+
+#[cfg(not(windows))]
+fn resize_wallet_popup_window(_width: i32, _height: i32) -> bool {
+  false
+}
+
+/// Enforces the popup's fixed size shortly after a fresh spawn. Two races to
+/// cover, not one:
+///  - The window doesn't exist the instant `Command::spawn` returns — Chrome
+///    forwards the `--app=` request over its single-instance IPC and the
+///    actual top-level window shows up some tens to hundreds of ms later.
+///  - The match is by *title* (`resize_wallet_popup_window`'s doc comment
+///    explains why PID matching isn't reliable here), and the title is only
+///    stamped once `wallet-ui`'s JS bundle finishes loading and evaluates
+///    `document.title = ...` (see App.tsx) — under load (e.g. two full game
+///    instances running at once, as with `just dev2`) that can take longer
+///    than a short poll window, so a watcher that gives up too early leaves
+///    the window at whichever size Chrome's shared profile happened to
+///    restore it to.
+/// Keeps reasserting for the whole window (not just until the first hit)
+/// since Chrome has also been observed to apply its own remembered bounds
+/// for that shared profile *after* creation, silently undoing a one-shot fix.
+/// Total time to keep polling for the popup window before giving up
+/// (`POLL_INTERVAL_MS` * `POLL_ATTEMPTS`). Was 8s (40*200ms), which is
+/// comfortable for a warm Chrome process but not for a genuinely cold start
+/// (first launch after reboot, machine under load, antivirus scanning the
+/// new process) — that's exactly the `gave up waiting for popup window to
+/// enforce its size` case, where the window shows up eventually just not
+/// within the old budget. 30s covers cold-start without leaving a runaway
+/// watcher: this task always exits once the loop ends regardless.
+const POPUP_WINDOW_POLL_INTERVAL_MS: u64 = 200;
+const POPUP_WINDOW_POLL_ATTEMPTS: u32 = 150;
+
+fn spawn_wallet_popup_resize_watcher() {
+  tauri::async_runtime::spawn(async move {
+    let mut found_once = false;
+    for _ in 0..POPUP_WINDOW_POLL_ATTEMPTS {
+      tokio::time::sleep(std::time::Duration::from_millis(
+        POPUP_WINDOW_POLL_INTERVAL_MS,
+      ))
+      .await;
+      if resize_wallet_popup_window(WALLET_POPUP_WIDTH, WALLET_POPUP_HEIGHT) {
+        if !found_once {
+          log_window_event("WINDOW_FOUND");
+        }
+        found_once = true;
+      }
+    }
+    if !found_once {
+      log_window_event("WINDOW_NOT_FOUND_TIMEOUT");
+      tracing::warn!("[WalletPopup] gave up waiting for popup window to enforce its size");
+    }
+  });
 }
 
 /// How long a hidden popup can sit idle before it's actually killed, so a

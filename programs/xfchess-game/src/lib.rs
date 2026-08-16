@@ -263,7 +263,7 @@ pub mod __client_accounts_global_join_game {
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
 
-declare_id!("JBt1hnamsAzvtggRZcom6zT5kg1eYM2R2yokqnocXUD7");
+declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
 
 #[program]
 pub mod xfchess_game {

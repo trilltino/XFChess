@@ -59,7 +59,7 @@ pub struct ActivateSessionReq {
 }
 
 /// Request to record a chess move.
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct RecordMoveReq {
     pub game_id: u64,
     pub move_uci: String,
@@ -403,8 +403,42 @@ pub async fn session_status(
 /// Validates engine-side before Solana submission; derives next_fen internally.
 pub async fn record_move(
     State(state): State<AppState>,
+    authed: Option<axum::Extension<crate::signing::auth::AuthedWallet>>,
     Json(req): Json<RecordMoveReq>,
 ) -> Result<Json<SigResp>, (StatusCode, String)> {
+    // If the caller authenticated with a per-user JWT, a valid credential for
+    // wallet A must not be usable to submit a move for a game A has nothing
+    // to do with. That does NOT mean caller == mover_wallet: the host's
+    // client relays moves for *both* players of a game it's actually part
+    // of (the backend's session key can sign for either mover, by design —
+    // see resolve_move_signer), so rejecting every caller != mover_wallet
+    // broke that relay pattern outright the moment a real two-player game
+    // hit it (confirmed live: 403s on every relayed opponent move, cascading
+    // into a finalize_game failure from the resulting on-chain move-count
+    // mismatch). The correct check is on-chain participation in THIS
+    // game_id, not string equality with the field the caller itself
+    // supplied. Cheap in the common case (cached, see
+    // `GameParticipantsCache`'s 5-minute TTL — participants never change
+    // mid-game) and only ever consulted when the fast path doesn't apply.
+    if let Some(axum::Extension(crate::signing::auth::AuthedWallet(caller))) = &authed {
+        if caller != &req.mover_wallet {
+            let is_participant = match Pubkey::from_str(caller) {
+                Ok(caller_pk) => match state.game_participants.get(req.game_id).await {
+                    Some((white, black)) => caller_pk == white || caller_pk == black,
+                    None => false,
+                },
+                Err(_) => false,
+            };
+            if !is_participant {
+                let msg = format!(
+                    "Authenticated wallet {caller} is not a registered participant of game {} \
+                     (and does not match mover_wallet '{}')",
+                    req.game_id, req.mover_wallet
+                );
+                return Err((StatusCode::FORBIDDEN, msg));
+            }
+        }
+    }
     let mover_wallet = Pubkey::from_str(&req.mover_wallet).map_err(|_| {
         let msg = format!(
             "Bad or missing mover_wallet '{}' for game {}",
@@ -1828,11 +1862,12 @@ mod tests {
             vps_authority_key: None,
             kyc_authority_key: None,
             link_authority_key: None,
-            treasury_authority_key: None,
+            treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
             admin_token: None,
             tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
             usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
             lichess_client_id: String::new(),
+            allowed_origins: vec![],
         };
         let state = AppState::new(
             config,
@@ -1881,6 +1916,214 @@ mod tests {
             white_kp.pubkey(),
             black_kp.pubkey(),
             "each player must resolve to their own session, not one shared/clobbered signer"
+        );
+    }
+
+    /// Reconciliation contract regression test (see
+    /// `docs/plans/state-reconciliation-contract.md`): once Solana finalized
+    /// state has been observed for a game — here, simulated by
+    /// `SessionStore::deactivate`, exactly what
+    /// `tasks::settlement_worker` calls the moment it sees the on-chain
+    /// `Game` account closed/finished — no further move can be authorized
+    /// for that game, no matter what the Ephemeral Rollup or the durable
+    /// event log still believe. `resolve_move_signer` is the single choke
+    /// point every move-recording path goes through
+    /// (`record_move`/`delegate_game`/`undelegate_game`/`finalize_game`),
+    /// so this one check is what makes "Solana finalized state wins" true
+    /// in practice, not just in a doc comment.
+    #[tokio::test]
+    async fn settlement_deactivation_blocks_further_moves_even_with_a_live_session_on_file() {
+        use crate::infrastructure::{initialize_pools, run_migrations};
+        use crate::signing::storage::tournament::TournamentStore;
+        use crate::signing::SigningConfig;
+
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let db_url = |tag: &str| {
+            format!("sqlite:file:xfchess_reconciliation_{tag}_{nanos}?mode=memory&cache=shared")
+        };
+        let pools = initialize_pools(&db_url("session"), &db_url("vault"))
+            .await
+            .expect("init pools");
+        run_migrations(&pools).await.expect("run migrations");
+        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+
+        let config = SigningConfig {
+            port: 0,
+            solana_rpc_url: "http://127.0.0.1:1".into(),
+            solana_mainnet_rpc_url: None,
+            er_rpc_url: "http://127.0.0.1:1".into(),
+            magic_router_rpc_url: "http://127.0.0.1:1".into(),
+            program_id: "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into(),
+            jwt_secret: "test-secret-not-for-production".into(),
+            identity_encryption_key: "0".repeat(64),
+            identity_salt: "0".repeat(64),
+            fee_payer_keys: vec![],
+            vps_authority_key: None,
+            kyc_authority_key: None,
+            link_authority_key: None,
+            treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
+            admin_token: None,
+            tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
+            usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
+            lichess_client_id: String::new(),
+            allowed_origins: vec![],
+        };
+        let state = AppState::new(
+            config,
+            pools.session_pool.clone(),
+            pools.vault_pool.clone(),
+            std::sync::Arc::new(tournament_store),
+        );
+
+        let game_id = 555_555u64;
+        let wallet = Keypair::new().pubkey();
+        state
+            .store
+            .create(game_id, wallet)
+            .await
+            .expect("create session");
+        state.store.activate(game_id).await;
+
+        // While live: the ER/event-log side of the system can get a move
+        // authorized, same as any in-progress game.
+        resolve_move_signer(&state, game_id, wallet)
+            .await
+            .expect("an active session must resolve to a usable signer");
+
+        // Reconciliation point: this is the exact call settlement_worker
+        // makes on observing the on-chain Game account finalized/closed —
+        // see `tasks/settlement_worker.rs`'s `state.store.deactivate` call
+        // sites. Nothing about the ER state or the durable event log changes
+        // here; only the backend's own bookkeeping does.
+        state.store.deactivate(game_id).await;
+
+        // After reconciliation: the exact same session row is still on
+        // file (never deleted), but must no longer authorize a move — this
+        // is "Solana finalized state overrides ER/event-log state" made
+        // concrete and enforced, not just documented.
+        let err = resolve_move_signer(&state, game_id, wallet)
+            .await
+            .expect_err("a deactivated (finalized) game must refuse further moves");
+        assert_eq!(
+            err,
+            MoveSignerError::SessionInactive,
+            "must reject via the SessionInactive path specifically, not just fail generically"
+        );
+    }
+
+    /// Regression test for the live-devnet 403 (2026-08-16): a game's host
+    /// relays moves for *both* players, so `caller` (the host's JWT wallet)
+    /// and `mover_wallet` (whichever player actually moved) routinely
+    /// differ. `record_move`'s auth check must allow that — verifying
+    /// on-chain participation in the game, not string equality with
+    /// `mover_wallet` — while still rejecting a wallet with no relationship
+    /// to the game at all. See the doc comment at the top of `record_move`
+    /// for the full incident writeup.
+    #[tokio::test]
+    async fn record_move_allows_a_genuine_participant_to_relay_the_other_players_move() {
+        use crate::infrastructure::{initialize_pools, run_migrations};
+        use crate::signing::storage::tournament::TournamentStore;
+        use crate::signing::SigningConfig;
+
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let db_url = |tag: &str| {
+            format!("sqlite:file:xfchess_record_move_relay_{tag}_{nanos}?mode=memory&cache=shared")
+        };
+        let pools = initialize_pools(&db_url("session"), &db_url("vault"))
+            .await
+            .expect("init pools");
+        run_migrations(&pools).await.expect("run migrations");
+        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+
+        let config = SigningConfig {
+            port: 0,
+            solana_rpc_url: "http://127.0.0.1:1".into(),
+            solana_mainnet_rpc_url: None,
+            er_rpc_url: "http://127.0.0.1:1".into(),
+            magic_router_rpc_url: "http://127.0.0.1:1".into(),
+            program_id: "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into(),
+            jwt_secret: "test-secret-not-for-production".into(),
+            identity_encryption_key: "0".repeat(64),
+            identity_salt: "0".repeat(64),
+            fee_payer_keys: vec![],
+            vps_authority_key: None,
+            kyc_authority_key: None,
+            link_authority_key: None,
+            treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
+            admin_token: None,
+            tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
+            usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
+            lichess_client_id: String::new(),
+            allowed_origins: vec![],
+        };
+        let state = AppState::new(
+            config,
+            pools.session_pool.clone(),
+            pools.vault_pool.clone(),
+            std::sync::Arc::new(tournament_store),
+        );
+
+        let game_id = 777_777u64;
+        let white_wallet = Keypair::new().pubkey();
+        let black_wallet = Keypair::new().pubkey();
+        let stranger_wallet = Keypair::new().pubkey();
+        state
+            .game_participants
+            .seed_for_test(game_id, white_wallet, black_wallet);
+
+        let req_body = RecordMoveReq {
+            game_id,
+            move_uci: "e2e4".to_string(),
+            next_fen: String::new(),
+            nonce: 1,
+            mover_wallet: black_wallet.to_string(),
+        };
+
+        // The host (authenticated as white) relays black's move — must clear
+        // the auth check. No session was created, so it should fail later,
+        // at resolve_move_signer (404), never with 403.
+        let result = record_move(
+            State(state.clone()),
+            Some(axum::Extension(crate::signing::auth::AuthedWallet(
+                white_wallet.to_string(),
+            ))),
+            Json(req_body.clone()),
+        )
+        .await;
+        let (status, _) = match result {
+            Err(e) => e,
+            Ok(_) => panic!("no session exists yet, so this must still fail"),
+        };
+        assert_ne!(
+            status,
+            StatusCode::FORBIDDEN,
+            "a genuine participant relaying the other player's move must not be 403'd"
+        );
+
+        // A wallet with no relationship to this game at all must still be
+        // rejected — proves the check wasn't simply removed.
+        let result = record_move(
+            State(state.clone()),
+            Some(axum::Extension(crate::signing::auth::AuthedWallet(
+                stranger_wallet.to_string(),
+            ))),
+            Json(req_body),
+        )
+        .await;
+        let (status, _) = match result {
+            Err(e) => e,
+            Ok(_) => panic!("a non-participant must be rejected"),
+        };
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "a wallet with no on-chain relationship to the game must be 403'd"
         );
     }
 

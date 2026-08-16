@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-xfchess_game = "JBt1hnamsAzvtggRZcom6zT5kg1eYM2R2yokqnocXUD7"
+xfchess_game = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
 
 [programs.localnet]
 xfchess_game = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"

@@ -747,22 +747,38 @@ function ProfileStep() {
         setLoading(true);
         setErr(null);
         try {
-            // Check backend first: existing wallet-registered users skip profile creation.
-            try {
-                const pk = wallet.publicKey.toBase58();
-                const r = await fetch(`${API}/api/auth/check-wallet/${pk}`);
-                if (r.ok) {
-                    const data = await r.json();
-                    if (data?.registered && data?.username) {
-                        localStorage.setItem('xfchess_username', data.username);
-                        localStorage.setItem('xfchess_wallet', pk);
-                        if (data.token) localStorage.setItem('xfchess_token', data.token);
-                        navigate('/');
-                        return;
+            // Check backend first: existing wallet-registered users skip
+            // profile creation. This is the ONLY place that knows about an
+            // off-chain username set via ProfileStep before the player's
+            // first wager (on-chain profile init is deferred until then) —
+            // falling through to the on-chain lookup below on anything other
+            // than a genuine "not registered" 404 would incorrectly show
+            // "choose your handle" to a player who already has one. Retry
+            // once before giving up: a transient network/backend hiccup here
+            // must not be indistinguishable from "this wallet has never
+            // registered."
+            const pk = wallet.publicKey.toBase58();
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    const r = await fetch(`${API}/api/auth/check-wallet/${pk}`);
+                    if (r.ok) {
+                        const data = await r.json();
+                        if (data?.registered && data?.username) {
+                            localStorage.setItem('xfchess_username', data.username);
+                            localStorage.setItem('xfchess_wallet', pk);
+                            navigate('/');
+                            return;
+                        }
                     }
+                    // A clean 404 ("Wallet not registered") is the real
+                    // "no off-chain account yet" case — stop retrying and
+                    // fall through to the on-chain lookup below.
+                    if (r.status === 404) break;
+                    if (!r.ok && attempt === 0) continue;
+                } catch (fetchErr) {
+                    if (attempt === 0) continue;
+                    console.warn('check-wallet unreachable after retry, falling back to on-chain lookup:', fetchErr);
                 }
-            } catch {
-                // Not fatal — fall through to on-chain lookup.
             }
 
             const program = getAnchorProgram(connection, wallet);

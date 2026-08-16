@@ -47,26 +47,93 @@ pub fn parse_program_error(code: u32) -> &'static str {
     }
 }
 
-/// Always returns a default `TransactionDebugInfo` (`success: true`, no logs,
-/// no account changes, zero fee) regardless of the actual transaction — the
-/// transaction-status RPC client types this needs aren't available in this
-/// build. Not a real inspector yet; see `routes::debug::debug_transaction_endpoint`.
+/// Fetches the real on-chain outcome of `signature` via `getTransaction` and
+/// reports what actually happened — `success` reflects the transaction's
+/// on-chain error status (`meta.err`), not a hardcoded default. Used by
+/// `routes::debug::debug_transaction_endpoint`, the tool an operator reaches
+/// for while triaging a live incident, so it must never claim success for a
+/// transaction that actually failed (or vice versa).
 pub async fn debug_transaction(
-    _rpc: &solana_client::rpc_client::RpcClient,
+    rpc: &solana_client::rpc_client::RpcClient,
     signature: &solana_sdk::signature::Signature,
 ) -> anyhow::Result<TransactionDebugInfo> {
-    // Stub implementation - transaction status client types not available
+    use solana_transaction_status::UiTransactionEncoding;
+
+    let confirmed = rpc.get_transaction(signature, UiTransactionEncoding::Base64)?;
+
+    let meta = confirmed.transaction.meta;
+    let success = meta.as_ref().is_some_and(|m| m.err.is_none());
+    let error = meta
+        .as_ref()
+        .and_then(|m| m.err.as_ref())
+        .map(|e| e.to_string());
+    let fee_paid = meta.as_ref().map(|m| m.fee).unwrap_or(0);
+    let compute_units_consumed = meta
+        .as_ref()
+        .and_then(|m| Option::<u64>::from(m.compute_units_consumed.clone()));
+    let logs: Vec<String> = meta
+        .as_ref()
+        .and_then(|m| Option::<Vec<String>>::from(m.log_messages.clone()))
+        .unwrap_or_default();
+
+    let account_keys: Vec<String> = confirmed
+        .transaction
+        .transaction
+        .decode()
+        .map(|tx| {
+            tx.message
+                .static_account_keys()
+                .iter()
+                .map(|k| k.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let pre_balances = meta.as_ref().map(|m| m.pre_balances.clone()).unwrap_or_default();
+    let post_balances = meta.as_ref().map(|m| m.post_balances.clone()).unwrap_or_default();
+    let account_changes: Vec<AccountChange> = account_keys
+        .iter()
+        .zip(pre_balances.iter())
+        .zip(post_balances.iter())
+        .map(|((pubkey, &pre), &post)| AccountChange {
+            pubkey: pubkey.clone(),
+            pre_balance: pre,
+            post_balance: post,
+            change: post as i64 - pre as i64,
+        })
+        .collect();
+
+    // Program IDs actually invoked, per the instructions in the decoded
+    // message — a subset of `account_keys` in general, but for the small,
+    // known instruction set this backend submits, every top-level program_id
+    // is one of the static account keys, so indexing into account_keys is
+    // sound here.
+    let program_ids: Vec<String> = confirmed
+        .transaction
+        .transaction
+        .decode()
+        .map(|tx| {
+            tx.message
+                .instructions()
+                .iter()
+                .filter_map(|ix| account_keys.get(ix.program_id_index as usize).cloned())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default();
+
     Ok(TransactionDebugInfo {
         signature: signature.to_string(),
-        slot: 0,
-        timestamp: None,
-        success: true,
-        error: None,
-        logs: vec![],
-        account_changes: vec![],
-        compute_units_consumed: None,
-        fee_paid: 0,
-        program_ids: vec![],
+        slot: confirmed.slot,
+        timestamp: confirmed.block_time,
+        success,
+        error,
+        logs,
+        account_changes,
+        compute_units_consumed,
+        fee_paid,
+        program_ids,
     })
 }
 

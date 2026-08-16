@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt; // for `oneshot`
 
 use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
+use backend::signing::identity::IdentityVault;
 use backend::signing::storage::tournament::{TournamentFormat, TournamentRecord, TournamentStore};
 use backend::signing::storage::SessionStore;
 use backend::signing::{AppState, SigningConfig};
@@ -49,11 +50,12 @@ fn test_config() -> SigningConfig {
         vps_authority_key: None,
         kyc_authority_key: None,
         link_authority_key: None,
-        treasury_authority_key: None,
+        treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
         admin_token: Some("test-admin-token".into()),
         tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
         usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
         lichess_client_id: String::new(),
+        allowed_origins: vec![],
     }
 }
 
@@ -118,7 +120,11 @@ async fn spawn_app() -> TestApp {
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
 
-    let session_store = SessionStore::new(pools.session_pool.clone());
+    // Only used to create/migrate tables via `.init()` — AppState::new below
+    // builds the real store this test actually reads/writes through.
+    let schema_vault =
+        IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
+    let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
 
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
@@ -299,4 +305,73 @@ async fn swiss_tournament_full_lifecycle_via_http() {
     }
     assert_eq!(standings[0]["player_id"], json!("gm_wallet"));
     assert_eq!(standings[0]["score"], json!(1.0));
+}
+
+/// `POST /admin/tournament/{id}/approve-prize-release` is the human-in-the-loop
+/// gate `spawn_prize_distributor` checks before paying out a prize pool above
+/// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` — see
+/// `tasks::tournament_scheduler::awaiting_prize_release_approval`. This test
+/// only exercises the HTTP surface (auth + persistence); the distributor's
+/// own gating logic has direct unit tests in that module.
+#[tokio::test]
+async fn approve_prize_release_route_sets_the_flag() {
+    let app = spawn_app().await;
+    let tournament_id = 9100_u64;
+
+    let record = TournamentRecord::new(tournament_id, "Big Prize Tournament", 0);
+    app.state.tournament_store.create(record).await;
+
+    let fetched = app
+        .state
+        .tournament_store
+        .get(tournament_id)
+        .await
+        .expect("seeded tournament");
+    assert!(
+        !fetched.prize_release_approved,
+        "should start unapproved"
+    );
+
+    // No X-API-Key → rejected before the handler runs, same as every other
+    // admin route.
+    let (status, _) = app
+        .post_json(
+            &format!("/admin/tournament/{tournament_id}/approve-prize-release"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(
+        !app.state
+            .tournament_store
+            .get(tournament_id)
+            .await
+            .unwrap()
+            .prize_release_approved,
+        "unauthorized call must not have flipped the flag"
+    );
+
+    // With the admin key → approved.
+    let (status, body) = app
+        .post_json_admin(
+            &format!("/admin/tournament/{tournament_id}/approve-prize-release"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        app.state
+            .tournament_store
+            .get(tournament_id)
+            .await
+            .unwrap()
+            .prize_release_approved,
+        "approved flag should now be set"
+    );
+
+    // Unknown tournament → 404, not a silent success.
+    let (status, _) = app
+        .post_json_admin("/admin/tournament/999999/approve-prize-release", &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

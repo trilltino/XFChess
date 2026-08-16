@@ -89,6 +89,75 @@ fn fallback_url_is_independently_reachable() {
         .expect("fallback RPC should report healthy");
 }
 
+#[test]
+#[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
+fn debug_transaction_reports_real_on_chain_outcome() {
+    if skip_unless_configured("debug_transaction_reports_real_on_chain_outcome") {
+        return;
+    }
+    // A real, finalized devnet transaction against this backend's own
+    // program — proves `debug::debug_transaction` (backend/src/signing/solana/debug.rs)
+    // reports the actual on-chain outcome instead of the old hardcoded
+    // `success: true` stub. Re-pin this signature if devnet is ever reset.
+    const KNOWN_GOOD_SIG: &str =
+        "2riEGnPfQQcvWRdnSDnW1kNMLU5TtpYE1CktsrLz9gssbrNZ1VyjwSXQk55fwUqQPiN5NQprsLU2A2Yxgv9pVDQM";
+
+    let url = backend::signing::solana::rpc::rpc_url_or_devnet();
+    let rpc = make_rpc(&url);
+    let sig = solana_sdk::signature::Signature::from_str(KNOWN_GOOD_SIG)
+        .expect("valid signature constant");
+
+    let info = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend::signing::solana::debug::debug_transaction(
+            &rpc, &sig,
+        ))
+        .expect("known-good signature should be found on-chain");
+
+    assert!(info.success, "known-good tx should report success: {info:?}");
+    assert!(info.slot > 0, "slot should be populated from the real transaction");
+    assert_eq!(info.signature, KNOWN_GOOD_SIG);
+    assert!(
+        info.program_ids.contains(&PROGRAM_ID.to_string()),
+        "program_ids should include this backend's own program: {:?}",
+        info.program_ids
+    );
+}
+
+#[test]
+#[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
+fn debug_transaction_reports_real_on_chain_failure() {
+    if skip_unless_configured("debug_transaction_reports_real_on_chain_failure") {
+        return;
+    }
+    // A real, finalized devnet transaction that failed on-chain (custom
+    // program error 3012) — the case the old hardcoded `success: true` stub
+    // would have gotten exactly backwards. Re-pin if devnet is ever reset.
+    const KNOWN_FAILED_SIG: &str =
+        "3tzUrvpK9ViBwc4fuHgLZ3fJGmiRjotF416dxrtgXEMYBfpiH4dukRk8G3jXMvzsBW72Gp8Y6JE9UeP3F9UWfNa2";
+
+    let url = backend::signing::solana::rpc::rpc_url_or_devnet();
+    let rpc = make_rpc(&url);
+    let sig = solana_sdk::signature::Signature::from_str(KNOWN_FAILED_SIG)
+        .expect("valid signature constant");
+
+    let info = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend::signing::solana::debug::debug_transaction(
+            &rpc, &sig,
+        ))
+        .expect("known-failed signature should still be found on-chain");
+
+    assert!(
+        !info.success,
+        "known-failed tx must report success: false, not the old hardcoded true: {info:?}"
+    );
+    assert!(
+        info.error.is_some(),
+        "a failed transaction should carry a real error string"
+    );
+}
+
 // ── Full on-chain profile-creation loop (opt-in, spends real devnet SOL) ────
 //
 // Exercises the exact gap Tier T1 (e2e_api.rs) can't reach because it's
@@ -103,6 +172,7 @@ fn fallback_url_is_independently_reachable() {
 
 async fn spawn_live_app(rpc_url: &str) -> axum::Router {
     use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
+    use backend::signing::identity::IdentityVault;
     use backend::signing::storage::tournament::TournamentStore;
     use backend::signing::storage::SessionStore;
     use backend::signing::{AppState, SigningConfig};
@@ -118,7 +188,11 @@ async fn spawn_live_app(rpc_url: &str) -> axum::Router {
         .await
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
-    let session_store = SessionStore::new(pools.session_pool.clone());
+    // Only used to create/migrate tables via `.init()` — AppState::new below
+    // builds the real store this test actually reads/writes through.
+    let schema_vault =
+        IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
+    let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
 
@@ -136,11 +210,12 @@ async fn spawn_live_app(rpc_url: &str) -> axum::Router {
         vps_authority_key: None,
         kyc_authority_key: None,
         link_authority_key: None,
-        treasury_authority_key: None,
+        treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
         admin_token: Some("test-admin-token".into()),
         tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
         usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
         lichess_client_id: String::new(),
+        allowed_origins: vec![],
     };
     let state = AppState::new(
         config,

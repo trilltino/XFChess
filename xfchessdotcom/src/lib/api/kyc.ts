@@ -25,10 +25,17 @@ export interface UserStatus {
   can_wager: boolean;
 }
 
-/** Submit KYC data to the backend identity vault. */
-export function submitKyc(body: KycSubmission): Promise<{ ok: boolean }> {
+/**
+ * Submit KYC data to the backend identity vault. Requires the caller's JWT —
+ * the backend now authenticates this route and rejects a submission whose
+ * `wallet_pubkey` doesn't match the token's wallet (previously this accepted
+ * an unauthenticated `wallet_pubkey` field, letting anyone submit PII
+ * attributed to an arbitrary wallet with no proof of ownership).
+ */
+export function submitKyc(body: KycSubmission, token: string): Promise<{ ok: boolean }> {
   return request('/api/kyc/submit', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
 }

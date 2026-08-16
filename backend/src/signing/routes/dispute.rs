@@ -154,7 +154,10 @@ pub async fn resolve_dispute(
         error!("[dispute] DISPUTE_AUTHORITY_KEYPAIR not set");
         StatusCode::SERVICE_UNAVAILABLE
     })?;
-    let authority = crate::signing::load_keypair_from_env_value(&authority_key);
+    let authority = crate::signing::load_keypair_from_env_value(&authority_key).map_err(|e| {
+        error!("[dispute] DISPUTE_AUTHORITY_KEYPAIR is set but invalid: {e}");
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
 
     // Determine winner pubkey
     let winner: Option<Pubkey> = match req.decision.as_str() {
@@ -255,7 +258,10 @@ pub async fn recover_stuck_delegation(
         error!("[dispute] DISPUTE_AUTHORITY_KEYPAIR not set");
         StatusCode::SERVICE_UNAVAILABLE
     })?;
-    let authority = crate::signing::load_keypair_from_env_value(&authority_key);
+    let authority = crate::signing::load_keypair_from_env_value(&authority_key).map_err(|e| {
+        error!("[dispute] DISPUTE_AUTHORITY_KEYPAIR is set but invalid: {e}");
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
 
     let white = Pubkey::from_str(&req.white_wallet).map_err(|_| StatusCode::BAD_REQUEST)?;
     let black = Pubkey::from_str(&req.black_wallet).map_err(|_| StatusCode::BAD_REQUEST)?;

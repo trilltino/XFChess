@@ -787,7 +787,19 @@ async fn auto_recover_stuck_delegation(
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return;
     };
-    let authority = crate::signing::load_keypair_from_env_value(&authority_key);
+    let authority = match crate::signing::load_keypair_from_env_value(&authority_key) {
+        Ok(kp) => kp,
+        Err(e) => {
+            warn!(
+                "[settlement] game {}: DISPUTE_AUTHORITY_KEYPAIR is set but invalid ({e}) — \
+                 cannot auto-recover stuck-delegation escrow; falling back to manual admin route",
+                game_id
+            );
+            worker_metrics::FORCE_UNDELEGATED_AWAITING_RECOVERY_TOTAL
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+    };
 
     let ix = solana::recover_stuck_delegation_ix(
         program_id,

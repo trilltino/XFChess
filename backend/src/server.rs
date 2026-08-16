@@ -86,7 +86,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     info!("[signing-server] Database migrations completed");
 
     // ── Initialize application state ─────────────────────────────────────
-    let session_store = SessionStore::new(pools.session_pool.clone());
+    // Vault used only to satisfy SessionStore::new's signature here — this
+    // local store exists solely to create/migrate tables via `.init()`
+    // before AppState::new builds the real one it actually reads/writes
+    // through.
+    let schema_vault = crate::signing::identity::IdentityVault::new(
+        &config.identity_encryption_key,
+        &config.identity_salt,
+    )
+    .expect("Failed to initialize IdentityVault from env config");
+    let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await?;
     info!("[signing-server] Session store initialized");
 
@@ -105,6 +114,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("[signing-server] Failed to init friends tables: {}", e);
     }
     info!("[signing-server] Social tables initialized");
+
+    // ── Initialize tournament gossip message persistence (late-joiner replay) ─
+    // Must run before `state` is cloned anywhere below — `Arc::get_mut`
+    // requires sole ownership, which only holds true this early.
+    match Arc::get_mut(&mut state.tournament_gossip) {
+        Some(gossip) => {
+            gossip.init_db(pools.session_pool.clone()).await;
+            info!("[signing-server] Tournament gossip persistence initialized");
+        }
+        None => {
+            tracing::warn!(
+                "[signing-server] Could not init tournament gossip persistence — \
+                 AppState.tournament_gossip already shared"
+            );
+        }
+    }
 
     // ── Build application router ───────────────────────────────────────────
     let app = crate::infrastructure::build_app_router(state.clone());
@@ -134,8 +159,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let settlement_state = Arc::new(state.clone());
     crate::tasks::settlement_worker::spawn_settlement_worker(settlement_state.clone());
     crate::tasks::er_watch::spawn_er_watch(settlement_state.clone());
+    crate::tasks::tournament_forfeit::spawn_tournament_forfeit_watcher(settlement_state.clone());
     crate::signing::anticheat_enqueue::spawn_reingest_sweep(settlement_state);
-    info!("[signing-server] Settlement worker + anti-cheat re-ingest sweep + ER watch spawned");
+    info!("[signing-server] Settlement worker + anti-cheat re-ingest sweep + ER watch + tournament auto-forfeit watcher spawned");
 
     // ── Start HTTP Server ──────────────────────────────────────────────────
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))

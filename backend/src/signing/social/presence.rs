@@ -7,6 +7,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tracing::info;
 
+/// How fresh a heartbeat must be to count as "online" in `get_all_online()`.
+/// Must stay comfortably above the client's heartbeat cadence
+/// (`tick_presence_sync` in `src/multiplayer/social.rs`, currently ~2s) to
+/// absorb normal jitter/latency, while staying short enough that a genuinely
+/// disconnected opponent (whose heartbeats simply stop) drops out of the
+/// online list quickly instead of lingering for up to 15s.
+pub const ONLINE_FRESHNESS_SECS: i64 = 6;
+
 /// A node's current presence state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -56,12 +64,16 @@ impl PresenceStore {
         }
     }
 
-    /// Everyone not `Offline` and updated within the last 15 seconds.
+    /// Everyone not `Offline` and updated within the last
+    /// `ONLINE_FRESHNESS_SECS`. This is the sole detection mechanism for
+    /// "opponent went offline" (see `set_offline`'s doc comment) — kept short
+    /// so client-side disconnect detection (`OpponentLivenessState` in the
+    /// game client) resolves in a few seconds instead of ~15-19s.
     pub fn get_all_online(&self) -> Vec<Presence> {
         self.inner
             .read()
             .map(|m| {
-                let cutoff = Utc::now() - chrono::Duration::seconds(15);
+                let cutoff = Utc::now() - chrono::Duration::seconds(ONLINE_FRESHNESS_SECS);
                 m.values()
                     .filter(|p| p.updated_at > cutoff && p.status != PresenceStatus::Offline)
                     .cloned()
