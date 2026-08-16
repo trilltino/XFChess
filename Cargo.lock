@@ -23355,7 +23355,6 @@ dependencies = [
  "iroh",
  "iroh-gossip",
  "nimzovich_engine",
- "openssl",
  "proptest",
  "rand 0.10.2",
  "regex",
